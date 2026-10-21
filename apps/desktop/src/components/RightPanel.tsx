@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Columns2, LayoutGrid, PanelRightClose, Plus, X } from 'lucide-react'
+import { ChevronRight, Columns2, LayoutGrid, PanelRightClose, Plus, X } from '../ui/icons'
 import { useChat } from '../stores/chat'
 import { useUi } from '../stores/ui'
 import BrowserPanel from './BrowserPanel'

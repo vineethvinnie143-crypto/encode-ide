@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { File, Loader2, Search } from 'lucide-react'
+import { File, Loader2, Search } from '../ui/icons'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
 import { useUi } from '../stores/ui'

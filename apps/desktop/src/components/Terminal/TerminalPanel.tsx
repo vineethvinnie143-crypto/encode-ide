@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, X } from '../../ui/icons'
 import { api } from '../../api'
 import { TerminalBuffer } from '../../terminal/buffer'
 import { useUi } from '../../stores/ui'

@@ -12,7 +12,7 @@ import {
   Search,
   SquareTerminal,
   XCircle,
-} from 'lucide-react'
+} from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import DiffView from './DiffView'
 

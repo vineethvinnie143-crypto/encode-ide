@@ -1,4 +1,4 @@
-import { Files, GitBranch, PanelBottom, Search, Settings } from 'lucide-react'
+import { Files, GitBranch, PanelBottom, Search, Settings } from '../ui/icons'
 import { useUi } from '../stores/ui'
 import type { SidebarView } from '../stores/ui'
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Info, X } from '../ui/icons'
 import { useUi } from '../stores/ui'
 
 export default function Toasts() {

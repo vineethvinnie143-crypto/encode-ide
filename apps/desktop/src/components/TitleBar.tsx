@@ -1,4 +1,5 @@
-import { FolderOpen, MessageSquare, Settings } from 'lucide-react'
+import { FolderOpen, MessageSquare, Settings } from '../ui/icons'
+import { LogoMark } from '../ui/Logo'
 import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
 
@@ -13,7 +14,7 @@ export default function TitleBar() {
   return (
     <header className="titlebar">
       <div className="titlebar-brand">
-        <div className="logo-mark">F</div>
+        <LogoMark size={24} />
         <span className="brand-name">eNCode</span>
       </div>
 

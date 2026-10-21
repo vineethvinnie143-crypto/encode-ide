@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Download, FileUp, Gauge, MessageSquare, Package, ScrollText, Settings2, Target } from 'lucide-react'
+import { Download, FileUp, Gauge, MessageSquare, Package, ScrollText, Settings2, Target } from '../ui/icons'
 
 export type CommandPaletteAction =
   | 'file'

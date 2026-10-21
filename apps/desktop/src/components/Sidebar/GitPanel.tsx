@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { GitBranch, RefreshCw } from 'lucide-react'
+import { GitBranch, RefreshCw } from '../../ui/icons'
 import { useEditor } from '../../stores/editor'
 import { useGit } from '../../stores/git'
 import { useUi } from '../../stores/ui'

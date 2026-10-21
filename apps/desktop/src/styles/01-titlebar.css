@@ -19,19 +19,6 @@
   gap: 8px;
 }
 
-.logo-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  color: var(--on-accent);
-  font-weight: 800;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--brand-1) 32%, transparent);
-}
-
 .brand-name {
   font-weight: 650;
   letter-spacing: 0.2px;

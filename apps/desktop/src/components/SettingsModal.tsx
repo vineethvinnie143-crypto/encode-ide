@@ -8,7 +8,7 @@ import {
   Star,
   Trash2,
   X,
-} from 'lucide-react'
+} from '../ui/icons'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'

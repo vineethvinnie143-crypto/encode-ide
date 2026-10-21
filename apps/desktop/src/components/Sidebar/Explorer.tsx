@@ -10,7 +10,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
-} from 'lucide-react'
+} from '../../ui/icons'
 import type { FileEntry } from '@shared/types'
 import { useEditor } from '../../stores/editor'
 import { useUi } from '../../stores/ui'
