@@ -1,0 +1,216 @@
+/* eNCode design tokens (ADR 0013).
+ *
+ * Dark is the default. <html data-theme="light"> switches the palette,
+ * data-accent picks the accent, data-density the row height and
+ * data-motion="reduce" turns animation off. The values are eNCode's own
+ * Graphite theme; see the UI spec for where each one is used.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, darkest to lightest */
+  --chrome: #0b0c10; /* title bar and icon rail */
+  --sidebar: #0d0f13; /* session list, settings navigation */
+  --canvas: #0f1116; /* thread and side panel */
+  --surface-1: #151820; /* cards, tool rows, shell output */
+  --surface-2: #1a1e27; /* composer, inputs, active tab */
+  --surface-3: #1f2430; /* menus, dialogs, keys */
+  --hover: rgb(255 255 255 / 0.05);
+  --pressed: rgb(255 255 255 / 0.08);
+
+  /* Lines */
+  --border-subtle: #1e222c;
+  --border: #2a2f3b;
+  --border-strong: #363c4a;
+
+  /* Text: every level passes 4.5:1 on every surface */
+  --text-1: #eceff4;
+  --text-2: #a9b1c1;
+  --text-3: #848ea1;
+  --text-disabled: #5a6274;
+  --on-accent: #ffffff;
+
+  /* Your messages */
+  --bubble: #1d2a48;
+  --bubble-text: #e8eeff;
+  --bubble-border: #2a3b63;
+
+  /* Meaning */
+  --success: #3ccb7f;
+  --danger: #ff6b6b;
+  --warning: #f5b54a;
+
+  /* The Trace N gradient, for brand moments only */
+  --brand-1: #5b8cff;
+  --brand-2: #3fd6ee;
+
+  /* Code */
+  --syn-keyword: #ff8fb1;
+  --syn-fn: #7fd1ff;
+  --syn-string: #9be38f;
+  --syn-number: #f7b267;
+  --syn-type: #c5a3ff;
+  --syn-comment: #7c859a;
+
+  /* Elevation */
+  --shadow-rgb: 0 0 0;
+  --shadow-alpha: 1;
+  --shadow-pop: 0 16px 40px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.07);
+  --shadow-composer: 0 10px 30px rgb(0 0 0 / 0.35);
+  --backdrop: rgb(4 6 10 / 0.6);
+
+  /* Accent: Signal blue */
+  --accent: #6b98ff; /* links, focus, active marks */
+  --accent-fill: #3d6bea; /* primary buttons and Send, white text */
+  --accent-fill-hover: #4a77f2;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --selected: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus: color-mix(in srgb, var(--accent) 60%, transparent);
+
+  /* Type */
+  --font-ui: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+  --fs-32: 32px;
+
+  /* Shape and rhythm */
+  --r-4: 4px;
+  --r-6: 6px;
+  --r-8: 8px;
+  --r-10: 10px;
+  --r-14: 14px;
+  --r-18: 18px;
+  --r-pill: 999px;
+  --row-h: 32px;
+
+  /* Motion */
+  --dur-1: 90ms; /* hover and press colour */
+  --dur-2: 140ms; /* toggles, chips, focus ring */
+  --dur-3: 200ms; /* menus and popovers */
+  --dur-4: 280ms; /* panels */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* M0 names, kept for packages that still read them. New code uses the names above. */
+  --bg: var(--canvas);
+  --bg-panel: var(--sidebar);
+  --bg-elevated: var(--surface-2);
+  --bg-hover: var(--hover);
+  --bg-active: var(--pressed);
+  --text: var(--text-1);
+  --text-dim: var(--text-2);
+  --text-muted: var(--text-3);
+  --blue: var(--accent);
+  --green: var(--success);
+  --yellow: var(--warning);
+  --red: var(--danger);
+  --purple: var(--syn-type);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --chrome: #edeff3;
+  --sidebar: #f4f5f8;
+  --canvas: #ffffff;
+  --surface-1: #f7f8fa;
+  --surface-2: #ffffff;
+  --surface-3: #ffffff;
+  --hover: rgb(15 23 42 / 0.05);
+  --pressed: rgb(15 23 42 / 0.08);
+
+  --border-subtle: #eceef2;
+  --border: #e0e3e9;
+  --border-strong: #cbd0d9;
+
+  --text-1: #11141a;
+  --text-2: #4b5363;
+  --text-3: #646c7e;
+  --text-disabled: #a2a9b6;
+
+  --bubble: #e8eeff;
+  --bubble-text: #0f1a33;
+  --bubble-border: #d3defb;
+
+  --success: #1a8f52;
+  --danger: #d64545;
+  --warning: #9a5b00;
+
+  --brand-1: #3d6bea;
+  --brand-2: #1fb8d6;
+
+  --syn-keyword: #c2185b;
+  --syn-fn: #0b6bcb;
+  --syn-string: #2e7d32;
+  --syn-number: #b45309;
+  --syn-type: #6d28d9;
+  --syn-comment: #6e7687;
+
+  --shadow-rgb: 15 23 42;
+  --shadow-alpha: 0.3;
+  --shadow-pop: 0 16px 40px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(15 23 42 / 0.08);
+  --shadow-composer: 0 8px 24px rgb(15 23 42 / 0.08);
+  --backdrop: rgb(15 23 42 / 0.32);
+
+  --accent: #2f5fe0;
+  --accent-fill: #2f5fe0;
+  --accent-fill-hover: #2752c8;
+}
+
+/* Accent choices (Signal blue needs no rule) */
+:root[data-accent='cyan'] {
+  --accent: #5ccff2;
+  --accent-fill: #0b7ea3;
+  --accent-fill-hover: #0d8db6;
+}
+:root[data-accent='jade'] {
+  --accent: #4edba0;
+  --accent-fill: #13865a;
+  --accent-fill-hover: #169866;
+}
+:root[data-accent='amber'] {
+  --accent: #f7be5c;
+  --accent-fill: #a15c00;
+  --accent-fill-hover: #b26800;
+}
+:root[data-theme='light'][data-accent='cyan'] {
+  --accent: #0b6e8f;
+  --accent-fill-hover: #096e8f;
+}
+:root[data-theme='light'][data-accent='jade'] {
+  --accent: #0f7a51;
+  --accent-fill-hover: #10744e;
+}
+:root[data-theme='light'][data-accent='amber'] {
+  --accent: #8f5200;
+  --accent-fill-hover: #8c5000;
+}
+
+:root[data-density='compact'] {
+  --row-h: 28px;
+}
+
+/* Reduce motion: System follows Windows, On always, Off never. */
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) *,
+  :root:not([data-motion='full']) *::before,
+  :root:not([data-motion='full']) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
