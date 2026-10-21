@@ -5,6 +5,8 @@ export type RightPanel = 'browse' | 'workspace'
 export type WorkspaceTab = 'files' | 'editor' | 'shell'
 export type MainView = 'chat' | 'trajectory'
 export type SettingsTab = 'models' | 'agent' | 'appearance'
+/** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
+export type SidebarMode = 'projects' | 'activity' | 'archived'
 
 export interface PromptRequest {
   id: number
@@ -21,9 +23,11 @@ export interface Toast {
 }
 
 interface UiStore {
+  /** The files pane's view in the side panel. */
   sidebarView: SidebarView
+  /** The session sidebar, which Ctrl+B shows and hides. */
   sidebarVisible: boolean
-  chatVisible: boolean
+  sidebarMode: SidebarMode
   panelVisible: boolean
   rightVisible: boolean
   rightPanel: RightPanel
@@ -34,11 +38,13 @@ interface UiStore {
   pluginsOpen: boolean
   automationOpen: boolean
   quickOpenOpen: boolean
+  shortcutsOpen: boolean
+  aboutOpen: boolean
   prompt: PromptRequest | null
   toast: Toast | null
   setSidebarView(view: SidebarView): void
   toggleSidebar(): void
-  toggleChat(): void
+  setSidebarMode(mode: SidebarMode): void
   togglePanel(): void
   toggleRight(): void
   setRightVisible(visible: boolean): void
@@ -50,6 +56,8 @@ interface UiStore {
   setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean): void
+  setShortcutsOpen(open: boolean): void
+  setAboutOpen(open: boolean): void
   askText(title: string, placeholder?: string, value?: string): Promise<string | null>
   resolvePrompt(value: string | null): void
   notify(kind: Toast['kind'], text: string): void
@@ -58,12 +66,31 @@ interface UiStore {
 
 let promptCounter = 0
 
+/** Which panels were open, kept between runs. */
+const LAYOUT_KEY = 'eNCode.layout.v1'
+
+function savedLayout(): { sidebarVisible: boolean; rightVisible: boolean } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as Record<string, unknown>
+    return { sidebarVisible: raw.sidebarVisible !== false, rightVisible: raw.rightVisible !== false }
+  } catch {
+    return { sidebarVisible: true, rightVisible: true }
+  }
+}
+
+function saveLayout(layout: { sidebarVisible: boolean; rightVisible: boolean }): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
+  } catch {
+    /* storage may be unavailable */
+  }
+}
+
 export const useUi = create<UiStore>((set, get) => ({
   sidebarView: 'explorer',
-  sidebarVisible: true,
-  chatVisible: true,
+  ...savedLayout(),
+  sidebarMode: 'projects',
   panelVisible: false,
-  rightVisible: true,
   rightPanel: 'browse',
   workspaceTab: 'files',
   mainView: 'chat',
@@ -72,15 +99,26 @@ export const useUi = create<UiStore>((set, get) => ({
   pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
+  shortcutsOpen: false,
+  aboutOpen: false,
   prompt: null,
   toast: null,
 
-  setSidebarView: (view) => set({ sidebarView: view, sidebarVisible: true }),
-  toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
-  toggleChat: () => set((state) => ({ chatVisible: !state.chatVisible })),
+  setSidebarView: (view) => set({ sidebarView: view }),
+  toggleSidebar: () => {
+    set((state) => ({ sidebarVisible: !state.sidebarVisible }))
+    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: get().rightVisible })
+  },
+  setSidebarMode: (mode) => set({ sidebarMode: mode, sidebarVisible: true }),
   togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
-  toggleRight: () => set((state) => ({ rightVisible: !state.rightVisible })),
-  setRightVisible: (visible) => set({ rightVisible: visible }),
+  toggleRight: () => {
+    set((state) => ({ rightVisible: !state.rightVisible }))
+    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: get().rightVisible })
+  },
+  setRightVisible: (visible) => {
+    set({ rightVisible: visible })
+    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: visible })
+  },
   setRightPanel: (panel) => set({ rightPanel: panel, rightVisible: true }),
   setWorkspaceTab: (tab) => set({ workspaceTab: tab, rightPanel: 'workspace', rightVisible: true }),
   setMainView: (view) => set({ mainView: view }),
@@ -89,6 +127,8 @@ export const useUi = create<UiStore>((set, get) => ({
   setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
+  setAboutOpen: (open) => set({ aboutOpen: open }),
 
   askText: (title, placeholder = '', value = '') =>
     new Promise<string | null>((resolve) => {

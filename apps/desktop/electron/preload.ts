@@ -7,6 +7,7 @@ import type {
   PlanRequest,
   SearchOptions,
   SessionGoal,
+  SessionPatch,
   Settings,
   ShellCreateOptions,
   ShellPromptInfo,
@@ -100,7 +101,8 @@ const api: EncodeApi = {
   },
   agent: {
     sessions: () => invoke('agent:sessions'),
-    createSession: () => invoke('agent:create'),
+    createSession: (options?: { projectRoot?: string | null }) => invoke('agent:create', options),
+    update: (sessionId: string, patch: SessionPatch) => invoke('agent:update', sessionId, patch),
     history: (sessionId?: string) => invoke('agent:history', sessionId),
     start: (sessionId: string, input: AgentStartInput) => invoke('agent:start', sessionId, input),
     cancel: (sessionId: string) => invoke('agent:cancel', sessionId),

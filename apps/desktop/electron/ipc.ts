@@ -149,7 +149,11 @@ export function registerIpc(deps: IpcDeps): void {
   handle('shell:complete', (id: string, line: string) => shell.complete(String(id), String(line)))
 
   handle('agent:sessions', () => agent.list())
-  handle('agent:create', () => agent.create())
+  handle('agent:create', (options?: { projectRoot?: unknown }) => {
+    const projectRoot = options?.projectRoot
+    return agent.create(undefined, projectRoot === null || typeof projectRoot === 'string' ? projectRoot : undefined)
+  })
+  handle('agent:update', (sessionId: string, patch: unknown) => agent.update(String(sessionId), patch))
   handle('agent:history', (sessionId?: string) => agent.history(sessionId ? String(sessionId) : undefined))
   handle('agent:start', (sessionId: string, input: AgentStartInput) => agent.start(String(sessionId), input))
   handle('agent:cancel', (sessionId: string) => agent.cancel(String(sessionId)))

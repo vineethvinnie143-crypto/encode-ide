@@ -14,6 +14,7 @@ import type {
   TodoItem,
 } from '../../shared/types'
 import { Agent } from './agent'
+import { applySessionPatch, newSessionMeta, previewOf, readSessionMeta, sessionsToKeep, type SessionMeta } from './sessions'
 import { exportSessionZip } from '../services/export'
 import { secureExisting, writePrivateFile } from '../services/private-file'
 import type { ChatMessage } from './types'
@@ -23,7 +24,7 @@ import type { ShellService } from '../services/shell'
 import type { SkillService } from '../services/skills'
 import type { WorkspaceService } from '../services/workspace'
 
-interface StoredSession extends SessionSummary {
+interface StoredSession extends SessionMeta {
   messages: ChatMessage[]
   entries: ConversationEntry[]
   goal?: SessionGoal | null
@@ -53,7 +54,7 @@ interface AgentManagerDeps {
  */
 export class AgentManager {
   private readonly agents = new Map<string, Agent>()
-  private readonly meta = new Map<string, SessionSummary>()
+  private readonly meta = new Map<string, SessionMeta>()
   private readonly stored = new Map<string, StoredSession>()
   private readonly goals = new Map<string, SessionGoal>()
   private readonly todosBySession = new Map<string, TodoItem[]>()
@@ -71,13 +72,8 @@ export class AgentManager {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as { sessions?: StoredSession[] }
       for (const session of raw.sessions ?? []) {
-        if (!session?.id) continue
-        const summary: SessionSummary = {
-          id: session.id,
-          title: session.title || 'New session',
-          createdAt: session.createdAt || Date.now(),
-          updatedAt: session.updatedAt || Date.now(),
-        }
+        const summary = readSessionMeta(session)
+        if (!summary) continue
         this.meta.set(summary.id, summary)
         this.stored.set(summary.id, {
           ...summary,
@@ -107,9 +103,7 @@ export class AgentManager {
       this.saveTimer = null
     }
     try {
-      const sessions = [...this.meta.values()]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 50)
+      const sessions = sessionsToKeep([...this.meta.values()])
         .map((summary) => {
           const stored = this.stored.get(summary.id)
           return {
@@ -250,26 +244,45 @@ export class AgentManager {
     return this.agents.get(id) ?? this.makeAgent(id)
   }
 
-  private summary(id: string): SessionSummary {
+  private summary(id: string): SessionMeta {
     const existing = this.meta.get(id)
     if (existing) return existing
-    const created: SessionSummary = { id, title: 'New session', createdAt: Date.now(), updatedAt: Date.now() }
+    const created = newSessionMeta(id, 'New session', null)
     this.meta.set(id, created)
     return created
   }
 
-  create(title = 'New session'): SessionSummary {
+  /** What the renderer sees of a session: its stored fields and a preview of its last reply. */
+  private toSummary(meta: SessionMeta): SessionSummary {
+    return { ...meta, preview: previewOf(this.stored.get(meta.id)?.entries ?? []) }
+  }
+
+  /** A new session in `projectRoot`; by default the folder open now, or none. */
+  create(title = 'New session', projectRoot?: string | null): SessionSummary {
     const id = randomUUID()
-    const created: SessionSummary = { id, title, createdAt: Date.now(), updatedAt: Date.now() }
+    const root = projectRoot === undefined ? (this.deps.workspace.current?.root ?? null) : projectRoot
+    const created = newSessionMeta(id, title, root)
     this.meta.set(id, created)
     this.stored.set(id, { ...created, messages: [], entries: [] })
     this.persistNow()
-    return created
+    return this.toSummary(created)
   }
 
   list(): SessionSummary[] {
     if (!this.meta.size) this.create()
-    return [...this.meta.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+    return [...this.meta.values()].sort((a, b) => b.updatedAt - a.updatedAt).map((meta) => this.toSummary(meta))
+  }
+
+  /** Pins, archives, marks unread, renames or moves a session; null when it does not exist. */
+  update(sessionId: string, patch: unknown): SessionSummary | null {
+    const meta = this.meta.get(sessionId)
+    if (!meta) return null
+    if (applySessionPatch(meta, patch)) {
+      const stored = this.stored.get(sessionId)
+      if (stored) Object.assign(stored, meta)
+      this.persistNow()
+    }
+    return this.toSummary(meta)
   }
 
   history(sessionId?: string): AgentHistory {
@@ -325,12 +338,8 @@ export class AgentManager {
     const source = this.agent(sessionId)
     const snapshot = source.snapshot()
     const id = randomUUID()
-    const created: SessionSummary = {
-      id,
-      title: `${this.summary(sessionId).title} (fork)`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
+    const parent = this.summary(sessionId)
+    const created = newSessionMeta(id, `${parent.title} (fork)`, parent.projectRoot)
     this.meta.set(id, created)
     this.stored.set(id, {
       ...created,
@@ -344,7 +353,7 @@ export class AgentManager {
     const todos = this.todosBySession.get(sessionId)
     if (todos) this.todosBySession.set(id, todos.map((todo) => ({ ...todo })))
     this.persistNow()
-    return created
+    return this.toSummary(created)
   }
 
   rename(sessionId: string, title: string): void {

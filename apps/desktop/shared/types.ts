@@ -262,7 +262,19 @@ export interface SessionSummary {
   title: string
   createdAt: number
   updatedAt: number
+  /** The project folder the session belongs to; null for a standalone session. */
+  projectRoot: string | null
+  pinned: boolean
+  /** Archived sessions leave the sidebar until restored. */
+  archived: boolean
+  /** Finished while another session was open. */
+  unread: boolean
+  /** The start of the last reply on one line, for the Activity view. */
+  preview: string
 }
+
+/** What the renderer may change about a session. */
+export type SessionPatch = Partial<Pick<SessionSummary, 'title' | 'projectRoot' | 'pinned' | 'archived' | 'unread'>>
 
 export interface AgentStartInput {
   text: string
@@ -332,7 +344,9 @@ export interface EncodeApi {
   }
   agent: {
     sessions(): Promise<SessionSummary[]>
-    createSession(): Promise<SessionSummary>
+    /** In the open project by default; `projectRoot: null` makes a standalone session. */
+    createSession(options?: { projectRoot?: string | null }): Promise<SessionSummary>
+    update(sessionId: string, patch: SessionPatch): Promise<SessionSummary | null>
     history(sessionId?: string): Promise<AgentHistory>
     start(sessionId: string, input: AgentStartInput): Promise<void>
     cancel(sessionId: string): Promise<void>
