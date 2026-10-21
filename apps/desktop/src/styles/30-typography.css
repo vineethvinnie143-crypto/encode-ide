@@ -19,20 +19,12 @@ body {
 .trajectory-preview,
 .trajectory-detail pre,
 .browser-address input,
-.rail-workspace-name,
 .markdown pre code,
 .markdown code,
 .diff-view {
   font-family: var(--font-mono);
 }
 
-.menubar-item,
-.menubar-dropdown button,
-.rail-new-session,
-.rail-nav button,
-.rail-workspace,
-.rail-session-title,
-.rail-filter,
 .main-tabs button,
 .right-tab,
 .chat-empty p,
@@ -56,7 +48,6 @@ body {
 .edit-summary-file,
 .trajectory-preview,
 .browser-address input,
-.rail-empty,
 .tool-row-detail,
 .markdown code {
   font-size: 12px;
@@ -67,8 +58,6 @@ body {
 .goal-status,
 .editor-footer,
 .chat-meta,
-.rail-section-head,
-.rail-session-badge,
 .attachment-chip,
 .trajectory-index,
 .trajectory-time,
@@ -106,7 +95,7 @@ body {
 
 /* Font surfaces: code font only for code, numbers and paths */
 .composer-stats, .tool-row-size, .diff-stats, .edit-summary-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.rail-workspace-name, .browser-address input { font-family: var(--font-ui); }
+.browser-address input { font-family: var(--font-ui); }
 .terminal-lines { font-size: 11px; }
 
 .markdown pre code, .tool-row-output, .approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
@@ -124,8 +113,8 @@ body {
 .edit-summary { border-radius: 8px; }
 
 /* Detail pass: control typography (strong 500 variants) */
-.session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .rail-new-session, .plugin-badge, .rail-session-badge { font-weight: 500; line-height: 18px; }
-.main-tabs button, .rail-nav button, .rail-workspace, .rail-session-title, .menubar-item, .menubar-dropdown button, .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
+.session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
+.main-tabs button, .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
 .tool-row-label { font-weight: 500; }
 
 /* Detail pass: card radii + tight metrics */
@@ -137,7 +126,7 @@ body {
 /* eNCode brand mark */
 
 /* Meta text uses the UI font with tabular numerals, not the code font */
-.composer-stats, .chat-meta, .rail-session-badge, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+.composer-stats, .chat-meta, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
 .goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: 11px; }
 
 /* Command palette */

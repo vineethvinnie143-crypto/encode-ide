@@ -36,8 +36,8 @@ export function createMainWindow(appearance: Appearance): BrowserWindow {
   const win = new BrowserWindow({
     width: 1480,
     height: 920,
-    minWidth: 980,
-    minHeight: 620,
+    minWidth: 960,
+    minHeight: 640,
     show: false,
     title: 'eNCode',
     backgroundColor: windowBackground(),

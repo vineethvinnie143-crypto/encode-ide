@@ -19,6 +19,7 @@ say so.
 | [0011](0011-agent-commands-run-in-the-os-shell.md) | The agent's commands run in the OS shell | Accepted, lands in M1 |
 | [0012](0012-windows-first-ci.md) | Windows-first CI with a sandboxed end-to-end smoke | Accepted |
 | [0013](0013-own-icons-tokens-and-bundled-fonts.md) | Own icons, one token set and bundled fonts | Accepted, amends 0003 |
+| [0014](0014-one-command-registry-and-no-project-switch-under-a-running-agent.md) | One command registry, and no project switch under a running agent | Accepted |
 
 ## Template
 

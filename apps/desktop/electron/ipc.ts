@@ -91,6 +91,19 @@ export function registerIpc(deps: IpcDeps): void {
     else win.maximize()
     return win.isMaximized()
   })
+  handle('window:toggle-fullscreen', () => {
+    const win = getWindow()
+    if (!win) return false
+    win.setFullScreen(!win.isFullScreen())
+    return win.isFullScreen()
+  })
+  handle('window:zoom', (action: unknown) => {
+    const contents = getWindow()?.webContents
+    if (!contents) return 0
+    const level = action === 'reset' ? 0 : Math.min(5, Math.max(-3, contents.getZoomLevel() + (action === 'in' ? 0.5 : -0.5)))
+    contents.setZoomLevel(level)
+    return level
+  })
   handle('window:close', () => getWindow()?.close())
 
   handle('workspace:open-dialog', async () => {
@@ -149,7 +162,12 @@ export function registerIpc(deps: IpcDeps): void {
   handle('shell:complete', (id: string, line: string) => shell.complete(String(id), String(line)))
 
   handle('agent:sessions', () => agent.list())
-  handle('agent:create', () => agent.create())
+  handle('agent:create', (options?: { projectRoot?: unknown }) => {
+    const projectRoot = options?.projectRoot
+    return agent.create(undefined, projectRoot === null || typeof projectRoot === 'string' ? projectRoot : undefined)
+  })
+  handle('agent:update', (sessionId: string, patch: unknown) => agent.update(String(sessionId), patch))
+  handle('agent:statuses', () => agent.statuses())
   handle('agent:history', (sessionId?: string) => agent.history(sessionId ? String(sessionId) : undefined))
   handle('agent:start', (sessionId: string, input: AgentStartInput) => agent.start(String(sessionId), input))
   handle('agent:cancel', (sessionId: string) => agent.cancel(String(sessionId)))

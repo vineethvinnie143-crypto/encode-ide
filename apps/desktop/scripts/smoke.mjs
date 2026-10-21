@@ -505,6 +505,24 @@ async function runSubagentChecks() {
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:subagent-check] Delegate a shell check to a subagent.')
   await waitFor("!!document.querySelector('.approval-card')", 30000, 'subagent approval card')
+
+  // A session that waits for approval keeps its card: leave it, remove the detour, reload, and it is back.
+  const waitingId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await click('.sb-new')
+  await waitFor(
+    "document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session' && !document.querySelector('.approval-card')",
+    8000,
+    'a new session replaces the waiting one on screen',
+  )
+  const waitingRows = await evaluate("[...document.querySelectorAll('.session-sidebar .sb-row .meta.warn')].map((node) => node.textContent)")
+  if (!waitingRows.includes('Approval')) throw new Error('the waiting session does not show Approval in the sidebar')
+  const extraId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await evaluate(`window.eNCode.agent.remove(${JSON.stringify(extraId)})`)
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(waitingId)})`)
+  await send('Page.reload')
+  await waitFor("!!document.querySelector('.approval-card')", 15000, 'the approval card comes back with the session')
+  const restoredReason = await evaluate("document.querySelector('.approval-reason')?.textContent ?? ''")
+  if (!restoredReason.includes('Workspace Write')) throw new Error(`the restored card lost its reason: ${restoredReason}`)
   await click('.composer-send.is-stop')
   await waitFor(
     "['idle', 'done'].includes(document.querySelector('.chat-panel')?.dataset.status ?? '') && !document.querySelector('.approval-card')",
@@ -555,12 +573,147 @@ async function screenshotSizes(name) {
 }
 
 async function openAppearanceSettings() {
-  if (!(await click('.rail-profile'))) throw new Error('profile menu not found')
-  await waitFor("!!document.querySelector('.rail-profile-menu')", 4000, 'profile menu')
-  await click('.rail-profile-menu button', 'Settings')
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
   await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
   if (!(await click('.settings-tabs button', 'Appearance'))) throw new Error('Appearance tab not found')
   await waitFor("!!document.querySelector('.settings-appearance')", 4000, 'appearance settings')
+}
+
+const key = (init) =>
+  evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ bubbles: true, cancelable: true }, ${JSON.stringify(init)})))`)
+const count = (selector) => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)
+const sidebarTitles = () =>
+  evaluate("[...document.querySelectorAll('.session-sidebar .sb-row-main .title')].map((node) => node.textContent)")
+const activeTitle = () => evaluate("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent ?? ''")
+const menuOpen = (name) => `!!document.querySelector('.ui-menu[aria-label="${name}"]')`
+
+/** Right-clicks the open session's row and chooses an item from its menu. */
+async function chooseFromSessionMenu(item) {
+  await evaluate(`(() => {
+    const row = document.querySelector('.session-sidebar .sb-row.is-active')
+    const box = row.getBoundingClientRect()
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 20, clientY: box.top + 10 }))
+  })()`)
+  await waitFor(menuOpen('Session'), 4000, 'session context menu')
+  if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`context menu has no ${item}`)
+}
+
+/**
+ * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
+ * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
+ */
+async function runShellChecks() {
+  console.log('[smoke] --- shell ---')
+  const sizes = await evaluate(`(() => {
+    const box = (selector) => document.querySelector(selector)?.getBoundingClientRect()
+    return { titlebar: box('.titlebar')?.height, rail: box('.icon-rail')?.width, railButton: box('.rail-btn')?.width, sidebar: box('.sidebar-wrap')?.width }
+  })()`)
+  console.log('[smoke] shell sizes:', JSON.stringify(sizes))
+  if (sizes.titlebar !== 44 || sizes.rail !== 52 || sizes.railButton !== 36) throw new Error('the title bar or icon rail is not the specified size')
+  if (sizes.sidebar < 220 || sizes.sidebar > 480) throw new Error('the sidebar is outside its 220 to 480 px range')
+
+  // Menus: a click opens, the arrow keys move to the next menu, Escape closes.
+  if (!(await click('.tb-menu', 'View'))) throw new Error('View menu not found')
+  await waitFor(menuOpen('View'), 4000, 'View menu')
+  const viewItems = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!viewItems.includes('Zoom in') || !viewItems.includes('Full screen')) throw new Error(`View menu is missing items: ${viewItems}`)
+  await sleep(400)
+  await screenshot('ui-dark-menu.png')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))")
+  await waitFor(menuOpen('Session'), 4000, 'ArrowRight opens the next menu')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the menu')
+
+  // Layout shortcuts.
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B hides the sidebar')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sidebar')
+  await key({ key: 'b', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B hides the side panel')
+  await key({ key: 'b', ctrlKey: true, altKey: true })
+  await waitFor("!!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B shows the side panel')
+  const ratioBefore = await evaluate('window.devicePixelRatio')
+  await key({ key: '=', code: 'Equal', ctrlKey: true })
+  await waitFor(`window.devicePixelRatio > ${ratioBefore}`, 4000, 'Ctrl+= zooms in')
+  await key({ key: '0', code: 'Digit0', ctrlKey: true })
+  await waitFor(`window.devicePixelRatio === ${ratioBefore}`, 4000, 'Ctrl+0 resets the zoom')
+
+  // The shortcuts list.
+  await key({ key: '/', code: 'Slash', ctrlKey: true })
+  await waitFor("!!document.querySelector('.shortcuts-dialog')", 4000, 'Ctrl+/ opens the shortcuts')
+  const rows = await count('.shortcuts-row')
+  if (rows < 30) throw new Error(`the shortcuts list has only ${rows} rows`)
+  await sleep(400)
+  await screenshot('ui-dark-shortcuts.png')
+  await key({ key: 'Escape' })
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Escape closes the shortcuts')
+
+  // Sessions: a new one, then Back and Forward over the ones you opened.
+  const firstTitle = await activeTitle()
+  const before = (await sidebarTitles()).length
+  await key({ key: 'n', ctrlKey: true })
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before + 1}`, 6000, 'Ctrl+N adds a session')
+  if ((await activeTitle()) !== 'New session') throw new Error('the new session is not the open one')
+  await key({ key: '[', code: 'BracketLeft', ctrlKey: true })
+  await waitFor(`document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === ${JSON.stringify(firstTitle)}`, 6000, 'Back returns to the first session')
+  await key({ key: ']', code: 'BracketRight', ctrlKey: true })
+  await waitFor("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session'", 6000, 'Forward returns to the new session')
+
+  // Pin from the context menu, then unpin with the shortcut.
+  await chooseFromSessionMenu('Pin')
+  await waitFor("!!document.querySelector('.session-sidebar section[aria-label=\"Pinned\"] .sb-row.is-active')", 6000, 'a pinned session is listed under Pinned')
+  await screenshot('ui-dark-sidebar-pinned.png')
+  await key({ key: 'p', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.session-sidebar section[aria-label=\"Pinned\"]')", 6000, 'Ctrl+Alt+P unpins')
+
+  // The Activity view groups sessions by what they need.
+  await key({ key: 'u', ctrlKey: true, altKey: true })
+  await waitFor("!!document.querySelector('.sb-activity-row.is-active')", 6000, 'Ctrl+Alt+U shows the Activity view')
+  await screenshot('ui-dark-activity.png')
+  await key({ key: 'u', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.sb-activity-row')", 6000, 'Ctrl+Alt+U leaves the Activity view')
+
+  // Archive, find it under Archived, restore it.
+  await key({ key: 'A', ctrlKey: true, shiftKey: true })
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before}`, 6000, 'Ctrl+Shift+A archives the open session')
+  await click('.rail-btn[aria-label="More"]')
+  await waitFor(menuOpen('More'), 4000, 'More menu')
+  await click('.ui-menu [role^="menuitem"]', 'Archived')
+  await waitFor("!!document.querySelector('.session-sidebar [aria-label=\"Restore\"]')", 6000, 'archived sessions are listed')
+  await click('.session-sidebar [aria-label="Restore"]')
+  await click('.rail-btn[aria-label="More"]')
+  await waitFor(menuOpen('More'), 4000, 'More menu again')
+  await click('.ui-menu [role^="menuitem"]', 'Projects')
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before + 1}`, 6000, 'the restored session is back')
+
+  // Delete asks first: Cancel keeps the session, Delete removes it.
+  await click('.session-sidebar .sb-row-main', 'New session')
+  await chooseFromSessionMenu('Delete…')
+  await waitFor("!!document.querySelector('.ui-dialog')", 4000, 'delete confirmation')
+  await click('.ui-dialog-foot .btn', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'Cancel closes the confirmation')
+  if ((await sidebarTitles()).length !== before + 1) throw new Error('Cancel deleted the session')
+  await chooseFromSessionMenu('Delete…')
+  await waitFor("!!document.querySelector('.ui-dialog')", 4000, 'delete confirmation again')
+  await click('.ui-dialog-foot .btn.danger')
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before}`, 6000, 'Delete removes the session')
+
+  // A session nobody has used yet joins the folder that is open when it comes up.
+  const looseId = await evaluate('window.eNCode.agent.createSession({ projectRoot: null }).then((session) => session.id)')
+  const openId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(looseId)})`)
+  await send('Page.reload')
+  await waitFor(
+    "!!document.querySelector('.session-sidebar section[aria-label=\"Projects\"] .sb-row.is-active')",
+    15000,
+    'an unused session joins the open folder',
+  )
+  await evaluate(`window.eNCode.agent.remove(${JSON.stringify(looseId)})`)
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(openId)})`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the adoption check')
+  console.log('[smoke] shell checks passed')
 }
 
 /**
@@ -608,7 +761,7 @@ try {
   await send('Runtime.enable')
 
   await waitFor(
-    "!!window.eNCode && !!document.querySelector('.menubar') && !!document.querySelector('.session-rail')",
+    "!!window.eNCode && !!document.querySelector('.titlebar .menubar') && !!document.querySelector('.icon-rail') && !!document.querySelector('.session-sidebar')",
     30000,
     'app shell',
   )
@@ -722,7 +875,7 @@ try {
   await screenshot('06-editor-ts.png')
 
   // Settings modal.
-  if (!(await click('.rail-nav button', 'Plugins'))) throw new Error('Plugins nav entry not found')
+  if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
   await waitFor("!!document.querySelector('.settings-modal')", 8000, 'settings modal')
   await screenshot('07-settings.png')
   await click('.settings-header .icon-btn')
@@ -814,6 +967,7 @@ try {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'final reload')
   await screenshot('12-final.png')
 
+  await runShellChecks()
   await runAppearanceChecks()
 
   if (errors.length) {
