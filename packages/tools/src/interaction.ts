@@ -222,7 +222,7 @@ export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> 
     describe: (input) => ({ title: input.description, detail: input.prompt }),
     async run(input, ctx) {
       if (!ctx.subagents) return fail('Subagents are not available here. Do the work yourself.')
-      const result = await ctx.subagents.run({ description: input.description, prompt: input.prompt, type: input.subagent_type, toolUseId: ctx.toolUseId }, ctx.signal)
+      const result = await ctx.subagents.run({ description: input.description, prompt: input.prompt, type: input.subagent_type, toolUseId: ctx.toolUseId, mode: ctx.mode }, ctx.signal)
       return { ok: result.ok, content: result.report || '(the subagent returned no report)' }
     },
   }

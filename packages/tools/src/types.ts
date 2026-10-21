@@ -302,6 +302,12 @@ export interface SubagentRequest {
   prompt: string
   type: string
   toolUseId: string
+  /** The mode of the call that started it; a subagent never has more freedom than its parent. */
+  mode: AgentMode
+  /** The transcript entry of the call, so the subagent's questions and approvals show under it. */
+  entryId?: string
+  /** Shows what the subagent is doing on the call's card while it works. */
+  progress?: (text: string) => void
 }
 
 export interface SkillSummary {

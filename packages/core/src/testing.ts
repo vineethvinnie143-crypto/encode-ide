@@ -7,16 +7,19 @@
 import os from 'node:os'
 import type { Usage } from '@encode/providers'
 import { userText } from '@encode/providers'
-import { createToolRegistry, createFileStateTracker, type AgentShell, type JobManager, type PlanVerdict, type Question, type Tool, type TodoInput, type WebAccess } from '@encode/tools'
+import { createToolRegistry, createFileStateTracker, type AgentShell, type JobManager, type ManagedShell, type PlanVerdict, type Question, type Tool, type TodoInput, type WebAccess } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { createDefaultAssessor } from './approval'
+import { createSkills } from './skills'
+import { AgentSession, type SessionEnv } from './session'
+import { createSessionStore, type FileSessionStore } from './session-store'
 import { memoryConversation, type MemoryConversation } from './conversation'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { systemParts } from './prompt'
 import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOptions } from './scripted'
-import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type NewEntry, type Surface, type TurnEnd } from './types'
-import type { AgentStatus, ConversationEntry } from './ui'
+import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
+import type { AgentEvent, AgentStatus, ConversationEntry } from './ui'
 
 export class RecordingSurface implements Surface {
   readonly statuses: AgentStatus[] = []
@@ -31,7 +34,7 @@ export class RecordingSurface implements Surface {
   readonly plans: string[] = []
   todos: TodoInput[] = []
   /** How the test answers an approval request. */
-  decide: (prompt: ApprovalPrompt, signal: AbortSignal) => boolean | Promise<boolean> = () => true
+  decide: (prompt: ApprovalPrompt, signal: AbortSignal) => boolean | ApprovalResult | Promise<boolean | ApprovalResult> = () => true
   answer: (question: Question) => string = (question) => question.options[0]?.label ?? ''
   verdict: PlanVerdict = { approved: true }
   private counter = 0
@@ -64,9 +67,10 @@ export class RecordingSurface implements Surface {
     this.changes.push(path)
   }
 
-  async approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<boolean> {
+  async approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<ApprovalResult> {
     this.approvals.push(prompt)
-    return this.decide(prompt, signal)
+    const answer = await this.decide(prompt, signal)
+    return typeof answer === 'boolean' ? { approved: answer } : answer
   }
 
   async ask(_entryId: string, question: Question): Promise<string> {
@@ -201,4 +205,103 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
       return loop.run({ turnId, mode, signal })
     },
   }
+}
+
+export function stubManagedShell(root: string): ManagedShell {
+  return {
+    ...stubShell(root),
+    removedEnv: [],
+    start: async () => {
+      throw new Error('This test has no shell.')
+    },
+    setCwd: async () => false,
+    dispose: async () => undefined,
+  }
+}
+
+export interface SessionHarnessOptions {
+  script?: Script
+  scriptFor?: (root: string) => Script
+  files?: Record<string, string | Buffer>
+  settings?: Partial<AgentSettings>
+  hooks?: AgentHooks
+  client?: ScriptedOptions
+  /** Files in the user's home folder, such as .encode/ENCODE.md. */
+  homeFiles?: Record<string, string>
+  createShell?: (root: string) => ManagedShell
+  env?: Partial<SessionEnv>
+}
+
+export interface SessionHarness {
+  root: string
+  home: string
+  dir: string
+  store: FileSessionStore
+  events: AgentEvent[]
+  client: ScriptedClient
+  env: SessionEnv
+  session: AgentSession
+  settings: AgentSettings
+  /** Closes the session and opens it again from its log, as after a restart. */
+  reopen(): Promise<AgentSession>
+  /** The events of one type. */
+  of<T extends AgentEvent['type']>(type: T): Extract<AgentEvent, { type: T }>[]
+}
+
+const openHarnesses: SessionHarness[] = []
+
+/** Closes every session and store the harness made; call it from a test file's `after`. */
+export async function closeHarnesses(): Promise<void> {
+  for (const harness of openHarnesses.splice(0)) {
+    await harness.session.dispose().catch(() => undefined)
+    await harness.store.dispose().catch(() => undefined)
+  }
+}
+
+/** A session on a scripted model, in a temporary workspace and store. */
+export async function sessionHarness(options: SessionHarnessOptions = {}): Promise<SessionHarness> {
+  const root = await tempWorkspace(options.files ?? {})
+  const home = await tempWorkspace(options.homeFiles ?? {})
+  const dir = await tempWorkspace()
+  const store = createSessionStore({ dir, indexDelayMs: 0 })
+  const events: AgentEvent[] = []
+  const client = createScriptedClient(options.scriptFor ? options.scriptFor(root) : (options.script ?? []), options.client)
+  const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
+  const env: SessionEnv = {
+    root,
+    home,
+    platform: process.platform,
+    client,
+    settings: () => settings,
+    hooks: options.hooks ?? {},
+    assessor: createDefaultAssessor(),
+    web: stubWeb,
+    createShell: () => (options.createShell ?? stubManagedShell)(root),
+    skills: createSkills(() => []),
+    emit: (event) => events.push(event),
+    ...options.env,
+  }
+  const log = await store.create({ root })
+  const harness: SessionHarness = {
+    root,
+    home,
+    dir,
+    store,
+    events,
+    client,
+    env,
+    settings,
+    session: new AgentSession(log, env),
+    async reopen() {
+      const id = harness.session.id
+      await harness.session.dispose()
+      const reopened = await store.open(id)
+      if (!reopened) throw new Error('The session log is gone.')
+      harness.session = new AgentSession(reopened, env)
+      return harness.session
+    },
+    of: (type) => events.filter((event): event is Extract<AgentEvent, { type: typeof type }> => event.type === type),
+  }
+  openHarnesses.push(harness)
+  return harness
 }

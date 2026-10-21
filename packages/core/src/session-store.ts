@@ -10,7 +10,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { ConversationEntry, PlanRequest, SessionGoal, SessionSummary, TodoItem } from './ui'
+import { previewOf, type ConversationEntry, type PlanRequest, type SessionGoal, type SessionSummary, type TodoItem } from './ui'
 import {
   SESSION_FORMAT,
   type ContextRecord,
@@ -19,6 +19,7 @@ import {
   type NewRecord,
   type SessionHeader,
   type SessionLog,
+  type SessionMarks,
   type SessionRecord,
   type SessionSnapshot,
   type SessionStore,
@@ -35,6 +36,7 @@ export function newRecordId(): string {
 interface Derived {
   header: SessionHeader
   title: string
+  marks: SessionMarks
   context?: ContextRecord
   messages: MessageRecord[]
   entries: Map<string, ConversationEntry>
@@ -45,7 +47,17 @@ interface Derived {
 }
 
 function start(header: SessionHeader): Derived {
-  return { header, title: header.title, messages: [], entries: new Map(), goal: null, todos: [], plan: null, updatedAt: header.at }
+  return {
+    header,
+    title: header.title,
+    marks: { projectRoot: header.root || null, pinned: false, archived: false, unread: false },
+    messages: [],
+    entries: new Map(),
+    goal: null,
+    todos: [],
+    plan: null,
+    updatedAt: header.at,
+  }
 }
 
 function apply(state: Derived, record: SessionRecord): void {
@@ -77,6 +89,13 @@ function apply(state: Derived, record: SessionRecord): void {
       return
     case 'plan':
       state.plan = record.plan
+      return
+    case 'meta':
+      // Marking a session changes where it sits, not when it was last worked on.
+      if (record.projectRoot !== undefined) state.marks.projectRoot = record.projectRoot || null
+      if (record.pinned !== undefined) state.marks.pinned = record.pinned
+      if (record.archived !== undefined) state.marks.archived = record.archived
+      if (record.unread !== undefined) state.marks.unread = record.unread
       return
   }
   state.updatedAt = record.at
@@ -121,9 +140,7 @@ export function parseLog(text: string): SessionRecord[] {
 
 // ---------------------------------------------------------------- the log
 
-interface IndexEntry extends SessionSummary {
-  root: string
-}
+type IndexEntry = SessionSummary
 
 class FileSessionLog implements SessionLog {
   private state: Derived
@@ -146,6 +163,7 @@ class FileSessionLog implements SessionLog {
     return {
       header: state.header,
       title: state.title,
+      marks: { ...state.marks },
       context: state.context,
       messages: [...state.messages],
       entries: [...state.entries.values()],
@@ -170,13 +188,7 @@ class FileSessionLog implements SessionLog {
   }
 
   private notify(): void {
-    this.changed({
-      id: this.id,
-      root: this.state.header.root,
-      title: this.state.title,
-      createdAt: this.state.header.at,
-      updatedAt: this.state.updatedAt,
-    })
+    this.changed(indexOf(this.state))
   }
 
   async append(record: NewRecord): Promise<SessionRecord> {
@@ -242,7 +254,15 @@ const INDEX_FILE = 'index.json'
 const LOG_EXTENSION = '.jsonl'
 
 function indexOf(derived: Derived): IndexEntry {
-  return { id: derived.header.id, root: derived.header.root, title: derived.title, createdAt: derived.header.at, updatedAt: derived.updatedAt }
+  return {
+    id: derived.header.id,
+    title: derived.title,
+    createdAt: derived.header.at,
+    updatedAt: derived.updatedAt,
+    ...derived.marks,
+    preview: previewOf([...derived.entries.values()]),
+    entryCount: derived.entries.size,
+  }
 }
 
 export interface FileSessionStore extends SessionStore {
@@ -307,7 +327,8 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       const id = name.slice(0, -LOG_EXTENSION.length)
       present.add(id)
       const known = entries.get(id)
-      let stale = !known
+      // An entry from before the index carried marks and previews is rebuilt.
+      let stale = !known || typeof known.entryCount !== 'number'
       if (known) {
         try {
           stale = (await fs.stat(path.join(dir, name))).mtimeMs > written
@@ -372,7 +393,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     async list(filter) {
       const entries = await loadIndex()
       return [...entries.values()]
-        .filter((entry) => !filter?.root || entry.root === filter.root)
+        .filter((entry) => filter?.root === undefined || entry.projectRoot === filter.root)
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map((entry) => ({ ...entry }))
     },
@@ -381,7 +402,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       await ensureDir()
       const entries = await loadIndex()
       const id = newRecordId()
-      const header: SessionHeader = { type: 'session', v: SESSION_FORMAT, id, at: Date.now(), root: create.root, title: create.title || DEFAULT_TITLE }
+      const header: SessionHeader = { type: 'session', v: SESSION_FORMAT, id, at: Date.now(), root: create.root || null, title: create.title || DEFAULT_TITLE }
       const records: SessionRecord[] = [header]
       if (create.fork) {
         header.forkedFrom = { sessionId: create.fork.sessionId, recordId: create.fork.recordId ?? '' }

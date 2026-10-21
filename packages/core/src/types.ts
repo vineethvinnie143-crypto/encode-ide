@@ -39,6 +39,14 @@ export interface ApprovalPrompt {
   reason?: string
   input: Record<string, unknown>
   preview?: DiffHunk[]
+  /** Names what the user would approve for the rest of the session; absent when each call must be asked. */
+  grant?: string
+}
+
+export interface ApprovalResult {
+  approved: boolean
+  /** What the user said when refusing, for the model to read. */
+  note?: string
 }
 
 export type NewEntry = Omit<ConversationEntry, 'id' | 'createdAt'> & { id?: string }
@@ -59,8 +67,8 @@ export interface Surface {
   delta(entry: ConversationEntry, text: string): void
   usage(usage: Usage): void
   fileChanged(path: string): void
-  /** Resolves true when the user approves; false when they refuse or the signal aborts. */
-  approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<boolean>
+  /** Resolves approved when the user approves; not approved when they refuse or the signal aborts. */
+  approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<ApprovalResult>
   /** One answer to one question. */
   ask(entryId: string, question: Question, signal: AbortSignal): Promise<string>
   proposePlan(entryId: string, plan: string, signal: AbortSignal): Promise<PlanVerdict>

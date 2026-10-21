@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import type { ShellCommandAssessor, ToolAccess } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
-import { createDefaultAssessor, decideApproval, hostOf, isPlainCommandLine, type ApprovalContext } from './approval'
+import { createDefaultAssessor, decideApproval, grantKey, hostOf, isPlainCommandLine, type ApprovalContext } from './approval'
 import type { ApprovalPolicy } from './ui'
 
 const allowing: ShellCommandAssessor = async () => ({ decision: 'allow', reason: 'read-only' })
@@ -58,6 +58,31 @@ describe('edits', () => {
     assert.equal((await decideApproval(write(path.join(full.root, '.git', 'config'), '/etc/hosts'), full)).kind, 'allow')
   })
 
+  it('let the user approve for the session what is outside the workspace or a command, but never a protected folder', async () => {
+    const ctx = await context('workspace-write')
+    const outside = await decideApproval(write(path.join(os.tmpdir(), 'elsewhere.txt')), ctx)
+    assert.equal(outside.kind === 'ask' && outside.grantable, true)
+    const guarded = await decideApproval(write(path.join(ctx.root, '.git', 'config')), ctx)
+    assert.equal(guarded.kind === 'ask' && guarded.grantable, false)
+    const command = await decideApproval({ type: 'command', command: 'npm test', cwd: ctx.root, background: false }, ctx)
+    assert.equal(command.kind === 'ask' && command.grantable, true)
+    const site = await decideApproval({ type: 'web', url: 'https://example.com/' }, ctx)
+    assert.equal(site.kind === 'ask' && site.grantable, false)
+    const external = await decideApproval({ type: 'external', server: 'github' }, ctx)
+    assert.equal(external.kind === 'ask' && external.grantable, false)
+  })
+
+  it('key a grant by the paths, or by the command and where it runs', () => {
+    assert.equal(grantKey(write('/b', '/a')), grantKey(write('/a', '/b')))
+    assert.notEqual(grantKey(write('/a')), grantKey(read('/a')))
+    const run = (command: string, cwd = '/w'): ToolAccess => ({ type: 'command', command, cwd, background: false })
+    assert.equal(grantKey(run('npm   test')), grantKey(run(' npm test ')))
+    assert.notEqual(grantKey(run('npm test')), grantKey(run('npm test', '/other')))
+    assert.notEqual(grantKey(run('npm test')), grantKey(run('npm test -- --watch')))
+    assert.equal(grantKey({ type: 'web', url: 'https://example.com/' }), undefined)
+    assert.equal(grantKey(write()), undefined)
+  })
+
   it('treat a symlink that leaves the workspace as outside it', async (t) => {
     const ctx = await context('workspace-write')
     const outside = await tempWorkspace({ 'secret.txt': 's' })
@@ -91,14 +116,14 @@ describe('reads', () => {
 describe('commands', () => {
   it('ask before every command under Workspace Write', async () => {
     const ctx = await context('workspace-write')
-    assert.deepEqual(await decideApproval(command('ls', ctx.root), ctx), { kind: 'ask', reason: 'Workspace Write asks before every command.' })
+    assert.deepEqual(await decideApproval(command('ls', ctx.root), ctx), { kind: 'ask', reason: 'Workspace Write asks before every command.', grantable: true })
   })
 
   it('run unasked under Auto review when the assessor proves them read-only, and ask when it does not', async () => {
     const proven = await context('auto-review')
     assert.equal((await decideApproval(command('ls', proven.root), proven)).kind, 'allow')
     const unproven = await context('auto-review', { assessor: asking })
-    assert.deepEqual(await decideApproval(command('rm -rf x', unproven.root), unproven), { kind: 'ask', reason: 'Not proven read-only: it writes.' })
+    assert.deepEqual(await decideApproval(command('rm -rf x', unproven.root), unproven), { kind: 'ask', reason: 'Not proven read-only: it writes.', grantable: true })
   })
 
   it('run only proven read-only commands under Read Only', async () => {

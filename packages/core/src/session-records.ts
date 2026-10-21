@@ -10,6 +10,7 @@
  *   entry       a UI entry; a later record with the same entry id replaces it
  *   compaction  the model-facing messages from here on start over with these
  *   title, goal, todos, plan   the latest record wins
+ *   meta        the session's project, pin, archive and unread marks; the latest value of each field wins
  *   truncate    drops every record after `after` (rewind)
  *
  * A user prompt's message id, its UI entry id and the turn id are the same
@@ -34,8 +35,8 @@ interface RecordBase {
 export interface SessionHeader extends RecordBase {
   type: 'session'
   v: typeof SESSION_FORMAT
-  /** The workspace root the session works in. */
-  root: string
+  /** The project the session was created in; null for a standalone session. */
+  root: string | null
   title: string
   /** The session and record this one was forked from. */
   forkedFrom?: { sessionId: string; recordId: string }
@@ -93,6 +94,14 @@ export interface PlanRecord extends RecordBase {
   plan: PlanRequest | null
 }
 
+export interface MetaRecord extends RecordBase {
+  type: 'meta'
+  projectRoot?: string | null
+  pinned?: boolean
+  archived?: boolean
+  unread?: boolean
+}
+
 export interface TruncateRecord extends RecordBase {
   type: 'truncate'
   /** The last record kept. */
@@ -109,6 +118,7 @@ export type SessionRecord =
   | GoalRecord
   | TodosRecord
   | PlanRecord
+  | MetaRecord
   | TruncateRecord
 
 type WithoutBase<T> = T extends unknown ? Omit<T, 'id' | 'at'> & Partial<Pick<RecordBase, 'id' | 'at'>> : never
@@ -116,10 +126,20 @@ type WithoutBase<T> = T extends unknown ? Omit<T, 'id' | 'at'> & Partial<Pick<Re
 /** A record to append; `id` and `at` are filled in when missing. */
 export type NewRecord = WithoutBase<Exclude<SessionRecord, SessionHeader | TruncateRecord>>
 
+/** What a session carries besides its conversation. */
+export interface SessionMarks {
+  /** The project the session belongs to now; null for a standalone session. */
+  projectRoot: string | null
+  pinned: boolean
+  archived: boolean
+  unread: boolean
+}
+
 /** The session as its log rebuilds it. */
 export interface SessionSnapshot {
   header: SessionHeader
   title: string
+  marks: SessionMarks
   context?: ContextRecord
   /** The model-facing conversation, after any compaction. */
   messages: MessageRecord[]
@@ -146,14 +166,16 @@ export interface SessionLog {
 }
 
 export interface CreateSessionOptions {
-  root: string
+  /** The project the session belongs to; null for a standalone session. */
+  root: string | null
   title?: string
   /** Starts from a copy of another session, up to and including `recordId` (default: all of it). */
   fork?: { sessionId: string; recordId?: string }
 }
 
 export interface SessionStore {
-  list(options?: { root?: string }): Promise<(SessionSummary & { root: string })[]>
+  /** Newest first. `root` keeps only the sessions of that project. */
+  list(options?: { root?: string | null }): Promise<SessionSummary[]>
   create(options: CreateSessionOptions): Promise<SessionLog>
   open(id: string): Promise<SessionLog | undefined>
   remove(id: string): Promise<void>

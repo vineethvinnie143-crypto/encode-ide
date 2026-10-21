@@ -23,7 +23,11 @@ import type { ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } fr
 import { isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
 import type { ApprovalPolicy } from './ui'
 
-export type ApprovalDecision = { kind: 'allow' } | { kind: 'ask'; reason: string } | { kind: 'deny'; reason: string }
+export type ApprovalDecision =
+  | { kind: 'allow' }
+  /** `grantable`: the user may approve this and its like for the rest of the session. Protected folders never are. */
+  | { kind: 'ask'; reason: string; grantable: boolean }
+  | { kind: 'deny'; reason: string }
 
 export interface ApprovalContext {
   policy: ApprovalPolicy
@@ -40,7 +44,7 @@ export interface ApprovalContext {
 }
 
 const ALLOW: ApprovalDecision = { kind: 'allow' }
-const ask = (reason: string): ApprovalDecision => ({ kind: 'ask', reason })
+const ask = (reason: string, grantable = true): ApprovalDecision => ({ kind: 'ask', reason, grantable })
 const deny = (reason: string): ApprovalDecision => ({ kind: 'deny', reason })
 
 function shown(file: string, root: string): string {
@@ -93,7 +97,7 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
       const outside = await outsideWorkspace(access.paths, context)
       if (outside) return ask(`${shown(outside, context.root)} is outside the workspace.`)
       const guarded = await protectedTarget(access.paths, context)
-      return guarded ? ask(`${shown(guarded, context.root)} is in a protected folder: changes there can run code or steer the agent.`) : ALLOW
+      return guarded ? ask(`${shown(guarded, context.root)} is in a protected folder: changes there can run code or steer the agent.`, false) : ALLOW
     }
 
     case 'command': {
@@ -121,11 +125,28 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
       if (!host || context.approvedHosts.has(host)) return ALLOW
       return ask(
         `eNCode asks before the agent contacts a site for the first time in a session, because anything in the address leaves your machine. Approving allows ${host} until the session ends.`,
+        false,
       )
     }
 
     case 'external':
-      return policy === 'full-access' ? ALLOW : ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`)
+      return policy === 'full-access' ? ALLOW : ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`, false)
+  }
+}
+
+/**
+ * What approving "for this session" would cover: the same paths, or the same
+ * command in the same directory. Anything else is asked each time.
+ */
+export function grantKey(access: ToolAccess): string | undefined {
+  switch (access.type) {
+    case 'read':
+    case 'write':
+      return access.paths.length ? `${access.type}\u0000${[...access.paths].sort().join('\u0000')}` : undefined
+    case 'command':
+      return `command\u0000${access.cwd}\u0000${access.command.replace(/\s+/g, ' ').trim()}`
+    default:
+      return undefined
   }
 }
 

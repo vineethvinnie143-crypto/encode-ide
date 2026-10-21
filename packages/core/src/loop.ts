@@ -51,7 +51,7 @@ import {
   type ToolRegistry,
   type WebAccess,
 } from '@encode/tools'
-import { decideApproval, hostOf, type ApprovalDecision } from './approval'
+import { decideApproval, grantKey, hostOf, type ApprovalDecision } from './approval'
 import {
   applyCompaction,
   CHARS_PER_TOKEN,
@@ -386,12 +386,14 @@ export class AgentLoop {
       this.meter.record(sent, this.fixed, usage)
       await o.conversation.add(message, { turnId: turn.turnId, usage })
       const text = messageText(message)
+      const model = message.origin?.model
       if (streaming) {
         streaming.text = text
         streaming.streaming = false
+        if (model) streaming.model = model
         o.surface.settle(streaming)
       } else if (text.trim()) {
-        o.surface.settle(o.surface.entry({ kind: 'assistant', text }))
+        o.surface.settle(o.surface.entry({ kind: 'assistant', text, ...(model ? { model } : {}) }))
       }
       return { kind: 'reply', message, finish }
     }
@@ -585,7 +587,7 @@ export class AgentLoop {
         assessor: o.assessor,
       })
     } catch (error) {
-      return { kind: 'ask', reason: `eNCode could not check this call (${errorMessage(error)}).` }
+      return { kind: 'ask', reason: `eNCode could not check this call (${errorMessage(error)}).`, grantable: false }
     }
   }
 
@@ -633,8 +635,12 @@ export class AgentLoop {
     if (verdict.kind === 'deny') return refuse(verdict.reason, 'rejected', `Refused by the approval policy: ${verdict.reason}`)
 
     let ask: string | undefined
-    if (verdict.kind === 'ask') ask = pre?.decision === 'allow' ? undefined : verdict.reason
-    else if (pre?.decision === 'ask') ask = pre.reason || 'A hook asks for approval.'
+    let grant: string | undefined
+    if (verdict.kind === 'ask') {
+      ask = pre?.decision === 'allow' ? undefined : verdict.reason
+      // A hook that asked wants to see each call.
+      if (verdict.grantable && pre?.decision !== 'ask') grant = grantKey(access)
+    } else if (pre?.decision === 'ask') ask = pre.reason || 'A hook asks for approval.'
     if (ask !== undefined) {
       entry.tool = { ...entry.tool!, state: 'waiting' }
       o.surface.update(entry)
@@ -648,13 +654,23 @@ export class AgentLoop {
       if (summary.preview && summary.preview.length > MAX_PREVIEW_HUNKS) {
         detail += `${detail ? '\n' : ''}Showing ${MAX_PREVIEW_HUNKS} of ${summary.preview.length} changed regions.`
       }
-      const approved = await o.surface.approve(
-        { entryId: entry.id, tool: block.name, title: summary.title, detail, reason: ask, input: trimInput(input), preview: summary.preview?.slice(0, MAX_PREVIEW_HUNKS) },
+      const answer = await o.surface.approve(
+        {
+          entryId: entry.id,
+          tool: block.name,
+          title: summary.title,
+          detail,
+          reason: ask,
+          input: trimInput(input),
+          preview: summary.preview?.slice(0, MAX_PREVIEW_HUNKS),
+          ...(grant ? { grant } : {}),
+        },
         turn.signal,
       )
-      if (!approved) {
+      if (!answer.approved) {
         if (turn.signal.aborted) throw new AgentAbortedError()
-        return refuse('Rejected by user.', 'rejected', REJECTED)
+        const note = answer.note?.trim().slice(0, 2_000)
+        return refuse(note ? `Rejected by user: ${note}` : 'Rejected by user.', 'rejected', note ? `${REJECTED} The user said: ${note}` : REJECTED)
       }
       entry.tool = { ...entry.tool!, state: 'running' }
       o.surface.update(entry)
@@ -765,7 +781,7 @@ export class AgentLoop {
         proposePlan: (plan, signal) => o.surface.proposePlan(entry.id, plan, signal),
         setTodos: (todos) => o.surface.setTodos(todos),
       },
-      ...(s.subagents ? { subagents: s.subagents } : {}),
+      ...(s.subagents ? { subagents: { types: () => s.subagents!.types(), run: (request, signal) => s.subagents!.run({ ...request, entryId: entry.id, ...(progress ? { progress } : {}) }, signal) } } : {}),
       ...(s.skills ? { skills: s.skills } : {}),
       ...(s.goals ? { goals: s.goals } : {}),
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),

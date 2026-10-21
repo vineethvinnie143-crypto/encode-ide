@@ -32,6 +32,8 @@ export interface ConversationEntry {
     diff?: DiffHunk[]
     state?: ToolState
   }
+  /** The model that wrote an assistant entry. */
+  model?: string
   createdAt: number
 }
 
@@ -46,6 +48,19 @@ export interface ApprovalRequest {
   input: Record<string, unknown>
   /** A diff preview shown before approving a write. */
   preview?: DiffHunk[]
+  /** True when the user may approve this and its like for the rest of the session. */
+  grantable?: boolean
+}
+
+/** The user's answer to an approval request. A bare boolean is approve or refuse. */
+export type ApprovalAnswer = boolean | { approved: boolean; note?: string; remember?: 'session' }
+
+/** A question waiting for the user's answer. */
+export interface AskRequest {
+  id: string
+  entryId: string
+  question: string
+  options?: string[]
 }
 
 export type GoalStatus = 'active' | 'paused' | 'complete' | 'blocked'
@@ -74,6 +89,35 @@ export interface SessionSummary {
   title: string
   createdAt: number
   updatedAt: number
+  /** The project folder the session belongs to; null for a standalone session. */
+  projectRoot: string | null
+  pinned: boolean
+  /** Archived sessions leave the sidebar until restored. */
+  archived: boolean
+  /** Finished while another session was open. */
+  unread: boolean
+  /** The start of the last reply on one line, for the Activity view. */
+  preview: string
+  /** How many entries the conversation has; 0 for a session nobody has used. */
+  entryCount: number
+}
+
+/** What a client may change about a session. */
+export type SessionPatch = Partial<Pick<SessionSummary, 'title' | 'projectRoot' | 'pinned' | 'archived' | 'unread'>>
+
+/** The start of the last reply on one line. */
+export function previewOf(entries: readonly ConversationEntry[], max = 140): string {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]
+    if (entry.kind !== 'assistant' || !entry.text?.trim()) continue
+    const flat = entry.text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[`*_#>]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
+  }
+  return ''
 }
 
 export interface AgentStartInput {
@@ -86,6 +130,12 @@ export interface AgentStartInput {
 export interface AgentHistory {
   entries: ConversationEntry[]
   status: AgentStatus
+  /** The approval card still waiting for an answer, so reopening the session shows it again. */
+  approval?: ApprovalRequest | null
+  /** Every approval still waiting, oldest first; `approval` is the first. */
+  approvals?: ApprovalRequest[]
+  /** The question still waiting for an answer. */
+  ask?: AskRequest | null
 }
 
 export interface BackgroundJob {
@@ -104,7 +154,7 @@ export type AgentEventBody =
   | { type: 'entry'; entry: ConversationEntry }
   | { type: 'delta'; entryId: string; text: string }
   | { type: 'approval-request'; request: ApprovalRequest }
-  | { type: 'ask'; id: string; entryId: string; question: string; options?: string[] }
+  | ({ type: 'ask' } & AskRequest)
   | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number; cachedTokens?: number }
   | { type: 'goal'; goal: SessionGoal | null }
   | { type: 'todos'; todos: TodoItem[] }
