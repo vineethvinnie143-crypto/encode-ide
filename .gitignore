@@ -10,5 +10,10 @@ screenshots/
 .env
 .env.*
 !.env.example
+# Wrangler: local secrets and the local state of D1, KV and Durable Objects.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
 .DS_Store
 Thumbs.db
