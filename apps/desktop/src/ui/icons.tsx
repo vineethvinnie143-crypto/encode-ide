@@ -45,6 +45,7 @@ const frame = <rect x="4" y="4.5" width="16" height="15" rx="2.5" />
 export const ArrowLeft = icon('ArrowLeft', <path d="M19 12H5 M11 6l-6 6 6 6" />)
 export const ArrowRight = icon('ArrowRight', <path d="M5 12h14 M13 6l6 6-6 6" />)
 export const ArrowUp = icon('ArrowUp', <path d="M12 19V5 M6 11l6-6 6 6" />)
+export const ArrowDown = icon('ArrowDown', <path d="M12 5v14 M6 13l6 6 6-6" />)
 export const ChevronDown = icon('ChevronDown', <path d="M7 10l5 5 5-5" />)
 export const ChevronUp = icon('ChevronUp', <path d="M7 14l5-5 5 5" />)
 export const ChevronRight = icon('ChevronRight', <path d="M10 7l5 5-5 5" />)

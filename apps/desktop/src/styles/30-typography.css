@@ -15,7 +15,6 @@ body {
 .terminal-lines,
 .tool-row-detail,
 .tool-row-output,
-.edit-summary-file,
 .trajectory-preview,
 .trajectory-detail pre,
 .browser-address input,
@@ -25,18 +24,14 @@ body {
   font-family: var(--font-mono);
 }
 
-.main-tabs button,
 .right-tab,
-.chat-empty p,
 .suggestion,
 .composer-input,
 .tool-row-toggle,
 .approval-head,
 .ask-head,
 .ask-option,
-.goal-text,
-.edit-summary-title,
-.chat-user-bubble {
+.goal-text {
   font-size: 13px;
 }
 
@@ -45,7 +40,6 @@ body {
 .model-chip,
 .workspace-tabs button,
 .files-switcher button,
-.edit-summary-file,
 .trajectory-preview,
 .browser-address input,
 .tool-row-detail,
@@ -65,26 +59,6 @@ body {
   font-size: 11px;
 }
 
-.msg {
-  font-size: 14px;
-  line-height: 24px;
-}
-
-.markdown p {
-  margin: 0 0 12px;
-}
-
-.chat-empty h2 {
-  font-size: 20px;
-  line-height: 28px;
-  font-weight: 500;
-}
-
-.session-title {
-  font-size: 15px;
-  line-height: 22px;
-}
-
 .code-editor {
   font-size: 12.5px;
 }
@@ -94,11 +68,11 @@ body {
 }
 
 /* Font surfaces: code font only for code, numbers and paths */
-.composer-stats, .tool-row-size, .diff-stats, .edit-summary-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.composer-stats, .tool-row-size, .diff-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .browser-address input { font-family: var(--font-ui); }
 .terminal-lines { font-size: 11px; }
 
-.markdown pre code, .tool-row-output, .approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
+.approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
 .code-editor { font-size: 12px; line-height: 19px; }
 .code-gutter { line-height: 19px; }
 .code-current-line { height: 19px; }
@@ -108,19 +82,16 @@ body {
 .diff-view { border-radius: 8px; border-color: var(--border); font-size: 11px; line-height: 16px; }
 .diff-hunk-header { padding: 2px 8px; font-size: 11px; line-height: 16px; background: var(--surface-1); }
 .diff-line { padding: 0 8px; line-height: 16px; }
-.tool-row-body { margin-left: 22px; padding: 8px 10px; border-radius: 8px; }
 .tool-row-detail { font-size: 12px; }
-.edit-summary { border-radius: 8px; }
 
 /* Detail pass: control typography (strong 500 variants) */
 .session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
-.main-tabs button, .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
+.suggestion, .ask-option { font-weight: 500; line-height: 20px; }
 .tool-row-label { font-weight: 500; }
 
 /* Detail pass: card radii + tight metrics */
-.goal-card, .todo-card, .plan-card, .edit-summary, .ask-card, .approval-card { border-radius: 12px; }
+.goal-card, .todo-card, .plan-card, .ask-card, .approval-card { border-radius: 12px; }
 .composer-stats { font-size: 11px; line-height: 16px; }
-.tool-row-toggle { padding: 3px 0; }
 .policy-chip, .model-chip { height: 24px; padding: 0 8px; border-radius: 6px; }
 
 /* eNCode brand mark */
