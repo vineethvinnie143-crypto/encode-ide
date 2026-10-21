@@ -54,6 +54,37 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)
 
+  packages/diff:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/editor:
+    dependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../diff
+      '@encode/text':
+        specifier: workspace:*
+        version: link:../text
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/permissions:
     devDependencies:
       '@encode/testkit':
@@ -68,6 +99,18 @@ importers:
 
   packages/testkit:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/text:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
