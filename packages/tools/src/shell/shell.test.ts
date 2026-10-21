@@ -104,6 +104,15 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     assert.equal(aborted.interrupted, true)
   })
 
+  it('returns when the shell exits, even if a process it started still holds the pipes', async () => {
+    const { shell } = await shellIn()
+    const started = Date.now()
+    const result = await shell.run('sleep 20 & echo started', { signal: signal(), timeoutMs: 8_000 })
+    assert.match(result.output, /started/)
+    assert.equal(result.timedOut, false)
+    assert.ok(Date.now() - started < 5_000)
+  })
+
   it('lets a sandbox rewrite the spawn', async () => {
     const { shell } = await shellIn({}, { wrapSpawn: (spec) => ({ ...spec, env: { ...spec.env, ENCODE_SANDBOXED: 'yes' } }) })
     const result = await shell.run('echo "sandboxed=$ENCODE_SANDBOXED"', { signal: signal() })

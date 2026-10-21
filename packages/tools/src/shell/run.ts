@@ -26,6 +26,8 @@ export const MAX_TIMEOUT_MS = 600_000
 const HEAD_CHARS = 200_000
 const TAIL_CHARS = 800_000
 const KILL_GRACE_MS = 2_000
+/** After the shell exits, how long to wait for output still in the pipes before closing them. */
+const DRAIN_MS = 500
 
 /** Keeps the start and the end of a long output, and counts what fell between. */
 export class OutputBuffer {
@@ -61,10 +63,10 @@ export class OutputBuffer {
   }
 }
 
-/** Ends a process and everything it started. */
-export async function killTree(child: ChildProcess, platform: NodeJS.Platform = process.platform): Promise<void> {
+/** Ends a process and everything it started. `finished` settles when the caller is done with the process; by default that is its `close`. */
+export async function killTree(child: ChildProcess, platform: NodeJS.Platform = process.platform, finished?: Promise<unknown>): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null || !child.pid) return
-  const exited = new Promise<void>((resolve) => child.once('close', () => resolve()))
+  const exited = finished ?? new Promise<void>((resolve) => child.once('close', () => resolve()))
   if (platform === 'win32') {
     await new Promise<void>((resolve) => {
       const killer = spawn(windowsSystemProgram('taskkill.exe'), ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' })
@@ -259,12 +261,24 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
         startOptions.onOutput?.(`${error.message}\n`)
         finish(127, null)
       })
+      // 'close' waits for every holder of the pipes. A process the command left behind (a daemon it started, a
+      // grandchild a tree kill missed) can hold them long after the shell is gone, so after 'exit' wait only for
+      // output already written, then stop listening.
+      child.once('exit', (exitCode, signal) => {
+        const timer = setTimeout(() => {
+          child.stdout?.destroy()
+          child.stderr?.destroy()
+          finish(exitCode, signal)
+        }, DRAIN_MS)
+        timer.unref()
+        child.once('close', () => clearTimeout(timer))
+      })
       child.once('close', (exitCode, signal) => finish(exitCode, signal))
     }).finally(() => {
       // The cwd file is read before cleanup by run(); background jobs do not need it.
       setTimeout(() => void Promise.all(files.map((file) => fs.rm(file, { force: true }))), 5_000).unref()
     })
-    const handle: RunningCommand = { child, done, kill: () => killTree(child, platform) }
+    const handle: RunningCommand = { child, done, kill: () => killTree(child, platform, done) }
     running.add(handle)
     return handle
   }
