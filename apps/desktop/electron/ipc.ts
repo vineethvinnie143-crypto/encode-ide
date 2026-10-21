@@ -214,6 +214,9 @@ export function registerIpc(deps: IpcDeps): void {
     skills.create(String(name), description ? String(description) : undefined),
   )
   handle('skills:open-folder', () => skills.openFolder())
-  handle('agent:approve', (id: string, approved: boolean) => agent.resolveApproval(String(id), Boolean(approved)))
+  // The answer is yes or no, or an object with a note and "for this session"; the current agent honours the yes or no.
+  handle('agent:approve', (id: string, answer: unknown) =>
+    agent.resolveApproval(String(id), typeof answer === 'object' && answer !== null ? Boolean((answer as { approved?: unknown }).approved) : Boolean(answer)),
+  )
   handle('agent:answer', (id: string, answer: string) => agent.resolveAnswer(String(id), String(answer)))
 }

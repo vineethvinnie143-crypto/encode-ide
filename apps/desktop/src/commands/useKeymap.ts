@@ -9,7 +9,8 @@ function isTyping(target: EventTarget | null): boolean {
   return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT' || element.isContentEditable
 }
 
-function modalOpen(): boolean {
+/** True while a dialog or the quick opener is open: shortcuts leave the keyboard to it. */
+export function modalOpen(): boolean {
   const ui = useUi.getState()
   return ui.settingsOpen || ui.pluginsOpen || ui.automationOpen || ui.shortcutsOpen || ui.aboutOpen || ui.quickOpenOpen || ui.confirm !== null || ui.prompt !== null
 }
