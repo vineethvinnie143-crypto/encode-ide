@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import type { Schedule } from '../../shared/types'
+import { secureExisting, writePrivateFile } from './private-file'
 
 /** One-shot or repeating prompts that fire into a session. */
 export class ScheduleService {
@@ -12,6 +13,7 @@ export class ScheduleService {
 
   constructor(private readonly fire: (schedule: Schedule) => Promise<void>) {
     this.file = path.join(app.getPath('userData'), 'eNCode-schedules.json')
+    secureExisting(this.file)
     this.load()
     this.timer = setInterval(() => this.tick(), 1000)
   }
@@ -27,9 +29,7 @@ export class ScheduleService {
 
   private persist(): void {
     try {
-      const tmp = `${this.file}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, schedules: this.schedules }, null, 0), 'utf8')
-      fs.renameSync(tmp, this.file)
+      writePrivateFile(this.file, JSON.stringify({ version: 1, schedules: this.schedules }, null, 0))
     } catch (error) {
       console.error('[schedules] failed to persist', error)
     }

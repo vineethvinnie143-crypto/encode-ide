@@ -65,6 +65,8 @@ const SCENARIOS = {
 }
 
 let requestCount = 0
+/** The Authorization header of the latest chat request, so the smoke can check keys reach the provider. */
+let lastAuthorization = null
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -112,6 +114,10 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, { ok: true })
       return
     }
+    if (request.url === '/__last-authorization') {
+      sendJson(response, 200, { authorization: lastAuthorization })
+      return
+    }
     if (request.url?.endsWith('/models')) {
       sendJson(response, 200, { data: [{ id: 'mock-model', name: 'Mock model' }] })
       return
@@ -121,6 +127,7 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
+    lastAuthorization = request.headers.authorization ?? null
     let raw = ''
     for await (const part of request) raw += part
     const body = JSON.parse(raw || '{}')

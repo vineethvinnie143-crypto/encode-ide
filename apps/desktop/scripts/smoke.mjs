@@ -203,6 +203,35 @@ async function ensureFakeProvider() {
   throw new Error('Fake provider failed to start')
 }
 
+/**
+ * Stores a key for the mock profile through the real IPC and safeStorage, and
+ * checks it reaches neither the renderer nor, unsealed, the disk. Returns it.
+ */
+async function checkKeyStorage() {
+  const secret = `sk-smoke-${Date.now().toString(36)}`
+  const settings = await evaluate(`window.eNCode.settings.setProfileKey('local-mock', ${JSON.stringify(secret)})`)
+  const profile = settings.profiles.find((entry) => entry.id === 'local-mock')
+  console.log('[smoke] key storage:', JSON.stringify(settings.keyStorage))
+  if (!profile?.hasApiKey) throw new Error('The key was not stored')
+  if (JSON.stringify(settings).includes(secret)) throw new Error('Settings handed the key to the renderer')
+
+  const profileDir = process.env.ENCODE_USER_DATA_DIR
+  if (!profileDir) {
+    console.log('[smoke] note: ENCODE_USER_DATA_DIR is not set, so the settings file was not inspected')
+    return secret
+  }
+  const disk = await fs.readFile(path.join(profileDir, 'eNCode-settings.json'), 'utf8')
+  const stored = JSON.parse(disk).profiles.find((entry) => entry.id === 'local-mock')?.apiKeyEnc
+  if (disk.includes(secret) || disk.includes('plain:')) throw new Error('The settings file holds a readable key')
+  if (settings.keyStorage.mode === 'keychain' && !stored?.startsWith('enc:')) {
+    throw new Error('The keychain is available but the key was not sealed on disk')
+  }
+  if (settings.keyStorage.mode === 'session' && stored !== undefined) {
+    throw new Error('Without a keychain the key must stay out of the settings file')
+  }
+  return secret
+}
+
 async function runProviderPhase() {
   console.log('[smoke] --- provider phase (local OpenAI-compatible server) ---')
   await ensureFakeProvider()
@@ -224,6 +253,7 @@ async function runProviderPhase() {
     policy: 'workspace-write',
     maxSteps: 12
   })`)
+  const secret = await checkKeyStorage()
 
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')
@@ -265,6 +295,9 @@ async function runProviderPhase() {
   if (stats.diffs < 1) throw new Error('No diff rendered for the provider-driven write')
   if (!stats.tools || !stats.commandOutput) throw new Error('run_command output missing')
   if (!stats.completion) throw new Error('completion summary missing')
+
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-authorization`)).json()
+  if (seen.authorization !== `Bearer ${secret}`) throw new Error('The stored key did not reach the provider')
 
   const statsText = await evaluate("document.querySelector('.composer-stats')?.textContent ?? ''")
   console.log('[smoke] usage stats:', JSON.stringify(statsText.trim()))

@@ -35,6 +35,7 @@ const PRESETS: Preset[] = [
 
 export default function SettingsModal() {
   const settings = useSettings((state) => state.settings)
+  const keyStorage = settings?.keyStorage
   const save = useSettings((state) => state.save)
   const setProfileKey = useSettings((state) => state.setProfileKey)
   const setSettingsOpen = useUi((state) => state.setSettingsOpen)
@@ -69,6 +70,8 @@ export default function SettingsModal() {
     () => draft?.profiles.find((profile) => profile.id === selectedId) ?? draft?.profiles[0] ?? null,
     [draft, selectedId],
   )
+  // Whether a key is stored comes from the main process: it can drop one when the base URL changes.
+  const storedKey = settings?.profiles.find((profile) => profile.id === selected?.id)?.hasApiKey ?? false
 
   const visibleModels = useMemo(() => {
     if (!models.length) return []
@@ -136,20 +139,21 @@ export default function SettingsModal() {
       notify('error', 'Keep at least one model profile.')
       return false
     }
+    const hadKey = new Set(settings?.profiles.filter((profile) => profile.hasApiKey).map((profile) => profile.id))
     await save({ ...draft, profiles: draft.profiles })
-    if (selected && keyInput.trim()) {
-      await setProfileKey(selected.id, keyInput.trim())
-      setKeyInput('')
-      setDraft((current) =>
-        current
-          ? {
-              ...current,
-              profiles: current.profiles.map((profile) =>
-                profile.id === selected.id ? { ...profile, hasApiKey: true } : profile,
-              ),
-            }
-          : current,
+    const newKeyFor = selected && keyInput.trim() ? selected.id : null
+    const dropped = (useSettings.getState().settings?.profiles ?? []).filter(
+      (profile) => hadKey.has(profile.id) && !profile.hasApiKey && profile.id !== newKeyFor,
+    )
+    if (dropped.length) {
+      notify(
+        'info',
+        `Removed the API key for ${dropped.map((profile) => profile.name).join(', ')} because its base URL now points to another server. Enter the key for that server.`,
       )
+    }
+    if (selected && newKeyFor) {
+      if (!(await setProfileKey(selected.id, keyInput.trim()))) return false
+      setKeyInput('')
     }
     return true
   }
@@ -370,8 +374,10 @@ export default function SettingsModal() {
                               type={showKey ? 'text' : 'password'}
                               value={keyInput}
                               placeholder={
-                                selected.hasApiKey
-                                  ? 'Stored — type to replace'
+                                storedKey
+                                  ? keyStorage?.mode === 'session'
+                                    ? 'Held for this session — type to replace'
+                                    : 'Stored — type to replace'
                                   : selected.kind === 'openrouter'
                                     ? 'sk-or-v1-…'
                                     : 'sk-…'
@@ -386,9 +392,15 @@ export default function SettingsModal() {
                               {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                             </button>
                           </div>
-                          <div className="form-help">
-                            Stored encrypted via the OS keychain when available. Never sent anywhere except the provider.
-                          </div>
+                          {keyStorage?.mode === 'session' ? (
+                            <div className="form-help is-warn">
+                              Kept in memory until eNCode closes and never written to disk. {keyStorage.reason}
+                            </div>
+                          ) : (
+                            <div className="form-help">
+                              Encrypted by your system keychain and sent only to this provider.
+                            </div>
+                          )}
                         </div>
                       </>
                     )}

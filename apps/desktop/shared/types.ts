@@ -29,6 +29,12 @@ export interface ModelProfile {
 
 export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | 'auto-review'
 
+/**
+ * Where API keys live: encrypted by the OS keychain on disk, or, when no
+ * keychain is usable, only in memory until eNCode quits.
+ */
+export type KeyStorage = { mode: 'keychain' } | { mode: 'session'; reason: string }
+
 export interface Settings {
   profiles: ModelProfile[]
   activeProfileId: string | null
@@ -39,6 +45,8 @@ export interface Settings {
   recentWorkspaces: string[]
   lastWorkspace: string | null
   agentMode: AgentMode
+  /** Read only; reported by the main process and ignored on save. */
+  keyStorage: KeyStorage
 }
 
 export interface FileEntry {
@@ -298,7 +306,7 @@ export interface EncodeApi {
   settings: {
     get(): Promise<Settings>
     save(patch: Partial<Settings>): Promise<Settings>
-    setProfileKey(id: string, key: string): Promise<void>
+    setProfileKey(id: string, key: string): Promise<Settings>
   }
   models: {
     openRouter(freeOnly?: boolean): Promise<ModelInfo[]>

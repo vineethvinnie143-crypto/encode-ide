@@ -14,6 +14,7 @@ import type {
 } from '../../shared/types'
 import { Agent } from './agent'
 import { exportSessionZip } from '../services/export'
+import { secureExisting, writePrivateFile } from '../services/private-file'
 import type { ChatMessage } from './types'
 import type { JobService } from '../services/jobs'
 import type { SettingsService } from '../services/settings'
@@ -59,6 +60,7 @@ export class AgentManager {
 
   constructor(private readonly deps: AgentManagerDeps) {
     this.file = path.join(app.getPath('userData'), 'eNCode-sessions.json')
+    secureExisting(this.file)
     this.load()
   }
 
@@ -116,9 +118,7 @@ export class AgentManager {
             plan: this.plans.get(summary.id) ?? null,
           }
         })
-      const tmp = `${this.file}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, sessions }, null, 0), 'utf8')
-      fs.renameSync(tmp, this.file)
+      writePrivateFile(this.file, JSON.stringify({ version: 1, sessions }, null, 0))
     } catch (error) {
       console.error('[sessions] failed to persist', error)
     }

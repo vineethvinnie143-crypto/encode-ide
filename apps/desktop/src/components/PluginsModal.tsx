@@ -63,7 +63,13 @@ export default function PluginsModal() {
                 {profile.id === settings?.activeProfileId && <span className="plugin-badge">active</span>}
               </div>
             ))}
-            <button className="btn ghost sm" onClick={() => openSettings('models')}>
+            <button
+              className="btn ghost sm"
+              onClick={() => {
+                setPluginsOpen(false)
+                openSettings('models')
+              }}
+            >
               Manage providers…
             </button>
 

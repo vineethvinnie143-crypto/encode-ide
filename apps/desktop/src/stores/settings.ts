@@ -8,7 +8,8 @@ interface SettingsStore {
   loading: boolean
   load(): Promise<void>
   save(patch: Partial<Settings>): Promise<void>
-  setProfileKey(id: string, key: string): Promise<void>
+  /** False when the key was refused; the reason has been shown. */
+  setProfileKey(id: string, key: string): Promise<boolean>
   setMode(mode: AgentMode): Promise<void>
   activeProfile(): Settings['profiles'][number] | null
 }
@@ -39,11 +40,13 @@ export const useSettings = create<SettingsStore>((set, get) => ({
 
   setProfileKey: async (id, key) => {
     try {
-      await api.settings.setProfileKey(id, key)
-      const settings = await api.settings.get()
+      const settings = await api.settings.setProfileKey(id, key)
       set({ settings })
+      return true
     } catch (error) {
-      useUi.getState().notify('error', `Could not store the key: ${(error as Error).message}`)
+      const message = (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      useUi.getState().notify('error', `Could not store the key: ${message}`)
+      return false
     }
   },
 

@@ -1,4 +1,4 @@
-import type { ModelInfo, ModelProfile } from '../../shared/types'
+import type { ModelInfo } from '../../shared/types'
 import type { SettingsService } from './settings'
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
@@ -97,10 +97,5 @@ export class ModelsService {
     } catch (err) {
       return { ok: false, message: (err as Error).message }
     }
-  }
-
-  profileFor(id: string): ModelProfile | undefined {
-    const p = this.settings.raw().profiles.find((x) => x.id === id)
-    return p ? { ...p, hasApiKey: Boolean(p.apiKeyEnc) } : undefined
   }
 }

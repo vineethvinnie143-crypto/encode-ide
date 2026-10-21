@@ -2645,6 +2645,10 @@ select {
   line-height: 1.45;
   word-break: break-all;
 }
+.form-help.is-warn {
+  color: var(--yellow);
+  word-break: normal;
+}
 .form-help code {
   font-family: var(--font-mono);
   font-size: 10.5px;

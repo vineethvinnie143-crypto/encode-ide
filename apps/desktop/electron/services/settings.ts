@@ -1,14 +1,16 @@
-import { app, safeStorage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AgentMode, ApprovalPolicy, ModelProfile, ProfileKind, Settings } from '../../shared/types'
+import { secureExisting, writePrivateFile } from './private-file'
+import { type Cipher, KeyVault } from './secrets'
 
 interface StoredProfile extends Omit<ModelProfile, 'hasApiKey'> {
+  /** A key sealed by the OS keychain; see KeyVault. Never plain text. */
   apiKeyEnc?: string
 }
 
-interface StoredSettings extends Omit<Settings, 'profiles'> {
+interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage'> {
   profiles: StoredProfile[]
 }
 
@@ -34,28 +36,6 @@ function defaults(): StoredSettings {
   }
 }
 
-function encrypt(value: string): string {
-  try {
-    if (safeStorage.isEncryptionAvailable()) {
-      return 'enc:' + safeStorage.encryptString(value).toString('base64')
-    }
-  } catch {
-    /* fall through to plain encoding */
-  }
-  return 'plain:' + Buffer.from(value, 'utf8').toString('base64')
-}
-
-function decrypt(stored?: string): string {
-  if (!stored) return ''
-  try {
-    if (stored.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'))
-    if (stored.startsWith('plain:')) return Buffer.from(stored.slice(6), 'base64').toString('utf8')
-  } catch {
-    /* ignore corrupted secrets */
-  }
-  return ''
-}
-
 const POLICIES: ApprovalPolicy[] = ['read-only', 'workspace-write', 'full-access', 'auto-review']
 
 function normalizePolicy(value: unknown, fallback: ApprovalPolicy): ApprovalPolicy {
@@ -66,6 +46,25 @@ function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+/** The server a profile's requests, and so its key, go to. */
+function serverOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl.trim()).origin
+  } catch {
+    return ''
+  }
+}
+
+const MAX_KEY_LENGTH = 4096
+
+/** Keys travel in an HTTP header, so they must be one line of printable characters. */
+function checkKey(key: string): void {
+  if (key.length > MAX_KEY_LENGTH) throw new Error(`An API key is at most ${MAX_KEY_LENGTH} characters.`)
+  if (key && !/^[\x21-\x7e]+$/.test(key)) {
+    throw new Error('An API key is a single line of printable characters without spaces.')
+  }
+}
+
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
   const n = typeof value === 'number' ? value : Number.NaN
   if (!Number.isFinite(n)) return fallback
@@ -74,13 +73,30 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 
 export class SettingsService {
   private readonly file: string
+  private readonly vault: KeyVault
   private data: StoredSettings
 
-  constructor() {
-    const dir = app.getPath('userData')
-    fs.mkdirSync(dir, { recursive: true })
+  /** `cipher` is Electron's safeStorage; tests pass a fake. */
+  constructor(dir: string, cipher: Cipher, platform: NodeJS.Platform = process.platform) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     this.file = path.join(dir, 'eNCode-settings.json')
+    this.vault = new KeyVault(cipher, platform)
+    secureExisting(this.file)
     this.data = this.load()
+    if (this.upgradeKeys()) this.persist()
+  }
+
+  /** Seals or evicts keys an earlier build stored in plain text. True when the file must be rewritten. */
+  private upgradeKeys(): boolean {
+    let changed = false
+    for (const profile of this.data.profiles) {
+      const next = this.vault.load(profile.id, profile.apiKeyEnc)
+      if (next !== profile.apiKeyEnc) {
+        profile.apiKeyEnc = next
+        changed = true
+      }
+    }
+    return changed
   }
 
   private load(): StoredSettings {
@@ -130,9 +146,7 @@ export class SettingsService {
 
   private persist(): void {
     try {
-      const tmp = `${this.file}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8')
-      fs.renameSync(tmp, this.file)
+      writePrivateFile(this.file, JSON.stringify(this.data, null, 2))
     } catch (err) {
       console.error('[settings] failed to persist', err)
     }
@@ -142,7 +156,7 @@ export class SettingsService {
   get(): Settings {
     const profiles: ModelProfile[] = this.data.profiles.map((p) => {
       const { apiKeyEnc, ...rest } = p
-      return { ...rest, hasApiKey: Boolean(apiKeyEnc) }
+      return { ...rest, hasApiKey: this.vault.has(p.id, apiKeyEnc) }
     })
     return {
       profiles,
@@ -153,6 +167,7 @@ export class SettingsService {
       recentWorkspaces: [...this.data.recentWorkspaces],
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
+      keyStorage: this.vault.storage,
     }
   }
 
@@ -170,17 +185,23 @@ export class SettingsService {
         .filter((p) => p && typeof p.id === 'string')
         .map((p) => {
           const prev = existing.get(p.id)
+          const baseUrl = str(p.baseUrl)
+          // A key stays with the server it was entered for: pointing its profile elsewhere drops it.
+          const sameServer = prev !== undefined && serverOf(prev.baseUrl) === serverOf(baseUrl)
+          if (prev && !sameServer) this.vault.forget(prev.id)
           return {
             id: p.id,
             name: str(p.name, 'Model'),
             kind: p.kind === 'openrouter' || p.kind === 'demo' ? p.kind : 'custom',
-            baseUrl: str(p.baseUrl),
+            baseUrl,
             model: str(p.model),
             models: Array.isArray(p.models) ? p.models : prev?.models,
-            apiKeyEnc: prev?.apiKeyEnc,
+            apiKeyEnc: sameServer ? prev.apiKeyEnc : undefined,
           }
         })
       if (!next.profiles.length) next.profiles = [{ ...DEMO_PROFILE }]
+      const kept = new Set(next.profiles.map((p) => p.id))
+      for (const id of existing.keys()) if (!kept.has(id)) this.vault.forget(id)
     }
 
     if (typeof patch.activeProfileId === 'string' && next.profiles.some((p) => p.id === patch.activeProfileId)) {
@@ -206,17 +227,21 @@ export class SettingsService {
     return this.get()
   }
 
-  setProfileKey(profileId: string, key: string): void {
-    const profile = this.data.profiles.find((p) => p.id === profileId)
-    if (!profile) return
+  /** Stores, replaces or (with an empty key) removes a profile's key, for the server it points at now. */
+  setProfileKey(profileId: string, key: string): Settings {
     const trimmed = key.trim()
-    profile.apiKeyEnc = trimmed ? encrypt(trimmed) : undefined
-    this.persist()
+    checkKey(trimmed)
+    const profile = this.data.profiles.find((p) => p.id === profileId)
+    if (profile) {
+      profile.apiKeyEnc = this.vault.put(profile.id, trimmed)
+      this.persist()
+    }
+    return this.get()
   }
 
   keyFor(profileId: string): string {
     const profile = this.data.profiles.find((p) => p.id === profileId)
-    return decrypt(profile?.apiKeyEnc)
+    return profile ? this.vault.get(profile.id, profile.apiKeyEnc) : ''
   }
 
   touchWorkspace(root: string): void {

@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, protocol } from 'electron'
+import { app, BrowserWindow, Menu, protocol, safeStorage } from 'electron'
+import path from 'node:path'
 import { AgentManager } from './agent/manager'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
@@ -18,6 +19,11 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
   },
 ])
+
+// End-to-end tests run against a throwaway profile. A packaged build always
+// uses the real one. This must precede the lock, which lives in the profile.
+const testProfile = app.isPackaged ? undefined : process.env.ENCODE_USER_DATA_DIR
+if (testProfile) app.setPath('userData', path.resolve(testProfile))
 
 const gotLock = app.requestSingleInstanceLock()
 
@@ -43,7 +49,7 @@ if (!gotLock) {
       registerAppProtocol()
     }
 
-    const settings = new SettingsService()
+    const settings = new SettingsService(app.getPath('userData'), safeStorage)
     const workspace = new WorkspaceService()
     const models = new ModelsService(settings)
     const git = new GitService(workspace)

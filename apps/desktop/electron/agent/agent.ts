@@ -266,7 +266,7 @@ export class Agent {
     mode: AgentMode
     isDemo: boolean
     profile: ModelProfile | null
-    settings: Settings
+    settings: Pick<Settings, 'maxSteps'>
     signal: AbortSignal
   }): Promise<void> {
     const { mode, isDemo, profile, settings, signal } = args
