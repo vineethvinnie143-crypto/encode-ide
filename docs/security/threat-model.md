@@ -64,6 +64,11 @@ Out of scope for v1:
    the workspace ([ADR 0005](../adr/0005-programs-from-absolute-path-entries.md)).
 5. **Repository to CI.** The workflow token is read-only and actions are pinned by hash
    ([ADR 0012](../adr/0012-windows-first-ci.md)).
+6. **Main process to the agent host.** The agent runs in a utility process the main process
+   supervises ([ADR 0030](../adr/0030-the-agent-runs-in-a-host-that-clients-drive.md)). Neither
+   end trusts the other's messages: envelopes are shape-checked and params are validated against a
+   schema before any handler runs. The host asks for a key only when a model call starts, and the
+   key vault stays in the main process.
 
 ## Threats and controls
 
@@ -95,6 +100,11 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T21 | A tampered build or update | Code signing and signed updates | Planned, M6 |
 | T22 | Runaway runs, rate limits and hung streams | Step cap, output caps and timeouts on commands and fetches | Partial (R10) |
 | T23 | Lost or corrupted sessions | Atomic private writes | Partial (R11) |
+| T24 | A crash or a hang in the agent takes the app, or the conversation, with it | The agent runs in its own process, restarted with a growing pause, and the user is told which sessions were mid-turn (0030). Sessions are append-only logs: a crash costs at most the line being written (0031). | Mitigated once the app uses the host (M1) |
+| T25 | Hostile or malformed messages between the main process and the host | Both ends check the envelope and validate params against a schema before a handler runs. Errors cross as a code and a message, never a stack (0030). | Mitigated once the app uses the host (M1) |
+| T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). | Partial (R1) |
+| T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
+| T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
 
 ## Residual risks
 
@@ -159,6 +169,11 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   large sessions block the UI. A capture cut short by Stop is persisted only with a later
   event, and nothing is flushed on quit.
   - Owner: M1 JSONL sessions (append-only, flushed per event).
+  - Status: `@encode/core` has the store (0031). This closes when the app runs on it.
+- **R12. Logs keep what the agent saw.** A session log holds file contents, command output and
+  anything the user typed, secrets included, and nothing prunes it (0031). It is as exposed as
+  the user's own files, and same-user malware reads those too (R5).
+  - Owner: M1, a storage view with explicit deletion.
 
 ## Verification
 
@@ -328,8 +343,8 @@ requests and get their rows when they land.
 - **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
   for. A folder cannot install one without the user's approval, and the sandbox will not cover
   them.
-- **RP7. The packages are not in the app yet.** Until the core adopts them (after the core pull
-  request merges), none of P1 to P10 acts in the product. `docs/m3-integration.md` lists the
+- **RP7. The packages are not in the app yet.** Until the core adopts them (the wiring pull
+  request, now that the core is in `main`), none of P1 to P10 acts in the product. `docs/m3-integration.md` lists the
   wiring.
   - Owner: the integration pull request.
 

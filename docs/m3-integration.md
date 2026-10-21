@@ -2,13 +2,14 @@
 
 Status: written with the M3 pull request (permission rules, trust, hooks, checkpoints, MCP
 client). **None of this is wired into the app yet.** The pull request adds libraries and
-touches no code of `apps/desktop`, `@encode/core` or `@encode/tools`. The wiring waits for the
-core pull request (#8), whose seams these packages were built against.
+touches no code of `apps/desktop`, `@encode/core` or `@encode/tools`. The core (#8) is in `main`
+now, so the wiring below can start; it is the next pull request.
 
 ## What was checked already
 
-A scratch merge of this branch with the core branch type-checks these assignments, with no
-change to either side:
+Before the core merged, a scratch merge of this branch with the core branch type-checked these
+assignments, with no change to either side. Nothing in the repository asserts them yet; the
+wiring pull request does, by using them:
 
 | This repository | Core's seam |
 | --- | --- |
@@ -56,11 +57,11 @@ change to either side:
 
 ## Later M3 pull requests (not in this one)
 
-| Piece | Why it waits |
+| Piece | Notes |
 | --- | --- |
-| OS sandbox: Seatbelt on macOS, bubblewrap on Linux, an allowlist proxy, and the Windows evaluation | A package of its own, with a `SpawnWrapper` that plugs into the core's shell once #8 is merged. Until it lands, R1 stays open and prompts are the control on every platform. |
-| Search providers (Brave, Tavily, Exa) | Implements the core's `WebAccess.search`; needs the core's web tools. |
-| Subagent definitions (`.encode/agents/*.md`) and the reviewer gate | Map onto the core's `Subagents` and hook points; need the core merged. |
+| OS sandbox: Seatbelt on macOS, bubblewrap on Linux, an allowlist proxy, and the Windows evaluation | A package of its own, with a `SpawnWrapper` for the core's shell. Until it lands, R1 stays open and prompts are the control on every platform. |
+| Search providers (Brave, Tavily, Exa) | Implements the core's `WebAccess.search`. |
+| Subagent definitions (`.encode/agents/*.md`) and the reviewer gate | Map onto the core's `Subagents` and hook points. |
 
 ## Known limits carried into the wiring
 
