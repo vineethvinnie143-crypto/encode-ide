@@ -59,6 +59,12 @@ export function openDoc(path: string, content: string): EditorState {
   return state
 }
 
+/** How the status bar names a document's indentation: "Spaces: 4" or "Tab Size: 4". */
+export function indentLabel(state: EditorState): string {
+  const { indentUnit, tabSize } = state.config
+  return indentUnit === '\t' ? `Tab Size: ${tabSize}` : `Spaces: ${indentUnit.length}`
+}
+
 export function hasDoc(path: string): boolean {
   return docs.has(path)
 }
@@ -69,6 +75,23 @@ export function docState(path: string): EditorState | undefined {
 
 export function closeDoc(path: string): void {
   docs.delete(path)
+}
+
+/** A file or folder was renamed: its open documents follow it, and take the language of their new names. */
+export function renameDocs(from: string, to: string): void {
+  for (const [path, entry] of [...docs]) {
+    if (path !== from && !path.startsWith(`${from}/`)) continue
+    const next = to + path.slice(from.length)
+    docs.delete(path)
+    docs.set(next, entry)
+    const current = entry.host?.state ?? entry.state
+    const language = languageForPath(next)
+    if (language.id !== current.config.language.id) {
+      const tr = current.update({ config: { language } })
+      entry.state = tr.state
+      entry.host?.dispatch(tr)
+    }
+  }
 }
 
 export function closeDocsUnder(prefix: string): void {
@@ -116,12 +139,7 @@ export function snapshotForSave(path: string): Snapshot | null {
   const entry = docs.get(path)
   if (!entry) return null
   const { state } = entry
-  const text = state.doc.toString()
-  return {
-    text: state.config.lineSeparator === '\r\n' ? text.replace(/\n/g, '\r\n') : text,
-    doc: state.doc,
-    point: state.history.point,
-  }
+  return { text: state.serialize(), doc: state.doc, point: state.history.point }
 }
 
 /** The file now holds what the snapshot held. */

@@ -1,6 +1,6 @@
 import { create } from '../store'
 import { api } from '../api'
-import { applyExternal, closeDoc, closeDocsUnder, hasDoc, isDirty, markSaved, openDoc, snapshotForSave } from '../editor/docs'
+import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
 
 export interface Tab {
@@ -12,16 +12,29 @@ export interface Tab {
   dirty: boolean
 }
 
+/** What the status bar shows about the active document besides the cursor. */
+export interface DocInfo {
+  indent: string
+  eol: 'LF' | 'CRLF'
+}
+
 interface EditorStore {
   tabs: Tab[]
   activePath: string | null
   cursor: { line: number; column: number }
+  info: DocInfo
   revealLine: number | null
   openFile(path: string, line?: number): Promise<void>
   closeTab(path: string): Promise<void>
   closeOthers(path: string): Promise<void>
   closeAll(): Promise<void>
+  /** Asks before unsaved changes in any tab are thrown away; true when there are none or the user agrees. */
+  confirmDiscardAll(): Promise<boolean>
+  /** Closes every tab without asking, for when the project changes under them: their paths belong to the old one. */
+  dropAll(): void
   closeTabsUnder(prefix: string): void
+  /** A file or folder was renamed: its tabs follow it. */
+  renamePath(from: string, to: string): void
   setActive(path: string): void
   /** The editor reports whether the document differs from the file. */
   setDirty(path: string, dirty: boolean): void
@@ -30,6 +43,7 @@ interface EditorStore {
   saveActive(): Promise<void>
   saveAll(): Promise<void>
   setCursor(line: number, column: number): void
+  setInfo(info: DocInfo): void
   consumeRevealLine(): void
 }
 
@@ -58,6 +72,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
   tabs: [],
   activePath: null,
   cursor: { line: 1, column: 1 },
+  info: { indent: 'Spaces: 2', eol: 'LF' },
   revealLine: null,
 
   openFile: async (path, line) => {
@@ -106,9 +121,13 @@ export const useEditor = create<EditorStore>((set, get) => ({
   },
 
   closeAll: async () => {
-    const tabs = get().tabs
-    if (!(await confirmDiscard(tabs.filter((tab) => tab.dirty)))) return
-    for (const tab of tabs) closeDoc(tab.path)
+    if (await get().confirmDiscardAll()) get().dropAll()
+  },
+
+  confirmDiscardAll: () => confirmDiscard(get().tabs.filter((tab) => tab.dirty)),
+
+  dropAll: () => {
+    for (const tab of get().tabs) closeDoc(tab.path)
     set({ tabs: [], activePath: null, revealLine: null })
   },
 
@@ -121,6 +140,19 @@ export const useEditor = create<EditorStore>((set, get) => ({
         : tabs[tabs.length - 1]?.path ?? null
       return { tabs, activePath }
     })
+  },
+
+  renamePath: (from, to) => {
+    renameDocs(from, to)
+    const moved = (path: string) => (path === from ? to : path.startsWith(`${from}/`) ? to + path.slice(from.length) : path)
+    set((state) => ({
+      tabs: state.tabs.map((tab) => {
+        const path = moved(tab.path)
+        if (path === tab.path) return tab
+        return { ...tab, path, name: nameOf(path), language: docState(path)?.config.language.id ?? tab.language }
+      }),
+      activePath: state.activePath === null ? null : moved(state.activePath),
+    }))
   },
 
   setActive: (path) => set({ activePath: path, revealLine: null }),
@@ -150,6 +182,11 @@ export const useEditor = create<EditorStore>((set, get) => ({
   setCursor: (line, column) => {
     const { cursor } = get()
     if (cursor.line !== line || cursor.column !== column) set({ cursor: { line, column } })
+  },
+
+  setInfo: (info) => {
+    const current = get().info
+    if (current.indent !== info.indent || current.eol !== info.eol) set({ info })
   },
 
   consumeRevealLine: () => set({ revealLine: null }),

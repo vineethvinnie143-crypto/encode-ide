@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function StatusBar() {
   const cursor = useEditor((state) => state.cursor)
+  const info = useEditor((state) => state.info)
   const activePath = useEditor((state) => state.activePath)
   const tabs = useEditor((state) => state.tabs)
   const git = useGit((state) => state.status)
@@ -50,8 +51,9 @@ export default function StatusBar() {
         </span>
         <span className="status-item">{language}</span>
         <span className="status-item">Ln {cursor.line}, Col {cursor.column}</span>
-        <span className="status-item">Spaces: 2</span>
+        {tab && <span className="status-item">{info.indent}</span>}
         <span className="status-item">UTF-8</span>
+        {tab && <span className="status-item">{info.eol}</span>}
       </div>
     </footer>
   )

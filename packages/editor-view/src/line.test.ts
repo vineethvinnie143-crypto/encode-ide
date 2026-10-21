@@ -61,6 +61,31 @@ describe('segmentsOf', () => {
     assert.ok(!hasControl('plain text\twith tab'))
   })
 
+  it('marks invisible filler characters and the tag block, which is two UTF-16 units per character', () => {
+    for (const code of [0x34f, 0x115f, 0x1160, 0x17b4, 0x180b, 0x3164, 0xffa0]) {
+      assert.ok(hasControl(`a${String.fromCodePoint(code)}b`), `U+${code.toString(16)} is a marker`)
+    }
+    const tag = String.fromCodePoint(0xe0041)
+    assert.equal(tag.length, 2)
+    const segments = segmentsOf(`a${tag}${tag}b`, [])
+    assert.deepEqual(
+      segments.map((segment) => [segment.text, segment.control, segment.start]),
+      [
+        ['a', false, 0],
+        [tag, true, 1],
+        [tag, true, 3],
+        ['b', false, 5],
+      ],
+    )
+    assert.equal(controlLabel(tag), 'U+E0041')
+    // Visible characters next to them stay text: emoji, a flag's regional indicators, variation selector 16, the code point after the block.
+    for (const text of [`smile ${String.fromCodePoint(0x1f600)}`, `heart${String.fromCodePoint(0x2764, 0xfe0f)}`, String.fromCodePoint(0x1f1e9, 0x1f1ea), String.fromCodePoint(0xe0080)]) {
+      assert.ok(!hasControl(text), text)
+    }
+    // A lone surrogate is not a tag character: the unit stays text.
+    assert.ok(!hasControl(String.fromCharCode(0xdb40)))
+  })
+
   it('keeps every character of highlighted source, whatever the language', async () => {
     const alphabet = `ab ={}()[]"'\`/*-#<>\\\t:;,.0123456789${String.fromCharCode(0x202e, 0x200b)}`
     for (const path of ['a.ts', 'a.py', 'a.lua', 'a.css', 'a.md', 'a.json', 'a.html', 'a.sh', 'a.sql']) {
@@ -103,7 +128,7 @@ describe('segmentsOf offsets', () => {
           assert.equal(segment.start, at, 'segments follow each other')
           assert.equal(text.slice(segment.start, segment.start + segment.text.length), segment.text)
           assert.ok(segment.text.length > 0)
-          if (segment.control) assert.equal(segment.text.length, 1)
+          if (segment.control) assert.equal([...segment.text].length, 1)
           at += segment.text.length
         }
         assert.equal(at, Math.max(start, end), 'and cover the window')

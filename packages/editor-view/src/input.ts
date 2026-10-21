@@ -11,6 +11,8 @@ import type { EditorView } from './view'
  */
 export class InputHandler {
   composing = false
+  /** Escape was the last key: Tab, the editor's indent key, now leaves the editor instead, so the keyboard is never trapped. */
+  private escaped = false
   /** The text of the last copy made from cursors without a selection: pasting it again puts whole lines above the cursor. */
   private linewise: string | null = null
 
@@ -36,6 +38,13 @@ export class InputHandler {
 
   private keydown(event: KeyboardEvent): void {
     if (this.composing || event.isComposing) return
+    if (event.key === 'Shift' || event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta') return
+    const plain = !event.ctrlKey && !event.altKey && !event.metaKey
+    if (this.escaped && event.key === 'Tab' && plain) {
+      this.escaped = false
+      return
+    }
+    this.escaped = event.key === 'Escape' && plain && !event.shiftKey
     for (const name of this.view.keymap.lookup(event)) {
       if (this.view.runCommand(name)) {
         event.preventDefault()

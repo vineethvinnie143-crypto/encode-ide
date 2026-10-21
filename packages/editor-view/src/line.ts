@@ -15,16 +15,20 @@ function characterClass(...pairs: number[]): string {
 
 /**
  * Characters that make code read differently from how it runs, or that do
- * not show at all: control characters, soft hyphens and zero-width, bidi and
- * line-separator characters. They are drawn as visible markers, so a
- * "Trojan Source" edit cannot hide in the editor.
+ * not show at all: control characters, soft hyphens, line separators, bidi
+ * controls, zero-width and filler characters, and the tag block (U+E0000 to
+ * U+E007F), which spells out invisible ASCII. They are drawn as visible
+ * markers, so neither a "Trojan Source" edit nor text hidden for a model to
+ * read can sit in a file unseen. A marker covers one code point, which is two
+ * UTF-16 units for the tag block.
  */
 const CONTROL_CLASS = characterClass(
-  0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0xad, 0xad, 0x61c, 0x61c, 0x180e, 0x180e, 0x200b, 0x200f, 0x2028, 0x2029,
-  0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0xfeff, 0xfeff, 0xfff9, 0xfffb,
+  0x00, 0x08, 0x0b, 0x1f, 0x7f, 0x9f, 0xad, 0xad, 0x34f, 0x34f, 0x61c, 0x61c, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180b, 0x180e,
+  0x200b, 0x200f, 0x2028, 0x2029, 0x202a, 0x202e, 0x2060, 0x2064, 0x2066, 0x2069, 0x3164, 0x3164, 0xfeff, 0xfeff, 0xffa0, 0xffa0,
+  0xfff9, 0xfffb, 0xe0000, 0xe007f,
 )
-const CONTROL = new RegExp(CONTROL_CLASS)
-const CONTROL_GLOBAL = new RegExp(CONTROL_CLASS, 'g')
+const CONTROL = new RegExp(CONTROL_CLASS, 'u')
+const CONTROL_GLOBAL = new RegExp(CONTROL_CLASS, 'gu')
 
 /**
  * Text whose width the view can compute as columns times the character
@@ -53,7 +57,7 @@ export interface Segment {
 
 /** The label drawn for a control character: U+200B. */
 export function controlLabel(char: string): string {
-  return `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`
+  return `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`
 }
 
 /**
@@ -75,7 +79,7 @@ export function segmentsOf(text: string, tokens: readonly number[], from = 0, to
     for (const match of piece.matchAll(CONTROL_GLOBAL)) {
       if (match.index! > last) out.push({ text: piece.slice(last, match.index), kind, control: false, start: start + last })
       out.push({ text: match[0], kind, control: true, start: start + match.index! })
-      last = match.index! + 1
+      last = match.index! + match[0].length
     }
     if (last < piece.length) out.push({ text: piece.slice(last), kind, control: false, start: start + last })
   }
@@ -116,7 +120,8 @@ export function fillLine(
       span.className = marked ? 'enc-ctrl enc-zone-mark' : 'enc-ctrl'
       span.dataset.label = controlLabel(piece)
       // Not the character itself: a bidi control in the DOM would still reorder the text after it.
-      span.textContent = ' '
+      // One blank per UTF-16 unit it stands for, so offsets keep counting the way the document does.
+      span.textContent = ' '.repeat(piece.length)
       nodes.push(span)
     } else if (kind === T.plain && !marked) {
       nodes.push(document.createTextNode(piece))

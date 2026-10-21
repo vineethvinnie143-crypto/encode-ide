@@ -20,6 +20,32 @@ export const edit = [
     },
   },
   {
+    name: 'Escape, then Tab, leaves the editor; Tab on its own still indents',
+    async run({ mount, ev, press, text, assert }) {
+      await mount({ text: 'x', path: 'a.txt' })
+      const focused = () => ev(() => document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName)
+      await press('Tab')
+      const indented = await text()
+      assert.equal(indented, '  x', 'Tab indented')
+      assert.equal(await focused(), 'enc-input', 'focus is still in the editor')
+      await press('Escape')
+      await press('Tab')
+      assert.equal(await text(), indented, 'the Tab after Escape did not edit')
+      assert.equal(await focused(), 'after', 'it moved focus out of the editor')
+      // Any other key in between disarms it.
+      await ev(() => window.view.focus())
+      await press('Escape')
+      await press('ArrowRight')
+      await press('Tab')
+      assert.ok((await text()).length > indented.length, 'a Tab after other keys indents again')
+      assert.equal(await focused(), 'enc-input')
+      // Shift on its own does not disarm it, and Shift+Tab goes back.
+      await press('Escape')
+      await press('Tab', { shift: true })
+      assert.notEqual(await focused(), 'enc-input', 'Escape then Shift+Tab leaves too')
+    },
+  },
+  {
     name: 'shortcuts: comment, move line, delete line, duplicate, select occurrences, word delete',
     async run({ mount, press, text, selection, assert }) {
       await mount({ text: 'one\ntwo\nthree\nthree', path: 'a.ts' })

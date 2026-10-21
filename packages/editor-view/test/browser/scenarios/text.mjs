@@ -48,6 +48,7 @@ export const text = [
         `caf${ch(0xe9)} ${ch(0x4e2d, 0x6587)} ab ${ch(0x1f600)} z`,
         `${ch(0x65, 0x301, 0x65, 0x301)} combining`,
         `bidi ${ch(0x202e)} marks ${ch(0x200b)} zero width ${ch(0)} nul`,
+        `tags ${ch(0xe0068, 0xe0069)} and a filler ${ch(0x3164)} between`,
         `${ch(0x65e5, 0x672c, 0x8a9e, 0x306e, 0x30c6, 0x30ad, 0x30b9, 0x30c8)} and latin`,
         '',
         '    indented',
@@ -86,13 +87,15 @@ export const text = [
   {
     name: 'control and bidirectional characters are drawn as visible markers',
     async run({ mount, ev, assert, shot, text }) {
-      const doc = `a${ch(0x202e)}b${ch(0x200b)}c${ch(0)}d${ch(0x2028)}e`
+      const doc = `a${ch(0x202e)}b${ch(0x200b)}c${ch(0)}d${ch(0x2028)}e${ch(0x3164)}f${ch(0xe0068, 0xe0069)}g`
       await mount({ text: doc, path: 'a.txt', width: 500, height: 120 })
       await shot('controls')
       const markers = await ev(() => [...document.querySelectorAll('.enc-ctrl')].map((el) => el.getAttribute('data-label')))
-      assert.equal(markers.length, 4)
-      assert.ok(markers.every((label) => label && label.length >= 2), JSON.stringify(markers))
+      assert.deepEqual(markers, ['U+202E', 'U+200B', 'U+0000', 'U+2028', 'U+3164', 'U+E0068', 'U+E0069'])
       assert.equal(await text(), doc)
+      // Nothing the markers stand for is in the page: a bidi control there would still reorder what follows.
+      const drawn = await ev(() => [...document.querySelectorAll('.enc-line')].map((el) => el.textContent).join(''))
+      assert.ok(!/[\u0000\u2028\u202e\u200b\u3164]/u.test(drawn) && !drawn.includes(String.fromCodePoint(0xe0068)), 'the characters themselves never reach the DOM')
       // The caret can still be put after the marked character with the arrow keys.
       const before = await ev(() => window.view.layerCoords(1).x)
       const after = await ev(() => window.view.layerCoords(2).x)

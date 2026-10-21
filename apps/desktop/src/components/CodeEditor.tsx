@@ -2,13 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { EditorState } from '@encode/editor'
 import { EditorView } from '@encode/editor-view'
 import '@encode/editor-view/style.css'
-import { attach, docState, recordState, saveScroll, scrollOf } from '../editor/docs'
+import { attach, docState, indentLabel, recordState, saveScroll, scrollOf } from '../editor/docs'
 import { useEditor, type Tab } from '../stores/editor'
 import { useUi } from '../stores/ui'
 import { ContextMenu, type MenuEntry } from '../ui/Menu'
 
 /** What the view shows when no file is open. */
 const NOTHING = EditorState.create({})
+
+function reportInfo(state: EditorState): void {
+  useEditor.getState().setInfo({ indent: indentLabel(state), eol: state.config.lineSeparator === '\r\n' ? 'CRLF' : 'LF' })
+}
 
 function reportCursor(state: EditorState): void {
   const head = state.selection.main.head
@@ -89,6 +93,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     }
     attach(path!, view)
     reportCursor(state)
+    reportInfo(state)
   }, [path])
 
   // A search result or Go to file asked for a line.

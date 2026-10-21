@@ -5,12 +5,16 @@ import {
   applyExternal,
   attach,
   closeDoc,
+  closeDocsUnder,
   docState,
+  hasDoc,
+  indentLabel,
   eolOf,
   isDirty,
   markSaved,
   openDoc,
   recordState,
+  renameDocs,
   scrollOf,
   saveScroll,
   snapshotForSave,
@@ -41,6 +45,12 @@ describe('open documents', () => {
     assert.equal(state.config.lineSeparator, '\r\n')
     assert.equal(eolOf('a\nb'), '\n')
     assert.equal(openDoc(path, 'something else'), state, 'opening again gives the open document')
+  })
+
+  it('names its indentation for the status bar', () => {
+    assert.equal(indentLabel(openDoc(path, 'a {\n    b\n}')), 'Spaces: 4')
+    closeDoc(path)
+    assert.equal(indentLabel(openDoc(path, 'a {\n\tb {\n\t\tc\n\t}\n}')), 'Tab Size: 4')
   })
 
   it('is unsaved exactly when the text differs from the file', () => {
@@ -126,5 +136,43 @@ describe('changes from outside', () => {
 
   it('on a document that is not open do nothing', () => {
     assert.equal(applyExternal('/work/other.ts', 'x'), false)
+  })
+})
+
+describe('renames', () => {
+  const root = '/work/rename'
+  afterEach(() => closeDocsUnder(root))
+
+  it('move the open documents under a folder with it, and leave a path that only starts alike', () => {
+    openDoc(`${root}/src/a.ts`, 'one')
+    openDoc(`${root}/src/deep/b.ts`, 'two')
+    openDoc(`${root}/srcs/c.ts`, 'three')
+    renameDocs(`${root}/src`, `${root}/lib`)
+    assert.equal(hasDoc(`${root}/src/a.ts`), false)
+    assert.equal(docState(`${root}/lib/a.ts`)!.doc.toString(), 'one')
+    assert.equal(docState(`${root}/lib/deep/b.ts`)!.doc.toString(), 'two')
+    assert.equal(hasDoc(`${root}/srcs/c.ts`), true)
+  })
+
+  it('keep what is unsaved and the undo history, and give the new name\'s language', () => {
+    const state = openDoc(`${root}/a.ts`, 'let a = 1')
+    const typed = state.update({ changes: { from: 9, insert: '!' }, origin: 'input.type' }).state
+    recordState(`${root}/a.ts`, typed)
+    renameDocs(`${root}/a.ts`, `${root}/a.py`)
+    const renamed = docState(`${root}/a.py`)!
+    assert.equal(renamed.config.language.id, 'python')
+    assert.equal(renamed.doc.toString(), 'let a = 1!')
+    assert.equal(isDirty(`${root}/a.py`), true)
+    const undone = undo(renamed)!
+    assert.equal(undone.state.doc.toString(), 'let a = 1')
+    assert.equal(recordState(`${root}/a.py`, undone.state), false)
+  })
+
+  it('go through the view that shows the document', () => {
+    const view = host(openDoc(`${root}/a.ts`, 'x'))
+    attach(`${root}/a.ts`, view)
+    renameDocs(`${root}/a.ts`, `${root}/a.md`)
+    assert.equal(view.state.config.language.id, 'markdown')
+    assert.equal(docState(`${root}/a.md`)!.config.language.id, 'markdown')
   })
 })

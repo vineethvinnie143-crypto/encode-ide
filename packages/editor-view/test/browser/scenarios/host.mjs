@@ -49,4 +49,73 @@ export const host = [
       assert.ok(Math.abs(geometry.left - geometry.content) < 1.5, JSON.stringify(geometry))
     },
   },
+  {
+    name: 'carets, selections and clicks stay on the glyphs at fractional display scaling',
+    async run({ mount, ev, page, settle, assert }) {
+      const line = Array.from({ length: 240 }, (_, index) => 'abcdefghij'[index % 10]).join('')
+      try {
+        for (const scale of [1.25, 1.5, 1.75, 2.5]) {
+          await page.send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: scale, mobile: false })
+          await mount({ text: `${line}\nshort\n${line}`, path: 'a.txt', width: 900, height: 300 })
+          await settle(4)
+          // Where the browser put the boundary before column `col` of the first line, from the text itself.
+          const glyphs = () => {
+            const el = [...document.querySelectorAll('.enc-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]
+            const at = (col) => {
+              const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+              let rest = col
+              for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                if (rest <= node.data.length) {
+                  const range = document.createRange()
+                  range.setStart(node, rest)
+                  range.setEnd(node, rest)
+                  return range.getBoundingClientRect().left
+                }
+                rest -= node.data.length
+              }
+              return NaN
+            }
+            return { at, top: el.getBoundingClientRect().top + 4 }
+          }
+          const carets = await ev((source) => {
+            const { at } = new Function(`return (${source})()`)()
+            return [0, 1, 37, 120, 239, 240].map((col) => ({ col, view: window.view.coordsAtPos(col).left, dom: at(col) }))
+          }, glyphs.toString())
+          for (const item of carets) {
+            assert.ok(Math.abs(item.view - item.dom) <= 1, `${scale}x: column ${item.col} is at ${item.view}, the glyphs are at ${item.dom}`)
+          }
+
+          // A selection that makes the view scroll sideways still follows the glyphs.
+          await ev(() => window.view.select(10, 200))
+          await settle(4)
+          const selected = await ev((source) => {
+            const { at } = new Function(`return (${source})()`)()
+            const rects = [...document.querySelectorAll('.enc-selection-rect')]
+              .filter((el) => el.getClientRects().length)
+              .map((el) => el.getBoundingClientRect())
+              .sort((a, b) => a.top - b.top)
+            return { rect: rects.length ? { left: rects[0].left, right: rects[0].right } : null, from: at(10), to: at(200), scrollLeft: window.view.scroller.scrollLeft }
+          }, glyphs.toString())
+          assert.ok(selected.scrollLeft > 0, `${scale}x: the view scrolled to the end of the selection`)
+          assert.ok(selected.rect, `${scale}x: the selection is drawn`)
+          assert.ok(
+            Math.abs(selected.rect.left - selected.from) <= 1 && Math.abs(selected.rect.right - selected.to) <= 1,
+            `${scale}x: selection ${selected.rect.left}-${selected.rect.right}, glyphs ${selected.from}-${selected.to}`,
+          )
+
+          // A click just right of a boundary puts the cursor after the glyph before it.
+          const target = await ev((source) => {
+            const { at, top } = new Function(`return (${source})()`)()
+            return { x: at(150), y: top }
+          }, glyphs.toString())
+          await page.click(target.x + 1.5, target.y)
+          await settle(2)
+          const head = await ev(() => window.view.state.selection.main.head)
+          assert.equal(head, 150, `${scale}x: a click just right of the boundary before column 150 landed on ${head}`)
+        }
+      } finally {
+        await page.send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false })
+      }
+    },
+  },
 ]

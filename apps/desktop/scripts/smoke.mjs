@@ -1051,6 +1051,16 @@ try {
   })()`)
   await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
   await screenshot('06b-editor-menu.png')
+  const menuFocus = await evaluate(`(() => {
+    const active = document.activeElement
+    return {
+      inMenu: Boolean(active?.closest('[role=menu]')),
+      active: active ? active.tagName + '.' + active.className : null,
+      pageFocused: document.hasFocus(),
+      menus: [...document.querySelectorAll('[role=menu]')].map((menu) => menu.getAttribute('aria-label')),
+    }
+  })()`)
+  console.log('[smoke] editor menu focus:', JSON.stringify(menuFocus))
   await pressKey('Escape')
   await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed')
 

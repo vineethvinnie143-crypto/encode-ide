@@ -23,6 +23,8 @@ say so.
 | [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |
 | [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |
 | [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |
+| [0030](0030-the-editor-is-our-own-engine.md) | The editor is our own engine: text model, core and view | Accepted |
+| [0031](0031-documents-live-outside-the-ui-store.md) | Open documents live outside the UI store, and "unsaved" is derived from the text | Accepted |
 
 ## Template
 
