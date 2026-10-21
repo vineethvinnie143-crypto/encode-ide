@@ -1,20 +1,31 @@
-import { AlertTriangle, CheckCircle2, Info, X } from '../ui/icons'
+import { useEffect, useState } from 'react'
 import { useUi } from '../stores/ui'
+import { Toast } from '../ui/Toast'
 
+/** The current notice, bottom right. It closes after 5 s, and waits while the pointer is on it. */
 export default function Toasts() {
   const toast = useUi((state) => state.toast)
   const dismiss = useUi((state) => state.dismissToast)
+  const [hovered, setHovered] = useState(false)
+
+  useEffect(() => {
+    if (!toast || hovered) return
+    const timer = window.setTimeout(dismiss, 5000)
+    return () => window.clearTimeout(timer)
+  }, [toast, hovered, dismiss])
+
+  useEffect(() => setHovered(false), [toast?.id])
+
   if (!toast) return null
-
-  const Icon = toast.kind === 'error' ? AlertTriangle : toast.kind === 'success' ? CheckCircle2 : Info
-
   return (
-    <div className={`toast toast-${toast.kind}`} role="status">
-      <Icon size={16} />
-      <span>{toast.text}</span>
-      <button className="toast-close" onClick={dismiss} title="Dismiss">
-        <X size={14} />
-      </button>
-    </div>
+    <Toast
+      key={toast.id}
+      kind={toast.kind}
+      onDismiss={dismiss}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+    >
+      {toast.text}
+    </Toast>
   )
 }
