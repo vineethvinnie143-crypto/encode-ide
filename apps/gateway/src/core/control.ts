@@ -27,7 +27,7 @@ export type AttemptOutcome =
   | 'daily_exhausted'
   | 'error'
   | 'timeout'
-  /** The model is gone from OpenRouter. */
+  /** The model is gone from OpenRouter, or not available to our key (a 404, or a 403 for a model reserved for listed apps). */
   | 'not_found'
   /** The request was refused as invalid or flagged; it says nothing about the model's health. */
   | 'rejected'

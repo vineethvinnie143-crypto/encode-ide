@@ -57,6 +57,36 @@ describe('HTTP failures from OpenRouter', () => {
     assert.match(classifyHttpFailure(422, headers(), 'not json', NOW).detail ?? '', /HTTP 422/)
   })
 
+  it('retire a model that OpenRouter reserves for listed apps, instead of blaming the request', () => {
+    const reserved = JSON.stringify({
+      error: {
+        code: 403,
+        message: 'acme/big:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps',
+      },
+    })
+    assert.deepEqual(classifyHttpFailure(403, headers(), reserved, NOW), { kind: 'failed', outcome: 'not_found', status: 403 })
+    assert.equal(classifyHttpFailure(403, headers(), JSON.stringify({ error: { message: 'Input was flagged' } }), NOW).outcome, 'rejected')
+  })
+
+  it('retire a model that the privacy settings of the account rule out', () => {
+    const guardrail = JSON.stringify({
+      error: {
+        code: 404,
+        message:
+          '0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy. We removed them for the following reasons (an endpoint may have matched multiple reasons): Free model training',
+      },
+    })
+    assert.deepEqual(classifyHttpFailure(404, headers(), guardrail, NOW), { kind: 'failed', outcome: 'not_found', status: 404 })
+  })
+
+  it('never hand a credential to the client in a rejection', () => {
+    const key = 'sk-or-v1-0123456789abcdef0123456789abcdef'
+    const body = JSON.stringify({ error: { message: `Bad request for ${key}, also other-secret-value` } })
+    assert.equal(classifyHttpFailure(400, headers(), body, NOW, ['other-secret-value']).detail, 'Bad request for [redacted], also [redacted]')
+    const long = classifyHttpFailure(400, headers(), JSON.stringify({ error: { message: `${'x'.repeat(295)} ${key}` } }), NOW)
+    assert.ok(!(long.detail ?? '').includes('sk-or'), 'no prefix of the key survives the cut')
+  })
+
   it('keep upstream details short and on one line', () => {
     assert.equal(safeDetail('a\u0000b\n\tc'), 'a b c')
     assert.equal(safeDetail('x'.repeat(400))?.length, 301)

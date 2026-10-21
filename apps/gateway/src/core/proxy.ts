@@ -237,6 +237,7 @@ class ChatRun {
         firstEventTimeoutMs: budget,
         signal: this.abort.signal,
         now: this.deps.now,
+        secrets: [this.config.openRouterKey],
       })
       if (result.kind === 'committed') {
         this.committedCandidates = candidates

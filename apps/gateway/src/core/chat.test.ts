@@ -143,6 +143,38 @@ describe('a streamed chat request', () => {
     assert.deepEqual([state.requests, state.refunds], [1, 0])
   })
 
+  it('moves past models that are closed to our key, never blames the request, and leaves them alone afterwards', async () => {
+    const { harness, token } = await signedIn({ tweak: (config) => (config.upstream.fallbackModels = 1) })
+    harness.openrouter.script.push(
+      () => errorResponse(403, 'acme/big:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps'),
+      () => errorResponse(404, '0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy. We removed them for the following reasons: Free model training'),
+    )
+    const first = await harness.chat(token, { stream: true })
+    assert.equal(first.status, 200)
+    const text = await first.text()
+    await harness.idle()
+    const { comments, events, done } = readSse(text)
+    assert.ok(done, 'the third model answers')
+    assert.ok(comments.includes('encode-model beta/vision:free'))
+    assert.ok(!text.includes('harness') && !text.includes('guardrail') && !text.includes('acme/'), 'the refusals stay inside the gateway')
+    assert.equal(events.filter((event) => readGatewayError(event)).length, 0)
+    assert.deepEqual(
+      harness.control.reports.map((report) => [report.model, report.outcome]),
+      [
+        ['acme/big:free', 'not_found'],
+        ['acme/medium:free', 'not_found'],
+        ['beta/vision:free', 'ok'],
+      ],
+    )
+
+    // The next request starts with the model that worked, not with the two that are closed.
+    await (await harness.chat(token, { stream: true })).text()
+    await harness.idle()
+    assert.equal(harness.openrouter.chats[3].body.model, 'beta/vision:free')
+    const [state] = harness.users.states.values() as IterableIterator<{ requests: number; refunds: number }>
+    assert.deepEqual([state.requests, state.refunds], [2, 0])
+  })
+
   it('ends a stream that fails after content with the upstream error and then a gateway error', async () => {
     const { harness, token } = await signedIn()
     harness.openrouter.script.push(() =>

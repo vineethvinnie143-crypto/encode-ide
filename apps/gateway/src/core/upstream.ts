@@ -18,6 +18,8 @@ export interface AttemptInput {
   /** Aborts the attempt when the client leaves or the request runs out of time. */
   signal: AbortSignal
   now: () => number
+  /** Credentials that must never appear in text shown to a client, such as the key this request carries. */
+  secrets?: readonly string[]
 }
 
 export interface Committed {
@@ -56,10 +58,25 @@ const MAX_ERROR_BODY = 8 * 1024
 
 class FirstEventTimeout extends Error {}
 
-/** A short, single-line excerpt of an upstream message that is safe to show the client who sent the request. */
-export function safeDetail(message: unknown): string | undefined {
+/** Anything shaped like an OpenRouter key, whoever sent it. */
+const KEY_SHAPED = /sk-or-[A-Za-z0-9_-]{6,}/g
+
+/** Masks the given secrets and anything shaped like an OpenRouter key. */
+function mask(text: string, secrets: readonly string[]): string {
+  let out = text
+  for (const secret of secrets) if (secret.length >= 8) out = out.split(secret).join('[redacted]')
+  return out.replace(KEY_SHAPED, '[redacted]')
+}
+
+/**
+ * A short, single-line excerpt of an upstream message that is safe to show the
+ * client who sent the request. It never carries a credential: the given
+ * secrets and anything shaped like an OpenRouter key are masked before the
+ * text is cut, so a key cannot survive as a prefix.
+ */
+export function safeDetail(message: unknown, secrets: readonly string[] = []): string | undefined {
   if (typeof message !== 'string') return undefined
-  const clean = message.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const clean = mask(message, secrets).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
   if (!clean) return undefined
   return clean.length > 300 ? `${clean.slice(0, 300)}…` : clean
 }
@@ -83,8 +100,11 @@ function retryAfterHeader(header: string | null, now: number): number | undefine
 
 const CONTEXT_PROBLEM = /context|maximum.{0,20}tokens|too long|token limit/i
 
+/** A model OpenRouter reserves for apps it lists. Our key is refused for it, whatever the request says. */
+const RESTRICTED_MODEL = /only available on agentic harnesses|apps listed on/i
+
 /** Classifies an HTTP error from OpenRouter. */
-export function classifyHttpFailure(status: number, headers: Headers, body: string, now: number): Failed {
+export function classifyHttpFailure(status: number, headers: Headers, body: string, now: number, secrets: readonly string[] = []): Failed {
   let message: unknown
   try {
     message = (JSON.parse(body) as { error?: { message?: unknown } })?.error?.message
@@ -104,11 +124,15 @@ export function classifyHttpFailure(status: number, headers: Headers, body: stri
   if (status === 402) return { kind: 'failed', outcome: 'payment_required', status }
   if (status === 401) return { kind: 'failed', outcome: 'unauthorized', status }
   if (status === 404) return { kind: 'failed', outcome: 'not_found', status }
-  if (status === 403) return { kind: 'failed', outcome: 'rejected', status, detail: safeDetail(message) ?? 'The model refused this request.' }
+  if (status === 403) {
+    // Not the request's fault: the model is not available to our key, so it is retired like a missing one and the next model is tried.
+    if (typeof message === 'string' && RESTRICTED_MODEL.test(message)) return { kind: 'failed', outcome: 'not_found', status }
+    return { kind: 'failed', outcome: 'rejected', status, detail: safeDetail(message, secrets) ?? 'The model refused this request.' }
+  }
   if (status === 400 || status === 413 || status === 422) {
     // A prompt too long for these models may still fit a larger one.
     if (typeof message === 'string' && CONTEXT_PROBLEM.test(message)) return { kind: 'failed', outcome: 'error', status }
-    return { kind: 'failed', outcome: 'rejected', status, detail: safeDetail(message) ?? `The model rejected the request (HTTP ${status}).` }
+    return { kind: 'failed', outcome: 'rejected', status, detail: safeDetail(message, secrets) ?? `The model rejected the request (HTTP ${status}).` }
   }
   return { kind: 'failed', outcome: 'error', status }
 }
@@ -182,7 +206,7 @@ export async function attemptUpstream(input: AttemptInput): Promise<AttemptResul
   if (!response.ok) {
     const text = await readLimited(response, MAX_ERROR_BODY, controller.signal)
     cleanup()
-    return failedBy(classifyHttpFailure(response.status, response.headers, text, input.now()))
+    return failedBy(classifyHttpFailure(response.status, response.headers, text, input.now(), input.secrets))
   }
   if (!response.body || !(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
     const text = await readLimited(response, MAX_ERROR_BODY, controller.signal)
