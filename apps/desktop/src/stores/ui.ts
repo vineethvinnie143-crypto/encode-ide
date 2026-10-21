@@ -16,6 +16,16 @@ export interface PromptRequest {
   resolve: (value: string | null) => void
 }
 
+export interface ConfirmRequest {
+  id: number
+  title: string
+  body: string
+  confirmLabel: string
+  /** Styles the confirm button as destructive. */
+  danger: boolean
+  resolve: (confirmed: boolean) => void
+}
+
 export interface Toast {
   id: number
   kind: 'info' | 'success' | 'error'
@@ -28,6 +38,7 @@ interface UiStore {
   /** The session sidebar, which Ctrl+B shows and hides. */
   sidebarVisible: boolean
   sidebarMode: SidebarMode
+  collapsedProjects: string[]
   panelVisible: boolean
   rightVisible: boolean
   rightPanel: RightPanel
@@ -41,10 +52,13 @@ interface UiStore {
   shortcutsOpen: boolean
   aboutOpen: boolean
   prompt: PromptRequest | null
+  confirm: ConfirmRequest | null
   toast: Toast | null
   setSidebarView(view: SidebarView): void
   toggleSidebar(): void
   setSidebarMode(mode: SidebarMode): void
+  /** Folds or unfolds a project in the sidebar; `key` is rootKey(folder). */
+  toggleProject(key: string): void
   togglePanel(): void
   toggleRight(): void
   setRightVisible(visible: boolean): void
@@ -60,6 +74,8 @@ interface UiStore {
   setAboutOpen(open: boolean): void
   askText(title: string, placeholder?: string, value?: string): Promise<string | null>
   resolvePrompt(value: string | null): void
+  askConfirm(options: { title: string; body: string; confirmLabel?: string; danger?: boolean }): Promise<boolean>
+  resolveConfirm(confirmed: boolean): void
   notify(kind: Toast['kind'], text: string): void
   dismissToast(): void
 }
@@ -69,21 +85,36 @@ let promptCounter = 0
 /** Which panels were open, kept between runs. */
 const LAYOUT_KEY = 'eNCode.layout.v1'
 
-function savedLayout(): { sidebarVisible: boolean; rightVisible: boolean } {
+interface Layout {
+  sidebarVisible: boolean
+  rightVisible: boolean
+  /** Projects folded in the sidebar, as folder keys (see rootKey). */
+  collapsedProjects: string[]
+}
+
+function savedLayout(): Layout {
   try {
     const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as Record<string, unknown>
-    return { sidebarVisible: raw.sidebarVisible !== false, rightVisible: raw.rightVisible !== false }
+    return {
+      sidebarVisible: raw.sidebarVisible !== false,
+      rightVisible: raw.rightVisible !== false,
+      collapsedProjects: Array.isArray(raw.collapsedProjects) ? raw.collapsedProjects.filter((key): key is string => typeof key === 'string') : [],
+    }
   } catch {
-    return { sidebarVisible: true, rightVisible: true }
+    return { sidebarVisible: true, rightVisible: true, collapsedProjects: [] }
   }
 }
 
-function saveLayout(layout: { sidebarVisible: boolean; rightVisible: boolean }): void {
+function saveLayout(layout: Layout): void {
   try {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout))
   } catch {
     /* storage may be unavailable */
   }
+}
+
+function layoutOf(state: Layout): Layout {
+  return { sidebarVisible: state.sidebarVisible, rightVisible: state.rightVisible, collapsedProjects: state.collapsedProjects }
 }
 
 export const useUi = create<UiStore>((set, get) => ({
@@ -102,22 +133,28 @@ export const useUi = create<UiStore>((set, get) => ({
   shortcutsOpen: false,
   aboutOpen: false,
   prompt: null,
+  confirm: null,
   toast: null,
 
   setSidebarView: (view) => set({ sidebarView: view }),
   toggleSidebar: () => {
     set((state) => ({ sidebarVisible: !state.sidebarVisible }))
-    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: get().rightVisible })
+    saveLayout(layoutOf(get()))
   },
   setSidebarMode: (mode) => set({ sidebarMode: mode, sidebarVisible: true }),
+  toggleProject: (key) => {
+    const folded = get().collapsedProjects
+    set({ collapsedProjects: folded.includes(key) ? folded.filter((item) => item !== key) : [...folded, key] })
+    saveLayout(layoutOf(get()))
+  },
   togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
   toggleRight: () => {
     set((state) => ({ rightVisible: !state.rightVisible }))
-    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: get().rightVisible })
+    saveLayout(layoutOf(get()))
   },
   setRightVisible: (visible) => {
     set({ rightVisible: visible })
-    saveLayout({ sidebarVisible: get().sidebarVisible, rightVisible: visible })
+    saveLayout({ ...layoutOf(get()), rightVisible: visible })
   },
   setRightPanel: (panel) => set({ rightPanel: panel, rightVisible: true }),
   setWorkspaceTab: (tab) => set({ workspaceTab: tab, rightPanel: 'workspace', rightVisible: true }),
@@ -140,6 +177,19 @@ export const useUi = create<UiStore>((set, get) => ({
     if (!prompt) return
     prompt.resolve(value)
     set({ prompt: null })
+  },
+
+  askConfirm: ({ title, body, confirmLabel = 'Confirm', danger = false }) =>
+    new Promise<boolean>((resolve) => {
+      get().confirm?.resolve(false)
+      set({ confirm: { id: ++promptCounter, title, body, confirmLabel, danger, resolve } })
+    }),
+
+  resolveConfirm: (confirmed) => {
+    const confirm = get().confirm
+    if (!confirm) return
+    confirm.resolve(confirmed)
+    set({ confirm: null })
   },
 
   // Toasts.tsx closes it after 5 s, pausing while the pointer is on it.

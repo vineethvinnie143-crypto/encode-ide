@@ -8,6 +8,8 @@ import { matchesChord, parseChord, worksWhileTyping, type Chord, type KeyEventLi
 export interface Command {
   id: string
   title: string
+  /** A title that depends on state, such as Pin or Unpin; menus show it instead of `title`. */
+  label?: () => string
   /** The menu it belongs to: File, Edit, View, Session or Help. */
   group: string
   /** Bound shortcuts. The first is the one menus and tooltips show. */
@@ -16,6 +18,8 @@ export interface Command {
   hint?: string
   /** Leave it out of menus and lists (one of a numbered family, for example). */
   hidden?: boolean
+  /** Still works while a dialog is open: quitting, zoom and full screen. */
+  global?: boolean
   enabled?: () => boolean
   run: () => void | Promise<void>
 }
@@ -53,6 +57,12 @@ export class CommandRegistry {
     return Boolean(command) && (command?.enabled?.() ?? true)
   }
 
+  /** The command's title as menus show it. */
+  titleOf(id: string): string {
+    const command = this.commands.get(id)
+    return command ? (command.label?.() ?? command.title) : id
+  }
+
   /** The shortcut to show for a command, if it has one. */
   shortcut(id: string): string | undefined {
     const command = this.commands.get(id)
@@ -64,9 +74,10 @@ export class CommandRegistry {
    * types in a field, only chords with Ctrl, Alt or a function key count, so
    * plain keys keep typing.
    */
-  forEvent(event: KeyEventLike, typing: boolean): Command | undefined {
+  forEvent(event: KeyEventLike, typing: boolean, modalOpen = false): Command | undefined {
     for (const { command, chord } of this.bindings) {
       if (typing && !worksWhileTyping(chord)) continue
+      if (modalOpen && !command.global) continue
       if (matchesChord(event, chord) && (command.enabled?.() ?? true)) return command
     }
     return undefined
@@ -85,7 +96,8 @@ export class CommandRegistry {
     const seen = new Map<string, string[]>()
     for (const { command, chord } of this.bindings) {
       const name = `${chord.ctrl ? 'Ctrl+' : ''}${chord.alt ? 'Alt+' : ''}${chord.shift ? 'Shift+' : ''}${chord.meta ? 'Meta+' : ''}${chord.key}`
-      seen.set(name, [...(seen.get(name) ?? []), command.id])
+      const ids = seen.get(name) ?? []
+      if (!ids.includes(command.id)) seen.set(name, [...ids, command.id])
     }
     return [...seen].filter(([, ids]) => ids.length > 1).map(([name, ids]) => `${name}: ${ids.join(', ')}`)
   }
