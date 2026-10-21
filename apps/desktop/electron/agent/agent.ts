@@ -316,13 +316,15 @@ export class Agent {
   }): Promise<void> {
     const { mode, isDemo, profile, settings, signal } = args
     const maxSteps = Math.max(1, Math.min(100, settings.maxSteps || 30))
+    /** Which model wrote each reply, so the thread can say so. */
+    const model = isDemo ? 'Offline demo' : (profile?.model ?? '')
 
     for (let step = 0; step < maxSteps; step++) {
       if (signal.aborted) throw new AgentAbortedError()
 
       this.setStatus('thinking')
       if (profile && !isDemo) await this.fitContext(profile, signal)
-      const assistantEntry = this.addEntry({ kind: 'assistant', text: '', streaming: true })
+      const assistantEntry = this.addEntry({ kind: 'assistant', text: '', streaming: true, model })
 
       let result: ChatResult
       if (isDemo) {
@@ -384,7 +386,7 @@ export class Agent {
           if (call.name === 'attempt_completion') {
             const summary = String(call.input.result ?? call.input.summary ?? '').trim() || 'Task complete.'
             answer(call.id, 'Reported to the user.')
-            this.addEntry({ kind: 'assistant', text: summary })
+            this.addEntry({ kind: 'assistant', text: summary, model })
             finished = summary
             break
           }
