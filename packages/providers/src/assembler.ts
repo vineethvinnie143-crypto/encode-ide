@@ -72,6 +72,24 @@ function parseArguments(raw: string): { input?: Record<string, unknown>; error?:
   }
 }
 
+const TRUNCATED_CALL =
+  'The reply reached the output limit while writing this call, so it was not run. Do the work in smaller steps (write a large file in parts, for example).'
+const FILTERED_CALL = "The provider's safety system stopped this reply, so its tool calls were not run."
+
+/**
+ * A call cut off by the output limit can still parse (as a shorter object),
+ * and a reply stopped by a safety filter may hold half a call: neither runs.
+ */
+function refuseUnsafeCalls(content: AssistantBlock[], finish: FinishReason): void {
+  const refuse = (index: number, error: string) => {
+    const block = content[index]
+    if (block.type !== 'tool-use' || block.invalid) return
+    content[index] = { type: 'tool-use', id: block.id, name: block.name, input: {}, invalid: { raw: JSON.stringify(block.input), error } }
+  }
+  if (finish === 'length' && content.length) refuse(content.length - 1, TRUNCATED_CALL)
+  if (finish === 'content_filter') content.forEach((_, index) => refuse(index, FILTERED_CALL))
+}
+
 export function createAssembler(options: AssemblerOptions): Assembler {
   const blocks: DraftBlock[] = []
   const calls = new Map<number, DraftToolCall>()
@@ -180,6 +198,7 @@ export function createAssembler(options: AssemblerOptions): Assembler {
     // Some servers report 'stop' while returning tool calls; the calls are what matter.
     if (reason === 'stop' && hasCalls) reason = 'tool_use'
     if (reason === 'tool_use' && !hasCalls) reason = 'stop'
+    refuseUnsafeCalls(content, reason)
     return {
       message: { role: 'assistant', content, origin: { ...options.origin, model } },
       usage: {
