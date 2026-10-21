@@ -130,7 +130,7 @@ export function parseMcpFile(text: string, scope: McpScope, file: string): Parse
   if (text.length > MAX_FILE_BYTES) return { servers, problems: [`${file}: the file is larger than 1 MB`] }
   let raw: unknown
   try {
-    raw = JSON.parse(text.replace(/^﻿/, ''))
+    raw = JSON.parse(text.replace(/^\uFEFF/, ''))
   } catch (error) {
     return { servers, problems: [`${file}: not valid JSON: ${error instanceof Error ? error.message : String(error)}`] }
   }

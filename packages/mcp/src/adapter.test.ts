@@ -117,7 +117,7 @@ describe('an MCP tool as the agent sees it', () => {
   })
 
   it('turns a failed call into an error the model can read, without the server’s hidden characters', async () => {
-    const outcome = await build(new McpError(-32602, 'Unknown​ tool: x')).run({}, context())
+    const outcome = await build(new McpError(-32602, 'Unknown\u200b tool: x')).run({}, context())
     assert.equal(outcome.ok, false)
     assert.deepEqual(outcome.content, [{ type: 'text', text: 'create_issue failed: Unknown tool: x' }])
   })
