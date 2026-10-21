@@ -44,7 +44,6 @@ export default function App() {
   const automationOpen = useUi((state) => state.automationOpen)
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
   const mainView = useUi((state) => state.mainView)
-  const setMainView = useUi((state) => state.setMainView)
   const appearance = useSettings((state) => state.settings?.appearance)
   const workspaceRoot = useWorkspace((state) => state.workspace?.root)
 
@@ -112,14 +111,6 @@ export default function App() {
 
           <main className="app-main">
             <SessionHeader />
-            <div className="main-tabs">
-              <button className={mainView === 'chat' ? 'is-active' : ''} onClick={() => setMainView('chat')}>
-                Chat
-              </button>
-              <button className={mainView === 'trajectory' ? 'is-active' : ''} onClick={() => setMainView('trajectory')}>
-                Trajectory
-              </button>
-            </div>
             <div className="main-body">{mainView === 'chat' ? <ChatPanel /> : <TrajectoryView />}</div>
           </main>
 

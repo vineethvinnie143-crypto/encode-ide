@@ -1,6 +1,6 @@
 /* Approval and question cards */
 .approval-card {
-  margin: 0 max(24px, calc((100% - 880px) / 2)) 8px;
+  margin: 0 var(--thread-gutter) 8px;
   padding: 12px 14px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
@@ -36,7 +36,7 @@
 }
 
 .ask-card {
-  margin: 0 max(24px, calc((100% - 880px) / 2)) 8px;
+  margin: 0 var(--thread-gutter) 8px;
   padding: 12px 14px;
   border: 1px solid var(--border-strong);
   border-radius: 12px;

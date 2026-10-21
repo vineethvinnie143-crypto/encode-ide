@@ -176,6 +176,8 @@ export interface ConversationEntry {
   text?: string
   /** True while assistant text is still streaming in. */
   streaming?: boolean
+  /** The model that wrote an assistant reply. */
+  model?: string
   tool?: {
     name: string
     input: Record<string, unknown>

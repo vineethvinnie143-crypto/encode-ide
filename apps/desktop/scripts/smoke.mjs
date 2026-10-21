@@ -280,8 +280,9 @@ async function runProviderPhase() {
     throw new Error('The command approval card does not show the command')
   }
 
+  await openWorkLogs()
   await evaluate(`(() => {
-    document.querySelectorAll('.tool-row').forEach((row) => {
+    document.querySelectorAll('.tool-row:not(.tool-group)').forEach((row) => {
       if (!row.querySelector('.tool-row-body')) row.querySelector('.tool-row-toggle')?.click()
     })
     return true
@@ -598,6 +599,53 @@ async function chooseFromSessionMenu(item) {
   if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`context menu has no ${item}`)
 }
 
+/** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
+async function openWorkLogs() {
+  await evaluate(`(() => {
+    document.querySelectorAll('.worklog-head[aria-expanded="false"]').forEach((head) => head.click())
+    return true
+  })()`)
+  await sleep(250)
+}
+
+/**
+ * The session view after the demo run: a finished turn folds to "Worked for ...", opens on a click,
+ * shows its result card, and the thread is 736 px of content in a wide window.
+ */
+async function runSessionViewChecks() {
+  console.log('[smoke] --- session view ---')
+  const head = await evaluate(`(() => {
+    const node = document.querySelector('.worklog-head')
+    return node ? { text: node.textContent, open: node.getAttribute('aria-expanded') } : null
+  })()`)
+  console.log('[smoke] work log header:', JSON.stringify(head))
+  if (!head || !/^Worked for \d/.test(head.text) || head.open !== 'false') throw new Error('a finished turn should fold to "Worked for ..."')
+  if ((await count('.worklog-body')) !== 0) throw new Error('a folded work log still shows its steps')
+  await click('.worklog-head')
+  await waitFor("document.querySelectorAll('.worklog-body .tool-row').length >= 2", 4000, 'the work log opens on a click')
+  const card = await evaluate("document.querySelector('.result-card .result-title')?.textContent ?? ''")
+  if (!card.startsWith('Edited 1 file')) throw new Error(`the result card says "${card}"`)
+  if ((await evaluate("document.querySelector('.session-header')?.getBoundingClientRect().height")) !== 52) throw new Error('the session header is not 52 px')
+
+  await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false })
+  await sleep(400)
+  const thread = await evaluate("document.querySelector('.thread')?.getBoundingClientRect().width")
+  if (thread !== 784) throw new Error(`the thread is ${thread} px wide, not 736 px of content with 24 px at each side`)
+  await sleep(300)
+  await screenshot('ui-dark-thread-1920x1080.png')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+
+  // The header menus.
+  await click('.session-header [aria-label="Summary"]')
+  await waitFor("!!document.querySelector('.ui-menu[aria-label=\"Summary\"]')", 4000, 'Summary menu')
+  const summary = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!summary.includes('Files changed') || !summary.includes('Commands run')) throw new Error(`the summary menu is missing items: ${summary}`)
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the summary')
+  console.log('[smoke] session view checks passed')
+}
+
 /**
  * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
  * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
@@ -907,6 +955,7 @@ try {
     ),
   )
   await screenshot('08-agent.png')
+  await runSessionViewChecks()
 
   console.log(
     '[smoke] demo file bytes:',

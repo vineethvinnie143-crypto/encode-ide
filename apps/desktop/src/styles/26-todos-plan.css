@@ -1,6 +1,6 @@
 /* Todos and plan cards */
 .todo-card {
-  margin: 10px max(24px, calc((100% - 880px) / 2)) 0;
+  margin: 10px var(--thread-gutter) 0;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -48,7 +48,7 @@
 }
 
 .plan-card {
-  margin: 10px max(24px, calc((100% - 880px) / 2)) 0;
+  margin: 10px var(--thread-gutter) 0;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 10px;

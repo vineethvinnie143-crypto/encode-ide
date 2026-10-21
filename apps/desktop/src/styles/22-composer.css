@@ -1,7 +1,7 @@
 /* Composer */
 .composer-dock {
   flex-shrink: 0;
-  padding: 10px max(24px, calc((100% - 880px) / 2)) 6px;
+  padding: 10px var(--thread-gutter) 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;

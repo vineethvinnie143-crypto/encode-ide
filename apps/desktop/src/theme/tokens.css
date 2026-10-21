@@ -89,6 +89,8 @@
   --r-18: 18px;
   --r-pill: 999px;
   --row-h: 32px;
+  /* The thread and everything docked to it is at most 736 px wide with 24 px at the sides, centred. */
+  --thread-gutter: max(24px, calc((100% - 736px) / 2));
 
   /* Motion */
   --dur-1: 90ms; /* hover and press colour */
