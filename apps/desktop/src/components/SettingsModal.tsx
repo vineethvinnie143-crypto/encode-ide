@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
-import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS, PROTECTED_NOTE } from '../policies'
+import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
@@ -447,7 +447,7 @@ export default function SettingsModal() {
                 ))}
               </div>
               <div className="info-note">
-                {PROTECTED_NOTE} Ask and Plan modes never edit files or run commands. When eNCode asks, it shows you
+                {ALWAYS_ASKS_NOTE} Ask and Plan modes never edit files or run commands. When eNCode asks, it shows you
                 exactly what will change or run.
               </div>
 

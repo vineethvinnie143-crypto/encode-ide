@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronRight,
   FileText,
+  Globe,
   ListTree,
   Loader2,
   MessageCircleQuestion,
@@ -32,6 +33,8 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   ask_followup_question: { label: 'Ask', icon: MessageCircleQuestion },
   attempt_completion: { label: 'Done', icon: CheckCircle2 },
   task: { label: 'Subagent', icon: Network },
+  web_fetch: { label: 'Fetch', icon: Globe },
+  web_search: { label: 'Web search', icon: Globe },
 }
 
 /** Tools whose header line says enough until they produce output. */

@@ -17,7 +17,7 @@ import { agentEnvironment, type ShellService } from '../services/shell'
 import type { JobService } from '../services/jobs'
 import type { SkillService } from '../services/skills'
 import type { WorkspaceService } from '../services/workspace'
-import { decideApproval, toolKind, type ApprovalDecision } from './approval'
+import { decideApproval, fetchHost, toolKind, type ApprovalDecision } from './approval'
 import { buildSystemPrompt } from './prompt'
 import { AgentAbortedError, chat } from './provider'
 import { applyEdit, buildDiff, executeTool, summarizeApproval, toolDefs } from './tools'
@@ -47,6 +47,8 @@ export interface SubagentParent {
   signal: AbortSignal
   requestApproval(tool: string, input: Record<string, unknown>, reason?: string): Promise<boolean>
   ask(question: string, options?: string[]): Promise<string>
+  /** The session's approved web sites, shared so the user is not asked twice. */
+  approvedHosts: Set<string>
 }
 
 interface DemoStep {
@@ -125,8 +127,12 @@ export class Agent {
   private demoStep = 0
   private pendingApprovals = new Map<string, (approved: boolean) => void>()
   private pendingQuestions = new Map<string, (answer: string) => void>()
+  /** Sites the user let web_fetch reach in this session. Not persisted. */
+  private readonly approvedHosts: Set<string>
 
-  constructor(private readonly deps: AgentDeps) {}
+  constructor(private readonly deps: AgentDeps) {
+    this.approvedHosts = deps.parent?.approvedHosts ?? new Set()
+  }
 
   getHistory(): AgentHistory {
     return { entries: this.entries.map((entry) => structuredClone(entry)), status: this.status }
@@ -234,6 +240,7 @@ export class Agent {
     }
     this.messages = []
     this.entries = []
+    this.approvedHosts.clear()
     this.status = 'idle'
     this.running = false
     this.send({ type: 'session-reset' })
@@ -363,6 +370,10 @@ export class Agent {
           }
           toolEntry.tool = { ...toolEntry.tool!, state: 'running' }
           this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+          if (toolKind(call.name) === 'web') {
+            const host = fetchHost(call.input)
+            if (host) this.approvedHosts.add(host)
+          }
         }
 
         this.setStatus('running-tool')
@@ -452,6 +463,7 @@ export class Agent {
         rootReal,
         env: agentEnvironment(),
         home: os.homedir(),
+        approvedHosts: this.approvedHosts,
       })
     } catch (error) {
       return { ask: true, reason: `eNCode could not check this call (${(error as Error).message}).` }
@@ -595,6 +607,7 @@ export class Agent {
       depth: (this.deps.depth ?? 0) + 1,
       parent: {
         signal,
+        approvedHosts: this.approvedHosts,
         requestApproval: async (tool, input, reason) => {
           this.setStatus('awaiting-approval')
           try {

@@ -358,6 +358,25 @@ async function runProviderPhase() {
   if (!featureCheck.jobsArray || !featureCheck.planNull) throw new Error('jobs/plan surface failed')
 
   await runSubagentChecks()
+  await runWebChecks()
+}
+
+async function runWebChecks() {
+  console.log('[smoke] --- web_fetch ---')
+  // A new site asks once per session; localhost then fails the address check, so nothing is fetched.
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:web-check] Fetch two pages from one site.')
+  const approvals = await driveAgent('15-web')
+  console.log('[smoke] web approvals:', JSON.stringify(approvals))
+  if (approvals.length !== 1 || approvals[0].title !== 'Fetch from localhost') {
+    throw new Error('Expected one approval for the first fetch from localhost')
+  }
+  if (!approvals[0].reason.includes('until the session ends')) throw new Error('The web approval does not explain itself')
+  const fetches = (await toolOutputs()).filter((entry) => entry.name === 'web_fetch')
+  console.log('[smoke] web fetches:', JSON.stringify(fetches.map((entry) => entry.output.slice(0, 120))))
+  if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
+    throw new Error('web_fetch reached a private address')
+  }
 }
 
 /** The tool entries of the active session, with their outputs. */

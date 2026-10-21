@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { assessCommand, isInside, isProtectedPath } from '@encode/permissions'
+import { assessCommand, checkFetchUrl, isInside, isProtectedPath } from '@encode/permissions'
 import type { AgentMode, ApprovalPolicy } from '../../shared/types'
 import { isInsideReal, realPathOf } from '../services/real-path'
 import { locateProgram } from '../services/shell'
@@ -15,10 +15,11 @@ import { locateProgram } from '../services/shell'
  *
  * Under every policy but Full access, writes into protected directories
  * (.git, .eNCode) ask, because they can make tools run code or steer later
- * turns. Ask and Plan modes never run edits or commands, so nothing asks.
+ * turns, and the first web fetch from each site in a session asks, because a
+ * URL can carry data out. Ask and Plan modes never run edits or commands.
  */
 
-export type ToolKind = 'write' | 'command' | 'other'
+export type ToolKind = 'write' | 'command' | 'web' | 'other'
 
 const TOOL_KINDS: Record<string, ToolKind> = {
   write: 'write',
@@ -27,6 +28,7 @@ const TOOL_KINDS: Record<string, ToolKind> = {
   replace_in_file: 'write',
   pwsh: 'command',
   run_command: 'command',
+  web_fetch: 'web',
 }
 
 export function toolKind(name: string): ToolKind {
@@ -43,6 +45,8 @@ export interface ApprovalContext {
   /** Environment commands run with, for PATH lookups. */
   env: Record<string, string>
   home: string
+  /** Sites the user already let web_fetch reach in this session. */
+  approvedHosts: ReadonlySet<string>
 }
 
 export interface ApprovalDecision {
@@ -97,13 +101,29 @@ async function assessCommandCall(input: Record<string, unknown>, context: Approv
   return RUN
 }
 
+/** The site a web_fetch call would contact, as remembered for the session; null for URLs the tool refuses anyway. */
+export function fetchHost(input: Record<string, unknown>): string | null {
+  const checked = checkFetchUrl(asString(input.url))
+  return checked.ok ? checked.host : null
+}
+
 export async function decideApproval(
   tool: string,
   input: Record<string, unknown>,
   context: ApprovalContext,
 ): Promise<ApprovalDecision> {
+  if (context.policy === 'full-access') return RUN
+  if (toolKind(tool) === 'web') {
+    // Any mode and policy: what the agent puts in a URL leaves the machine.
+    const host = fetchHost(input)
+    if (!host || context.approvedHosts.has(host)) return RUN
+    return {
+      ask: true,
+      reason: `eNCode asks before the agent contacts a site for the first time in a session, because anything in the address leaves your machine. Approving allows ${host} until the session ends.`,
+    }
+  }
   if (context.mode !== 'code') return RUN
-  if (context.policy === 'full-access' || context.policy === 'read-only') return RUN
+  if (context.policy === 'read-only') return RUN
 
   switch (toolKind(tool)) {
     case 'write': {

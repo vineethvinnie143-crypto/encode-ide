@@ -55,6 +55,7 @@ before(async () => {
     rootReal: await fs.realpath(ws),
     env: { PATH: '' },
     home: os.homedir(),
+    approvedHosts: new Set(),
   }
 })
 
@@ -84,6 +85,24 @@ describe('decideApproval', () => {
       }
       assert.equal((await decide('replace_in_file', { path: target }, 'full-access')).ask, false)
     }
+  })
+
+  it('asks once per site before a web fetch, in every mode and policy but Full access', async () => {
+    const fetch = { url: 'https://Docs.Example.com/guide?q=1' }
+    for (const policy of ['read-only', 'workspace-write', 'auto-review'] as const) {
+      for (const mode of ['code', 'ask', 'plan'] as const) {
+        const decision = await decideApproval('web_fetch', fetch, { ...context, policy, mode })
+        assert.equal(decision.ask, true, `${policy} ${mode}`)
+        assert.match(decision.reason ?? '', /docs\.example\.com until the session ends/)
+      }
+    }
+    assert.equal((await decide('web_fetch', fetch, 'full-access')).ask, false)
+    const approved = { ...context, approvedHosts: new Set(['docs.example.com']) }
+    assert.equal((await decideApproval('web_fetch', { url: 'https://docs.example.com/other' }, approved)).ask, false)
+    assert.equal((await decideApproval('web_fetch', { url: 'https://example.com/' }, approved)).ask, true)
+    // URLs the tool refuses anyway (private addresses, other schemes) need no approval.
+    assert.equal((await decide('web_fetch', { url: 'http://127.0.0.1/' })).ask, false)
+    assert.equal((await decide('web_fetch', { url: 'file:///etc/passwd' })).ask, false)
   })
 
   it('never asks in Read Only, Full access, or Ask and Plan modes', async () => {

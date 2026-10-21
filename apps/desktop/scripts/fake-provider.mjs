@@ -52,6 +52,12 @@ const SCENARIOS = {
     },
     { text: 'Done.', call: { name: 'attempt_completion', args: { result: 'Plan mode delegation finished.' } } },
   ],
+  // web_fetch asks once for a new site, then refuses it because localhost is a private address.
+  'web-check': [
+    { text: 'Fetching a page.', call: { name: 'web_fetch', args: { url: `http://localhost:${port}/health` } } },
+    { text: 'Fetching another page on the same site.', call: { name: 'web_fetch', args: { url: `http://localhost:${port}/v1/models` } } },
+    { text: '', call: { name: 'attempt_completion', args: { result: 'Web check finished.' } } },
+  ],
   'subagent-write': [
     { text: 'Creating the file.', call: { name: 'write', args: { path: 'escalation.txt', content: 'must not exist\n' } } },
     { text: '', call: { name: 'attempt_completion', args: { result: 'Subagent finished.' } } },
