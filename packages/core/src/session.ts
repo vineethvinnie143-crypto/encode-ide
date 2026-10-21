@@ -76,7 +76,7 @@ const CANCELLED = '(cancelled)'
 
 /** Everything a session needs from the program around it. */
 export interface SessionEnv {
-  /** The workspace root, as a real path. */
+  /** The workspace root, as a real path; empty when no folder is open, which leaves the session to be read but not run. */
   root: string
   home: string
   platform: NodeJS.Platform
@@ -200,6 +200,7 @@ export class AgentSession {
     this.id = log.id
     let shell: ManagedShell
     try {
+      if (!env.root) throw new Error('Open a folder before using the agent.')
       shell = env.createShell()
     } catch (error) {
       this.shellError = errorMessage(error)
@@ -683,6 +684,7 @@ export class AgentSession {
   /** Runs one turn on the user's request. Resolves when the turn ends; rejects only when the request cannot start. */
   async start(input: AgentStartInput): Promise<TurnEnd> {
     if (this.disposed) throw new Error('This session is closed.')
+    if (!this.env.root) throw new Error('Open a folder before using the agent.')
     if (this.controller) throw new Error('eNCode is already working on this session. Stop it first.')
     const text = (input.text ?? '').trim()
     if (!text) throw new Error('Type a request first.')
@@ -708,7 +710,7 @@ export class AgentSession {
       if ('blocked' in prompt) {
         this.notice(`A hook refused this request: ${prompt.blocked}`)
         this.setStatus('idle')
-        return { kind: 'stopped', summary: prompt.blocked }
+        return { kind: 'cancelled' }
       }
 
       const message: UserMessage = { role: 'user', content: prompt.blocks }
@@ -728,7 +730,7 @@ export class AgentSession {
       if (error instanceof AgentAbortedError || signal.aborted) {
         this.setStatus('idle')
         this.notice('Stopped.')
-        return { kind: 'stopped', summary: 'Stopped.' }
+        return { kind: 'cancelled' }
       }
       const message = errorMessage(error)
       this.fail(message)
@@ -757,6 +759,8 @@ export class AgentSession {
         return
       case 'failed':
         this.fail(end.message)
+        return
+      case 'cancelled':
         return
     }
   }

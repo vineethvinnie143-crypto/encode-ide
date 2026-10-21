@@ -169,6 +169,9 @@ export interface CreateSessionOptions {
   /** The project the session belongs to; null for a standalone session. */
   root: string | null
   title?: string
+  /** For importing a session that already has an id and a date. */
+  id?: string
+  createdAt?: number
   /** Starts from a copy of another session, up to and including `recordId` (default: all of it). */
   fork?: { sessionId: string; recordId?: string }
 }

@@ -55,7 +55,7 @@ describe('a session', () => {
     await until(() => h.of('delta')[0])
     h.session.cancel()
     const end = await running
-    assert.equal(end.kind, 'stopped')
+    assert.equal(end.kind, 'cancelled')
     const entries = h.session.history().entries
     assert.ok(entries.every((entry) => !entry.streaming))
     assert.equal(entries.at(-1)?.text, 'Stopped.')
@@ -129,7 +129,7 @@ describe('a session', () => {
   it('lets a hook refuse a request before the model sees it', async () => {
     const h = await sessionHarness({ hooks: { async userPromptSubmit() { return { block: 'not today' } } }, script: [{ text: 'never' }] })
     const end = await h.session.start({ text: 'go', mode: 'code' })
-    assert.equal(end.kind, 'stopped')
+    assert.equal(end.kind, 'cancelled')
     assert.equal(h.client.requests.length, 0)
     assert.match(h.session.history().entries.at(-1)?.text ?? '', /not today/)
     assert.equal(h.session.status(), 'idle')
@@ -173,7 +173,7 @@ describe('approvals and questions', () => {
     const running = h.session.start({ text: 'write', mode: 'code' })
     await until(() => h.of('approval-request')[0])
     h.session.cancel()
-    assert.equal((await running).kind, 'stopped')
+    assert.equal((await running).kind, 'cancelled')
     assert.equal(h.session.status(), 'idle')
     const tool = h.session.history().entries.find((entry) => entry.kind === 'tool')
     assert.equal(tool?.tool?.state, 'rejected')

@@ -102,3 +102,8 @@ export type TurnEnd =
   /** No model could run now. */
   | { kind: 'paused'; reason: PauseReason; message: string; retryAt?: number }
   | { kind: 'failed'; message: string }
+  /** The turn did not run to its end: the user stopped it, or a hook refused the request. */
+  | { kind: 'cancelled' }
+
+/** How the loop itself can end a turn; it signals a stop by throwing. */
+export type LoopEnd = Exclude<TurnEnd, { kind: 'cancelled' }>

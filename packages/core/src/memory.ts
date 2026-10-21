@@ -49,7 +49,7 @@ async function readText(file: string): Promise<string | undefined> {
   try {
     const stats = await fs.stat(file)
     if (!stats.isFile() || stats.size > 2_000_000) return undefined
-    return (await fs.readFile(file, 'utf8')).replace(/^﻿/, '')
+    return (await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, '')
   } catch {
     return undefined
   }

@@ -401,8 +401,8 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     async create(create: CreateSessionOptions) {
       await ensureDir()
       const entries = await loadIndex()
-      const id = newRecordId()
-      const header: SessionHeader = { type: 'session', v: SESSION_FORMAT, id, at: Date.now(), root: create.root || null, title: create.title || DEFAULT_TITLE }
+      const id = create.id ?? newRecordId()
+      const header: SessionHeader = { type: 'session', v: SESSION_FORMAT, id, at: create.createdAt ?? Date.now(), root: create.root || null, title: create.title || DEFAULT_TITLE }
       const records: SessionRecord[] = [header]
       if (create.fork) {
         header.forkedFrom = { sessionId: create.fork.sessionId, recordId: create.fork.recordId ?? '' }

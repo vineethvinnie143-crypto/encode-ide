@@ -73,7 +73,7 @@ import {
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
-import { AgentAbortedError, type AgentSettings, type Conversation, type Surface, type Turn, type TurnEnd } from './types'
+import { AgentAbortedError, type AgentSettings, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
 import type { ConversationEntry } from './ui'
 
 /** What a call may ask of the model for its answer. */
@@ -248,7 +248,7 @@ export class AgentLoop {
   // ------------------------------------------------------------ the turn
 
   /** Runs steps until the turn ends. Rejects only with AgentAbortedError. */
-  async run(turn: Turn): Promise<TurnEnd> {
+  async run(turn: Turn): Promise<LoopEnd> {
     try {
       return await this.steps(turn)
     } catch (error) {
@@ -260,7 +260,7 @@ export class AgentLoop {
     }
   }
 
-  private async steps(turn: Turn): Promise<TurnEnd> {
+  private async steps(turn: Turn): Promise<LoopEnd> {
     const { o } = this
     const { signal } = turn
     let mode = turn.mode
@@ -307,7 +307,7 @@ export class AgentLoop {
 
   // ------------------------------------------------------------ one model call
 
-  private async complete(turn: Turn): Promise<{ kind: 'reply'; message: AssistantMessage; finish: FinishReason } | { kind: 'end'; end: TurnEnd }> {
+  private async complete(turn: Turn): Promise<{ kind: 'reply'; message: AssistantMessage; finish: FinishReason } | { kind: 'end'; end: LoopEnd }> {
     const { o } = this
     let overflows = 0
     let empties = 0
