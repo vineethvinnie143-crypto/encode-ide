@@ -8,6 +8,31 @@ const marks = () => ({
 
 export const find = [
   {
+    name: 'find: the box fits an editor as narrow as a side drawer, with replace open',
+    async run({ mount, ev, press, assert, shot }) {
+      for (const width of [360, 300, 900]) {
+        await mount({ text: words, path: 'a.txt', width, height: 260 })
+        await press('f', { ctrl: true })
+        await press('h', { ctrl: true })
+        const fit = await ev(() => {
+          const root = window.view.root.getBoundingClientRect()
+          const box = document.querySelector('.enc-find').getBoundingClientRect()
+          const inside = [...document.querySelectorAll('.enc-find button, .enc-find input, .enc-find-count')]
+            .filter((el) => el.getClientRects().length)
+            .every((el) => {
+              const rect = el.getBoundingClientRect()
+              return rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5
+            })
+          return { rootRight: root.right, rootLeft: root.left, left: box.left, right: box.right, inside, field: document.querySelector('.enc-find-field').getBoundingClientRect().width }
+        })
+        assert.ok(fit.right <= fit.rootRight && fit.left >= fit.rootLeft, `${width}px: box ${fit.left}-${fit.right} in editor ${fit.rootLeft}-${fit.rootRight}`)
+        assert.ok(fit.inside, `${width}px: every control is inside the box`)
+        assert.ok(fit.field >= 60, `${width}px: the search field is ${fit.field}px`)
+        if (width === 360) await shot('find-narrow')
+      }
+    },
+  },
+  {
     name: 'find: opens with Ctrl+F, selects matches as you type, steps with Enter, closes with Escape',
     async run({ mount, ev, page, type, press, selection, assert, shot, settle }) {
       await mount({ text: words, path: 'a.txt' })

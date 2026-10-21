@@ -381,6 +381,7 @@
 
 .tok-comment {
   color: var(--e-tok-comment);
+  font-style: italic;
 }
 .tok-string {
   color: var(--e-tok-string);
@@ -625,7 +626,8 @@
 .enc-find-field {
   display: flex;
   align-items: center;
-  width: 240px;
+  /* 240px, less when the editor is narrow: the rest of the row (expand, count, buttons) takes about 220px of the width. */
+  width: clamp(64px, calc(var(--enc-view-w, 800px) - 220px), 240px);
   height: 26px;
   padding: 0 2px 0 8px;
   box-sizing: border-box;

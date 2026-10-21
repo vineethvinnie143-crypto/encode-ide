@@ -1,76 +1,15 @@
 import { create } from '../store'
 import { api } from '../api'
+import { applyExternal, closeDoc, closeDocsUnder, hasDoc, isDirty, markSaved, openDoc, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
-
-const LANGUAGE_BY_EXT: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'typescript',
-  js: 'javascript',
-  jsx: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  json: 'json',
-  jsonc: 'json',
-  css: 'css',
-  scss: 'scss',
-  less: 'less',
-  html: 'html',
-  htm: 'html',
-  md: 'markdown',
-  markdown: 'markdown',
-  mdx: 'markdown',
-  py: 'python',
-  rs: 'rust',
-  go: 'go',
-  java: 'java',
-  kt: 'kotlin',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  php: 'php',
-  rb: 'ruby',
-  sh: 'shell',
-  bash: 'shell',
-  zsh: 'shell',
-  ps1: 'powershell',
-  bat: 'bat',
-  cmd: 'bat',
-  yml: 'yaml',
-  yaml: 'yaml',
-  toml: 'ini',
-  ini: 'ini',
-  xml: 'xml',
-  svg: 'xml',
-  sql: 'sql',
-  graphql: 'graphql',
-  gql: 'graphql',
-  vue: 'html',
-  svelte: 'html',
-  dockerfile: 'dockerfile',
-  makefile: 'makefile',
-  txt: 'plaintext',
-}
-
-export function languageFor(filePath: string): string {
-  const name = filePath.split('/').pop()?.toLowerCase() ?? filePath
-  if (name === 'dockerfile') return 'dockerfile'
-  if (name === 'makefile') return 'makefile'
-  const ext = name.includes('.') ? name.split('.').pop() ?? '' : ''
-  return LANGUAGE_BY_EXT[ext] ?? 'plaintext'
-}
 
 export interface Tab {
   path: string
   name: string
+  /** The id of the file's language, as the footer and the status bar show it. */
   language: string
-  content: string
-  savedContent: string
+  /** Unsaved changes. The text itself lives in `editor/docs`, not in this store. */
   dirty: boolean
-  /** Preserve the file's original line endings on save. */
-  eol: '\n' | '\r\n'
 }
 
 interface EditorStore {
@@ -79,17 +18,40 @@ interface EditorStore {
   cursor: { line: number; column: number }
   revealLine: number | null
   openFile(path: string, line?: number): Promise<void>
-  closeTab(path: string): void
-  closeOthers(path: string): void
-  closeAll(): void
+  closeTab(path: string): Promise<void>
+  closeOthers(path: string): Promise<void>
+  closeAll(): Promise<void>
   closeTabsUnder(prefix: string): void
   setActive(path: string): void
-  updateContent(path: string, content: string): void
+  /** The editor reports whether the document differs from the file. */
+  setDirty(path: string, dirty: boolean): void
+  /** The file changed on disk: an open document without unsaved changes takes the new text. */
   applyExternalContent(path: string, content: string): void
   saveActive(): Promise<void>
   saveAll(): Promise<void>
   setCursor(line: number, column: number): void
   consumeRevealLine(): void
+}
+
+const nameOf = (path: string): string => path.split('/').pop() ?? path
+
+/** Asks before unsaved changes are thrown away; true when there is nothing to lose or the user agrees. */
+async function confirmDiscard(dirty: readonly Tab[]): Promise<boolean> {
+  if (!dirty.length) return true
+  const [first] = dirty
+  return useUi.getState().askConfirm({
+    title: dirty.length === 1 ? `Discard changes to ${first.name}?` : `Discard changes to ${dirty.length} files?`,
+    body: dirty.length === 1 ? 'Your unsaved changes will be lost.' : dirty.map((tab) => tab.name).join(', '),
+    confirmLabel: 'Discard',
+    danger: true,
+  })
+}
+
+/** The tab to show once `path` is gone, as the neighbour that takes its place. */
+function neighbour(tabs: readonly Tab[], path: string): string | null {
+  const index = tabs.findIndex((tab) => tab.path === path)
+  const rest = tabs.filter((tab) => tab.path !== path)
+  return rest[Math.min(index, rest.length - 1)]?.path ?? null
 }
 
 export const useEditor = create<EditorStore>((set, get) => ({
@@ -99,8 +61,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
   revealLine: null,
 
   openFile: async (path, line) => {
-    const existing = get().tabs.find((tab) => tab.path === path)
-    if (existing) {
+    if (get().tabs.some((tab) => tab.path === path)) {
       set({ activePath: path, revealLine: line ?? null })
       return
     }
@@ -110,56 +71,51 @@ export const useEditor = create<EditorStore>((set, get) => ({
         useUi.getState().notify('error', `${path} is a binary file and cannot be opened as text.`)
         return
       }
-      const name = path.split('/').pop() ?? path
-      const eol: '\n' | '\r\n' = file.content.includes('\r\n') ? '\r\n' : '\n'
-      const content = eol === '\r\n' ? file.content.replace(/\r\n/g, '\n') : file.content
-      const tab: Tab = {
-        path,
-        name,
-        language: languageFor(path),
-        content,
-        savedContent: content,
-        dirty: false,
-        eol,
-      }
-      set((state) => ({ tabs: [...state.tabs, tab], activePath: path, revealLine: line ?? null }))
+      const state = openDoc(path, file.content)
+      set((current) => ({
+        tabs: current.tabs.some((tab) => tab.path === path)
+          ? current.tabs
+          : [...current.tabs, { path, name: nameOf(path), language: state.config.language.id, dirty: false }],
+        activePath: path,
+        revealLine: line ?? null,
+      }))
     } catch (error) {
       useUi.getState().notify('error', (error as Error).message)
     }
   },
 
-  closeTab: (path) => {
+  closeTab: async (path) => {
     const tab = get().tabs.find((item) => item.path === path)
     if (!tab) return
-    if (tab.dirty && !window.confirm(`Discard unsaved changes to ${tab.name}?`)) return
-    set((state) => {
-      const index = state.tabs.findIndex((item) => item.path === path)
-      const tabs = state.tabs.filter((item) => item.path !== path)
-      let activePath = state.activePath
-      if (activePath === path) {
-        activePath = tabs[Math.min(index, tabs.length - 1)]?.path ?? null
-      }
-      return { tabs, activePath, revealLine: null }
-    })
+    if (!(await confirmDiscard(tab.dirty ? [tab] : []))) return
+    closeDoc(path)
+    set((state) => ({
+      tabs: state.tabs.filter((item) => item.path !== path),
+      activePath: state.activePath === path ? neighbour(state.tabs, path) : state.activePath,
+      revealLine: null,
+    }))
   },
 
-  closeOthers: (path) => {
+  closeOthers: async (path) => {
     const keep = get().tabs.find((tab) => tab.path === path)
     if (!keep) return
-    set({ tabs: [keep], activePath: keep.path })
+    const others = get().tabs.filter((tab) => tab.path !== path)
+    if (!(await confirmDiscard(others.filter((tab) => tab.dirty)))) return
+    for (const tab of others) closeDoc(tab.path)
+    set({ tabs: [keep], activePath: keep.path, revealLine: null })
   },
 
-  closeAll: () => {
-    const dirty = get().tabs.filter((tab) => tab.dirty)
-    if (dirty.length && !window.confirm(`Discard unsaved changes in ${dirty.length} file(s)?`)) return
+  closeAll: async () => {
+    const tabs = get().tabs
+    if (!(await confirmDiscard(tabs.filter((tab) => tab.dirty)))) return
+    for (const tab of tabs) closeDoc(tab.path)
     set({ tabs: [], activePath: null, revealLine: null })
   },
 
   closeTabsUnder: (prefix) => {
+    closeDocsUnder(prefix)
     set((state) => {
-      const tabs = state.tabs.filter(
-        (tab) => tab.path !== prefix && !tab.path.startsWith(`${prefix}/`),
-      )
+      const tabs = state.tabs.filter((tab) => hasDoc(tab.path))
       const activePath = tabs.some((tab) => tab.path === state.activePath)
         ? state.activePath
         : tabs[tabs.length - 1]?.path ?? null
@@ -169,52 +125,47 @@ export const useEditor = create<EditorStore>((set, get) => ({
 
   setActive: (path) => set({ activePath: path, revealLine: null }),
 
-  updateContent: (path, content) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.path === path ? { ...tab, content, dirty: content !== tab.savedContent } : tab,
-      ),
-    }))
+  setDirty: (path, dirty) => {
+    if (get().tabs.some((tab) => tab.path === path && tab.dirty !== dirty)) {
+      set((state) => ({ tabs: state.tabs.map((tab) => (tab.path === path ? { ...tab, dirty } : tab)) }))
+    }
   },
 
   applyExternalContent: (path, content) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) => {
-        if (tab.path !== path) return tab
-        const eol = content.includes('\r\n') ? '\r\n' : tab.eol
-        const normalized = eol === '\r\n' ? content.replace(/\r\n/g, '\n') : content
-        return { ...tab, content: normalized, savedContent: normalized, dirty: false, eol }
-      }),
-    }))
+    // Typing since the file was read wins; the next save is the user's call.
+    if (!hasDoc(path) || isDirty(path)) return
+    applyExternal(path, content)
   },
 
   saveActive: async () => {
     const { activePath, tabs } = get()
     const tab = tabs.find((item) => item.path === activePath)
-    if (!tab || !tab.dirty) return
-    try {
-      const data = tab.eol === '\r\n' ? tab.content.replace(/\n/g, '\r\n') : tab.content
-      await api.workspace.write(tab.path, data)
-      set((state) => ({
-        tabs: state.tabs.map((item) =>
-          item.path === tab.path ? { ...item, savedContent: item.content, dirty: false } : item,
-        ),
-      }))
-      useUi.getState().notify('success', `Saved ${tab.name}`)
-    } catch (error) {
-      useUi.getState().notify('error', `Save failed: ${(error as Error).message}`)
-    }
+    if (tab) await save(tab)
   },
 
   saveAll: async () => {
-    for (const tab of get().tabs) {
-      if (!tab.dirty) continue
-      set((state) => ({ activePath: tab.path }))
-      await get().saveActive()
-    }
+    for (const tab of get().tabs) await save(tab)
   },
 
-  setCursor: (line, column) => set({ cursor: { line, column } }),
+  setCursor: (line, column) => {
+    const { cursor } = get()
+    if (cursor.line !== line || cursor.column !== column) set({ cursor: { line, column } })
+  },
 
   consumeRevealLine: () => set({ revealLine: null }),
 }))
+
+async function save(tab: Tab): Promise<void> {
+  if (!isDirty(tab.path)) return
+  const snapshot = snapshotForSave(tab.path)
+  if (!snapshot) return
+  try {
+    await api.workspace.write(tab.path, snapshot.text)
+    markSaved(tab.path, snapshot)
+    // Typing may have gone on while the file was written.
+    useEditor.getState().setDirty(tab.path, isDirty(tab.path))
+    useUi.getState().notify('success', `Saved ${tab.name}`)
+  } catch (error) {
+    useUi.getState().notify('error', `Save failed: ${(error as Error).message}`)
+  }
+}

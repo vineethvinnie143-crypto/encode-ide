@@ -28,6 +28,8 @@ export {
   type ReviewResult,
   type WordChange,
 } from './review'
+export { reload, reloadChanges } from './reload'
+export { detectIndent, type IndentStyle } from './indent'
 export { languageById, languageByName, languageForContent, languageForPath, languages, plain, type LanguageEntry } from './languages'
 export {
   CharClass,

@@ -14,12 +14,24 @@ importers:
 
   apps/desktop:
     devDependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../../packages/diff
+      '@encode/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@encode/editor-view':
+        specifier: workspace:*
+        version: link:../../packages/editor-view
       '@encode/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
       '@encode/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
+      '@encode/text':
+        specifier: workspace:*
+        version: link:../../packages/text
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

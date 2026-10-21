@@ -8,7 +8,7 @@
  *
  * ENCODE_DEBUG_PORT and ENCODE_FAKE_PROVIDER_PORT override the ports (9222, 8787).
  *
- * Exercises the hand-built editor (overlay integrity, save round-trip, find,
+ * Exercises the in-house editor (what it draws, typing, save and undo round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
  * scripts/fake-provider.mjs including approvals, diffs and command execution, and
  * last the appearance settings, capturing dark and light at 1280 x 800 and 1920 x 1080.
@@ -143,6 +143,31 @@ async function typeInto(selector, value) {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     return true
   })()`)
+}
+
+/** The lines the editor has drawn, top to bottom. They are pooled, so DOM order is not line order. */
+const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
+  .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+  .map((line) => line.textContent)`
+
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13 }
+
+/** A key chord through the browser's own input path, to whatever has focus. */
+async function pressKey(key, { ctrl = false, shift = false } = {}) {
+  const common = {
+    key,
+    code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+    modifiers: (ctrl ? 2 : 0) | (shift ? 8 : 0),
+    windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
+  }
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...common })
+}
+
+async function focusEditor() {
+  if (!(await evaluate("(() => { const input = document.querySelector('.enc-input'); input?.focus(); return Boolean(input) })()"))) {
+    throw new Error('The editor is not on screen')
+  }
 }
 
 /**
@@ -843,56 +868,64 @@ try {
   await screenshot('02-explorer.png')
 
   if (!(await click('.tree-row', 'README.md'))) throw new Error('README.md row not found')
-  await waitFor("document.querySelector('.code-input')?.value.includes('Demo Project')", 15000, 'README loaded')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('Demo Project')`, 15000, 'README loaded')
   await sleep(450)
 
-  const integrity = await evaluate(`(() => {
-    const source = document.querySelector('.code-input').value
-    const rendered = document.querySelector('.code-highlight code').textContent
+  const integrity = await evaluate(`(async () => {
+    const lines = ${RENDERED_LINES}
+    const file = await window.eNCode.workspace.read('README.md')
+    const expected = file.content.replace(/\\r\\n?/g, '\\n').split('\\n').slice(0, lines.length)
     return {
-      equal: source === rendered,
-      tokens: document.querySelectorAll('.code-highlight .tok-heading, .code-highlight .tok-meta').length,
+      equal: lines.join('\\n') === expected.join('\\n'),
+      lines: lines.length,
+      tokens: document.querySelectorAll('.enc-line .tok-heading, .enc-line .tok-meta').length,
+      numbers: document.querySelectorAll('.enc-gutter-num').length,
     }
   })()`)
-  console.log('[smoke] overlay integrity:', JSON.stringify(integrity))
-  if (!integrity.equal) throw new Error('highlight overlay does not match the source text')
+  console.log('[smoke] editor content:', JSON.stringify(integrity))
+  if (!integrity.lines || !integrity.equal) throw new Error('the editor does not draw the file as it is on disk')
   if (integrity.tokens < 1) throw new Error('markdown tokens were not rendered')
+  if (integrity.numbers < integrity.lines) throw new Error('the gutter does not number the lines')
   await screenshot('03-editor.png')
 
-  // Save round-trip through the custom editor.
-  const original = await evaluate("document.querySelector('.code-input').value")
-  await typeInto('.code-input', original + '\n\nEdited by the eNCode smoke test.\n')
+  // Typing, saving and undo through the editor, with the file checked on disk.
+  const original = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: '\n\nEdited by the eNCode smoke test.\n' })
   await sleep(450)
   const dirty = await evaluate("!!document.querySelector('.editor-tab.is-dirty')")
-  await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))")
+  await pressKey('s', { ctrl: true })
   await sleep(800)
   const savedOnDisk = await evaluate(
     "window.eNCode.workspace.read('README.md').then((file) => file.content.includes('Edited by the eNCode smoke test'), () => false)",
   )
-  console.log(`[smoke] save round-trip dirty=${dirty} disk=${savedOnDisk}`)
-  if (!dirty || !savedOnDisk) throw new Error('editor save round-trip failed')
+  const cleanAfterSave = await evaluate("!document.querySelector('.editor-tab.is-dirty')")
+  console.log(`[smoke] save round-trip dirty=${dirty} disk=${savedOnDisk} cleanAfterSave=${cleanAfterSave}`)
+  if (!dirty || !savedOnDisk || !cleanAfterSave) throw new Error('editor save round-trip failed')
 
-  await typeInto('.code-input', original)
-  await sleep(300)
-  await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))")
-  await sleep(600)
+  // Undo goes back to the text the file had, which is no longer what is on disk: unsaved until saved again.
+  await pressKey('z', { ctrl: true })
+  await sleep(350)
+  const dirtyAfterUndo = await evaluate("!!document.querySelector('.editor-tab.is-dirty')")
+  if (!dirtyAfterUndo) throw new Error('undoing the edit did not mark the document as unsaved')
+  await pressKey('s', { ctrl: true })
+  await sleep(700)
+  const restored = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  if (restored !== original) throw new Error('undo and save did not restore README.md')
 
   // In-file find.
-  await evaluate(`(() => {
-    const textarea = document.querySelector('.code-input')
-    textarea.focus()
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }))
-    return true
-  })()`)
-  await waitFor("!!document.querySelector('.find-bar')", 6000, 'find bar')
-  await typeInto('.find-input', 'Scripts')
+  await focusEditor()
+  await pressKey('f', { ctrl: true })
+  await waitFor("!!document.querySelector('.enc-find')", 6000, 'find widget')
+  await send('Input.insertText', { text: 'Scripts' })
   await sleep(500)
-  const findCount = await evaluate("document.querySelector('.find-count')?.textContent")
+  const findCount = await evaluate("document.querySelector('.enc-find-count')?.textContent")
   console.log('[smoke] find count:', findCount)
-  if (!findCount || findCount === '0/0') throw new Error('find bar did not find matches')
+  if (!findCount || !/\d/.test(findCount)) throw new Error('find did not find matches')
   await screenshot('04-find.png')
-  await evaluate("document.querySelectorAll('.find-bar .icon-btn').forEach((button) => button.click())")
-  await sleep(300)
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.enc-find')", 4000, 'find widget closed')
 
   // Quick open → open src/utils.ts.
   await evaluate(
@@ -911,16 +944,74 @@ try {
     item.click()
     return true
   })()`)
-  await waitFor("document.querySelector('.code-input')?.value.includes('export function add')", 15000, 'utils.ts open')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('export function add')`, 15000, 'utils.ts open')
   await sleep(500)
   const tsStats = await evaluate(`(() => ({
-    keywords: document.querySelectorAll('.code-highlight .tok-keyword').length,
-    functions: document.querySelectorAll('.code-highlight .tok-function').length,
+    keywords: document.querySelectorAll('.enc-line .tok-keyword').length,
+    functions: document.querySelectorAll('.enc-line .tok-function').length,
     language: (document.querySelector('.editor-footer')?.textContent ?? '').includes('typescript'),
+    tabs: document.querySelectorAll('.editor-tab').length,
   }))()`)
   console.log('[smoke] typescript tokens:', JSON.stringify(tsStats))
   if (tsStats.keywords < 1) throw new Error('TypeScript tokens were not rendered')
+  if (!tsStats.language) throw new Error('the footer does not show the language')
+  if (tsStats.tabs !== 2) throw new Error(`expected two tabs, saw ${tsStats.tabs}`)
   await screenshot('06-editor-ts.png')
+
+  // Switching back keeps the document: its place, its undo history.
+  await click('.editor-tab', 'README.md')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('Demo Project')`, 8000, 'README shown again')
+
+  // Go to line: the editor asks, the footer follows.
+  await focusEditor()
+  await pressKey('g', { ctrl: true })
+  await waitFor("!!document.querySelector('.prompt-dialog')", 6000, 'go to line prompt')
+  await typeInto('.prompt-dialog .text-input', '5:3')
+  await sleep(150)
+  await pressKey('Enter')
+  await waitFor("(document.querySelector('.editor-footer')?.textContent ?? '').includes('Ln 5, Col 3')", 6000, 'cursor moved by go to line')
+
+  // Right-click opens the editor's own menu.
+  await evaluate(`(() => {
+    const scroller = document.querySelector('.enc-scroller')
+    const rect = scroller.getBoundingClientRect()
+    scroller.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 140, clientY: rect.top + 70 }))
+    return true
+  })()`)
+  await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
+  await screenshot('06b-editor-menu.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed')
+
+  // A change on disk (here a write through the app's API, as the agent's are) reaches the open document and keeps the cursor.
+  const readme = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  const cursorBefore = /Ln \d+, Col \d+/.exec(await evaluate("document.querySelector('.editor-footer')?.textContent ?? ''"))?.[0]
+  await evaluate(
+    `window.eNCode.workspace.write('README.md', ${JSON.stringify(readme.replace('Demo Project', 'Demo Project (changed on disk)'))})`,
+  )
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('changed on disk')`, 10000, 'change on disk shown')
+  const afterExternal = await evaluate(`(() => ({
+    dirty: Boolean(document.querySelector('.editor-tab.is-dirty')),
+    footer: document.querySelector('.editor-footer')?.textContent ?? '',
+  }))()`)
+  console.log('[smoke] after change on disk:', JSON.stringify(afterExternal))
+  if (afterExternal.dirty) throw new Error('a change from disk marked the document as edited')
+  if (!cursorBefore || !afterExternal.footer.includes(cursorBefore)) throw new Error(`a change from disk moved the cursor from ${cursorBefore}`)
+  await evaluate(`window.eNCode.workspace.write('README.md', ${JSON.stringify(readme)})`)
+  await waitFor(`!${RENDERED_LINES}.join('\\n').includes('changed on disk')`, 10000, 'change on disk undone')
+
+  // Closing a tab with unsaved changes asks first, and Cancel keeps the changes.
+  await focusEditor()
+  await send('Input.insertText', { text: 'unsaved' })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'unsaved mark')
+  await click('.editor-tab.is-active .tab-close')
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'discard prompt')
+  await screenshot('06c-discard.png')
+  await click('.ui-dialog-foot button', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'discard prompt closed')
+  if (!(await evaluate("!!document.querySelector('.editor-tab.is-dirty')"))) throw new Error('Cancel threw the changes away')
+  await pressKey('z', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 4000, 'undo back to the saved text')
 
   // Settings modal.
   if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')

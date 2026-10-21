@@ -177,6 +177,8 @@ export class EditorView {
   private rendered: { first: number; last: number } = { first: 0, last: -1 }
   private frame = 0
   private pendingReveal: { pos: number; center: boolean } | null = null
+  /** A scroll position asked for by `setState`: set once the scrollable area has the new document's size. */
+  private pendingScroll: { top: number; left: number } | null = null
   private bracketCache: { version: number; head: number; pair: [number, number] | null } | null = null
   private blink: Animation | null = null
   private idleWork = 0
@@ -369,10 +371,8 @@ export class EditorView {
     this.find.stateReplaced()
     this.review.stateReplaced()
     this.pendingReveal = null
-    if (scroll) {
-      this.scroller.scrollTop = scroll.top
-      this.scroller.scrollLeft = scroll.left
-    } else {
+    this.pendingScroll = scroll ?? null
+    if (!scroll) {
       this.scroller.scrollTop = 0
       this.scroller.scrollLeft = 0
     }
@@ -381,7 +381,7 @@ export class EditorView {
   }
 
   saveScroll(): { top: number; left: number } {
-    return { top: this.scroller.scrollTop, left: this.scroller.scrollLeft }
+    return this.pendingScroll ?? { top: this.scroller.scrollTop, left: this.scroller.scrollLeft }
   }
 
   private createHighlighter(): Highlighter {
@@ -634,6 +634,11 @@ export class EditorView {
     const scrollHeight = `${this.scale.scrollHeight}px`
     if (this.sizer.style.height !== scrollHeight) this.sizer.style.height = scrollHeight
 
+    if (this.pendingScroll) {
+      this.scroller.scrollTop = this.pendingScroll.top
+      this.scroller.scrollLeft = this.pendingScroll.left
+      this.pendingScroll = null
+    }
     if (this.pendingReveal) this.applyReveal()
 
     const scrollTop = this.scroller.scrollTop
