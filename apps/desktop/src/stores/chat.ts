@@ -2,6 +2,7 @@ import { create } from '../store'
 import type {
   AgentEvent,
   AgentStatus,
+  ApprovalAnswer,
   ApprovalRequest,
   ConversationEntry,
   PlanRequest,
@@ -9,6 +10,7 @@ import type {
   TodoItem,
 } from '@shared/types'
 import { api } from '../api'
+import { enqueue, dequeue, moveQueued, removeQueued, takeQueued, mergeDraft, type Queued } from '../components/Chat/queue'
 import { getActiveSessionId } from './active'
 import { useSettings } from './settings'
 import { useUi } from './ui'
@@ -24,7 +26,8 @@ interface ChatStore {
   entries: ConversationEntry[]
   status: AgentStatus
   running: boolean
-  approval: ApprovalRequest | null
+  /** Every approval waiting for you in this session, oldest first. */
+  approvals: ApprovalRequest[]
   ask: AskState | null
   goal: SessionGoal | null
   todos: TodoItem[]
@@ -32,6 +35,8 @@ interface ChatStore {
   usageTotals: { total: number; cached: number; prompt: number; completion: number }
   initialized: boolean
   draft: string
+  /** Messages sent while the agent worked, by session, waiting to go out one by one. */
+  queues: Record<string, Queued[]>
   tokensPerSecond: number
   streamStartedAt: number
   streamChars: number
@@ -41,8 +46,17 @@ interface ChatStore {
   send(text: string, attachments?: { path: string; content: string }[]): void
   stop(): Promise<void>
   clear(): Promise<void>
-  approve(approved: boolean): Promise<void>
+  /** Answers one approval (the first, unless an id is given); the card leaves the list at once. */
+  answerApproval(answer: boolean | ApprovalAnswer, id?: string): Promise<void>
   answer(text: string): Promise<void>
+  /** Holds a message until the agent is done. */
+  enqueue(text: string): void
+  removeQueued(id: string): void
+  moveQueued(id: string, direction: -1 | 1): void
+  /** Takes a queued message back into the composer to edit it. */
+  editQueued(id: string): void
+  /** Sends the next queued message of a session, if there is one. */
+  drainQueue(sessionId: string): void
   applyEvent(event: AgentEvent): void
 }
 
@@ -58,7 +72,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   entries: [],
   status: 'idle',
   running: false,
-  approval: null,
+  approvals: [],
   ask: null,
   goal: null,
   todos: [],
@@ -66,6 +80,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   usageTotals: { total: 0, cached: 0, prompt: 0, completion: 0 },
   initialized: false,
   draft: '',
+  queues: {},
   tokensPerSecond: 0,
   streamStartedAt: 0,
   streamChars: 0,
@@ -107,12 +122,14 @@ export const useChat = create<ChatStore>((set, get) => ({
       } catch {
         plan = null
       }
+      const waiting = history.status === 'awaiting-approval' || history.status === 'awaiting-user'
       set({
         entries: history.entries,
         status: history.status,
-        running: history.status === 'thinking' || history.status === 'running-tool',
-        approval: null,
-        ask: null,
+        running: history.status === 'thinking' || history.status === 'running-tool' || waiting,
+        // A session that is still waiting for an answer shows its card again.
+        approvals: history.status === 'awaiting-approval' ? (history.approvals ?? (history.approval ? [history.approval] : [])) : [],
+        ask: history.status === 'awaiting-user' ? (history.ask ?? null) : null,
         goal,
         todos,
         plan,
@@ -130,7 +147,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   send: (text, attachments) => {
     const trimmed = text.trim()
     if (!trimmed || get().running) return
-    set({ running: true, status: 'thinking', approval: null, ask: null, draft: '', streamStartedAt: 0, streamChars: 0 })
+    set({ running: true, status: 'thinking', approvals: [], ask: null, draft: '', streamStartedAt: 0, streamChars: 0 })
     const sessionId = getActiveSessionId()
     void api.agent
       .start(sessionId, {
@@ -158,15 +175,18 @@ export const useChat = create<ChatStore>((set, get) => ({
     } catch {
       /* ignore */
     }
-    set({ entries: [], status: 'idle', running: false, approval: null, ask: null })
+    set({ entries: [], status: 'idle', running: false, approvals: [], ask: null })
   },
 
-  approve: async (approved) => {
-    const approval = get().approval
+  answerApproval: async (answer, id) => {
+    const approval = get().approvals.find((item) => item.id === (id ?? get().approvals[0]?.id))
     if (!approval) return
-    set({ approval: null, status: approved ? 'running-tool' : 'thinking' })
+    const approved = typeof answer === 'boolean' ? answer : answer.approved
+    const approvals = get().approvals.filter((item) => item.id !== approval.id)
+    // Another card may still be waiting; otherwise the agent carries on.
+    set({ approvals, status: approvals.length ? 'awaiting-approval' : approved ? 'running-tool' : 'thinking' })
     try {
-      await api.agent.approve(approval.id, approved)
+      await api.agent.approve(approval.id, answer)
     } catch (error) {
       useUi.getState().notify('error', (error as Error).message)
     }
@@ -183,6 +203,43 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
   },
 
+  enqueue: (text) => {
+    const sessionId = getActiveSessionId()
+    const queue = enqueue(get().queues[sessionId] ?? [], text, crypto.randomUUID())
+    set({ queues: { ...get().queues, [sessionId]: queue }, draft: '' })
+  },
+
+  removeQueued: (id) => {
+    const sessionId = getActiveSessionId()
+    set({ queues: { ...get().queues, [sessionId]: removeQueued(get().queues[sessionId] ?? [], id) } })
+  },
+
+  moveQueued: (id, direction) => {
+    const sessionId = getActiveSessionId()
+    set({ queues: { ...get().queues, [sessionId]: moveQueued(get().queues[sessionId] ?? [], id, direction) } })
+  },
+
+  editQueued: (id) => {
+    const sessionId = getActiveSessionId()
+    const { taken, rest } = takeQueued(get().queues[sessionId] ?? [], id)
+    if (!taken) return
+    set({ queues: { ...get().queues, [sessionId]: rest }, draft: mergeDraft(get().draft, taken.text) })
+  },
+
+  drainQueue: (sessionId) => {
+    const { next, rest } = dequeue(get().queues[sessionId] ?? [])
+    if (!next) return
+    set({ queues: { ...get().queues, [sessionId]: rest } })
+    if (sessionId === getActiveSessionId()) {
+      get().send(next.text)
+      return
+    }
+    // A session in the background: start it directly; its events reach the sidebar through the sessions store.
+    void api.agent
+      .start(sessionId, { text: next.text, mode: useSettings.getState().settings?.agentMode ?? 'code' })
+      .catch((error: Error) => useUi.getState().notify('error', error.message))
+  },
+
   applyEvent: (event) => {
     if (event.sessionId && event.sessionId !== getActiveSessionId()) return
     switch (event.type) {
@@ -190,8 +247,8 @@ export const useChat = create<ChatStore>((set, get) => ({
         set((state) => ({
           status: event.status,
           running: event.status === 'thinking' || event.status === 'running-tool' || event.status === 'awaiting-approval' || event.status === 'awaiting-user',
-          // A pending card only makes sense while the agent waits on it (stopping, for one, ends the wait).
-          approval: event.status === 'awaiting-approval' ? state.approval : null,
+          // Cards leave when you answer them, or when the run ends (stopping, for one, ends the wait).
+          approvals: event.status === 'idle' || event.status === 'done' || event.status === 'error' ? [] : state.approvals,
           ask: event.status === 'awaiting-user' ? state.ask : null,
         }))
         break
@@ -208,7 +265,11 @@ export const useChat = create<ChatStore>((set, get) => ({
         }))
         break
       case 'approval-request':
-        set({ approval: event.request, status: 'awaiting-approval', running: true })
+        set((state) => ({
+          approvals: [...state.approvals.filter((item) => item.id !== event.request.id), event.request],
+          status: 'awaiting-approval',
+          running: true,
+        }))
         break
       case 'ask':
         set({
@@ -224,7 +285,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           return {
             running: false,
             status: 'done',
-            approval: null,
+            approvals: [],
             ask: null,
             tokensPerSecond: measured || state.tokensPerSecond,
             streamStartedAt: 0,
@@ -233,7 +294,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         })
         break
       case 'error':
-        set({ running: false, status: 'error', approval: null, ask: null })
+        set({ running: false, status: 'error', approvals: [], ask: null })
         useUi.getState().notify('error', event.message)
         break
       case 'session-reset':
@@ -241,7 +302,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           entries: [],
           status: 'idle',
           running: false,
-          approval: null,
+          approvals: [],
           ask: null,
           tokensPerSecond: 0,
           streamStartedAt: 0,

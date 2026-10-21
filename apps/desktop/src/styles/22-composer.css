@@ -1,0 +1,192 @@
+/* ============================================================
+   Composer: an 18 px card as wide as the thread, with a 40 px
+   toolbar (Add, permissions, model, Send) and a meta row below
+   ============================================================ */
+
+.composer-dock {
+  flex-shrink: 0;
+  padding: 10px var(--thread-gutter) 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.chip-remove {
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+.chip-remove:hover {
+  color: var(--danger);
+}
+
+.composer-card {
+  padding: 12px 12px 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-18);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-composer);
+  transition: border-color var(--dur-2) var(--ease-out);
+}
+.composer-card:focus-within {
+  border-color: var(--accent);
+}
+.composer-card.is-running {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 22px;
+  max-height: 264px;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  line-height: 22px;
+}
+.composer-input::placeholder {
+  color: var(--text-3);
+}
+
+.composer-toolbar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  margin-left: -6px;
+}
+.composer-plus {
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+}
+.composer-spacer {
+  flex: 1;
+}
+
+.policy-chip,
+.model-chip {
+  height: 28px;
+  font-size: var(--fs-12);
+}
+.model-chip {
+  max-width: 260px;
+}
+
+.composer-send {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  transition: background var(--dur-1) var(--ease-out);
+}
+.composer-send:hover {
+  background: var(--accent-fill-hover);
+}
+.composer-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.composer-send:disabled:hover {
+  background: var(--accent-fill);
+}
+.composer-send.is-stop {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+.composer-send.is-stop:hover {
+  background: var(--text-disabled);
+}
+
+/* The meta row: context ring, turns, steps, tokens */
+.composer-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.stats-sep {
+  color: var(--text-3);
+}
+.context-ring-track {
+  stroke: var(--border-strong);
+}
+.context-ring-fill {
+  stroke: var(--accent);
+}
+.context-ring.is-high .context-ring-fill {
+  stroke: var(--warning);
+}
+
+/* Messages waiting for the agent to finish */
+.queue-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-14);
+  background: var(--surface-1);
+}
+.queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  line-height: 20px;
+}
+.queue-note {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.queue-row {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.queue-actions {
+  display: flex;
+  flex-shrink: 0;
+}

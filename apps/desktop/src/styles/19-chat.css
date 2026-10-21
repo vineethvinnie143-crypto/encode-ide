@@ -1,0 +1,402 @@
+/* ============================================================
+   The thread: your messages as bubbles, replies as plain text,
+   a folded work log, hover actions. 736 px wide at most.
+   ============================================================ */
+
+.chat-panel {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+.chat-scroll {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.chat-list {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 0 8px;
+}
+
+/* 736 px of content, 24 px at the sides, centred; turns sit 22 px apart */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 784px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* New session */
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 48px 0 20px;
+}
+.chat-empty-mark {
+  margin-bottom: 6px;
+}
+.chat-empty h2 {
+  margin: 0;
+  font-size: var(--fs-24);
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.chat-empty p {
+  margin: 0;
+  max-width: 560px;
+  font-size: var(--fs-14);
+  line-height: 22px;
+  color: var(--text-2);
+}
+.chat-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  margin-top: 14px;
+}
+.suggestion {
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.suggestion:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+/* One turn */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.turn-user {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bubble-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.chat-user-bubble {
+  max-width: 80%;
+  padding: 10px 16px;
+  border: 1px solid var(--bubble-border);
+  border-radius: 20px;
+  background: var(--bubble);
+  color: var(--bubble-text);
+  font-size: var(--fs-14);
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Copy, fork, time and model: under a message, on hover or focus */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.msg-actions.is-right {
+  justify-content: flex-end;
+}
+.turn:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+.msg-time {
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.msg-model {
+  height: 20px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-6);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+
+/* Replies and notices */
+.msg {
+  font-size: var(--fs-14);
+  line-height: 22px;
+  color: var(--text-1);
+}
+.msg-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.msg-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font-size: var(--fs-13);
+  line-height: 20px;
+  white-space: pre-wrap;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p {
+  margin: 0 0 12px;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 18px 0 8px;
+  color: var(--text-1);
+  font-size: var(--fs-16);
+  line-height: 24px;
+  font-weight: 600;
+}
+.markdown ul,
+.markdown ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.markdown li {
+  margin: 2px 0;
+}
+.markdown a {
+  color: var(--accent);
+}
+.markdown code {
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  background: var(--surface-3);
+  font-size: 12px;
+}
+.markdown pre {
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.markdown pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 19px;
+}
+
+/* A fenced block: a 32 px header with the language and Copy */
+.code-block {
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.code-head {
+  height: 32px;
+  padding: 0 6px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.code-copy {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-6);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.code-copy:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+/* The work log: "Worked for 2m 14s" folds everything the agent did */
+.worklog {
+  display: flex;
+  flex-direction: column;
+}
+.worklog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 28px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  text-align: left;
+}
+.worklog-head:hover .worklog-label {
+  color: var(--text-2);
+}
+.worklog-label {
+  flex: none;
+  transition: color var(--dur-1) var(--ease-out);
+}
+.worklog-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.worklog-chevron {
+  flex: none;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.worklog-chevron.is-open {
+  transform: rotate(90deg);
+}
+.worklog-label.shimmer {
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-1) 50%, var(--text-3) 100%) 0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: worklog-shimmer 2s linear infinite;
+}
+@keyframes worklog-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.worklog-body {
+  margin: 6px 0 4px 6px;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 1px solid var(--border);
+}
+.worklog-text {
+  margin: 4px 0;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.worklog-text .markdown p {
+  margin-bottom: 8px;
+}
+.worklog-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.worklog-notice.is-error {
+  color: var(--danger);
+}
+
+/* Jump to a turn, and back to the latest */
+.turn-ticks {
+  position: absolute;
+  left: 6px;
+  top: 24px;
+  bottom: 24px;
+  width: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.turn-tick {
+  width: 12px;
+  height: 8px;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+}
+.turn-tick::before {
+  content: '';
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+  transition: background var(--dur-1) var(--ease-out);
+}
+.turn-tick:hover::before {
+  background: var(--accent);
+}
+@media (max-width: 999px) {
+  .turn-ticks {
+    display: none;
+  }
+}
+
+.latest-btn {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-1);
+  box-shadow: var(--shadow-pop);
+  animation: ui-fade var(--dur-2) var(--ease-out);
+}
+.latest-btn:hover {
+  background: var(--surface-2);
+}

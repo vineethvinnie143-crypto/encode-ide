@@ -1,0 +1,82 @@
+/* ============================================================
+   Title bar (44 px): logo, history, sidebar toggle, menus, window buttons.
+   The whole bar drags the window; everything you can click opts out.
+   ============================================================ */
+
+.titlebar {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 14px;
+  background: var(--chrome);
+  color: var(--text-2);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar button,
+.titlebar .menubar {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-logo {
+  margin-right: 10px;
+}
+
+.tb-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.menubar {
+  display: flex;
+  align-items: center;
+}
+
+.tb-menu {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--r-8);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.tb-menu:hover,
+.tb-menu.is-open {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.tb-drag {
+  flex: 1;
+  align-self: stretch;
+}
+
+/* Windows caption buttons: 46 x 44, with the system's red on Close */
+.caption {
+  display: flex;
+  align-self: stretch;
+}
+.caption button {
+  width: 46px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.caption button:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.caption button.close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}

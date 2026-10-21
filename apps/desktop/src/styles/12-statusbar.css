@@ -1,0 +1,66 @@
+/* ============================================================
+   Status bar
+   ============================================================ */
+
+.statusbar {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border-subtle);
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.status-item:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.status-badge {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+  border-radius: 8px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.agent-status.agent-error {
+  color: var(--danger);
+}
+.agent-status.agent-thinking,
+.agent-status.agent-running-tool {
+  color: var(--accent);
+}
+.agent-status.agent-awaiting-approval,
+.agent-status.agent-awaiting-user {
+  color: var(--warning);
+}
+.agent-status.agent-done {
+  color: var(--success);
+}
+
+.muted {
+  color: var(--text-3);
+}

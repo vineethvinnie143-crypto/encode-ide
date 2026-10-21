@@ -1,4 +1,4 @@
-import { CheckCircle2, Pause, Pencil, Play, Target, Trash2 } from 'lucide-react'
+import { CheckCircle2, Pause, Pencil, Play, Target, Trash2 } from '../../ui/icons'
 import type { SessionGoal } from '@shared/types'
 import { api } from '../../api'
 import { useChat } from '../../stores/chat'

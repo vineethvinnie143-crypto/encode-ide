@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, ListTodo, Loader2 } from 'lucide-react'
+import { CheckCircle2, Circle, ListTodo, Loader2 } from '../../ui/icons'
 import { useChat } from '../../stores/chat'
 
 const ICONS = {

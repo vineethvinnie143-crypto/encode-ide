@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Clock, Play, Plus, Trash2, X } from 'lucide-react'
+import { Clock, Play, Plus, Trash2, X } from '../ui/icons'
 import type { Schedule } from '@shared/types'
 import { api } from '../api'
 import { useSessions } from '../stores/sessions'

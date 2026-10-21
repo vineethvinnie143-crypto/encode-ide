@@ -1,0 +1,159 @@
+/* ============================================================
+   Typography — type scale
+   text: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif
+   code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, …
+   scale: 20 / 16 / 14 / 13 / 12, content 14px/24px, code 11–12px/19px
+   ============================================================ */
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.code-editor,
+.terminal-lines,
+.tool-row-detail,
+.tool-row-output,
+.trajectory-preview,
+.trajectory-detail pre,
+.browser-address input,
+.markdown pre code,
+.markdown code,
+.diff-view {
+  font-family: var(--font-mono);
+}
+
+.right-tab,
+.suggestion,
+.tool-row-toggle,
+.ask-option,
+.goal-text {
+  font-size: 13px;
+}
+
+.session-chip,
+.workspace-tabs button,
+.files-switcher button,
+.trajectory-preview,
+.browser-address input,
+.tool-row-detail,
+.markdown code {
+  font-size: 12px;
+}
+
+.tool-row-size,
+.goal-status,
+.editor-footer,
+.chat-meta,
+.attachment-chip,
+.trajectory-index,
+.trajectory-time {
+  font-size: 11px;
+}
+
+.code-editor {
+  font-size: 12.5px;
+}
+
+.terminal-lines {
+  font-size: 12px;
+}
+
+/* Font surfaces: code font only for code, numbers and paths */
+.composer-stats, .tool-row-size, .diff-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.browser-address input { font-family: var(--font-ui); }
+.terminal-lines { font-size: 11px; }
+
+.approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
+.code-editor { font-size: 12px; line-height: 19px; }
+.code-gutter { line-height: 19px; }
+.code-current-line { height: 19px; }
+.term-line { min-height: 19px; }
+
+/* Tool-change card + diff metrics */
+.diff-view { border-radius: 8px; border-color: var(--border); font-size: 11px; line-height: 16px; }
+.diff-hunk-header { padding: 2px 8px; font-size: 11px; line-height: 16px; background: var(--surface-1); }
+.diff-line { padding: 0 8px; line-height: 16px; }
+.tool-row-detail { font-size: 12px; }
+
+/* Detail pass: control typography (strong 500 variants) */
+.session-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
+.suggestion, .ask-option { font-weight: 500; line-height: 20px; }
+.tool-row-label { font-weight: 500; }
+
+/* Detail pass: card radii + tight metrics */
+.goal-card, .todo-card, .plan-card { border-radius: 12px; }
+
+/* eNCode brand mark */
+
+/* Meta text uses the UI font with tabular numerals, not the code font */
+.composer-stats, .chat-meta, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+.goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+/* Command palette */
+.command-palette { width: min(680px, 92vw); background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-pop); }
+.command-input { width: 100%; height: 44px; padding: 0 14px; background: var(--surface-2); border: 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); font-size: 14px; outline: none; }
+.command-list { max-height: 60vh; overflow: auto; padding: 6px; }
+.command-group-title { padding: 8px 10px 4px; font-size: 11px; color: var(--text-3); }
+.command-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; text-align: left; color: var(--text-2); }
+.command-item:hover { background: var(--hover); color: var(--text-1); }
+.command-label { font-size: 13px; font-weight: 500; color: var(--text-1); }
+.command-detail { margin-left: auto; font-size: 11.5px; color: var(--text-3); }
+
+.job-preview { display: block; width: 100%; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+
+/* Policy menu (Read Only / Workspace Write / Full access / Auto review) */
+.policy-menu { min-width: 208px; }
+.policy-menu button { justify-content: flex-start; }
+.policy-menu button span { margin-left: auto; font-size: 10px; color: var(--accent); }
+
+/* Approval reason and policy picker */
+.approval-reason {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.policy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.policy-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.policy-option:hover {
+  background: var(--hover);
+}
+.policy-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.policy-option input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.policy-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.policy-option-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+.policy-option-description {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}

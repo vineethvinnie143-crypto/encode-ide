@@ -1,16 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentEvent,
+  ApprovalAnswer,
   AgentStartInput,
   BackgroundJob,
   EncodeApi,
   PlanRequest,
   SearchOptions,
   SessionGoal,
+  SessionPatch,
   Settings,
   ShellCreateOptions,
   ShellPromptInfo,
   TodoItem,
+  ZoomAction,
 } from '../shared/types'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -35,6 +38,8 @@ const api: EncodeApi = {
   window: {
     minimize: () => invoke('window:minimize'),
     toggleMaximize: () => invoke('window:toggle-maximize'),
+    toggleFullScreen: () => invoke('window:toggle-fullscreen'),
+    zoom: (action: ZoomAction) => invoke('window:zoom', action),
     close: () => invoke('window:close'),
     onStateChange: (callback) => on('window:state', callback),
   },
@@ -100,7 +105,9 @@ const api: EncodeApi = {
   },
   agent: {
     sessions: () => invoke('agent:sessions'),
-    createSession: () => invoke('agent:create'),
+    createSession: (options?: { projectRoot?: string | null }) => invoke('agent:create', options),
+    update: (sessionId: string, patch: SessionPatch) => invoke('agent:update', sessionId, patch),
+    statuses: () => invoke('agent:statuses'),
     history: (sessionId?: string) => invoke('agent:history', sessionId),
     start: (sessionId: string, input: AgentStartInput) => invoke('agent:start', sessionId, input),
     cancel: (sessionId: string) => invoke('agent:cancel', sessionId),
@@ -116,7 +123,7 @@ const api: EncodeApi = {
     export: (sessionId: string, targetPath?: string) => invoke('agent:export', sessionId, targetPath),
     plan: (sessionId: string) => invoke('agent:plan', sessionId),
     setPlan: (sessionId: string, plan: PlanRequest | null) => invoke('agent:set-plan', sessionId, plan),
-    approve: (requestId: string, approved: boolean) => invoke('agent:approve', requestId, approved),
+    approve: (requestId: string, answer: boolean | ApprovalAnswer) => invoke('agent:approve', requestId, answer),
     answer: (requestId: string, answer: string) => invoke('agent:answer', requestId, answer),
     onEvent: (callback) => on<AgentEvent>('agent:event', callback),
   },

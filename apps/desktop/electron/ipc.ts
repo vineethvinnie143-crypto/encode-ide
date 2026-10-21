@@ -11,6 +11,7 @@ import type { SettingsService } from './services/settings'
 import type { ShellService } from './services/shell'
 import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
+import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
 import type {
   AgentStartInput,
@@ -90,6 +91,19 @@ export function registerIpc(deps: IpcDeps): void {
     else win.maximize()
     return win.isMaximized()
   })
+  handle('window:toggle-fullscreen', () => {
+    const win = getWindow()
+    if (!win) return false
+    win.setFullScreen(!win.isFullScreen())
+    return win.isFullScreen()
+  })
+  handle('window:zoom', (action: unknown) => {
+    const contents = getWindow()?.webContents
+    if (!contents) return 0
+    const level = action === 'reset' ? 0 : Math.min(5, Math.max(-3, contents.getZoomLevel() + (action === 'in' ? 0.5 : -0.5)))
+    contents.setZoomLevel(level)
+    return level
+  })
   handle('window:close', () => getWindow()?.close())
 
   handle('workspace:open-dialog', async () => {
@@ -122,7 +136,11 @@ export function registerIpc(deps: IpcDeps): void {
   handle('workspace:search', (options: SearchOptions) => workspace.search(options))
 
   handle('settings:get', () => settings.get())
-  handle('settings:save', (patch: Partial<Settings>) => settings.save(patch))
+  handle('settings:save', (patch: Partial<Settings>) => {
+    const saved = settings.save(patch)
+    if (patch?.appearance !== undefined) applyNativeAppearance(saved.appearance, getWindow())
+    return saved
+  })
   handle('settings:set-key', (profileId: string, key: string) => settings.setProfileKey(String(profileId), String(key ?? '')))
 
   handle('models:openrouter', (freeOnly?: boolean) => models.openRouter(Boolean(freeOnly)))
@@ -144,7 +162,12 @@ export function registerIpc(deps: IpcDeps): void {
   handle('shell:complete', (id: string, line: string) => shell.complete(String(id), String(line)))
 
   handle('agent:sessions', () => agent.list())
-  handle('agent:create', () => agent.create())
+  handle('agent:create', (options?: { projectRoot?: unknown }) => {
+    const projectRoot = options?.projectRoot
+    return agent.create(undefined, projectRoot === null || typeof projectRoot === 'string' ? projectRoot : undefined)
+  })
+  handle('agent:update', (sessionId: string, patch: unknown) => agent.update(String(sessionId), patch))
+  handle('agent:statuses', () => agent.statuses())
   handle('agent:history', (sessionId?: string) => agent.history(sessionId ? String(sessionId) : undefined))
   handle('agent:start', (sessionId: string, input: AgentStartInput) => agent.start(String(sessionId), input))
   handle('agent:cancel', (sessionId: string) => agent.cancel(String(sessionId)))
@@ -191,6 +214,9 @@ export function registerIpc(deps: IpcDeps): void {
     skills.create(String(name), description ? String(description) : undefined),
   )
   handle('skills:open-folder', () => skills.openFolder())
-  handle('agent:approve', (id: string, approved: boolean) => agent.resolveApproval(String(id), Boolean(approved)))
+  // The answer is yes or no, or an object with a note and "for this session"; the current agent honours the yes or no.
+  handle('agent:approve', (id: string, answer: unknown) =>
+    agent.resolveApproval(String(id), typeof answer === 'object' && answer !== null ? Boolean((answer as { approved?: unknown }).approved) : Boolean(answer)),
+  )
   handle('agent:answer', (id: string, answer: string) => agent.resolveAnswer(String(id), String(answer)))
 }

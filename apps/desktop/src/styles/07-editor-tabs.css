@@ -1,0 +1,106 @@
+/* ============================================================
+   Editor area & tabs
+   ============================================================ */
+
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+}
+.editor-tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  min-width: 110px;
+  max-width: 220px;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  position: relative;
+  background: var(--surface-1);
+  flex-shrink: 0;
+}
+.editor-tab:hover {
+  background: var(--hover);
+}
+.editor-tab.is-active {
+  background: var(--sidebar);
+  color: var(--text-1);
+}
+.editor-tab.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1.5px;
+  background: var(--accent);
+}
+
+.tab-icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tab-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  display: none;
+}
+.tab-dirty.show {
+  display: block;
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-3);
+  opacity: 0;
+  flex-shrink: 0;
+}
+.tab-close:hover {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+.editor-tab:hover .tab-close,
+.editor-tab.is-active .tab-close {
+  opacity: 1;
+}
+
+.editor-host {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: var(--sidebar);
+}

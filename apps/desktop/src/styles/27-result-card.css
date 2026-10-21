@@ -1,0 +1,80 @@
+/* ============================================================
+   Result card: "Edited 2 files +12 −3" with Review changes
+   ============================================================ */
+
+.result-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+
+.result-head {
+  min-height: 48px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.result-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-8);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-2);
+}
+
+.result-title {
+  flex-shrink: 0;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+
+.result-stats {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.result-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.result-chevron {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.result-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.result-files {
+  padding: 4px 10px 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.result-file {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-12);
+}
+.result-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}

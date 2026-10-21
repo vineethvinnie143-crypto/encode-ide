@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, protocol, safeStorage } from 'electron'
 import path from 'node:path'
 import { AgentManager } from './agent/manager'
+import { applyNativeAppearance, followSystemTheme } from './appearance'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
 import { GitService } from './services/git'
@@ -55,8 +56,10 @@ if (!gotLock) {
     const git = new GitService(workspace)
     const shell = new ShellService()
 
-    const win = createMainWindow()
+    applyNativeAppearance(settings.get().appearance, null)
+    const win = createMainWindow(settings.get().appearance)
     mainWindow = win
+    followSystemTheme(() => mainWindow)
 
     const send = (channel: string, payload: unknown) => {
       if (!win.isDestroyed()) win.webContents.send(channel, payload)
@@ -125,7 +128,7 @@ if (!gotLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow()
+        mainWindow = createMainWindow(settings.get().appearance)
       }
     })
   })

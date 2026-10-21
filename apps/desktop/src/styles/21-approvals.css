@@ -1,0 +1,186 @@
+/* ============================================================
+   Approval and question cards, docked above the composer
+   ============================================================ */
+
+.approval-card {
+  flex-shrink: 0;
+  margin: 0 var(--thread-gutter) 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--warning);
+  border-radius: var(--r-14);
+  background: var(--surface-2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 14%, transparent);
+  animation: ui-pop-down var(--dur-3) var(--ease-out);
+}
+
+.approval-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.approval-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: 22px;
+}
+.approval-head svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.approval-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-step {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.approval-reason {
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.approval-detail {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 19px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.approval-preview {
+  max-height: 200px;
+  overflow: auto;
+}
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.approval-actions .ui-kbd {
+  margin-left: 2px;
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 30%, transparent);
+  color: inherit;
+  opacity: 0.8;
+}
+
+.approval-explain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.approval-note {
+  width: 100%;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-13);
+  line-height: 20px;
+  outline: none;
+}
+.approval-note:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.ask-card {
+  flex-shrink: 0;
+  margin: 0 var(--thread-gutter) 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-14);
+  background: var(--surface-2);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  animation: ui-pop-down var(--dur-3) var(--ease-out);
+}
+.ask-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: 22px;
+}
+.ask-head svg {
+  margin-top: 3px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ask-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.ask-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+.ask-option-index {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--pressed);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.ask-hint {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}

@@ -1,4 +1,5 @@
-import { ArrowRight, Bot, FolderOpen, Search, Terminal } from 'lucide-react'
+import { ArrowRight, Bot, FolderOpen, Search, Terminal } from '../ui/icons'
+import { LogoMark } from '../ui/Logo'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
@@ -18,7 +19,7 @@ export default function Welcome() {
   return (
     <div className="welcome">
       <div className="welcome-inner">
-        <div className="welcome-mark">F</div>
+        <LogoMark size={56} className="welcome-mark" />
         <h1 className="welcome-title">eNCode</h1>
         <p className="welcome-sub">An AI-first editor. Bring your own model, keep your files.</p>
 

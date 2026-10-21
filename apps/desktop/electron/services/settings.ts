@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
 import type { AgentMode, ApprovalPolicy, ModelProfile, ProfileKind, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
@@ -33,6 +34,7 @@ function defaults(): StoredSettings {
     recentWorkspaces: [],
     lastWorkspace: null,
     agentMode: 'code',
+    appearance: { ...DEFAULT_APPEARANCE },
   }
 }
 
@@ -141,6 +143,7 @@ export class SettingsService {
         : [],
       lastWorkspace: typeof input.lastWorkspace === 'string' ? input.lastWorkspace : null,
       agentMode: input.agentMode === 'ask' || input.agentMode === 'plan' ? input.agentMode : 'code',
+      appearance: normalizeAppearance(input.appearance),
     }
   }
 
@@ -167,6 +170,7 @@ export class SettingsService {
       recentWorkspaces: [...this.data.recentWorkspaces],
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
+      appearance: { ...this.data.appearance },
       keyStorage: this.vault.storage,
     }
   }
@@ -221,6 +225,8 @@ export class SettingsService {
     if (patch.agentMode === 'ask' || patch.agentMode === 'plan' || patch.agentMode === 'code') {
       next.agentMode = patch.agentMode
     }
+    // A partial appearance changes only the fields it names.
+    if (patch.appearance !== undefined) next.appearance = normalizeAppearance(patch.appearance, next.appearance)
 
     this.data = next
     this.persist()

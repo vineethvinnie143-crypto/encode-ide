@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { FakeCipher } from '../testing/fake-cipher'
+import type { Settings } from '../../shared/types'
 import { SettingsService } from './settings'
 
 let dir = ''
@@ -132,5 +133,43 @@ describe('SettingsService keys', () => {
       fs.readdirSync(dir).filter((name) => name.endsWith('.tmp')),
       [],
     )
+  })
+})
+
+describe('SettingsService appearance', () => {
+  it('starts dark with the Signal blue accent', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.get().appearance, {
+      mode: 'dark',
+      accent: 'blue',
+      contrast: 'standard',
+      density: 'comfortable',
+      motion: 'system',
+    })
+  })
+
+  it('saves a change, keeps the fields a patch leaves out, and reads it back after a restart', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ appearance: { ...settings.get().appearance, mode: 'light', accent: 'jade' } })
+    const partial = { density: 'compact' } as unknown as Settings['appearance']
+    const saved = settings.save({ appearance: partial }).appearance
+    assert.deepEqual(saved, { mode: 'light', accent: 'jade', contrast: 'standard', density: 'compact', motion: 'system' })
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().appearance, saved)
+  })
+
+  it('ignores values it does not know, from the renderer or from the file', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    const bad = { mode: 'neon', accent: 'url(evil)', contrast: 7, density: null, motion: 'full', extra: 'x' }
+    const saved = settings.save({ appearance: bad as unknown as Settings['appearance'] }).appearance
+    assert.deepEqual(saved, { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'full' })
+
+    fs.writeFileSync(file(), JSON.stringify({ appearance: 'light' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().appearance.mode, 'dark')
+  })
+
+  it('hands the renderer a copy', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.get().appearance.mode = 'light'
+    assert.equal(settings.get().appearance.mode, 'dark')
   })
 })

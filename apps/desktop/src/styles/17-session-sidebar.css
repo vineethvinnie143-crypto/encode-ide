@@ -1,0 +1,293 @@
+/* ============================================================
+   Session sidebar: project switcher, sessions by project, the
+   Activity and Archived views. Rows are 32 px with 14 px text.
+   ============================================================ */
+
+.session-sidebar {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.sb-head {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 0 10px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.proj-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  font-size: 15px;
+  font-weight: 600;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.proj-switch:hover,
+.proj-switch[aria-expanded='true'] {
+  background: var(--hover);
+}
+.proj-switch .muted {
+  flex: none;
+  color: var(--text-3);
+}
+
+.proj-mark {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-6);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-2);
+  font: 600 11px/1 var(--font-ui);
+}
+
+.proj-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 8px 12px;
+}
+
+.sb-label {
+  height: 30px;
+  margin-top: 14px;
+  padding: 0 4px 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+/* One row: a project, a session, or a quick action. Buttons and divs share the look. */
+.sb-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 8px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.sb-row:hover {
+  background: var(--hover);
+}
+.sb-row.is-active {
+  background: var(--selected);
+}
+.sb-row .ic {
+  flex: none;
+  color: var(--text-3);
+}
+.sb-row .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-row .meta {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.sb-row .meta.warn,
+.sb-activity-row .meta.warn {
+  color: var(--warning);
+}
+
+/* Sessions sit 30 px in under their project */
+.sb-sub {
+  padding-left: 30px;
+}
+
+.sb-new {
+  margin-top: 2px;
+}
+
+.sb-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.sb-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* The session itself is a button inside the row, so hover actions can sit beside it. */
+.sb-row-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--r-8);
+  color: inherit;
+  text-align: left;
+}
+
+.sb-row-actions {
+  display: none;
+  flex: none;
+  align-items: center;
+}
+.sb-row:hover .sb-row-actions,
+.sb-row:focus-within .sb-row-actions,
+.sb-row-actions.is-visible {
+  display: flex;
+}
+.sb-row:hover .sb-row-main .meta,
+.sb-row:focus-within .sb-row-main .meta {
+  display: none;
+}
+
+/* 14 px slot before a title: spinner, amber dot with a halo, or accent dot */
+.slot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+}
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dot.unread {
+  background: var(--accent);
+}
+.dot.attn {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
+.sb-filter,
+.sb-rename {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  outline: none;
+}
+.sb-filter {
+  width: 100%;
+  height: 32px;
+  margin-bottom: 6px;
+  padding: 0 10px;
+  border-radius: var(--r-8);
+  font-size: var(--fs-13);
+}
+.sb-rename {
+  flex: 1;
+  height: 26px;
+  padding: 0 6px;
+  border-color: var(--accent);
+  border-radius: var(--r-6);
+  font-size: var(--fs-14);
+}
+.sb-filter:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.sb-empty {
+  padding: 20px 12px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.sb-empty-sub {
+  padding: 2px 8px 2px 52px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 20px;
+}
+
+/* Activity view: the title, and the start of the last reply under it */
+.sb-activity-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.sb-activity-row:hover {
+  background: var(--hover);
+}
+.sb-activity-row.is-active {
+  background: var(--selected);
+}
+.sb-activity-row .slot {
+  margin-top: 3px;
+}
+.sb-activity-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sb-activity-text .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: 20px;
+}
+.sb-activity-text .preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.sb-activity-row .meta {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
