@@ -1,3 +1,4 @@
 export * from './node-fs'
 export * from './settings'
 export * from './trust'
+export * from './rules-file'

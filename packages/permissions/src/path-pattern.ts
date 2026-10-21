@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 /**
  * Path patterns for Read(...) and Edit(...) permission rules, in gitignore
  * syntax: `*` and `?` stay within one folder, `**` spans any number of
@@ -38,7 +40,8 @@ export interface CompiledPattern {
 /** A path as patterns see it: forward slashes, single separators, no trailing slash, lower case on Windows. */
 export function normalizeForMatch(absolute: string, windows: boolean): string {
   const unc = /^[\\/]{2}[^\\/]/.test(absolute)
-  let out = absolute.replace(/\\/g, '/').replace(/\/+/g, '/')
+  // `.` and `..` are resolved on the text, so /work/src/../../.env cannot be taken for a path inside /work/src.
+  let out = path.posix.normalize(absolute.replace(/\\/g, '/').replace(/\/+/g, '/'))
   if (windows) out = out.toLowerCase()
   if (unc) out = `/${out}`
   if (out.length > 1 && out.endsWith('/') && !/^[a-z]:\/$/i.test(out)) out = out.slice(0, -1)

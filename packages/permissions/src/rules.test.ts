@@ -82,6 +82,16 @@ describe('path patterns', () => {
 })
 
 describe('permission rules', () => {
+  it('reads . and .. in a path before matching it', () => {
+    assert.ok(!matches('/src/**', '/ws/src/../.env'))
+    assert.ok(matches('/src/**', '/ws/src/./a/../b.ts'))
+    assert.ok(!matches('/src/**', '/ws/src/ui/../../.env'))
+    assert.ok(matches('.env', '/ws/src/../.env'))
+    assert.equal(normalizeForMatch('/ws/a/../../etc/passwd', false), '/etc/passwd')
+    assert.equal(normalizeForMatch('C:\\ws\\src\\..\\.env', true), 'c:/ws/.env')
+    assert.equal(normalizeForMatch('\\\\server\\share\\a\\..\\b', true), '//server/share/b')
+  })
+
   it('parses rules and rejects malformed ones', () => {
     assert.deepEqual(parseRule('Bash(npm test:*)', 'allow', 'user'), {
       ok: true,
@@ -125,6 +135,21 @@ describe('permission rules', () => {
     assert.equal(decide(set, 'echo $GREETING'), null)
     assert.equal(decide(set, 'X=1 npm run build'), null) // the assignment is part of the command
     assert.equal(decide(rules({ allow: ['Bash(echo:*)'] }), '$CMD hello'), null)
+  })
+
+  it('does not take a command fed from a redirect for the bare command', () => {
+    const exact = rules({ allow: ['Bash(bash)', 'Bash(cat)', 'Bash(sort:*)'] })
+    assert.equal(decide(exact, 'bash'), 'allow')
+    assert.equal(decide(exact, 'bash < /tmp/evil.sh'), null)
+    assert.equal(decide(exact, 'bash <<< "rm -rf ~"'), null)
+    assert.equal(decide(exact, 'bash <<EOF\nrm -rf ~\nEOF'), null)
+    assert.equal(decide(exact, '{ bash; } < /tmp/evil.sh'), null)
+    assert.equal(decide(exact, 'while read l; do bash; done < /tmp/evil.sh'), null)
+    assert.equal(decide(exact, 'cat <<EOF\nx\nEOF'), null)
+    // A prefix rule already says "and whatever follows", so input it is fed is no surprise.
+    assert.equal(decide(exact, 'sort < names.txt'), 'allow')
+    // A deny rule keeps seeing the command, fed or not.
+    assert.equal(decide(rules({ deny: ['Bash(bash)'] }), 'bash < /tmp/evil.sh'), 'deny')
   })
 
   it('applies deny and ask rules to any command, wrapped or not, and to text it cannot read', () => {

@@ -221,8 +221,10 @@ export class RuleSet {
     if (!split || split.writes || !split.commands.length) return null
     if (whole) return whole
     let first: CompiledRule | null = null
-    for (const command of split.commands) {
-      const hit = relevant.find((entry) => entry.command?.(canonical(command)))
+    for (const [index, command] of split.commands.entries()) {
+      // What a redirect feeds the command is part of what it does, and is not in its words: it counts as one more word known only at run time.
+      const text = split.fed[index] ? canonical([...command, DYNAMIC]) : canonical(command)
+      const hit = relevant.find((entry) => entry.command?.(text))
       if (!hit) return null
       first ??= hit
     }
@@ -274,6 +276,13 @@ interface SplitLine {
   commands: string[][]
   /** True when a command redirects output to a file. */
   writes: boolean
+  /**
+   * For each command, whether its input comes from a redirect (`< file`, a
+   * here-document, a here-string), including one on a group it sits in.
+   * What a redirect feeds a command is not in its words, so a rule that
+   * allows a command by its exact words must not allow it fed from elsewhere.
+   */
+  fed: boolean[]
 }
 
 /** A command's text as rules see it: its words joined by single spaces. */
@@ -296,11 +305,13 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
         }
       }
     }
-    return { commands, writes }
+    // PowerShell has no input redirection.
+    return { commands, writes, fed: commands.map(() => false) }
   }
   const parsed = parseBash(line)
   if (!parsed.ok) return null
   const commands: string[][] = []
+  const fed: boolean[] = []
   let writes = false
   const wordText = (word: BashWord) => {
     let value = ''
@@ -314,15 +325,17 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
   const visitWord = (word: BashWord) => {
     for (const part of word.parts) if (part.kind === 'command' || part.kind === 'process') visitScript(part.script)
   }
-  const visitCommand = (command: BashCommand) => {
+  const visitCommand = (command: BashCommand, inherited: boolean) => {
+    let input = inherited
     for (const redirect of command.redirects) {
       visitWord(redirect.target)
       const target = wordText(redirect.target)
       if (['>', '>>', '>|', '&>', '&>>', '<>'].includes(redirect.operator) && target !== '/dev/null') writes = true
       if (redirect.operator === '>&' && !/^(\d+|-)$/.test(target)) writes = true
+      if (['<', '<<', '<<-', '<<<', '<>'].includes(redirect.operator) || (redirect.operator === '<&' && target !== '-')) input = true
     }
     if (command.kind !== 'simple') {
-      visitScript(command.body)
+      visitScript(command.body, input)
       return
     }
     for (const assignment of command.assignments) visitWord(assignment.value)
@@ -331,13 +344,16 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
       ...command.assignments.map((assignment) => `${assignment.name}=${wordText(assignment.value)}`),
       ...command.words.map(wordText),
     ]
-    if (words.length) commands.push(words)
+    if (words.length) {
+      commands.push(words)
+      fed.push(input)
+    }
   }
-  const visitScript = (script: BashScript) => {
-    for (const list of script.lists) for (const pipeline of list.pipelines) pipeline.commands.forEach(visitCommand)
+  const visitScript = (script: BashScript, input = false) => {
+    for (const list of script.lists) for (const pipeline of list.pipelines) for (const command of pipeline.commands) visitCommand(command, input)
   }
   visitScript(parsed.script)
-  return { commands, writes }
+  return { commands, writes, fed }
 }
 
 /** Programs that run the command given in their arguments. */
