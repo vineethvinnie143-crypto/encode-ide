@@ -1,39 +1,23 @@
 {
-  "name": "encode-ide",
-  "productName": "eNCode",
+  "name": "encode",
   "version": "0.1.0",
   "private": true,
-  "description": "Forge — an AI-first desktop code editor with an autonomous coding agent.",
-  "author": "Forge",
+  "description": "eNCode monorepo: the desktop IDE and its in-house packages.",
   "license": "MIT",
-  "main": "dist/electron/main.cjs",
+  "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "start": "electron .",
-    "smoke": "node scripts/smoke.mjs",
-    "fake-provider": "node scripts/fake-provider.mjs",
-    "package:dir": "electron-builder --win --x64 --dir",
-    "dist": "node scripts/build.mjs && electron-builder --win --x64"
-  },
-  "dependencies": {
-    "lucide-react": "^1.60.0",
-    "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "dev": "pnpm --filter @encode/desktop dev",
+    "build": "pnpm --filter @encode/desktop build",
+    "start": "pnpm --filter @encode/desktop start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "node scripts/test.mjs",
+    "e2e": "pnpm --filter @encode/desktop e2e",
+    "dist": "pnpm --filter @encode/desktop dist"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "electron": "^44.9.2",
-    "electron-builder": "^26.15.3",
-    "esbuild": "^0.28.2",
-    "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "esbuild": "^0.28.2"
   }
 }

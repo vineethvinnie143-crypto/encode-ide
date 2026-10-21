@@ -2,7 +2,13 @@ node_modules/
 dist/
 release/
 out/
+.test-dist/
+coverage/
+screenshots/
+*.tsbuildinfo
 *.log
+.env
+.env.*
+!.env.example
 .DS_Store
 Thumbs.db
-screenshots/

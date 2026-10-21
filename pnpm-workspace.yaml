@@ -1,3 +1,18 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Supply-chain guard: only resolve versions that have been public for at
+# least a day, the window in which hijacked releases are usually caught.
+# Kept short so security patches are not held back. Exclusions are exact
+# versions we reviewed and adopted early.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - electron@44.9.2
   - lucide-react@1.60.0
+
+# Install scripts we do not need: esbuild ships its binary as an optional
+# dependency, and electron-winstaller only serves Squirrel targets.
+ignoredBuiltDependencies:
+  - electron-winstaller
+  - esbuild

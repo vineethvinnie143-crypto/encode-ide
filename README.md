@@ -1,281 +1,173 @@
-# eNCode Harness
+# eNCode
 
-An agent-first desktop coding harness — built from scratch, not a VS Code fork.
+An AI-first desktop IDE with an autonomous coding agent. eNCode is built in this repository,
+from the editor to the shell: it is not a VS Code fork and embeds no Monaco, xterm.js or
+node-pty.
 
-Forge combines a DeepSeek-Harness-style interface (sessions rail, conversation with a
-tool timeline, composer, browser/workspace rail) with a hand-written editor, shell
-interpreter, terminal emulator and autonomous coding agent. It does not embed VS Code,
-Monaco, xterm.js, node-pty or the `diff` package.
+![eNCode](docs/images/overview.png)
 
-![eNCode Harness](docs/harness.png)
+**Status:** private development, milestone M0 (foundation and security). Not released yet.
+Windows is the primary platform; the code stays cross-platform.
 
-| Conversation | Workspace editor |
-| --- | --- |
-| ![Agent](docs/agent.png) | ![Editor](docs/editor.png) |
+## What it does
 
-## Highlights
+- **Agent-first workspace.** It has a sessions rail, a conversation with a tool timeline
+  (Chat and Trajectory views), a composer with mode, approval-policy and model chips, and a
+  Browse and Workspace rail with Files, Editor and Shell.
+- **A coding agent with real tools.** The agent has these tools:
+  - files: `glob`, `grep`, `read`, `edit`, `write`;
+  - commands: `pwsh` (with background jobs: `job_list`, `job_output`, `job_kill`);
+  - delegation: subagents through `task`;
+  - planning: `todo_write`, goals, `exit_plan_mode`;
+  - knowledge: `skill`, `web_search`, `web_fetch`;
+  - questions: `ask_user_question`.
 
-- **Harness UI** — full-width menu bar with Application/Edit menus and custom window
-  controls, a monochrome palette with a single blue accent, a sessions/workspaces rail, a
-  session header with mode and job chips, **Chat / Trajectory** views, a DSH-style composer
-  with approval policy and model chips, and a **Browse / Workspace** right rail.
-- **Real sessions** — each session owns its own conversation, transcript and agent context.
-  Create, switch, fork and delete sessions from the rail; every conversation is persisted to
-  `userData/forge-sessions.json` and restored on launch, with the active session remembered.
-- **Hand-written shell** — tokenizer, statement/pipeline parser, quoting, redirection
-  (`>`, `>>`), `;`/`&&`/`||`, built-ins (`ls`, `cd`, `cat`, `echo`, `mkdir`, `rm`, `cp`,
-  `mv`, `head`, `tail`, `wc`, `which`, `env`, `set`, …) and external program execution
-  without cmd.exe or PowerShell. npm-style `.cmd` shims are resolved to their Node CLI.
-- **Hand-written terminal** — an ANSI screen buffer with SGR colours, erase and cursor
-  sequences, carriage-return progress output, history, tab completion and Ctrl+C/Ctrl+L.
-- **Hand-written editor** — `textarea` engine over a highlighted overlay with a custom
-  tokenizer (11+ languages), line-number gutter, current-line marker, in-file find,
-  auto-indent, bracket pairing, block indent/outdent and per-file scroll memory.
-- **Hand-written diff** — Myers line diff with unified hunks, used by the agent's diff
-  previews and approval prompts.
-- **Autonomous agent** — streaming tool-calling loop with `read_file`, `write_file`,
-  `replace_in_file`, `list_files`, `search_files`, `run_command`,
-  `ask_followup_question` and `attempt_completion`.
-- **Review before it writes** — approval prompts with an inline diff preview; a single
-  composer chip toggles *Full access* vs *Ask first*. Agent shell commands run inside the
-  eNCode Shell, not a system shell.
-- **Bring your own model** — any OpenAI-compatible chat-completions endpoint plus
-  OpenRouter's catalogue (including free models), with DeepSeek/OpenAI/Ollama/LM Studio
-  presets. Keys are encrypted with the OS keychain when available.
-- **Workspace tools** — file explorer, tabs, dirty tracking, quick open, full-text search,
-  source-control status, and a file/editor/shell drawer.
+  It works in Code, Ask and Plan modes, and every session is persisted and can be forked.
+- **Review before it acts.** Four approval policies decide what runs unasked:
+  - Read Only: edits and commands are refused.
+  - Workspace Write: every command asks.
+  - Auto review: only provably read-only commands run unasked.
+  - Full access: nothing asks.
 
-## From-scratch status
-
-| Layer | Implementation |
-| --- | --- |
-| Editor + tokenizer | hand-written (`src/components/CodeEditor.tsx`, `src/editor/tokenize.ts`) |
-| Shell interpreter | hand-written (`electron/services/shell.ts`) |
-| Terminal emulator | hand-written (`src/terminal/buffer.ts`) |
-| Diff | hand-written Myers diff (`electron/agent/diff.ts`) |
-| Markdown rendering | hand-written (`src/markdown.ts`) |
-| State store | hand-written external store (`src/store.ts`) |
-| Agent, tools, prompt, provider | hand-written (`electron/agent/**`) |
-| Harness UI | hand-written components (`src/components/**`) |
-| Filesystem, search, git, settings, IPC | hand-written (`electron/services/**`, `electron/ipc.ts`) |
-| Runtime | **Electron / Chromium / Node** — the platform boundary |
-| Build toolchain | Vite, esbuild, TypeScript |
-
-Still to be replaced before the "no app-level libraries" goal is complete: React and its
-icon set (a React-free DOM renderer with inline SVG icons), and electron-builder packaging.
-These are the next migration phases.
+  Approval cards say why they ask, and edits show their diff first.
+- **Any model.** It works with any OpenAI-compatible endpoint and OpenRouter's catalog
+  (including free models), with presets for DeepSeek, OpenAI, Ollama and LM Studio. Long
+  sessions are compacted into a summary instead of failing at the context limit.
+- **Hand-written internals.**
+  - an editor engine and tokenizer;
+  - the eNCode Shell (an interpreter, not cmd.exe or PowerShell);
+  - an ANSI terminal buffer;
+  - a Myers diff;
+  - a markdown renderer and a state store.
 
 ## Quick start
 
-Requires Node.js 20+ (Node 24 recommended) and npm.
+Requires Node.js 22.12 or newer (24 recommended) and pnpm 10. `corepack enable` installs the
+pnpm version pinned in `package.json`.
 
 ```bash
-cd forge
-npm install
-npm run build
-npm start
+pnpm install
+pnpm build
+pnpm start
 ```
 
-Development with renderer HMR and automatic main-process restarts:
+`pnpm dev` runs the renderer with hot reload and restarts Electron when the main process
+changes.
 
-```bash
-npm run dev
-```
+Open a folder and start a session. The **Demo (offline)** profile needs no key: its plan is
+scripted, but its tools act on the real workspace, so you can try approvals, diffs and the
+shell straight away.
 
-Open a folder, then pick a model under **Models** in the left rail. The **Demo (offline)**
-profile needs no key: its plan is scripted, but its tools operate on the real workspace, so
-you can try approvals, diffs and the eNCode Shell immediately.
+## Models
 
-## Model setup
-
-**Models → Add provider**, then choose a preset or *Custom*:
+Open the profile menu at the bottom of the left rail and choose **Settings… → Models → Add
+provider**, then pick a preset or *Custom*:
 
 | Preset | Base URL | Example model |
 | --- | --- | --- |
+| OpenRouter | `https://openrouter.ai/api/v1` | pick from the catalog (`:free` models cost nothing) |
 | DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
-| OpenRouter | `https://openrouter.ai/api/v1` | pick from the fetched list (`:free` models are free) |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | Ollama | `http://localhost:11434/v1` | `llama3.2` |
 | LM Studio | `http://localhost:1234/v1` | your loaded model |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 
-Endpoints must implement `POST {baseUrl}/chat/completions` with streaming SSE and OpenAI
-tool calling. Forge retries once without streaming if a provider rejects it. Keys are
-encrypted with Electron `safeStorage` (DPAPI on Windows) when available.
+An endpoint must implement `POST {baseUrl}/chat/completions` with OpenAI tool calling.
+Streaming is preferred, and servers that answer with a single JSON body work too.
 
-## Using the harness
+API keys are sealed by the operating system's keychain (DPAPI on Windows) and never written in
+any other form. Where no keychain is usable, Settings says so and keeps the key for the
+current session only. A key is bound to its server: pointing a profile at another server
+drops it.
 
-- **Chat** shows the live transcript; **Trajectory** shows every step with tool input and
-  output.
-- **Standard mode** can read, edit and execute. **Ask mode** is read-only and proposes
-  changes instead of applying them.
-- **Full access** auto-approves edits and commands. **Ask first** pauses before every write
-  or command; file writes include a diff preview.
-- **Browse** is an embedded browser tab (Enter an HTTP(S) address). **Workspace** holds the
-  Files, Editor and Shell drawers.
-- Opening a file from Files or Quick Open switches the right rail to the Editor. The Shell
-  keeps its session while you switch drawers.
-- **Stop** cancels the current request and kills its process tree.
+## The eNCode Shell
 
-### The eNCode Shell
+The terminal and the agent's `pwsh` tool share one hand-written shell. It supports
+pipelines, `>` and `>>`, `;`, `&&`, `||`, quoting and its own built-ins (`ls`, `cat`, `echo`,
+`cd`, `mkdir`, `cp`, `mv`, `rm`, `head`, `tail`, `wc`, `which`, `env`, `set`, …). Other
+programs are found only in absolute `PATH` entries and started by absolute path. npm-style
+`.cmd` shims run through cmd.exe only when their arguments are plain.
 
-The terminal and the agent's `run_command` use the same hand-written shell:
-
-```text
-ls -a
-cat README.md | wc -l
-echo hello > notes.txt
-cd src && ls
-node --version
-```
-
-Built-ins run in-process; other commands are resolved from `PATH` and spawned directly.
-`Ctrl+C` cancels, `Ctrl+L` clears, `Up`/`Down` walk history, `Tab` completes files and
-commands. npm-generated `.cmd` shims are detected and executed through `node` rather than
-cmd.exe.
-
-The shell is line-oriented rather than a full PTY: interactive TUI programs (vim, less,
-full-screen apps) are not supported.
+It is line-oriented, not a PTY, so full-screen programs such as vim and less are not
+supported. The agent moves to the OS shell in M1
+([ADR 0011](docs/adr/0011-agent-commands-run-in-the-os-shell.md)). The eNCode Shell stays
+the terminal's shell.
 
 ## Shortcuts
 
 | Action | Shortcut |
 | --- | --- |
-| Save active file | `Ctrl+S` |
-| Quick open file | `Ctrl+P` |
+| Save the active file | `Ctrl+S` |
+| Quick open | `Ctrl+P` |
 | New session | `Ctrl+N` |
 | Search across files | `Ctrl+Shift+F` |
-| Toggle right rail | `Ctrl+B` |
-| Open Shell | `` Ctrl+` `` |
-| Find in file | `Ctrl+F` (inside the editor) |
-| Close quick open / dialogs | `Esc` |
+| Toggle the right rail | `Ctrl+B` |
+| Open the Shell | `` Ctrl+` `` |
+| Find in file | `Ctrl+F` (in the editor) |
 
-## Architecture
+## Repository layout
 
 ```
-electron/
-  main.ts             app lifecycle, window, service wiring
-  window.ts           frameless BrowserWindow + navigation hardening
-  protocol.ts         app:// origin serving the built renderer
-  preload.ts          contextBridge API (the only renderer↔main surface)
-  ipc.ts              typed ipcMain handlers
-  services/
-    shell.ts          hand-written shell interpreter + session service
-    workspace.ts      path-confined fs, search, recursive watcher
-    settings.ts       settings + safeStorage encrypted keys
-    models.ts         OpenRouter catalogue + provider model discovery
-    git.ts            porcelain status parsing
-  agent/
-    agent.ts          tool-calling loop, approvals, cancellation, events
-    manager.ts        per-session agents, persistence, fork/rename/remove
-    provider.ts       streaming SSE + tool-delta accumulation, retry
-    tools.ts          tool schemas, execution
-    diff.ts           Myers line diff + unified hunks
-    prompt.ts         system prompt
-shared/types.ts       types shared across main / preload / renderer
-src/
-  markdown.ts         hand-written markdown renderer
-  store.ts            hand-written external store (useSyncExternalStore)
-  editor/tokenize.ts  dependency-free tokenizer
-  terminal/buffer.ts  ANSI screen buffer
-  components/CodeEditor.tsx  hand-built editor engine
-  components/AppMenuBar.tsx / HarnessSidebar.tsx / SessionHeader.tsx / RightPanel.tsx
-  components/Chat/*   transcript, flat tool rows, diffs, approvals, composer
-  stores/*            store modules built on src/store.ts
+apps/desktop/                 the Electron app (@encode/desktop)
+  electron/                   main process: window, IPC, services, agent
+    agent/                    loop, tools, approval, compaction, provider, prompt
+    services/                 shell, workspace, settings and key vault, web, git, programs
+  src/                        renderer: components, stores, editor, terminal, markdown
+  shared/types.ts             types shared by main, preload and renderer
+  scripts/                    build, dev, e2e harness, smoke, fake provider
+  test/fixtures/              the workspace the smoke opens (copied, never edited)
+packages/permissions/         shell grammar, command policy, egress and path rules
+packages/testkit/             seeded property testing
+docs/adr/                     architecture decision records
+docs/security/                threat model
+scripts/                      repository tooling: test runner, source checks
 ```
 
-### Agent loop
-
-1. Build a system prompt (mode, workspace root, top-level entries).
-2. Stream a chat completion with tools and render deltas as they arrive.
-3. Accumulate streamed tool-call deltas into complete calls.
-4. For each call: optionally request approval (with a diff preview), execute it with
-   validated, workspace-confined inputs, then append the tool result to the transcript.
-5. Repeat until `attempt_completion`, a plain-text answer, cancellation or the step cap.
-
-### Security model
-
-- `contextIsolation: true`, `nodeIntegration: false`, no remote module, navigation and
-  `window.open` are denied and external links open in the system browser.
-- Renderer is served from a privileged `app://` origin with a CSP; the preload exposes a
-  narrow, typed API. The browser tab is sandboxed and limited by `frame-src`.
-- Every filesystem path is resolved against the workspace root, symlinks are realpath
-  checked, and deletion is restricted to the root and uses the OS trash.
-- Agent commands run through the eNCode Shell, only after approval unless auto-approved,
-  with output caps and process-tree kill on timeout/cancel.
-- API keys never cross into the renderer; the UI only learns whether a key exists.
-
-## Development and testing
+## Development
 
 ```bash
-npm run typecheck   # renderer + main projects
-npm run build       # Vite renderer + esbuild main/preload
-npm run dev         # HMR renderer, auto-restarting Electron
+pnpm typecheck                # every package
+pnpm test                     # unit tests (node:test); pnpm test shell compaction filters by path
+pnpm build                    # renderer with Vite, main and preload with esbuild
+pnpm e2e                      # the full smoke against the built app, in a throwaway sandbox
 ```
 
-The end-to-end smoke test drives the real UI over the Chrome DevTools Protocol:
+`pnpm e2e` copies `apps/desktop/test/fixtures/demo-project` to a temporary folder, gives
+eNCode a temporary profile, and drives the real UI over the Chrome DevTools Protocol. The run
+covers:
 
-```bash
-# terminal 1
-npm start -- --remote-debugging-port=9222
-# terminal 2
-npm run smoke -- ..\demo-project
-```
+- the editor;
+- the demo agent;
+- the shell, running `node` and `npm`;
+- a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs;
+- the key path;
+- sessions, subagents and Stop;
+- web_fetch approvals;
+- compaction.
 
-It verifies the harness shell, editor overlay text integrity, save round-trips, find,
-quick open, tokenization, the offline demo agent, the eNCode Shell, and — with
-`scripts/fake-provider.mjs` — the real streaming provider path including two approval
-prompts, a rendered diff and shell execution. Screenshots are written to `screenshots/`.
+Screenshots and the Electron log land in `apps/desktop/screenshots`. Set
+`ENCODE_SMOKE_OFFLINE=1` to skip the one check that needs the internet.
 
-`node scripts/fake-provider.mjs` runs standalone on `http://127.0.0.1:8787/v1`
-(model `mock-model`) if you want to try Forge without an API key.
+CI runs all of the above on Windows for every pull request
+([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not
+import Electron, so logic under test takes Electron APIs by injection.
+
+## Security
+
+The agent is treated as a confused deputy: whatever it decides to do passes an approval
+policy, and content it reads is data, never instructions.
+
+The [threat model](docs/security/threat-model.md) lists what is protected, how, and what
+remains open. The decisions behind each control are in [docs/adr](docs/adr/README.md).
 
 ## Packaging
 
 ```bash
-npm run dist        # -> release/Forge-<version>-portable.exe
+pnpm dist                     # -> apps/desktop/release/eNCode-<version>-portable.exe
 ```
 
-`electron-builder.yml` currently defines Windows portable, macOS dmg and Linux AppImage
-targets. Replacing electron-builder with a custom launcher/zip distribution is part of the
-remaining from-scratch migration. Builds are unsigned unless you configure a certificate.
+Builds are unsigned until the release milestone (M6), which also adds installers,
+auto-update and Electron fuses.
 
-## Harness feature parity
+## License
 
-Implemented:
-
-- Sessions: create / switch / fork / delete, persisted transcripts, remembered active session
-- Goals: `create_goal` / `update_goal` (active, paused, complete, blocked), persisted per
-  session, shown as a transcript card with pause/resume/edit/complete/delete, and
-  auto-continuation rounds (capped at 8) while a goal is active
-- Chat and Trajectory views, flat tool rows, inline diffs, edit-summary cards
-- Approval prompts with diff previews; `Ask first` / `Full access` policy
-- Standard (read · edit · run) and Ask (read-only) agent modes
-- Composer stats: turns, steps, measured tok/s, tokens, context %
-- Browse tab (sandboxed iframe) and Workspace drawers: Files, Editor, Shell
-- Hand-written eNCode Shell, editor, search, quick open, git status
-- Model providers: custom OpenAI-compatible, OpenRouter catalogue, DeepSeek/OpenAI/Ollama/LM Studio presets
-- Offline demo agent for trying the loop without a key
-
-Still to come (tracked in the goal for the next rounds):
-
-- Todo list tool and panel
-- Subagents and background jobs (spawn, poll, interrupt, collect)
-- Scheduled tasks / reminders that fire prompts into a session
-- Skills catalogue loaded from disk
-- Plan mode (propose a plan, approve, then execute)
-- `web_search` / `web_fetch` agent tools
-- Provider usage accounting (total tokens, cache hit %) via `stream_options`
-- Plugins page and automation-task management UI
-
-## Limitations / roadmap
-
-- Sessions persist to disk (last 50); there is no cross-workspace session scoping yet.
-- The shell is line-oriented, not a PTY; full-screen TUI programs are unsupported.
-- The Browse tab is an iframe and cannot display sites that forbid framing.
-- No LSP or language servers; highlighting is tokenizer-based.
-- Files larger than 300k characters render without syntax highlighting.
-- Git integration is status-only. No split editors or extension API.
-- Remaining third-party app libraries (React, Zustand, icons, markdown) are scheduled for
-  hand-written replacements.
-
-MIT licensed. See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The license for a public release is still to be confirmed.
