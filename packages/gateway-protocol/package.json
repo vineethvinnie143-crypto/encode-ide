@@ -1,0 +1,18 @@
+{
+  "name": "@encode/gateway-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The wire contract between eNCode clients and the free-tier gateway: paths, virtual models, headers and error codes.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
