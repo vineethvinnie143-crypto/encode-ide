@@ -269,9 +269,9 @@ function assessGit(args: string[], scope: Scope): string | null {
  * `<rev>:<path>` reads a file from history. The path is relative to the
  * repository root, which can lie above the workspace, or to the current
  * directory when it starts with `./` or `../`; either way `..` and absolute
- * paths can name files outside the workspace. GIT_CEILING_DIRECTORIES keeps
- * the repository inside the workspace (see gitBoundaryEnvironment); this
- * check is the lexical half.
+ * paths can name files outside the workspace. This check is the lexical
+ * half; the disk check (confirmOnDisk) asks when the repository itself
+ * starts above the workspace.
  */
 function checkRevisionPaths(args: string[]): string | null {
   for (const operand of operandsOf(args)) {

@@ -121,14 +121,16 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   pager. The status bar's `git status` can run clean filters too.
   - This needs a hostile `.git/config`, which a clone does not deliver but a copied or
     shared folder can.
-  - Owner: M3 workspace trust. Untrusted folders get git with these keys neutralized, or no
-    git at all. The trust store is built (`@encode/config`); the core passes `trusted` to the
-    shell assessor when it adopts it.
+  - Owner: M3 workspace trust. Done in the libraries: the bash and PowerShell policies ask
+    for git unless the folder is trusted (the trust store is in `@encode/config`) and eNCode's
+    git settings are in effect (`core.fsmonitor=false`, `safe.bareRepository=explicit`).
+    It acts in the product once the core adopts the new assessor and passes `trusted` (RP7).
 - **R4. Repository discovery above the workspace.** Opening a subfolder of a repository
   makes git use the parent's `.git`. Then `git show HEAD:../other/file` can read committed
   files outside the opened folder.
-  - Owner: M3. Treat `<rev>:<path>` arguments as paths, and set `GIT_CEILING_DIRECTORIES`
-    when the workspace is not itself a repository root.
+  - Owner: M3. Done in the libraries: a git command asks when its repository starts above the
+    workspace (the disk check, `confirmOnDisk`), and `<rev>:<path>` operands that name `..` or
+    an absolute path ask. It acts in the product once the core adopts them (RP7).
 - **R5. Same-user malware can decrypt keys.** DPAPI and the macOS Keychain protect keys
   against other users and offline disk theft, not against code already running as the user.
   Accepted, as for every desktop app.
