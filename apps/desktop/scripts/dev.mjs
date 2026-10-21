@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import electronPath from 'electron'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const external = ['electron', '@homebridge/node-pty-prebuilt-multiarch', 'node-pty']
+const external = ['electron']
 
 let child = null
 let exiting = false

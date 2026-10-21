@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** Native modules that must stay external and be resolved at runtime. */
-const external = ['electron', '@homebridge/node-pty-prebuilt-multiarch', 'node-pty']
+/** Provided by the Electron runtime; everything else is bundled. */
+const external = ['electron']
 
 export async function buildMain({ production = true } = {}) {
   return await esbuild({

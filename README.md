@@ -7,11 +7,11 @@ tool timeline, composer, browser/workspace rail) with a hand-written editor, she
 interpreter, terminal emulator and autonomous coding agent. It does not embed VS Code,
 Monaco, xterm.js, node-pty or the `diff` package.
 
-![eNCode Harness](docs/harness.png)
+![eNCode Harness](docs/images/harness.png)
 
 | Conversation | Workspace editor |
 | --- | --- |
-| ![Agent](docs/agent.png) | ![Editor](docs/editor.png) |
+| ![Agent](docs/images/agent.png) | ![Editor](docs/images/editor.png) |
 
 ## Highlights
 
@@ -67,19 +67,19 @@ These are the next migration phases.
 
 ## Quick start
 
-Requires Node.js 20+ (Node 24 recommended) and npm.
+Requires Node.js 22.12+ (Node 24 recommended) and pnpm 10 (`corepack enable` picks the
+version pinned in `package.json`).
 
 ```bash
-cd forge
-npm install
-npm run build
-npm start
+pnpm install
+pnpm build
+pnpm start
 ```
 
 Development with renderer HMR and automatic main-process restarts:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Open a folder, then pick a model under **Models** in the left rail. The **Demo (offline)**
