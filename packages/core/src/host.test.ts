@@ -259,7 +259,8 @@ describe('goals', () => {
     const session = await h.host.create()
     await h.host.setGoal(session.id, goal)
     const running = h.host.start(session.id, { text: 'work on it', mode: 'code' })
-    await until(() => h.host.statuses()[session.id])
+    // Stopping before the model has been asked would end the turn with no request at all, and prove nothing.
+    await until(() => h.client.requests.length === 1)
     h.host.cancel(session.id)
     await running
     await new Promise((resolve) => setTimeout(resolve, 80))
