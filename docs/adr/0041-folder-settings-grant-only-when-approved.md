@@ -1,4 +1,4 @@
-# 0031. A folder's settings grant only what the user approved
+# 0041. A folder's settings grant only what the user approved
 
 - Status: Accepted
 - Date: 2026-10-21
@@ -27,7 +27,7 @@ grant itself authority the moment it is opened ([threat model](../security/threa
 - The trust store (`~/.encode/trust.json`) is written atomically, keyed by the real path
   (case-insensitive on Windows), and an unreadable store trusts nothing.
 - A project's MCP servers are approved one at a time by the digest of their entry
-  ([0034](0034-an-in-house-mcp-client-with-per-server-approval.md)).
+  ([0044](0044-an-in-house-mcp-client-with-per-server-approval.md)).
 - When the user saves a rule from the approval card into a folder's file, the new digest is
   approved with it only if the configuration was approved just before. Otherwise the rule is
   saved and reported as held back, so a click never approves unrelated changes.

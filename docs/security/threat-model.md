@@ -113,7 +113,7 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - Compaction summaries are produced from transcripts that may contain injected text, and
     the summary sits in a user message (0009). The summarizer is told the transcript is
     data, and approvals still gate every action.
-  - Owner: M3. Workspace trust is built ([0031](../adr/0031-folder-settings-grant-only-when-approved.md));
+  - Owner: M3. Workspace trust is built ([0041](../adr/0041-folder-settings-grant-only-when-approved.md));
     the reviewer gate follows in the next M3 pull request.
 - **R3. Git in a folder whose `.git/config` someone else wrote.** Under Auto review,
   "read-only" git commands such as `git diff`, `git log -p` and `git show` can still start
@@ -297,16 +297,16 @@ requests and get their rows when they land.
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0031). | Partial (RP7) |
-| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0034). | Partial (RP7) |
-| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0034). | Partial (RP1) |
-| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0034). | Partial (RP2) |
-| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0030). | Partial (RP7) |
-| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0030). | Partial (RP3) |
-| P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0032). | Partial (RP6) |
-| P8 | Rewind overwrites the user's work or writes outside the workspace | Changed files are conflicts and need force. Each target is checked on its real path (inside the workspace, never in `.git` or `.encode`), restored bytes are checked against their hash, and the rewind is journaled first (0033). | Mitigated (RP4) |
-| P9 | A rewind plan is altered on its way through the UI | The plan carries a fingerprint, and applying it re-derives everything from the manifest and the disk (0033). | Mitigated |
-| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0030, 0031). | Mitigated |
+| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Partial (RP7) |
+| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). | Partial (RP7) |
+| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). | Partial (RP1) |
+| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). | Partial (RP2) |
+| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Partial (RP7) |
+| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). | Partial (RP3) |
+| P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0042). | Partial (RP6) |
+| P8 | Rewind overwrites the user's work or writes outside the workspace | Changed files are conflicts and need force. Each target is checked on its real path (inside the workspace, never in `.git` or `.encode`), restored bytes are checked against their hash, and the rewind is journaled first (0043). | Mitigated (RP4) |
+| P9 | A rewind plan is altered on its way through the UI | The plan carries a fingerprint, and applying it re-derives everything from the manifest and the disk (0043). | Mitigated |
+| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0040, 0041). | Mitigated |
 
 ### Residual risks
 

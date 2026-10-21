@@ -23,11 +23,11 @@ say so.
 | [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |
 | [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |
 | [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |
-| [0030](0030-permission-rules-are-judged-over-parsed-commands.md) | Permission rules are judged over parsed commands | Accepted |
-| [0031](0031-folder-settings-grant-only-when-approved.md) | A folder's settings grant only what the user approved | Accepted |
-| [0032](0032-hooks-in-claude-codes-format-fail-closed.md) | Hooks in Claude Code's format, and a broken guard denies | Accepted |
-| [0033](0033-checkpoints-record-what-the-file-tools-change.md) | Checkpoints record what the file tools change, and rewinding never overwrites silently | Accepted |
-| [0034](0034-an-in-house-mcp-client-with-per-server-approval.md) | An in-house MCP client, with per-server approval | Accepted |
+| [0040](0040-permission-rules-are-judged-over-parsed-commands.md) | Permission rules are judged over parsed commands | Accepted |
+| [0041](0041-folder-settings-grant-only-when-approved.md) | A folder's settings grant only what the user approved | Accepted |
+| [0042](0042-hooks-in-claude-codes-format-fail-closed.md) | Hooks in Claude Code's format, and a broken guard denies | Accepted |
+| [0043](0043-checkpoints-record-what-the-file-tools-change.md) | Checkpoints record what the file tools change, and rewinding never overwrites silently | Accepted |
+| [0044](0044-an-in-house-mcp-client-with-per-server-approval.md) | An in-house MCP client, with per-server approval | Accepted |
 
 ## Template
 

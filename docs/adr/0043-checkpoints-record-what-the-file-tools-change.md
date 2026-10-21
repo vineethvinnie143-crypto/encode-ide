@@ -1,4 +1,4 @@
-# 0033. Checkpoints record what the file tools change, and rewinding never overwrites silently
+# 0043. Checkpoints record what the file tools change, and rewinding never overwrites silently
 
 - Status: Accepted
 - Date: 2026-10-21

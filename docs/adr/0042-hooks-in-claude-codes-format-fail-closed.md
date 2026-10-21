@@ -1,4 +1,4 @@
-# 0032. Hooks in Claude Code's format, and a broken guard denies
+# 0042. Hooks in Claude Code's format, and a broken guard denies
 
 - Status: Accepted
 - Date: 2026-10-21
@@ -25,7 +25,7 @@ that cannot run must not quietly let a call through.
   - a `Stop` hook may send the agent back at most three times in a row.
 - A command that outlives its timeout (60 seconds unless set) is stopped with everything it
   started: its process group on macOS and Linux, `taskkill /T` on Windows.
-- Hooks from a folder's files run only under 0031.
+- Hooks from a folder's files run only under 0041.
 
 ## Consequences
 

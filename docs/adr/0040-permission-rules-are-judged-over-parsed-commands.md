@@ -1,4 +1,4 @@
-# 0030. Permission rules are judged over parsed commands
+# 0040. Permission rules are judged over parsed commands
 
 - Status: Accepted
 - Date: 2026-10-21
@@ -18,7 +18,7 @@ here-documents and redirects all hide a second command from a prefix match.
   `Read(./.env)`, `Edit(src/**)`, `WebFetch(domain:docs.github.com)`, `mcp__server__tool`.
   `parseRule` refuses what it cannot read, and the settings screen shows why.
 - Deny beats ask beats allow, whichever file a rule came from. What a folder's files grant
-  needs approval ([0031](0031-folder-settings-grant-only-when-approved.md)). What they
+  needs approval ([0041](0041-folder-settings-grant-only-when-approved.md)). What they
   restrict always applies.
 - A Bash rule is judged on the line's parsed commands (the grammar of 0004, for bash and for
   PowerShell), never on its text:

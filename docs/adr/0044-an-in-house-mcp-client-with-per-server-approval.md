@@ -1,4 +1,4 @@
-# 0034. An in-house MCP client, with per-server approval
+# 0044. An in-house MCP client, with per-server approval
 
 - Status: Accepted
 - Date: 2026-10-21
