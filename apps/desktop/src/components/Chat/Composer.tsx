@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, Paperclip, Plus, Shield, ShieldCheck, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, Paperclip, Plus, Shield, Sparkles, Square, X } from 'lucide-react'
 import { api } from '../../api'
+import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
 import { useChat } from '../../stores/chat'
 import CommandPalette from '../CommandPalette'
 import type { CommandPaletteAction } from '../CommandPalette'
@@ -9,14 +10,6 @@ import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
-
-const POLICY_OPTIONS = ['read-only', 'workspace-write', 'full-access', 'auto-review'] as const
-const POLICY_LABELS: Record<string, string> = {
-  'read-only': 'Read Only',
-  'workspace-write': 'Workspace Write',
-  'full-access': 'Full access',
-  'auto-review': 'Auto review',
-}
 
 export default function Composer() {
   const draft = useChat((state) => state.draft)
@@ -48,7 +41,6 @@ export default function Composer() {
     element.style.height = `${Math.min(200, Math.max(42, element.scrollHeight))}px`
   }, [draft])
 
-  const fullAccess = Boolean(settings?.autoApprove && settings?.autoApproveCommands)
   const policy = settings?.policy ?? 'workspace-write'
   const [policyOpen, setPolicyOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -100,11 +92,6 @@ export default function Composer() {
     if (current && current.title === 'New session') void sessions.rename(current.id, text)
     send(text, attachments)
     setAttachments([])
-  }
-
-  const togglePolicy = () => {
-    const next = !fullAccess
-    void save({ autoApprove: next, autoApproveCommands: next })
   }
 
   const runPaletteAction = async (action: CommandPaletteAction) => {
@@ -227,6 +214,7 @@ export default function Composer() {
                   <button
                     key={option}
                     className={policy === option ? 'is-selected' : ''}
+                    title={POLICY_DESCRIPTIONS[option]}
                     onClick={() => {
                       setPolicyOpen(false)
                       void save({ policy: option })

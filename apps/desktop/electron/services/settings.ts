@@ -26,8 +26,6 @@ function defaults(): StoredSettings {
     profiles: [{ ...DEMO_PROFILE }],
     activeProfileId: DEMO_PROFILE.id,
     policy: 'workspace-write',
-    autoApprove: true,
-    autoApproveCommands: false,
     maxSteps: 30,
     maxGoalRounds: 8,
     recentWorkspaces: [],
@@ -120,9 +118,6 @@ export class SettingsService {
       profiles,
       activeProfileId: active.id,
       policy: normalizePolicy(input.policy, base.policy),
-      autoApprove: typeof input.autoApprove === 'boolean' ? input.autoApprove : base.autoApprove,
-      autoApproveCommands:
-        typeof input.autoApproveCommands === 'boolean' ? input.autoApproveCommands : base.autoApproveCommands,
       maxSteps: clamp(input.maxSteps, 1, 100, base.maxSteps),
       maxGoalRounds: clamp(input.maxGoalRounds, 1, 100, base.maxGoalRounds),
       recentWorkspaces: Array.isArray(input.recentWorkspaces)
@@ -153,8 +148,6 @@ export class SettingsService {
       profiles,
       activeProfileId: this.data.activeProfileId,
       policy: this.data.policy,
-      autoApprove: this.data.autoApprove,
-      autoApproveCommands: this.data.autoApproveCommands,
       maxSteps: this.data.maxSteps,
       maxGoalRounds: this.data.maxGoalRounds,
       recentWorkspaces: [...this.data.recentWorkspaces],
@@ -196,13 +189,7 @@ export class SettingsService {
       next.activeProfileId = next.profiles[0].id
     }
 
-    if (patch.policy) {
-      next.policy = patch.policy
-      next.autoApprove = patch.policy !== 'read-only'
-      next.autoApproveCommands = patch.policy === 'full-access'
-    }
-    if (typeof patch.autoApprove === 'boolean') next.autoApprove = patch.autoApprove
-    if (typeof patch.autoApproveCommands === 'boolean') next.autoApproveCommands = patch.autoApproveCommands
+    if (patch.policy !== undefined) next.policy = normalizePolicy(patch.policy, next.policy)
     if (patch.maxSteps !== undefined) next.maxSteps = clamp(patch.maxSteps, 1, 100, 30)
     if (patch.maxGoalRounds !== undefined) next.maxGoalRounds = clamp(patch.maxGoalRounds, 1, 100, 8)
     if (Array.isArray(patch.recentWorkspaces)) {

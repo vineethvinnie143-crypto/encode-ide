@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import os from 'node:os'
 import type {
   AgentEventBody,
   AgentHistory,
@@ -12,13 +13,14 @@ import type {
   Settings,
 } from '../../shared/types'
 import type { SettingsService } from '../services/settings'
-import type { ShellService } from '../services/shell'
+import { agentEnvironment, type ShellService } from '../services/shell'
 import type { JobService } from '../services/jobs'
 import type { SkillService } from '../services/skills'
 import type { WorkspaceService } from '../services/workspace'
+import { decideApproval, toolKind, type ApprovalDecision } from './approval'
 import { buildSystemPrompt } from './prompt'
 import { AgentAbortedError, chat } from './provider'
-import { buildDiff, executeTool, requiresApprovalFor, summarizeApproval, toolDefs } from './tools'
+import { applyEdit, buildDiff, executeTool, summarizeApproval, toolDefs } from './tools'
 import type { ChatMessage, GoalAccess, ParsedToolCall, TodoAccess, ToolCallPayload } from './types'
 
 export interface AgentDeps {
@@ -69,6 +71,8 @@ const DEMO_SCRIPT: DemoStep[] = [
     },
   },
 ]
+
+const MAX_PREVIEW_HUNKS = 4
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -314,11 +318,12 @@ export class Agent {
           tool: { name: call.name, input: call.input, state: 'running' },
         })
 
-        if (requiresApprovalFor(call.name, settings, mode, call.input)) {
+        const approval = await this.approvalFor(call, mode)
+        if (approval.ask) {
           toolEntry.tool = { ...toolEntry.tool!, state: 'waiting' }
           this.send({ type: 'entry', entry: structuredClone(toolEntry) })
           this.setStatus('awaiting-approval')
-          const approved = await this.requestApproval(toolEntry.id, call.name, call.input)
+          const approved = await this.requestApproval(toolEntry.id, call.name, call.input, approval.reason)
           if (!approved) {
             toolEntry.tool = {
               ...toolEntry.tool!,
@@ -408,36 +413,74 @@ export class Agent {
     }
   }
 
+  /** Asks the approval policy, reading the live policy so a change mid-run applies to the next call. */
+  private async approvalFor(call: ParsedToolCall, mode: AgentMode): Promise<ApprovalDecision> {
+    const root = this.deps.workspace.rootPath
+    const rootReal = this.deps.workspace.rootRealPath
+    const kind = toolKind(call.name)
+    if (!root || !rootReal) return kind === 'other' ? { ask: false } : { ask: true, reason: 'No folder is open.' }
+    try {
+      return await decideApproval(call.name, call.input, {
+        mode,
+        policy: this.deps.settings.raw().policy,
+        root,
+        rootReal,
+        env: agentEnvironment(),
+        home: os.homedir(),
+      })
+    } catch (error) {
+      return { ask: true, reason: `eNCode could not check this call (${(error as Error).message}).` }
+    }
+  }
+
+  /** The diff a write or edit would produce, for the approval card. */
+  private async previewChange(tool: string, input: Record<string, unknown>): Promise<DiffHunk[] | undefined> {
+    const rel = String(input.path ?? '').trim()
+    if (!rel) return undefined
+    let previous = ''
+    try {
+      previous = (await this.deps.workspace.read(rel)).content
+    } catch {
+      previous = ''
+    }
+    let next: string
+    if (tool === 'write' || tool === 'write_file') {
+      next = typeof input.content === 'string' ? input.content : ''
+    } else {
+      const edit = applyEdit(previous, String(input.old_string ?? ''), String(input.new_string ?? ''))
+      if (!edit.ok) return undefined
+      next = edit.updated
+    }
+    try {
+      return buildDiff(rel, previous, next)
+    } catch {
+      return undefined
+    }
+  }
+
   private async requestApproval(
     entryId: string,
     tool: string,
     input: Record<string, unknown>,
+    reason?: string,
   ): Promise<boolean> {
-    const { title, detail } = summarizeApproval(tool, input)
+    const summary = summarizeApproval(tool, input)
+    const { title } = summary
+    let { detail } = summary
 
     // Show the exact change before asking for approval.
     let preview: DiffHunk[] | undefined
-    if (tool === 'write_file') {
-      const rel = String(input.path ?? '').trim()
-      const next = typeof input.content === 'string' ? input.content : ''
-      if (rel) {
-        let previous = ''
-        try {
-          previous = (await this.deps.workspace.read(rel)).content
-        } catch {
-          previous = ''
-        }
-        try {
-          preview = buildDiff(rel, previous, next).slice(0, 4)
-        } catch {
-          preview = undefined
-        }
+    if (toolKind(tool) === 'write') {
+      const hunks = await this.previewChange(tool, input)
+      if (hunks && hunks.length > MAX_PREVIEW_HUNKS) {
+        detail += `\nShowing ${MAX_PREVIEW_HUNKS} of ${hunks.length} changed regions.`
       }
+      preview = hunks?.slice(0, MAX_PREVIEW_HUNKS)
     }
 
     return new Promise<boolean>((resolve) => {
       const id = randomUUID()
-      const request: ApprovalRequest = { id, entryId, tool, title, detail, input, preview }
+      const request: ApprovalRequest = { id, entryId, tool, title, detail, reason, input, preview }
       this.pendingApprovals.set(id, resolve)
 
       const onAbort = () => {

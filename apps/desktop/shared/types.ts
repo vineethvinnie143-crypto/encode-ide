@@ -32,12 +32,8 @@ export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | '
 export interface Settings {
   profiles: ModelProfile[]
   activeProfileId: string | null
-  /** Tool permission policy, chosen from the policy menu in the composer. */
+  /** What the agent may do without asking; see electron/agent/approval.ts. */
   policy: ApprovalPolicy
-  /** Require explicit approval before file writes / edits. */
-  autoApprove: boolean
-  /** Require explicit approval before shell commands. */
-  autoApproveCommands: boolean
   maxSteps: number
   maxGoalRounds: number
   recentWorkspaces: string[]
@@ -132,6 +128,8 @@ export interface ApprovalRequest {
   tool: string
   title: string
   detail: string
+  /** Why the approval policy asks, when it is not obvious from the policy. */
+  reason?: string
   input: Record<string, unknown>
   /** Optional diff preview shown before approving a write. */
   preview?: DiffHunk[]

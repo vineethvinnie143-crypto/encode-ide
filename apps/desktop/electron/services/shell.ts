@@ -41,6 +41,35 @@ function currentEnv(): Record<string, string> {
   return env
 }
 
+/**
+ * git settings for commands the agent runs. They are passed as command-line
+ * config, which outranks repository config.
+ */
+const AGENT_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
+  // A repository's config must not start a program on `git status`.
+  ['core.fsmonitor', 'false'],
+  // A bare repository planted in the workspace (dir/HEAD, dir/config) is not picked up by `cd dir; git log -p`.
+  ['safe.bareRepository', 'explicit'],
+]
+
+/**
+ * Environment for commands the agent runs: the user's environment, plus the
+ * git settings above, and no credential prompt nobody could answer.
+ */
+export function agentEnvironment(): Record<string, string> {
+  const env = currentEnv()
+  const count = Number(env.GIT_CONFIG_COUNT ?? 0)
+  let index = Number.isInteger(count) && count >= 0 ? count : 0
+  for (const [key, value] of AGENT_GIT_CONFIG) {
+    env[`GIT_CONFIG_KEY_${index}`] = key
+    env[`GIT_CONFIG_VALUE_${index}`] = value
+    index++
+  }
+  env.GIT_CONFIG_COUNT = String(index)
+  env.GIT_TERMINAL_PROMPT = '0'
+  return env
+}
+
 interface ResolvedCommand {
   file: string
   args: string[]
@@ -117,6 +146,15 @@ function resolveCommand(name: string, cwd: string, env: Record<string, string>):
     if (shim) return { file: shim.node, args: [shim.script] }
   }
   return { file: found, args: [] }
+}
+
+/**
+ * The files the shell would execute for a bare program name: the program
+ * itself, plus the script for npm-style shims. Empty when it is not found.
+ */
+export function locateProgram(name: string, cwd: string, env: Record<string, string>): string[] {
+  const resolved = resolveCommand(name, cwd, env)
+  return resolved ? [resolved.file, ...resolved.args] : []
 }
 
 export class ShellSession {
@@ -662,7 +700,7 @@ export class ShellService {
       },
     }
 
-    const session = new ShellSession('capture', cwd, currentEnv(), sink)
+    const session = new ShellSession('capture', cwd, agentEnvironment(), sink)
     const promptDone = new Promise<void>((resolve) => {
       resolvePrompt = resolve
     })

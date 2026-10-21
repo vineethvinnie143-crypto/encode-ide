@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { FileEntry, OpenWorkspace, ReadFileResult, SearchOptions, SearchResult } from '../../shared/types'
 import { matchesAny, parseGlobList } from './glob'
+import { isInsideReal } from './real-path'
 
 /** Hidden from the explorer and excluded from walking/search. */
 const IGNORED_NAMES = new Set([
@@ -80,6 +81,11 @@ export class WorkspaceService {
     return this.root
   }
 
+  /** The root with symlinks resolved, for containment checks. */
+  get rootRealPath(): string | null {
+    return this.rootReal
+  }
+
   setChangeHandler(handler: ((paths: string[]) => void) | null): void {
     this.changeHandler = handler
   }
@@ -115,22 +121,7 @@ export class WorkspaceService {
   /** Resolve symlinks on the nearest existing ancestor and ensure it stays inside the root. */
   private async assertReal(abs: string): Promise<void> {
     if (!this.rootReal) throw new Error('No folder is open')
-    let probe = abs
-    for (let i = 0; i < 64; i++) {
-      try {
-        const real = await fs.realpath(probe)
-        const relative = path.relative(this.rootReal, real)
-        if (relative.startsWith('..') || path.isAbsolute(relative)) {
-          throw new Error('Path escapes the workspace through a symlink')
-        }
-        return
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-        const parent = path.dirname(probe)
-        if (parent === probe) return
-        probe = parent
-      }
-    }
+    if (!(await isInsideReal(this.rootReal, abs))) throw new Error('Path escapes the workspace through a symlink')
   }
 
   toRelative(abs: string): string {

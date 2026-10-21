@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import path from 'node:path'
-import type { AgentMode, ApprovalPolicy, Settings } from '../../shared/types'
+import { toolKind } from './approval'
 import { buildDiff } from './diff'
 import type { ParsedToolCall, ToolContext, ToolResult, ToolSchema } from './types'
 
@@ -134,11 +134,26 @@ async function replaceInFile(input: Record<string, unknown>, ctx: ToolContext): 
   const file = await ctx.workspace.read(rel)
   if (file.binary) return err(`${rel} is a binary file.`)
 
-  let content = file.content
+  const edit = applyEdit(file.content, oldString, newString)
+  if (!edit.ok) return err(edit.error.replace('{path}', rel))
+  const diff = buildDiff(rel, file.content, edit.updated)
+  await ctx.workspace.write(rel, edit.updated)
+
+  return { ok: true, output: `Edited ${rel}.`, diff, changedPath: rel }
+}
+
+/**
+ * Replaces the single occurrence of `oldString`. Tolerates CRLF files when the
+ * model sent LF snippets. Errors mention `{path}` for the caller to fill in.
+ */
+export function applyEdit(
+  content: string,
+  oldString: string,
+  newString: string,
+): { ok: true; updated: string } | { ok: false; error: string } {
   let actualOld = oldString
   let index = content.indexOf(actualOld)
 
-  // Tolerate CRLF files when the model emitted LF snippets.
   if (index === -1 && oldString.includes('\n') && content.includes('\r\n')) {
     const crlfOld = oldString.replace(/\n/g, '\r\n')
     if (content.includes(crlfOld)) {
@@ -148,20 +163,17 @@ async function replaceInFile(input: Record<string, unknown>, ctx: ToolContext): 
   }
 
   if (index === -1) {
-    return err(
-      `old_string was not found in ${rel}. Read the file again and copy the exact text, including indentation and line endings.`,
-    )
+    return {
+      ok: false,
+      error: 'old_string was not found in {path}. Read the file again and copy the exact text, including indentation and line endings.',
+    }
   }
   if (content.indexOf(actualOld, index + actualOld.length) !== -1) {
-    return err(`old_string matches more than one place in ${rel}. Include more surrounding context so it is unique.`)
+    return { ok: false, error: 'old_string matches more than one place in {path}. Include more surrounding context so it is unique.' }
   }
 
   const actualNew = actualOld === oldString ? newString : newString.replace(/\n/g, '\r\n')
-  const updated = content.slice(0, index) + actualNew + content.slice(index + actualOld.length)
-  const diff = buildDiff(rel, content, updated)
-  await ctx.workspace.write(rel, updated)
-
-  return { ok: true, output: `Edited ${rel}.`, diff, changedPath: rel }
+  return { ok: true, updated: content.slice(0, index) + actualNew + content.slice(index + actualOld.length) }
 }
 
 async function searchFiles(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
@@ -344,16 +356,16 @@ export async function executeTool(call: ParsedToolCall, ctx: ToolContext): Promi
   const input = call.input ?? {}
 
   try {
-    if (ctx.mode === 'ask' && (name === 'write' || name === 'write_file' || name === 'edit' || name === 'replace_in_file' || name === 'pwsh' || name === 'run_command')) {
-      return err('This is ASK mode (read-only). File edits and commands are disabled. Explain the proposed change instead, or switch to CODE mode.')
-    }
-    if (ctx.mode === 'plan' && (name === 'write' || name === 'write_file' || name === 'edit' || name === 'replace_in_file' || name === 'pwsh' || name === 'run_command')) {
-      return err('This is PLAN mode (read-only). Investigate the project, then submit your implementation plan with exit_plan_mode.')
-    }
-
-    const policy = (ctx.settings.raw() as { policy?: ApprovalPolicy }).policy
-    if (policy === 'read-only' && (name === 'write' || name === 'write_file' || name === 'edit' || name === 'replace_in_file' || name === 'pwsh' || name === 'run_command')) {
-      return err('This session is in Read Only policy, so file changes and commands are blocked. Ask the user to switch the policy (Workspace Write, Full access or Auto review) to continue.')
+    if (toolKind(name) !== 'other') {
+      if (ctx.mode === 'ask') {
+        return err('This is ASK mode (read-only). File edits and commands are disabled. Explain the proposed change instead, or switch to CODE mode.')
+      }
+      if (ctx.mode === 'plan') {
+        return err('This is PLAN mode (read-only). Investigate the project, then submit your implementation plan with exit_plan_mode.')
+      }
+      if (ctx.settings.raw().policy === 'read-only') {
+        return err('This session is in Read Only policy, so file changes and commands are blocked. Ask the user to switch the policy (Workspace Write, Full access or Auto review) to continue.')
+      }
     }
 
     switch (name) {
@@ -441,51 +453,33 @@ export async function executeTool(call: ParsedToolCall, ctx: ToolContext): Promi
   }
 }
 
-const SAFE_COMMAND = /^(ls|dir|cat|type|pwd|head|tail|wc|which|git status|git diff|git log|node --version|npm --version|npm test|npm run (build|test|lint|typecheck)|tsc)\b/i
-
-/** The approval policies offered in the composer: read-only, workspace-write, full-access, auto-review. */
-export function requiresApprovalFor(
-  tool: string,
-  settings: Pick<Settings, 'autoApprove' | 'autoApproveCommands'> & { policy?: ApprovalPolicy },
-  mode: AgentMode,
-  input: Record<string, unknown> = {},
-): boolean {
-  if (mode === 'ask' || mode === 'plan') return false
-  switch (settings.policy) {
-    case 'read-only':
-    case 'full-access':
-      return false
-    case 'workspace-write':
-      return tool === 'run_command' || tool === 'pwsh'
-    case 'auto-review':
-      if (tool !== 'run_command' && tool !== 'pwsh') return false
-      return !SAFE_COMMAND.test(String(input.command ?? '').trim())
-    default:
-      break
-  }
-  if (tool === 'write' || tool === 'write_file' || tool === 'edit' || tool === 'replace_in_file') return !settings.autoApprove
-  if (tool === 'run_command' || tool === 'pwsh') return !settings.autoApproveCommands
-  return false
-}
-
+/** Title and detail for the approval card, for both current and legacy tool names. */
 export function summarizeApproval(tool: string, input: Record<string, unknown>): { title: string; detail: string } {
-  if (tool === 'write_file') {
-    const content = asString(input.content)
-    return {
-      title: `Write ${asString(input.path) || '(missing path)'}`,
-      detail: `${content.split('\n').length} lines · ${content.length} chars`,
+  const target = asString(input.path) || '(missing path)'
+  switch (tool) {
+    case 'write':
+    case 'write_file': {
+      const content = asString(input.content)
+      return { title: `Write ${target}`, detail: `${content.split('\n').length} lines · ${content.length} chars` }
     }
-  }
-  if (tool === 'replace_in_file') {
-    return {
-      title: `Edit ${asString(input.path) || '(missing path)'}`,
-      detail: `Replace ${asString(input.old_string).length} chars with ${asString(input.new_string).length} chars`,
+    case 'edit':
+    case 'replace_in_file':
+      return {
+        title: `Edit ${target}`,
+        detail: `Replace ${asString(input.old_string).length} chars with ${asString(input.new_string).length} chars`,
+      }
+    case 'pwsh':
+    case 'run_command': {
+      const cwd = asString(input.cwd).trim()
+      const where = [cwd && `in ${cwd}`, input.background === true && 'as a background job'].filter(Boolean).join(', ')
+      return {
+        title: input.background === true ? 'Run background command' : 'Run command',
+        detail: (asString(input.command) || '(missing command)') + (where ? `\n(${where})` : ''),
+      }
     }
+    default:
+      return { title: tool, detail: JSON.stringify(input, null, 2).slice(0, 2000) }
   }
-  if (tool === 'run_command') {
-    return { title: 'Run command', detail: asString(input.command) || '(missing command)' }
-  }
-  return { title: tool, detail: '' }
 }
 
 export const toolDefs: ToolSchema[] = [

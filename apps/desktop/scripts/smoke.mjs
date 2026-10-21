@@ -135,6 +135,45 @@ async function typeInto(selector, value) {
   })()`)
 }
 
+/**
+ * Waits for the agent to finish, approving every approval card on the way.
+ * Returns the approval cards it saw ({ title, reason, detail }).
+ */
+async function driveAgent(label, timeoutMs = 120000) {
+  const approvals = []
+  const deadline = Date.now() + timeoutMs
+  let status = ''
+  while (Date.now() < deadline) {
+    status = await evaluate("document.querySelector('.chat-panel')?.dataset.status ?? ''")
+    if (status === 'done') return approvals
+    if (status === 'error') {
+      const detail = await evaluate(
+        "[...document.querySelectorAll('.msg-error')].map((node) => node.textContent).join('\\n')",
+      )
+      throw new Error(`${label} agent errored: ${detail}`)
+    }
+    const card = await evaluate(`(() => {
+      const card = document.querySelector('.approval-card')
+      if (!card) return null
+      return {
+        title: card.querySelector('.approval-head')?.textContent ?? '',
+        reason: card.querySelector('.approval-reason')?.textContent ?? '',
+        detail: card.querySelector('.approval-detail')?.textContent ?? '',
+      }
+    })()`)
+    if (card) {
+      approvals.push(card)
+      await sleep(250)
+      await screenshot(`${label}-approval-${approvals.length}.png`)
+      await click('.approval-card .btn.primary')
+      await sleep(350)
+      continue
+    }
+    await sleep(300)
+  }
+  throw new Error(`${label} agent did not finish (status=${status})`)
+}
+
 let provider = null
 
 async function ensureFakeProvider() {
@@ -182,8 +221,7 @@ async function runProviderPhase() {
   await evaluate(`window.eNCode.settings.save({
     profiles: ${JSON.stringify(profiles)},
     activeProfileId: 'local-mock',
-    autoApprove: false,
-    autoApproveCommands: false,
+    policy: 'workspace-write',
     maxSteps: 12
   })`)
 
@@ -194,32 +232,13 @@ async function runProviderPhase() {
   await sleep(350)
   await click('.composer-send')
 
-  let approvals = 0
-  const deadline = Date.now() + 120000
-  let status = ''
-  while (Date.now() < deadline) {
-    status = await evaluate("document.querySelector('.chat-panel')?.dataset.status ?? ''")
-    if (status === 'done') break
-    if (status === 'error') {
-      const detail = await evaluate(
-        "[...document.querySelectorAll('.msg-error')].map((node) => node.textContent).join('\\n')",
-      )
-      throw new Error(`Provider agent errored: ${detail}`)
-    }
-    if (await evaluate("!!document.querySelector('.approval-card')")) {
-      approvals += 1
-      await sleep(250)
-      if (approvals === 1) await screenshot('10-approval.png')
-      await click('.approval-card .btn.primary')
-      await sleep(350)
-      continue
-    }
-    await sleep(300)
+  // Workspace Write: the write runs unasked, the command asks and the card shows the exact command.
+  const approvals = await driveAgent('10-provider')
+  console.log('[smoke] provider approvals:', JSON.stringify(approvals))
+  if (approvals.length !== 1) throw new Error(`Expected 1 approval prompt (the command), saw ${approvals.length}`)
+  if (!approvals[0].detail.includes('echo provider-command-ok')) {
+    throw new Error('The command approval card does not show the command')
   }
-
-  console.log(`[smoke] provider agent status=${status} approvals=${approvals}`)
-  if (status !== 'done') throw new Error(`Provider agent did not finish (status=${status})`)
-  if (approvals < 1) throw new Error(`Expected 2 approval prompts, saw ${approvals}`)
 
   await evaluate(`(() => {
     document.querySelectorAll('.tool-row').forEach((row) => {
@@ -367,7 +386,7 @@ try {
     await evaluate(`window.eNCode.settings.save({ profiles: ${JSON.stringify(withDemo)} })`)
   }
   await evaluate(
-    "window.eNCode.settings.save({ activeProfileId: 'demo', autoApprove: true, autoApproveCommands: true, agentMode: 'code' })",
+    "window.eNCode.settings.save({ activeProfileId: 'demo', policy: 'workspace-write', agentMode: 'code' })",
   )
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'file tree after profile pin')
@@ -470,7 +489,13 @@ try {
   await sleep(350)
   console.log('[smoke] demo send clicked:', await click('.composer-send'))
 
-  await waitFor("document.querySelector('.chat-panel')?.dataset.status === 'done'", 120000, 'demo completion')
+  // The demo writes into .eNCode, a protected folder, so even Workspace Write asks first.
+  const demoApprovals = await driveAgent('08-demo')
+  console.log('[smoke] demo approvals:', JSON.stringify(demoApprovals))
+  if (demoApprovals.length !== 1 || !demoApprovals[0].title.includes('.eNCode/demo-note.md')) {
+    throw new Error('Expected one approval for the protected .eNCode write')
+  }
+  if (!demoApprovals[0].reason.includes('protected')) throw new Error('The approval card does not say why it asks')
   await sleep(600)
   console.log(
     '[smoke] demo result:',
@@ -517,7 +542,7 @@ try {
   await runProviderPhase()
 
   await evaluate("window.eNCode.agent.reset()")
-  await evaluate("window.eNCode.settings.save({ activeProfileId: 'demo', autoApprove: false, autoApproveCommands: false })")
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'demo', policy: 'workspace-write' })")
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'final reload')
   await screenshot('12-final.png')

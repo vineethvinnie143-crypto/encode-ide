@@ -115,6 +115,7 @@ export default function ChatPanel() {
             <ShieldAlert size={14} />
             <span>{approval.title}</span>
           </div>
+          {approval.reason && <div className="approval-reason">{approval.reason}</div>}
           <pre className="approval-detail">{approval.detail}</pre>
           {approval.preview && approval.preview.length > 0 && (
             <div className="approval-preview">

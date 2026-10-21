@@ -25,30 +25,44 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   list_files: { label: 'List', icon: ListTree },
   grep: { label: 'Grep', icon: Search },
   search_files: { label: 'Search', icon: Search },
-  pwsh: { label: 'Pwsh', icon: SquareTerminal },
+  pwsh: { label: 'Shell', icon: SquareTerminal },
   run_command: { label: 'Shell', icon: SquareTerminal },
   ask_user_question: { label: 'Ask', icon: MessageCircleQuestion },
   ask_followup_question: { label: 'Ask', icon: MessageCircleQuestion },
   attempt_completion: { label: 'Done', icon: CheckCircle2 },
 }
 
+/** Tools whose header line says enough until they produce output. */
+const QUIET_TOOLS = new Set(['read', 'read_file', 'glob', 'list_files', 'grep', 'search_files', 'pwsh', 'run_command'])
+
 function detailOf(entry: ConversationEntry): string {
   const tool = entry.tool
   if (!tool) return ''
   const input = tool.input ?? {}
   switch (tool.name) {
+    case 'read':
     case 'read_file':
+    case 'write':
     case 'write_file':
+    case 'edit':
     case 'replace_in_file':
       return String(input.path ?? '')
+    case 'glob':
     case 'list_files':
       return String(input.path || '.')
+    case 'grep':
     case 'search_files':
       return String(input.query ?? '')
+    case 'pwsh':
     case 'run_command':
       return String(input.command ?? '')
+    case 'ask_user_question':
     case 'ask_followup_question':
       return String(input.question ?? '')
+    case 'web_fetch':
+      return String(input.url ?? '')
+    case 'web_search':
+      return String(input.query ?? '')
     default:
       return ''
   }
@@ -69,7 +83,7 @@ export default function ToolCard({ entry }: { entry: ConversationEntry }) {
   const Icon = meta.icon
   const detail = detailOf(entry)
   const state = tool.state ?? 'done'
-  const hasBody = Boolean(tool.output || tool.diff?.length || (tool.name !== 'read_file' && tool.name !== 'list_files' && tool.name !== 'search_files' && tool.name !== 'run_command'))
+  const hasBody = Boolean(tool.output || tool.diff?.length || !QUIET_TOOLS.has(tool.name))
   const additions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'add').length, 0) ?? 0
   const deletions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'del').length, 0) ?? 0
   const content = tool.input.content

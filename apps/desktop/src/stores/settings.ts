@@ -10,8 +10,6 @@ interface SettingsStore {
   save(patch: Partial<Settings>): Promise<void>
   setProfileKey(id: string, key: string): Promise<void>
   setMode(mode: AgentMode): Promise<void>
-  setAutoApprove(value: boolean): Promise<void>
-  setAutoApproveCommands(value: boolean): Promise<void>
   activeProfile(): Settings['profiles'][number] | null
 }
 
@@ -53,14 +51,6 @@ export const useSettings = create<SettingsStore>((set, get) => ({
     const current = get().settings
     if (current?.agentMode === mode) return
     await get().save({ agentMode: mode })
-  },
-
-  setAutoApprove: async (value) => {
-    await get().save({ autoApprove: value })
-  },
-
-  setAutoApproveCommands: async (value) => {
-    await get().save({ autoApproveCommands: value })
   },
 
   activeProfile: () => {

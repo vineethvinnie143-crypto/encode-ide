@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
+import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS, PROTECTED_NOTE } from '../policies'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
@@ -428,24 +429,26 @@ export default function SettingsModal() {
           ) : (
             <div className="settings-agent">
               <div className="section-title">Approvals</div>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={draft.autoApprove}
-                  onChange={(event) => setDraft({ ...draft, autoApprove: event.target.checked })}
-                />
-                Auto-approve file edits
-              </label>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={draft.autoApproveCommands}
-                  onChange={(event) => setDraft({ ...draft, autoApproveCommands: event.target.checked })}
-                />
-                Auto-approve shell commands
-              </label>
+              <div className="policy-list" role="radiogroup" aria-label="Approval policy">
+                {POLICY_OPTIONS.map((option) => (
+                  <label key={option} className={`policy-option${draft.policy === option ? ' is-selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="approval-policy"
+                      value={option}
+                      checked={draft.policy === option}
+                      onChange={() => setDraft({ ...draft, policy: option })}
+                    />
+                    <span className="policy-option-text">
+                      <span className="policy-option-label">{POLICY_LABELS[option]}</span>
+                      <span className="policy-option-description">{POLICY_DESCRIPTIONS[option]}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
               <div className="info-note">
-                With approvals off, eNCode pauses before every write or command and shows you exactly what it will do.
+                {PROTECTED_NOTE} Ask and Plan modes never edit files or run commands. When eNCode asks, it shows you
+                exactly what will change or run.
               </div>
 
               <div className="section-title">Limits</div>
