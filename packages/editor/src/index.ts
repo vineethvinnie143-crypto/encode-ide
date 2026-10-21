@@ -29,4 +29,15 @@ export {
   type WordChange,
 } from './review'
 export { languageById, languageByName, languageForContent, languageForPath, languages, plain, type LanguageEntry } from './languages'
-export { columnAt, indexAtColumn, nextCluster, previousCluster } from './text-utils'
+export {
+  CharClass,
+  charClass,
+  columnAt,
+  indentWidth,
+  indexAtColumn,
+  leadingWhitespace,
+  nextCluster,
+  previousCluster,
+  unitWidth,
+  wordAround,
+} from './text-utils'

@@ -62,7 +62,7 @@ export type CharClass = (typeof CharClass)[keyof typeof CharClass]
 const WORD_CHAR = /[\p{L}\p{N}_]/u
 
 export function charClass(char: string, wordChars = ''): CharClass {
-  if (char === ' ' || char === '\t' || char === ' ' || char === '　') return CharClass.Space
+  if (char === ' ' || char === '\t') return CharClass.Space
   if (WORD_CHAR.test(char) || (wordChars && wordChars.includes(char))) return CharClass.Word
   return /\s/.test(char) ? CharClass.Space : CharClass.Other
 }
