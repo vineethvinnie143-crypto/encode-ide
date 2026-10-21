@@ -7,6 +7,7 @@ import {
   isBuiltin,
   parseLine,
   resolveShellPath,
+  unfoldedShellPath,
   type PathApi,
   type ShellHost,
 } from './shell-grammar'
@@ -42,6 +43,8 @@ export interface CommandAssessment {
   paths: string[]
   /** External programs the line starts, as typed. */
   programs: string[]
+  /** Directories the line may run commands in; also listed in `paths`. */
+  cwds?: string[]
 }
 
 const MAX_LINE_LENGTH = 2000
@@ -66,7 +69,7 @@ for (const builtin of SHELL_BUILTINS) {
   if (!classified) throw new Error(`command policy: shell built-in "${builtin}" has no rule`)
 }
 
-interface OptionRule {
+export interface OptionRule {
   /** Short option letters that write, execute, follow symlinks or read file lists. */
   denyShort?: string
   /**
@@ -87,14 +90,15 @@ interface OptionRule {
   maxOperands?: number
 }
 
-interface ExternalRule extends OptionRule {
+export interface ExternalRule extends OptionRule {
   /** Only `<program> <flag>` with one of these flags (version queries). */
   versionFlags?: readonly string[]
   /** Hand-written rule; returns a reason to ask, or null. */
   custom?: (args: string[], scope: Scope) => string | null
 }
 
-interface Scope {
+/** What a line has done so far: where it may be running, and what it may read. */
+export interface Scope {
   host: ShellHost
   root: string
   cwds: Set<string>
@@ -250,13 +254,33 @@ function assessGit(args: string[], scope: Scope): string | null {
   const rule = GIT_RULES.get(sub)
   if (!rule) return `runs git ${sub}, which is not on the read-only list`
   if (rule.custom) return rule.custom(rest, scope)
-  const problem = checkOptions(rest, rule, scope)
+  const problem = checkOptions(rest, rule, scope) ?? checkRevisionPaths(rest)
   if (problem) return problem
   if (rule.listingOptions && operandsOf(rest).length) {
     const listing = rest.some((arg) =>
       rule.listingOptions!.some((option) => arg === option || arg.startsWith(`${option}=`) || (option.length === 2 && arg.startsWith(option))),
     )
     if (!listing) return `creates a git ${sub}`
+  }
+  return null
+}
+
+/**
+ * `<rev>:<path>` reads a file from history. The path is relative to the
+ * repository root, which can lie above the workspace, or to the current
+ * directory when it starts with `./` or `../`; either way `..` and absolute
+ * paths can name files outside the workspace. GIT_CEILING_DIRECTORIES keeps
+ * the repository inside the workspace (see gitBoundaryEnvironment); this
+ * check is the lexical half.
+ */
+function checkRevisionPaths(args: string[]): string | null {
+  for (const operand of operandsOf(args)) {
+    const colon = operand.indexOf(':')
+    if (colon === -1 || /^[A-Za-z]:[\\/]/.test(operand)) continue
+    const target = operand.slice(colon + 1)
+    if (/^[\\/]/.test(target) || /^[A-Za-z]:/.test(target) || target.split(/[\\/]+/).includes('..')) {
+      return `reads ${operand} from git history, which may lie outside the workspace`
+    }
   }
   return null
 }
@@ -275,7 +299,7 @@ function operandsOf(args: string[]): string[] {
  * Checks options against a rule and records every operand and option value as
  * a path the line may read. Returns a reason to ask, or null.
  */
-function checkOptions(args: string[], rule: OptionRule, scope: Scope): string | null {
+export function checkOptions(args: string[], rule: OptionRule, scope: Scope): string | null {
   const candidates: string[] = []
   let operands = 0
   let endOfOptions = false
@@ -319,12 +343,32 @@ function checkOptions(args: string[], rule: OptionRule, scope: Scope): string | 
   return null
 }
 
-function checkPath(target: string, scope: Scope): string | null {
+export function checkPath(target: string, scope: Scope): string | null {
   for (const cwd of scope.cwds) {
     const absolute = resolveShellPath(cwd, target, scope.host)
     if (!isInside(scope.root, absolute, scope.host.path)) return `reaches outside the workspace (${target})`
     scope.paths.add(absolute)
+    const unfolded = unfoldedShellPath(cwd, target, scope.host)
+    if (unfolded) scope.paths.add(unfolded)
   }
+  return null
+}
+
+/**
+ * Runs `cd target` on paper: every directory the line may then be in must be
+ * inside the workspace. `cd` may fail or be skipped by `&&` and `||`, so
+ * later commands may run in the old directories too and all are kept.
+ */
+export function changeDirectory(target: string, scope: Scope): string | null {
+  const next = new Set(scope.cwds)
+  for (const cwd of scope.cwds) {
+    const resolved = resolveShellPath(cwd, target, scope.host)
+    if (!isInside(scope.root, resolved, scope.host.path)) return `reaches outside the workspace (${target})`
+    next.add(resolved)
+    const unfolded = unfoldedShellPath(cwd, target, scope.host)
+    if (unfolded) next.add(unfolded)
+  }
+  scope.cwds = next
   return null
 }
 
@@ -334,6 +378,30 @@ function ask(reason: string): CommandAssessment {
 
 /** A plain program name: no path, no drive, no leading dot. */
 const PROGRAM_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.+-]*$/
+
+/**
+ * Whether starting the external program `first` with `args` is read-only:
+ * null when it is, otherwise the reason to ask. Paths it may read are added
+ * to `scope`. `extra` adds rules for programs that are built-ins in the
+ * eNCode Shell but separate programs in other shells (ls, cat). Shared by
+ * every shell grammar eNCode reads, so all of them use one allow list.
+ */
+export function checkExternal(
+  first: string,
+  args: string[],
+  scope: Scope,
+  windows: boolean,
+  extra?: ReadonlyMap<string, ExternalRule>,
+): string | null {
+  if (!PROGRAM_NAME.test(first)) return `runs ${first} by path`
+  const key = windows ? first.toLowerCase().replace(/\.(exe|com)$/, '') : first
+  const rule = EXTERNAL_RULES.get(key) ?? extra?.get(key)
+  if (!rule) return `${first} is not on the read-only list`
+  if (rule.versionFlags) {
+    return args.length === 1 && rule.versionFlags.includes(args[0]) ? null : `only version queries of ${first} run unasked`
+  }
+  return rule.custom ? rule.custom(args, scope) : checkOptions(args, rule, scope)
+}
 
 export function assessCommand(line: string, context: CommandContext): CommandAssessment {
   const api: PathApi =
@@ -364,14 +432,8 @@ export function assessCommand(line: string, context: CommandContext): CommandAss
         if (READ_ONLY_BUILTINS.has(name)) continue
         if (name === 'cd') {
           if (!args.length) return ask('cd without a directory goes to the home directory')
-          const next = new Set(scope.cwds)
-          for (const cwd of scope.cwds) {
-            const target = resolveShellPath(cwd, args[0], scope.host)
-            if (!isInside(root, target, api)) return ask(`reaches outside the workspace (${args[0]})`)
-            // cd may fail or be skipped by && / ||, so later commands may run in either directory.
-            next.add(target)
-          }
-          scope.cwds = next
+          const problem = changeDirectory(args[0], scope)
+          if (problem) return ask(problem)
           continue
         }
         // Reading built-ins treat every argument that is not an option as a path (cat: every argument).
@@ -383,17 +445,8 @@ export function assessCommand(line: string, context: CommandContext): CommandAss
         continue
       }
 
-      if (!PROGRAM_NAME.test(first)) return ask(`runs ${first} by path`)
-      const key = windows ? first.toLowerCase().replace(/\.(exe|com)$/, '') : first
-      const rule = EXTERNAL_RULES.get(key)
-      if (!rule) return ask(`${first} is not on the read-only list`)
-
-      if (rule.versionFlags) {
-        if (args.length !== 1 || !rule.versionFlags.includes(args[0])) return ask(`only version queries of ${first} run unasked`)
-      } else {
-        const problem = rule.custom ? rule.custom(args, scope) : checkOptions(args, rule, scope)
-        if (problem) return ask(problem)
-      }
+      const problem = checkExternal(first, args, scope, windows)
+      if (problem) return ask(problem)
       programs.add(first)
     }
   }
@@ -405,5 +458,6 @@ export function assessCommand(line: string, context: CommandContext): CommandAss
     reason: 'read-only',
     paths: [...scope.paths],
     programs: [...programs],
+    cwds: [...scope.cwds],
   }
 }

@@ -1,3 +1,5 @@
+export * from './bash-grammar'
+export * from './bash-policy'
 export * from './command-policy'
 export * from './egress'
 export * from './paths'
