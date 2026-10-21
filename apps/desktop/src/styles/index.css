@@ -16,7 +16,7 @@
 @import './14-modals.css';
 @import './15-toasts.css';
 @import './16-layout.css';
-@import './17-rail.css';
+@import './17-session-sidebar.css';
 @import './18-center.css';
 @import './19-chat.css';
 @import './20-tool-rows.css';
@@ -30,3 +30,4 @@
 @import './28-trajectory.css';
 @import './29-diff.css';
 @import './30-typography.css';
+@import './31-dialogs.css';

@@ -41,7 +41,8 @@ export function Dialog({
     if (!open) return
     const returnTo = document.activeElement as HTMLElement | null
     const node = panel.current
-    const first = node?.querySelector<HTMLElement>(`.ui-dialog-body ${FOCUSABLE}`) ?? node
+    // An element marked data-autofocus wins, then the first field or button in the body.
+    const first = node?.querySelector<HTMLElement>('[data-autofocus]') ?? node?.querySelector<HTMLElement>(`.ui-dialog-body ${FOCUSABLE}`) ?? node
     first?.focus({ preventScroll: true })
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {

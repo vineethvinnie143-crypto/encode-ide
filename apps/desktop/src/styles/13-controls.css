@@ -93,3 +93,10 @@
 .narrow {
   width: 90px;
 }
+
+/* Empty line inside a list or dialog: "No skills yet." */
+.rail-empty {
+  padding: 6px 8px;
+  font-size: var(--fs-12);
+  color: var(--text-3);
+}
