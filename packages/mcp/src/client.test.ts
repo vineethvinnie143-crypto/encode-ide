@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { describe, it } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { McpClient, UnsupportedVersionError, type McpClientOptions } from './client'
 import { fakeServer, type FakeServerOptions } from './fake-server'
 import { ErrorCode, McpError, ProtocolError, RequestTimeoutError } from './jsonrpc'
@@ -59,11 +61,15 @@ describe('handshake', () => {
   })
 
   it('offers the workspace roots when asked to, and only then', async () => {
-    const { fake, mcp } = connect({}, { roots: () => [{ path: '/work/space', name: 'space' }] })
+    // Absolute on the platform running the test: a drive letter is added on Windows.
+    const root = path.resolve('/work/space')
+    const { fake, mcp } = connect({}, { roots: () => [{ path: root, name: 'space' }] })
     await mcp.connect()
     assert.deepEqual((fake.requests[0].params as { capabilities: unknown }).capabilities, { roots: { listChanged: false } })
     const answer = await fake.connection.request('roots/list')
-    assert.deepEqual(answer, { roots: [{ uri: 'file:///work/space', name: 'space' }] })
+    const uri = pathToFileURL(root).href
+    assert.match(uri, /^file:\/\/(?:\/[A-Za-z]:)?\/work\/space$/)
+    assert.deepEqual(answer, { roots: [{ uri, name: 'space' }] })
     await mcp.close()
 
     const bare = connect()

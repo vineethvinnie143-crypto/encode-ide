@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
+import path from 'node:path'
 import { describe, it } from 'node:test'
+import { pathToFileURL } from 'node:url'
 import { McpClient } from './client'
 import {
   AuthRequiredError,
@@ -142,8 +144,10 @@ describe('Streamable HTTP', () => {
         return true
       }),
     )
+    // Absolute on the platform running the test: a drive letter is added on Windows.
+    const root = path.resolve('/work')
     try {
-      const client = new McpClient({ transport: new StreamableHttpTransport({ url: server.url }), clientInfo, roots: () => [{ path: '/work' }] })
+      const client = new McpClient({ transport: new StreamableHttpTransport({ url: server.url }), clientInfo, roots: () => [{ path: root }] })
       await client.connect()
       const progress: number[] = []
       const result = await client.callTool('anything', {}, { onProgress: (p) => progress.push(p.progress) })
@@ -151,7 +155,7 @@ describe('Streamable HTTP', () => {
       assert.deepEqual(progress, [1])
       // The client answered the server's request with a POST of its own.
       await until(() => server.requests.some((r) => r.json?.id === 'server-1'))
-      assert.deepEqual(server.requests.find((r) => r.json?.id === 'server-1')?.json.result, { roots: [{ uri: 'file:///work' }] })
+      assert.deepEqual(server.requests.find((r) => r.json?.id === 'server-1')?.json.result, { roots: [{ uri: pathToFileURL(root).href }] })
       await client.close()
     } finally {
       await server.stop()
