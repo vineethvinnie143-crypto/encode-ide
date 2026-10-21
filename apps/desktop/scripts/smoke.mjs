@@ -32,6 +32,7 @@ const shotsDir = path.join(root, 'screenshots')
 await fs.mkdir(shotsDir, { recursive: true })
 
 const errors = []
+const deferred = []
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function findTarget() {
@@ -1054,7 +1055,10 @@ try {
   })()`)
   await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
   await screenshot('06b-editor-menu.png')
+  let menuHasFocus = true
   await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
+    menuHasFocus = false
+    deferred.push(error.message)
     console.log(
       '[smoke] focus is on:',
       await evaluate(`(() => {
@@ -1072,9 +1076,9 @@ try {
         })
       })()`),
     )
-    throw error
   })
-  await pressKey('Escape')
+  if (menuHasFocus) await pressKey('Escape')
+  else await evaluate("document.querySelector('[role=menu]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
   await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed')
 
   // A change on disk (here a write through the app's API, as the agent's are) reaches the open document and keeps the cursor.
@@ -1233,8 +1237,9 @@ try {
   await runShellChecks()
   await runAppearanceChecks()
 
-  if (errors.length) {
-    console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
+  if (deferred.length) console.error('[smoke] failures that did not stop the run:\n' + deferred.join('\n'))
+  if (errors.length || deferred.length) {
+    if (errors.length) console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
     process.exitCode = 1
   } else {
     console.log('[smoke] PASS — no renderer exceptions')
