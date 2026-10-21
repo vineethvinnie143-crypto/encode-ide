@@ -1,8 +1,12 @@
 /**
  * End-to-end smoke test driven over the Chrome DevTools Protocol.
  *
+ * pnpm e2e (scripts/e2e.mjs) runs it in a throwaway sandbox. By hand:
+ *
  *   1. start Electron:  .\node_modules\electron\dist\electron.exe . --remote-debugging-port=9222
  *   2. run:             node scripts/smoke.mjs <workspace-to-open>
+ *
+ * ENCODE_DEBUG_PORT and ENCODE_FAKE_PROVIDER_PORT override the ports (9222, 8787).
  *
  * Exercises the hand-built editor (overlay integrity, save round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
@@ -16,8 +20,13 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const port = process.env.ENCODE_DEBUG_PORT || '9222'
-const providerPort = 8787
-const demoPath = (process.argv[2] || path.join(root, '..', 'demo-project')).replace(/\\/g, '/')
+const providerPort = Number(process.env.ENCODE_FAKE_PROVIDER_PORT || 8787)
+if (!process.argv[2]) {
+  // The smoke edits the workspace it opens, so it never defaults to the fixture in the repository.
+  console.error('usage: node scripts/smoke.mjs <copy-of-test/fixtures/demo-project>')
+  process.exit(2)
+}
+const demoPath = path.resolve(process.argv[2]).replace(/\\/g, '/')
 const shotsDir = path.join(root, 'screenshots')
 await fs.mkdir(shotsDir, { recursive: true })
 
@@ -719,11 +728,16 @@ try {
   )
   await screenshot('09-terminal.png')
 
-  const freeModels = await evaluate(
-    "window.eNCode.models.openRouter(true).then((list) => list.length, (error) => 'ERR: ' + error.message)",
-  )
-  console.log('[smoke] openrouter free models:', freeModels)
-  if (typeof freeModels !== 'number' || freeModels < 1) throw new Error('OpenRouter model catalog unavailable')
+  // CI sets ENCODE_SMOKE_OFFLINE=1 so a run never depends on a third-party service being up.
+  if (process.env.ENCODE_SMOKE_OFFLINE === '1') {
+    console.log('[smoke] offline: OpenRouter catalog skipped')
+  } else {
+    const freeModels = await evaluate(
+      "window.eNCode.models.openRouter(true).then((list) => list.length, (error) => 'ERR: ' + error.message)",
+    )
+    console.log('[smoke] openrouter free models:', freeModels)
+    if (typeof freeModels !== 'number' || freeModels < 1) throw new Error('OpenRouter model catalog unavailable')
+  }
 
   await runProviderPhase()
 

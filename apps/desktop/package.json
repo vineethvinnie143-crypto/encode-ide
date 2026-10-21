@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "start": "electron .",
     "smoke": "node scripts/smoke.mjs",
+    "e2e": "node scripts/e2e.mjs",
     "fake-provider": "node scripts/fake-provider.mjs",
     "package:dir": "electron-builder --win --x64 --dir",
     "dist": "node scripts/build.mjs && electron-builder --win --x64"
