@@ -3,7 +3,7 @@
   "productName": "eNCode",
   "version": "0.1.0",
   "private": true,
-  "description": "eNCode — an AI-first desktop IDE with an autonomous coding agent.",
+  "description": "eNCode \u2014 an AI-first desktop IDE with an autonomous coding agent.",
   "author": "eNCode",
   "license": "MIT",
   "main": "dist/electron/main.cjs",
@@ -19,8 +19,12 @@
     "dist": "node scripts/build.mjs && electron-builder --win --x64"
   },
   "devDependencies": {
+    "@encode/core": "workspace:*",
     "@encode/permissions": "workspace:*",
+    "@encode/protocol": "workspace:*",
+    "@encode/providers": "workspace:*",
     "@encode/testkit": "workspace:*",
+    "@encode/tools": "workspace:*",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
