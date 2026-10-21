@@ -1,8 +1,7 @@
 # @encode/providers
 
 The layer between eNCode's agent and the model APIs: the canonical conversation, the transport
-contract, the error classifier, the stream assembler and (as M1 lands them) the provider
-adapters.
+contract, the error classifier, the stream assembler, the provider adapters and DirectClient.
 
 ```
 core ──complete()──▶ ModelClient ──stream()──▶ ProviderAdapter ──▶ HTTP
@@ -21,6 +20,12 @@ per role and no failover.
 | `contract.ts` | `TransportTarget`, `TransportEvent`, `ProviderAdapter`, `ModelClient` and its outcomes. |
 | `errors.ts` | `TransportError` and the classifiers for HTTP failures, stream errors and socket errors. |
 | `assembler.ts` | Incremental events → `AssistantMessage`, with tool-call parsing and validation. |
+| `json-repair.ts` | Repairs malformed tool JSON; never completes a truncated value. |
+| `sse.ts`, `http.ts` | The event-stream reader and the HTTP plumbing adapters share. |
+| `openai.ts` | The chat-completions dialect: OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio, vLLM. |
+| `anthropic.ts` | Anthropic's Messages API. |
+| `models.ts` | Families, windows, output limits and capabilities eNCode knows offline; Claude's per-generation rules. |
+| `direct-client.ts` | `DirectClient`: one model per role, retries without failover. |
 
 The classifier is kept in its own file so the router's quota and gateway rules can grow it
 without touching the rest.
@@ -85,7 +90,9 @@ UI events are `attempt`, `text`, `thinking`, `tool-call`, `discard` (forget the 
 An adapter is stateless. It translates a `ModelRequest`, streams `TransportEvent`s, and fails
 with a `TransportError` from `classifyHttpFailure`, `classifyStreamError` or
 `classifyNetworkFailure`. Once aborted, it fails with `signal.reason`. It does not retry, fail
-over or repair JSON.
+over or repair JSON. The one exception is negotiating the wire format before the first byte: a
+server that cannot stream, or that names an optional parameter as unknown, is asked once more
+without it.
 
 Event order is content order:
 
@@ -96,3 +103,18 @@ Event order is content order:
 `usage` events are cumulative, and later fields overwrite earlier ones. `inputTokens` counts
 every prompt token, cached or not. `keepalive` reports an SSE comment (OpenRouter's processing
 note). It may stretch a first-token deadline, but it is not content.
+
+## Adapter notes
+
+- **OpenAI-compatible.** Tool results become `tool` messages, and their images follow in a user
+  message. Thinking from earlier turns is not sent back. Mistral's tool ids are mapped to its
+  nine-character form, the same way for calls and results. Through OpenRouter, the adapter
+  passes `models` (server fallbacks), `provider.data_collection` and cache breakpoints for models
+  that take them.
+- **Anthropic.** Thinking blocks go back byte for byte, and only to Claude. Each request has four
+  cache breakpoints at most: the stable system part, then the last two user turns. New
+  generations get adaptive thinking with summarized display and `output_config.effort`, and no
+  sampling parameters. Older ones get a thinking budget only when asked. Tool input streams
+  eagerly from `api.anthropic.com`, and not through proxies that may reject the field.
+- **Truncated or filtered replies.** A tool call cut off by the output limit, or a reply stopped
+  by a safety filter, is marked invalid instead of run.

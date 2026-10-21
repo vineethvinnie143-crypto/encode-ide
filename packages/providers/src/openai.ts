@@ -276,9 +276,11 @@ function streamErrorOf(error: unknown): TransportError {
   const message = typeof record.message === 'string' ? record.message : JSON.stringify(error)
   const metadata = record.metadata as Record<string, unknown> | undefined
   const raw = typeof metadata?.raw === 'string' && !message.includes(metadata.raw) ? ` (${metadata.raw})` : ''
+  // A string code (the gateway's) names the error more precisely than its type; a numeric one is an HTTP status.
   const code = typeof record.code === 'number' ? record.code : typeof record.status === 'number' ? record.status : undefined
-  const type = typeof record.type === 'string' ? record.type : typeof record.code === 'string' ? record.code : undefined
-  return classifyStreamError(type, message + raw, code)
+  const type = typeof record.code === 'string' ? record.code : typeof record.type === 'string' ? record.type : undefined
+  const retryAfterSeconds = typeof record.retry_after === 'number' ? record.retry_after : undefined
+  return classifyStreamError(type, message + raw, code, { retryAfterSeconds })
 }
 
 /** Assigns stable slots to streamed tool calls, whether the server sends an index, an id, or neither. */

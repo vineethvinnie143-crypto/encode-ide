@@ -24,6 +24,7 @@ import type {
   TransportTarget,
 } from './contract'
 import { isTransportError, TransportError } from './errors'
+import { repairJson } from './json-repair'
 import { isEmptyReply } from './messages'
 import { modelInfo, providerTypeFor } from './models'
 import { createOpenAICompatibleAdapter, createOpenRouterAdapter } from './openai'
@@ -76,6 +77,7 @@ export interface DirectClientOptions {
   idleTimeoutMs?: number
   /** The longest rate-limit wait sat out; a longer one pauses instead. Default 60 s. */
   maxWaitMs?: number
+  /** Repairs malformed tool JSON. Default: json-repair's, which never completes a truncated value. */
   repairJson?: (raw: string) => unknown
   now?: () => number
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
@@ -180,7 +182,7 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
       const assembler = createAssembler({
         origin: { provider: target.provider, model: target.model, family: target.family },
         validateToolCall: request.validateToolCall,
-        repairJson: options.repairJson,
+        repairJson: options.repairJson ?? repairJson,
       })
       const controller = new AbortController()
       const onAbort = () => controller.abort(signal.reason)
