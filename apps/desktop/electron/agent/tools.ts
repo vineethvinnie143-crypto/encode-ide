@@ -201,7 +201,7 @@ async function webFetch(input: Record<string, unknown>): Promise<ToolResult> {
   try {
     const response = await fetch(url, {
       redirect: 'follow',
-      headers: { 'user-agent': 'eNCode/0.1 (+local coding harness)' },
+      headers: { 'user-agent': 'eNCode/0.1' },
     })
     if (!response.ok) return err(`request failed with HTTP ${response.status}`)
     const text = await response.text()
@@ -443,7 +443,7 @@ export async function executeTool(call: ParsedToolCall, ctx: ToolContext): Promi
 
 const SAFE_COMMAND = /^(ls|dir|cat|type|pwd|head|tail|wc|which|git status|git diff|git log|node --version|npm --version|npm test|npm run (build|test|lint|typecheck)|tsc)\b/i
 
-/** Mirrors the harness policy menu: read-only, workspace-write, full-access, auto-review. */
+/** The approval policies offered in the composer: read-only, workspace-write, full-access, auto-review. */
 export function requiresApprovalFor(
   tool: string,
   settings: Pick<Settings, 'autoApprove' | 'autoApproveCommands'> & { policy?: ApprovalPolicy },

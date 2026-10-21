@@ -32,7 +32,7 @@ export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | '
 export interface Settings {
   profiles: ModelProfile[]
   activeProfileId: string | null
-  /** Tool permission policy, mirroring the harness policy menu. */
+  /** Tool permission policy, chosen from the policy menu in the composer. */
   policy: ApprovalPolicy
   /** Require explicit approval before file writes / edits. */
   autoApprove: boolean
@@ -266,7 +266,7 @@ export interface AgentHistory {
   status: AgentStatus
 }
 
-export interface ForgeApi {
+export interface EncodeApi {
   app: {
     version(): Promise<string>
     platform(): Promise<string>

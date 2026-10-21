@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import AppMenuBar from './components/AppMenuBar'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
-import HarnessSidebar from './components/HarnessSidebar'
+import SessionRail from './components/SessionRail'
 import PluginsModal from './components/PluginsModal'
 import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
@@ -118,9 +118,9 @@ export default function App() {
       <AppMenuBar />
 
       <div className="app-body">
-        <HarnessSidebar />
+        <SessionRail />
 
-        <main className="harness-main">
+        <main className="app-main">
           <SessionHeader />
           <div className="main-tabs">
             <button className={mainView === 'chat' ? 'is-active' : ''} onClick={() => setMainView('chat')}>

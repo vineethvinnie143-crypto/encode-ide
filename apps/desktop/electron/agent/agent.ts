@@ -52,7 +52,7 @@ const DEMO_SCRIPT: DemoStep[] = [
     args: {
       path: '.eNCode/demo-note.md',
       content:
-        '# eNCode demo\n\nThis file was written by the offline demo agent.\n\n- Tools run locally against your real workspace.\n- Connect DeepSeek, OpenRouter (free models available) or any OpenAI-compatible endpoint in Settings.\n- Toggle "Auto-approve edits" in the chat header to skip approval prompts.\n',
+        '# eNCode demo\n\nThis file was written by the offline demo agent.\n\n- Tools run locally against your real workspace.\n- Connect DeepSeek, OpenRouter (free models available) or any OpenAI-compatible endpoint in Settings.\n- Choose how much runs without asking from the approval-policy chip in the composer.\n',
     },
   },
   {

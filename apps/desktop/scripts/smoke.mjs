@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const port = process.env.FORGE_DEBUG_PORT || '9222'
+const port = process.env.ENCODE_DEBUG_PORT || '9222'
 const providerPort = 8787
 const demoPath = (process.argv[2] || path.join(root, '..', 'demo-project')).replace(/\\/g, '/')
 const shotsDir = path.join(root, 'screenshots')
@@ -344,7 +344,7 @@ try {
   await send('Runtime.enable')
 
   await waitFor(
-    "!!window.eNCode && !!document.querySelector('.menubar') && !!document.querySelector('.harness-sidebar')",
+    "!!window.eNCode && !!document.querySelector('.menubar') && !!document.querySelector('.session-rail')",
     30000,
     'app shell',
   )
@@ -458,7 +458,7 @@ try {
   await screenshot('06-editor-ts.png')
 
   // Settings modal.
-  if (!(await click('.hs-nav button', 'Plugins'))) throw new Error('Plugins nav entry not found')
+  if (!(await click('.rail-nav button', 'Plugins'))) throw new Error('Plugins nav entry not found')
   await waitFor("!!document.querySelector('.settings-modal')", 8000, 'settings modal')
   await screenshot('07-settings.png')
   await click('.settings-header .icon-btn')

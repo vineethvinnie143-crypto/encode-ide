@@ -27,7 +27,7 @@ export function collectEdits(entries: ConversationEntry[]): EditedFile[] {
   return [...files.values()]
 }
 
-/** Inline "Edited N files" card, mirroring the harness transcript summary. */
+/** Inline "Edited N files" card summarising a turn's file changes. */
 export default function EditSummary({ entries }: { entries: ConversationEntry[] }) {
   const files = useMemo(() => collectEdits(entries), [entries])
   const [expanded, setExpanded] = useState(true)

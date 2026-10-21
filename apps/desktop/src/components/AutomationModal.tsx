@@ -116,7 +116,7 @@ export default function AutomationModal() {
                 </button>
               </div>
             ))}
-            {!schedules.length && <div className="hs-empty">No scheduled tasks.</div>}
+            {!schedules.length && <div className="rail-empty">No scheduled tasks.</div>}
           </div>
         </div>
       </div>

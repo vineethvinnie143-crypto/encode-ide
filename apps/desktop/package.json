@@ -3,8 +3,8 @@
   "productName": "eNCode",
   "version": "0.1.0",
   "private": true,
-  "description": "Forge — an AI-first desktop code editor with an autonomous coding agent.",
-  "author": "Forge",
+  "description": "eNCode — an AI-first desktop IDE with an autonomous coding agent.",
+  "author": "eNCode",
   "license": "MIT",
   "main": "dist/electron/main.cjs",
   "scripts": {

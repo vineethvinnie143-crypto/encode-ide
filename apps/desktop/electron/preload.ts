@@ -3,7 +3,7 @@ import type {
   AgentEvent,
   AgentStartInput,
   BackgroundJob,
-  ForgeApi,
+  EncodeApi,
   PlanRequest,
   SearchOptions,
   SessionGoal,
@@ -25,7 +25,7 @@ function on<T>(channel: string, callback: (payload: T) => void): () => void {
   }
 }
 
-const api: ForgeApi = {
+const api: EncodeApi = {
   app: {
     version: () => invoke('app:version'),
     platform: () => invoke('app:platform'),

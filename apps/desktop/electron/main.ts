@@ -112,7 +112,7 @@ if (!gotLock) {
       agent,
     })
 
-    if (process.env.FORGE_DEVTOOLS === '1') {
+    if (process.env.ENCODE_DEVTOOLS === '1') {
       win.webContents.openDevTools({ mode: 'detach' })
     }
 

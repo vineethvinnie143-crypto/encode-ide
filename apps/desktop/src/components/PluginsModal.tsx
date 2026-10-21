@@ -79,7 +79,7 @@ export default function PluginsModal() {
                 <span className="plugin-badge">{skill.source}</span>
               </div>
             ))}
-            {!skills.length && <div className="hs-empty">No skills yet.</div>}
+            {!skills.length && <div className="rail-empty">No skills yet.</div>}
             <div className="form-actions">
               <button className="btn ghost sm" onClick={() => void createSkill()}>
                 <Plus size={12} /> New skill

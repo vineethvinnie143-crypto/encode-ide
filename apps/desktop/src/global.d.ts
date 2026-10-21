@@ -1,8 +1,8 @@
-import type { ForgeApi } from '@shared/types'
+import type { EncodeApi } from '@shared/types'
 
 declare global {
   interface Window {
-    eNCode: ForgeApi
+    eNCode: EncodeApi
   }
 }
 

@@ -1,5 +1,5 @@
 /* ============================================================
-   Forge — design tokens & global styles
+   eNCode — design tokens & global styles
    ============================================================ */
 
 :root {
@@ -886,7 +886,7 @@ select {
   background: rgba(91, 140, 255, 0.25);
 }
 
-/* Token colours — monochrome plus the blue accent, matching the harness theme */
+/* Token colours — monochrome plus the blue accent */
 .tok-comment {
   color: #6b6b73;
   font-style: italic;
@@ -2856,7 +2856,7 @@ select.text-input:focus {
 }
 
 /* ============================================================
-   Harness layout (DeepSeek-Harness-style shell)
+   App layout: session rail, main column, right rail
    ============================================================ */
 
 .app {
@@ -2984,7 +2984,7 @@ select.text-input:focus {
 }
 
 /* Left rail */
-.harness-sidebar {
+.session-rail {
   width: 280px;
   flex-shrink: 0;
   display: flex;
@@ -2995,14 +2995,14 @@ select.text-input:focus {
   border-right: 1px solid var(--border);
 }
 
-.hs-brand {
+.rail-brand {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 12px 4px 16px;
 }
 
-.hs-logo {
+.rail-logo {
   width: 22px;
   height: 22px;
   border-radius: 6px;
@@ -3014,14 +3014,14 @@ select.text-input:focus {
   place-items: center;
 }
 
-.hs-brand-name {
+.rail-brand-name {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.2px;
   color: #ffffff;
 }
 
-.hs-brand-tag {
+.rail-brand-tag {
   font-size: 8.5px;
   font-weight: 700;
   letter-spacing: 1.1px;
@@ -3032,7 +3032,7 @@ select.text-input:focus {
   margin-left: 2px;
 }
 
-.hs-new-session {
+.rail-new-session {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3046,18 +3046,18 @@ select.text-input:focus {
   font-size: 12.5px;
   font-weight: 600;
 }
-.hs-new-session:hover {
+.rail-new-session:hover {
   background: #1c1c21;
 }
 
-.hs-nav {
+.rail-nav {
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
-.hs-nav button {
+.rail-nav button {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -3067,27 +3067,27 @@ select.text-input:focus {
   font-size: 12.5px;
   text-align: left;
 }
-.hs-nav button:hover {
+.rail-nav button:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.hs-section {
+.rail-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding-top: 12px;
 }
-.hs-workspaces {
+.rail-workspaces {
   flex-shrink: 0;
   max-height: 42%;
 }
-.hs-sessions {
+.rail-sessions {
   flex: 1;
   min-height: 0;
 }
 
-.hs-section-head {
+.rail-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3097,11 +3097,11 @@ select.text-input:focus {
   color: var(--text-muted);
 }
 
-.hs-section-actions {
+.rail-section-actions {
   display: flex;
   gap: 1px;
 }
-.hs-section-actions button {
+.rail-section-actions button {
   width: 20px;
   height: 20px;
   display: grid;
@@ -3109,12 +3109,12 @@ select.text-input:focus {
   border-radius: 4px;
   color: var(--text-muted);
 }
-.hs-section-actions button:hover {
+.rail-section-actions button:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.hs-filter {
+.rail-filter {
   height: 26px;
   margin: 0 6px 6px;
   padding: 0 8px;
@@ -3126,7 +3126,7 @@ select.text-input:focus {
   outline: none;
 }
 
-.hs-list {
+.rail-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -3134,7 +3134,7 @@ select.text-input:focus {
   min-height: 0;
 }
 
-.hs-workspace {
+.rail-workspace {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3144,27 +3144,27 @@ select.text-input:focus {
   font-size: 12.5px;
   text-align: left;
 }
-.hs-workspace:hover {
+.rail-workspace:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
-.hs-workspace.is-active {
+.rail-workspace.is-active {
   background: transparent;
   color: var(--text);
 }
-.hs-workspace-name {
+.rail-workspace-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.hs-empty {
+.rail-empty {
   padding: 6px 8px;
   font-size: 11.5px;
   color: var(--text-muted);
 }
 
-.hs-session {
+.rail-session {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -3174,15 +3174,15 @@ select.text-input:focus {
   text-align: left;
   padding-right: 4px;
 }
-.hs-session:hover {
+.rail-session:hover {
   background: var(--bg-hover);
 }
-.hs-session.is-active {
+.rail-session.is-active {
   background: #18181d;
   border-color: #26262c;
   color: var(--text);
 }
-.hs-session-main {
+.rail-session-main {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -3192,14 +3192,14 @@ select.text-input:focus {
   text-align: left;
   color: inherit;
 }
-.hs-session-actions {
+.rail-session-actions {
   display: none;
   gap: 1px;
 }
-.hs-session:hover .hs-session-actions {
+.rail-session:hover .rail-session-actions {
   display: flex;
 }
-.hs-session-actions button {
+.rail-session-actions button {
   width: 20px;
   height: 20px;
   display: grid;
@@ -3207,11 +3207,11 @@ select.text-input:focus {
   border-radius: 4px;
   color: var(--text-muted);
 }
-.hs-session-actions button:hover {
+.rail-session-actions button:hover {
   background: #26262c;
   color: var(--text);
 }
-.hs-session-title {
+.rail-session-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -3219,30 +3219,30 @@ select.text-input:focus {
   white-space: nowrap;
   font-size: 12.5px;
 }
-.hs-session-dot {
+.rail-session-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   border: 1.5px solid #4a4a52;
   flex-shrink: 0;
 }
-.hs-session-dot.is-busy {
+.rail-session-dot.is-busy {
   border-color: var(--accent);
   animation: pulse 1.4s infinite;
 }
-.hs-session-badge {
+.rail-session-badge {
   font-size: 10px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
-.hs-session-badge.is-answer {
+.rail-session-badge.is-answer {
   color: #9db9ff;
   background: rgba(91, 140, 255, 0.14);
   border-radius: 8px;
   padding: 1px 6px;
 }
 
-.hs-footer {
+.rail-footer {
   position: relative;
   margin-top: auto;
   display: flex;
@@ -3251,7 +3251,7 @@ select.text-input:focus {
   padding: 10px 4px;
   border-top: 1px solid var(--border);
 }
-.hs-profile {
+.rail-profile {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3262,14 +3262,14 @@ select.text-input:focus {
   color: var(--text-dim);
   text-align: left;
 }
-.hs-profile:hover {
+.rail-profile:hover {
   background: var(--bg-hover);
 }
-.hs-profile-chevron {
+.rail-profile-chevron {
   color: var(--text-muted);
   flex-shrink: 0;
 }
-.hs-profile-menu {
+.rail-profile-menu {
   position: absolute;
   bottom: 46px;
   left: 4px;
@@ -3284,7 +3284,7 @@ select.text-input:focus {
   border-radius: 8px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
-.hs-profile-menu button {
+.rail-profile-menu button {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -3294,18 +3294,18 @@ select.text-input:focus {
   font-size: 12px;
   text-align: left;
 }
-.hs-profile-menu button:hover {
+.rail-profile-menu button:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
-.hs-profile {
+.rail-profile {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
   flex: 1;
 }
-.hs-avatar {
+.rail-avatar {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -3317,14 +3317,14 @@ select.text-input:focus {
   place-items: center;
   flex-shrink: 0;
 }
-.hs-username {
+.rail-username {
   font-size: 12px;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hs-settings {
+.rail-settings {
   width: 24px;
   height: 24px;
   display: grid;
@@ -3332,13 +3332,13 @@ select.text-input:focus {
   border-radius: 5px;
   color: var(--text-muted);
 }
-.hs-settings:hover {
+.rail-settings:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
 /* Center */
-.harness-main {
+.app-main {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -4689,7 +4689,7 @@ select.text-input:focus {
   font-size: 12px;
 }
 
-/* DSH-like diff block */
+/* Diff block */
 .diff-view {
   background: #0b0b0e;
   border: 1px solid #232329;
@@ -4714,7 +4714,7 @@ select.text-input:focus {
 }
 
 /* ============================================================
-   Typography — matched to the harness type scale
+   Typography — type scale
    text: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif
    code: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, …
    scale: 20 / 16 / 14 / 13 / 12, content 14px/24px, code 11–12px/19px
@@ -4734,7 +4734,7 @@ body {
 .trajectory-preview,
 .trajectory-detail pre,
 .browser-address input,
-.hs-workspace-name,
+.rail-workspace-name,
 .markdown pre code,
 .markdown code,
 .diff-view {
@@ -4743,11 +4743,11 @@ body {
 
 .menubar-item,
 .menubar-dropdown button,
-.hs-new-session,
-.hs-nav button,
-.hs-workspace,
-.hs-session-title,
-.hs-filter,
+.rail-new-session,
+.rail-nav button,
+.rail-workspace,
+.rail-session-title,
+.rail-filter,
 .main-tabs button,
 .right-tab,
 .chat-empty p,
@@ -4771,7 +4771,7 @@ body {
 .edit-summary-file,
 .trajectory-preview,
 .browser-address input,
-.hs-empty,
+.rail-empty,
 .tool-row-detail,
 .markdown code {
   font-size: 12px;
@@ -4782,8 +4782,8 @@ body {
 .goal-status,
 .editor-footer,
 .chat-meta,
-.hs-section-head,
-.hs-session-badge,
+.rail-section-head,
+.rail-session-badge,
 .attachment-chip,
 .trajectory-index,
 .trajectory-time,
@@ -4819,9 +4819,9 @@ body {
   font-size: 12px;
 }
 
-/* Font surfaces: code font only where the harness uses it */
+/* Font surfaces: code font only for code, numbers and paths */
 .composer-stats, .tool-row-size, .diff-stats, .edit-summary-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.hs-workspace-name, .browser-address input { font-family: var(--font-ui); }
+.rail-workspace-name, .browser-address input { font-family: var(--font-ui); }
 .terminal-lines { font-size: 11px; }
 
 .markdown pre code, .tool-row-output, .approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
@@ -4830,7 +4830,7 @@ body {
 .code-current-line { height: 19px; }
 .term-line { min-height: 19px; }
 
-/* Tool-change card + diff: harness metrics */
+/* Tool-change card + diff metrics */
 .diff-view { border-radius: 8px; border-color: #2a2a30; font-size: 11px; line-height: 16px; }
 .diff-hunk-header { padding: 2px 8px; font-size: 11px; line-height: 16px; background: #141418; }
 .diff-line { padding: 0 8px; line-height: 16px; }
@@ -4838,9 +4838,9 @@ body {
 .tool-row-detail { font-size: 12px; }
 .edit-summary { border-radius: 8px; }
 
-/* Detail pass: harness control typography (strong 500 variants) */
-.session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .hs-new-session, .plugin-badge, .hs-session-badge { font-weight: 500; line-height: 18px; }
-.main-tabs button, .hs-nav button, .hs-workspace, .hs-session-title, .menubar-item, .menubar-dropdown button, .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
+/* Detail pass: control typography (strong 500 variants) */
+.session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .rail-new-session, .plugin-badge, .rail-session-badge { font-weight: 500; line-height: 18px; }
+.main-tabs button, .rail-nav button, .rail-workspace, .rail-session-title, .menubar-item, .menubar-dropdown button, .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
 .tool-row-label { font-weight: 500; }
 
 /* Detail pass: card radii + tight metrics */
@@ -4850,10 +4850,10 @@ body {
 .policy-chip, .model-chip { height: 24px; padding: 0 8px; border-radius: 6px; }
 
 /* eNCode brand mark */
-.hs-logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #6b9bff, #3f6fe0); color: #ffffff; font-weight: 800; font-size: 10px; letter-spacing: -0.3px; }
+.rail-logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #6b9bff, #3f6fe0); color: #ffffff; font-weight: 800; font-size: 10px; letter-spacing: -0.3px; }
 
-/* Meta text uses the UI font with tabular numerals (harness), not the code font */
-.composer-stats, .chat-meta, .hs-session-badge, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+/* Meta text uses the UI font with tabular numerals, not the code font */
+.composer-stats, .chat-meta, .rail-session-badge, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
 .goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: 11px; }
 
 /* Command palette */

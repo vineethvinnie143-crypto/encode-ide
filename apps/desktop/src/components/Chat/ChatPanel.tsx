@@ -71,7 +71,7 @@ export default function ChatPanel() {
           <div className="chat-empty">
             <div className="chat-empty-kicker">
               <Sparkles size={14} />
-              eNCode Harness
+              eNCode
             </div>
             <h2>What are we building?</h2>
             <p>

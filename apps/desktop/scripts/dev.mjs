@@ -14,8 +14,8 @@ let firstBuild = true
 
 function startElectron(url) {
   const args = ['.']
-  if (process.env.FORGE_DEBUG) {
-    args.push(`--remote-debugging-port=${process.env.FORGE_DEBUG_PORT || '9222'}`)
+  if (process.env.ENCODE_DEBUG) {
+    args.push(`--remote-debugging-port=${process.env.ENCODE_DEBUG_PORT || '9222'}`)
   }
   child = spawn(electronPath, args, {
     cwd: root,

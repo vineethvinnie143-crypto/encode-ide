@@ -84,7 +84,7 @@ export default function CommandPalette({
               </div>
             )
           })}
-          {!filtered.length && <div className="hs-empty">No matching commands.</div>}
+          {!filtered.length && <div className="rail-empty">No matching commands.</div>}
         </div>
       </div>
     </div>

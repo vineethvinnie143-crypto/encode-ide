@@ -1,13 +1,14 @@
-# eNCode Harness
+# eNCode
 
-An agent-first desktop coding harness — built from scratch, not a VS Code fork.
+An AI-first desktop IDE with an autonomous coding agent — built from scratch, not a VS Code
+fork.
 
-Forge combines a DeepSeek-Harness-style interface (sessions rail, conversation with a
-tool timeline, composer, browser/workspace rail) with a hand-written editor, shell
-interpreter, terminal emulator and autonomous coding agent. It does not embed VS Code,
-Monaco, xterm.js, node-pty or the `diff` package.
+eNCode pairs an agent-first interface (sessions rail, conversation with a tool timeline,
+composer, browser/workspace rail) with a hand-written editor, shell interpreter, terminal
+emulator and coding agent. It does not embed VS Code, Monaco, xterm.js, node-pty or the
+`diff` package.
 
-![eNCode Harness](docs/images/harness.png)
+![eNCode](docs/images/overview.png)
 
 | Conversation | Workspace editor |
 | --- | --- |
@@ -15,13 +16,13 @@ Monaco, xterm.js, node-pty or the `diff` package.
 
 ## Highlights
 
-- **Harness UI** — full-width menu bar with Application/Edit menus and custom window
+- **Agent-first UI** — full-width menu bar with Application/Edit menus and custom window
   controls, a monochrome palette with a single blue accent, a sessions/workspaces rail, a
-  session header with mode and job chips, **Chat / Trajectory** views, a DSH-style composer
-  with approval policy and model chips, and a **Browse / Workspace** right rail.
+  session header with mode and job chips, **Chat / Trajectory** views, a composer with
+  approval policy and model chips, and a **Browse / Workspace** right rail.
 - **Real sessions** — each session owns its own conversation, transcript and agent context.
   Create, switch, fork and delete sessions from the rail; every conversation is persisted to
-  `userData/forge-sessions.json` and restored on launch, with the active session remembered.
+  `userData/eNCode-sessions.json` and restored on launch, with the active session remembered.
 - **Hand-written shell** — tokenizer, statement/pipeline parser, quoting, redirection
   (`>`, `>>`), `;`/`&&`/`||`, built-ins (`ls`, `cd`, `cat`, `echo`, `mkdir`, `rm`, `cp`,
   `mv`, `head`, `tail`, `wc`, `which`, `env`, `set`, …) and external program execution
@@ -56,7 +57,7 @@ Monaco, xterm.js, node-pty or the `diff` package.
 | Markdown rendering | hand-written (`src/markdown.ts`) |
 | State store | hand-written external store (`src/store.ts`) |
 | Agent, tools, prompt, provider | hand-written (`electron/agent/**`) |
-| Harness UI | hand-written components (`src/components/**`) |
+| App UI | hand-written components (`src/components/**`) |
 | Filesystem, search, git, settings, IPC | hand-written (`electron/services/**`, `electron/ipc.ts`) |
 | Runtime | **Electron / Chromium / Node** — the platform boundary |
 | Build toolchain | Vite, esbuild, TypeScript |
@@ -99,10 +100,10 @@ you can try approvals, diffs and the eNCode Shell immediately.
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 
 Endpoints must implement `POST {baseUrl}/chat/completions` with streaming SSE and OpenAI
-tool calling. Forge retries once without streaming if a provider rejects it. Keys are
+tool calling. eNCode retries once without streaming if a provider rejects it. Keys are
 encrypted with Electron `safeStorage` (DPAPI on Windows) when available.
 
-## Using the harness
+## Using eNCode
 
 - **Chat** shows the live transcript; **Trajectory** shows every step with tool input and
   output.
@@ -178,7 +179,7 @@ src/
   editor/tokenize.ts  dependency-free tokenizer
   terminal/buffer.ts  ANSI screen buffer
   components/CodeEditor.tsx  hand-built editor engine
-  components/AppMenuBar.tsx / HarnessSidebar.tsx / SessionHeader.tsx / RightPanel.tsx
+  components/AppMenuBar.tsx / SessionRail.tsx / SessionHeader.tsx / RightPanel.tsx
   components/Chat/*   transcript, flat tool rows, diffs, approvals, composer
   stores/*            store modules built on src/store.ts
 ```
@@ -207,39 +208,39 @@ src/
 ## Development and testing
 
 ```bash
-npm run typecheck   # renderer + main projects
-npm run build       # Vite renderer + esbuild main/preload
-npm run dev         # HMR renderer, auto-restarting Electron
+pnpm typecheck      # every package (renderer + main projects for the desktop app)
+pnpm build          # Vite renderer + esbuild main/preload
+pnpm dev            # HMR renderer, auto-restarting Electron
 ```
 
 The end-to-end smoke test drives the real UI over the Chrome DevTools Protocol:
 
 ```bash
 # terminal 1
-npm start -- --remote-debugging-port=9222
+pnpm start -- --remote-debugging-port=9222
 # terminal 2
-npm run smoke -- ..\demo-project
+pnpm --filter @encode/desktop smoke ..\demo-project
 ```
 
-It verifies the harness shell, editor overlay text integrity, save round-trips, find,
+It verifies the app shell, editor overlay text integrity, save round-trips, find,
 quick open, tokenization, the offline demo agent, the eNCode Shell, and — with
 `scripts/fake-provider.mjs` — the real streaming provider path including two approval
 prompts, a rendered diff and shell execution. Screenshots are written to `screenshots/`.
 
 `node scripts/fake-provider.mjs` runs standalone on `http://127.0.0.1:8787/v1`
-(model `mock-model`) if you want to try Forge without an API key.
+(model `mock-model`) if you want to try eNCode without an API key.
 
 ## Packaging
 
 ```bash
-npm run dist        # -> release/Forge-<version>-portable.exe
+pnpm dist           # -> apps/desktop/release/eNCode-<version>-portable.exe
 ```
 
 `electron-builder.yml` currently defines Windows portable, macOS dmg and Linux AppImage
 targets. Replacing electron-builder with a custom launcher/zip distribution is part of the
 remaining from-scratch migration. Builds are unsigned unless you configure a certificate.
 
-## Harness feature parity
+## Feature status
 
 Implemented:
 

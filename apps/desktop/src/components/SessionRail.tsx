@@ -7,7 +7,7 @@ import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
 
-export default function HarnessSidebar() {
+export default function SessionRail() {
   const workspace = useWorkspace((state) => state.workspace)
   const openDialog = useWorkspace((state) => state.openDialog)
   const openPath = useWorkspace((state) => state.openPath)
@@ -61,19 +61,19 @@ export default function HarnessSidebar() {
   const badge = awaiting ? 'Answer' : busy ? 'Working' : status === 'error' ? 'Error' : 'now'
 
   return (
-    <aside className="harness-sidebar">
-      <div className="hs-brand">
-        <span className="hs-logo">eN</span>
-        <span className="hs-brand-name">eNCode</span>
-        <span className="hs-brand-tag">HARNESS</span>
+    <aside className="session-rail">
+      <div className="rail-brand">
+        <span className="rail-logo">eN</span>
+        <span className="rail-brand-name">eNCode</span>
+        <span className="rail-brand-tag">IDE</span>
       </div>
 
-      <button className="hs-new-session" onClick={newSession}>
+      <button className="rail-new-session" onClick={newSession}>
         <Plus size={15} />
         New Session
       </button>
 
-      <nav className="hs-nav">
+      <nav className="rail-nav">
         <button onClick={() => setPluginsOpen(true)}>
           <Puzzle size={15} /> Plugins
         </button>
@@ -82,10 +82,10 @@ export default function HarnessSidebar() {
         </button>
       </nav>
 
-      <div className="hs-section hs-workspaces">
-        <div className="hs-section-head">
+      <div className="rail-section rail-workspaces">
+        <div className="rail-section-head">
           <span>Workspaces</span>
-          <span className="hs-section-actions">
+          <span className="rail-section-actions">
             <button title="Search workspaces" onClick={() => setSearchOpen((value) => !value)}>
               <Search size={13} />
             </button>
@@ -106,7 +106,7 @@ export default function HarnessSidebar() {
 
         {searchOpen && (
           <input
-            className="hs-filter"
+            className="rail-filter"
             autoFocus
             placeholder="Filter workspaces"
             value={query}
@@ -117,37 +117,37 @@ export default function HarnessSidebar() {
           />
         )}
 
-        <div className="hs-list">
+        <div className="rail-list">
           {workspaces.map((item) => (
             <button
               key={item.root}
-              className={`hs-workspace ${workspace?.root === item.root ? 'is-active' : ''}`}
+              className={`rail-workspace ${workspace?.root === item.root ? 'is-active' : ''}`}
               title={item.root}
               onClick={() => void openPath(item.root)}
             >
               {workspace?.root === item.root ? <FolderOpen size={14} /> : <Folder size={14} />}
-              <span className="hs-workspace-name">{item.name}</span>
+              <span className="rail-workspace-name">{item.name}</span>
             </button>
           ))}
-          {workspaces.length === 0 && <div className="hs-empty">No workspace open</div>}
+          {workspaces.length === 0 && <div className="rail-empty">No workspace open</div>}
         </div>
       </div>
 
-      <div className="hs-section hs-sessions">
-        <div className="hs-section-head">
+      <div className="rail-section rail-sessions">
+        <div className="rail-section-head">
           <span>Sessions</span>
         </div>
-        <div className="hs-list">
+        <div className="rail-list">
           {sessions.map((session) => (
-            <div key={session.id} className={`hs-session ${session.id === activeId ? 'is-active' : ''}`}>
-              <button className="hs-session-main" onClick={() => void selectSession(session.id)}>
-                <span className={`hs-session-dot ${session.id === activeId && busy ? 'is-busy' : ''}`} />
-                <span className="hs-session-title">{session.title}</span>
+            <div key={session.id} className={`rail-session ${session.id === activeId ? 'is-active' : ''}`}>
+              <button className="rail-session-main" onClick={() => void selectSession(session.id)}>
+                <span className={`rail-session-dot ${session.id === activeId && busy ? 'is-busy' : ''}`} />
+                <span className="rail-session-title">{session.title}</span>
                 {session.id === activeId && (
-                  <span className={`hs-session-badge ${awaiting ? 'is-answer' : ''}`}>{badge}</span>
+                  <span className={`rail-session-badge ${awaiting ? 'is-answer' : ''}`}>{badge}</span>
                 )}
               </button>
-              <span className="hs-session-actions">
+              <span className="rail-session-actions">
                 <button title="Fork session" onClick={() => void forkSession(session.id)}>
                   <GitFork size={11} />
                 </button>
@@ -160,14 +160,14 @@ export default function HarnessSidebar() {
         </div>
       </div>
 
-      <div className="hs-footer" ref={profileRef}>
-        <button className="hs-profile" onClick={() => setProfileOpen((value) => !value)}>
-          <span className="hs-avatar">{user.slice(0, 1).toUpperCase()}</span>
-          <span className="hs-username">{user}</span>
-          <ChevronDown size={13} className="hs-profile-chevron" />
+      <div className="rail-footer" ref={profileRef}>
+        <button className="rail-profile" onClick={() => setProfileOpen((value) => !value)}>
+          <span className="rail-avatar">{user.slice(0, 1).toUpperCase()}</span>
+          <span className="rail-username">{user}</span>
+          <ChevronDown size={13} className="rail-profile-chevron" />
         </button>
         {profileOpen && (
-          <div className="hs-profile-menu">
+          <div className="rail-profile-menu">
             <button onClick={() => { setProfileOpen(false); openSettings('models') }}>
               <Settings size={13} /> Settings…
             </button>
