@@ -23,6 +23,9 @@ say so.
 | [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |
 | [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |
 | [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |
+| [0030](0030-the-agent-runs-in-a-host-that-clients-drive.md) | The agent runs in a host that clients drive over a message port | Accepted |
+| [0031](0031-sessions-are-append-only-logs.md) | Sessions are append-only logs | Accepted |
+| [0032](0032-claude-code-tool-contracts-and-reminders.md) | Claude Code's tool contracts, and reminders instead of a changing prompt | Accepted |
 
 ## Template
 
