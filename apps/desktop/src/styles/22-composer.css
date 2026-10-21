@@ -78,6 +78,7 @@
   margin-left: -6px;
 }
 .composer-plus {
+  flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
 }
@@ -90,7 +91,12 @@
   height: 28px;
   font-size: var(--fs-12);
 }
+.policy-chip {
+  flex-shrink: 0;
+}
+/* A narrow thread (a wide side panel beside it) shortens the model name instead of pushing Send out. */
 .model-chip {
+  min-width: 0;
   max-width: 260px;
 }
 

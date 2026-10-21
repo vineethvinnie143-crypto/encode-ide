@@ -1,0 +1,231 @@
+/* ============================================================
+   Work area: the thread and the side panel side by side, the
+   bottom panel under both. Tabs live in the shared strip.
+   ============================================================ */
+
+.workarea {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workrow {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 120px;
+  display: flex;
+}
+
+/* A full-width side panel covers the thread; the thread stays mounted so a draft in the composer survives. */
+.app-main.is-covered {
+  display: none;
+}
+
+/* ---------- Side panel ---------- */
+
+.right-wrap {
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+  /* A width saved on a bigger window cannot cover the thread. */
+  max-width: 60%;
+  display: flex;
+}
+.right-wrap.is-full {
+  flex: 1 1 0;
+  max-width: none;
+}
+.right-wrap.is-hidden {
+  display: none;
+}
+
+.side-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  border-left: 1px solid var(--border-subtle);
+}
+.side-panel[data-layout='full'] {
+  border-left: 0;
+}
+
+/* Below 1100 px the side panel floats over the thread instead of pushing it. */
+@media (max-width: 1099px) {
+  .right-wrap:not(.is-full):not(.is-hidden) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow-pop);
+  }
+}
+
+/* ---------- Tab strip ---------- */
+
+.panel-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--canvas);
+}
+.panel-strip.is-compact {
+  height: 34px;
+}
+
+.panel-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+.panel-tablist {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel-tab {
+  position: relative;
+  /* As wide as its title, up to 170 px; more tabs share the strip. */
+  flex: 0 1 auto;
+  min-width: 72px;
+  max-width: 170px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-8);
+  color: var(--text-3);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.is-compact .panel-tab {
+  height: 26px;
+}
+.panel-tab:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+.panel-tab.is-active {
+  background: var(--surface-2);
+  color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.panel-tab-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 9px;
+  border-radius: inherit;
+  font-size: var(--fs-12);
+  text-align: left;
+}
+.panel-tab-main svg {
+  flex: none;
+}
+.panel-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-tab-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-6);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+.panel-tab:hover .panel-tab-close,
+.panel-tab.is-active .panel-tab-close,
+.panel-tab-close:focus-visible {
+  opacity: 1;
+}
+.panel-tab-close:hover {
+  background: var(--pressed);
+  color: var(--text-1);
+}
+
+.panel-strip-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ---------- Pages ---------- */
+
+.panel-panes {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Every tab's page stays mounted; only the one in front shows. */
+.panel-pane {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.panel-pane.is-active {
+  display: flex;
+}
+.panel-pane > .terminal-panel {
+  flex: 1;
+  height: auto;
+}
+
+/* ---------- Bottom panel ---------- */
+
+.bottom-panel {
+  position: relative;
+  flex: none;
+  min-height: 0;
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  border-top: 1px solid var(--border-subtle);
+}
+.bottom-panel.is-closed {
+  display: none;
+}
+/* The drag handle sits on the top edge without taking space. */
+.bottom-panel > .resizer-h {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+}
