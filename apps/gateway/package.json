@@ -1,0 +1,24 @@
+{
+  "name": "@encode/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "eNCode's free-tier gateway on Cloudflare Workers: GitHub sign-in, quotas and a :free-only proxy to OpenRouter.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "test:workers": "node scripts/workers-e2e.mjs"
+  },
+  "dependencies": {
+    "@encode/gateway-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@encode/accounts": "workspace:*",
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "wrangler": "4.151.3"
+  }
+}

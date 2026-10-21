@@ -1,0 +1,15 @@
+# Local development only. Copy to .dev.vars (git-ignored) and run
+# `node scripts/fake-upstream.mjs` beside `pnpm dev`: the gateway then talks to
+# fake OpenRouter and GitHub endpoints on 127.0.0.1:8790 and needs no account
+# anywhere. These values are placeholders; real secrets go in with
+# `wrangler secret put` and never into a file.
+ENVIRONMENT=development
+OPENROUTER_API_KEY=sk-or-local-placeholder
+GATEWAY_SECRET=local-development-secret-not-for-production-0001
+ADMIN_TOKEN=local-development-admin-token-not-for-production
+GITHUB_CLIENT_ID=Iv1.localdevclient
+SIGNUP_MODE=open
+MIN_GITHUB_ACCOUNT_AGE_DAYS=0
+OPENROUTER_BASE_URL=http://127.0.0.1:8790/api/v1
+GITHUB_BASE_URL=http://127.0.0.1:8790
+GITHUB_API_BASE_URL=http://127.0.0.1:8790
