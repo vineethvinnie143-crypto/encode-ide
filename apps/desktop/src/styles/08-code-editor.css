@@ -94,67 +94,67 @@
 }
 
 .code-input::selection {
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  background: var(--enc-editor-selection-bg);
 }
 
-/* Token colours — monochrome plus the blue accent */
+/* Token colours, from the editor variables in theme/editor-terminal.css */
 .tok-comment {
-  color: var(--text-3);
+  color: var(--enc-tok-comment);
   font-style: italic;
 }
 .tok-string {
-  color: var(--text-2);
+  color: var(--enc-tok-string);
 }
 .tok-number {
-  color: var(--text-2);
+  color: var(--enc-tok-number);
 }
 .tok-keyword {
-  color: var(--accent);
+  color: var(--enc-tok-keyword);
 }
 .tok-type {
-  color: var(--accent);
+  color: var(--enc-tok-type);
 }
 .tok-function {
-  color: var(--text-1);
+  color: var(--enc-tok-function);
 }
 .tok-bool {
-  color: var(--accent);
+  color: var(--enc-tok-bool);
 }
 .tok-punct {
-  color: var(--text-3);
+  color: var(--enc-tok-punct);
 }
 .tok-operator {
-  color: var(--text-3);
+  color: var(--enc-tok-operator);
 }
 .tok-tag {
-  color: var(--accent);
+  color: var(--enc-tok-tag);
 }
 .tok-attr {
-  color: var(--text-2);
+  color: var(--enc-tok-attr);
 }
 .tok-value {
-  color: var(--text-2);
+  color: var(--enc-tok-value);
 }
 .tok-key {
-  color: var(--accent);
+  color: var(--enc-tok-key);
 }
 .tok-heading {
-  color: var(--text-1);
+  color: var(--enc-tok-heading);
   font-weight: 700;
 }
 .tok-emphasis {
-  color: var(--text-1);
+  color: var(--enc-tok-emphasis);
   font-style: italic;
 }
 .tok-variable {
-  color: var(--text-2);
+  color: var(--enc-tok-variable);
 }
 .tok-link {
-  color: var(--accent);
+  color: var(--enc-tok-link);
   text-decoration: underline;
 }
 .tok-meta {
-  color: var(--text-3);
+  color: var(--enc-tok-meta);
 }
 
 /* In-file find bar */
