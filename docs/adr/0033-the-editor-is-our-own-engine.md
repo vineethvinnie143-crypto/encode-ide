@@ -1,4 +1,4 @@
-# 0030. The editor is our own engine: text model, core and view
+# 0033. The editor is our own engine: text model, core and view
 
 - Status: Accepted
 - Date: 2026-10-21

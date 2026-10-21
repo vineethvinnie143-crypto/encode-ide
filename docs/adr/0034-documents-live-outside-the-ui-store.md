@@ -1,4 +1,4 @@
-# 0031. Open documents live outside the UI store, and "unsaved" is derived from the text
+# 0034. Open documents live outside the UI store, and "unsaved" is derived from the text
 
 - Status: Accepted
 - Date: 2026-10-21

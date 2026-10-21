@@ -1055,7 +1055,23 @@ try {
   await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
   await screenshot('06b-editor-menu.png')
   await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
-    console.log('[smoke] focus is on:', await evaluate("(() => { const a = document.activeElement; return a ? a.tagName + '.' + a.className : 'nothing' })()"))
+    console.log(
+      '[smoke] focus is on:',
+      await evaluate(`(() => {
+        const describe = (el) => (el ? el.tagName + '.' + el.className : 'nothing')
+        const menu = document.querySelector('[role=menu]')
+        const before = describe(document.activeElement)
+        menu?.focus({ preventScroll: true })
+        return JSON.stringify({
+          before,
+          afterManualFocus: describe(document.activeElement),
+          visibility: menu && getComputedStyle(menu).visibility,
+          box: menu && JSON.stringify(menu.getBoundingClientRect()),
+          hasFocus: document.hasFocus(),
+          visible: document.visibilityState,
+        })
+      })()`),
+    )
     throw error
   })
   await pressKey('Escape')
