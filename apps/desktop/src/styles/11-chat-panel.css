@@ -446,81 +446,8 @@
   font-style: italic;
 }
 
-/* Approval / ask */
-.approval-card {
-  margin: 0 10px 8px;
-  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
-  background: color-mix(in srgb, var(--warning) 6%, transparent);
-  border-radius: 8px;
-  padding: 9px 10px;
-  flex-shrink: 0;
-}
-
-.approval-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--warning);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.approval-detail {
-  margin: 6px 0 8px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-1);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 120px;
-  overflow: auto;
-}
-
-.approval-preview {
-  margin: 6px 0 9px;
-  max-height: 170px;
-  overflow: auto;
-}
-
 .approval-preview .diff-view {
   max-height: 160px;
-}
-
-.approval-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.ask-card {
-  margin: 0 10px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  border-radius: 8px;
-  padding: 9px 10px;
-  flex-shrink: 0;
-}
-
-.ask-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.ask-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.ask-hint {
-  color: var(--text-3);
-  font-size: 10.5px;
-  margin-top: 7px;
 }
 
 .chat-running {
@@ -567,34 +494,6 @@
   gap: 6px;
 }
 
-.composer-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.attachment-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  color: var(--text-1);
-  background: var(--pressed);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 2px 7px;
-  max-width: 100%;
-}
-
-.chip-remove {
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-}
-.chip-remove:hover {
-  color: var(--danger);
-}
-
 .composer-box {
   display: flex;
   align-items: flex-end;
@@ -622,41 +521,6 @@
 .composer-attach:hover {
   background: var(--hover);
   color: var(--text-1);
-}
-
-.composer-input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  resize: none;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--text-1);
-  max-height: 190px;
-  min-height: 20px;
-  padding: 4px 0;
-}
-.composer-input::placeholder {
-  color: var(--text-3);
-}
-
-.composer-send {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--accent-fill);
-  color: var(--on-accent);
-  flex-shrink: 0;
-}
-.composer-send:hover {
-  filter: brightness(1.08);
-}
-.composer-send:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 .composer-send.stop {
   background: var(--border-strong);

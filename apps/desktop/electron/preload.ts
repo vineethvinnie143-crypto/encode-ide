@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AgentEvent,
+  ApprovalAnswer,
   AgentStartInput,
   BackgroundJob,
   EncodeApi,
@@ -122,7 +123,7 @@ const api: EncodeApi = {
     export: (sessionId: string, targetPath?: string) => invoke('agent:export', sessionId, targetPath),
     plan: (sessionId: string) => invoke('agent:plan', sessionId),
     setPlan: (sessionId: string, plan: PlanRequest | null) => invoke('agent:set-plan', sessionId, plan),
-    approve: (requestId: string, approved: boolean) => invoke('agent:approve', requestId, approved),
+    approve: (requestId: string, answer: boolean | ApprovalAnswer) => invoke('agent:approve', requestId, answer),
     answer: (requestId: string, answer: string) => invoke('agent:answer', requestId, answer),
     onEvent: (callback) => on<AgentEvent>('agent:event', callback),
   },
