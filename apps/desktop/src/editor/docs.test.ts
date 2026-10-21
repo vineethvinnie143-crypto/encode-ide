@@ -12,6 +12,7 @@ import {
   eolOf,
   isDirty,
   markSaved,
+  matchesSaved,
   openDoc,
   recordState,
   renameDocs,
@@ -136,6 +137,34 @@ describe('changes from outside', () => {
 
   it('on a document that is not open do nothing', () => {
     assert.equal(applyExternal('/work/other.ts', 'x'), false)
+  })
+})
+
+describe('whether the file is still the one that was read', () => {
+  it('compares the file with the text last read or written, whatever its line endings', () => {
+    openDoc(path, 'one\r\ntwo\r\n')
+    assert.equal(matchesSaved(path, 'one\r\ntwo\r\n'), true)
+    assert.equal(matchesSaved(path, 'one\ntwo\n'), true, 'line endings are not content')
+    assert.equal(matchesSaved(path, 'one\r\ntwo\r\nthree\r\n'), false)
+    assert.equal(matchesSaved(path, ''), false)
+  })
+
+  it('follows what a save wrote and what a reload brought in, not what has been typed', () => {
+    const view = host(openDoc(path, 'one'))
+    attach(path, view)
+    view.dispatch(view.state.update({ changes: { from: 3, insert: '!' }, origin: 'input.type' }))
+    assert.equal(matchesSaved(path, 'one'), true, 'typing does not change what the file is expected to hold')
+    assert.equal(matchesSaved(path, 'one!'), false)
+    markSaved(path, snapshotForSave(path)!)
+    assert.equal(matchesSaved(path, 'one!'), true)
+    assert.equal(matchesSaved(path, 'one'), false)
+    applyExternal(path, 'one!\ntwo')
+    assert.equal(matchesSaved(path, 'one!\ntwo'), true)
+    attach(path, null)
+  })
+
+  it('has nothing to say about a document that is not open', () => {
+    assert.equal(matchesSaved('/work/other.ts', 'x'), true)
   })
 })
 

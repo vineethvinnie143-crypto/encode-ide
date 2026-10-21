@@ -1,6 +1,6 @@
 import { create } from '../store'
 import { api } from '../api'
-import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
+import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, matchesSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
 
 export interface Tab {
@@ -192,11 +192,36 @@ export const useEditor = create<EditorStore>((set, get) => ({
   consumeRevealLine: () => set({ revealLine: null }),
 }))
 
+/**
+ * A file that someone else changed since eNCode read it (the agent, a formatter, git) is
+ * not overwritten unasked. A file that is gone or cannot be read is written as before.
+ * The check and the write are two steps, so a change in between still wins.
+ */
+async function confirmOverwrite(tab: Tab): Promise<boolean> {
+  let content: string
+  try {
+    const file = await api.workspace.read(tab.path)
+    if (!file.binary && matchesSaved(tab.path, file.content)) return true
+    content = file.binary ? '' : file.content
+  } catch {
+    return true
+  }
+  return useUi.getState().askConfirm({
+    title: `${tab.name} changed on disk`,
+    body: content
+      ? 'Saving replaces the version on disk with yours. Cancel keeps your changes unsaved, so you can copy them out or compare first.'
+      : 'The file on disk is no longer text. Saving replaces it with yours.',
+    confirmLabel: 'Overwrite',
+    danger: true,
+  })
+}
+
 async function save(tab: Tab): Promise<void> {
   if (!isDirty(tab.path)) return
   const snapshot = snapshotForSave(tab.path)
   if (!snapshot) return
   try {
+    if (!(await confirmOverwrite(tab))) return
     await api.workspace.write(tab.path, snapshot.text)
     markSaved(tab.path, snapshot)
     // Typing may have gone on while the file was written.

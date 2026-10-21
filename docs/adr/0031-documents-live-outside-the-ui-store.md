@@ -30,7 +30,10 @@ indentation for the status bar.
   transaction.
 - **Saves** take a snapshot (text as written, document, point) when they start, and mark
   exactly that snapshot saved once the write succeeds. Typing during the write stays
-  unsaved. The text is written with the line ending the file had.
+  unsaved. The text is written with the line ending the file had. Before writing, a save
+  reads the file and compares it with the text last read or written there; if someone else
+  changed it, the save asks (Overwrite or Cancel) and Cancel leaves the changes unsaved.
+  A file that is gone or unreadable is written as before.
 - **Changes on disk** are applied only to a document with no unsaved changes, through the
   view that shows it, as a line diff with its own history group. The cursor and scroll stay,
   the new text becomes the saved text before the view hears about it (so it is never
@@ -50,8 +53,9 @@ indentation for the status bar.
 - Typing does not touch the UI store except when the unsaved flag changes.
 - Undo history survives tab switches and the panel being hidden, for as long as the tab is
   open. Memory is bounded by the open tabs.
-- A change on disk while a document has unsaved changes is neither shown nor merged: the next
-  save overwrites it. A conflict prompt is the follow-up
-  ([threat model](../security/threat-model.md), ER2).
+- A change on disk while a document has unsaved changes is neither shown nor merged. The save
+  asks before it overwrites, but the prompt carries no comparison, and the check and the write
+  are two steps ([threat model](../security/threat-model.md), ER3). A compare view is the
+  follow-up.
 - The agent's edits (M1) reach the editor the same way, as `applyExternal` for a clean
   document, and will feed the review baseline.

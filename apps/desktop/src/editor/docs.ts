@@ -127,6 +127,12 @@ export function isDirty(path: string): boolean {
   return entry ? differs(entry) : false
 }
 
+/** Whether `content`, as read from disk just now, is what the document last read or wrote there: nobody else has changed the file since. */
+export function matchesSaved(path: string, content: string): boolean {
+  const entry = docs.get(path)
+  return entry ? Text.of(normalize(content)).eq(entry.saved) : true
+}
+
 /** The document as one save reads it: the text to write, and what "saved" will mean once the write has succeeded. */
 export interface Snapshot {
   text: string

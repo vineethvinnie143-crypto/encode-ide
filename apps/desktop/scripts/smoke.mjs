@@ -1041,6 +1041,9 @@ try {
   await sleep(150)
   await pressKey('Enter')
   await waitFor("(document.querySelector('.editor-footer')?.textContent ?? '').includes('Ln 5, Col 3')", 6000, 'cursor moved by go to line')
+  // A closed dialog gives focus back to where it was a moment later; a menu opened before that would lose it again.
+  await waitFor("!document.querySelector('.prompt-dialog') && document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor')
+  await sleep(400)
 
   // Right-click opens the editor's own menu.
   await evaluate(`(() => {
@@ -1051,16 +1054,10 @@ try {
   })()`)
   await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
   await screenshot('06b-editor-menu.png')
-  const menuFocus = await evaluate(`(() => {
-    const active = document.activeElement
-    return {
-      inMenu: Boolean(active?.closest('[role=menu]')),
-      active: active ? active.tagName + '.' + active.className : null,
-      pageFocused: document.hasFocus(),
-      menus: [...document.querySelectorAll('[role=menu]')].map((menu) => menu.getAttribute('aria-label')),
-    }
-  })()`)
-  console.log('[smoke] editor menu focus:', JSON.stringify(menuFocus))
+  await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
+    console.log('[smoke] focus is on:', await evaluate("(() => { const a = document.activeElement; return a ? a.tagName + '.' + a.className : 'nothing' })()"))
+    throw error
+  })
   await pressKey('Escape')
   await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed')
 
@@ -1093,6 +1090,34 @@ try {
   if (!(await evaluate("!!document.querySelector('.editor-tab.is-dirty')"))) throw new Error('Cancel threw the changes away')
   await pressKey('z', { ctrl: true })
   await waitFor("!document.querySelector('.editor-tab.is-dirty')", 4000, 'undo back to the saved text')
+
+  // A file that someone else changed since it was read is not overwritten unasked.
+  const readDisk = () => evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  await focusEditor()
+  await send('Input.insertText', { text: 'mine ' })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'unsaved mark before the overwrite check')
+  await evaluate(`window.eNCode.workspace.write('README.md', ${JSON.stringify(`${readme}\nTheirs.\n`)})`)
+  await pressKey('s', { ctrl: true })
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'overwrite prompt')
+  await screenshot('06d-overwrite.png')
+  await click('.ui-dialog-foot button', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'overwrite prompt closed')
+  const afterCancel = await readDisk()
+  if (!afterCancel.includes('Theirs.') || afterCancel.includes('mine ')) throw new Error('Cancel still wrote the file')
+  if (!(await evaluate("!!document.querySelector('.editor-tab.is-dirty')"))) throw new Error('Cancel marked the document as saved')
+  await pressKey('s', { ctrl: true })
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'overwrite prompt again')
+  await click('.ui-dialog-foot button', 'Overwrite')
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, 'saved after Overwrite')
+  const afterOverwrite = await readDisk()
+  if (!afterOverwrite.includes('mine ') || afterOverwrite.includes('Theirs.')) throw new Error('Overwrite did not write the typed version')
+  // Back through the editor: the file is what the editor wrote last, so saving asks nothing.
+  await pressKey('z', { ctrl: true })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'undo makes the document differ from the file')
+  await pressKey('s', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, 'saved without a prompt')
+  if (await evaluate("!!document.querySelector('.ui-dialog')")) throw new Error('a file the editor wrote last was reported as changed')
+  if ((await readDisk()) !== readme) throw new Error('the file was not put back')
 
   // Settings modal.
   if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
