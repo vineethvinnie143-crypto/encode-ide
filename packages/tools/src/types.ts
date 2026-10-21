@@ -183,6 +183,8 @@ export interface ShellResult {
   interrupted: boolean
   /** The directory the command ended in; the next command starts there. */
   cwd: string
+  /** Something the model should know, such as the directory being reset to the workspace root. */
+  notice?: string
 }
 
 export interface AgentShell {
