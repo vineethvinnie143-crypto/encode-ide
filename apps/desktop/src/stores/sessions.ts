@@ -182,6 +182,8 @@ export const useSessions = create<SessionsStore>((set, get) => {
       if (!id) return
       if (event.type === 'status') useStatus.getState().set(id, event.status)
       if (event.type === 'session-reset') useStatus.getState().set(id, 'idle')
+      // The agent is free again: the next message you queued goes out.
+      if (event.type === 'done') useChat.getState().drainQueue(id)
       if (event.type === 'done' || event.type === 'error') {
         // A session that finishes while you are elsewhere is marked unread.
         if (id !== get().activeId && get().sessions.some((session) => session.id === id && !session.unread)) {

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, MessageCircleQuestion, ShieldAlert } from '../../ui/icons'
+import { ArrowDown, MessageCircleQuestion } from '../../ui/icons'
 import { useChat } from '../../stores/chat'
 import { useSessions } from '../../stores/sessions'
 import { useWorkspace } from '../../stores/workspace'
 import { LogoMark } from '../../ui/Logo'
+import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
-import DiffView from './DiffView'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
@@ -26,9 +26,7 @@ export default function ChatPanel() {
   const entries = useChat((state) => state.entries)
   const status = useChat((state) => state.status)
   const running = useChat((state) => state.running)
-  const approval = useChat((state) => state.approval)
   const ask = useChat((state) => state.ask)
-  const approve = useChat((state) => state.approve)
   const answer = useChat((state) => state.answer)
   const setDraft = useChat((state) => state.setDraft)
   const workspace = useWorkspace((state) => state.workspace)
@@ -72,10 +70,6 @@ export default function ChatPanel() {
 
   return (
     <div className="chat-panel" data-status={status}>
-      <GoalCard />
-      <TodoCard />
-      <PlanCard />
-
       <div className="chat-scroll">
         <div
           className="chat-list"
@@ -141,29 +135,7 @@ export default function ChatPanel() {
         )}
       </div>
 
-      {approval && (
-        <div className="approval-card">
-          <div className="approval-head">
-            <ShieldAlert size={14} />
-            <span>{approval.title}</span>
-          </div>
-          {approval.reason && <div className="approval-reason">{approval.reason}</div>}
-          <pre className="approval-detail">{approval.detail}</pre>
-          {approval.preview && approval.preview.length > 0 && (
-            <div className="approval-preview">
-              <DiffView diff={approval.preview} />
-            </div>
-          )}
-          <div className="approval-actions">
-            <button className="btn primary sm" onClick={() => void approve(true)}>
-              Approve
-            </button>
-            <button className="btn ghost sm" onClick={() => void approve(false)}>
-              Deny
-            </button>
-          </div>
-        </div>
-      )}
+      <ApprovalCard />
 
       {ask && (
         <div className="ask-card">
@@ -185,6 +157,9 @@ export default function ChatPanel() {
         </div>
       )}
 
+      <GoalCard />
+      <TodoCard />
+      <PlanCard />
       <Composer />
     </div>
   )
