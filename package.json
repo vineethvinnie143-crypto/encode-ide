@@ -1,0 +1,39 @@
+{
+  "name": "encode-ide",
+  "productName": "eNCode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forge — an AI-first desktop code editor with an autonomous coding agent.",
+  "author": "Forge",
+  "license": "MIT",
+  "main": "dist/electron/main.cjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "start": "electron .",
+    "smoke": "node scripts/smoke.mjs",
+    "fake-provider": "node scripts/fake-provider.mjs",
+    "package:dir": "electron-builder --win --x64 --dir",
+    "dist": "node scripts/build.mjs && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "lucide-react": "^1.60.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.9.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

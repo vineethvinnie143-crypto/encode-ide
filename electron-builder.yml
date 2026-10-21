@@ -1,0 +1,29 @@
+appId: dev.eNCode.ide
+productName: eNCode
+copyright: MIT
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+asar: true
+# No native modules are bundled: the shell and terminal are hand-written.
+npmRebuild: false
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  icon: build/icon.ico
+portable:
+  artifactName: eNCode-${version}-portable.exe
+linux:
+  target:
+    - AppImage
+  category: Development
+mac:
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+publish: null
