@@ -569,7 +569,17 @@ async function runSubagentChecks() {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
 }
 
-const DEFAULT_APPEARANCE = { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'system' }
+const DEFAULT_APPEARANCE = {
+  mode: 'dark',
+  accent: 'blue',
+  contrast: 'standard',
+  density: 'comfortable',
+  motion: 'system',
+  uiFont: '@system',
+  codeFont: '@system',
+  uiSize: 14,
+  codeSize: 12,
+}
 const theme = () => evaluate('document.documentElement.dataset.theme')
 
 /** The window at the two sizes the UI pull requests are reviewed at. */
@@ -875,6 +885,84 @@ async function runAppearanceChecks() {
   if ((await theme()) !== 'dark') throw new Error('saving Dark did not switch back')
 }
 
+/** Chooses an option of a native select by its label and tells the page, as a click on the option would. */
+const chooseOption = (selectLabel, optionLabel) =>
+  evaluate(`(() => {
+    const select = document.querySelector('select[aria-label=${JSON.stringify(selectLabel)}]')
+    const option = select && [...select.options].find((item) => item.textContent === ${JSON.stringify(optionLabel)})
+    if (!option) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    setter.call(select, option.value)
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  })()`)
+const cssVar = (name) => evaluate(`document.documentElement.style.getPropertyValue(${JSON.stringify(name)}).trim()`)
+const bodyFont = () => evaluate('getComputedStyle(document.body).fontFamily')
+const sizeOf = (selector) => evaluate(`parseFloat(getComputedStyle(document.querySelector(${JSON.stringify(selector)})).fontSize)`)
+
+/**
+ * Settings > Appearance > Fonts: Windows' own fonts at Codex's sizes by default, Inter and JetBrains Mono
+ * one choice away, the installed fonts listed, sizes that move the whole interface, Cancel putting
+ * the old fonts back, and a saved choice drawn right from the first frame after a reload.
+ */
+async function runFontChecks() {
+  console.log('[smoke] --- fonts ---')
+  if (!(await bodyFont()).startsWith('system-ui')) throw new Error(`the default interface font is not the system font: ${await bodyFont()}`)
+  if (!(await cssVar('--font-mono')).startsWith('Consolas')) throw new Error('the default code font is not Consolas')
+  const smallSystem = await sizeOf('.session-sidebar .sb-row .meta')
+  const inputSystem = await sizeOf('.composer-input')
+  console.log('[smoke] system font sizes:', JSON.stringify({ smallSystem, inputSystem }))
+  if (inputSystem !== 14) throw new Error(`the thread text is ${inputSystem} px, not Codex's 14`)
+
+  await openAppearanceSettings()
+  // The installed fonts arrive a moment after the page opens.
+  await waitFor("document.querySelectorAll('select[aria-label=\"Interface font\"] option').length >= 4", 15000, 'the installed fonts')
+  const options = await evaluate("[...document.querySelectorAll('select[aria-label=\"Interface font\"] option')].map((node) => node.textContent)")
+  console.log('[smoke] interface font choices:', options.length, JSON.stringify(options.slice(0, 5)))
+  if (options[0] !== 'System' || options[1] !== 'eNCode (Inter)') throw new Error('the built-in font choices are not first')
+  if (options.length < 4) throw new Error('the installed fonts are not listed')
+  await screenshotSizes('ui-dark-fonts')
+
+  // Inter: the same sizes minus the pixel Windows' font gets on small text.
+  if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
+  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('Inter')", 4000, 'Inter preview')
+  await waitFor("document.documentElement.style.getPropertyValue('--ui-small').trim() === '0px'", 4000, 'Inter takes no extra pixel')
+  const smallInter = await sizeOf('.session-sidebar .sb-row .meta')
+  if (smallInter !== smallSystem - 1) throw new Error(`Inter's small text is ${smallInter} px, the system font's is ${smallSystem} px`)
+  if ((await sizeOf('.composer-input')) !== inputSystem) throw new Error('Inter changed the size of the thread text')
+
+  // The sizes move the whole interface.
+  if (!(await chooseOption('Interface size', '16 px'))) throw new Error('no 16 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--ui-delta').trim() === '2px'", 4000, '16 px preview')
+  if ((await sizeOf('.composer-input')) !== 16) throw new Error('the thread text did not follow the interface size')
+  if (!(await chooseOption('Code size', '14 px'))) throw new Error('no 14 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--code-size').trim() === '14px'", 4000, 'code size preview')
+  if (!(await chooseOption('Code font', 'eNCode (JetBrains Mono)'))) throw new Error('no JetBrains Mono choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--font-mono').trim().startsWith(\"'JetBrains Mono'\")", 4000, 'JetBrains Mono preview')
+
+  // Cancel puts Windows' fonts back.
+  await click('.settings-footer .btn', 'Cancel')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+  if (!(await bodyFont()).startsWith('system-ui') || (await sizeOf('.composer-input')) !== 14) throw new Error('Cancel did not put the fonts back')
+
+  // Saved, Inter is there from the first frame of the next load.
+  await openAppearanceSettings()
+  if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
+  const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
+  if (saved.uiFont !== '@encode' || saved.uiSize !== 14) throw new Error(`the fonts were not saved: ${JSON.stringify(saved)}`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with Inter')
+  if (!(await bodyFont()).startsWith('Inter')) throw new Error('Inter did not survive a reload')
+  await screenshot('ui-dark-inter.png')
+
+  await evaluate(`window.eNCode.settings.save({ appearance: ${JSON.stringify(DEFAULT_APPEARANCE)} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with the system fonts')
+  if (!(await bodyFont()).startsWith('system-ui')) throw new Error('saving the defaults did not bring the system font back')
+}
+
 try {
   await send('Page.enable')
   await send('Runtime.enable')
@@ -1089,6 +1177,7 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runFontChecks()
   await runAppearanceChecks()
 
   if (errors.length) {
