@@ -1,4 +1,4 @@
-import { BrowserWindow, app, dialog, ipcMain } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
@@ -11,6 +11,7 @@ import type { SettingsService } from './services/settings'
 import type { ShellService } from './services/shell'
 import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
+import { isRendererUrl } from './window'
 import type {
   AgentStartInput,
   PlanRequest,
@@ -37,9 +38,25 @@ export interface IpcDeps {
 export function registerIpc(deps: IpcDeps): void {
   const { getWindow, settings, workspace, shell, jobs, schedules, skills, models, git, agent } = deps
 
+  /**
+   * Only the app's own page may call the main process: the top frame of the
+   * main window, showing the bundled renderer (or the dev server in
+   * development). A page in the browser panel's frame, or anything that
+   * navigated the window elsewhere, is refused.
+   */
+  const fromApp = (event: IpcMainInvokeEvent): boolean => {
+    const frame = event.senderFrame
+    const win = getWindow()
+    if (!frame || frame.parent !== null || !win || win.isDestroyed() || event.sender !== win.webContents) return false
+    return isRendererUrl(frame.url)
+  }
+
   const handle = (channel: string, fn: (...args: any[]) => unknown): void => {
     ipcMain.removeHandler(channel)
-    ipcMain.handle(channel, async (_event, ...args: unknown[]) => fn(...args))
+    ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+      if (!fromApp(event)) throw new Error(`eNCode refused ${channel} from ${event.senderFrame?.url ?? 'an unknown frame'}`)
+      return fn(...args)
+    })
   }
 
   const sendToWindow = (channel: string, payload: unknown): void => {

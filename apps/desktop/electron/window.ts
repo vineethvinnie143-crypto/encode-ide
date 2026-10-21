@@ -1,6 +1,27 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 
+/** The Vite dev server, honoured only by an unpackaged build. */
+const devServer = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
+/** True for the app's own pages: the bundled renderer, or the dev server in development. */
+export function isRendererUrl(url: string): boolean {
+  // Origins, not prefixes: http://localhost:5173 must not admit http://localhost:51730.
+  if (devServer) {
+    const origin = originOf(url)
+    return origin !== null && origin === originOf(devServer)
+  }
+  return url.startsWith('app://renderer/')
+}
+
 export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1480,
@@ -17,7 +38,7 @@ export function createMainWindow(): BrowserWindow {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: false,
       webviewTag: false,
     },
@@ -33,20 +54,12 @@ export function createMainWindow(): BrowserWindow {
   })
 
   win.webContents.on('will-navigate', (event, url) => {
-    const devUrl = process.env.VITE_DEV_SERVER_URL
-    const allowed = devUrl ? url.startsWith(devUrl) : url.startsWith('app://')
-    if (!allowed) {
-      event.preventDefault()
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
-    }
+    if (isRendererUrl(url)) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
   })
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL
-  if (devUrl) {
-    void win.loadURL(devUrl)
-  } else {
-    void win.loadURL('app://renderer/index.html')
-  }
+  void win.loadURL(devServer ?? 'app://renderer/index.html')
 
   return win
 }

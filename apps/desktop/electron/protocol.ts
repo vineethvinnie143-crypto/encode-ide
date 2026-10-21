@@ -26,7 +26,7 @@ const MIME: Record<string, string> = {
 
 /**
  * Serves the built renderer from dist/renderer over `app://renderer/...`.
- * A real origin (rather than file://) keeps module workers (Monaco), fetch and
+ * A real origin (rather than file://) keeps module workers, fetch and
  * localStorage behaving the same way they do in the browser.
  */
 export function registerAppProtocol(): void {
