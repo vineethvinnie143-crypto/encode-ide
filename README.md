@@ -6,7 +6,8 @@ node-pty.
 
 ![eNCode](docs/images/overview.png)
 
-**Status:** private development, milestone M0 (foundation and security). Not released yet.
+**Status:** private development. M0 (foundation and security) is in, and the agent engine (M1)
+is landing as packages: the app still runs M0's agent until it is switched over. Not released yet.
 Windows is the primary platform; the code stays cross-platform.
 
 ## What it does
@@ -130,7 +131,8 @@ wrong project. Stop it or let it finish first.
 ```
 apps/desktop/                 the Electron app (@encode/desktop)
   electron/                   main process: window, IPC, services, agent
-    agent/                    loop, tools, approval, compaction, provider, prompt
+    agent/                    M0's loop, tools, approval, compaction, provider, prompt (replaced by packages/core)
+    agent-host/               the main process side of the agent host in a utility process (not wired in yet)
     services/                 shell, workspace, settings and key vault, web, git, programs
   src/                        renderer: components, stores, editor, terminal, markdown
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
@@ -144,9 +146,13 @@ apps/desktop/                 the Electron app (@encode/desktop)
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
+packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
 packages/permissions/         shell grammar, command policy, egress and path rules
+packages/protocol/            RPC over any message port, and the JSON Schema checks
+packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
 packages/testkit/             seeded property testing
+packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model

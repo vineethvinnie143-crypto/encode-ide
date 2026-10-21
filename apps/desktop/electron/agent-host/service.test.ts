@@ -1,0 +1,162 @@
+import assert from 'node:assert/strict'
+import { after, describe, it } from 'node:test'
+import { createScriptedClient, type AgentEvent } from '@encode/core'
+import { stubManagedShell } from '@encode/core/testing'
+import { createPortPair } from '@encode/protocol'
+import { tempWorkspace } from '@encode/tools/testing'
+import type { HostConfig } from './api'
+import { runHostRuntime, type HostRuntime } from './runtime'
+import { AgentHostService, HOST_STOPPED_MESSAGE, type HostProcess } from './service'
+
+const config: HostConfig = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8, profile: null }
+
+async function until<T>(read: () => T | undefined | false, ms = 3_000): Promise<T> {
+  const end = Date.now() + ms
+  for (;;) {
+    const value = read()
+    if (value) return value
+    if (Date.now() > end) throw new Error('Timed out waiting.')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
+interface Fixture {
+  service: AgentHostService
+  events: AgentEvent[]
+  /** Every process started, newest last. */
+  processes: { runtime: HostRuntime; kill(): void; killed: boolean; exit(): void }[]
+  keysAsked: string[]
+  dir: string
+  workspace: string
+}
+
+const services: AgentHostService[] = []
+after(async () => {
+  for (const service of services.splice(0)) await service.dispose()
+})
+
+async function fixture(options: { script?: Parameters<typeof createScriptedClient>[0]; spawnFails?: () => boolean; maxFailures?: number } = {}): Promise<Fixture> {
+  const dir = await tempWorkspace()
+  const home = await tempWorkspace()
+  const workspace = await tempWorkspace()
+  const events: AgentEvent[] = []
+  const processes: Fixture['processes'] = []
+  const keysAsked: string[] = []
+  const client = createScriptedClient(options.script ?? [{ text: 'ok' }], { delayMs: 15 })
+  const service = new AgentHostService({
+    spawn(): HostProcess {
+      const [mainSide, hostSide] = createPortPair()
+      let onExit: () => void = () => undefined
+      const record = {
+        runtime: undefined as unknown as HostRuntime,
+        killed: false,
+        kill() {
+          if (record.killed) return
+          record.killed = true
+          mainSide.close?.()
+          hostSide.close?.()
+          onExit()
+        },
+        exit() {
+          record.kill()
+        },
+      }
+      // A process that dies as soon as it starts, or one that runs the host.
+      if (options.spawnFails?.()) setImmediate(() => record.kill())
+      else record.runtime = runHostRuntime(hostSide, { hostOptions: { client, createShell: stubManagedShell, goalDelayMs: 0 }, log: () => undefined, onShutdown: () => record.exit() })
+      processes.push(record)
+      return { port: mainSide, kill: record.kill, onExit: (handler) => (onExit = handler) }
+    },
+    init: () => ({ dir, home, workspace, legacySessionsFile: undefined }),
+    apiKey: (profileId) => {
+      keysAsked.push(profileId)
+      return `key-for-${profileId}`
+    },
+    onEvent: (event) => events.push(event),
+    onJobs: () => undefined,
+    log: () => undefined,
+    restartDelayMs: 5,
+    maxRestartDelayMs: 20,
+    ...(options.maxFailures ? { maxFailures: options.maxFailures } : {}),
+  })
+  services.push(service)
+  return { service, events, processes, keysAsked, dir, workspace }
+}
+
+describe('the agent host service', () => {
+  it('starts the host on first use, and runs a turn through it', async () => {
+    const f = await fixture({ script: [{ text: 'Hello from the host' }] })
+    assert.equal(f.processes.length, 0)
+    const [session] = await f.service.client.sessions()
+    assert.equal(f.processes.length, 1)
+    await f.service.client.start(session.id, { text: 'hi', mode: 'code' })
+    const history = await f.service.client.history(session.id)
+    assert.deepEqual(history.entries.map((entry) => entry.text), ['hi', 'Hello from the host'])
+    assert.ok(f.events.some((event) => event.type === 'done'))
+    assert.equal(f.processes.length, 1)
+  })
+
+  it('gives the host its configuration at start, and a change while it runs', async () => {
+    const f = await fixture()
+    f.service.configure({ ...config, maxGoalRounds: 3 })
+    await f.service.start()
+    f.service.configure({ ...config, maxGoalRounds: 2, policy: 'read-only' })
+    await until(() => (f.processes[0].runtime.host() as unknown as { o: { settings(): { maxGoalRounds: number; policy: string } } }).o.settings().maxGoalRounds === 2)
+    assert.equal((f.processes[0].runtime.host() as unknown as { o: { settings(): { policy: string } } }).o.settings().policy, 'read-only')
+  })
+
+  it('tells the user which sessions a dying host was working in, and starts it again', async () => {
+    const f = await fixture({ script: [{ text: 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen' }] })
+    const [session] = await f.service.client.sessions()
+    const running = f.service.client.start(session.id, { text: 'talk', mode: 'code' })
+    running.catch(() => undefined)
+    await until(() => f.events.some((event) => event.type === 'status' && event.status === 'thinking'))
+    f.processes[0].kill()
+    await assert.rejects(running, { code: 'closed' })
+
+    const errors = f.events.filter((event) => event.type === 'error')
+    assert.deepEqual(errors.map((event) => event.type === 'error' && event.message), [HOST_STOPPED_MESSAGE])
+    assert.equal(f.events.at(-1)?.type === 'status' && f.events.at(-1)?.type === 'status' && (f.events.at(-1) as { status: string }).status, 'error')
+
+    // The restart brings the sessions back from their logs.
+    await until(() => f.processes.length === 2 && f.processes[1].runtime?.host())
+    const again = await f.service.client.history(session.id)
+    assert.equal(again.entries[0].text, 'talk')
+  })
+
+  it('gives up after repeated failures, and tries once more when asked again', async () => {
+    let failing = true
+    const f = await fixture({ spawnFails: () => failing, maxFailures: 3 })
+    await assert.rejects(f.service.client.sessions())
+    await until(() => f.processes.length >= 1)
+    // Each process that never answers is killed by the failed start, and the restarts back off.
+    await until(() => f.processes.length >= 3, 2_000)
+    const count = f.processes.length
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(f.processes.length, count, 'it stopped trying')
+
+    failing = false
+    const sessions = await f.service.client.sessions()
+    assert.equal(sessions.length, 1)
+  })
+
+  it('answers the host\'s requests for keys, and for nothing else', async () => {
+    const f = await fixture()
+    await f.service.start()
+    const peer = f.processes[0].runtime.peer
+    assert.equal(await peer.request('key', { profileId: 'p1' }), 'key-for-p1')
+    assert.deepEqual(f.keysAsked, ['p1'])
+    await assert.rejects((peer as unknown as { request(method: string): Promise<unknown> }).request('cancelEverything'), { code: 'unknown-method' })
+  })
+
+  it('shuts the host down in order', async () => {
+    const f = await fixture({ script: [{ text: 'done' }] })
+    const [session] = await f.service.client.sessions()
+    await f.service.client.start(session.id, { text: 'go', mode: 'code' })
+    await f.service.dispose()
+    assert.equal(f.processes[0].killed, true)
+    assert.equal(f.processes[0].runtime.host(), undefined)
+    await assert.rejects(f.service.client.sessions(), /closing/)
+    assert.equal(f.processes.length, 1, 'no restart after dispose')
+  })
+})
