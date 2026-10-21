@@ -75,6 +75,8 @@ export interface ToolOutcome {
   changed?: string[]
   /** Ends the turn after this step, with a summary for the user. */
   stop?: { summary: string }
+  /** The session continues in this mode (ExitPlanMode, once the plan is approved). */
+  mode?: AgentMode
 }
 
 export interface Tool<Input extends Record<string, unknown> = Record<string, unknown>> {
@@ -269,6 +271,23 @@ export interface PlanVerdict {
   approved: boolean
   /** What the user said instead, when they did not approve. */
   feedback?: string
+  /** The user will answer later, in a new turn: end this one. */
+  deferred?: boolean
+}
+
+export type GoalStatus = 'active' | 'paused' | 'complete' | 'blocked'
+
+export interface GoalState {
+  text: string
+  status: GoalStatus
+  rounds: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Goals {
+  get(): GoalState | null
+  set(goal: GoalState | null): void
 }
 
 export interface SubagentType {
@@ -334,6 +353,7 @@ export interface ToolContext {
   readonly interaction: Interaction
   readonly subagents?: Subagents
   readonly skills?: Skills
+  readonly goals?: Goals
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.
@@ -341,4 +361,9 @@ export interface ToolContext {
   beforeWrite?(path: string, previous: Buffer | null, info: WriteInfo): Promise<void>
   /** Streams live output of a long call to the UI. */
   progress?(text: string): void
+  /**
+   * Answers `prompt` about `content` with a small, fast model (WebFetch).
+   * Without it, WebFetch returns the page text itself.
+   */
+  summarize?(request: { source: string; content: string; prompt: string }, signal: AbortSignal): Promise<string>
 }
