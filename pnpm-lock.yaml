@@ -95,6 +95,22 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/checkpoints:
+    dependencies:
+      '@encode/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/config:
     dependencies:
       '@encode/permissions':
