@@ -173,8 +173,9 @@ async function focusEditor() {
 /**
  * Waits for the agent to finish, approving every approval card on the way.
  * Returns the approval cards it saw ({ title, reason, detail }).
+ * options.keyboard approves with Enter; options.whileWaiting runs once, while the first card shows.
  */
-async function driveAgent(label, timeoutMs = 120000) {
+async function driveAgent(label, timeoutMs = 120000, options = {}) {
   const approvals = []
   const deadline = Date.now() + timeoutMs
   let status = ''
@@ -200,7 +201,13 @@ async function driveAgent(label, timeoutMs = 120000) {
       approvals.push(card)
       await sleep(250)
       await screenshot(`${label}-approval-${approvals.length}.png`)
-      await click('.approval-card .btn.primary')
+      if (options.whileWaiting && approvals.length === 1) await options.whileWaiting()
+      if (options.keyboard) {
+        // Enter approves while nothing is being typed.
+        await evaluate("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+      } else {
+        await click('.approval-card .btn.primary')
+      }
       await sleep(350)
       continue
     }
@@ -298,7 +305,7 @@ async function runProviderPhase() {
   await click('.composer-send')
 
   // Workspace Write: the write runs unasked, the command asks and the card shows the exact command.
-  const approvals = await driveAgent('10-provider')
+  const approvals = await driveAgent('10-provider', 120000, { keyboard: true })
   console.log('[smoke] provider approvals:', JSON.stringify(approvals))
   if (approvals.length !== 1) throw new Error(`Expected 1 approval prompt (the command), saw ${approvals.length}`)
   if (!approvals[0].detail.includes('echo provider-command-ok')) {
@@ -515,8 +522,14 @@ async function runSubagentChecks() {
   // A subagent's command asks on the parent's card, under the parent's policy.
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:subagent-check] Delegate a shell check to a subagent.')
-  const approvals = await driveAgent('13-subagent')
+  const approvals = await driveAgent('13-subagent', 120000, { whileWaiting: queueWhileWaiting })
   console.log('[smoke] subagent approvals:', JSON.stringify(approvals))
+  await waitFor("document.body.textContent.includes('Follow-up handled.')", 60000, 'the queued message goes out when the agent is done')
+  await waitFor(
+    "document.querySelector('.chat-panel')?.dataset.status === 'done' && !document.querySelector('.queue-strip')",
+    60000,
+    'the queued run finishes',
+  )
   if (approvals.length !== 1 || !approvals[0].title.startsWith('Subagent: Run command')) {
     throw new Error('Expected one approval for the subagent command, on the parent card')
   }
@@ -622,6 +635,64 @@ async function chooseFromSessionMenu(item) {
   })()`)
   await waitFor(menuOpen('Session'), 4000, 'session context menu')
   if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`context menu has no ${item}`)
+}
+
+const pressEnterInComposer = () =>
+  evaluate("document.querySelector('.composer-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+
+/** While an approval card shows: the card's keys, and a message queued, edited back into the composer and queued again. */
+async function queueWhileWaiting() {
+  const hint = await evaluate("[...document.querySelectorAll('.approval-actions .ui-kbd')].map((node) => node.textContent).join(' ')")
+  if (!hint.includes('Enter') || !hint.includes('Esc')) throw new Error(`the approval card does not show its keys: ${hint}`)
+  const radius = await evaluate("getComputedStyle(document.querySelector('.approval-card')).borderTopLeftRadius")
+  if (radius !== '14px') throw new Error(`the approval card has a ${radius} radius, not 14px`)
+  const text = '[scenario:follow-up] Queued while waiting.'
+  await typeInto('.composer-input', text)
+  await sleep(250)
+  await pressEnterInComposer()
+  await waitFor("document.querySelectorAll('.queue-row').length === 1", 4000, 'a message sent while the agent works is queued')
+  const queued = await evaluate("document.querySelector('.queue-text')?.textContent ?? ''")
+  if (queued !== text) throw new Error(`the queue shows "${queued}"`)
+  if ((await evaluate("document.querySelector('.composer-input').value")) !== '') throw new Error('the composer was not cleared by queueing')
+  await click('.queue-row [aria-label="Edit queued message"]')
+  await waitFor("!document.querySelector('.queue-strip')", 4000, 'editing takes the message out of the queue')
+  if ((await evaluate("document.querySelector('.composer-input').value")) !== text) throw new Error('the queued message did not come back to the composer')
+  await pressEnterInComposer()
+  await waitFor("document.querySelectorAll('.queue-row').length === 1", 4000, 'the edited message is queued again')
+  await screenshot('ui-dark-queue.png')
+}
+
+/** The composer's menus: Add, and the permissions with their descriptions. */
+async function runComposerChecks() {
+  console.log('[smoke] --- composer ---')
+  const height = await evaluate("document.querySelector('.composer-card').getBoundingClientRect().height")
+  const radius = await evaluate("getComputedStyle(document.querySelector('.composer-card')).borderTopLeftRadius")
+  if (radius !== '18px') throw new Error(`the composer has a ${radius} radius, not 18px`)
+  console.log('[smoke] composer card height:', height)
+  const sendSize = await evaluate("(() => { const box = document.querySelector('.composer-send').getBoundingClientRect(); return [box.width, box.height] })()")
+  if (sendSize[0] !== 32 || sendSize[1] !== 32) throw new Error(`Send is ${sendSize} px, not 32 x 32`)
+
+  await click('.composer-plus')
+  await waitFor(menuOpen('Add'), 4000, 'Add menu')
+  const add = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!add.includes('Plan mode') || !add.includes('Compact the conversation')) throw new Error(`the Add menu is missing items: ${add}`)
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the Add menu')
+
+  await click('.policy-chip')
+  await waitFor(menuOpen('Permissions'), 4000, 'Permissions menu')
+  const policies = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  for (const label of ['Read Only', 'Workspace Write', 'Auto review', 'Full access']) {
+    if (!policies.includes(label)) throw new Error(`the Permissions menu is missing ${label}: ${policies}`)
+  }
+  const described = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-description')].length")
+  if (described < 4) throw new Error('the permission choices do not describe themselves')
+  await click('.ui-menu [role^="menuitem"]', 'Auto review')
+  await waitFor("window.eNCode.settings.get().then((settings) => settings.policy === 'auto-review')", 4000, 'Auto review is chosen')
+  await evaluate("window.eNCode.settings.save({ policy: 'workspace-write' })")
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the composer checks')
+  console.log('[smoke] composer checks passed')
 }
 
 /** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
@@ -1047,6 +1118,7 @@ try {
   )
   await screenshot('08-agent.png')
   await runSessionViewChecks()
+  await runComposerChecks()
 
   console.log(
     '[smoke] demo file bytes:',

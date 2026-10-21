@@ -11,8 +11,11 @@ minimumReleaseAgeExclude:
   - electron@44.9.2
   - lucide-react@1.60.0
 
-# Install scripts we do not need: esbuild ships its binary as an optional
-# dependency, and electron-winstaller only serves Squirrel targets.
+# Install scripts we do not need: esbuild and workerd ship their binaries as
+# optional dependencies, sharp is an optional image helper of wrangler's that
+# the gateway never uses, and electron-winstaller only serves Squirrel targets.
 ignoredBuiltDependencies:
   - electron-winstaller
   - esbuild
+  - sharp
+  - workerd

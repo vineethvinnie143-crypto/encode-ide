@@ -145,6 +145,18 @@ export interface ApprovalRequest {
   input: Record<string, unknown>
   /** Optional diff preview shown before approving a write. */
   preview?: DiffHunk[]
+  /**
+   * Set by a core that supports session grants: whether this request may be allowed for the
+   * rest of the session. When it is set (true or false), the card also offers a note on a refusal.
+   */
+  grantable?: boolean
+}
+
+/** What you answer to an approval: yes or no, with a note to the agent on a refusal, or "for this session". */
+export interface ApprovalAnswer {
+  approved: boolean
+  note?: string
+  remember?: 'session'
 }
 
 export interface ToolCall {
@@ -292,6 +304,8 @@ export interface AgentHistory {
   status: AgentStatus
   /** The approval card still waiting for an answer, so reopening the session shows it again. */
   approval?: ApprovalRequest | null
+  /** Every approval still waiting, oldest first, when the agent can have several at once. */
+  approvals?: ApprovalRequest[]
   /** The question still waiting for an answer. */
   ask?: { id: string; entryId: string; question: string; options?: string[] } | null
 }
@@ -378,7 +392,7 @@ export interface EncodeApi {
     export(sessionId: string, targetPath?: string): Promise<string | null>
     plan(sessionId: string): Promise<PlanRequest | null>
     setPlan(sessionId: string, plan: PlanRequest | null): Promise<void>
-    approve(requestId: string, approved: boolean): Promise<void>
+    approve(requestId: string, answer: boolean | ApprovalAnswer): Promise<void>
     answer(requestId: string, answer: string): Promise<void>
     onEvent(cb: (e: AgentEvent) => void): () => void
   }

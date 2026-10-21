@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, Paperclip, Plus, Shield, Sparkles, Square, X } from '../../ui/icons'
+import { ArrowDown, ArrowUp, ChevronDown, Paperclip, Pencil, Plus, Shield, Sparkles, Square, Target, Trash2, X } from '../../ui/icons'
 import { api } from '../../api'
 import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
 import { useChat } from '../../stores/chat'
@@ -10,6 +10,35 @@ import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
+import { IconButton } from '../../ui/Button'
+import { cx } from '../../ui/cx'
+import { Menu, type MenuEntry } from '../../ui/Menu'
+import { Pill } from '../../ui/Pill'
+
+const MAX_LINES = 12
+const LINE = 22
+
+/** A ring that fills with how much of the context window the conversation uses. */
+function ContextRing({ percent }: { percent: number }) {
+  const radius = 5.5
+  const circumference = 2 * Math.PI * radius
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" className={cx('context-ring', percent >= 80 && 'is-high')} aria-hidden="true">
+      <circle cx="7" cy="7" r={radius} fill="none" strokeWidth="2" className="context-ring-track" />
+      <circle
+        cx="7"
+        cy="7"
+        r={radius}
+        fill="none"
+        strokeWidth="2"
+        strokeLinecap="round"
+        className="context-ring-fill"
+        strokeDasharray={`${(Math.min(100, percent) / 100) * circumference} ${circumference}`}
+        transform="rotate(-90 7 7)"
+      />
+    </svg>
+  )
+}
 
 export default function Composer() {
   const draft = useChat((state) => state.draft)
@@ -20,30 +49,36 @@ export default function Composer() {
   const ask = useChat((state) => state.ask)
   const answer = useChat((state) => state.answer)
   const entries = useChat((state) => state.entries)
+  const enqueue = useChat((state) => state.enqueue)
+  const removeQueued = useChat((state) => state.removeQueued)
+  const moveQueued = useChat((state) => state.moveQueued)
+  const editQueued = useChat((state) => state.editQueued)
   const tokensPerSecond = useChat((state) => state.tokensPerSecond)
   const usageTotals = useChat((state) => state.usageTotals)
+  const activeId = useSessions((state) => state.activeId)
+  const queue = useChat((state) => state.queues[activeId])
   const activePath = useEditor((state) => state.activePath)
   const settings = useSettings((state) => state.settings)
   const save = useSettings((state) => state.save)
   const activeProfile = useSettings((state) => state.activeProfile())
   const workspace = useWorkspace((state) => state.workspace)
-  const setSettingsOpen = useUi((state) => state.setSettingsOpen)
   const notify = useUi((state) => state.notify)
   const askText = useUi((state) => state.askText)
 
   const [attachments, setAttachments] = useState<{ path: string; content: string }[]>([])
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // The box grows from one line to twelve, then scrolls.
   useEffect(() => {
     const element = textareaRef.current
     if (!element) return
     element.style.height = '0px'
-    element.style.height = `${Math.min(200, Math.max(42, element.scrollHeight))}px`
+    element.style.height = `${Math.min(MAX_LINES * LINE, Math.max(LINE, element.scrollHeight))}px`
   }, [draft])
 
   const policy = settings?.policy ?? 'workspace-write'
-  const [policyOpen, setPolicyOpen] = useState(false)
-  const [paletteOpen, setPaletteOpen] = useState(false)
+  const mode = settings?.agentMode ?? 'code'
 
   const stats = useMemo(() => {
     const turns = entries.filter((entry) => entry.kind === 'user').length
@@ -74,6 +109,32 @@ export default function Composer() {
     }
   }
 
+  const togglePlan = () => void save({ agentMode: mode === 'plan' ? 'code' : 'plan' })
+
+  const setGoal = async () => {
+    const sessionId = useSessions.getState().activeId
+    const current = useChat.getState().goal
+    const text = await askText(current ? 'Goal' : 'Set a goal', 'Goal', current?.text ?? '')
+    if (text && sessionId) {
+      void api.agent.setGoal(sessionId, { text, status: 'active', rounds: 0, createdAt: Date.now(), updatedAt: Date.now() })
+    }
+  }
+
+  const compact = async () => {
+    const sessionId = useSessions.getState().activeId
+    try {
+      const result = await api.agent.compact(sessionId)
+      notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact yet')
+    } catch (error) {
+      notify('error', (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    }
+  }
+
+  const exportSession = async () => {
+    const file = await api.agent.export(useSessions.getState().activeId)
+    if (file) notify('success', `Exported to ${file}`)
+  }
+
   const submit = () => {
     const text = draft.trim()
     if (!text) return
@@ -82,9 +143,13 @@ export default function Composer() {
       setDraft('')
       return
     }
-    if (running) return
     if (!workspace) {
       notify('info', 'Open a workspace first so the agent has a project to work on.')
+      return
+    }
+    // While the agent works, a message waits in the queue and goes out when it is done.
+    if (running) {
+      enqueue(text)
       return
     }
     const sessions = useSessions.getState()
@@ -96,27 +161,15 @@ export default function Composer() {
 
   const runPaletteAction = async (action: CommandPaletteAction) => {
     setPaletteOpen(false)
-    const sessionId = useSessions.getState().activeId
     switch (action) {
       case 'file':
         await attachActiveFile()
         break
-      case 'goal': {
-        const current = useChat.getState().goal
-        const text = await askText(current ? 'Goal' : 'Set a goal', 'Goal', current?.text ?? '')
-        if (text && sessionId) {
-          void api.agent.setGoal(sessionId, {
-            text,
-            status: 'active',
-            rounds: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          })
-        }
+      case 'goal':
+        await setGoal()
         break
-      }
       case 'plan':
-        void save({ agentMode: (settings?.agentMode ?? 'code') === 'plan' ? 'code' : 'plan' })
+        togglePlan()
         break
       case 'feedback': {
         const text = await askText('Feedback', 'What went well or badly?')
@@ -126,39 +179,87 @@ export default function Composer() {
         }
         break
       }
-      case 'compact': {
-        try {
-          const result = await api.agent.compact(sessionId)
-          notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact yet')
-        } catch (error) {
-          notify('error', (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
-        }
+      case 'compact':
+        await compact()
         break
-      }
       case 'permission':
-        setPolicyOpen(true)
+        document.querySelector<HTMLButtonElement>('.policy-chip')?.click()
         break
       case 'model':
-        setSettingsOpen(true)
+        useUi.getState().openSettings('models')
         break
-      case 'export': {
-        const file = await api.agent.export(sessionId)
-        if (file) notify('success', `Exported to ${file}`)
+      case 'export':
+        await exportSession()
         break
-      }
     }
   }
+
+  const addEntries = (): MenuEntry[] => [
+    { kind: 'group', id: 'g-add', label: 'Add' },
+    { id: 'file', label: 'The open file', description: activePath ?? 'Open a file in the editor first', disabled: !activePath, onSelect: () => void attachActiveFile() },
+    { id: 'goal', label: 'A goal for a long task…', icon: <Target size={14} />, onSelect: () => void setGoal() },
+    { kind: 'separator', id: 'sep-add' },
+    { id: 'plan', label: 'Plan mode', description: 'Plan first, then ask before building.', checked: mode === 'plan', shortcut: 'Shift+Tab', onSelect: togglePlan },
+    { kind: 'separator', id: 'sep-session' },
+    { id: 'compact', label: 'Compact the conversation', onSelect: () => void compact() },
+    { id: 'export', label: 'Export session…', onSelect: () => void exportSession() },
+    { id: 'commands', label: 'All commands…', shortcut: '/', onSelect: () => setPaletteOpen(true) },
+  ]
+
+  const policyEntries = (): MenuEntry[] => [
+    { kind: 'group', id: 'g-policy', label: 'What eNCode may do without asking' },
+    ...POLICY_OPTIONS.map((option) => ({
+      id: option,
+      label: POLICY_LABELS[option],
+      description: POLICY_DESCRIPTIONS[option],
+      checked: policy === option,
+      onSelect: () => void save({ policy: option }),
+    })),
+  ]
 
   const placeholder = !workspace
     ? 'Open a workspace to start…'
     : ask
       ? "Answer the agent's question…"
       : running
-        ? 'eNCode is working…'
+        ? 'Queue a message for when eNCode is done…'
         : 'Message or run a task. / commands, @ files or sessions'
+
+  const lastPrompt = [...entries].reverse().find((entry) => entry.kind === 'user')?.text
+  const tone = policy === 'full-access' ? 'warning' : policy === 'auto-review' ? 'accent' : 'neutral'
 
   return (
     <div className="composer-dock">
+      {queue && queue.length > 0 && (
+        <div className="queue-strip" aria-label="Queued messages">
+          <div className="queue-head">
+            Queued · {queue.length}
+            <span className="queue-note">sent one by one when eNCode is done</span>
+          </div>
+          {queue.map((item, index) => (
+            <div className="queue-row" key={item.id}>
+              <span className="queue-text" title={item.text}>
+                {item.text}
+              </span>
+              <span className="queue-actions">
+                <IconButton label="Move up" size="sm" disabled={index === 0} onClick={() => moveQueued(item.id, -1)}>
+                  <ArrowUp size={14} />
+                </IconButton>
+                <IconButton label="Move down" size="sm" disabled={index === queue.length - 1} onClick={() => moveQueued(item.id, 1)}>
+                  <ArrowDown size={14} />
+                </IconButton>
+                <IconButton label="Edit queued message" size="sm" onClick={() => editQueued(item.id)}>
+                  <Pencil size={14} />
+                </IconButton>
+                <IconButton label="Remove queued message" size="sm" onClick={() => removeQueued(item.id)}>
+                  <Trash2 size={14} />
+                </IconButton>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {attachments.length > 0 && (
         <div className="composer-attachments">
           {attachments.map((file) => (
@@ -177,7 +278,7 @@ export default function Composer() {
         </div>
       )}
 
-      <div className={`composer-card ${running ? 'is-running' : ''}`}>
+      <div className={cx('composer-card', running && 'is-running')}>
         <textarea
           ref={textareaRef}
           className="composer-input"
@@ -194,71 +295,75 @@ export default function Composer() {
             setDraft(value)
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.nativeEvent.isComposing) return
+            if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               submit()
+            } else if (event.key === 'Tab' && event.shiftKey) {
+              event.preventDefault()
+              togglePlan()
+            } else if (event.key === 'ArrowUp' && !draft && lastPrompt) {
+              event.preventDefault()
+              setDraft(lastPrompt)
             }
           }}
         />
 
         <div className="composer-toolbar">
-          <button className="composer-plus" onClick={() => setPaletteOpen(true)} title="Commands (/)">
-            <Plus size={15} />
-          </button>
-
-          <span className="session-chip-wrap">
-            <button className="policy-chip" onClick={() => setPolicyOpen((value) => !value)} title="Tool permission policy">
-              <Shield size={13} />
-              {POLICY_LABELS[policy]}
-              <ChevronDown size={12} />
-            </button>
-            {policyOpen && (
-              <div className="session-popover policy-menu">
-                {POLICY_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    className={policy === option ? 'is-selected' : ''}
-                    title={POLICY_DESCRIPTIONS[option]}
-                    onClick={() => {
-                      setPolicyOpen(false)
-                      void save({ policy: option })
-                    }}
-                  >
-                    <Shield size={13} /> {POLICY_LABELS[option]}
-                    {policy === option && <span>selected</span>}
-                  </button>
-                ))}
-              </div>
+          <Menu
+            label="Add"
+            side="top"
+            width={320}
+            entries={addEntries}
+            trigger={(props) => (
+              <IconButton label="Add" size="md" className="composer-plus" {...props}>
+                <Plus size={16} />
+              </IconButton>
             )}
-          </span>
+          />
+
+          <Menu
+            label="Permissions"
+            side="top"
+            width={360}
+            entries={policyEntries}
+            trigger={(props) => (
+              <Pill className="policy-chip" tone={tone} icon={<Shield size={14} />} caret={<ChevronDown size={12} />} title="What eNCode may do without asking" {...props}>
+                {POLICY_LABELS[policy]}
+              </Pill>
+            )}
+          />
 
           <span className="composer-spacer" />
 
-          <button className="model-chip" onClick={() => setSettingsOpen(true)} title="Model settings">
-            <Sparkles size={12} />
+          <Pill
+            className="model-chip"
+            icon={<Sparkles size={13} />}
+            caret={<ChevronDown size={12} />}
+            title="Model settings"
+            onClick={() => useUi.getState().openSettings('models')}
+          >
             {activeProfile ? `${activeProfile.name}: ${activeProfile.model || 'pick a model'}` : 'No model'}
-            <ChevronDown size={12} />
-          </button>
+          </Pill>
 
           {running && !ask ? (
-            <button className="composer-send is-stop" onClick={() => void stop()} title="Stop">
+            <button type="button" className="composer-send is-stop" onClick={() => void stop()} title="Stop" aria-label="Stop">
               <Square size={13} fill="currentColor" />
             </button>
           ) : (
-            <button className="composer-send" onClick={submit} disabled={!draft.trim() || !workspace} title="Send (Enter)">
-              <ArrowUp size={15} />
+            <button type="button" className="composer-send" onClick={submit} disabled={!draft.trim() || !workspace} title="Send (Enter)" aria-label="Send">
+              <ArrowUp size={16} />
             </button>
           )}
         </div>
       </div>
 
-      {paletteOpen && (
-        <CommandPalette onClose={() => setPaletteOpen(false)} onAction={(action) => void runPaletteAction(action)} />
-      )}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} onAction={(action) => void runPaletteAction(action)} />}
 
       <div className="composer-stats">
-        <span>{stats.turns} turns</span>
-        <span>{stats.steps} steps</span>
+        <ContextRing percent={stats.context} />
+        <span>{stats.turns === 1 ? '1 turn' : `${stats.turns} turns`}</span>
+        <span>{stats.steps === 1 ? '1 step' : `${stats.steps} steps`}</span>
         <span className="stats-sep">·</span>
         {stats.tokensPerSecond > 0 && (
           <>

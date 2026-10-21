@@ -1,0 +1,22 @@
+{
+  "name": "@encode/accounts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The app side of eNCode accounts: GitHub sign-in through the free-tier gateway, a session that refreshes itself, and Connect OpenRouter.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/gateway-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

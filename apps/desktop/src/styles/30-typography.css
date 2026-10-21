@@ -25,18 +25,13 @@ body {
 
 .right-tab,
 .suggestion,
-.composer-input,
 .tool-row-toggle,
-.approval-head,
-.ask-head,
 .ask-option,
 .goal-text {
   font-size: 13px;
 }
 
 .session-chip,
-.policy-chip,
-.model-chip,
 .workspace-tabs button,
 .files-switcher button,
 .trajectory-preview,
@@ -46,15 +41,13 @@ body {
   font-size: 12px;
 }
 
-.composer-stats,
 .tool-row-size,
 .goal-status,
 .editor-footer,
 .chat-meta,
 .attachment-chip,
 .trajectory-index,
-.trajectory-time,
-.ask-hint {
+.trajectory-time {
   font-size: 11px;
 }
 
@@ -77,14 +70,12 @@ body {
 .tool-row-detail { font-size: 12px; }
 
 /* Detail pass: control typography (strong 500 variants) */
-.session-chip, .policy-chip, .model-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
+.session-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
 .suggestion, .ask-option { font-weight: 500; line-height: 20px; }
 .tool-row-label { font-weight: 500; }
 
 /* Detail pass: card radii + tight metrics */
-.goal-card, .todo-card, .plan-card, .ask-card, .approval-card { border-radius: 12px; }
-.composer-stats { font-size: 11px; line-height: 16px; }
-.policy-chip, .model-chip { height: 24px; padding: 0 8px; border-radius: 6px; }
+.goal-card, .todo-card, .plan-card { border-radius: 12px; }
 
 /* eNCode brand mark */
 
