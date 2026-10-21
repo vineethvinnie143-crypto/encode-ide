@@ -71,6 +71,6 @@ export function demoStep(request: CompletionRequest): ScriptedStep {
   }
 }
 
-export function createDemoClient(): ScriptedClient {
-  return createScriptedClient((request) => demoStep(request), { delayMs: 14, contextWindow: 200_000 })
+export function createDemoClient(options: { delayMs?: number } = {}): ScriptedClient {
+  return createScriptedClient((request) => demoStep(request), { delayMs: options.delayMs ?? 14, contextWindow: 200_000 })
 }

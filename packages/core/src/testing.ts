@@ -11,6 +11,7 @@ import { createToolRegistry, createFileStateTracker, type AgentShell, type JobMa
 import { tempWorkspace } from '@encode/tools/testing'
 import { createDefaultAssessor } from './approval'
 import { createSkills } from './skills'
+import { AgentHost, type HostOptions } from './host'
 import { AgentSession, type SessionEnv } from './session'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { memoryConversation, type MemoryConversation } from './conversation'
@@ -19,7 +20,7 @@ import { AgentLoop, type LoopServices } from './loop'
 import { systemParts } from './prompt'
 import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOptions } from './scripted'
 import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
-import type { AgentEvent, AgentStatus, ConversationEntry } from './ui'
+import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry } from './ui'
 
 export class RecordingSurface implements Surface {
   readonly statuses: AgentStatus[] = []
@@ -249,13 +250,15 @@ export interface SessionHarness {
 }
 
 const openHarnesses: SessionHarness[] = []
+const openHosts: AgentHost[] = []
 
-/** Closes every session and store the harness made; call it from a test file's `after`. */
+/** Closes every session, store and host the harnesses made; call it from a test file's `after`. */
 export async function closeHarnesses(): Promise<void> {
   for (const harness of openHarnesses.splice(0)) {
     await harness.session.dispose().catch(() => undefined)
     await harness.store.dispose().catch(() => undefined)
   }
+  for (const host of openHosts.splice(0)) await host.dispose().catch(() => undefined)
 }
 
 /** A session on a scripted model, in a temporary workspace and store. */
@@ -304,4 +307,66 @@ export async function sessionHarness(options: SessionHarnessOptions = {}): Promi
   }
   openHarnesses.push(harness)
   return harness
+}
+
+export interface HostHarnessOptions {
+  script?: Script
+  scriptFor?: (root: string) => Script
+  files?: Record<string, string | Buffer>
+  settings?: Partial<AgentSettings>
+  client?: ScriptedOptions
+  /** No folder is open. */
+  noWorkspace?: boolean
+  homeFiles?: Record<string, string>
+  host?: Partial<HostOptions>
+}
+
+export interface HostHarness {
+  host: AgentHost
+  /** The open folder, or '' when there is none. */
+  root: string
+  home: string
+  dir: string
+  events: AgentEvent[]
+  /** What the host reported each time the background jobs changed. */
+  jobReports: BackgroundJob[][]
+  client: ScriptedClient
+  settings: AgentSettings
+  of<T extends AgentEvent['type']>(type: T, sessionId?: string): Extract<AgentEvent, { type: T }>[]
+}
+
+/** A host on a scripted model, in a temporary workspace, home and log folder. */
+export async function hostHarness(options: HostHarnessOptions = {}): Promise<HostHarness> {
+  const root = options.noWorkspace ? '' : await tempWorkspace(options.files ?? {})
+  const home = await tempWorkspace(options.homeFiles ?? {})
+  const dir = await tempWorkspace()
+  const events: AgentEvent[] = []
+  const jobReports: BackgroundJob[][] = []
+  const client = createScriptedClient(options.scriptFor ? options.scriptFor(root) : (options.script ?? []), options.client)
+  const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
+  const host = new AgentHost({
+    dir,
+    client,
+    settings: () => settings,
+    emit: (event) => events.push(event),
+    onJobs: (jobs) => jobReports.push(jobs),
+    workspace: root || null,
+    home,
+    web: stubWeb,
+    createShell: stubManagedShell,
+    goalDelayMs: 0,
+    ...options.host,
+  })
+  openHosts.push(host)
+  return {
+    host,
+    root,
+    home,
+    dir,
+    events,
+    jobReports,
+    client,
+    settings,
+    of: (type, sessionId) => events.filter((event): event is Extract<AgentEvent, { type: typeof type }> => event.type === type && (!sessionId || event.sessionId === sessionId)),
+  }
 }

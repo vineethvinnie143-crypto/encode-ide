@@ -188,3 +188,56 @@ describe('the session store', () => {
     assert.equal(index.sessions[0].title, 'Renamed')
   })
 })
+
+describe('marks and summaries', () => {
+  it('keeps marks apart from the work: they last, and do not make a session look recently used', async () => {
+    const { store, dir } = await fresh()
+    const log = await store.create({ root: '/work' })
+    assert.deepEqual(log.snapshot().marks, { projectRoot: '/work', pinned: false, archived: false, unread: false })
+    const touched = log.snapshot().updatedAt
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    await log.append({ type: 'meta', pinned: true, unread: true })
+    assert.deepEqual(log.snapshot().marks, { projectRoot: '/work', pinned: true, archived: false, unread: true })
+    assert.equal(log.snapshot().updatedAt, touched)
+    await log.append({ type: 'meta', projectRoot: null, archived: true, pinned: false })
+    assert.deepEqual(log.snapshot().marks, { projectRoot: null, pinned: false, archived: true, unread: true })
+    assert.deepEqual((await store.list({ root: '/work' })).map((entry) => entry.id), [])
+    assert.deepEqual((await store.list({ root: null })).map((entry) => entry.id), [log.id])
+    await log.close()
+
+    const again = (await createSessionStore({ dir }).open(log.id))!
+    assert.deepEqual(again.snapshot().marks, { projectRoot: null, pinned: false, archived: true, unread: true })
+    assert.equal(again.snapshot().updatedAt, touched)
+    await again.close()
+  })
+
+  it('summarizes a session for the sidebar: the start of the last reply and how much was said', async () => {
+    const { store } = await fresh()
+    const log = await store.create({ root: '/work' })
+    await prompt(log, 'p1', 'fix the bug')
+    await log.append({ type: 'entry', entry: { id: 'a1', kind: 'assistant', text: 'Done. **The bug** was in `parse.ts`.\n\n```ts\nconst x = 1\n```', createdAt: 2 } })
+    const [summary] = await store.list()
+    assert.equal(summary.preview, 'Done. The bug was in parse.ts.')
+    assert.equal(summary.entryCount, 2)
+    assert.equal(summary.projectRoot, '/work')
+    assert.equal(summary.pinned, false)
+  })
+
+  it('rebuilds an index entry written before summaries existed', async () => {
+    const { store, dir } = await fresh()
+    const log = await store.create({ root: '/work', title: 'Old' })
+    await prompt(log, 'p1', 'hello')
+    await store.dispose()
+    // The index of an earlier build: no marks, no preview, and newer than the log.
+    await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify({ sessions: [{ id: log.id, title: 'Old', createdAt: 1, updatedAt: 1, root: '/work' }] }))
+    const later = new Date(Date.now() + 60_000)
+    await fs.utimes(path.join(dir, 'index.json'), later, later)
+    const rebuilt = createSessionStore({ dir })
+    stores.push(rebuilt)
+    const [summary] = await rebuilt.list()
+    assert.equal(summary.entryCount, 1)
+    assert.equal(summary.projectRoot, '/work')
+    assert.equal(summary.pinned, false)
+  })
+})

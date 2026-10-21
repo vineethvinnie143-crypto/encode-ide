@@ -99,10 +99,11 @@ export async function migrateLegacySessions(options: { file: string; store: Sess
     }
     const entries = asEntries(legacy.entries)
     const records: NewRecord[] = []
+    // The transcript counts up from the creation date; the last records carry the date of the last use, so the session keeps its place in the list.
     const at = (offset: number) => Math.min(updatedAt, createdAt + offset)
     for (const [index, entry] of entries.entries()) records.push({ type: 'entry', entry, at: at(index + 1) })
     const turnId = `imported-${legacy.id}`
-    for (const message of openingMessages(entries)) records.push({ type: 'message', message, turnId, agentId: 'main', at: at(entries.length + 1) })
+    for (const message of openingMessages(entries)) records.push({ type: 'message', message, turnId, agentId: 'main', at: updatedAt })
     if (legacy.goal && typeof legacy.goal === 'object') records.push({ type: 'goal', goal: legacy.goal as SessionGoal, at: updatedAt })
     if (Array.isArray(legacy.todos) && legacy.todos.length) records.push({ type: 'todos', todos: legacy.todos as TodoItem[], at: updatedAt })
     if (legacy.plan && typeof legacy.plan === 'object') records.push({ type: 'plan', plan: legacy.plan as PlanRequest, at: updatedAt })

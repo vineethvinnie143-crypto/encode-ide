@@ -101,11 +101,16 @@ export interface EnvironmentInfo {
 
 const PLATFORM_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }
 
-export function environmentReminder(info: EnvironmentInfo): string {
+/** The line of the environment reminder that names the workspace; `toldWorkspaceRoot` reads it back. */
+export const WORKSPACE_LINE = '- Workspace root: '
+
+/** `previousRoot`: the session was working in another folder until now. */
+export function environmentReminder(info: EnvironmentInfo, previousRoot?: string): string {
   const entries = info.topLevel.length ? info.topLevel.slice(0, 60).join(', ') + (info.topLevel.length > 60 ? ', …' : '') : '(the workspace is empty)'
   const lines = [
-    'Environment',
-    `- Workspace root: ${info.root}`,
+    previousRoot ? `The workspace changed: this session was working in ${previousRoot} and now works in the folder below. Paths mentioned earlier belong to the old folder.` : 'Environment',
+    ...(previousRoot ? ['Environment'] : []),
+    `${WORKSPACE_LINE}${info.root}`,
     ...(info.cwd !== info.root ? [`- Shell working directory: ${info.cwd}`] : []),
     `- Platform: ${PLATFORM_NAMES[info.platform] ?? info.platform} (${info.arch})`,
     `- Shell: ${info.shell}`,

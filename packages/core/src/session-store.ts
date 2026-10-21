@@ -329,7 +329,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       const known = entries.get(id)
       // An entry from before the index carried marks and previews is rebuilt.
       let stale = !known || typeof known.entryCount !== 'number'
-      if (known) {
+      if (known && !stale) {
         try {
           stale = (await fs.stat(path.join(dir, name))).mtimeMs > written
         } catch {

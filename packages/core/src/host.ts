@@ -25,8 +25,10 @@ import {
 } from '@encode/tools'
 import { createDefaultAssessor } from './approval'
 import type { AgentHooks } from './hooks'
+import { migrateLegacySessions } from './migrate'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
 import { AgentSession, type SessionEnv } from './session'
+import type { SessionLog } from './session-records'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
 import type { AgentSource } from './subagents'
@@ -92,6 +94,9 @@ export class AgentHost {
   private readonly opening = new Map<string, Promise<AgentSession>>()
   private readonly timers = new Set<NodeJS.Timeout>()
   private workspaceRoot: string | null
+  /** Counts the changes of the open folder; a session made before the latest one may be pointing at the wrong folder. */
+  private epoch = 0
+  private readonly bornAt = new WeakMap<AgentSession, number>()
   private disposed = false
   private readonly home: string
   private readonly platform: NodeJS.Platform
@@ -154,19 +159,37 @@ export class AgentHost {
 
   // ------------------------------------------------------------ opening sessions
 
+  private async make(log: SessionLog): Promise<AgentSession> {
+    const project = log.snapshot().marks.projectRoot ?? this.workspaceRoot
+    const session = new AgentSession(log, this.envFor(project ? await realPath(project) : ''))
+    this.bornAt.set(session, this.epoch)
+    this.loaded.set(log.id, session)
+    return session
+  }
+
+  private idle(session: AgentSession): boolean {
+    return !session.isRunning() && !session.jobs().some((job) => job.status === 'running')
+  }
+
+  /** A session that belongs to no project, made before the open folder changed, and doing nothing now. */
+  private stale(session: AgentSession): boolean {
+    return session.marks().projectRoot === null && this.bornAt.get(session) !== this.epoch && this.idle(session)
+  }
+
   private async open(id: string): Promise<AgentSession> {
     if (this.disposed) throw new Error('The agent host is closed.')
     const cached = this.loaded.get(id)
-    if (cached) return cached
+    if (cached && !this.stale(cached)) return cached
     const pending = this.opening.get(id)
     if (pending) return pending
     const task = (async () => {
+      if (cached) {
+        this.loaded.delete(id)
+        await cached.dispose()
+      }
       const log = await this.store.open(id)
       if (!log) throw new Error(NO_SESSION)
-      const project = log.snapshot().marks.projectRoot ?? this.workspaceRoot
-      const session = new AgentSession(log, this.envFor(project ? await realPath(project) : ''))
-      this.loaded.set(id, session)
-      return session
+      return this.make(log)
     })()
     this.opening.set(id, task)
     try {
@@ -179,14 +202,25 @@ export class AgentHost {
   /** The folder open now. Sessions that belong to no project follow it once they are idle. */
   async setWorkspace(root: string | null): Promise<void> {
     this.workspaceRoot = root
+    this.epoch++
     for (const [id, session] of [...this.loaded]) {
-      if (session.marks().projectRoot !== null || session.isRunning() || session.jobs().some((job) => job.status === 'running')) continue
+      if (!this.stale(session)) continue
       this.loaded.delete(id)
       await session.dispose()
     }
   }
 
   // ------------------------------------------------------------ the renderer's API
+
+  /**
+   * Brings in the sessions an earlier build kept in one JSON file, once: the
+   * file is renamed afterwards. Sessions that name no project follow the open
+   * folder, as they did before. Resolves to how many were imported.
+   */
+  async importLegacySessions(file: string): Promise<number> {
+    const existing = new Set((await this.store.list()).map((summary) => summary.id))
+    return migrateLegacySessions({ file, store: this.store, defaultRoot: null, existing })
+  }
 
   async sessions(): Promise<SessionSummary[]> {
     let list = await this.store.list()
@@ -202,10 +236,7 @@ export class AgentHost {
     const requested = options.projectRoot
     const root = requested === undefined ? this.workspaceRoot : typeof requested === 'string' && requested.trim() ? requested : null
     const log = await this.store.create({ root, ...(options.title?.trim() ? { title: options.title.trim().slice(0, 90) } : {}) })
-    const project = log.snapshot().marks.projectRoot ?? this.workspaceRoot
-    const session = new AgentSession(log, this.envFor(project ? await realPath(project) : ''))
-    this.loaded.set(log.id, session)
-    return session.summary()
+    return (await this.make(log)).summary()
   }
 
   async update(sessionId: string, patch: unknown): Promise<SessionSummary | null> {
@@ -278,9 +309,7 @@ export class AgentHost {
     await source.flush()
     const { title, projectRoot } = { title: source.summary().title, projectRoot: source.marks().projectRoot }
     const log = await this.store.create({ root: projectRoot, title: `${title} (fork)`, fork: { sessionId, recordId: source.lastRecordId() } })
-    const project = projectRoot ?? this.workspaceRoot
-    const session = new AgentSession(log, this.envFor(project ? await realPath(project) : ''))
-    this.loaded.set(log.id, session)
+    const session = await this.make(log)
     await session.rename(`${title} (fork)`)
     await session.update({ pinned: false, archived: false, unread: false })
     const goal = session.goal()
@@ -344,20 +373,27 @@ export class AgentHost {
 
   // ------------------------------------------------------------ background jobs
 
+  /** The background jobs of every session. Job ids are numbered per session, so the host names them `<session>:<job>`. */
   jobs(): BackgroundJob[] {
-    return [...this.loaded.values()].flatMap((session) => session.jobs()).sort((a, b) => b.startedAt - a.startedAt)
+    return [...this.loaded.values()]
+      .flatMap((session) => session.jobs().map((job) => ({ ...job, id: `${session.id}:${job.id}` })))
+      .sort((a, b) => b.startedAt - a.startedAt)
+  }
+
+  private jobSession(jobId: string): { session: AgentSession; local: string } | undefined {
+    const split = jobId.indexOf(':')
+    const session = split > 0 ? this.loaded.get(jobId.slice(0, split)) : undefined
+    return session ? { session, local: jobId.slice(split + 1) } : undefined
   }
 
   jobOutput(jobId: string): string {
-    for (const session of this.loaded.values()) {
-      const output = session.jobOutput(jobId)
-      if (output !== undefined) return output
-    }
-    return ''
+    const found = this.jobSession(jobId)
+    return found?.session.jobOutput(found.local) ?? ''
   }
 
   async killJob(jobId: string): Promise<void> {
-    for (const session of this.loaded.values()) if (await session.killJob(jobId)) return
+    const found = this.jobSession(jobId)
+    await found?.session.killJob(found.local)
   }
 
   private reportJobs(): void {

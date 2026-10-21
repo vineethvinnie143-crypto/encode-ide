@@ -41,7 +41,7 @@ import {
   type WebAccess,
 } from '@encode/tools'
 import { estimateTokens } from './compaction'
-import { gatherEnvironment, localDate } from './environment'
+import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
@@ -162,6 +162,8 @@ interface TurnState {
   mode?: AgentMode
   memory?: string
   date?: string
+  /** The workspace root the model was last told about. */
+  root?: string
 }
 
 export class AgentSession {
@@ -635,7 +637,14 @@ export class AgentSession {
       if (reminderText) blocks.push(textBlock(reminderText))
     }
 
-    if (first) add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform)))
+    if (first) {
+      add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform)))
+    } else {
+      // The session may have been opened in another folder than the one the model was told about.
+      this.turn.root ??= toldWorkspaceRoot(this.messages)
+      if (this.turn.root && this.turn.root !== env.root) add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform), this.turn.root))
+    }
+    this.turn.root = env.root
 
     const memory = await this.memory().catch(() => [])
     const fingerprint = memoryFingerprint(memory)
