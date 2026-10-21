@@ -356,6 +356,75 @@ async function runProviderPhase() {
   }
   if (!featureCheck.skillListed || !featureCheck.skillText) throw new Error('skill create/read failed')
   if (!featureCheck.jobsArray || !featureCheck.planNull) throw new Error('jobs/plan surface failed')
+
+  await runSubagentChecks()
+}
+
+/** The tool entries of the active session, with their outputs. */
+async function toolOutputs() {
+  return evaluate(`window.eNCode.agent.history().then((history) =>
+    history.entries.filter((entry) => entry.kind === 'tool').map((entry) => ({
+      name: entry.tool.name,
+      state: entry.tool.state,
+      output: entry.tool.output ?? '',
+    })))`)
+}
+
+async function sendPrompt(text) {
+  await typeInto('.composer-input', text)
+  await sleep(350)
+  if (!(await click('.composer-send'))) throw new Error('composer send button not found')
+}
+
+async function runSubagentChecks() {
+  console.log('[smoke] --- subagents ---')
+
+  // A subagent's command asks on the parent's card, under the parent's policy.
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:subagent-check] Delegate a shell check to a subagent.')
+  const approvals = await driveAgent('13-subagent')
+  console.log('[smoke] subagent approvals:', JSON.stringify(approvals))
+  if (approvals.length !== 1 || !approvals[0].title.startsWith('Subagent: Run command')) {
+    throw new Error('Expected one approval for the subagent command, on the parent card')
+  }
+  if (!approvals[0].detail.includes('echo subagent-command-ok')) throw new Error('The subagent approval does not show the command')
+  const task = (await toolOutputs()).find((entry) => entry.name === 'task')
+  console.log('[smoke] subagent task:', JSON.stringify(task))
+  if (!task || task.state !== 'done' || !task.output.includes('Subagent ran the command')) {
+    throw new Error('The subagent report did not reach the parent')
+  }
+
+  // Stopping the parent while the subagent waits for approval stops both.
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:subagent-check] Delegate a shell check to a subagent.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'subagent approval card')
+  await click('.composer-send.is-stop')
+  await waitFor(
+    "['idle', 'done'].includes(document.querySelector('.chat-panel')?.dataset.status ?? '') && !document.querySelector('.approval-card')",
+    15000,
+    'stop while the subagent waits',
+  )
+  const stopped = await evaluate('window.eNCode.agent.history().then((history) => history.status)')
+  console.log('[smoke] subagent stop status:', stopped)
+  if (stopped !== 'idle') throw new Error(`Stopping during a subagent approval left the agent ${stopped}`)
+
+  // A subagent started from Plan mode stays in Plan mode: it cannot write.
+  await evaluate('window.eNCode.agent.reset()')
+  await evaluate("window.eNCode.workspace.delete('escalation.txt').catch(() => null)")
+  await evaluate("window.eNCode.settings.save({ agentMode: 'plan', policy: 'full-access' })")
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after plan mode')
+  await sendPrompt('[scenario:plan-escalation] Investigate with a subagent.')
+  const planApprovals = await driveAgent('14-plan-subagent')
+  const escalation = await evaluate(
+    "window.eNCode.workspace.read('escalation.txt').then(() => 'written', () => 'absent')",
+  )
+  const planTask = (await toolOutputs()).find((entry) => entry.name === 'task')
+  console.log('[smoke] plan mode subagent:', JSON.stringify({ approvals: planApprovals.length, escalation, task: planTask }))
+  if (escalation !== 'absent') throw new Error('A subagent wrote a file while the session was in Plan mode')
+  await evaluate("window.eNCode.settings.save({ agentMode: 'code', policy: 'workspace-write' })")
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
 }
 
 try {

@@ -6,6 +6,7 @@ import {
   ListTree,
   Loader2,
   MessageCircleQuestion,
+  Network,
   Pencil,
   Search,
   SquareTerminal,
@@ -30,6 +31,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   ask_user_question: { label: 'Ask', icon: MessageCircleQuestion },
   ask_followup_question: { label: 'Ask', icon: MessageCircleQuestion },
   attempt_completion: { label: 'Done', icon: CheckCircle2 },
+  task: { label: 'Subagent', icon: Network },
 }
 
 /** Tools whose header line says enough until they produce output. */
@@ -63,6 +65,8 @@ function detailOf(entry: ConversationEntry): string {
       return String(input.url ?? '')
     case 'web_search':
       return String(input.query ?? '')
+    case 'task':
+      return String(input.prompt ?? '').split('\n', 1)[0]
     default:
       return ''
   }

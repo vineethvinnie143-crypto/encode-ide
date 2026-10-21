@@ -34,6 +34,19 @@ export interface AgentDeps {
   plan: (plan: string | null) => void
   emit: (event: AgentEventBody) => void
   depth?: number
+  /** Set for subagents: the agent that started this one through the `task` tool. */
+  parent?: SubagentParent
+}
+
+/**
+ * What a subagent borrows from its parent. The parent owns the conversation
+ * the user sees, so approvals and questions go through it, and the subagent
+ * stops when the parent does.
+ */
+export interface SubagentParent {
+  signal: AbortSignal
+  requestApproval(tool: string, input: Record<string, unknown>, reason?: string): Promise<boolean>
+  ask(question: string, options?: string[]): Promise<string>
 }
 
 interface DemoStep {
@@ -126,8 +139,13 @@ export class Agent {
     if (!input.text.trim()) throw new Error('Type a request first.')
 
     this.running = true
-    this.controller = new AbortController()
-    const signal = this.controller.signal
+    const controller = new AbortController()
+    this.controller = controller
+    const signal = controller.signal
+    const parentSignal = this.deps.parent?.signal
+    const stopWithParent = () => controller.abort()
+    if (parentSignal?.aborted) controller.abort()
+    parentSignal?.addEventListener('abort', stopWithParent, { once: true })
 
     try {
       const settings = this.deps.settings.raw()
@@ -192,6 +210,7 @@ export class Agent {
         this.send({ type: 'error', message })
       }
     } finally {
+      parentSignal?.removeEventListener('abort', stopWithParent)
       this.running = false
       this.controller = null
       this.pendingApprovals.clear()
@@ -325,13 +344,15 @@ export class Agent {
           this.setStatus('awaiting-approval')
           const approved = await this.requestApproval(toolEntry.id, call.name, call.input, approval.reason)
           if (!approved) {
+            const stopped = signal.aborted
             toolEntry.tool = {
               ...toolEntry.tool!,
               state: 'rejected',
-              output: 'Rejected by user.',
+              output: stopped ? 'Stopped.' : 'Rejected by user.',
               ok: false,
             }
             this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+            if (stopped) throw new AgentAbortedError()
             this.messages.push({
               role: 'tool',
               tool_call_id: call.id,
@@ -350,7 +371,7 @@ export class Agent {
           if (call.name === 'task') {
             const prompt = String(call.input.prompt ?? '').trim()
             toolResult = prompt
-              ? await this.runSubagent(prompt)
+              ? await this.runSubagent(prompt, mode, toolEntry.id, signal)
               : { ok: false, output: 'prompt is required' }
           } else {
             toolResult = await executeTool(call, {
@@ -368,7 +389,11 @@ export class Agent {
             })
           }
         } catch (error) {
-          if (signal.aborted) throw new AgentAbortedError()
+          if (signal.aborted) {
+            toolEntry.tool = { ...toolEntry.tool!, state: 'rejected', output: 'Stopped.', ok: false }
+            this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+            throw new AgentAbortedError()
+          }
           toolResult = { ok: false, output: `Error: ${(error as Error).message}` }
         }
 
@@ -463,9 +488,12 @@ export class Agent {
     tool: string,
     input: Record<string, unknown>,
     reason?: string,
+    source?: string,
   ): Promise<boolean> {
+    if (this.deps.parent) return this.deps.parent.requestApproval(tool, input, reason)
+
     const summary = summarizeApproval(tool, input)
-    const { title } = summary
+    const title = source ? `${source}: ${summary.title}` : summary.title
     let { detail } = summary
 
     // Show the exact change before asking for approval.
@@ -492,6 +520,7 @@ export class Agent {
   }
 
   private askUser(question: string, options: string[] | undefined, entryId: string): Promise<string> {
+    if (this.deps.parent) return this.deps.parent.ask(question, options)
     return new Promise<string>((resolve) => {
       const id = randomUUID()
       this.pendingQuestions.set(id, resolve)
@@ -535,11 +564,22 @@ export class Agent {
     this.send({ type: 'status', status })
   }
 
-  /** Runs a nested agent for the `task` tool and returns its final summary. */
-  private async runSubagent(prompt: string): Promise<{ ok: boolean; output: string }> {
+  /**
+   * Runs a nested agent for the `task` tool and returns its final report. The
+   * subagent works in the parent's mode under the same approval policy; its
+   * approvals and questions appear on the parent's `task` card, and it stops
+   * when the parent is stopped.
+   */
+  private async runSubagent(
+    prompt: string,
+    mode: AgentMode,
+    entryId: string,
+    signal: AbortSignal,
+  ): Promise<{ ok: boolean; output: string }> {
     if ((this.deps.depth ?? 0) >= 1) {
       return { ok: false, output: 'Nested subagents are not supported. Do the work directly.' }
     }
+    let plan: string | null = null
     const child = new Agent({
       settings: this.deps.settings,
       workspace: this.deps.workspace,
@@ -548,18 +588,42 @@ export class Agent {
       todos: { get: () => [], set: () => {} },
       jobs: this.deps.jobs,
       skills: this.deps.skills,
-      plan: () => {},
+      plan: (proposed) => {
+        plan = proposed
+      },
       emit: () => {},
       depth: (this.deps.depth ?? 0) + 1,
+      parent: {
+        signal,
+        requestApproval: async (tool, input, reason) => {
+          this.setStatus('awaiting-approval')
+          try {
+            return await this.requestApproval(entryId, tool, input, reason, 'Subagent')
+          } finally {
+            if (!signal.aborted) this.setStatus('running-tool')
+          }
+        },
+        ask: async (question, options) => {
+          try {
+            return await this.askUser(question, options, entryId)
+          } finally {
+            if (!signal.aborted) this.setStatus('running-tool')
+          }
+        },
+      },
     })
-    try {
-      await child.start({ text: prompt, mode: 'code' })
-      const entries = child.getHistory().entries
-      const summary = [...entries].reverse().find((entry) => entry.kind === 'assistant' && entry.text)?.text
-      return { ok: true, output: summary ? `Subagent report:\n${summary}` : 'Subagent finished without a summary.' }
-    } catch (error) {
-      return { ok: false, output: `Subagent failed: ${(error as Error).message}` }
+
+    await child.start({ text: prompt, mode })
+    if (signal.aborted) throw new AgentAbortedError()
+
+    const entries = child.getHistory().entries
+    if (child.getStatus() === 'error') {
+      const failure = [...entries].reverse().find((entry) => entry.kind === 'error')?.text ?? 'unknown error'
+      return { ok: false, output: `Subagent failed: ${failure}` }
     }
+    const summary = [...entries].reverse().find((entry) => entry.kind === 'assistant' && entry.text)?.text
+    const report = [summary, plan && `Proposed plan:\n${plan}`].filter(Boolean).join('\n\n')
+    return { ok: true, output: report ? `Subagent report:\n${report}` : 'Subagent finished without a summary.' }
   }
 
   private send(event: AgentEventBody): void {

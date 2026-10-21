@@ -187,10 +187,13 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (event.sessionId && event.sessionId !== getActiveSessionId()) return
     switch (event.type) {
       case 'status':
-        set({
+        set((state) => ({
           status: event.status,
           running: event.status === 'thinking' || event.status === 'running-tool' || event.status === 'awaiting-approval' || event.status === 'awaiting-user',
-        })
+          // A pending card only makes sense while the agent waits on it (stopping, for one, ends the wait).
+          approval: event.status === 'awaiting-approval' ? state.approval : null,
+          ask: event.status === 'awaiting-user' ? state.ask : null,
+        }))
         break
       case 'entry':
         set((state) => ({ entries: upsertEntry(state.entries, event.entry) }))
