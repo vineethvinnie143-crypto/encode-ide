@@ -78,6 +78,12 @@ function deltaText(content: unknown): string {
   return ''
 }
 
+/** Tool arguments as JSON text. Some OpenAI-compatible servers send an object instead of a string. */
+function argumentsText(value: unknown): string {
+  if (typeof value === 'string') return value
+  return value === undefined || value === null ? '' : JSON.stringify(value)
+}
+
 function linkAbort(outer: AbortSignal, timeoutMs: number) {
   const controller = new AbortController()
   let timedOut = false
@@ -103,7 +109,7 @@ function parseJsonResponse(json: unknown): ChatResult {
     choices?: Array<{
       message?: {
         content?: unknown
-        tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+        tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: unknown } }>
       }
       finish_reason?: string
     }>
@@ -121,7 +127,7 @@ function parseJsonResponse(json: unknown): ChatResult {
     .map((call, index) => ({
       id: call.id || `call_${index}`,
       name: call.function?.name ?? '',
-      arguments: call.function?.arguments ?? '',
+      arguments: argumentsText(call.function?.arguments),
     }))
     .filter((call) => Boolean(call.name))
 
@@ -182,11 +188,17 @@ async function requestChat(options: ChatOptions & { stream: boolean }): Promise<
     throw new ProviderError(message, response.status)
   }
 
-  if (!options.stream) {
-    linked.dispose()
-    const json = await response.json().catch(() => null)
-    if (!json) throw new ProviderError('The provider returned an invalid JSON response.')
-    return parseJsonResponse(json)
+  // Some servers ignore stream: true and answer with a single JSON body.
+  if (!options.stream || (response.headers.get('content-type') ?? '').includes('application/json')) {
+    try {
+      const json = await response.json().catch(() => null)
+      if (options.signal.aborted) throw new AgentAbortedError()
+      if (linked.timedOut()) throw new ProviderError('The model request timed out after 5 minutes.')
+      if (!json) throw new ProviderError('The provider returned an invalid JSON response.')
+      return parseJsonResponse(json)
+    } finally {
+      linked.dispose()
+    }
   }
 
   try {
@@ -249,9 +261,9 @@ async function readStream(
         const index = typeof entry.index === 'number' ? entry.index : 0
         const slot = accumulators.get(index) ?? { args: '' }
         if (typeof entry.id === 'string') slot.id = entry.id
-        const fn = entry.function as { name?: string; arguments?: string } | undefined
+        const fn = entry.function as { name?: string; arguments?: unknown } | undefined
         if (fn?.name) slot.name = fn.name
-        if (typeof fn?.arguments === 'string') slot.args += fn.arguments
+        slot.args += argumentsText(fn?.arguments)
         accumulators.set(index, slot)
       }
     }

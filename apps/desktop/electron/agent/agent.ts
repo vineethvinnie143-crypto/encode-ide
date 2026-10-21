@@ -37,7 +37,7 @@ import {
 } from './compaction'
 import { buildSystemPrompt } from './prompt'
 import { AgentAbortedError, chat, ProviderError, type ChatResult, type ChatUsage } from './provider'
-import { applyEdit, buildDiff, executeTool, summarizeApproval, toolDefs } from './tools'
+import { applyEdit, buildDiff, executeTool, parseToolArguments, summarizeApproval, toolDefs } from './tools'
 import type { ChatMessage, GoalAccess, ParsedToolCall, TodoAccess, ToolCallPayload } from './types'
 
 export interface AgentDeps {
@@ -79,12 +79,12 @@ interface DemoStep {
 const DEMO_SCRIPT: DemoStep[] = [
   {
     text: 'Let me look around the workspace first.',
-    tool: 'list_files',
+    tool: 'glob',
     args: { path: '', depth: 2 },
   },
   {
     text: 'I will create a small note so you can see edits, diffs and the approval flow in action. Approve or reject it when prompted.',
-    tool: 'write_file',
+    tool: 'write',
     args: {
       path: '.eNCode/demo-note.md',
       content:
@@ -93,7 +93,7 @@ const DEMO_SCRIPT: DemoStep[] = [
   },
   {
     text: 'Now let me read it back to confirm the write landed.',
-    tool: 'read_file',
+    tool: 'read',
     args: { path: '.eNCode/demo-note.md' },
   },
   {
@@ -138,16 +138,6 @@ function streamChunks(text: string): string[] {
   const chunks: string[] = []
   for (let i = 0; i < parts.length; i += 3) chunks.push(parts.slice(i, i + 3).join(''))
   return chunks
-}
-
-function parseArguments(raw: string): Record<string, unknown> {
-  if (!raw || !raw.trim()) return {}
-  try {
-    const value = JSON.parse(raw) as unknown
-    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
 }
 
 function toolCallPayloads(calls: { id: string; name: string; arguments: string }[]): ToolCallPayload[] {
@@ -363,8 +353,19 @@ export class Agent {
         for (const rawCall of calls) {
           if (signal.aborted) throw new AgentAbortedError()
 
-          const call: ParsedToolCall = { id: rawCall.id, name: rawCall.name, input: parseArguments(rawCall.arguments) }
+          const parsed = parseToolArguments(rawCall.arguments)
+          const call: ParsedToolCall = { id: rawCall.id, name: rawCall.name, input: parsed.input }
           if (!call.name) continue
+
+          if (parsed.error) {
+            // Often a reply cut off by the output limit. Running with no arguments would only fail less clearly.
+            this.addEntry({
+              kind: 'tool',
+              tool: { name: call.name, input: {}, state: 'error', ok: false, output: `Not run: ${parsed.error}.` },
+            })
+            answer(call.id, `Not run: ${parsed.error}. Call ${call.name} again with its arguments as one JSON object.`)
+            continue
+          }
 
           if (call.name === 'attempt_completion') {
             const summary = String(call.input.result ?? call.input.summary ?? '').trim() || 'Task complete.'

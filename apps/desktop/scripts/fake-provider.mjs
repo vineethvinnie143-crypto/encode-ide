@@ -172,8 +172,11 @@ function pairingProblem(messages) {
   return null
 }
 
+/** True once eNCode has put a summary in the conversation (the system prompt only mentions the tag). */
 const compacted = (messages) =>
-  messages.some((message) => typeof message.content === 'string' && message.content.includes('<conversation_summary>'))
+  messages.some(
+    (message) => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<conversation_summary>'),
+  )
 
 const server = http.createServer(async (request, response) => {
   try {

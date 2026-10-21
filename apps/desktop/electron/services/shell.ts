@@ -702,7 +702,11 @@ export class ShellService {
         chunks.push(text)
         onChunk?.(text)
       },
-      prompt: () => resolvePrompt?.(),
+      // The prompt returns after the command line: its status is the last command's.
+      prompt: () => {
+        exitCode = session.exitCode
+        resolvePrompt?.()
+      },
       exit: (code) => {
         exitCode = code
         resolvePrompt?.()

@@ -529,6 +529,18 @@ export function summarizeApproval(tool: string, input: Record<string, unknown>):
   }
 }
 
+/** A tool call's arguments, or why they cannot be used. No arguments at all is an empty object. */
+export function parseToolArguments(raw: string): { input: Record<string, unknown>; error?: string } {
+  if (!raw.trim()) return { input: {} }
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (value && typeof value === 'object' && !Array.isArray(value)) return { input: value as Record<string, unknown> }
+    return { input: {}, error: 'the arguments are not a JSON object' }
+  } catch (error) {
+    return { input: {}, error: `the arguments are not valid JSON (${(error as Error).message})` }
+  }
+}
+
 export const toolDefs: ToolSchema[] = [
   {
     type: 'function',
@@ -565,7 +577,7 @@ export const toolDefs: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'write',
-      description: 'Create a file or completely overwrite an existing one. Parent directories are created automatically. Prefer replace_in_file for small edits.',
+      description: 'Create a file or completely overwrite an existing one. Parent directories are created automatically. Prefer edit for small changes.',
       parameters: {
         type: 'object',
         properties: {
@@ -711,7 +723,7 @@ export const toolDefs: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'job_list',
-      description: 'List background jobs started with run_command background:true.',
+      description: 'List background jobs started with pwsh background:true.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
-import { agentEnvironment } from './shell'
+import { agentEnvironment, ShellService } from './shell'
 
 const hasGit = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0
 
@@ -47,6 +47,23 @@ before(async () => {
 
 after(async () => {
   await fs.rm(base, { recursive: true, force: true })
+})
+
+describe('ShellService.capture', () => {
+  const node = `"${process.execPath.replace(/\\/g, '/')}"`
+  const run = (command: string) => new ShellService().capture(command, base, 20_000, new AbortController().signal)
+
+  it('reports the exit status of the command line', async () => {
+    assert.equal((await run(`${node} -e "process.exit(3)"`)).code, 3)
+    assert.equal((await run(`${node} -e "process.exit(0)"`)).code, 0)
+    assert.equal((await run(`${node} -e "process.exit(0)" && ${node} -e "process.exit(5)"`)).code, 5)
+    assert.equal((await run(`${node} -e "process.exit(2)" || ${node} -e "process.exit(0)"`)).code, 0)
+  })
+
+  it('reports a command that cannot be found as a failure', async () => {
+    const result = await run('encode-no-such-program --version')
+    assert.notEqual(result.code, 0)
+  })
 })
 
 describe('agentEnvironment', () => {
