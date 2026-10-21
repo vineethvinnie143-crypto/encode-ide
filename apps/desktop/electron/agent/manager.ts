@@ -7,6 +7,7 @@ import type {
   AgentHistory,
   AgentStartInput,
   ConversationEntry,
+  ModelProfile,
   PlanRequest,
   SessionGoal,
   SessionSummary,
@@ -41,6 +42,8 @@ interface AgentManagerDeps {
   jobs: JobService
   skills: SkillService
   emit: (event: AgentEvent) => void
+  /** The model's context window in tokens, when a catalog knows it. */
+  contextWindow?: (profile: ModelProfile) => number | undefined
 }
 
 /**
@@ -148,6 +151,7 @@ export class AgentManager {
       },
       jobs: this.deps.jobs,
       skills: this.deps.skills,
+      contextWindow: this.deps.contextWindow,
       plan: (plan) => this.setPlanInternal(id, plan ? { id: randomUUID(), plan } : null),
       emit: (event) => {
         const summary = this.meta.get(id)
@@ -368,30 +372,13 @@ export class AgentManager {
     return false
   }
 
-  /** Compacts older history: keeps the system prompt plus the recent tail. */
-  compact(sessionId: string): { removed: number } {
+  /** Summarizes older history into the session's context; see Agent.compact. */
+  async compact(sessionId: string): Promise<{ removed: number }> {
     const id = sessionId || this.list()[0].id
-    const agent = this.agent(id)
-    const snapshot = agent.snapshot()
-    const messages = snapshot.messages
-    if (messages.length <= 12) return { removed: 0 }
-    const system = messages.filter((message) => message.role === 'system')
-    const tail = messages.slice(-12)
-    const removed = messages.length - system.length - tail.length
-    agent.setMessages([...system, ...tail])
+    const result = await this.agent(id).compact()
     this.capture(id)
-    this.deps.emit({
-      type: 'entry',
-      entry: {
-        id: randomUUID(),
-        kind: 'notice',
-        text: `Compacted ${removed} earlier messages to free up context.`,
-        createdAt: Date.now(),
-      },
-      sessionId: id,
-    })
     this.persistNow()
-    return { removed }
+    return result
   }
 
   /** Builds the markdown + json payload and writes it as a zip archive. */

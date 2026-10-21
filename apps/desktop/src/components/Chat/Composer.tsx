@@ -127,8 +127,12 @@ export default function Composer() {
         break
       }
       case 'compact': {
-        const result = await api.agent.compact(sessionId)
-        notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact')
+        try {
+          const result = await api.agent.compact(sessionId)
+          notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact yet')
+        } catch (error) {
+          notify('error', (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+        }
         break
       }
       case 'permission':

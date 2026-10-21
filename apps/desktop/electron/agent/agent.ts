@@ -18,8 +18,25 @@ import type { JobService } from '../services/jobs'
 import type { SkillService } from '../services/skills'
 import type { WorkspaceService } from '../services/workspace'
 import { decideApproval, fetchHost, toolKind, type ApprovalDecision } from './approval'
+import {
+  applyCompaction,
+  CHARS_PER_TOKEN,
+  COMPACT_AT,
+  type CompactionPlan,
+  contextOverflow,
+  DEFAULT_CONTEXT_WINDOW,
+  digest,
+  elideOldOutputs,
+  estimateTokens,
+  KEEP_SHARE,
+  NOT_RUN,
+  planCompaction,
+  repairPairing,
+  summaryRequest,
+  textTokens,
+} from './compaction'
 import { buildSystemPrompt } from './prompt'
-import { AgentAbortedError, chat } from './provider'
+import { AgentAbortedError, chat, ProviderError, type ChatResult, type ChatUsage } from './provider'
 import { applyEdit, buildDiff, executeTool, summarizeApproval, toolDefs } from './tools'
 import type { ChatMessage, GoalAccess, ParsedToolCall, TodoAccess, ToolCallPayload } from './types'
 
@@ -36,6 +53,8 @@ export interface AgentDeps {
   depth?: number
   /** Set for subagents: the agent that started this one through the `task` tool. */
   parent?: SubagentParent
+  /** The model's context window in tokens, when a catalog knows it. */
+  contextWindow?: (profile: ModelProfile) => number | undefined
 }
 
 /**
@@ -89,6 +108,27 @@ const DEMO_SCRIPT: DemoStep[] = [
 
 const MAX_PREVIEW_HUNKS = 4
 
+/** The tool definitions travel with every request. */
+const TOOLS_TOKENS = textTokens(JSON.stringify(toolDefs))
+/** A manual compaction keeps less verbatim than an automatic one. */
+const MANUAL_KEEP_SHARE = 0.1
+const MAX_SUMMARY_CHARS = 12_000
+
+/** Context windows that providers' overflow errors revealed, by endpoint and model, for every session. */
+const learnedWindows = new Map<string, number>()
+const windowKey = (profile: ModelProfile) => `${profile.baseUrl.trim()}\n${profile.model}`
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function compactedNotice(count: number, byModel: boolean): string {
+  const what = `Compacted ${count} earlier message${count === 1 ? '' : 's'}`
+  return byModel
+    ? `${what} into a summary to stay within the model's context.`
+    : `${what} into an outline of the requests, files and commands, because the model could not write a summary.`
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -129,6 +169,8 @@ export class Agent {
   private pendingQuestions = new Map<string, (answer: string) => void>()
   /** Sites the user let web_fetch reach in this session. Not persisted. */
   private readonly approvedHosts: Set<string>
+  /** Provider tokens per estimated token, from the last response that reported usage. */
+  private tokenRatio = 1
 
   constructor(private readonly deps: AgentDeps) {
     this.approvedHosts = deps.parent?.approvedHosts ?? new Set()
@@ -194,7 +236,6 @@ export class Agent {
         : input.text
 
       this.messages.push({ role: 'user', content: userContent })
-      this.trimHistory()
       this.addEntry({ kind: 'user', text: input.text })
       this.demoStep = 0
 
@@ -276,36 +317,21 @@ export class Agent {
       if (signal.aborted) throw new AgentAbortedError()
 
       this.setStatus('thinking')
+      if (profile && !isDemo) await this.fitContext(profile, signal)
       const assistantEntry = this.addEntry({ kind: 'assistant', text: '', streaming: true })
 
-      let result: Awaited<ReturnType<typeof chat>>
+      let result: ChatResult
       if (isDemo) {
         result = await this.demoTurn(step, (text) => this.appendDelta(assistantEntry, text))
       } else if (profile) {
-        result = await chat({
-          profile,
-          apiKey: this.deps.settings.keyFor(profile.id),
-          messages: this.messages,
-          tools: toolDefs,
-          signal,
-          temperature: 0.2,
-          onDelta: (text) => this.appendDelta(assistantEntry, text),
-        })      } else {
+        result = await this.request(profile, signal, (text) => this.appendDelta(assistantEntry, text))
+      } else {
         throw new Error('No model profile is configured. Open Settings to add one.')
       }
 
       assistantEntry.streaming = false
       this.send({ type: 'entry', entry: structuredClone(assistantEntry) })
-
-      if (result.usage) {
-        this.send({
-          type: 'usage',
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          totalTokens: result.usage.totalTokens,
-          cachedTokens: result.usage.cachedTokens,
-        })
-      }
+      if (result.usage) this.reportUsage(result.usage)
 
       const calls = result.toolCalls
       if (result.content.trim() || calls.length) {
@@ -325,110 +351,122 @@ export class Agent {
         return
       }
 
-      for (const rawCall of calls) {
-        if (signal.aborted) throw new AgentAbortedError()
+      // Every call gets exactly one result, also when the loop ends early: strict providers refuse the next request otherwise.
+      const answered = new Set<string>()
+      const answer = (id: string, content: string) => {
+        this.messages.push({ role: 'tool', tool_call_id: id, content })
+        answered.add(id)
+      }
+      /** Set when the task ends with this step; reported once every call is answered. */
+      let finished: string | null = null
+      try {
+        for (const rawCall of calls) {
+          if (signal.aborted) throw new AgentAbortedError()
 
-        const call: ParsedToolCall = { id: rawCall.id, name: rawCall.name, input: parseArguments(rawCall.arguments) }
-        if (!call.name) continue
+          const call: ParsedToolCall = { id: rawCall.id, name: rawCall.name, input: parseArguments(rawCall.arguments) }
+          if (!call.name) continue
 
-        if (call.name === 'attempt_completion') {
-          const summary = String(call.input.result ?? call.input.summary ?? '').trim() || 'Task complete.'
-          this.addEntry({ kind: 'assistant', text: summary })
-          this.setStatus('done')
-          this.send({ type: 'done', summary })
-          return
-        }
+          if (call.name === 'attempt_completion') {
+            const summary = String(call.input.result ?? call.input.summary ?? '').trim() || 'Task complete.'
+            answer(call.id, 'Reported to the user.')
+            this.addEntry({ kind: 'assistant', text: summary })
+            finished = summary
+            break
+          }
 
-        const toolEntry = this.addEntry({
-          kind: 'tool',
-          tool: { name: call.name, input: call.input, state: 'running' },
-        })
+          const toolEntry = this.addEntry({
+            kind: 'tool',
+            tool: { name: call.name, input: call.input, state: 'running' },
+          })
 
-        const approval = await this.approvalFor(call, mode)
-        if (approval.ask) {
-          toolEntry.tool = { ...toolEntry.tool!, state: 'waiting' }
-          this.send({ type: 'entry', entry: structuredClone(toolEntry) })
-          this.setStatus('awaiting-approval')
-          const approved = await this.requestApproval(toolEntry.id, call.name, call.input, approval.reason)
-          if (!approved) {
-            const stopped = signal.aborted
-            toolEntry.tool = {
-              ...toolEntry.tool!,
-              state: 'rejected',
-              output: stopped ? 'Stopped.' : 'Rejected by user.',
-              ok: false,
-            }
+          const approval = await this.approvalFor(call, mode)
+          if (approval.ask) {
+            toolEntry.tool = { ...toolEntry.tool!, state: 'waiting' }
             this.send({ type: 'entry', entry: structuredClone(toolEntry) })
-            if (stopped) throw new AgentAbortedError()
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content:
+            this.setStatus('awaiting-approval')
+            const approved = await this.requestApproval(toolEntry.id, call.name, call.input, approval.reason)
+            if (!approved) {
+              const stopped = signal.aborted
+              toolEntry.tool = {
+                ...toolEntry.tool!,
+                state: 'rejected',
+                output: stopped ? 'Stopped.' : 'Rejected by user.',
+                ok: false,
+              }
+              this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+              if (stopped) throw new AgentAbortedError()
+              answer(
+                call.id,
                 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.',
-            })
-            continue
-          }
-          toolEntry.tool = { ...toolEntry.tool!, state: 'running' }
-          this.send({ type: 'entry', entry: structuredClone(toolEntry) })
-          if (toolKind(call.name) === 'web') {
-            const host = fetchHost(call.input)
-            if (host) this.approvedHosts.add(host)
-          }
-        }
-
-        this.setStatus('running-tool')
-        let toolResult
-        try {
-          if (call.name === 'task') {
-            const prompt = String(call.input.prompt ?? '').trim()
-            toolResult = prompt
-              ? await this.runSubagent(prompt, mode, toolEntry.id, signal)
-              : { ok: false, output: 'prompt is required' }
-          } else {
-            toolResult = await executeTool(call, {
-              workspace: this.deps.workspace,
-              settings: this.deps.settings,
-              shell: this.deps.shell,
-              goals: this.deps.goals,
-              todos: this.deps.todos,
-              jobs: this.deps.jobs,
-              skills: this.deps.skills,
-              proposePlan: (plan) => this.deps.plan(plan),
-              mode,
-              signal,
-              ask: (question, options) => this.askUser(question, options, toolEntry.id),
-            })
-          }
-        } catch (error) {
-          if (signal.aborted) {
-            toolEntry.tool = { ...toolEntry.tool!, state: 'rejected', output: 'Stopped.', ok: false }
+              )
+              continue
+            }
+            toolEntry.tool = { ...toolEntry.tool!, state: 'running' }
             this.send({ type: 'entry', entry: structuredClone(toolEntry) })
-            throw new AgentAbortedError()
+            if (toolKind(call.name) === 'web') {
+              const host = fetchHost(call.input)
+              if (host) this.approvedHosts.add(host)
+            }
           }
-          toolResult = { ok: false, output: `Error: ${(error as Error).message}` }
-        }
 
-        toolEntry.tool = {
-          ...toolEntry.tool!,
-          output: toolResult.output,
-          ok: toolResult.ok,
-          diff: toolResult.diff,
-          state: toolResult.ok ? 'done' : 'error',
-        }
-        this.send({ type: 'entry', entry: structuredClone(toolEntry) })
-        if (toolResult.changedPath) this.send({ type: 'file-changed', path: toolResult.changedPath })
+          this.setStatus('running-tool')
+          let toolResult
+          try {
+            if (call.name === 'task') {
+              const prompt = String(call.input.prompt ?? '').trim()
+              toolResult = prompt
+                ? await this.runSubagent(prompt, mode, toolEntry.id, signal)
+                : { ok: false, output: 'prompt is required' }
+            } else {
+              toolResult = await executeTool(call, {
+                workspace: this.deps.workspace,
+                settings: this.deps.settings,
+                shell: this.deps.shell,
+                goals: this.deps.goals,
+                todos: this.deps.todos,
+                jobs: this.deps.jobs,
+                skills: this.deps.skills,
+                proposePlan: (plan) => this.deps.plan(plan),
+                mode,
+                signal,
+                ask: (question, options) => this.askUser(question, options, toolEntry.id),
+              })
+            }
+          } catch (error) {
+            if (signal.aborted) {
+              toolEntry.tool = { ...toolEntry.tool!, state: 'rejected', output: 'Stopped.', ok: false }
+              this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+              throw new AgentAbortedError()
+            }
+            toolResult = { ok: false, output: `Error: ${(error as Error).message}` }
+          }
 
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          content: toolResult.output.slice(0, 40_000),
-        })
+          toolEntry.tool = {
+            ...toolEntry.tool!,
+            output: toolResult.output,
+            ok: toolResult.ok,
+            diff: toolResult.diff,
+            state: toolResult.ok ? 'done' : 'error',
+          }
+          this.send({ type: 'entry', entry: structuredClone(toolEntry) })
+          if (toolResult.changedPath) this.send({ type: 'file-changed', path: toolResult.changedPath })
 
-        if (toolResult.done) {
-          this.setStatus('done')
-          this.send({ type: 'done', summary: toolResult.summary ?? toolResult.output })
-          return
+          answer(call.id, toolResult.output.slice(0, 40_000))
+
+          if (toolResult.done) {
+            finished = toolResult.summary ?? toolResult.output
+            break
+          }
         }
+      } finally {
+        for (const call of calls) {
+          if (!answered.has(call.id)) this.messages.push({ role: 'tool', tool_call_id: call.id, content: NOT_RUN })
+        }
+      }
+      if (finished !== null) {
+        this.setStatus('done')
+        this.send({ type: 'done', summary: finished })
+        return
       }
     }
 
@@ -546,17 +584,149 @@ export class Agent {
     })
   }
 
-  private trimHistory(): void {
-    const maxMessages = 90
-    if (this.messages.length <= maxMessages) return
-    const system = this.messages[0]
-    const rest = this.messages.slice(1)
-    const overflow = rest.length - (maxMessages - 1)
-    let cut = 0
-    for (let i = 0; i < overflow && i < rest.length; i++) {
-      if (rest[i].role === 'user') cut = i + 1
+  private windowFor(profile: ModelProfile): number {
+    return learnedWindows.get(windowKey(profile)) ?? this.deps.contextWindow?.(profile) ?? DEFAULT_CONTEXT_WINDOW
+  }
+
+  /** The prompt's size in the provider's tokens, as well as eNCode can tell. */
+  private promptTokens(messages: readonly ChatMessage[]): number {
+    return Math.ceil((estimateTokens(messages) + TOOLS_TOKENS) * this.tokenRatio)
+  }
+
+  /**
+   * Makes the transcript valid and small enough for the next request: old
+   * tool outputs are shortened first, and only if that is not enough are the
+   * oldest whole units summarized. `force` compacts regardless of the
+   * estimate, after the provider refused a prompt as too long.
+   */
+  private async fitContext(profile: ModelProfile, signal: AbortSignal, force = false): Promise<void> {
+    let messages = repairPairing(this.messages)
+    const window = this.windowFor(profile)
+    const limit = Math.floor(window * COMPACT_AT)
+    if (force || this.promptTokens(messages) > limit) {
+      messages = elideOldOutputs(messages)
+      if (force || this.promptTokens(messages) > limit) {
+        const plan = planCompaction(messages, Math.floor((window * KEEP_SHARE) / this.tokenRatio), force)
+        if (plan) {
+          const summary = await this.summarize(plan, profile, signal, window)
+          messages = repairPairing(applyCompaction(plan, summary.text))
+          this.addEntry({ kind: 'notice', text: compactedNotice(plan.dropped.length, summary.byModel) })
+        }
+        // Still too long: the recent steps' outputs have to give way too.
+        if (this.promptTokens(messages) > limit) messages = elideOldOutputs(messages, 0, 600)
+      }
     }
-    if (cut > 0) this.messages = [system, ...rest.slice(cut)]
+    this.messages = messages
+  }
+
+  /** Sends the transcript. A prompt refused as too long is compacted to the window the provider names and sent once more. */
+  private async request(profile: ModelProfile, signal: AbortSignal, onDelta: (text: string) => void): Promise<ChatResult> {
+    const send = async () => {
+      const sent = this.messages
+      const result = await chat({
+        profile,
+        apiKey: this.deps.settings.keyFor(profile.id),
+        messages: sent,
+        tools: toolDefs,
+        signal,
+        temperature: 0.2,
+        onDelta,
+      })
+      if (result.usage?.promptTokens) {
+        this.tokenRatio = clamp(result.usage.promptTokens / (estimateTokens(sent) + TOOLS_TOKENS), 0.5, 3)
+      }
+      return result
+    }
+    try {
+      return await send()
+    } catch (error) {
+      const overflow = error instanceof ProviderError ? contextOverflow(error.message) : null
+      if (!overflow || signal.aborted) throw error
+      const estimate = estimateTokens(this.messages) + TOOLS_TOKENS
+      if (overflow.used) this.tokenRatio = clamp(overflow.used / estimate, 0.5, 3)
+      learnedWindows.set(
+        windowKey(profile),
+        overflow.window ?? Math.floor(Math.min(this.windowFor(profile), estimate * this.tokenRatio) * 0.75),
+      )
+      await this.fitContext(profile, signal, true)
+      return await send()
+    }
+  }
+
+  /** A summary of what a plan drops, written by the model when it can be reached. */
+  private async summarize(
+    plan: CompactionPlan,
+    profile: ModelProfile | null,
+    signal: AbortSignal,
+    window: number,
+  ): Promise<{ text: string; byModel: boolean }> {
+    if (profile) {
+      try {
+        // The transcript to summarize may take about half the window.
+        const maxChars = Math.floor((window * 0.5 * CHARS_PER_TOKEN) / this.tokenRatio)
+        const result = await chat({
+          profile,
+          apiKey: this.deps.settings.keyFor(profile.id),
+          messages: summaryRequest(plan, maxChars),
+          signal,
+          temperature: 0,
+        })
+        if (result.usage) this.reportUsage(result.usage)
+        const text = result.content.trim()
+        if (text) return { text: text.slice(0, MAX_SUMMARY_CHARS), byModel: true }
+      } catch (error) {
+        if (error instanceof AgentAbortedError || signal.aborted) throw new AgentAbortedError()
+      }
+    }
+    return { text: digest(plan.dropped), byModel: false }
+  }
+
+  /**
+   * Summarizes older history at the user's request, keeping only the most
+   * recent messages verbatim. Refuses while the agent is working; Stop cancels it.
+   */
+  async compact(): Promise<{ removed: number }> {
+    if (this.running) throw new Error('eNCode Agent is working. Stop it before compacting.')
+    this.running = true
+    const controller = new AbortController()
+    this.controller = controller
+    this.setStatus('thinking')
+    try {
+      const settings = this.deps.settings.raw()
+      const active = settings.profiles.find((p) => p.id === settings.activeProfileId) ?? settings.profiles[0]
+      const profile = active && active.kind !== 'demo' && active.model ? (active as ModelProfile) : null
+      const window = profile ? this.windowFor(profile) : DEFAULT_CONTEXT_WINDOW
+      const messages = elideOldOutputs(repairPairing(this.messages))
+      const plan = planCompaction(messages, Math.floor((window * MANUAL_KEEP_SHARE) / this.tokenRatio), true)
+      if (!plan) {
+        this.messages = messages
+        return { removed: 0 }
+      }
+      let summary: { text: string; byModel: boolean }
+      try {
+        summary = await this.summarize(plan, profile, controller.signal, window)
+      } catch (error) {
+        if (error instanceof AgentAbortedError) throw new Error('Compaction was stopped. Nothing changed.')
+        throw error
+      }
+      this.messages = repairPairing(applyCompaction(plan, summary.text))
+      this.addEntry({ kind: 'notice', text: compactedNotice(plan.dropped.length, summary.byModel) })
+      return { removed: plan.dropped.length }
+    } finally {
+      this.running = false
+      this.controller = null
+      this.setStatus('idle')
+    }
+  }
+
+  private reportUsage(usage: ChatUsage): void {
+    this.send({
+      type: 'usage',
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      cachedTokens: usage.cachedTokens,
+    })
   }
 
   private appendDelta(entry: ConversationEntry, text: string): void {
@@ -604,6 +774,7 @@ export class Agent {
         plan = proposed
       },
       emit: () => {},
+      contextWindow: this.deps.contextWindow,
       depth: (this.deps.depth ?? 0) + 1,
       parent: {
         signal,
@@ -647,11 +818,6 @@ export class Agent {
     }
   }
 
-  /** Replace the transcript (used by compaction). */
-  setMessages(messages: ChatMessage[]): void {
-    this.messages = messages.map((message) => structuredClone(message))
-  }
-
   /** Snapshot for session persistence. */
   snapshot(): { messages: ChatMessage[]; entries: ConversationEntry[] } {
     return {
@@ -662,7 +828,8 @@ export class Agent {
 
   /** Restore a persisted conversation into this agent instance. */
   restore(snapshot: { messages?: ChatMessage[]; entries?: ConversationEntry[] }): void {
-    this.messages = (snapshot.messages ?? []).map((message) => structuredClone(message))
+    // Sessions saved by earlier builds can hold calls without results.
+    this.messages = repairPairing((snapshot.messages ?? []).map((message) => structuredClone(message)))
     this.entries = (snapshot.entries ?? []).map((entry) => structuredClone(entry))
     this.status = 'idle'
     this.running = false

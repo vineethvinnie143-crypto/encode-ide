@@ -1,4 +1,4 @@
-import type { ModelInfo } from '../../shared/types'
+import type { ModelInfo, ModelProfile } from '../../shared/types'
 import type { SettingsService } from './settings'
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
@@ -12,6 +12,12 @@ export class ModelsService {
   private cache: { at: number; models: ModelInfo[] } | null = null
 
   constructor(private readonly settings: SettingsService) {}
+
+  /** The model's context window in tokens, from the OpenRouter catalog once it has been fetched. */
+  contextWindow(profile: ModelProfile): number | undefined {
+    if (profile.kind !== 'openrouter') return undefined
+    return this.cache?.models.find((model) => model.id === profile.model)?.contextLength
+  }
 
   async openRouter(freeOnly = false): Promise<ModelInfo[]> {
     const models = await this.fetchOpenRouter()

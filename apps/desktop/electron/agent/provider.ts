@@ -1,4 +1,5 @@
 import type { ModelProfile } from '../../shared/types'
+import { contextOverflow } from './compaction'
 import type { ChatMessage, ToolSchema } from './types'
 
 export class AgentAbortedError extends Error {
@@ -302,6 +303,8 @@ export async function chat(options: ChatOptions): Promise<ChatResult> {
     return await requestChat({ ...options, stream: true })
   } catch (error) {
     if (error instanceof AgentAbortedError) throw error
+    // A prompt too long for the model fails the same way without streaming.
+    if (error instanceof ProviderError && contextOverflow(error.message)) throw error
     const status = error instanceof ProviderError ? error.status : undefined
     const retryable = status === undefined || [400, 404, 405, 415, 422].includes(status)
     if (!retryable) throw error

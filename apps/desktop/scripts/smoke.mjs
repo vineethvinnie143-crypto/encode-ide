@@ -305,6 +305,11 @@ async function runProviderPhase() {
 
   await screenshot('11-provider-agent.png')
 
+  // A follow-up in the same session. The finished task's completion call needs a result too,
+  // or a strict provider (the fake one included) refuses the whole transcript.
+  await sendPrompt('[scenario:follow-up] One more thing.')
+  await driveAgent('11-follow-up')
+
   // Session manager: create, rename, remove and persisted history.
   const sessionCheck = await evaluate(`(async () => {
     const sessions = await window.eNCode.agent.sessions()
@@ -392,6 +397,46 @@ async function runProviderPhase() {
 
   await runSubagentChecks()
   await runWebChecks()
+  await runCompactionChecks()
+}
+
+async function providerStats() {
+  return (await fetch(`http://127.0.0.1:${providerPort}/__stats`)).json()
+}
+
+async function notices() {
+  return evaluate(`window.eNCode.agent.history().then((history) =>
+    history.entries.filter((entry) => entry.kind === 'notice').map((entry) => entry.text))`)
+}
+
+async function runCompactionChecks() {
+  console.log('[smoke] --- compaction ---')
+  // The provider refuses the second request as too long; eNCode summarizes and sends it once more.
+  await evaluate('window.eNCode.agent.reset()')
+  const before = await providerStats()
+  await sendPrompt('[scenario:overflow] Look around, then finish.')
+  await driveAgent('16-compaction')
+  const after = await providerStats()
+  const automatic = await notices()
+  console.log('[smoke] automatic compaction:', JSON.stringify({ before, after, notices: automatic }))
+  if (after.overflowRefusals - before.overflowRefusals !== 1) throw new Error('Expected the provider to refuse one prompt as too long')
+  if (after.summaryRequests - before.summaryRequests !== 1) throw new Error('Compaction did not ask the model for a summary')
+  if (!automatic.some((text) => text.startsWith('Compacted') && text.includes('into a summary'))) {
+    throw new Error('No notice tells the user the conversation was compacted')
+  }
+  if (!(await evaluate("document.body.textContent.includes('Compaction verified')"))) {
+    throw new Error('The run did not finish after compaction')
+  }
+
+  // Compacting by hand, then carrying on: the provider must accept the compacted transcript.
+  const [session] = await evaluate('window.eNCode.agent.sessions()')
+  const manual = await evaluate(`window.eNCode.agent.compact(${JSON.stringify(session.id)})`)
+  console.log('[smoke] manual compaction:', JSON.stringify(manual))
+  if (!manual.removed) throw new Error('Manual compaction removed nothing')
+  await sendPrompt('[scenario:follow-up] Carry on after compacting.')
+  await driveAgent('16-after-compaction')
+  const final = await providerStats()
+  if (final.invalidTranscripts) throw new Error(`The provider refused ${final.invalidTranscripts} malformed transcripts`)
 }
 
 async function runWebChecks() {
@@ -459,6 +504,9 @@ async function runSubagentChecks() {
   const stopped = await evaluate('window.eNCode.agent.history().then((history) => history.status)')
   console.log('[smoke] subagent stop status:', stopped)
   if (stopped !== 'idle') throw new Error(`Stopping during a subagent approval left the agent ${stopped}`)
+  // The stop left the task call without a result; the next request must still be accepted.
+  await sendPrompt('[scenario:follow-up] Carry on after the stop.')
+  await driveAgent('13-after-stop')
 
   // A subagent started from Plan mode stays in Plan mode: it cannot write.
   await evaluate('window.eNCode.agent.reset()')

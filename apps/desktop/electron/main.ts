@@ -72,6 +72,7 @@ if (!gotLock) {
       jobs,
       skills,
       emit: (event) => send('agent:event', event),
+      contextWindow: (profile) => models.contextWindow(profile),
     })
 
     const schedules = new ScheduleService(async (schedule) => {
