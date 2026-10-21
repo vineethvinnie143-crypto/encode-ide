@@ -1,0 +1,76 @@
+/* ============================================================
+   Buttons & inputs
+   ============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--pressed);
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--border-strong);
+}
+.btn.primary {
+  background: linear-gradient(180deg, var(--accent-fill), var(--accent-fill));
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+}
+.btn.primary:hover {
+  filter: brightness(1.06);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-2);
+}
+.btn.ghost:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+}
+.btn.lg {
+  height: 38px;
+  padding: 0 18px;
+  font-size: 13px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.text-input {
+  width: 100%;
+  height: 32px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--text-1);
+  font-size: 12px;
+  outline: none;
+}
+.text-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.text-input:disabled {
+  opacity: 0.55;
+}
+.narrow {
+  width: 90px;
+}

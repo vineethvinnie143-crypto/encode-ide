@@ -1,0 +1,80 @@
+/* Flat tool rows */
+.tool-row {
+  display: flex;
+  flex-direction: column;
+}
+.tool-row-head {
+  display: flex;
+}
+.tool-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 0;
+  text-align: left;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.tool-row-toggle:hover .tool-row-label {
+  color: var(--text-1);
+}
+.tool-row-icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.tool-row-label {
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tool-row-detail {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-row-size {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.tool-row-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.tool-row-state.is-good {
+  color: var(--text-3);
+}
+.tool-row-state.is-bad {
+  color: var(--danger);
+}
+.tool-row-body {
+  margin: 4px 0 6px 22px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+.tool-row-output {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}

@@ -1,0 +1,96 @@
+/* ============================================================
+   Title bar
+   ============================================================ */
+
+.titlebar {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  color: var(--on-accent);
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--brand-1) 32%, transparent);
+}
+
+.brand-name {
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  font-size: 13px;
+}
+
+.titlebar-path {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.workspace-name {
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.workspace-root {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tb-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tb-btn:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.tb-btn.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.tb-btn kbd {
+  font-size: 9px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-3);
+}
