@@ -10,7 +10,8 @@
  *
  * Exercises the hand-built editor (overlay integrity, save round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
- * scripts/fake-provider.mjs including approvals, diffs and command execution.
+ * scripts/fake-provider.mjs including approvals, diffs and command execution, and
+ * last the appearance settings, capturing dark and light at 1280 x 800 and 1920 x 1080.
  * Screenshots land in ./screenshots.
  */
 import fs from 'node:fs/promises'
@@ -536,6 +537,72 @@ async function runSubagentChecks() {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
 }
 
+const DEFAULT_APPEARANCE = { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'system' }
+const theme = () => evaluate('document.documentElement.dataset.theme')
+
+/** The window at the two sizes the UI pull requests are reviewed at. */
+async function screenshotSizes(name) {
+  for (const [width, height] of [
+    [1280, 800],
+    [1920, 1080],
+  ]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    await sleep(400)
+    await screenshot(`${name}-${width}x${height}.png`)
+  }
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+}
+
+async function openAppearanceSettings() {
+  if (!(await click('.rail-profile'))) throw new Error('profile menu not found')
+  await waitFor("!!document.querySelector('.rail-profile-menu')", 4000, 'profile menu')
+  await click('.rail-profile-menu button', 'Settings')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Appearance'))) throw new Error('Appearance tab not found')
+  await waitFor("!!document.querySelector('.settings-appearance')", 4000, 'appearance settings')
+}
+
+/**
+ * Settings > Appearance: a choice previews at once, Cancel puts the saved look back, Save
+ * keeps it across a reload. Captures the main window and the Appearance page in both themes.
+ */
+async function runAppearanceChecks() {
+  console.log('[smoke] --- appearance ---')
+  if ((await theme()) !== 'dark') throw new Error(`eNCode should start dark, not ${await theme()}`)
+  await screenshotSizes('ui-dark-main')
+
+  await openAppearanceSettings()
+  await screenshotSizes('ui-dark-appearance')
+  await click('.settings-appearance [role="radio"]', 'Light')
+  await waitFor("document.documentElement.dataset.theme === 'light'", 4000, 'light preview')
+  await click('.settings-footer .btn', 'Cancel')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+  if ((await theme()) !== 'dark') throw new Error('Cancel did not put the dark theme back')
+
+  await openAppearanceSettings()
+  await click('.settings-appearance [role="radio"]', 'Light')
+  await click('.accent-swatch[aria-label="Jade"]')
+  await waitFor("document.documentElement.dataset.accent === 'jade'", 4000, 'jade preview')
+  await click('.accent-swatch[aria-label="Signal blue"]')
+  await screenshotSizes('ui-light-appearance')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
+  const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
+  console.log('[smoke] saved appearance:', JSON.stringify(saved))
+  if (saved.mode !== 'light' || saved.accent !== 'blue') throw new Error('Light was not saved')
+
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload in light')
+  if ((await theme()) !== 'light') throw new Error('the light theme did not survive a reload')
+  await screenshotSizes('ui-light-main')
+
+  await evaluate(`window.eNCode.settings.save({ appearance: ${JSON.stringify(DEFAULT_APPEARANCE)} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload in dark')
+  if ((await theme()) !== 'dark') throw new Error('saving Dark did not switch back')
+}
+
 try {
   await send('Page.enable')
   await send('Runtime.enable')
@@ -746,6 +813,8 @@ try {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'final reload')
   await screenshot('12-final.png')
+
+  await runAppearanceChecks()
 
   if (errors.length) {
     console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
