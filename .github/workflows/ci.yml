@@ -50,6 +50,10 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # The gateway's Worker in workerd against fake OpenRouter and GitHub servers; needs no account.
+      - name: Gateway on the Workers runtime
+        run: pnpm --filter @encode/gateway test:workers
+
       - name: Build
         run: pnpm build
 

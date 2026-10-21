@@ -115,9 +115,13 @@ apps/desktop/                 the Electron app (@encode/desktop)
   shared/types.ts             types shared by main, preload and renderer
   scripts/                    build, dev, e2e harness, smoke, fake provider
   test/fixtures/              the workspace the smoke opens (copied, never edited)
+apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
+packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
+packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/testkit/             seeded property testing
 docs/adr/                     architecture decision records
+docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
 scripts/                      repository tooling: test runner, source checks
 ```

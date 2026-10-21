@@ -1,8 +1,8 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0. It covers the desktop app as built from this
-repository. The CLI, the router and the free-tier gateway get their own sections when they
-land.
+repository. The free-tier gateway and accounts (M5) have their own section at the end. The
+CLI and the router get theirs when they land.
 
 Review this document whenever a change touches a trust boundary below, and at the end of
 every milestone.
@@ -16,7 +16,7 @@ every milestone.
 | Model API keys | Keys are paid credentials, and a stolen key bills the user. |
 | The user's other data | That covers files outside the workspace, local services, and cloud metadata endpoints. |
 | Sessions and settings | Users lose work if these are corrupted or lost. |
-| Our free-tier OpenRouter key (M5) | Abuse costs money and can get the account banned. |
+| Our free-tier OpenRouter key | Abuse costs money and can get the account banned. It lives only in the gateway. |
 
 ## Who we defend against
 
@@ -37,8 +37,8 @@ every milestone.
 Out of scope for v1:
 - an attacker with administrator or root rights, or physical access;
 - malware already running as the same user. This is noted where it weakens a control;
-- the data practices of the model provider the user chooses (disclosure and a no-training
-  mode are planned for the free tier).
+- the data practices of the model provider the user chooses. For the free tier the gateway
+  publishes its data policy (`GET /v1/status`) for the app to show.
 
 ## Trust boundaries
 
@@ -90,7 +90,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T17 | A subagent does what its parent may not | Same mode, policy, approvals and cancellation as the parent (0006) | Mitigated |
 | T18 | Source that reads differently from how it runs (bidi controls, zero-width characters) | `scripts/check-sources.mjs` in CI, and the command policy asks for lines containing them (0004, 0012) | Mitigated |
 | T19 | A compromised dependency, action or Electron download | Frozen lockfile, one-day minimum release age, skipped install scripts, actions pinned by hash, read-only CI token, checksum-verified Electron download | Partial (R9) |
-| T20 | Abuse of the free tier's shared key | The key never ships in the client. Gateway quotas, a `:free`-only cost firewall and a kill switch. | Planned, M5 |
+| T20 | Abuse of the free tier's shared key | The key never ships in the client. Gateway quotas, a `:free`-only cost firewall and a kill switch (0020). Threats G1 to G15 below. | Partial (GR1) |
 | T21 | A tampered build or update | Code signing and signed updates | Planned, M6 |
 | T22 | Runaway runs, rate limits and hung streams | Step cap, output caps and timeouts on commands and fetches | Partial (R10) |
 | T23 | Lost or corrupted sessions | Atomic private writes | Partial (R11) |
@@ -165,3 +165,115 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - Plan-mode subagents unable to write;
   - the web_fetch approval and private-address refusal;
   - compaction after an overflow refusal.
+
+## The free-tier gateway and accounts
+
+Version 1, 2026-10-21, written with M5. It covers `apps/gateway`, `packages/accounts` and
+`packages/gateway-protocol`
+([0020](../adr/0020-the-free-tier-runs-behind-our-own-gateway.md),
+[0021](../adr/0021-sessions-are-rotating-device-bound-refresh-tokens.md),
+[0022](../adr/0022-connect-openrouter-with-pkce-on-a-loopback-listener.md)). Nothing is
+deployed yet. The controls below are verified by tests and by running the Worker locally, and
+the first deploy should be followed by a review of this section.
+
+### What we protect here
+
+| Asset | Why it matters |
+| --- | --- |
+| The free-tier OpenRouter key | Whoever holds it spends our budget and can get the account banned. |
+| The shared free budget | OpenRouter allows 1,000 free requests a day for the whole account. Draining it ends the free tier for everyone. |
+| Spend on the key | The key must never pay for a request. Any credit used is a bug or an attack. |
+| Sessions | An access token acts as one account for an hour, a refresh token for months. |
+| Account data | GitHub id, login and avatar, plus session hashes. No prompts, completions or GitHub tokens. |
+| The gateway's secrets | `GATEWAY_SECRET` signs tokens, and `ADMIN_TOKEN` opens the operator API. |
+
+Who we defend against: a user who wants more than their share, by script or with many
+accounts; someone holding a copy of another user's session; a client that sends crafted
+requests; a network attacker between the app and the gateway; a local process or web page that
+can reach a loopback port; and anyone who can read the gateway's logs.
+
+### Trust boundaries
+
+```
+ app ──HTTPS, bearer token──► gateway (Worker) ──our key──► OpenRouter ──► free providers
+  │                             ├─ Durable Objects: account quotas, daily budget, address limits
+  │                             ├─ D1: accounts, session hashes, allowlist
+  │                             ├─ KV: kill switch, model pool, overrides
+  │                             └─ device flow ──► GitHub (identity only, no scopes)
+  └─ loopback listener ◄── browser ◄── OpenRouter consent page   (Connect OpenRouter; no gateway)
+```
+
+1. **App to gateway.** HTTPS only (loopback HTTP in development). The app sends a bearer
+   token, never a key. The gateway trusts nothing in a request except what the token proves.
+2. **Gateway to OpenRouter.** The only place the free-tier key is used. The request is rebuilt
+   from an allowlist and checked again before it is sent.
+3. **Gateway to GitHub.** Identity only. The GitHub token is used once to read the user's id
+   and dropped.
+4. **Operator to gateway.** The `/admin` API behind `ADMIN_TOKEN`, and the Cloudflare account
+   that holds the secrets.
+5. **Browser to loopback listener.** Connect OpenRouter receives a one-time code on the user's
+   machine.
+
+### Threats and controls
+
+Status: **Mitigated**, or **Partial** (a residual risk is listed below).
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| G1 | The free-tier key is read from the app, the repository, a log or a response | It exists only as a Worker secret. The app and the repository hold none: `.dev.vars` is git-ignored and its example holds placeholders. The gateway refuses to serve with a missing or malformed secret instead of falling back. The gateway's own error messages are fixed wording. The one place upstream text reaches a client is the reason for a rejected request: it is cut to 300 characters, with the key and anything shaped like one masked first. After a stream's first content, the model's bytes are relayed as they come. They originate behind OpenRouter, which authenticates our key before any provider sees the request, so the key is not in them. Tests feed back upstream answers that echo the key and check that nothing reaches the client or the log, and that logs never contain the key, tokens, the device id, a GitHub token or a prompt. A key that was ever pasted into a chat, an issue or a commit is replaced before it is deployed (DEPLOY.md). | Mitigated |
+| G2 | A client reaches paid models or paid features through the proxy | The client cannot name a model. The request is rebuilt from an allowlist, models come from a pool of `:free` ids with zero pricing (at most three fallbacks), and `assertFreeOnly` checks the final body before it is sent. There is no provider routing, no plugins, no web search and no files. The cron raises a critical `paid_usage` alert if the key spent any credit, and the key's credit limit ($0, or $1 if OpenRouter needs it) makes OpenRouter refuse anything that would cost money if the firewall ever failed (DEPLOY.md). | Mitigated |
+| G3 | One account drains the shared budget | Admission runs before any upstream call: requests a minute and a day, tokens a day, concurrent streams with leases that expire. A global daily ceiling (950) and a per-minute pacer (18) sit below OpenRouter's limits. Fair share shrinks each account's limits as the day's budget runs down. Accounts active round the clock, or pinned at the per-minute limit, are flagged and held to a quarter for a day. Refunds after upstream failures are capped at 20 a day. | Mitigated |
+| G4 | One person makes many accounts | Sign-up is an allowlist until opened. GitHub accounts must be users and at least 30 days old. Sign-in is limited per address, and the global ceiling bounds the total whatever the number of accounts. | Partial (GR1) |
+| G5 | A forged or stolen access token | HMAC-SHA256 under a derived key, checked in constant time, with claims validated and a one-hour life. A revoked session is refused at once by the account's Durable Object. Quotas bind to the account, so a stolen token adds no capacity. | Mitigated |
+| G6 | A stolen refresh token | Single use, rotated on every refresh, stored only as a SHA-256, bound to the device id. A spent token is honored for 120 seconds, and after that its reuse ends the session on every device. Thirty days unused or 180 in all ends it anyway. | Partial (GR2) |
+| G7 | A user is tricked into approving an attacker's sign-in code | The OAuth app asks for no scopes, so the attacker gets that user's free-tier quota and learns their GitHub login, not access to repositories. The app opens only the pinned `github.com` verification link, and an operator can sign the account out everywhere. | Partial (GR3) |
+| G8 | The operator API is guessed or abused | Off unless `ADMIN_TOKEN` (at least 32 characters) is set. The token is compared in constant time, every failure looks like a missing route, actions are logged by name without bodies, and pool overrides accept only `:free` ids. | Partial (GR4) |
+| G9 | Prompts or identities leak through the gateway | No prompts or completions are kept. Logs hold an HMAC of the account id, the model, counts, latency and the outcome. Addresses serve only as HMAC bucket names for rate limits. OpenRouter receives the HMAC as `user`, never the login. The data policy is published at `GET /v1/status`. | Partial (GR5) |
+| G10 | The gateway is used as an open relay or to reach internal addresses | It requests only the configured GitHub and OpenRouter origins (HTTPS, loopback HTTP in development only) and the optional alert webhook. Clients cannot supply a URL. Image links go to the provider and are never fetched by the gateway. | Mitigated |
+| G11 | Oversized or endless requests exhaust the Worker | Limits on body (4 MB), messages, tools and parts. Output tokens are capped. There is a 50 second first-content budget, an idle timeout and a 9 minute ceiling. The upstream is aborted when the client leaves, and lease expiry frees the slot of a crashed request. | Mitigated |
+| G12 | Abuse or a failing provider needs a stop | A kill switch (variable or KV), account suspension and sign-out, model block and pin overrides, per-model cooldowns, and alerts to a webhook. | Mitigated |
+| G13 | A hostile or intercepted gateway answer reaches the app | `@encode/accounts` accepts HTTPS (or loopback HTTP) only, refuses redirects, caps response sizes, checks the shape of tokens, pins the verification link to `github.com` and strips control and bidirectional characters from messages shown to users. | Mitigated |
+| G14 | Session tokens leak from the user's machine | Tokens and the device id live in a `SecretStore` backed by the OS keychain (0008), never in settings, logs or the renderer. The state the UI reads holds no token. A saved session that cannot be parsed counts as signed out. | Partial (R5) |
+| G15 | Another process or web page attacks the OpenRouter callback port | PKCE with S256, a constant-time `state` check, a `Host` check against DNS rebinding, GET only, one use, a random port and a short life, with strict response headers. The main process makes the exchange, and the key goes straight to the key vault (0022). | Mitigated |
+
+### Residual risks
+
+- **GR1. Many accounts, one person.** The allowlist, the account-age check and per-address
+  limits raise the cost, but someone with several aged GitHub accounts gets several shares.
+  The global ceiling bounds the total and fair share keeps the day usable for others.
+  - Owner: M6 beta. Watch flagged accounts and the metrics, and add another signal before
+    sign-up opens to everyone.
+- **GR2. A copied session plus its device id.** Same-user malware can read both from the
+  keychain and refresh once as that device. The real app's next refresh then presents a spent
+  token and the session ends everywhere. Accepted, as for keys (R5).
+- **GR3. Device-code phishing.** The user is told to check the code against the one shown in
+  eNCode. With no scopes the damage is limited to that user's free-tier quota.
+- **GR4. One bearer token opens the operator API.** It is long, compared in constant time and
+  can be left unset. It has no per-address throttle of its own, so add a Cloudflare rate
+  limiting rule on `/admin/*` if the API stays on (DEPLOY.md).
+- **GR5. Providers and the gateway see prompts.** Free providers can log and train on what
+  they receive, and a compromised gateway could read prompts in flight. The gateway stores
+  none. The app must show `data_policy` before the first free request and point private work
+  at the user's own key.
+  - Owner: the app's UI and router work.
+- **GR6. One Cloudflare account and one OpenRouter account hold everything.** Taking either
+  over takes the free tier. Use two-factor sign-in and tokens scoped to this Worker, and
+  rotate the secrets after anyone leaves (DEPLOY.md).
+- **GR7. The kill switch in KV takes about a minute to reach every location.** Setting
+  `KILL_SWITCH` and redeploying is immediate. Accepted.
+
+### Verification
+
+- The gateway core has unit tests for tokens, sign-in and refresh (including grace, reuse and
+  device mismatch), chat streaming and failover, the cost firewall (with property tests),
+  quotas, the global budget, the pool, the admin API, the cron job and configuration.
+- `accounts-client.test.ts` runs the real `@encode/accounts` against the real gateway core,
+  in process: sign-in, single-flight refresh, lost answers, replay after the grace window,
+  device mismatch, sign-out, suspension and a scan of the gateway log for secrets.
+- `packages/accounts` tests the loopback listener's refusals (wrong state, wrong host, wrong
+  method, second use), PKCE, the saved session's parser and the HTTP hardening.
+- `pnpm --filter @encode/gateway test:workers` runs the Worker in `wrangler dev` (workerd with
+  local Durable Objects, D1 and KV) against fake OpenRouter and GitHub servers. It walks
+  through sign-in, streaming, failover, refresh, sign-out, the cron job, the kill switch and a
+  suspension, then checks every request the fake OpenRouter received against the firewall's
+  promises. CI runs it on Windows.

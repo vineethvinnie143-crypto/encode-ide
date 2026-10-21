@@ -18,6 +18,9 @@ say so.
 | [0010](0010-renderer-isolation.md) | A sandboxed renderer that only the app's page can use | Accepted |
 | [0011](0011-agent-commands-run-in-the-os-shell.md) | The agent's commands run in the OS shell | Accepted, lands in M1 |
 | [0012](0012-windows-first-ci.md) | Windows-first CI with a sandboxed end-to-end smoke | Accepted |
+| [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |
+| [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |
+| [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |
 
 ## Template
 
