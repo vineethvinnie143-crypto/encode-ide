@@ -62,11 +62,21 @@ describe('settings files', () => {
       '/ws/.encode/settings.json': '{"model":"project"}',
       '/ws/.encode/settings.local.json': 'not json',
     })
-    const sources = await loadSettingsSources({ home: HOME, root: ROOT, read, cli: { model: 'cli' } })
+    const sources = await loadSettingsSources({ home: HOME, root: ROOT, read, cli: { model: 'cli' }, platform: 'linux' })
     assert.deepEqual(sources.map((source) => source.scope), ['user', 'project', 'local', 'cli'])
     assert.match(sources[2].problems[0], /not valid JSON/)
-    const failing = await loadSettingsSources({ home: HOME, root: ROOT, read: async () => { throw new Error('EACCES') } })
+    const failing = await loadSettingsSources({ home: HOME, root: ROOT, read: async () => { throw new Error('EACCES') }, platform: 'linux' })
     assert.match(failing[0].problems[0], /could not be read: EACCES/)
+    const windows = await loadSettingsSources({
+      home: 'C:\\Users\\u',
+      root: 'D:\\ws',
+      read: memoryFiles({ 'C:\\Users\\u\\.encode\\settings.json': '{"model":"user"}', 'D:\\ws\\.encode\\settings.local.json': '{}' }),
+      platform: 'win32',
+    })
+    assert.deepEqual(windows.map((source) => [source.scope, source.file]), [
+      ['user', 'C:\\Users\\u\\.encode\\settings.json'],
+      ['local', 'D:\\ws\\.encode\\settings.local.json'],
+    ])
   })
 })
 

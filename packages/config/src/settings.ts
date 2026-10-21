@@ -183,8 +183,10 @@ export async function loadSettingsSources(options: {
   read: ReadText
   /** Settings given on the command line, already parsed. */
   cli?: unknown
+  /** Whose path rules the folders follow; the running system's by default. */
+  platform?: NodeJS.Platform
 }): Promise<SettingsSource[]> {
-  const files = settingsFiles(options.home, options.root)
+  const files = settingsFiles(options.home, options.root, (options.platform ?? process.platform) === 'win32' ? path.win32 : path.posix)
   const sources: SettingsSource[] = []
   for (const scope of ['user', 'project', 'local'] as const) {
     let text: string | null
