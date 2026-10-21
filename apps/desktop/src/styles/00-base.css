@@ -24,6 +24,11 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Until main.tsx has applied the appearance, the window's own colour shows through. */
+html:not([data-theme]) body {
+  background: transparent;
+}
+
 body.is-resizing {
   user-select: none;
 }

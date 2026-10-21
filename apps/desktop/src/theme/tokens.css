@@ -1,9 +1,9 @@
 /* eNCode design tokens (ADR 0013).
  *
- * Dark is the default. <html data-theme="light"> switches the palette,
- * data-accent picks the accent, data-density the row height and
- * data-motion="reduce" turns animation off. The values are eNCode's own
- * Graphite theme; see the UI spec for where each one is used.
+ * Dark is the default. src/theme/appearance.ts sets, on <html>:
+ * data-theme (light or dark), data-accent, data-contrast, data-density
+ * (row height) and data-motion. The values are eNCode's own Graphite
+ * theme; see the UI spec for where each one is used.
  */
 
 :root {
@@ -195,6 +195,22 @@
 
 :root[data-density='compact'] {
   --row-h: 28px;
+}
+
+/* High contrast: stronger secondary text and lines, same surfaces. */
+:root[data-contrast='high'] {
+  --text-2: #c4cad6;
+  --text-3: #a3acbe;
+  --border-subtle: #2b303c;
+  --border: #3c4352;
+  --border-strong: #4d5567;
+}
+:root[data-theme='light'][data-contrast='high'] {
+  --text-2: #2e3542;
+  --text-3: #475061;
+  --border-subtle: #dadee6;
+  --border: #c3c9d4;
+  --border-strong: #a3abb9;
 }
 
 /* Reduce motion: System follows Windows, On always, Off never. */

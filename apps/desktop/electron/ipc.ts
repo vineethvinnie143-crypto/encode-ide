@@ -11,6 +11,7 @@ import type { SettingsService } from './services/settings'
 import type { ShellService } from './services/shell'
 import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
+import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
 import type {
   AgentStartInput,
@@ -122,7 +123,11 @@ export function registerIpc(deps: IpcDeps): void {
   handle('workspace:search', (options: SearchOptions) => workspace.search(options))
 
   handle('settings:get', () => settings.get())
-  handle('settings:save', (patch: Partial<Settings>) => settings.save(patch))
+  handle('settings:save', (patch: Partial<Settings>) => {
+    const saved = settings.save(patch)
+    if (patch?.appearance !== undefined) applyNativeAppearance(saved.appearance, getWindow())
+    return saved
+  })
   handle('settings:set-key', (profileId: string, key: string) => settings.setProfileKey(String(profileId), String(key ?? '')))
 
   handle('models:openrouter', (freeOnly?: boolean) => models.openRouter(Boolean(freeOnly)))
