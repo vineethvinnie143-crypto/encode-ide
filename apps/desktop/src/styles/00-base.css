@@ -18,7 +18,7 @@ body {
   background: var(--canvas);
   color: var(--text-1);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: calc(13px + var(--ui-small));
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

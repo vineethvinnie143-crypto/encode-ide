@@ -34,7 +34,7 @@
   padding: 0 8px;
   border-radius: var(--r-8);
   color: var(--text-1);
-  font-size: 15px;
+  font-size: calc(15px + var(--ui-delta));
   font-weight: 600;
   transition: background var(--dur-1) var(--ease-out);
 }
@@ -57,7 +57,7 @@
   background: var(--surface-3);
   box-shadow: inset 0 0 0 1px var(--border);
   color: var(--text-2);
-  font: 600 11px/1 var(--font-ui);
+  font: 600 calc(11px + var(--ui-small))/1 var(--font-ui);
 }
 
 .proj-name {

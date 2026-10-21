@@ -80,7 +80,7 @@
   border-radius: 6px;
   padding: 0 10px;
   color: var(--text-1);
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   outline: none;
 }
 .text-input:focus {

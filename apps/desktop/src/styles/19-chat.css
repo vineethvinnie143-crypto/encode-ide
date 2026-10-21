@@ -211,7 +211,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-4);
   background: var(--surface-3);
-  font-size: 12px;
+  font-size: var(--code-size);
 }
 .markdown pre {
   margin: 0 0 12px;
@@ -225,7 +225,7 @@
   padding: 0;
   border: 0;
   background: none;
-  font-size: 12px;
+  font-size: var(--code-size);
   line-height: 19px;
 }
 

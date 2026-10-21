@@ -41,7 +41,7 @@
   background: none;
   border: none;
   outline: none;
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   min-width: 0;
 }
 
@@ -68,7 +68,7 @@
 
 .search-meta {
   padding: 2px 12px 6px;
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--text-3);
   min-height: 18px;
 }
@@ -98,13 +98,13 @@
 
 .search-file-name {
   font-weight: 600;
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   white-space: nowrap;
 }
 
 .search-file-dir {
   color: var(--text-3);
-  font-size: 10.5px;
+  font-size: calc(10.5px + var(--ui-small));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -112,7 +112,7 @@
 }
 
 .search-file-count {
-  font-size: 10px;
+  font-size: calc(10px + var(--ui-small));
   color: var(--text-3);
   background: var(--pressed);
   border-radius: 8px;
@@ -127,7 +127,7 @@
   text-align: left;
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(var(--code-size) - 1px);
 }
 .search-hit:hover {
   background: var(--hover);
