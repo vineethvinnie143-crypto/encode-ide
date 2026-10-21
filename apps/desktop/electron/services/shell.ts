@@ -4,6 +4,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import {
+  SHELL_BUILTINS,
+  commandName,
+  isBuiltin,
+  parseLine,
+  resolveShellPath as resolveWithHost,
+  type ShellSegment,
+} from '@encode/permissions'
 import type { ShellCreateOptions, ShellInfo, ShellPromptInfo } from '../../shared/types'
 
 const RESET = '\x1b[0m'
@@ -12,24 +20,6 @@ const BLUE = '\x1b[34m'
 const GRAY = '\x1b[90m'
 const DIM = '\x1b[2m'
 const BOLD = '\x1b[1m'
-
-const BUILTINS = [
-  'help', 'clear', 'pwd', 'cd', 'ls', 'cat', 'echo', 'mkdir', 'rm', 'mv', 'cp', 'touch',
-  'head', 'tail', 'wc', 'which', 'env', 'set', 'export', 'unset', 'date', 'whoami',
-  'history', 'ver', 'exit',
-]
-
-const ALIASES: Record<string, string> = {
-  dir: 'ls',
-  del: 'rm',
-  move: 'mv',
-  copy: 'cp',
-  where: 'which',
-  type: 'cat',
-  cls: 'clear',
-}
-
-const BUILTIN_SET = new Set(BUILTINS)
 
 export function stripAnsi(text: string): string {
   return text
@@ -51,139 +41,9 @@ function currentEnv(): Record<string, string> {
   return env
 }
 
-interface Statement {
-  text: string
-  cond: 'always' | 'and' | 'or'
-}
-
-interface Segment {
-  tokens: string[]
-  redirect?: { file: string; append: boolean }
-}
-
 interface ResolvedCommand {
   file: string
   args: string[]
-}
-
-function splitStatements(line: string): Statement[] {
-  const out: Statement[] = []
-  let current = ''
-  let quote: string | null = null
-  let cond: Statement['cond'] = 'always'
-
-  for (let index = 0; index < line.length; index++) {
-    const char = line[index]
-    if (quote) {
-      current += char
-      if (char === quote) quote = null
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      current += char
-      continue
-    }
-    if (char === ';') {
-      out.push({ text: current, cond })
-      current = ''
-      cond = 'always'
-      continue
-    }
-    if (char === '&' && line[index + 1] === '&') {
-      out.push({ text: current, cond })
-      current = ''
-      cond = 'and'
-      index++
-      continue
-    }
-    if (char === '|' && line[index + 1] === '|') {
-      out.push({ text: current, cond })
-      current = ''
-      cond = 'or'
-      index++
-      continue
-    }
-    current += char
-  }
-
-  if (current.trim()) out.push({ text: current, cond })
-  return out.filter((statement) => statement.text.trim().length > 0)
-}
-
-function splitPipeline(text: string): string[] {
-  const parts: string[] = []
-  let current = ''
-  let quote: string | null = null
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index]
-    if (quote) {
-      current += char
-      if (char === quote) quote = null
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      current += char
-      continue
-    }
-    if (char === '|') {
-      parts.push(current)
-      current = ''
-      continue
-    }
-    current += char
-  }
-  parts.push(current)
-  return parts.filter((part) => part.trim().length > 0)
-}
-
-function tokenizeSegment(text: string): Segment {
-  const tokens: string[] = []
-  let current = ''
-  let quote: string | null = null
-  let redirect: Segment['redirect']
-
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index]
-    if (quote) {
-      if (char === quote) quote = null
-      else current += char
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (char === ' ' || char === '\t') {
-      if (current) {
-        tokens.push(current)
-        current = ''
-      }
-      continue
-    }
-    if (char === '>') {
-      if (current) {
-        tokens.push(current)
-        current = ''
-      }
-      let append = false
-      if (text[index + 1] === '>') {
-        append = true
-        index++
-      }
-      let target = text.slice(index + 1).trim()
-      if ((target.startsWith('"') && target.endsWith('"')) || (target.startsWith("'") && target.endsWith("'"))) {
-        target = target.slice(1, -1)
-      }
-      if (target) redirect = { file: target, append }
-      break
-    }
-    current += char
-  }
-
-  if (current) tokens.push(current)
-  return { tokens, redirect }
 }
 
 function fileExists(file: string): boolean {
@@ -203,11 +63,7 @@ function directoryExists(dir: string): boolean {
 }
 
 function resolveShellPath(cwd: string, target: string): string {
-  if (!target) return cwd
-  let expanded = target
-  if (target === '~') expanded = os.homedir()
-  else if (target.startsWith('~/') || target.startsWith('~\\')) expanded = path.join(os.homedir(), target.slice(2))
-  return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(cwd, expanded)
+  return resolveWithHost(cwd, target, { home: os.homedir(), path })
 }
 
 /**
@@ -308,11 +164,10 @@ export class ShellSession {
     this.timedOut = false
 
     try {
-      const statements = splitStatements(line)
-      for (const statement of statements) {
+      for (const statement of parseLine(line)) {
         if (statement.cond === 'and' && this.lastCode !== 0) continue
         if (statement.cond === 'or' && this.lastCode === 0) continue
-        this.lastCode = await this.executeStatement(statement.text)
+        this.lastCode = await this.executeStatement(statement.segments)
         if (this.closed) return
       }
     } catch (error) {
@@ -367,7 +222,7 @@ export class ShellSession {
       }
     }
 
-    const candidates = new Set<string>(BUILTINS)
+    const candidates = new Set<string>(SHELL_BUILTINS)
     try {
       for (const entry of fs.readdirSync(this.cwd)) candidates.add(entry)
     } catch {
@@ -390,8 +245,7 @@ export class ShellSession {
     return [...candidates].filter((name) => name.toLowerCase().startsWith(needle)).sort().slice(0, 50)
   }
 
-  private async executeStatement(text: string): Promise<number> {
-    const segments = splitPipeline(text).map(tokenizeSegment).filter((segment) => segment.tokens.length > 0)
+  private async executeStatement(segments: ShellSegment[]): Promise<number> {
     if (!segments.length) return 0
 
     const redirect = segments[segments.length - 1].redirect
@@ -427,9 +281,8 @@ export class ShellSession {
     input: string | null,
     single: boolean,
   ): Promise<{ code: number; output: string }> {
-    const raw = tokens[0]
-    const name = ALIASES[raw] ?? raw
-    if (BUILTIN_SET.has(name)) {
+    const name = commandName(tokens[0])
+    if (isBuiltin(name)) {
       return this.runBuiltin(name, tokens.slice(1), input)
     }
     return this.runExternal(tokens, input, single)
@@ -450,7 +303,7 @@ export class ShellSession {
       case 'help':
         return ok(
           `${BOLD}eNCode Shell${RESET} — built-ins execute in-process; other commands run as real programs.\n\n` +
-            `Built-ins: ${BUILTINS.join(', ')}\n` +
+            `Built-ins: ${SHELL_BUILTINS.join(', ')}\n` +
             `Examples:\n` +
             `  ls -a            list files (blue directories)\n` +
             `  cd src           change directory\n` +
