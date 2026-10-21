@@ -11,9 +11,11 @@ Windows is the primary platform; the code stays cross-platform.
 
 ## What it does
 
-- **Agent-first workspace.** It has a sessions rail, a conversation with a tool timeline
-  (Chat and Trajectory views), a composer with mode, approval-policy and model chips, and a
-  Browse and Workspace rail with Files, Editor and Shell.
+- **Agent-first workspace.** A title bar with menus and Back and Forward, an icon rail, and a
+  sidebar of sessions grouped by project (pin, archive, mark unread, an Activity view of what
+  needs you). Beside them are a conversation with a tool timeline (Chat and Trajectory views),
+  a composer with mode, approval-policy and model chips, and a Browse and Workspace panel with
+  Files, Editor and Shell.
 - **A coding agent with real tools.** The agent has these tools:
   - files: `glob`, `grep`, `read`, `edit`, `write`;
   - commands: `pwsh` (with background jobs: `job_list`, `job_output`, `job_kill`);
@@ -97,15 +99,31 @@ the terminal's shell.
 
 ## Shortcuts
 
+`Ctrl+/` lists every shortcut and the menus show them next to each command. The main ones:
+
 | Action | Shortcut |
 | --- | --- |
-| Save the active file | `Ctrl+S` |
-| Quick open | `Ctrl+P` |
 | New session | `Ctrl+N` |
+| Open a folder | `Ctrl+O` |
+| Go to file | `Ctrl+P` |
+| Save the active file | `Ctrl+S` |
+| Settings | `Ctrl+,` |
+| Show or hide the sidebar / the side panel | `Ctrl+B` / `Ctrl+Alt+B` |
+| Activity view | `Ctrl+Alt+U` |
 | Search across files | `Ctrl+Shift+F` |
-| Toggle the right rail | `Ctrl+B` |
-| Open the Shell | `` Ctrl+` `` |
+| Show files / chat / the Shell | `Ctrl+Shift+E` / `Ctrl+Shift+X` / `` Ctrl+` `` |
+| Back / forward over the sessions you opened | `Ctrl+[` / `Ctrl+]` (or the mouse buttons) |
+| Next / previous recent session | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Go to session 1 to 9 | `Alt+1` to `Alt+9` |
+| Next session that needs you | `Ctrl+Alt+A` |
+| Rename, pin, archive, mark unread | `Ctrl+Alt+R`, `Ctrl+Alt+P`, `Ctrl+Shift+A`, `Ctrl+Shift+U` |
+| Zoom in, out, reset | `Ctrl+=`, `Ctrl+-`, `Ctrl+0` |
+| Full screen | `F11` |
 | Find in file | `Ctrl+F` (in the editor) |
+
+Opening a folder, or a session from another project, is refused while any session runs or
+waits for you: the agent works in the open folder, so switching would point its edits at the
+wrong project. Stop it or let it finish first.
 
 ## Repository layout
 
@@ -115,6 +133,8 @@ apps/desktop/                 the Electron app (@encode/desktop)
     agent/                    loop, tools, approval, compaction, provider, prompt
     services/                 shell, workspace, settings and key vault, web, git, programs
   src/                        renderer: components, stores, editor, terminal, markdown
+    commands/                 the command registry: one list behind the menus, shortcuts and dialogs
+    components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)
     ui/                       eNCode's icons, logo and shared controls
