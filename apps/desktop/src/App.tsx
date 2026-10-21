@@ -19,6 +19,7 @@ import { useSessions } from './stores/sessions'
 import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
 import { useWorkspace } from './stores/workspace'
+import { applyAppearance } from './theme/appearance'
 
 async function refreshOpenTab(path: string): Promise<void> {
   const editor = useEditor.getState()
@@ -40,6 +41,7 @@ export default function App() {
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
   const mainView = useUi((state) => state.mainView)
   const setMainView = useUi((state) => state.setMainView)
+  const appearance = useSettings((state) => state.settings?.appearance)
 
   const right = useResizable({ initial: 380, min: 320, max: 900, axis: 'x', invert: true, persistKey: 'eNCode.right.v2' })
 
@@ -49,6 +51,10 @@ export default function App() {
     void useSessions.getState().init()
     void useGit.getState().refresh()
   }, [])
+
+  useEffect(() => {
+    if (appearance) applyAppearance(appearance)
+  }, [appearance])
 
   useEffect(() => {
     const refresh = () => {

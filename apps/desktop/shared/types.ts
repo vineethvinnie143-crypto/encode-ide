@@ -4,6 +4,8 @@
  * can be consumed from both tsconfig projects.
  */
 
+import type { Appearance } from './appearance'
+
 export type AgentMode = 'code' | 'ask' | 'plan'
 export type AgentStatus =
   | 'idle'
@@ -45,6 +47,8 @@ export interface Settings {
   recentWorkspaces: string[]
   lastWorkspace: string | null
   agentMode: AgentMode
+  /** Theme, accent, contrast, density and motion; see shared/appearance.ts. */
+  appearance: Appearance
   /** Read only; reported by the main process and ignored on save. */
   keyStorage: KeyStorage
 }

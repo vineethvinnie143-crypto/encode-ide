@@ -1,4 +1,4 @@
-import { Code2, Files, GitBranch, Search, SquareTerminal } from 'lucide-react'
+import { Code2, Files, GitBranch, Search, SquareTerminal } from '../ui/icons'
 import type { SidebarView } from '../stores/ui'
 import { useUi } from '../stores/ui'
 import CodeEditor from './CodeEditor'

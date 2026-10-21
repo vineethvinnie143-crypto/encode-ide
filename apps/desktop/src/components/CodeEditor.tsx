@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Search, X } from '../ui/icons'
 import type { Tab } from '../stores/editor'
 import { useEditor } from '../stores/editor'
 import { escapeHtml, renderTokens, tokenize } from '../editor/tokenize'

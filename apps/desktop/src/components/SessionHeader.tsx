@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, BookOpen, ChevronDown, MoreHorizontal, Plus, ScrollText, ShieldCheck, Sparkles } from 'lucide-react'
+import { Activity, BookOpen, ChevronDown, MoreHorizontal, Plus, ScrollText, ShieldCheck, Sparkles } from '../ui/icons'
 import type { BackgroundJob } from '@shared/types'
 import { api } from '../api'
 import { useChat } from '../stores/chat'

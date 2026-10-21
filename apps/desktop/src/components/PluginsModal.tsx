@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Plus, Puzzle, Sparkles, X } from 'lucide-react'
+import { FolderOpen, Plus, Puzzle, Sparkles, X } from '../ui/icons'
 import type { SkillInfo } from '@shared/types'
 import { api } from '../api'
 import { useSettings } from '../stores/settings'

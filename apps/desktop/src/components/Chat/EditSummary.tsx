@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronRight, Pencil } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 
 interface EditedFile {

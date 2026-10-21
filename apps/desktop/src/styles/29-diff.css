@@ -1,0 +1,23 @@
+/* Diff block */
+.diff-view {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 10.5px;
+}
+.diff-hunk-header {
+  background: var(--surface-2);
+  color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+}
+.diff-add {
+  background: color-mix(in srgb, var(--text-1) 2.5%, transparent);
+  color: var(--text-1);
+}
+.diff-del {
+  background: rgb(var(--shadow-rgb) / calc(0.2 * var(--shadow-alpha)));
+  color: var(--text-2);
+}
+.diff-ctx {
+  color: var(--text-2);
+}

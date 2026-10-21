@@ -1,0 +1,119 @@
+/* The editor's and the terminal's theme, mapped from the tokens (ADR 0013).
+ *
+ * These names are the contract of the editor and terminal packages (root
+ * classes .enc-editor and .enc-terminal): they read only these variables, so
+ * theming them never reaches into their markup. Anything that points at a
+ * token follows the theme by itself; only literal colours need a light value.
+ */
+
+:root {
+  /* Editor */
+  --enc-editor-bg: var(--canvas);
+  --enc-editor-fg: var(--text-1);
+  --enc-editor-font-family: var(--font-mono);
+  --enc-editor-font-size: 13px;
+  --enc-editor-line-height: 20px;
+  --enc-editor-gutter-bg: var(--canvas);
+  --enc-editor-gutter-fg: var(--text-disabled);
+  --enc-editor-gutter-active-fg: var(--text-2);
+  --enc-editor-active-line-bg: color-mix(in srgb, var(--text-1) 4%, transparent);
+  --enc-editor-selection-bg: color-mix(in srgb, var(--accent) 28%, transparent);
+  --enc-editor-selection-inactive-bg: color-mix(in srgb, var(--text-2) 16%, transparent);
+  --enc-editor-cursor: var(--accent);
+  --enc-editor-match-bg: color-mix(in srgb, var(--warning) 22%, transparent);
+  --enc-editor-match-active-bg: color-mix(in srgb, var(--warning) 45%, transparent);
+  --enc-editor-bracket-match-bg: color-mix(in srgb, var(--accent) 22%, transparent);
+  --enc-editor-indent-guide: var(--border-subtle);
+  --enc-editor-whitespace: color-mix(in srgb, var(--text-3) 45%, transparent);
+  --enc-editor-error: var(--danger);
+  --enc-editor-warning: var(--warning);
+  --enc-editor-info: var(--accent);
+  --enc-editor-inserted-bg: color-mix(in srgb, var(--success) 30%, transparent);
+  --enc-editor-inserted-line-bg: color-mix(in srgb, var(--success) 10%, transparent);
+  --enc-editor-deleted-bg: color-mix(in srgb, var(--danger) 30%, transparent);
+  --enc-editor-deleted-line-bg: color-mix(in srgb, var(--danger) 10%, transparent);
+  --enc-editor-widget-bg: var(--surface-3);
+  --enc-editor-widget-fg: var(--text-1);
+  --enc-editor-widget-border: var(--border);
+  --enc-editor-widget-shadow: var(--shadow-pop);
+  --enc-editor-accent: var(--accent-fill);
+  --enc-editor-accent-fg: var(--on-accent);
+  --enc-editor-scrollbar: color-mix(in srgb, var(--text-3) 30%, transparent);
+  --enc-editor-scrollbar-hover: color-mix(in srgb, var(--text-3) 50%, transparent);
+  --enc-editor-radius: var(--r-8);
+
+  /* Syntax; plain text is --enc-editor-fg */
+  --enc-tok-comment: var(--syn-comment);
+  --enc-tok-string: var(--syn-string);
+  --enc-tok-number: var(--syn-number);
+  --enc-tok-keyword: var(--syn-keyword);
+  --enc-tok-type: var(--syn-type);
+  --enc-tok-function: var(--syn-fn);
+  --enc-tok-punct: var(--text-3);
+  --enc-tok-operator: var(--text-2);
+  --enc-tok-tag: var(--syn-keyword);
+  --enc-tok-attr: var(--syn-type);
+  --enc-tok-value: var(--syn-string);
+  --enc-tok-key: var(--syn-fn);
+  --enc-tok-bool: var(--syn-number);
+  --enc-tok-heading: var(--syn-fn);
+  --enc-tok-emphasis: var(--text-1);
+  --enc-tok-strong: var(--text-1);
+  --enc-tok-variable: var(--text-1);
+  --enc-tok-link: var(--accent);
+  --enc-tok-meta: var(--syn-type);
+  --enc-tok-regexp: var(--syn-string);
+  --enc-tok-escape: var(--syn-number);
+  --enc-tok-property: var(--syn-fn);
+  --enc-tok-constant: var(--syn-number);
+  --enc-tok-inserted: var(--success);
+  --enc-tok-deleted: var(--danger);
+  --enc-tok-code: var(--syn-string);
+
+  /* Terminal */
+  --enc-term-bg: var(--canvas);
+  --enc-term-fg: var(--text-1);
+  --enc-term-cursor: var(--accent);
+  --enc-term-cursor-text: var(--canvas);
+  --enc-term-selection-bg: color-mix(in srgb, var(--accent) 30%, transparent);
+  --enc-term-font-family: var(--font-mono);
+  --enc-term-font-size: 12px;
+  --enc-term-line-height: 19px;
+
+  /* ANSI: black, red, green, yellow, blue, magenta, cyan, white, then the bright eight */
+  --enc-term-ansi-0: #2a2f3b;
+  --enc-term-ansi-1: #ff6b6b;
+  --enc-term-ansi-2: #3ccb7f;
+  --enc-term-ansi-3: #f5b54a;
+  --enc-term-ansi-4: #6b98ff;
+  --enc-term-ansi-5: #c5a3ff;
+  --enc-term-ansi-6: #3fd6ee;
+  --enc-term-ansi-7: #c9d0dc;
+  --enc-term-ansi-8: #5a6274;
+  --enc-term-ansi-9: #ff8f8f;
+  --enc-term-ansi-10: #6ee7a6;
+  --enc-term-ansi-11: #ffd27a;
+  --enc-term-ansi-12: #9bb8ff;
+  --enc-term-ansi-13: #dcc6ff;
+  --enc-term-ansi-14: #7fe6f5;
+  --enc-term-ansi-15: #f5f7fa;
+}
+
+:root[data-theme='light'] {
+  --enc-term-ansi-0: #1f2430;
+  --enc-term-ansi-1: #c62828;
+  --enc-term-ansi-2: #1a7f4b;
+  --enc-term-ansi-3: #8a5a00;
+  --enc-term-ansi-4: #2f5fe0;
+  --enc-term-ansi-5: #7c3aed;
+  --enc-term-ansi-6: #0b7e98;
+  --enc-term-ansi-7: #5c6370;
+  --enc-term-ansi-8: #4b5363;
+  --enc-term-ansi-9: #e04848;
+  --enc-term-ansi-10: #23a160;
+  --enc-term-ansi-11: #a86f00;
+  --enc-term-ansi-12: #4a77f2;
+  --enc-term-ansi-13: #9157f5;
+  --enc-term-ansi-14: #0d97b6;
+  --enc-term-ansi-15: #a2a9b6;
+}

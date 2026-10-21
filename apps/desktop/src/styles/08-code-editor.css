@@ -1,0 +1,205 @@
+/* ============================================================
+   Hand-built code editor
+   ============================================================ */
+
+.code-editor {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: var(--canvas);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 21px;
+  font-variant-ligatures: none;
+}
+
+.code-gutter {
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 12px 10px 0 0;
+  text-align: right;
+  color: var(--text-3);
+  background: var(--canvas);
+  border-right: 1px solid var(--border-subtle);
+  user-select: none;
+  white-space: pre;
+  font-size: 11.5px;
+  line-height: 21px;
+}
+
+.code-gutter-inner {
+  will-change: transform;
+}
+
+.code-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.code-current-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 21px;
+  background: var(--surface-2);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  will-change: transform;
+}
+
+.code-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 12px 16px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+  white-space: pre;
+  color: var(--text-1);
+  font: inherit;
+}
+
+.code-highlight code {
+  display: block;
+  white-space: pre;
+  font: inherit;
+  will-change: transform;
+}
+
+.code-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--accent);
+  font: inherit;
+  white-space: pre;
+  overflow: auto;
+  z-index: 2;
+  tab-size: 2;
+}
+
+.code-input::selection {
+  background: var(--enc-editor-selection-bg);
+}
+
+/* Token colours, from the editor variables in theme/editor-terminal.css */
+.tok-comment {
+  color: var(--enc-tok-comment);
+  font-style: italic;
+}
+.tok-string {
+  color: var(--enc-tok-string);
+}
+.tok-number {
+  color: var(--enc-tok-number);
+}
+.tok-keyword {
+  color: var(--enc-tok-keyword);
+}
+.tok-type {
+  color: var(--enc-tok-type);
+}
+.tok-function {
+  color: var(--enc-tok-function);
+}
+.tok-bool {
+  color: var(--enc-tok-bool);
+}
+.tok-punct {
+  color: var(--enc-tok-punct);
+}
+.tok-operator {
+  color: var(--enc-tok-operator);
+}
+.tok-tag {
+  color: var(--enc-tok-tag);
+}
+.tok-attr {
+  color: var(--enc-tok-attr);
+}
+.tok-value {
+  color: var(--enc-tok-value);
+}
+.tok-key {
+  color: var(--enc-tok-key);
+}
+.tok-heading {
+  color: var(--enc-tok-heading);
+  font-weight: 700;
+}
+.tok-emphasis {
+  color: var(--enc-tok-emphasis);
+  font-style: italic;
+}
+.tok-variable {
+  color: var(--enc-tok-variable);
+}
+.tok-link {
+  color: var(--enc-tok-link);
+  text-decoration: underline;
+}
+.tok-meta {
+  color: var(--enc-tok-meta);
+}
+
+/* In-file find bar */
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 22px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 4px 6px;
+  box-shadow: 0 8px 24px rgb(var(--shadow-rgb) / calc(0.4 * var(--shadow-alpha)));
+}
+
+.find-icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.find-input {
+  width: 190px;
+  height: 24px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 0 7px;
+  font-size: 11.5px;
+  outline: none;
+}
+.find-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.find-count {
+  font-size: 10.5px;
+  color: var(--text-3);
+  min-width: 36px;
+  text-align: center;
+}
+
+.find-bar .icon-btn {
+  width: 22px;
+  height: 22px;
+}

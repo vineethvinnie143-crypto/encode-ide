@@ -4,7 +4,7 @@ export type SidebarView = 'explorer' | 'search' | 'git'
 export type RightPanel = 'browse' | 'workspace'
 export type WorkspaceTab = 'files' | 'editor' | 'shell'
 export type MainView = 'chat' | 'trajectory'
-export type SettingsTab = 'models' | 'agent'
+export type SettingsTab = 'models' | 'agent' | 'appearance'
 
 export interface PromptRequest {
   id: number
@@ -102,13 +102,8 @@ export const useUi = create<UiStore>((set, get) => ({
     set({ prompt: null })
   },
 
-  notify: (kind, text) => {
-    const toast: Toast = { id: Date.now() + Math.random(), kind, text }
-    set({ toast })
-    setTimeout(() => {
-      if (get().toast?.id === toast.id) set({ toast: null })
-    }, 5000)
-  },
+  // Toasts.tsx closes it after 5 s, pausing while the pointer is on it.
+  notify: (kind, text) => set({ toast: { id: Date.now() + Math.random(), kind, text } }),
 
   dismissToast: () => set({ toast: null }),
 }))

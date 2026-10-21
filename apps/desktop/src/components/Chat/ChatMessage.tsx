@@ -1,4 +1,4 @@
-import { AlertTriangle, Copy, Info } from 'lucide-react'
+import { AlertTriangle, Copy, Info } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { renderMarkdown } from '../../markdown'
 import ToolCard from './ToolCard'

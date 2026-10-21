@@ -1,4 +1,4 @@
-import { FileCode2, FileJson, FileText, X } from 'lucide-react'
+import { FileCode2, FileJson, FileText, X } from '../ui/icons'
 import { useEditor } from '../stores/editor'
 
 function iconFor(name: string) {

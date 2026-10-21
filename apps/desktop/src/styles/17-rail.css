@@ -1,0 +1,328 @@
+/* Left rail */
+.session-rail {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 8px;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 4px 16px;
+}
+
+.rail-brand-name {
+  font-size: 15px;
+  color: var(--text-1);
+}
+
+.rail-new-session {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  margin: 0 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.rail-new-session:hover {
+  background: var(--pressed);
+}
+
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rail-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.rail-nav button:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 12px;
+}
+.rail-workspaces {
+  flex-shrink: 0;
+  max-height: 42%;
+}
+.rail-sessions {
+  flex: 1;
+  min-height: 0;
+}
+
+.rail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.rail-section-actions {
+  display: flex;
+  gap: 1px;
+}
+.rail-section-actions button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-3);
+}
+.rail-section-actions button:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.rail-filter {
+  height: 26px;
+  margin: 0 6px 6px;
+  padding: 0 8px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 12px;
+  outline: none;
+}
+
+.rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.rail-workspace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.rail-workspace:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.rail-workspace.is-active {
+  background: transparent;
+  color: var(--text-1);
+}
+.rail-workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-empty {
+  padding: 6px 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.rail-session {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  text-align: left;
+  padding-right: 4px;
+}
+.rail-session:hover {
+  background: var(--hover);
+}
+.rail-session.is-active {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+.rail-session-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+  color: inherit;
+}
+.rail-session-actions {
+  display: none;
+  gap: 1px;
+}
+.rail-session:hover .rail-session-actions {
+  display: flex;
+}
+.rail-session-actions button {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-3);
+}
+.rail-session-actions button:hover {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+.rail-session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.rail-session-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  flex-shrink: 0;
+}
+.rail-session-dot.is-busy {
+  border-color: var(--accent);
+  animation: pulse 1.4s infinite;
+}
+.rail-session-badge {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.rail-session-badge.is-answer {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 8px;
+  padding: 1px 6px;
+}
+
+.rail-footer {
+  position: relative;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+.rail-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+  text-align: left;
+}
+.rail-profile:hover {
+  background: var(--hover);
+}
+.rail-profile-chevron {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.rail-profile-menu {
+  position: absolute;
+  bottom: 46px;
+  left: 4px;
+  right: 4px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgb(var(--shadow-rgb) / calc(0.55 * var(--shadow-alpha)));
+}
+.rail-profile-menu button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: left;
+}
+.rail-profile-menu button:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.rail-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.rail-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.rail-username {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-settings {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-3);
+}
+.rail-settings:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}

@@ -1,4 +1,4 @@
-import { CircleDot, GitBranch, Bot, Wifi } from 'lucide-react'
+import { CircleDot, GitBranch, Bot, Wifi } from '../ui/icons'
 import { useEditor } from '../stores/editor'
 import { useGit } from '../stores/git'
 import { useSettings } from '../stores/settings'

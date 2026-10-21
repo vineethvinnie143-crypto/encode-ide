@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef } from 'react'
-import { MessageCircleQuestion, ShieldAlert, Sparkles } from 'lucide-react'
+import { MessageCircleQuestion, ShieldAlert, Sparkles } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { useChat } from '../../stores/chat'
 import { useWorkspace } from '../../stores/workspace'

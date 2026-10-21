@@ -1,5 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
+import { appearanceParams, type Appearance } from '../shared/appearance'
+import { windowBackground } from './appearance'
 
 /** The Vite dev server, honoured only by an unpackaged build. */
 const devServer = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL
@@ -22,7 +24,15 @@ export function isRendererUrl(url: string): boolean {
   return url.startsWith('app://renderer/')
 }
 
-export function createMainWindow(): BrowserWindow {
+/** The renderer's address. It carries the appearance, so the first frame is drawn in the right theme. */
+function rendererUrl(appearance: Appearance): string {
+  const url = new URL(devServer ?? 'app://renderer/index.html')
+  for (const [name, value] of Object.entries(appearanceParams(appearance))) url.searchParams.set(name, value)
+  return url.toString()
+}
+
+/** Call after applyNativeAppearance, so the window starts in the colour of the chosen theme. */
+export function createMainWindow(appearance: Appearance): BrowserWindow {
   const win = new BrowserWindow({
     width: 1480,
     height: 920,
@@ -30,7 +40,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     title: 'eNCode',
-    backgroundColor: '#0a0a0c',
+    backgroundColor: windowBackground(),
     frame: false,
     icon: path.join(app.getAppPath(), 'build', 'icon.png'),
     autoHideMenuBar: true,
@@ -59,7 +69,7 @@ export function createMainWindow(): BrowserWindow {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
   })
 
-  void win.loadURL(devServer ?? 'app://renderer/index.html')
+  void win.loadURL(rendererUrl(appearance))
 
   return win
 }

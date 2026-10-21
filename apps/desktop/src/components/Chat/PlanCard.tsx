@@ -1,4 +1,4 @@
-import { Play, ScrollText, X } from 'lucide-react'
+import { Play, ScrollText, X } from '../../ui/icons'
 import { api } from '../../api'
 import { useChat } from '../../stores/chat'
 import { useSessions } from '../../stores/sessions'

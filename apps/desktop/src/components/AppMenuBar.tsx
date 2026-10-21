@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Maximize2, Menu, Minus, X } from 'lucide-react'
+import { Copy, Maximize2, Menu, Minus, X } from '../ui/icons'
 import { api } from '../api'
 import { useSessions } from '../stores/sessions'
 import { useUi } from '../stores/ui'

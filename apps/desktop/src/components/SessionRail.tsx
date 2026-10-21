@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Clock, Folder, FolderOpen, GitFork, Plus, Puzzle, RefreshCw, Search, Settings, Trash2 } from 'lucide-react'
+import { ChevronDown, Clock, Folder, FolderOpen, GitFork, Plus, Puzzle, RefreshCw, Search, Settings, Trash2 } from '../ui/icons'
 import { api } from '../api'
+import { LogoMark, Wordmark } from '../ui/Logo'
 import { useChat } from '../stores/chat'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
@@ -63,9 +64,8 @@ export default function SessionRail() {
   return (
     <aside className="session-rail">
       <div className="rail-brand">
-        <span className="rail-logo">eN</span>
-        <span className="rail-brand-name">eNCode</span>
-        <span className="rail-brand-tag">IDE</span>
+        <LogoMark size={22} />
+        <Wordmark className="rail-brand-name" />
       </div>
 
       <button className="rail-new-session" onClick={newSession}>
