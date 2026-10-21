@@ -1,0 +1,144 @@
+/* Todos and plan cards */
+.todo-card {
+  margin: 10px var(--thread-gutter) 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.todo-count {
+  margin-left: auto;
+}
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.todo-item svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.todo-completed {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.todo-in_progress {
+  color: var(--text-1);
+}
+.todo-in_progress svg {
+  color: var(--accent);
+}
+
+.plan-card {
+  margin: 10px var(--thread-gutter) 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.plan-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+}
+.plan-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+.plugin-name {
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.plugin-meta {
+  color: var(--text-3);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-badge {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+
+.job-popover {
+  padding: 6px;
+  min-width: 320px;
+}
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.job-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.job-running {
+  color: var(--accent);
+}
+.job-command {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

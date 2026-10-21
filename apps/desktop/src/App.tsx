@@ -1,16 +1,19 @@
 import { useEffect } from 'react'
-import AppMenuBar from './components/AppMenuBar'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
-import SessionRail from './components/SessionRail'
 import PluginsModal from './components/PluginsModal'
 import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
 import RightPanel, { TrajectoryView } from './components/RightPanel'
 import SessionHeader from './components/SessionHeader'
 import SettingsModal from './components/SettingsModal'
+import { AboutDialog, ConfirmDialog, ShortcutsDialog } from './components/shell/Dialogs'
+import IconRail from './components/shell/IconRail'
+import SessionSidebar from './components/shell/SessionSidebar'
+import TitleBar from './components/shell/TitleBar'
 import Toasts from './components/Toasts'
 import { api } from './api'
+import { useKeymap } from './commands/useKeymap'
 import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useEditor } from './stores/editor'
@@ -19,6 +22,7 @@ import { useSessions } from './stores/sessions'
 import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
 import { useWorkspace } from './stores/workspace'
+import { applyAppearance } from './theme/appearance'
 
 async function refreshOpenTab(path: string): Promise<void> {
   const editor = useEditor.getState()
@@ -34,14 +38,19 @@ async function refreshOpenTab(path: string): Promise<void> {
 
 export default function App() {
   const rightVisible = useUi((state) => state.rightVisible)
+  const sidebarVisible = useUi((state) => state.sidebarVisible)
   const settingsOpen = useUi((state) => state.settingsOpen)
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
   const mainView = useUi((state) => state.mainView)
-  const setMainView = useUi((state) => state.setMainView)
+  const appearance = useSettings((state) => state.settings?.appearance)
+  const workspaceRoot = useWorkspace((state) => state.workspace?.root)
 
+  const sidebar = useResizable({ initial: 272, min: 220, max: 480, axis: 'x', persistKey: 'eNCode.sidebar.v1' })
   const right = useResizable({ initial: 380, min: 320, max: 900, axis: 'x', invert: true, persistKey: 'eNCode.right.v2' })
+
+  useKeymap()
 
   useEffect(() => {
     void useWorkspace.getState().init()
@@ -51,6 +60,15 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (appearance) applyAppearance(appearance)
+  }, [appearance])
+
+  // Opening a folder gives it to the empty session that has no project yet, so that session is listed under it.
+  useEffect(() => {
+    if (workspaceRoot) void useSessions.getState().adoptProject()
+  }, [workspaceRoot])
+
+  useEffect(() => {
     const refresh = () => {
       void useWorkspace.getState().refreshAll()
       void useGit.getState().refresh()
@@ -58,6 +76,7 @@ export default function App() {
 
     const offAgent = api.agent.onEvent((event) => {
       useChat.getState().applyEvent(event)
+      useSessions.getState().applyEvent(event)
       if (event.type === 'file-changed') void refreshOpenTab(event.path)
       if (event.type === 'file-changed' || event.type === 'done') refresh()
     })
@@ -73,74 +92,37 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const mod = event.ctrlKey || event.metaKey
-      if (!mod) {
-        if (event.key === 'Escape') useUi.getState().setQuickOpenOpen(false)
-        return
-      }
-      const key = event.key.toLowerCase()
-
-      if (key === 's' && !event.shiftKey) {
-        event.preventDefault()
-        void useEditor.getState().saveActive()
-      } else if (key === 'p' && !event.shiftKey) {
-        event.preventDefault()
-        useUi.getState().setQuickOpenOpen(true)
-      } else if (key === 'n' && !event.shiftKey) {
-        event.preventDefault()
-        useSessions.getState().newSession()
-      } else if (key === 'b' && !event.shiftKey) {
-        event.preventDefault()
-        useUi.getState().toggleRight()
-      } else if (key === 'f' && event.shiftKey) {
-        event.preventDefault()
-        useUi.getState().setSidebarView('search')
-        useUi.getState().setRightPanel('workspace')
-        useUi.getState().setWorkspaceTab('files')
-      } else if (event.code === 'Backquote' && !event.shiftKey) {
-        event.preventDefault()
-        useUi.getState().setWorkspaceTab('shell')
-      } else if (key === 'x' && event.shiftKey) {
-        event.preventDefault()
-        useUi.getState().setWorkspaceTab('files')
-        useUi.getState().setMainView('chat')
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
-
   return (
     <div className="app">
-      <AppMenuBar />
+      <TitleBar />
 
       <div className="app-body">
-        <SessionRail />
+        <IconRail />
 
-        <main className="app-main">
-          <SessionHeader />
-          <div className="main-tabs">
-            <button className={mainView === 'chat' ? 'is-active' : ''} onClick={() => setMainView('chat')}>
-              Chat
-            </button>
-            <button className={mainView === 'trajectory' ? 'is-active' : ''} onClick={() => setMainView('trajectory')}>
-              Trajectory
-            </button>
-          </div>
-          <div className="main-body">{mainView === 'chat' ? <ChatPanel /> : <TrajectoryView />}</div>
-        </main>
+        <div className="sheet">
+          {sidebarVisible && (
+            <>
+              <div className="sidebar-wrap" style={{ width: sidebar.size }}>
+                <SessionSidebar />
+              </div>
+              <div className="resizer resizer-v" onPointerDown={sidebar.onPointerDown} />
+            </>
+          )}
 
-        {rightVisible && (
-          <>
-            <div className="resizer resizer-v" onPointerDown={right.onPointerDown} />
-            <div className="right-wrap" style={{ width: right.size }}>
-              <RightPanel />
-            </div>
-          </>
-        )}
+          <main className="app-main">
+            <SessionHeader />
+            <div className="main-body">{mainView === 'chat' ? <ChatPanel /> : <TrajectoryView />}</div>
+          </main>
+
+          {rightVisible && (
+            <>
+              <div className="resizer resizer-v" onPointerDown={right.onPointerDown} />
+              <div className="right-wrap" style={{ width: right.size }}>
+                <RightPanel />
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {quickOpenOpen && <QuickOpen />}
@@ -148,6 +130,9 @@ export default function App() {
       {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
       <PromptDialog />
+      <ShortcutsDialog />
+      <AboutDialog />
+      <ConfirmDialog />
       <Toasts />
     </div>
   )

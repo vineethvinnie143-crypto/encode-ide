@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, Paperclip, Plus, Shield, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, Paperclip, Plus, Shield, Sparkles, Square, X } from '../../ui/icons'
 import { api } from '../../api'
 import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
 import { useChat } from '../../stores/chat'

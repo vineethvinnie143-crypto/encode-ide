@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CaseSensitive, Regex, Search } from 'lucide-react'
+import { CaseSensitive, Regex, Search } from '../../ui/icons'
 import type { SearchResult } from '@shared/types'
 import { api } from '../../api'
 import { useEditor } from '../../stores/editor'

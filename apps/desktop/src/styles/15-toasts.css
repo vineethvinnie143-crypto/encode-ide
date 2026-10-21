@@ -1,0 +1,72 @@
+/* ============================================================
+   Toasts & utilities
+   ============================================================ */
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 34px;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(360px, calc(100vw - 36px));
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  padding: 10px 10px 10px 12px;
+  font-size: var(--fs-13);
+  line-height: 20px;
+  color: var(--text-1);
+  box-shadow: var(--shadow-pop);
+  animation: toast-in var(--dur-3) var(--ease-out);
+}
+.toast-icon {
+  margin-top: 2px;
+  color: var(--accent);
+}
+.toast-error .toast-icon {
+  color: var(--danger);
+}
+.toast-success .toast-icon {
+  color: var(--success);
+}
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-4);
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+}
+.toast-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

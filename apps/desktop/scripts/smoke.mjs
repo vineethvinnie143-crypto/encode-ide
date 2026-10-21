@@ -10,7 +10,8 @@
  *
  * Exercises the hand-built editor (overlay integrity, save round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
- * scripts/fake-provider.mjs including approvals, diffs and command execution.
+ * scripts/fake-provider.mjs including approvals, diffs and command execution, and
+ * last the appearance settings, capturing dark and light at 1280 x 800 and 1920 x 1080.
  * Screenshots land in ./screenshots.
  */
 import fs from 'node:fs/promises'
@@ -279,8 +280,9 @@ async function runProviderPhase() {
     throw new Error('The command approval card does not show the command')
   }
 
+  await openWorkLogs()
   await evaluate(`(() => {
-    document.querySelectorAll('.tool-row').forEach((row) => {
+    document.querySelectorAll('.tool-row:not(.tool-group)').forEach((row) => {
       if (!row.querySelector('.tool-row-body')) row.querySelector('.tool-row-toggle')?.click()
     })
     return true
@@ -504,6 +506,24 @@ async function runSubagentChecks() {
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:subagent-check] Delegate a shell check to a subagent.')
   await waitFor("!!document.querySelector('.approval-card')", 30000, 'subagent approval card')
+
+  // A session that waits for approval keeps its card: leave it, remove the detour, reload, and it is back.
+  const waitingId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await click('.sb-new')
+  await waitFor(
+    "document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session' && !document.querySelector('.approval-card')",
+    8000,
+    'a new session replaces the waiting one on screen',
+  )
+  const waitingRows = await evaluate("[...document.querySelectorAll('.session-sidebar .sb-row .meta.warn')].map((node) => node.textContent)")
+  if (!waitingRows.includes('Approval')) throw new Error('the waiting session does not show Approval in the sidebar')
+  const extraId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await evaluate(`window.eNCode.agent.remove(${JSON.stringify(extraId)})`)
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(waitingId)})`)
+  await send('Page.reload')
+  await waitFor("!!document.querySelector('.approval-card')", 15000, 'the approval card comes back with the session')
+  const restoredReason = await evaluate("document.querySelector('.approval-reason')?.textContent ?? ''")
+  if (!restoredReason.includes('Workspace Write')) throw new Error(`the restored card lost its reason: ${restoredReason}`)
   await click('.composer-send.is-stop')
   await waitFor(
     "['idle', 'done'].includes(document.querySelector('.chat-panel')?.dataset.status ?? '') && !document.querySelector('.approval-card')",
@@ -536,12 +556,260 @@ async function runSubagentChecks() {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
 }
 
+const DEFAULT_APPEARANCE = { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'system' }
+const theme = () => evaluate('document.documentElement.dataset.theme')
+
+/** The window at the two sizes the UI pull requests are reviewed at. */
+async function screenshotSizes(name) {
+  for (const [width, height] of [
+    [1280, 800],
+    [1920, 1080],
+  ]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+    await sleep(400)
+    await screenshot(`${name}-${width}x${height}.png`)
+  }
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+}
+
+async function openAppearanceSettings() {
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Appearance'))) throw new Error('Appearance tab not found')
+  await waitFor("!!document.querySelector('.settings-appearance')", 4000, 'appearance settings')
+}
+
+const key = (init) =>
+  evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ bubbles: true, cancelable: true }, ${JSON.stringify(init)})))`)
+const count = (selector) => evaluate(`document.querySelectorAll(${JSON.stringify(selector)}).length`)
+const sidebarTitles = () =>
+  evaluate("[...document.querySelectorAll('.session-sidebar .sb-row-main .title')].map((node) => node.textContent)")
+const activeTitle = () => evaluate("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent ?? ''")
+const menuOpen = (name) => `!!document.querySelector('.ui-menu[aria-label="${name}"]')`
+
+/** Right-clicks the open session's row and chooses an item from its menu. */
+async function chooseFromSessionMenu(item) {
+  await evaluate(`(() => {
+    const row = document.querySelector('.session-sidebar .sb-row.is-active')
+    const box = row.getBoundingClientRect()
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 20, clientY: box.top + 10 }))
+  })()`)
+  await waitFor(menuOpen('Session'), 4000, 'session context menu')
+  if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`context menu has no ${item}`)
+}
+
+/** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
+async function openWorkLogs() {
+  await evaluate(`(() => {
+    document.querySelectorAll('.worklog-head[aria-expanded="false"]').forEach((head) => head.click())
+    return true
+  })()`)
+  await sleep(250)
+}
+
+/**
+ * The session view after the demo run: a finished turn folds to "Worked for ...", opens on a click,
+ * shows its result card, and the thread is 736 px of content in a wide window.
+ */
+async function runSessionViewChecks() {
+  console.log('[smoke] --- session view ---')
+  const head = await evaluate(`(() => {
+    const node = document.querySelector('.worklog-head')
+    return node ? { text: node.textContent, open: node.getAttribute('aria-expanded') } : null
+  })()`)
+  console.log('[smoke] work log header:', JSON.stringify(head))
+  if (!head || !/^Worked for \d/.test(head.text) || head.open !== 'false') throw new Error('a finished turn should fold to "Worked for ..."')
+  if ((await count('.worklog-body')) !== 0) throw new Error('a folded work log still shows its steps')
+  await click('.worklog-head')
+  await waitFor("document.querySelectorAll('.worklog-body .tool-row').length >= 2", 4000, 'the work log opens on a click')
+  const card = await evaluate("document.querySelector('.result-card .result-title')?.textContent ?? ''")
+  if (!card.startsWith('Edited 1 file')) throw new Error(`the result card says "${card}"`)
+  if ((await evaluate("document.querySelector('.session-header')?.getBoundingClientRect().height")) !== 52) throw new Error('the session header is not 52 px')
+
+  await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false })
+  await sleep(400)
+  const thread = await evaluate("document.querySelector('.thread')?.getBoundingClientRect().width")
+  if (thread !== 784) throw new Error(`the thread is ${thread} px wide, not 736 px of content with 24 px at each side`)
+  await sleep(300)
+  await screenshot('ui-dark-thread-1920x1080.png')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+
+  // The header menus.
+  await click('.session-header [aria-label="Summary"]')
+  await waitFor("!!document.querySelector('.ui-menu[aria-label=\"Summary\"]')", 4000, 'Summary menu')
+  const summary = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!summary.includes('Files changed') || !summary.includes('Commands run')) throw new Error(`the summary menu is missing items: ${summary}`)
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the summary')
+  console.log('[smoke] session view checks passed')
+}
+
+/**
+ * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
+ * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
+ */
+async function runShellChecks() {
+  console.log('[smoke] --- shell ---')
+  const sizes = await evaluate(`(() => {
+    const box = (selector) => document.querySelector(selector)?.getBoundingClientRect()
+    return { titlebar: box('.titlebar')?.height, rail: box('.icon-rail')?.width, railButton: box('.rail-btn')?.width, sidebar: box('.sidebar-wrap')?.width }
+  })()`)
+  console.log('[smoke] shell sizes:', JSON.stringify(sizes))
+  if (sizes.titlebar !== 44 || sizes.rail !== 52 || sizes.railButton !== 36) throw new Error('the title bar or icon rail is not the specified size')
+  if (sizes.sidebar < 220 || sizes.sidebar > 480) throw new Error('the sidebar is outside its 220 to 480 px range')
+
+  // Menus: a click opens, the arrow keys move to the next menu, Escape closes.
+  if (!(await click('.tb-menu', 'View'))) throw new Error('View menu not found')
+  await waitFor(menuOpen('View'), 4000, 'View menu')
+  const viewItems = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!viewItems.includes('Zoom in') || !viewItems.includes('Full screen')) throw new Error(`View menu is missing items: ${viewItems}`)
+  await sleep(400)
+  await screenshot('ui-dark-menu.png')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))")
+  await waitFor(menuOpen('Session'), 4000, 'ArrowRight opens the next menu')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the menu')
+
+  // Layout shortcuts.
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B hides the sidebar')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sidebar')
+  await key({ key: 'b', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B hides the side panel')
+  await key({ key: 'b', ctrlKey: true, altKey: true })
+  await waitFor("!!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B shows the side panel')
+  const ratioBefore = await evaluate('window.devicePixelRatio')
+  await key({ key: '=', code: 'Equal', ctrlKey: true })
+  await waitFor(`window.devicePixelRatio > ${ratioBefore}`, 4000, 'Ctrl+= zooms in')
+  await key({ key: '0', code: 'Digit0', ctrlKey: true })
+  await waitFor(`window.devicePixelRatio === ${ratioBefore}`, 4000, 'Ctrl+0 resets the zoom')
+
+  // The shortcuts list.
+  await key({ key: '/', code: 'Slash', ctrlKey: true })
+  await waitFor("!!document.querySelector('.shortcuts-dialog')", 4000, 'Ctrl+/ opens the shortcuts')
+  const rows = await count('.shortcuts-row')
+  if (rows < 30) throw new Error(`the shortcuts list has only ${rows} rows`)
+  await sleep(400)
+  await screenshot('ui-dark-shortcuts.png')
+  await key({ key: 'Escape' })
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Escape closes the shortcuts')
+
+  // Sessions: a new one, then Back and Forward over the ones you opened.
+  const firstTitle = await activeTitle()
+  const before = (await sidebarTitles()).length
+  await key({ key: 'n', ctrlKey: true })
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before + 1}`, 6000, 'Ctrl+N adds a session')
+  if ((await activeTitle()) !== 'New session') throw new Error('the new session is not the open one')
+  await key({ key: '[', code: 'BracketLeft', ctrlKey: true })
+  await waitFor(`document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === ${JSON.stringify(firstTitle)}`, 6000, 'Back returns to the first session')
+  await key({ key: ']', code: 'BracketRight', ctrlKey: true })
+  await waitFor("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session'", 6000, 'Forward returns to the new session')
+
+  // Pin from the context menu, then unpin with the shortcut.
+  await chooseFromSessionMenu('Pin')
+  await waitFor("!!document.querySelector('.session-sidebar section[aria-label=\"Pinned\"] .sb-row.is-active')", 6000, 'a pinned session is listed under Pinned')
+  await screenshot('ui-dark-sidebar-pinned.png')
+  await key({ key: 'p', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.session-sidebar section[aria-label=\"Pinned\"]')", 6000, 'Ctrl+Alt+P unpins')
+
+  // The Activity view groups sessions by what they need.
+  await key({ key: 'u', ctrlKey: true, altKey: true })
+  await waitFor("!!document.querySelector('.sb-activity-row.is-active')", 6000, 'Ctrl+Alt+U shows the Activity view')
+  await screenshot('ui-dark-activity.png')
+  await key({ key: 'u', ctrlKey: true, altKey: true })
+  await waitFor("!document.querySelector('.sb-activity-row')", 6000, 'Ctrl+Alt+U leaves the Activity view')
+
+  // Archive, find it under Archived, restore it.
+  await key({ key: 'A', ctrlKey: true, shiftKey: true })
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before}`, 6000, 'Ctrl+Shift+A archives the open session')
+  await click('.rail-btn[aria-label="More"]')
+  await waitFor(menuOpen('More'), 4000, 'More menu')
+  await click('.ui-menu [role^="menuitem"]', 'Archived')
+  await waitFor("!!document.querySelector('.session-sidebar [aria-label=\"Restore\"]')", 6000, 'archived sessions are listed')
+  await click('.session-sidebar [aria-label="Restore"]')
+  await click('.rail-btn[aria-label="More"]')
+  await waitFor(menuOpen('More'), 4000, 'More menu again')
+  await click('.ui-menu [role^="menuitem"]', 'Projects')
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before + 1}`, 6000, 'the restored session is back')
+
+  // Delete asks first: Cancel keeps the session, Delete removes it.
+  await click('.session-sidebar .sb-row-main', 'New session')
+  await chooseFromSessionMenu('Delete…')
+  await waitFor("!!document.querySelector('.ui-dialog')", 4000, 'delete confirmation')
+  await click('.ui-dialog-foot .btn', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'Cancel closes the confirmation')
+  if ((await sidebarTitles()).length !== before + 1) throw new Error('Cancel deleted the session')
+  await chooseFromSessionMenu('Delete…')
+  await waitFor("!!document.querySelector('.ui-dialog')", 4000, 'delete confirmation again')
+  await click('.ui-dialog-foot .btn.danger')
+  await waitFor(`document.querySelectorAll('.session-sidebar .sb-row-main').length === ${before}`, 6000, 'Delete removes the session')
+
+  // A session nobody has used yet joins the folder that is open when it comes up.
+  const looseId = await evaluate('window.eNCode.agent.createSession({ projectRoot: null }).then((session) => session.id)')
+  const openId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(looseId)})`)
+  await send('Page.reload')
+  await waitFor(
+    "!!document.querySelector('.session-sidebar section[aria-label=\"Projects\"] .sb-row.is-active')",
+    15000,
+    'an unused session joins the open folder',
+  )
+  await evaluate(`window.eNCode.agent.remove(${JSON.stringify(looseId)})`)
+  await evaluate(`localStorage.setItem('eNCode.activeSession', ${JSON.stringify(openId)})`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the adoption check')
+  console.log('[smoke] shell checks passed')
+}
+
+/**
+ * Settings > Appearance: a choice previews at once, Cancel puts the saved look back, Save
+ * keeps it across a reload. Captures the main window and the Appearance page in both themes.
+ */
+async function runAppearanceChecks() {
+  console.log('[smoke] --- appearance ---')
+  if ((await theme()) !== 'dark') throw new Error(`eNCode should start dark, not ${await theme()}`)
+  await screenshotSizes('ui-dark-main')
+
+  await openAppearanceSettings()
+  await screenshotSizes('ui-dark-appearance')
+  await click('.settings-appearance [role="radio"]', 'Light')
+  await waitFor("document.documentElement.dataset.theme === 'light'", 4000, 'light preview')
+  await click('.settings-footer .btn', 'Cancel')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+  if ((await theme()) !== 'dark') throw new Error('Cancel did not put the dark theme back')
+
+  await openAppearanceSettings()
+  await click('.settings-appearance [role="radio"]', 'Light')
+  await click('.accent-swatch[aria-label="Jade"]')
+  await waitFor("document.documentElement.dataset.accent === 'jade'", 4000, 'jade preview')
+  await click('.accent-swatch[aria-label="Signal blue"]')
+  await screenshotSizes('ui-light-appearance')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
+  const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
+  console.log('[smoke] saved appearance:', JSON.stringify(saved))
+  if (saved.mode !== 'light' || saved.accent !== 'blue') throw new Error('Light was not saved')
+
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload in light')
+  if ((await theme()) !== 'light') throw new Error('the light theme did not survive a reload')
+  await screenshotSizes('ui-light-main')
+
+  await evaluate(`window.eNCode.settings.save({ appearance: ${JSON.stringify(DEFAULT_APPEARANCE)} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload in dark')
+  if ((await theme()) !== 'dark') throw new Error('saving Dark did not switch back')
+}
+
 try {
   await send('Page.enable')
   await send('Runtime.enable')
 
   await waitFor(
-    "!!window.eNCode && !!document.querySelector('.menubar') && !!document.querySelector('.session-rail')",
+    "!!window.eNCode && !!document.querySelector('.titlebar .menubar') && !!document.querySelector('.icon-rail') && !!document.querySelector('.session-sidebar')",
     30000,
     'app shell',
   )
@@ -655,7 +923,7 @@ try {
   await screenshot('06-editor-ts.png')
 
   // Settings modal.
-  if (!(await click('.rail-nav button', 'Plugins'))) throw new Error('Plugins nav entry not found')
+  if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
   await waitFor("!!document.querySelector('.settings-modal')", 8000, 'settings modal')
   await screenshot('07-settings.png')
   await click('.settings-header .icon-btn')
@@ -687,6 +955,7 @@ try {
     ),
   )
   await screenshot('08-agent.png')
+  await runSessionViewChecks()
 
   console.log(
     '[smoke] demo file bytes:',
@@ -746,6 +1015,9 @@ try {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'final reload')
   await screenshot('12-final.png')
+
+  await runShellChecks()
+  await runAppearanceChecks()
 
   if (errors.length) {
     console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))

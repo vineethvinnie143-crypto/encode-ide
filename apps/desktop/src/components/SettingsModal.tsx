@@ -8,13 +8,15 @@ import {
   Star,
   Trash2,
   X,
-} from 'lucide-react'
+} from '../ui/icons'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
+import { applyAppearance } from '../theme/appearance'
+import AppearanceSettings from './AppearanceSettings'
 
 interface Preset {
   label: string
@@ -57,6 +59,19 @@ export default function SettingsModal() {
     setDraft(structuredClone(settings))
     setSelectedId(settings.activeProfileId ?? settings.profiles[0]?.id ?? null)
   }, [settings, draft])
+
+  // The Appearance tab previews its draft live; closing puts the saved look back (or keeps it, after Save).
+  const draftAppearance = draft?.appearance
+  useEffect(() => {
+    if (draftAppearance) applyAppearance(draftAppearance)
+  }, [draftAppearance])
+  useEffect(
+    () => () => {
+      const saved = useSettings.getState().settings
+      if (saved) applyAppearance(saved.appearance)
+    },
+    [],
+  )
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -214,6 +229,9 @@ export default function SettingsModal() {
             </button>
             <button className={tab === 'agent' ? 'is-on' : ''} onClick={() => setTab('agent')}>
               Agent
+            </button>
+            <button className={tab === 'appearance' ? 'is-on' : ''} onClick={() => setTab('appearance')}>
+              Appearance
             </button>
           </div>
           <button className="icon-btn" onClick={close} title="Close">
@@ -438,7 +456,7 @@ export default function SettingsModal() {
                 )}
               </section>
             </div>
-          ) : (
+          ) : tab === 'agent' ? (
             <div className="settings-agent">
               <div className="section-title">Approvals</div>
               <div className="policy-list" role="radiogroup" aria-label="Approval policy">
@@ -478,6 +496,11 @@ export default function SettingsModal() {
                 />
               </div>
             </div>
+          ) : (
+            <AppearanceSettings
+              value={draft.appearance}
+              onChange={(appearance) => setDraft({ ...draft, appearance })}
+            />
           )}
         </div>
 

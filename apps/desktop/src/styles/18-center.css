@@ -1,0 +1,115 @@
+/* ============================================================
+   Center: the session header over the thread
+   ============================================================ */
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+/* Session header (52 px): title, where it runs and what it is doing, then its menus */
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.session-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-title {
+  margin: 0;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* A chip that opens a menu */
+.ui-chip.is-button {
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.ui-chip.is-button:hover,
+.ui-chip.is-button[aria-expanded='true'] {
+  background: var(--hover);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+
+/* Popovers of the composer's chips (until the composer moves to the shared Menu) */
+.session-chip-wrap {
+  position: relative;
+}
+
+.session-popover {
+  position: absolute;
+  top: 29px;
+  left: 0;
+  z-index: 80;
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-pop);
+}
+.session-popover.right {
+  left: auto;
+  right: 0;
+}
+.session-popover button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  text-align: left;
+}
+.session-popover button span {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.session-popover button:hover,
+.session-popover button.is-selected {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.main-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

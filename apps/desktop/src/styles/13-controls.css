@@ -1,0 +1,102 @@
+/* ============================================================
+   Buttons & inputs
+   ============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-8);
+  border: 1px solid var(--border);
+  background: var(--pressed);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.btn:hover {
+  background: var(--border-strong);
+}
+.btn.primary {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.btn.primary:hover {
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-2);
+}
+.btn.ghost:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.btn.danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+.btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-12);
+}
+.btn.lg {
+  height: 38px;
+  padding: 0 18px;
+  font-size: var(--fs-13);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn:disabled:hover {
+  background: var(--pressed);
+}
+.btn.primary:disabled:hover {
+  background: var(--accent-fill);
+}
+
+.text-input {
+  width: 100%;
+  height: 32px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--text-1);
+  font-size: 12px;
+  outline: none;
+}
+.text-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.text-input:disabled {
+  opacity: 0.55;
+}
+.narrow {
+  width: 90px;
+}
+
+/* Empty line inside a list or dialog: "No skills yet." */
+.rail-empty {
+  padding: 6px 8px;
+  font-size: var(--fs-12);
+  color: var(--text-3);
+}

@@ -1,6 +1,8 @@
 import { create } from '../store'
 import type { FileEntry, OpenWorkspace } from '@shared/types'
 import { api } from '../api'
+import { SWITCH_BLOCKED, canSwitchProject } from './sidebar-model'
+import { useStatus } from './status'
 import { useUi } from './ui'
 
 interface WorkspaceStore {
@@ -48,6 +50,11 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
   },
 
   openDialog: async () => {
+    // The folder to be chosen is not known yet, so any running session blocks the dialog.
+    if (useStatus.getState().anyBusy()) {
+      useUi.getState().notify('info', SWITCH_BLOCKED)
+      return
+    }
     try {
       const workspace = await api.workspace.openDialog()
       if (!workspace) return
@@ -59,6 +66,12 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
   },
 
   openPath: async (path: string) => {
+    // The agent works in the open folder: opening another one under a running session would redirect it.
+    const check = canSwitchProject(path, get().workspace?.root ?? null, useStatus.getState().statusById)
+    if (!check.ok) {
+      useUi.getState().notify('info', check.reason ?? SWITCH_BLOCKED)
+      return
+    }
     try {
       const workspace = await api.workspace.openPath(path)
       set({ workspace, children: {}, expanded: {}, selected: null })

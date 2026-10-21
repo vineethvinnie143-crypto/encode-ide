@@ -1,0 +1,147 @@
+/* ============================================================
+   Steps in the work log: 26 px rows that open inline
+   ============================================================ */
+
+.tool-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: var(--r-6);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.tool-row-toggle:hover {
+  background: var(--hover);
+}
+.tool-row-toggle:hover .tool-row-label {
+  color: var(--text-1);
+}
+
+.tool-row-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.tool-row-label {
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tool-row-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.tool-row-size {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.tool-row-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+}
+.tool-row-state.is-bad {
+  color: var(--danger);
+}
+
+.group-chevron {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.group-chevron.is-open {
+  transform: rotate(90deg);
+}
+.group-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 18px;
+}
+
+/* An open step: a card with its output, diff or findings */
+.tool-row-body {
+  margin: 4px 0 8px 22px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.tool-row-output {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 19px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A shell step: a 32 px header with the command and its status, then the output */
+.tool-row-body.is-card {
+  padding: 0;
+  gap: 0;
+}
+.step-card-head {
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+}
+.step-card-command {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.step-status {
+  flex-shrink: 0;
+  font-size: var(--fs-12);
+}
+.step-status.is-done {
+  color: var(--success);
+}
+.step-status.is-error,
+.step-status.is-rejected {
+  color: var(--danger);
+}
+.step-status.is-running,
+.step-status.is-waiting {
+  color: var(--warning);
+}
+.tool-row-body.is-card .tool-row-output {
+  padding: 10px 12px;
+}

@@ -59,7 +59,12 @@ export function renderMarkdown(source: string): string {
       }
       index++ // consume closing fence
       const className = language ? ` class="language-${escapeHtml(language)}"` : ''
-      html.push(`<pre><code${className}>${escapeHtml(body.join('\n'))}</code></pre>`)
+      // A header with the language and a Copy button; the page wires the button up (see Chat/Markdown.tsx).
+      html.push(
+        `<div class="code-block"><div class="code-head"><span class="code-lang">${escapeHtml(language || 'text')}</span>` +
+          `<button type="button" class="code-copy">Copy</button></div>` +
+          `<pre><code${className}>${escapeHtml(body.join('\n'))}</code></pre></div>`,
+      )
       continue
     }
 

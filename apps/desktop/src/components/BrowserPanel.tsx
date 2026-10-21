@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from '../ui/icons'
 
 export default function BrowserPanel() {
   const [address, setAddress] = useState('')
