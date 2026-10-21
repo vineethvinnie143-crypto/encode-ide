@@ -179,6 +179,8 @@ const DEFAULT_BLOCK_MS = {
   unsupported: 60 * 60_000,
 } as const
 const MAX_SESSIONS = 500
+/** A key read that hangs (a token refresh on a dead connection) is given up on after this long. */
+const KEY_READ_MS = 20_000
 /** Canaries run only while at least this many free requests are left today. */
 const CANARY_RESERVE = 100
 
@@ -335,6 +337,36 @@ export class ModelRouter implements ModelClient {
     }
   }
 
+  /**
+   * Reads a provider's key. A KeySource may refresh a token over the network, so
+   * a read that hangs must not outlive an abort or hold a catalog sync for good:
+   * it ends when the signal aborts or after KEY_READ_MS, with `problem` saying why.
+   * A missing key is no problem, just no `key`.
+   */
+  private async readKey(provider: ProviderConfig, signal?: AbortSignal): Promise<{ key?: string; problem?: string }> {
+    let timer: unknown
+    let onAbort: (() => void) | undefined
+    try {
+      return await Promise.race([
+        (async () => ({ key: (await this.keys.get(provider.id, originOf(provider.baseUrl))) || undefined }))(),
+        new Promise<{ problem: string }>((resolve) => {
+          timer = this.clock.setTimeout(() => resolve({ problem: `Reading the key for ${provider.id} took longer than ${KEY_READ_MS / 1000} s.` }), KEY_READ_MS)
+        }),
+        new Promise<Record<string, never>>((resolve) => {
+          if (!signal) return
+          onAbort = () => resolve({})
+          if (signal.aborted) onAbort()
+          else signal.addEventListener('abort', onAbort, { once: true })
+        }),
+      ])
+    } catch (error) {
+      return { problem: `Reading the key for ${provider.id} failed: ${error instanceof Error ? error.message : String(error)}` }
+    } finally {
+      if (timer !== undefined) this.clock.clearTimeout(timer)
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort)
+    }
+  }
+
   private emitter(request: CompletionRequest): (event: ClientEvent) => void {
     return (event) => {
       try {
@@ -478,15 +510,13 @@ export class ModelRouter implements ModelClient {
 
       let apiKey: string | undefined
       if (provider.needsKey) {
-        try {
-          apiKey = await this.keys.get(provider.id, originOf(provider.baseUrl))
-        } catch (error) {
-          this.log('warn', `Reading the key for ${provider.id} failed: ${error instanceof Error ? error.message : String(error)}`)
-        }
+        const read = await this.readKey(provider, request.signal)
         if (request.signal.aborted) throw abortReason(request.signal)
+        apiKey = read.key
+        if (read.problem) this.log('warn', read.problem, key)
         if (!apiKey) {
           state.excluded.add(scopes.provider(provider.id))
-          state.lastFailure = { key, kind: 'auth', message: `No key is set for ${provider.id}.` }
+          state.lastFailure = { key, kind: 'auth', message: redact(read.problem ?? `No key is set for ${provider.id}.`) }
           return NEXT
         }
       }
@@ -1078,9 +1108,10 @@ export class ModelRouter implements ModelClient {
             this.log('warn', `${id} lists ${named} ${named === 1 ? 'model' : 'models'} with a :free id, but none passed the free check, so the free pool is empty. Run scripts/free-models.mjs to see each price.`)
           }
         } else {
-          const apiKey = provider.needsKey ? await this.keys.get(id, originOf(provider.baseUrl)) : undefined
-          if (provider.needsKey && !apiKey) return
-          models = await fetchModelList({ fetch: fetchImpl, provider, apiKey, signal })
+          const read = provider.needsKey ? await this.readKey(provider, signal) : {}
+          if (read.problem) this.log('warn', read.problem)
+          if (provider.needsKey && !read.key) return
+          models = await fetchModelList({ fetch: fetchImpl, provider, apiKey: read.key, signal })
         }
         this.registry.setCatalog(id, models, this.clock.now())
         this.syncErrors.delete(id)
@@ -1101,7 +1132,9 @@ export class ModelRouter implements ModelClient {
   private async syncQuota(provider: ProviderConfig, fetchImpl: Fetch, signal: AbortSignal | undefined): Promise<void> {
     let apiKey: string | undefined
     try {
-      apiKey = await this.keys.get(provider.id, originOf(provider.baseUrl))
+      const read = await this.readKey(provider, signal)
+      if (read.problem) this.log('warn', read.problem)
+      apiKey = read.key
       if (!apiKey) return
       const quota = await fetchFreeQuota({ fetch: fetchImpl, baseUrl: provider.baseUrl, apiKey, now: this.clock.now(), signal })
       if (quota) this.freeTier(provider.id)?.applyQuota(quota)
@@ -1128,8 +1161,11 @@ export class ModelRouter implements ModelClient {
     if (!adapter) return { ok: false, key, toolCall: false, message: `No adapter speaks ${provider.type}.` }
     const early = this.paidRefusal(provider, parsed.model)
     if (early) return { ok: false, key, toolCall: false, message: early }
-    const apiKey = provider.needsKey ? await this.keys.get(provider.id, originOf(provider.baseUrl)) : undefined
-    if (provider.needsKey && !apiKey) return { ok: false, key, toolCall: false, message: `No key is set for ${provider.id}.` }
+    const signal = options.signal ?? new AbortController().signal
+    const read = provider.needsKey ? await this.readKey(provider, signal) : {}
+    if (signal.aborted) throw abortReason(signal)
+    const apiKey = read.key
+    if (provider.needsKey && !apiKey) return { ok: false, key, toolCall: false, message: redact(read.problem ?? `No key is set for ${provider.id}.`) }
     // The registry may have changed while the key was read.
     const late = this.paidRefusal(provider, parsed.model)
     if (late) return { ok: false, key, toolCall: false, message: late }
@@ -1148,7 +1184,6 @@ export class ModelRouter implements ModelClient {
     }
     const candidate: Candidate = { info, provider, fromPool: false, probe: false, delayMs: 0, maxOutputTokens: Math.min(512, info.maxOutputTokens), serverFallbacks: [] }
     if (info.free) this.freeTier(provider.id)?.record()
-    const signal = options.signal ?? new AbortController().signal
     const result = await runAttempt({
       adapter,
       target: this.target(candidate, apiKey),

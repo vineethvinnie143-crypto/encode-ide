@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { TransportError, type ClientEvent, type CompletionOutcome, type ToolUseBlock } from '@encode/providers'
+import { staticKeys, type KeySource } from './keys'
 import { nextUtcMidnight } from './openrouter'
 import { catalogEntry, faults, TestWorld, type TestWorldOptions } from './testing'
 
@@ -705,5 +706,69 @@ describe('ModelRouter: sessions, abort and budget', () => {
     assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768 })
     const empty = new TestWorld({ catalogs: {} })
     assert.equal((await empty.router.budget('main')).model, '@free')
+  })
+})
+
+/** A KeySource whose read for one provider never finishes, like a token refresh on a dead connection. */
+function hangingFor(provider: string, keys: Record<string, string>): KeySource {
+  const fixed = staticKeys(keys)
+  return {
+    has: (id) => fixed.has(id),
+    get: (id, origin) => (id === provider ? new Promise<string | undefined>(() => undefined) : fixed.get(id, origin)),
+  }
+}
+
+describe('ModelRouter: key reads', () => {
+  const settings = { providers: { openrouter: { type: 'openrouter' }, anthropic: { type: 'anthropic' } }, roles: { main: ['anthropic:claude-sonnet-5', `openrouter:${A}`] } }
+  const keys = { openrouter: 'sk-or-v1-test-key-0123456789', anthropic: 'sk-ant-test-key-0123456789' }
+
+  it('gives up on a key read that hangs and carries on with the next model', async () => {
+    const logs: string[] = []
+    const world = freeWorld({ settings, keys: hangingFor('anthropic', keys), router: { onLog: (entry) => logs.push(entry.message) } })
+    const started = world.clock.now()
+    const { text } = await world.complete()
+    assert.equal(text, `hello from ${A}`)
+    assert.equal(world.callsTo(A)[0].at - started, 20_000)
+    assert.ok(logs.some((line) => /Reading the key for anthropic took longer than 20 s/.test(line)))
+  })
+
+  it('ends a request on abort while a key read hangs', async () => {
+    const world = freeWorld({ settings, keys: hangingFor('anthropic', keys) })
+    const controller = new AbortController()
+    const reason = new Error('stopped by the user')
+    const started = world.clock.now()
+    const pending = world.router.complete({
+      role: 'main',
+      payload: { system: [], messages: [], tools: [] },
+      requirements: { promptTokens: 10, maxOutputTokens: 100, tools: false, images: false },
+      signal: controller.signal,
+    })
+    world.clock.setTimeout(() => controller.abort(reason), 5_000)
+    await assert.rejects(world.clock.run(pending), (error) => error === reason)
+    assert.equal(world.clock.now() - started, 5_000, 'the abort ended it, not the key read timeout')
+    assert.equal(world.calls.length, 0)
+  })
+
+  it('answers a model check whose key read hangs instead of hanging with it', async () => {
+    const world = freeWorld({ keys: hangingFor('openrouter', keys) })
+    const result = await world.clock.run(world.router.checkModel(`openrouter:${A}`))
+    assert.equal(result.ok, false)
+    assert.match(result.message, /Reading the key for openrouter took longer than 20 s/)
+  })
+
+  it('takes a key read that throws for a missing key, says why, and keeps the key out of what it says', async () => {
+    const secret = 'sk-or-v1-secret-value-abcdef0123'
+    const failing: KeySource = { has: () => true, get: async () => Promise.reject(new Error(`keychain locked (${secret})`)) }
+    const world = freeWorld({ keys: failing })
+    const { outcome } = await world.complete()
+    assert.equal(outcome.kind === 'paused' && outcome.reason, 'auth')
+    assert.match(outcome.kind === 'paused' ? outcome.message : '', /Reading the key for openrouter failed: keychain locked/)
+    assert.doesNotMatch(JSON.stringify(outcome), /secret-value/)
+  })
+
+  it('does not leave a timer behind once a key is read', async () => {
+    const world = freeWorld()
+    await world.complete()
+    assert.equal(world.clock.pending, 0)
   })
 })
