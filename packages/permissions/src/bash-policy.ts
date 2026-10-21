@@ -321,10 +321,17 @@ function bashScope(context: BashContext): Scope | string {
   return { host: { home, path: api, translate }, root, cwds: new Set([start]), paths: new Set() }
 }
 
+/** Checks shared by the bash and PowerShell policies, before a line is parsed. */
+export function shellLineProblem(line: string): string | null {
+  if (!line.trim()) return 'empty command'
+  if (line.length > MAX_LINE_LENGTH) return 'too long to review automatically'
+  if (HIDDEN_CHARACTERS.test(line)) return 'contains control or invisible characters'
+  return null
+}
+
 export function assessBashCommand(line: string, context: BashContext): CommandAssessment {
-  if (!line.trim()) return ask('empty command')
-  if (line.length > MAX_LINE_LENGTH) return ask('too long to review automatically')
-  if (HIDDEN_CHARACTERS.test(line)) return ask('contains control or invisible characters')
+  const lineProblem = shellLineProblem(line)
+  if (lineProblem) return ask(lineProblem)
   const parsed = parseBash(line)
   if (!parsed.ok) return ask(parsed.reason)
   const scope = bashScope(context)
