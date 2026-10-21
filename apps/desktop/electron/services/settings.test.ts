@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
+import { DEFAULT_APPEARANCE } from '../../shared/appearance'
 import { FakeCipher } from '../testing/fake-cipher'
 import type { Settings } from '../../shared/types'
 import { SettingsService } from './settings'
@@ -137,15 +138,11 @@ describe('SettingsService keys', () => {
 })
 
 describe('SettingsService appearance', () => {
-  it('starts dark with the Signal blue accent', () => {
+  it('starts dark with the Signal blue accent, in the system fonts', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
-    assert.deepEqual(settings.get().appearance, {
-      mode: 'dark',
-      accent: 'blue',
-      contrast: 'standard',
-      density: 'comfortable',
-      motion: 'system',
-    })
+    assert.deepEqual(settings.get().appearance, DEFAULT_APPEARANCE)
+    assert.equal(settings.get().appearance.mode, 'dark')
+    assert.equal(settings.get().appearance.accent, 'blue')
   })
 
   it('saves a change, keeps the fields a patch leaves out, and reads it back after a restart', () => {
@@ -153,15 +150,15 @@ describe('SettingsService appearance', () => {
     settings.save({ appearance: { ...settings.get().appearance, mode: 'light', accent: 'jade' } })
     const partial = { density: 'compact' } as unknown as Settings['appearance']
     const saved = settings.save({ appearance: partial }).appearance
-    assert.deepEqual(saved, { mode: 'light', accent: 'jade', contrast: 'standard', density: 'compact', motion: 'system' })
+    assert.deepEqual(saved, { ...DEFAULT_APPEARANCE, mode: 'light', accent: 'jade', density: 'compact' })
     assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().appearance, saved)
   })
 
   it('ignores values it does not know, from the renderer or from the file', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
-    const bad = { mode: 'neon', accent: 'url(evil)', contrast: 7, density: null, motion: 'full', extra: 'x' }
+    const bad = { mode: 'neon', accent: 'url(evil)', contrast: 7, density: null, motion: 'full', uiFont: 'x"; y', uiSize: 99, extra: 'x' }
     const saved = settings.save({ appearance: bad as unknown as Settings['appearance'] }).appearance
-    assert.deepEqual(saved, { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'full' })
+    assert.deepEqual(saved, { ...DEFAULT_APPEARANCE, motion: 'full' })
 
     fs.writeFileSync(file(), JSON.stringify({ appearance: 'light' }))
     assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().appearance.mode, 'dark')

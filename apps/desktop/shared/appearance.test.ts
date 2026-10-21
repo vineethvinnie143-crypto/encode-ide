@@ -2,11 +2,18 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   DEFAULT_APPEARANCE,
+  FONT_ENCODE,
+  FONT_SYSTEM,
   appearanceFromParams,
   appearanceParams,
+  codeFontStack,
+  fontVariables,
   normalizeAppearance,
+  normalizeFont,
+  normalizeSize,
   resolveTheme,
   sameAppearance,
+  uiFontStack,
   type Appearance,
 } from './appearance'
 
@@ -19,7 +26,17 @@ describe('appearance', () => {
   })
 
   it('normalizes field by field against a base', () => {
-    const base: Appearance = { mode: 'light', accent: 'amber', contrast: 'high', density: 'compact', motion: 'reduce' }
+    const base: Appearance = {
+      mode: 'light',
+      accent: 'amber',
+      contrast: 'high',
+      density: 'compact',
+      motion: 'reduce',
+      uiFont: FONT_ENCODE,
+      codeFont: 'Cascadia Code',
+      uiSize: 15,
+      codeSize: 13,
+    }
     assert.deepEqual(normalizeAppearance({ accent: 'cyan', motion: 'sideways' }, base), { ...base, accent: 'cyan' })
     assert.deepEqual(normalizeAppearance(undefined), DEFAULT_APPEARANCE)
     assert.deepEqual(normalizeAppearance('dark'), DEFAULT_APPEARANCE)
@@ -32,7 +49,17 @@ describe('appearance', () => {
   })
 
   it('round-trips through page URL parameters', () => {
-    const appearance: Appearance = { mode: 'system', accent: 'jade', contrast: 'high', density: 'compact', motion: 'full' }
+    const appearance: Appearance = {
+      mode: 'system',
+      accent: 'jade',
+      contrast: 'high',
+      density: 'compact',
+      motion: 'full',
+      uiFont: 'Segoe UI Variable',
+      codeFont: FONT_ENCODE,
+      uiSize: 16,
+      codeSize: 11,
+    }
     const params = new URLSearchParams(appearanceParams(appearance))
     assert.deepEqual(appearanceFromParams(params), appearance)
     assert.deepEqual(appearanceFromParams(new URLSearchParams('mode=light&accent=pink')), {
@@ -47,5 +74,69 @@ describe('appearance', () => {
       const changed = { ...DEFAULT_APPEARANCE, [key]: 'other' } as Appearance
       assert.equal(sameAppearance(DEFAULT_APPEARANCE, changed), false, key)
     }
+  })
+})
+
+describe('fonts', () => {
+  it('defaults to Windows\' own fonts at Codex\'s sizes', () => {
+    assert.equal(DEFAULT_APPEARANCE.uiFont, FONT_SYSTEM)
+    assert.equal(DEFAULT_APPEARANCE.codeFont, FONT_SYSTEM)
+    assert.equal(DEFAULT_APPEARANCE.uiSize, 14)
+    assert.equal(DEFAULT_APPEARANCE.codeSize, 12)
+  })
+
+  it('takes the built-in choices and plausible family names, and nothing else', () => {
+    assert.equal(normalizeFont(FONT_ENCODE, FONT_SYSTEM), FONT_ENCODE)
+    assert.equal(normalizeFont('  Segoe UI Variable  ', FONT_SYSTEM), 'Segoe UI Variable')
+    assert.equal(normalizeFont('Noto Sans CJK JP', FONT_SYSTEM), 'Noto Sans CJK JP')
+    assert.equal(normalizeFont("Source Code Pro (Black)", FONT_SYSTEM), 'Source Code Pro (Black)')
+    assert.equal(normalizeFont('Calibri Light & Co. 2', FONT_SYSTEM), 'Calibri Light & Co. 2')
+    assert.equal(normalizeFont('Ubuntu Mono 日本語', FONT_SYSTEM), 'Ubuntu Mono 日本語')
+    assert.equal(normalizeFont('System', FONT_ENCODE), 'System', 'the word System names a font; the built-in choices are not words')
+    for (const bad of ['', '   ', 'x'.repeat(65), 'Arial"; } body { display: none', 'a\\b', 'a\nb', 'url(x)\\', '@evil', '<b>', 7, null, {}]) {
+      assert.equal(normalizeFont(bad, 'Arial'), 'Arial', String(bad))
+    }
+  })
+
+  it('takes whole sizes in range, as a number or as the text of one', () => {
+    assert.equal(normalizeSize(15, [12, 13, 14, 15, 16], 14), 15)
+    assert.equal(normalizeSize('13', [12, 13, 14, 15, 16], 14), 13)
+    for (const bad of [11, 17, 14.5, '14.5', '', 'big', NaN, Infinity, null, undefined, [], '1e1']) {
+      assert.equal(normalizeSize(bad, [12, 13, 14, 15, 16], 14), 14, String(bad))
+    }
+  })
+
+  it('repairs fonts and sizes field by field', () => {
+    const fixed = normalizeAppearance({ uiFont: 'bad;font', codeFont: FONT_ENCODE, uiSize: 99, codeSize: 13 })
+    assert.equal(fixed.uiFont, FONT_SYSTEM)
+    assert.equal(fixed.codeFont, FONT_ENCODE)
+    assert.equal(fixed.uiSize, 14)
+    assert.equal(fixed.codeSize, 13)
+  })
+
+  it('builds font lists that fall back to Windows\' fonts, with the family quoted', () => {
+    assert.equal(uiFontStack(FONT_SYSTEM), "system-ui, 'Segoe UI', sans-serif")
+    assert.ok(uiFontStack(FONT_ENCODE).startsWith("'Inter', system-ui"))
+    assert.ok(uiFontStack('Segoe UI Variable').startsWith('"Segoe UI Variable", system-ui'))
+    assert.ok(codeFontStack(FONT_SYSTEM).startsWith('Consolas,'))
+    assert.ok(codeFontStack(FONT_ENCODE).startsWith("'JetBrains Mono', Consolas"))
+    assert.ok(codeFontStack('Cascadia Code').startsWith('"Cascadia Code", Consolas'))
+    assert.ok(codeFontStack('anything').endsWith('monospace'))
+  })
+
+  it('moves every size with the base size, and small text one pixel more in Windows\' font', () => {
+    const system = fontVariables(DEFAULT_APPEARANCE)
+    assert.equal(system['--ui-delta'], '0px')
+    assert.equal(system['--ui-small'], '1px')
+    assert.equal(system['--code-size'], '12px')
+    const inter = fontVariables({ ...DEFAULT_APPEARANCE, uiFont: FONT_ENCODE, uiSize: 15, codeSize: 13 })
+    assert.equal(inter['--ui-delta'], '1px')
+    assert.equal(inter['--ui-small'], '1px', 'Inter gets the size change only')
+    assert.equal(inter['--code-size'], '13px')
+    const large = fontVariables({ ...DEFAULT_APPEARANCE, uiSize: 16 })
+    assert.equal(large['--ui-delta'], '2px')
+    assert.equal(large['--ui-small'], '3px')
+    const custom = fontVariables({ ...DEFAULT_APPEARANCE, uiFont: 'Calibri', uiSize: 12 })
+    assert.equal(custom['--ui-small'], '-2px', 'a font picked by name gets the size change only')
   })
 })
