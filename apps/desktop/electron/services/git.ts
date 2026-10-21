@@ -1,9 +1,20 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { GitChange, GitStatus } from '../../shared/types'
+import { GIT_SAFETY_CONFIG, isFile, searchPath } from './programs'
 import type { WorkspaceService } from './workspace'
 
 const execFileAsync = promisify(execFile)
+
+/** git by absolute path; a bare `git` could resolve to a git.exe in the app's working directory on Windows. */
+let gitPath: string | null = null
+
+function locateGit(): string | null {
+  if (!gitPath || !isFile(gitPath)) gitPath = searchPath('git', process.env)
+  return gitPath
+}
+
+const SAFETY_ARGS = GIT_SAFETY_CONFIG.flatMap(([key, value]) => ['-c', `${key}=${value}`])
 
 const STATUS_LABEL: Record<string, string> = {
   M: 'modified',
@@ -21,13 +32,15 @@ export class GitService {
 
   async status(): Promise<GitStatus> {
     const root = this.workspace.current?.root
-    if (!root) return { isRepo: false, changes: [] }
+    const git = locateGit()
+    if (!root || !git) return { isRepo: false, changes: [] }
 
     try {
-      const { stdout } = await execFileAsync('git', ['-C', root, 'status', '--porcelain=v1', '-b'], {
+      const { stdout } = await execFileAsync(git, [...SAFETY_ARGS, '-C', root, 'status', '--porcelain=v1', '-b'], {
         timeout: 8000,
         windowsHide: true,
         maxBuffer: 4 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       })
       return this.parse(stdout)
     } catch {

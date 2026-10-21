@@ -11,7 +11,7 @@
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -596,6 +596,23 @@ try {
     "document.querySelector('.term-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))",
   )
   await waitFor("document.querySelector('.terminal-lines')?.textContent.includes('shell-ok')", 10000, 'shell output')
+  // Real programs: found on PATH (Path on Windows), and npm.cmd run through cmd.exe on Windows.
+  const programs = [
+    ['node --version', process.version],
+    ['npm --version', execSync('npm --version', { encoding: 'utf8' }).trim()],
+  ]
+  for (const [command, expected] of programs) {
+    await typeInto('.term-input', command)
+    await sleep(250)
+    await evaluate(
+      "document.querySelector('.term-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))",
+    )
+    await waitFor(
+      `document.querySelector('.terminal-lines')?.textContent.includes(${JSON.stringify(expected)})`,
+      20000,
+      `${command} prints ${expected}`,
+    )
+  }
   console.log(
     '[smoke] shell output:',
     JSON.stringify((await evaluate("document.querySelector('.terminal-lines').textContent")).slice(-160)),

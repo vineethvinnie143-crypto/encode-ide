@@ -13,6 +13,16 @@ import {
   type ShellSegment,
 } from '@encode/permissions'
 import type { ShellCreateOptions, ShellInfo, ShellPromptInfo } from '../../shared/types'
+import {
+  GIT_SAFETY_CONFIG,
+  batchCommand,
+  candidateNames,
+  envKey,
+  isFile,
+  searchDirectories,
+  searchPath,
+  windowsSystemProgram,
+} from './programs'
 
 const RESET = '\x1b[0m'
 const RED = '\x1b[31m'
@@ -42,45 +52,31 @@ function currentEnv(): Record<string, string> {
 }
 
 /**
- * git settings for commands the agent runs. They are passed as command-line
- * config, which outranks repository config.
- */
-const AGENT_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
-  // A repository's config must not start a program on `git status`.
-  ['core.fsmonitor', 'false'],
-  // A bare repository planted in the workspace (dir/HEAD, dir/config) is not picked up by `cd dir; git log -p`.
-  ['safe.bareRepository', 'explicit'],
-]
-
-/**
- * Environment for commands the agent runs: the user's environment, plus the
- * git settings above, and no credential prompt nobody could answer.
+ * Environment for commands the agent runs: the user's environment, plus git
+ * settings that stop repository config from starting programs (passed as
+ * command-line config, which outranks it), and no credential prompt nobody
+ * could answer.
  */
 export function agentEnvironment(): Record<string, string> {
   const env = currentEnv()
-  const count = Number(env.GIT_CONFIG_COUNT ?? 0)
+  const countKey = envKey(env, 'GIT_CONFIG_COUNT')
+  const count = Number(env[countKey] ?? 0)
   let index = Number.isInteger(count) && count >= 0 ? count : 0
-  for (const [key, value] of AGENT_GIT_CONFIG) {
+  for (const [key, value] of GIT_SAFETY_CONFIG) {
     env[`GIT_CONFIG_KEY_${index}`] = key
     env[`GIT_CONFIG_VALUE_${index}`] = value
     index++
   }
-  env.GIT_CONFIG_COUNT = String(index)
-  env.GIT_TERMINAL_PROMPT = '0'
+  env[countKey] = String(index)
+  env[envKey(env, 'GIT_TERMINAL_PROMPT')] = '0'
+  // cmd.exe (npm scripts, batch files) must not look for bare program names in the project.
+  if (process.platform === 'win32') env[envKey(env, 'NoDefaultCurrentDirectoryInExePath')] = '1'
   return env
 }
 
 interface ResolvedCommand {
   file: string
   args: string[]
-}
-
-function fileExists(file: string): boolean {
-  try {
-    return fs.statSync(file).isFile()
-  } catch {
-    return false
-  }
 }
 
 function directoryExists(dir: string): boolean {
@@ -98,51 +94,44 @@ function resolveShellPath(cwd: string, target: string): string {
 /**
  * Many Node tools on Windows are npm-generated `.cmd` shims that ultimately run
  * `node <cli.js>`. Rather than invoking cmd.exe, parse that pattern and run the
- * node script directly.
+ * node script directly, with the node.exe next to the shim or the one on PATH.
  */
-function parseNodeShim(file: string): { node: string; script: string } | null {
+function parseNodeShim(file: string, env: Record<string, string>): { node: string; script: string } | null {
   try {
     const content = fs.readFileSync(file, 'utf8')
     const match = /"%_prog%"\s+"([^"]+\.(?:js|cjs|mjs))"\s*%\*/i.exec(content)
     if (!match) return null
     const dir = path.dirname(file)
     const script = path.resolve(dir, match[1].replace(/%dp0%/gi, dir))
-    if (!fileExists(script)) return null
+    if (!isFile(script)) return null
     const localNode = path.join(dir, 'node.exe')
-    return { node: fileExists(localNode) ? localNode : 'node.exe', script }
+    const node = isFile(localNode) ? localNode : searchPath('node', env)
+    return node ? { node, script } : null
   } catch {
     return null
   }
 }
 
-function resolveCommand(name: string, cwd: string, env: Record<string, string>): ResolvedCommand | null {
-  const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-  const tryFile = (base: string): string | null => {
-    if (fileExists(base)) return base
-    if (!path.extname(base)) {
-      for (const ext of exts) {
-        if (fileExists(base + ext)) return base + ext
-      }
-    }
-    return null
-  }
+function isBatchFile(file: string): boolean {
+  const ext = path.extname(file).toLowerCase()
+  return ext === '.cmd' || ext === '.bat'
+}
 
-  let found: string | null = null
+/**
+ * The absolute file a command name runs. Names with a slash or a leading dot
+ * are paths from the shell's directory; bare names come from PATH only.
+ */
+function resolveCommand(name: string, cwd: string, env: Record<string, string>): ResolvedCommand | null {
+  let found: string | null
   if (/[\\/]/.test(name) || name.startsWith('.')) {
-    found = tryFile(resolveShellPath(cwd, name))
+    found = candidateNames(resolveShellPath(cwd, name), env).find(isFile) ?? null
   } else {
-    const dirs = (env.PATH ?? '').split(path.delimiter)
-    for (const dir of dirs) {
-      if (!dir) continue
-      found = tryFile(path.join(dir, name))
-      if (found) break
-    }
+    found = searchPath(name, env)
   }
   if (!found) return null
 
-  const ext = path.extname(found).toLowerCase()
-  if (ext === '.cmd' || ext === '.bat') {
-    const shim = parseNodeShim(found)
+  if (isBatchFile(found)) {
+    const shim = parseNodeShim(found, env)
     if (shim) return { file: shim.node, args: [shim.script] }
   }
   return { file: found, args: [] }
@@ -222,7 +211,10 @@ export class ShellSession {
     if (!child || !child.pid) return
     try {
       if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' })
+        spawn(windowsSystemProgram('taskkill.exe'), ['/pid', String(child.pid), '/t', '/f'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        })
       } else {
         process.kill(-child.pid, 'SIGKILL')
       }
@@ -266,8 +258,7 @@ export class ShellSession {
     } catch {
       /* unreadable cwd */
     }
-    for (const dir of (this.env.PATH ?? '').split(path.delimiter)) {
-      if (!dir) continue
+    for (const dir of searchDirectories(this.env)) {
       try {
         for (const file of fs.readdirSync(dir)) {
           const ext = path.extname(file).toLowerCase()
@@ -464,12 +455,12 @@ export class ShellSession {
             code = 1
             continue
           }
-          this.env[assignment.slice(0, index)] = assignment.slice(index + 1)
+          this.env[envKey(this.env, assignment.slice(0, index))] = assignment.slice(index + 1)
         }
         return { code, output: '' }
       }
       case 'unset':
-        for (const key of args) delete this.env[key]
+        for (const key of args) delete this.env[envKey(this.env, key)]
         return ok()
       case 'date':
         return ok(`${new Date().toString()}\n`)
@@ -587,12 +578,30 @@ export class ShellSession {
     if (!resolved) {
       return { code: 127, output: `${RED}${tokens[0]}: command not found${RESET}\n` }
     }
+    let file = resolved.file
+    let args = [...resolved.args, ...tokens.slice(1)]
+    const env: Record<string, string> = { ...this.env, PWD: this.cwd }
+    let verbatim = false
+    if (isBatchFile(file)) {
+      const batch = batchCommand(file, args)
+      if (!batch.ok) {
+        return {
+          code: 126,
+          output: `${RED}${tokens[0]} is a batch file and ${batch.reason}. Run it through cmd.exe yourself: cmd /c ${tokens.join(' ')}${RESET}\n`,
+        }
+      }
+      file = batch.file
+      args = batch.args
+      verbatim = true
+      env.NoDefaultCurrentDirectoryInExePath = '1'
+    }
 
     try {
-      const child = spawn(resolved.file, [...resolved.args, ...tokens.slice(1)], {
+      const child = spawn(file, args, {
         cwd: this.cwd,
-        env: { ...this.env, PWD: this.cwd },
+        env,
         windowsHide: true,
+        windowsVerbatimArguments: verbatim,
         stdio: 'pipe',
         detached: process.platform !== 'win32',
       })

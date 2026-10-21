@@ -35,7 +35,6 @@ const ALLOWED = [
   'tree -L 2',
   'du -sh src',
   'node --version',
-  'npm -v',
   'python3 --version',
   'git status',
   'git status --porcelain -b',
@@ -91,8 +90,9 @@ const ASKED: Array<[string, RegExp]> = [
   ['set', /environment/],
   ['unset PATH', /environment/],
   ['curl https://example.com', /not on the read-only list/],
-  ['npm test', /only version queries/],
-  ['npm run build', /only version queries/],
+  ['npm test', /npm is not on the read-only list/],
+  ['npm run build', /npm is not on the read-only list/],
+  ['npm -v', /npm is not on the read-only list/],
   ['tsc', /only version queries/],
   ['tsc -p .', /only version queries/],
   ['node script.js', /only version queries/],
@@ -212,7 +212,7 @@ describe('assessCommand', () => {
     'ls', 'cat', 'head', 'tail', 'wc', 'which', 'cd', 'echo', 'pwd', 'help', 'clear', 'date', 'whoami', 'history',
     'ver', 'exit', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'findstr', 'sort', 'uniq', 'cut', 'tr', 'diff', 'cmp',
     'comm', 'stat', 'file', 'du', 'tree', 'basename', 'dirname', 'realpath', 'readlink', 'uname', 'nl', 'rev', 'fold',
-    'column', 'printf', 'true', 'false', 'node', 'npm', 'python', 'python3', 'tsc', 'git',
+    'column', 'printf', 'true', 'false', 'node', 'python', 'python3', 'tsc', 'git',
   ])
 
   it('never lets a writing or unlisted command, a redirect or an outside path through', async () => {

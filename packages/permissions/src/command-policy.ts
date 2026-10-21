@@ -154,9 +154,9 @@ const EXTERNAL_RULES = new Map<string, ExternalRule>([
   ['printf', { textOnly: true }],
   ['true', { textOnly: true }],
   ['false', { textOnly: true }],
-  // Version queries only: anything more runs project code or scripts.
+  // Version queries only: anything more runs project code or scripts. Not npm: on Windows,
+  // npm.cmd loads the project's npm config to locate npm before it prints a version.
   ['node', { versionFlags: ['--version', '-v'] }],
-  ['npm', { versionFlags: ['--version', '-v'] }],
   ['python', { versionFlags: ['--version', '-V'] }],
   ['python3', { versionFlags: ['--version', '-V'] }],
   ['tsc', { versionFlags: ['--version', '-v'] }],
