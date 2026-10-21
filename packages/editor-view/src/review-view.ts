@@ -89,6 +89,12 @@ export class ReviewController {
     this.emit()
   }
 
+  /** The view is going away: nothing is left running. */
+  destroy(): void {
+    this.cancel()
+    this.listeners.clear()
+  }
+
   /** The view replaced its whole state: nothing carries over. */
   stateReplaced(): void {
     this.cancel()

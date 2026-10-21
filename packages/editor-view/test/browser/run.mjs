@@ -144,6 +144,14 @@ function makeContext(page) {
       await page.insertText(text)
       await page.frames(2)
     },
+    /** Types text one key at a time, as a keyboard does: each character is its own input, so brackets close and so on. */
+    async typeKeys(text) {
+      for (const char of text) {
+        if (char === '\n') await page.key('Enter')
+        else await page.key(char, { text: char })
+      }
+      await page.frames(2)
+    },
     async press(key, options) {
       await page.key(key, options)
       await page.frames(2)

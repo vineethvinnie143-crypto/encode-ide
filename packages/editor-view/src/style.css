@@ -345,6 +345,8 @@
   line-height: var(--enc-line-h);
   -webkit-user-select: text;
   user-select: text;
+  /* Only the keyboard and the input method talk to it; a click at the caret must reach the text. */
+  pointer-events: none;
 }
 .enc-composing .enc-input {
   opacity: 1;

@@ -244,4 +244,59 @@ export const text = [
       assert.equal(await ev(() => window.view.root.classList.contains('enc-readonly')), true)
     },
   },
+  {
+    name: 'revealing a position far to the right on a line that was never drawn widens the scroll area',
+    async run({ mount, ev, assert, settle }) {
+      // More lines than the view scans for the longest one, so the width is only known for lines that were drawn.
+      const target = await ev(() => {
+        const lines = Array.from({ length: 60000 }, (_, index) => (index === 39999 ? `${'x'.repeat(2900)}needle${'y'.repeat(100)}` : `line ${index + 1}`))
+        const text = lines.join('\n')
+        window.harness.mount({ text, path: 'a.txt', width: 600, height: 300 })
+        return text.indexOf('needle')
+      })
+      await settle()
+      await ev((pos) => window.view.select(pos, pos + 6), target)
+      await settle(4)
+      const result = await ev(() => ({
+        visible: window.view.isVisible(window.view.state.selection.main.head),
+        scrollLeft: window.view.scroller.scrollLeft,
+        charWidth: window.view.metrics.charWidth,
+        line: window.view.state.doc.lineAt(window.view.state.selection.main.head).number,
+      }))
+      assert.equal(result.line, 40000)
+      assert.equal(result.visible, true)
+      assert.ok(result.scrollLeft > 2900 * result.charWidth - 600, `scrolled to ${result.scrollLeft}`)
+      const box = await ev(() => {
+        const rect = document.querySelector('.enc-selection-rect')?.getBoundingClientRect()
+        const view = window.view.scroller.getBoundingClientRect()
+        return rect && { left: rect.left - view.left, right: rect.right - view.left, width: view.width }
+      })
+      assert.ok(box && box.left > 0 && box.right < box.width, `the selection is drawn inside the view: ${JSON.stringify(box)}`)
+    },
+  },
+  {
+    name: 'a resize is drawn in the same frame',
+    async run({ mount, ev, assert, settle }) {
+      const text = Array.from({ length: 300 }, (_, index) => `row ${index + 1}`).join('\n')
+      await mount({ text, path: 'a.txt', height: 160 })
+      const counts = await ev(async () => {
+        const host = document.getElementById('host')
+        const before = window.view.renderedLineCount
+        host.style.height = '700px'
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        return { before, after: window.view.renderedLineCount, lines: [...document.querySelectorAll('.enc-line')].length }
+      })
+      assert.ok(counts.after > counts.before + 10, JSON.stringify(counts))
+      // Showing an editor that was hidden: drawn before the first paint.
+      const shown = await ev(async (doc) => {
+        const host = document.getElementById('host')
+        host.style.display = 'none'
+        window.harness.mount({ text: doc, path: 'a.txt', height: 300 })
+        host.style.display = 'block'
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        return window.view.renderedLineCount
+      }, text)
+      assert.ok(shown > 10, `${shown} lines after the first frame`)
+    },
+  },
 ]

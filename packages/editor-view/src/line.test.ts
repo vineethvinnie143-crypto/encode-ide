@@ -80,6 +80,38 @@ describe('segmentsOf', () => {
   })
 })
 
+describe('segmentsOf offsets', () => {
+  it('reports where each segment starts, for the whole line and for any window of it', async () => {
+    const alphabet = `ab {}"'/\t0${String.fromCharCode(0x202e, 0x200b, 0)}`
+    const tokenised = gen.map(gen.tuple(gen.string(alphabet, 0, 40), gen.array(gen.int(0, 12), 0, 8), gen.int(0, 45), gen.int(0, 45)), ([text, cuts, a, b]) => {
+      const tokens: number[] = []
+      let last = -1
+      for (const cut of [...new Set(cuts)].sort((x, y) => x - y)) {
+        if (cut <= last || cut >= text.length) continue
+        tokens.push(cut, (cut % 5) + 1)
+        last = cut
+      }
+      return { text, tokens, from: Math.min(a, b), to: Math.max(a, b) }
+    })
+    await check(tokenised, ({ text, tokens, from, to }) => {
+      for (const [lo, hi] of [[0, text.length], [from, to]] as const) {
+        const start = Math.min(lo, text.length)
+        const end = Math.min(hi, text.length)
+        const segments = segmentsOf(text, tokens, lo, hi)
+        let at = start
+        for (const segment of segments) {
+          assert.equal(segment.start, at, 'segments follow each other')
+          assert.equal(text.slice(segment.start, segment.start + segment.text.length), segment.text)
+          assert.ok(segment.text.length > 0)
+          if (segment.control) assert.equal(segment.text.length, 1)
+          at += segment.text.length
+        }
+        assert.equal(at, Math.max(start, end), 'and cover the window')
+      }
+    })
+  })
+})
+
 describe('isSimpleText', () => {
   it('accepts text whose width is columns times the character width', () => {
     assert.ok(isSimpleText('const x = "hello";\t// ok'))

@@ -267,9 +267,13 @@ export class EditorView {
     this.listen(this.scroller, 'wheel', (event) => this.onWheel(event), { passive: false })
     this.listen(this.textarea, 'focus', () => this.setFocused(true))
     this.listen(this.textarea, 'blur', () => this.setFocused(false))
-    const resize = new ResizeObserver(() => this.onResize())
-    resize.observe(this.scroller)
-    this.disposers.push(() => resize.disconnect())
+    // The editor's own size: drawn in the callback, which runs after layout and before paint, so a resized or newly shown editor never has a blank frame.
+    // (The scroller is watched for its scrollbars appearing, which drawing itself can cause, so that one only asks for the next frame.)
+    const resize = new ResizeObserver(() => this.onResize(true))
+    resize.observe(this.root)
+    const inner = new ResizeObserver(() => this.onResize(false))
+    inner.observe(this.scroller)
+    this.disposers.push(() => resize.disconnect(), () => inner.disconnect())
     const probeObserver = new ResizeObserver(() => this.onProbeResize())
     probeObserver.observe(this.probeA)
     probeObserver.observe(this.probeB)
@@ -521,7 +525,7 @@ export class EditorView {
     for (const el of this.lineEls.values()) this.release(el)
     this.lineEls.clear()
     this.rendered = { first: 0, last: -1 }
-    this.requestRender()
+    this.flush()
   }
 
   private readViewport(): void {
@@ -533,9 +537,11 @@ export class EditorView {
     }
   }
 
-  private onResize(): void {
+  private onResize(now: boolean): void {
+    if (this.destroyed) return
     this.readViewport()
-    this.requestRender()
+    if (now) this.flush()
+    else this.requestRender()
     this.emit('viewport')
   }
 
@@ -738,13 +744,16 @@ export class EditorView {
       const name = `enc-gutter-num${active.has(number) ? ' enc-active' : ''}${gutterClasses.get(number) ?? ''}`
       if (el.number.className !== name) el.number.className = name
     }
-    if (widest > this.maxCols) {
-      this.maxCols = widest
-      const width = Math.min(MAX_CONTENT_WIDTH, Math.max(this.viewport.width - this.gutterWidth, Math.ceil(this.metrics.paddingX * 2 + widest * charWidth)))
-      if (width !== this.contentWidth) {
-        this.contentWidth = width
-        this.sizer.style.width = `${this.gutterWidth + width}px`
-      }
+    if (widest > this.maxCols) this.growWidth(widest)
+  }
+
+  /** Makes the scrollable area wide enough for `cols` columns. */
+  private growWidth(cols: number): void {
+    this.maxCols = cols
+    const width = Math.min(MAX_CONTENT_WIDTH, Math.max(this.viewport.width - this.gutterWidth, Math.ceil(this.metrics.paddingX * 2 + cols * this.metrics.charWidth)))
+    if (width !== this.contentWidth) {
+      this.contentWidth = width
+      this.sizer.style.width = `${this.gutterWidth + width}px`
     }
   }
 
@@ -1111,7 +1120,9 @@ export class EditorView {
     else if (lineTop + lineHeight + marginY > view + height) target = lineTop + lineHeight + marginY - height
     if (target !== view) this.scroller.scrollTop = Math.max(0, this.scale.toScroll(target))
 
-    // Horizontally: keep the position clear of both edges of the text area.
+    // Horizontally: keep the position clear of both edges of the text area. The line may never have been drawn, so the scrollable width may not reach it yet.
+    const cols = columnAt(line.text, line.text.length, this.state.config.tabSize)
+    if (cols > this.maxCols) this.growWidth(cols)
     const x = this.metrics.paddingX + columnAt(line.text, pos - line.from, this.state.config.tabSize) * charWidth
     const visible = this.viewport.width - this.gutterWidth
     const marginX = Math.min(charWidth * 6, visible / 4)
@@ -1177,6 +1188,8 @@ export class EditorView {
     }
     this.blink?.cancel()
     this.find.destroy()
+    this.review.destroy()
+    this.pointer.destroy()
     for (const dispose of this.disposers.splice(0)) dispose()
     for (const entry of this.zones) this.detachZone(entry.zone)
     this.root.remove()

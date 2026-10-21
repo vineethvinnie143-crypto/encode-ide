@@ -151,12 +151,15 @@ export async function launch({ width = 1200, height = 800 } = {}) {
     },
     /** Presses and releases a key. `text` is what the key types, if anything. */
     async key(key, options = {}) {
-      const code = options.code ?? (key.length === 1 ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : '') : key)
+      const known = SYMBOLS[key]
+      const code = options.code ?? known?.code ?? (key.length === 1 ? (/[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : /\d/.test(key) ? `Digit${key}` : '') : key)
+      // A character typed with Shift held, on a US keyboard: capital letters and the shifted symbols.
+      const shifted = options.shift || (options.text && (known?.shift || (/[A-Z]/.test(key) && key.length === 1)))
       const common = {
         key,
         code,
-        modifiers: modifiers(options),
-        windowsVirtualKeyCode: options.keyCode ?? keyCodeOf(key),
+        modifiers: modifiers({ ...options, shift: shifted }),
+        windowsVirtualKeyCode: options.keyCode ?? known?.keyCode ?? keyCodeOf(key),
       }
       await send('Input.dispatchKeyEvent', { type: options.text ? 'keyDown' : 'rawKeyDown', ...common, text: options.text, unmodifiedText: options.text })
       await send('Input.dispatchKeyEvent', { type: 'keyUp', ...common })
@@ -178,12 +181,15 @@ export async function launch({ width = 1200, height = 800 } = {}) {
       await send('Input.imeSetComposition', { text, selectionStart: start, selectionEnd: end })
     },
     async mouse(type, x, y, options = {}) {
+      // A move has no button of its own; the buttons held are given with `buttons` (a drag holds the left one).
+      const button = type === 'mouseMoved' ? 'none' : (options.button ?? 'left')
+      const held = type === 'mousePressed' ? { left: 1, right: 2, middle: 4 }[button] : 0
       await send('Input.dispatchMouseEvent', {
         type,
         x,
         y,
-        button: options.button ?? (type === 'mouseMoved' ? 'none' : 'left'),
-        buttons: type === 'mouseReleased' ? 0 : (options.buttons ?? 1),
+        button,
+        buttons: options.buttons ?? held,
         clickCount: options.count ?? (type === 'mouseMoved' ? 0 : 1),
         modifiers: modifiers(options),
       })
@@ -201,7 +207,7 @@ export async function launch({ width = 1200, height = 800 } = {}) {
       await page.mouse('mousePressed', from.x, from.y, options)
       const steps = 6
       for (let step = 1; step <= steps; step++) {
-        await page.mouse('mouseMoved', from.x + ((to.x - from.x) * step) / steps, from.y + ((to.y - from.y) * step) / steps, options)
+        await page.mouse('mouseMoved', from.x + ((to.x - from.x) * step) / steps, from.y + ((to.y - from.y) * step) / steps, { ...options, buttons: 1 })
       }
       await page.mouse('mouseReleased', to.x, to.y, options)
     },
@@ -232,6 +238,43 @@ export async function launch({ width = 1200, height = 800 } = {}) {
     },
   }
   return page
+}
+
+/** Symbols on a US keyboard: the key's code, its virtual key code and whether Shift types it. */
+const SYMBOLS = {
+  ' ': { code: 'Space', keyCode: 32 },
+  '!': { code: 'Digit1', keyCode: 49, shift: true },
+  '@': { code: 'Digit2', keyCode: 50, shift: true },
+  '#': { code: 'Digit3', keyCode: 51, shift: true },
+  $: { code: 'Digit4', keyCode: 52, shift: true },
+  '%': { code: 'Digit5', keyCode: 53, shift: true },
+  '^': { code: 'Digit6', keyCode: 54, shift: true },
+  '&': { code: 'Digit7', keyCode: 55, shift: true },
+  '*': { code: 'Digit8', keyCode: 56, shift: true },
+  '(': { code: 'Digit9', keyCode: 57, shift: true },
+  ')': { code: 'Digit0', keyCode: 48, shift: true },
+  '-': { code: 'Minus', keyCode: 189 },
+  _: { code: 'Minus', keyCode: 189, shift: true },
+  '=': { code: 'Equal', keyCode: 187 },
+  '+': { code: 'Equal', keyCode: 187, shift: true },
+  '[': { code: 'BracketLeft', keyCode: 219 },
+  '{': { code: 'BracketLeft', keyCode: 219, shift: true },
+  ']': { code: 'BracketRight', keyCode: 221 },
+  '}': { code: 'BracketRight', keyCode: 221, shift: true },
+  '\\': { code: 'Backslash', keyCode: 220 },
+  '|': { code: 'Backslash', keyCode: 220, shift: true },
+  ';': { code: 'Semicolon', keyCode: 186 },
+  ':': { code: 'Semicolon', keyCode: 186, shift: true },
+  "'": { code: 'Quote', keyCode: 222 },
+  '"': { code: 'Quote', keyCode: 222, shift: true },
+  ',': { code: 'Comma', keyCode: 188 },
+  '<': { code: 'Comma', keyCode: 188, shift: true },
+  '.': { code: 'Period', keyCode: 190 },
+  '>': { code: 'Period', keyCode: 190, shift: true },
+  '/': { code: 'Slash', keyCode: 191 },
+  '?': { code: 'Slash', keyCode: 191, shift: true },
+  '`': { code: 'Backquote', keyCode: 192 },
+  '~': { code: 'Backquote', keyCode: 192, shift: true },
 }
 
 const KEY_CODES = {
