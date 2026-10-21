@@ -57,7 +57,44 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)
 
+  packages/core:
+    dependencies:
+      '@encode/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      '@encode/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@encode/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@encode/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/permissions:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/protocol:
     devDependencies:
       '@encode/testkit':
         specifier: workspace:*
@@ -83,6 +120,28 @@ importers:
 
   packages/testkit:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/tools:
+    dependencies:
+      '@encode/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      '@encode/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@encode/providers':
+        specifier: workspace:*
+        version: link:../providers
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

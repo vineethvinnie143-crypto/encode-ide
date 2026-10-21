@@ -1,0 +1,24 @@
+{
+  "name": "@encode/tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The agent's tools: files, search, the OS shell, background jobs and the web, with Claude Code's contracts.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/permissions": "workspace:*",
+    "@encode/protocol": "workspace:*",
+    "@encode/providers": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
