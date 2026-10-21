@@ -5,8 +5,8 @@
  */
 import type { ConversationEntry, SessionSummary } from '../../shared/types'
 
-/** A session's stored fields; the preview is derived from its conversation. */
-export type SessionMeta = Omit<SessionSummary, 'preview'>
+/** A session's stored fields; the preview and the entry count are derived from its conversation. */
+export type SessionMeta = Omit<SessionSummary, 'preview' | 'entryCount'>
 
 export const MAX_TITLE = 90
 

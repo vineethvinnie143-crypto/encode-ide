@@ -271,6 +271,8 @@ export interface SessionSummary {
   unread: boolean
   /** The start of the last reply on one line, for the Activity view. */
   preview: string
+  /** How many entries the conversation has; 0 for a session nobody has used. */
+  entryCount: number
 }
 
 /** What the renderer may change about a session. */
@@ -286,7 +288,13 @@ export interface AgentStartInput {
 export interface AgentHistory {
   entries: ConversationEntry[]
   status: AgentStatus
+  /** The approval card still waiting for an answer, so reopening the session shows it again. */
+  approval?: ApprovalRequest | null
+  /** The question still waiting for an answer. */
+  ask?: { id: string; entryId: string; question: string; options?: string[] } | null
 }
+
+export type ZoomAction = 'in' | 'out' | 'reset'
 
 export interface EncodeApi {
   app: {
@@ -298,6 +306,10 @@ export interface EncodeApi {
   window: {
     minimize(): Promise<void>
     toggleMaximize(): Promise<boolean>
+    /** Enters or leaves full screen; resolves to whether the window is now full screen. */
+    toggleFullScreen(): Promise<boolean>
+    /** Zooms the whole interface a half step; resolves to the new zoom level (0 is 100%). */
+    zoom(action: ZoomAction): Promise<number>
     close(): Promise<void>
     onStateChange(cb: (state: { maximized: boolean }) => void): () => void
   }
@@ -347,6 +359,8 @@ export interface EncodeApi {
     /** In the open project by default; `projectRoot: null` makes a standalone session. */
     createSession(options?: { projectRoot?: string | null }): Promise<SessionSummary>
     update(sessionId: string, patch: SessionPatch): Promise<SessionSummary | null>
+    /** The sessions that are running or waiting right now, by id. */
+    statuses(): Promise<Record<string, AgentStatus>>
     history(sessionId?: string): Promise<AgentHistory>
     start(sessionId: string, input: AgentStartInput): Promise<void>
     cancel(sessionId: string): Promise<void>

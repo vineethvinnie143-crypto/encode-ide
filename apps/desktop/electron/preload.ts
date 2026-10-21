@@ -12,6 +12,7 @@ import type {
   ShellCreateOptions,
   ShellPromptInfo,
   TodoItem,
+  ZoomAction,
 } from '../shared/types'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -36,6 +37,8 @@ const api: EncodeApi = {
   window: {
     minimize: () => invoke('window:minimize'),
     toggleMaximize: () => invoke('window:toggle-maximize'),
+    toggleFullScreen: () => invoke('window:toggle-fullscreen'),
+    zoom: (action: ZoomAction) => invoke('window:zoom', action),
     close: () => invoke('window:close'),
     onStateChange: (callback) => on('window:state', callback),
   },
@@ -103,6 +106,7 @@ const api: EncodeApi = {
     sessions: () => invoke('agent:sessions'),
     createSession: (options?: { projectRoot?: string | null }) => invoke('agent:create', options),
     update: (sessionId: string, patch: SessionPatch) => invoke('agent:update', sessionId, patch),
+    statuses: () => invoke('agent:statuses'),
     history: (sessionId?: string) => invoke('agent:history', sessionId),
     start: (sessionId: string, input: AgentStartInput) => invoke('agent:start', sessionId, input),
     cancel: (sessionId: string) => invoke('agent:cancel', sessionId),

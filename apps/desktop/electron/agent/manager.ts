@@ -5,6 +5,7 @@ import { app } from 'electron'
 import type {
   AgentEvent,
   AgentHistory,
+  AgentStatus,
   AgentStartInput,
   ConversationEntry,
   ModelProfile,
@@ -254,7 +255,8 @@ export class AgentManager {
 
   /** What the renderer sees of a session: its stored fields and a preview of its last reply. */
   private toSummary(meta: SessionMeta): SessionSummary {
-    return { ...meta, preview: previewOf(this.stored.get(meta.id)?.entries ?? []) }
+    const entries = this.stored.get(meta.id)?.entries ?? []
+    return { ...meta, preview: previewOf(entries), entryCount: entries.length }
   }
 
   /** A new session in `projectRoot`; by default the folder open now, or none. */
@@ -266,6 +268,16 @@ export class AgentManager {
     this.stored.set(id, { ...created, messages: [], entries: [] })
     this.persistNow()
     return this.toSummary(created)
+  }
+
+  /** The sessions an agent is working in or waiting on; idle ones are left out. */
+  statuses(): Record<string, AgentStatus> {
+    const live: Record<string, AgentStatus> = {}
+    for (const [id, agent] of this.agents) {
+      const status = agent.getStatus()
+      if (status === 'thinking' || status === 'running-tool' || status === 'awaiting-approval' || status === 'awaiting-user') live[id] = status
+    }
+    return live
   }
 
   list(): SessionSummary[] {

@@ -107,12 +107,14 @@ export const useChat = create<ChatStore>((set, get) => ({
       } catch {
         plan = null
       }
+      const waiting = history.status === 'awaiting-approval' || history.status === 'awaiting-user'
       set({
         entries: history.entries,
         status: history.status,
-        running: history.status === 'thinking' || history.status === 'running-tool',
-        approval: null,
-        ask: null,
+        running: history.status === 'thinking' || history.status === 'running-tool' || waiting,
+        // A session that is still waiting for an answer shows its card again.
+        approval: history.status === 'awaiting-approval' ? (history.approval ?? null) : null,
+        ask: history.status === 'awaiting-user' ? (history.ask ?? null) : null,
         goal,
         todos,
         plan,
