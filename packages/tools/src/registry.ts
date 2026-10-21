@@ -55,6 +55,20 @@ export class ToolRegistry {
   }
 
   /**
+   * Every tool, whatever its modes, optionally limited to `allowed` names. A
+   * session sends this list in every mode, so switching modes does not change
+   * the prompt prefix; `check` refuses what the current mode does not offer.
+   */
+  list(allowed?: readonly string[]): Tool[] {
+    const only = allowed ? new Set(allowed) : undefined
+    return [...this.tools.values()].filter((tool) => !only || only.has(tool.definition.name))
+  }
+
+  allDefinitions(allowed?: readonly string[]): ToolDefinition[] {
+    return this.list(allowed).map((tool) => tool.definition)
+  }
+
+  /**
    * What is wrong with a call, or undefined when it may run: an unknown tool,
    * one the mode does not offer, input that fails the schema or the tool's
    * own rules.
