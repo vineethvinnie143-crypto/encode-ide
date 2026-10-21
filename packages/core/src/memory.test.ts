@@ -57,7 +57,7 @@ describe('project memory', () => {
   })
 
   it('ignores empty files and a byte order mark', async () => {
-    const root = await tempWorkspace({ 'ENCODE.md': '   \n', 'AGENTS.md': '﻿Real rules' })
+    const root = await tempWorkspace({ 'ENCODE.md': '   \n', 'AGENTS.md': String.fromCharCode(0xfeff) + 'Real rules' })
     const [file] = await loadMemory({ root, home: await tempWorkspace() })
     assert.equal(file.content, 'Real rules')
   })
