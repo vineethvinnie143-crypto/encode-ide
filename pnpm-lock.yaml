@@ -14,6 +14,9 @@ importers:
 
   apps/desktop:
     devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../../packages/testkit
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -50,6 +53,15 @@ importers:
       vite:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)
+
+  packages/testkit:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
 
 packages:
 
