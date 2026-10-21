@@ -211,12 +211,30 @@ export class HealthTracker {
     }
   }
 
-  /** The model cannot serve this account for now (gone, or refused by its data policy). No breaker change. */
+  /**
+   * The model cannot serve this account for now (gone, or refused by its data
+   * policy). No breaker change. Whatever it answered before no longer vouches
+   * for it.
+   */
   unusable(key: string, details: { kind: string; message: string; until: number }): void {
     const state = this.state(key)
     state.probing = false
+    state.lastSuccessAt = undefined
     state.lastFailure = { kind: details.kind, message: details.message, at: this.clock.now() }
     state.cooldownUntil = Math.max(state.cooldownUntil, this.hinted(details.until))
+  }
+
+  /** Ends a model's cooldown now, keeping its record: the user fixed what kept it out. */
+  release(key: string): void {
+    const state = this.models.get(key)
+    if (!state) return
+    state.cooldownUntil = 0
+    state.probing = false
+  }
+
+  /** Whether the model has answered a request since it last failed to be usable: a listing says it exists, only an answer says it works. */
+  proven(key: string): boolean {
+    return this.models.get(key)?.lastSuccessAt !== undefined
   }
 
   /** A call that worked but went wrong in a smaller way (invalid tool arguments): ranks the model lower. */

@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { describe, it } from 'node:test'
 import { defaultRouterConfig } from './config'
 import { auditFreeEntries, freeReport } from './free-report'
-import { catalogEntry } from './testing'
+import { OPENROUTER_REFUSALS, catalogEntry } from './testing'
 
 const NOW = Date.UTC(2026, 9, 21, 12, 0, 0)
 const ZERO = { prompt: '0', completion: '0' }
@@ -153,6 +153,7 @@ const catalog = JSON.parse(process.env.MOCK_CATALOG)
 const key = process.env.OPENROUTER_API_KEY
 const chargePerCall = Number(process.env.MOCK_CHARGE_PER_CALL || 0)
 const cost = process.env.MOCK_COST === undefined ? undefined : Number(process.env.MOCK_COST)
+const refuse = process.env.MOCK_REFUSE ? JSON.parse(process.env.MOCK_REFUSE) : {}
 let calls = 0
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 globalThis.fetch = async (input, init = {}) => {
@@ -163,12 +164,13 @@ globalThis.fetch = async (input, init = {}) => {
   if (headers.authorization !== 'Bearer ' + key) return json({ error: { message: 'No auth credentials found' } }, 401)
   if (url.pathname === '/api/v1/key') {
     const used = 0.5 + calls * chargePerCall
-    return json({ data: { label: 'sk-or-v1-abc...xyz', usage: used, usage_daily: used, limit: null, limit_remaining: null, is_free_tier: true, free_model_daily_requests: { used: calls, limit: 50, remaining: 50 - calls } } })
+    return json({ data: { label: 'sk-or-v1-abc...xyz', usage: used, usage_daily: used, limit: null, limit_remaining: null, is_free_tier: true, free_model_daily_requests: process.env.MOCK_COUNT_LATE ? { used: 0, limit: 50, remaining: 50 } : { used: calls, limit: 50, remaining: 50 - calls } } })
   }
   if (url.pathname === '/api/v1/chat/completions') {
     calls++
     const body = JSON.parse(init.body)
     if (process.env.MOCK_CHAT_ERROR) return json({ error: { message: 'Invalid key: ' + key, code: 401 } }, 401)
+    if (refuse[body.model]) return json({ error: { message: refuse[body.model].message, code: refuse[body.model].status } }, refuse[body.model].status)
     const chunk = (value) => 'data: ' + JSON.stringify(value) + '\n\n'
     const stream =
       chunk({ model: body.model, choices: [{ delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'echo', arguments: '{"text":"eNCode"}' } }] } }] }) +
@@ -224,6 +226,35 @@ describe('scripts/free-models.mjs with real calls', () => {
     assert.match(out, /a call reported a cost above zero/)
     assert.match(out, /openrouter billed \$0\.002 for a request to vendor\/big:free, which is listed as free\. eNCode now treats vendor\/big:free as a paid model and will not use it\./)
     assert.doesNotMatch(out + err, /sk-or-v1/)
+  })
+
+  it("skips a model the account is shut out of, goes on to the next, and is still clean", () => {
+    const refuse = { 'vendor/big:free': { status: 404, message: OPENROUTER_REFUSALS.policy } }
+    const { status, out, err } = live({ MOCK_COST: '0', MOCK_REFUSE: JSON.stringify(refuse) }, '--test', '1')
+    assert.equal(status, 0, err || out)
+    assert.match(out, /– vendor\/big:free: skipped\. Your OpenRouter privacy settings leave vendor\/big:free no endpoint/)
+    assert.match(out, /✔ vendor\/mid:free: answered/)
+    assert.match(out, /1 answered, 1 shut out by this account or app/)
+    assert.match(out, /Clean: every pick is free by its listing, and the key was not charged\./)
+    assert.doesNotMatch(out, /NOT CLEAN/)
+  })
+
+  it('does not call it clean when every model it tries is shut out', () => {
+    const refuse = {
+      'vendor/big:free': { status: 403, message: OPENROUTER_REFUSALS.appOnly('vendor/big:free') },
+      'vendor/mid:free': { status: 404, message: OPENROUTER_REFUSALS.policy },
+    }
+    const { status, out } = live({ MOCK_REFUSE: JSON.stringify(refuse) })
+    assert.equal(status, 1)
+    assert.match(out, /– vendor\/big:free: skipped\. OpenRouter limits vendor\/big:free to the coding apps/)
+    assert.match(out, /0 answered, 2 shut out by this account or app/)
+    assert.match(out, /no call was answered, so the comparison above proves nothing/)
+  })
+
+  it("says so when OpenRouter's count of free requests does not move", () => {
+    const { status, out, err } = live({ MOCK_COST: '0', MOCK_COUNT_LATE: '1' })
+    assert.equal(status, 0, err || out)
+    assert.match(out, /free requests used today: 0 → 0 of 50 \(OpenRouter's count runs late, so this proves nothing either way\)/)
   })
 
   it('does not call a clean run when no call was answered, and keeps the key out of what the provider says back', () => {

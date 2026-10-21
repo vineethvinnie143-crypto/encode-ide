@@ -20,6 +20,8 @@ import { catalogEntry, faults, TestWorld, type Script } from './testing'
  *  6. A request pauses only when its budget is spent or nothing can run.
  *  7. Every request ends within bounded simulated time.
  *  8. With only free models enabled, no model that is not free is ever called, however the free ones fail.
+ *  9. A model the provider refused for this account (privacy settings, app-only) is not asked again,
+ *     and the key is never blamed for it.
  *
  * Seeded: ENCODE_PROPERTY_SEED replays a failure, ENCODE_PROPERTY_RUNS runs more cases.
  */
@@ -44,6 +46,8 @@ type Fault =
   | 'served'
   | 'overflow'
   | 'notfound'
+  | 'policy'
+  | 'apponly'
 
 interface Step {
   fault: Fault
@@ -61,7 +65,7 @@ interface Scenario {
 }
 
 const COMMON_FAULTS = gen.oneOf<Fault>('cut', 'midstream', 'server', 'overloaded', 'slow', 'stall', 'empty', 'badjson', 'ratelimit', 'ratelimit-unknown')
-const RARE_FAULTS = gen.oneOf<Fault>('network', 'keepalive', 'hang', 'served', 'minutecap', 'overflow', 'notfound')
+const RARE_FAULTS = gen.oneOf<Fault>('network', 'keepalive', 'hang', 'served', 'minutecap', 'overflow', 'notfound', 'policy', 'apponly')
 /** A normal day: mostly answers, now and then a failure. */
 const CALM = gen.weighted<Fault>([8, gen.oneOf('reply')], [3, gen.oneOf('tool')], [1, COMMON_FAULTS], [0.6, RARE_FAULTS])
 /** A bad day: mostly failures, so budgets run out and requests pause. */
@@ -136,11 +140,17 @@ function scriptFor(step: Step, model: string, models: string[]): Script {
       return faults.contextOverflow(32_768)
     case 'notfound':
       return faults.notFound()
+    case 'policy':
+      return faults.policyBlocked()
+    case 'apponly':
+      return faults.appOnly(model)
   }
 }
 
 /** Faults that rule a model out for the rest of a request. */
-const EXCLUDES = new Set<Fault>(['overflow', 'notfound', 'badjson', 'empty'])
+const EXCLUDES = new Set<Fault>(['overflow', 'notfound', 'badjson', 'empty', 'policy', 'apponly'])
+/** Faults after which the provider will not serve the model on this account for a day. */
+const REFUSES = new Set<Fault>(['policy', 'apponly'])
 
 /**
  * Failures after which the model is avoided for at least the first cooldown.
@@ -331,13 +341,23 @@ async function runScenario(input: Scenario): Promise<void> {
     seen.guardedRuns++
     assert.deepEqual(calls.filter((call) => !call.model.endsWith(':free')).map((call) => call.model), [], 'a model that is not free was called in free-only mode')
   }
+
+  // 9. A refused model is not asked again, and the key is not blamed. A fallback that names the model as the one
+  // that answered would lift the refusal, so runs with one are left out of the first check.
+  if (!played.some((entry) => entry.step.fault === 'served')) {
+    calls.forEach((call, index) => {
+      if (REFUSES.has(call.step.step.fault)) assert.deepEqual(calls.slice(index + 1).filter((later) => later.model === call.model), [], `${call.model} was asked again after the provider refused it`)
+    })
+  }
+  assert.deepEqual(world.router.status().blocks.filter((block) => block.kind === 'auth'), [], 'a refused model blocked the provider')
+  assert.deepEqual(world.alerts.filter((alert) => alert.type === 'key-refused'), [], 'a refused model was taken for a refused key')
 }
 
 describe('ModelRouter chaos', () => {
   it('keeps every invariant under random provider failures', async () => {
     await check(scenario, runScenario, { maxSize: 12 })
     if ((Number(process.env.ENCODE_PROPERTY_RUNS) || 200) < 200) return
-    const faultsPlayed: Fault[] = ['reply', 'tool', 'cut', 'midstream', 'server', 'overloaded', 'network', 'slow', 'keepalive', 'stall', 'hang', 'empty', 'badjson', 'ratelimit', 'ratelimit-unknown', 'minutecap', 'served', 'overflow', 'notfound']
+    const faultsPlayed: Fault[] = ['reply', 'tool', 'cut', 'midstream', 'server', 'overloaded', 'network', 'slow', 'keepalive', 'stall', 'hang', 'empty', 'badjson', 'ratelimit', 'ratelimit-unknown', 'minutecap', 'served', 'overflow', 'notfound', 'policy', 'apponly']
     assert.deepEqual(faultsPlayed.filter((fault) => !seen.faults.has(fault)), [], 'every fault was played')
     for (const outcome of ['done', 'paused:unavailable', 'aborted']) assert.ok(seen.outcomes.has(outcome), `no request ended ${outcome}`)
     for (const event of ['attempt', 'text', 'tool-call', 'discard', 'switch', 'wait']) assert.ok(seen.events.has(event), `no ${event} event was seen`)

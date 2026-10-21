@@ -81,6 +81,34 @@ describe('HealthTracker', () => {
     assert.ok(health.score('unknown') > health.score('slow'))
   })
 
+  it('knows a model has answered only after it did, and stops vouching for it once it is unusable', () => {
+    const clock = new FakeClock()
+    const health = new HealthTracker(clock)
+    assert.equal(health.proven(KEY), false, 'a model never used is not proven')
+    health.success(KEY)
+    assert.equal(health.proven(KEY), true)
+    fail(health)
+    assert.equal(health.proven(KEY), true, 'a bad moment does not undo an answer')
+    health.unusable(KEY, { kind: 'policy', message: 'refused', until: clock.now() + 60_000 })
+    assert.equal(health.proven(KEY), false)
+    const restored = new HealthTracker(clock)
+    health.success('other')
+    restored.restore(JSON.parse(JSON.stringify(health.snapshot())))
+    assert.equal(restored.proven('other'), true, 'a restart keeps what was proven')
+  })
+
+  it('lets a model back in when asked, keeping its record', () => {
+    const clock = new FakeClock()
+    const health = new HealthTracker(clock)
+    fail(health)
+    health.unusable(KEY, { kind: 'policy', message: 'refused', until: clock.now() + 24 * 60 * 60_000 })
+    assert.equal(health.availability(KEY).available, false)
+    health.release(KEY)
+    assert.deepEqual(health.availability(KEY), { available: true, probe: false })
+    assert.equal(health.report().models[0].failures, 1)
+    health.release('never-seen')
+  })
+
   it('blocks a scope until a time, never shortening an earlier block', async () => {
     const clock = new FakeClock()
     const health = new HealthTracker(clock)

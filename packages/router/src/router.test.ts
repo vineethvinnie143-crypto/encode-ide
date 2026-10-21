@@ -499,6 +499,182 @@ describe('ModelRouter: a bill for a model listed as free', () => {
   })
 })
 
+describe('ModelRouter: models the account cannot use', () => {
+  const HOUR = 60 * 60_000
+  const DAY = 24 * HOUR
+  const stateOf = (world: TestWorld, model: string) => world.router.status().models.find((entry) => entry.key === `openrouter:${model}`)
+
+  it("sets aside models the account's privacy settings exclude, and the budget does not count them", async () => {
+    // Four refusals in a row would end a request that counted them as failures: the budget is three.
+    const models = ['vendor/m1:free', 'vendor/m2:free', 'vendor/m3:free', 'vendor/m4:free', 'vendor/m5:free']
+    const world = new TestWorld({
+      catalogs: { openrouter: models.map((model) => catalogEntry(model)) },
+      behavior: Object.fromEntries(models.slice(0, 4).map((model) => [model, faults.policyBlocked()])),
+    })
+    const started = world.clock.now()
+    const { text } = await world.complete()
+    assert.equal(text, 'hello from vendor/m5:free')
+    assert.deepEqual(world.calls.map((call) => call.model), models)
+    const refused = stateOf(world, models[0])
+    assert.equal(refused?.state, 'cooling')
+    assert.equal(refused?.cooldownUntil, started + DAY)
+    assert.equal(refused?.lastFailure?.kind, 'policy')
+    assert.equal(refused?.failures, 0, 'a refusal is not ill health')
+  })
+
+  it('does not ask a refused model again for a day, and then does', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.policyBlocked(), faults.reply('A, allowed now')] } })
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    for (let index = 0; index < 3; index++) {
+      await world.clock.advance(HOUR)
+      assert.equal((await world.complete()).text, `hello from ${B}`)
+    }
+    await world.clock.advance(DAY - 3 * HOUR - 1)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1)
+    await world.clock.advance(1)
+    assert.equal((await world.complete()).text, 'A, allowed now')
+    assert.equal(world.callsTo(A).length, 2)
+  })
+
+  it('does not take a 403 on one model for a refused key, and leaves the other models alone', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.appOnly(A) } })
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.deepEqual(world.alerts.map((alert) => alert.type), ['model-refused'])
+    assert.deepEqual(world.router.status().blocks, [], 'the provider is not blocked')
+    assert.equal(stateOf(world, A)?.cooldownUntil, world.clock.now() + DAY)
+    // The key goes on working for everything else, and A is not asked again.
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1)
+    assert.equal(world.calls.at(-1)?.target.apiKey, 'sk-or-v1-test-key-0123456789')
+  })
+
+  it('sets aside any other 403 for an hour', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.forbidden('Region not supported'), faults.reply('A, back')] } })
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.deepEqual(world.router.status().blocks, [])
+    await world.clock.advance(HOUR - 1)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    await world.clock.advance(1)
+    assert.equal((await world.complete()).text, 'A, back')
+  })
+
+  it('still stops at a moderation refusal rather than route around it', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.contentFilter() } })
+    const { outcome } = await world.complete()
+    assert.equal(outcome.kind === 'paused' && outcome.reason, 'refused')
+    assert.equal(world.calls.length, 1)
+  })
+
+  it('tells the user once for each reason, and never with the key in it', async () => {
+    const key = 'sk-or-v1-test-key-0123456789'
+    const models = ['vendor/m1:free', 'vendor/m2:free', 'vendor/m3:free', 'vendor/m4:free', 'vendor/m5:free']
+    const leaky = [{ fail: new TransportError('auth', `HTTP 403: Forbidden for ${key}`, { status: 403 }) }]
+    const world = new TestWorld({
+      catalogs: { openrouter: models.map((model) => catalogEntry(model)) },
+      behavior: { 'vendor/m1:free': faults.policyBlocked(), 'vendor/m2:free': faults.appOnly('vendor/m2:free'), 'vendor/m3:free': faults.policyBlocked(), 'vendor/m4:free': leaky },
+    })
+    assert.equal((await world.complete()).text, 'hello from vendor/m5:free')
+    const refused = world.alerts.flatMap((alert) => (alert.type === 'model-refused' ? [{ model: alert.model, reason: alert.reason }] : []))
+    assert.deepEqual(refused, [
+      { model: 'vendor/m1:free', reason: 'policy' },
+      { model: 'vendor/m2:free', reason: 'app-only' },
+      { model: 'vendor/m4:free', reason: 'forbidden' },
+    ])
+    assert.doesNotMatch(JSON.stringify(world.alerts), /sk-or-v1/)
+    assert.doesNotMatch(JSON.stringify(world.router.status()), /sk-or-v1/)
+  })
+
+  it('tries refused models again when asked, and says so again if they are refused again', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.policyBlocked(), faults.policyBlocked(), faults.reply('A, allowed now')] } })
+    await world.complete()
+    assert.equal(world.router.retryRefused('somewhere-else'), 0)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1)
+
+    assert.equal(world.router.retryRefused('openrouter'), 1)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 2)
+    assert.deepEqual(world.alerts.map((alert) => alert.type), ['model-refused', 'model-refused'])
+
+    assert.equal(world.router.retryRefused(), 1)
+    assert.equal((await world.complete()).text, 'A, allowed now')
+    assert.equal(world.router.retryRefused(), 0, 'nothing is refused any more')
+  })
+
+  it('tries refused models again when the key changes, which may be another account', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.policyBlocked(), faults.reply('A, new account')] } })
+    await world.complete()
+    world.router.keysChanged('openrouter')
+    assert.equal((await world.complete()).text, 'A, new account')
+  })
+
+  it('remembers a refusal across a restart', async () => {
+    const first = freeWorld({ behavior: { [A]: faults.policyBlocked() } })
+    await first.complete()
+    const second = freeWorld()
+    second.router.restore(JSON.parse(JSON.stringify(first.router.snapshot())))
+    assert.equal((await second.complete()).text, `hello from ${B}`)
+    assert.equal(second.callsTo(A).length, 0)
+    assert.equal(second.router.retryRefused(), 1, 'a restored refusal can be lifted too')
+  })
+
+  it('pauses with the fix in the message when every model is refused', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.policyBlocked(), [B]: faults.policyBlocked(), [C]: faults.policyBlocked() } })
+    const first = (await world.complete()).outcome
+    assert.equal(first.kind, 'paused')
+    assert.equal(first.kind === 'paused' && first.reason, 'no-model')
+    assert.match(first.kind === 'paused' ? first.message : '', /privacy settings/)
+    const calls = world.calls.length
+    const second = (await world.complete()).outcome
+    assert.equal(second.kind === 'paused' && second.reason, 'no-model')
+    assert.match(second.kind === 'paused' ? second.message : '', /privacy settings/)
+    assert.equal(second.kind === 'paused' && second.retryAt, world.clock.now() + DAY, 'the day the refusal lasts is the earliest a retry could work')
+    assert.equal(world.calls.length, calls, 'refused models are not asked again')
+  })
+
+  it('reports a refusal from a check, and remembers it', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.appOnly(A) } })
+    const result = await world.router.checkModel(`openrouter:${A}`)
+    assert.equal(result.ok, false)
+    assert.equal(result.blocked, 'app-only')
+    assert.match(result.message, /coding apps/)
+    assert.equal(stateOf(world, A)?.state, 'cooling')
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1, 'the request did not ask the refused model again')
+  })
+})
+
+describe('ModelRouter: models nothing but a listing stands behind', () => {
+  const DAY = 24 * 60 * 60_000
+  const big = 'vendor/big:free'
+  const small = 'vendor/small:free'
+  const world = () =>
+    new TestWorld({ catalogs: { openrouter: [catalogEntry(big, { contextWindow: 1_000_000, created: Date.UTC(2026, 9, 1) }), catalogEntry(small, { contextWindow: 131_072 })] } })
+
+  it('tries the bigger and newer model first, until another has answered', async () => {
+    const test = world()
+    assert.equal((await test.complete()).text, `hello from ${big}`)
+    const stale = world()
+    stale.router.health.success(`openrouter:${small}`)
+    assert.equal((await stale.complete()).text, `hello from ${small}`)
+  })
+
+  it('stops vouching for a model once it is refused', async () => {
+    const test = world()
+    test.router.health.success(`openrouter:${small}`)
+    assert.deepEqual(test.router.pool.members('openrouter', 'main', test.router.settings.freePool).map((model) => model.model), [small, big])
+    test.router.health.unusable(`openrouter:${small}`, { kind: 'policy', message: 'refused', until: test.clock.now() + DAY })
+    assert.deepEqual(test.router.pool.members('openrouter', 'main', test.router.settings.freePool).map((model) => model.model), [big, small])
+  })
+
+  it('takes an eval score as evidence too', () => {
+    const test = world()
+    test.router.registry.setScores({ [`openrouter:${small}`]: { main: 0.8 } })
+    assert.equal(test.router.pool.members('openrouter', 'main', test.router.settings.freePool)[0].model, small)
+  })
+})
+
 describe('ModelRouter: sessions, abort and budget', () => {
   it("keeps a session on the model it moved to, while other sessions use the best one", async () => {
     const world = freeWorld({ behavior: { [A]: [faults.rateLimited(1_000), faults.reply('A')] } })

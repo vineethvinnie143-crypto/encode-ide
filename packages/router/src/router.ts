@@ -19,6 +19,7 @@ import {
   type TransportErrorKind,
   type TransportTarget,
 } from '@encode/providers'
+import { REFUSAL_KINDS, refusalMessage, refusalOf, type Refusal, type RefusalKind } from './access'
 import { runAttempt, type AttemptResult } from './attempt'
 import { abortReason, sleep, systemClock, type Clock } from './clock'
 import { defaultRouterConfig, isLoopbackUrl, resolveModelList, type ProviderConfig, type RouterConfig } from './config'
@@ -66,6 +67,13 @@ export type RouterAlert =
   | { type: 'catalog'; provider: string; message: string }
   /** The provider billed a request to a model listed as free. The model counts as paid from now on. */
   | { type: 'billed'; provider: string; model: string; cost: number; message: string }
+  /**
+   * The provider will not serve one model on this account: its privacy settings
+   * leave the model no endpoint, or the model is limited to listed apps. The
+   * model is skipped until `until`, and nothing else is affected. Sent once
+   * per provider and reason until retryRefused() or keysChanged().
+   */
+  | { type: 'model-refused'; provider: string; model: string; reason: RefusalKind; message: string; until: number }
 
 export interface RouterLogEntry {
   level: 'debug' | 'info' | 'warn'
@@ -145,6 +153,8 @@ export interface CheckResult {
   toolCall: boolean
   /** What the provider billed for the call in US dollars, when it says. Zero for a free model. */
   cost?: number
+  /** The provider will not serve this model on this account (see RefusalKind); it is skipped for a day or an hour, and `message` says why. */
+  blocked?: RefusalKind
   message: string
 }
 
@@ -172,7 +182,7 @@ const MAX_SESSIONS = 500
 /** Canaries run only while at least this many free requests are left today. */
 const CANARY_RESERVE = 100
 
-type FailureKind = TransportErrorKind | 'empty' | 'tool-json'
+type FailureKind = TransportErrorKind | RefusalKind | 'empty' | 'tool-json'
 
 interface RequestState {
   readonly startedAt: number
@@ -223,6 +233,8 @@ export class ModelRouter implements ModelClient {
   private readonly syncing = new Map<string, Promise<void>>()
   private readonly syncErrors = new Map<string, string>()
   private readonly quotaFetchedAt = new Map<string, number>()
+  /** `<provider>:<reason>` of the model-refused alerts already sent. */
+  private readonly announced = new Set<string>()
 
   constructor(options: RouterOptions) {
     this.options = options
@@ -254,10 +266,42 @@ export class ModelRouter implements ModelClient {
     return this.config
   }
 
-  /** The user changed a provider's key or credit: lift the blocks a refused key or payment set. */
+  /** The user changed a provider's key or credit: lift the blocks a refused key or payment set. A new key may be a new account, so refused models get another try too. */
   keysChanged(provider: string): void {
     this.health.unblock(scopes.provider(provider))
     this.health.unblock(scopes.paid(provider))
+    this.retryRefused(provider)
+  }
+
+  /**
+   * Puts the models a provider refused for this account back in play, for a
+   * "Check again" button after the user changed their OpenRouter settings.
+   * Without a provider, every provider's. Returns how many models were released.
+   */
+  retryRefused(provider?: string): number {
+    let released = 0
+    for (const model of this.health.report().models) {
+      if (model.state === 'healthy' || !model.lastFailure || !REFUSAL_KINDS.has(model.lastFailure.kind)) continue
+      if (provider !== undefined && splitKey(model.key).provider !== provider) continue
+      this.health.release(model.key)
+      released++
+    }
+    for (const announced of [...this.announced]) if (provider === undefined || announced.startsWith(`${provider}:`)) this.announced.delete(announced)
+    return released
+  }
+
+  /** Sets a refused model aside for this account, tells the user the first time, and returns what to say about it. */
+  private refuse(key: string, refusal: Refusal, providerText: string, secrets: string[]): string {
+    const { provider, model } = splitKey(key)
+    const until = this.clock.now() + refusal.ms
+    const message = redact(refusalMessage(refusal.kind, model, providerText), secrets)
+    this.health.unusable(key, { kind: refusal.kind, message, until })
+    const announcement = `${provider}:${refusal.kind}`
+    if (!this.announced.has(announcement)) {
+      this.announced.add(announcement)
+      this.alert({ type: 'model-refused', provider, model, reason: refusal.kind, message, until })
+    }
+    return message
   }
 
   /** In free-only mode, why the model may not be sent a request, judged on the registry as it is right now. */
@@ -664,8 +708,16 @@ export class ModelRouter implements ModelClient {
     const message = redact(`${info.model}: ${error.message}`, secrets)
     if (result.streamed) emit({ type: 'discard', reason: message })
     state.firstProblemAt ??= now
-    state.lastFailure = { key, kind: error.kind, message, retryAt: error.retryAt }
     this.log('info', message, key)
+
+    // This model, on this account: set it aside for long, and leave the key and the other models alone.
+    const refusal = refusalOf(provider.type, error)
+    if (refusal) {
+      state.lastFailure = { key, kind: refusal.kind, message: this.refuse(key, refusal, error.message, secrets) }
+      state.excluded.add(key)
+      return NEXT
+    }
+    state.lastFailure = { key, kind: error.kind, message, retryAt: error.retryAt }
     const openRouter = provider.type === 'openrouter'
     const account = error.scope === 'account' || (error.scope === undefined && !openRouter && (error.kind === 'quota' || error.kind === 'payment'))
 
@@ -839,6 +891,9 @@ export class ModelRouter implements ModelClient {
           return 'refused'
         case 'not-found':
         case 'unsupported':
+        case 'policy':
+        case 'app-only':
+        case 'forbidden':
           return 'no-model'
         default:
           return 'unavailable'
@@ -1109,6 +1164,8 @@ export class ModelRouter implements ModelClient {
     if (!result.ok) {
       const { error } = result
       const message = redact(error.message, secrets)
+      const refusal = refusalOf(provider.type, error)
+      if (refusal) return { ok: false, key, toolCall: false, blocked: refusal.kind, message: this.refuse(key, refusal, error.message, secrets) }
       if (error.kind === 'server' || error.kind === 'overloaded' || error.kind === 'timeout' || error.kind === 'protocol') {
         this.health.failure(key, { kind: error.kind, message, retryAt: error.retryAt })
       }

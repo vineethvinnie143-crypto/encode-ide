@@ -1,5 +1,6 @@
 import {
   TransportError,
+  classifyHttpFailure,
   type ModelRequest,
   type ProviderAdapter,
   type ProviderType,
@@ -96,6 +97,18 @@ function textSteps(text: string, gapMs: number): ScriptStep[] {
   return pieces.flatMap((piece, index) => (index && gapMs ? [{ wait: gapMs }, event({ type: 'text', text: piece })] : [event({ type: 'text', text: piece })]))
 }
 
+/** What OpenRouter wrote when an account's settings, or the app itself, shut a model out (as seen on 21 October 2026). */
+export const OPENROUTER_REFUSALS = {
+  policy:
+    '0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy. We removed them for the following reasons (an endpoint may have matched multiple reasons): Free model training violation (guardrail): 1 endpoint excluded; configurable at https://openrouter.ai/workspaces/default/guardrails',
+  appOnly: (model: string) => `${model} is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps`,
+}
+
+/** A failed response as the providers package classifies it, so tests see the kinds real calls get. */
+function httpFailure(status: number, message: string): ScriptStep {
+  return { fail: classifyHttpFailure(status, undefined, JSON.stringify({ error: { message, code: status } })) }
+}
+
 export const faults = {
   /** A clean reply. */
   reply(text: string, options: { firstTokenMs?: number; gapMs?: number; model?: string; cost?: number } = {}): Script {
@@ -168,6 +181,18 @@ export const faults = {
   },
   contentFilter(): Script {
     return [fail('content-filter', 'HTTP 403: Input was flagged by moderation', { status: 403 })]
+  },
+  /** OpenRouter: the account's privacy or guardrail settings leave the model no endpoint. HTTP 404, which the providers package calls not-found. */
+  policyBlocked(): Script {
+    return [httpFailure(404, OPENROUTER_REFUSALS.policy)]
+  },
+  /** OpenRouter: the model answers only the apps on its list. HTTP 403, which the providers package calls a refused key. */
+  appOnly(model = 'vendor/gated:free'): Script {
+    return [httpFailure(403, OPENROUTER_REFUSALS.appOnly(model))]
+  },
+  /** A 403 that says nothing about why. */
+  forbidden(message = 'Forbidden'): Script {
+    return [httpFailure(403, message)]
   },
   /** Nothing at all for `ms`, then a reply. */
   slowFirstToken(ms: number, text = 'late but fine'): Script {

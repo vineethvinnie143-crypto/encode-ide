@@ -6,7 +6,9 @@
  *   node scripts/free-models.mjs --file models.json  the same from a saved copy of /api/v1/models, offline
  *   OPENROUTER_API_KEY=... node scripts/free-models.mjs --test 3
  *       also makes 3 real calls through the router in free-only mode, then compares the
- *       key's credit usage and free-request count from before and after
+ *       key's credit usage and free-request count from before and after. Models the account
+ *       cannot use (its privacy settings exclude them, or OpenRouter limits them to listed apps)
+ *       are skipped and reported, and the calls go on down the list until 3 answer.
  *
  * Options: --role <role> (default main), --limit <n> picks to list (default 10), --test <n> real calls (default 0),
  *          --wait <seconds> for the key's usage figures to settle after the calls (default 4)
@@ -120,7 +122,7 @@ const creditFields = (data) => Object.entries(data).filter(([name, value]) => ty
 function printReport(report, options) {
   const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
   console.log(`OpenRouter lists ${plural(report.listed, 'model', 'models')}; ${report.free} ${report.free === 1 ? 'is' : 'are'} free (an id ending in :free, with every price at zero).`)
-  console.log(`@free would try these first for the ${options.role} role:\n`)
+  console.log(`@free would try these first for the ${options.role} role (a listing only makes a model a candidate; --test shows which ones answer):\n`)
   const width = Math.max(5, ...report.picks.map((pick) => pick.model.length))
   for (const pick of report.picks) {
     console.log(`${cell(pick.rank, 3)} ${cell(pick.model, width)}  ${cell(pick.contextWindow.toLocaleString('en-US'), 9)} ${cell(pick.tools ? 'tools' : 'no tools', 9)} ${priceSummary(pick.pricing)}`)
@@ -154,11 +156,18 @@ async function liveCheck(mod, key, catalog, report, options) {
   console.log(`\nMaking ${options.test} real call${options.test === 1 ? '' : 's'}, in free-only mode:`)
   let answered = 0
   let tried = 0
+  let shutOut = 0
   const costs = []
   for (const pick of report.picks) {
     if (answered >= options.test || tried >= options.test + 3) break
-    tried++
     const result = await router.checkModel(`openrouter:${pick.model}`)
+    if (result.blocked) {
+      // Shut out of this model by the account or the app: nothing against its price, and the router skips it from now on.
+      shutOut++
+      console.log(`  – ${pick.model}: skipped. ${clean(result.message)}`)
+      continue
+    }
+    tried++
     if (!result.ok) {
       console.log(`  ✖ ${pick.model}: ${clean(result.message)}`)
       continue
@@ -169,6 +178,8 @@ async function liveCheck(mod, key, catalog, report, options) {
     const seconds = result.ttftMs === undefined ? '' : `, first token after ${(result.ttftMs / 1000).toFixed(1)} s`
     console.log(`  ✔ ${pick.model}: answered${seconds}, ${result.toolCall ? 'called the tool' : 'did not call the tool'}, ${cost}`)
   }
+
+  console.log(`  ${answered} answered${shutOut ? `, ${shutOut} shut out by this account or app (the router skips those for a day)` : ''}${tried - answered ? `, ${tried - answered} failed` : ''}.`)
 
   await sleep(options.wait * 1_000)
   const after = await keyInfo(key)
@@ -182,9 +193,13 @@ async function liveCheck(mod, key, catalog, report, options) {
   }
   if (!names.length) console.log('  (the key response has no credit figures to compare; the per-call costs above are the only evidence)')
   const free = (data) => data.free_model_daily_requests
-  if (free(before) && free(after)) console.log(`  free requests used today: ${free(before).used} → ${free(after).used} of ${free(after).limit}`)
+  if (free(before) && free(after)) {
+    const moved = free(before).used !== free(after).used
+    console.log(`  free requests used today: ${free(before).used} → ${free(after).used} of ${free(after).limit}${moved ? '' : " (OpenRouter's count runs late, so this proves nothing either way)"}`)
+  }
 
-  for (const alert of alerts) problems.push(clean(alert.message))
+  // A model the account is shut out of is reported above; every other alert (a bill, a refused key, an empty list) is a problem.
+  for (const alert of alerts) if (alert.type !== 'model-refused') problems.push(clean(alert.message))
   if (costs.some((cost) => cost > 0)) problems.push('a call reported a cost above zero.')
   if (!answered) problems.push('no call was answered, so the comparison above proves nothing; try again.')
   return problems

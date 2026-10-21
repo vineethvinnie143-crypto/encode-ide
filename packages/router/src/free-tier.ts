@@ -11,6 +11,8 @@ import { nextUtcMidnight, type FreeQuota } from './openrouter'
  */
 
 const MINUTE = 60_000
+/** A tier that only OpenRouter's count says is spent is looked at again after this long, since that count may be stale. */
+const RECHECK_MS = 15 * MINUTE
 
 export interface FreeTierStatus {
   provider: string
@@ -77,18 +79,39 @@ export class FreeTier {
     }
   }
 
-  /** Takes OpenRouter's own count, which also sees requests from other apps using the same key. */
+  /**
+   * Takes OpenRouter's own count into account. It sees requests from other
+   * apps on the same key, but it runs late: a request that went through can
+   * leave it at zero, and just after midnight it can still show yesterday's.
+   * So it can only raise this tier's own tally, never lower it. A tier that a
+   * 429 closed stays closed unless the limit itself rose (the account bought
+   * credit). When its count alone says the day is spent, the tier closes only
+   * until the next reading and the tally is left as it was, so a stale figure
+   * costs minutes, not the day.
+   */
   applyQuota(quota: FreeQuota): void {
-    this.daily = { used: quota.used, limit: quota.limit, resetAt: quota.resetAt }
-    if (quota.remaining <= 0) this.close({ until: quota.resetAt, kind: 'free-daily', reason: 'The free tier used up its requests for today.' })
-    else if (this.closed?.kind === 'free-daily') this.closed = undefined
+    this.rollDay()
+    const raised = this.daily.limit !== undefined && quota.limit > this.daily.limit
+    const spent = quota.used >= quota.limit
+    this.daily = { used: spent ? this.daily.used : Math.max(this.daily.used, quota.used), limit: quota.limit, resetAt: quota.resetAt }
+    if (spent) {
+      this.close({ until: Math.min(quota.resetAt, this.clock.now() + RECHECK_MS), kind: 'free-daily', reason: 'The free tier used up its requests for today.' }, false)
+    } else if (this.daily.used >= quota.limit) {
+      this.close({ until: quota.resetAt, kind: 'free-daily', reason: 'The free tier used up its requests for today.' })
+    } else if (raised && this.closed?.kind === 'free-daily') {
+      this.closed = undefined
+    }
   }
 
-  /** Closes the tier after a 429 that named the per-minute or the daily limit. */
-  close(closed: NonNullable<FreeTierStatus['closed']>): void {
+  /**
+   * Closes the tier after a 429 that named the per-minute or the daily limit.
+   * A daily closure also counts the day as spent, unless `spent` says it is
+   * only a guess that the next reading may undo.
+   */
+  close(closed: NonNullable<FreeTierStatus['closed']>, spent = true): void {
     if (this.closed && this.closed.until >= closed.until && this.clock.now() < this.closed.until) return
     this.closed = closed
-    if (closed.kind === 'free-daily') this.daily = { ...this.daily, used: Math.max(this.daily.used, this.daily.limit ?? 0) }
+    if (closed.kind === 'free-daily' && spent) this.daily = { ...this.daily, used: Math.max(this.daily.used, this.daily.limit ?? 0) }
   }
 
   /** The closure in force, if any. */

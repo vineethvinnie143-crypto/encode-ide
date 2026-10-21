@@ -15,6 +15,12 @@ import type { ModelInfo, ModelRegistry } from './registry'
  * trusted. A model that failed the canary stays out for a week. Virtual
  * models that name their roles (the gateway's) serve those roles first and
  * the others only as a fallback.
+ *
+ * A listing says a model exists and costs nothing, not that this account can
+ * use it: some listed free models are closed to an account by its privacy
+ * settings, or to apps the provider has not listed, and a new one may be slow.
+ * So a listing alone is only a candidate. A model that has an eval score for
+ * the role, or has answered a request, ranks above one that has neither.
  */
 
 export type CanaryStatus = 'passed' | 'failed'
@@ -35,6 +41,14 @@ const DAY = 24 * 60 * 60_000
 export const CANARY_RETRY_MS = 7 * DAY
 /** A model that passed is checked again after this long, since a model id can change what it serves. */
 export const CANARY_REFRESH_MS = 30 * DAY
+/**
+ * What it is worth to a model's rank that something beyond its listing stands
+ * behind it: an eval score for the role, or an answer from the model itself.
+ * More than the whole spread of the guess from window and age (0.45 × 0.7), so
+ * a model that is only bigger or newer cannot outrank one that has shown it
+ * works; less than a role the model is declared for (worth 2).
+ */
+const VOUCHED_BONUS = 0.6
 
 function globToRegExp(glob: string): RegExp {
   const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
@@ -91,10 +105,12 @@ export class FreePool {
   rank(model: ModelInfo, role: string): number {
     const now = this.clock.now()
     const prior = 0.3 + 0.4 * windowScore(model.contextWindow) + 0.3 * recencyScore(model.created, now)
+    const measured = model.scores[role] !== undefined
     const quality = model.scores[role] ?? prior
     const roleFit = model.roles?.length ? (model.roles.includes(role) ? 1 : 0) : 0.5
     const checked = this.canaries.get(model.key)?.status === 'passed' ? 1 : 0
-    return 2 * roleFit + 0.45 * quality + 0.35 * this.health.score(model.key) + 0.2 * checked
+    const vouched = measured || this.health.proven(model.key)
+    return 2 * roleFit + 0.45 * quality + 0.35 * this.health.score(model.key) + 0.2 * checked + (vouched ? VOUCHED_BONUS : 0)
   }
 
   /**
