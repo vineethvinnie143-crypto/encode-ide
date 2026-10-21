@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { File, Loader2, Search } from '../ui/icons'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
+import { usePanels } from '../stores/panels'
 import { useUi } from '../stores/ui'
 
 function fuzzyScore(query: string, target: string): number {
@@ -75,7 +76,7 @@ export default function QuickOpen() {
     const target = path ?? results[index]
     if (!target) return
     setOpen(false)
-    useUi.getState().setWorkspaceTab('editor')
+    usePanels.getState().open('editor')
     void openFile(target)
   }
 

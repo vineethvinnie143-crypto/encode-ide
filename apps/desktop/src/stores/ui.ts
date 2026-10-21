@@ -1,9 +1,6 @@
 import { create } from '../store'
 
 export type SidebarView = 'explorer' | 'search' | 'git'
-export type RightPanel = 'browse' | 'workspace'
-export type WorkspaceTab = 'files' | 'editor' | 'shell'
-export type MainView = 'chat' | 'trajectory'
 export type SettingsTab = 'models' | 'agent' | 'appearance'
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'
@@ -39,11 +36,6 @@ interface UiStore {
   sidebarVisible: boolean
   sidebarMode: SidebarMode
   collapsedProjects: string[]
-  panelVisible: boolean
-  rightVisible: boolean
-  rightPanel: RightPanel
-  workspaceTab: WorkspaceTab
-  mainView: MainView
   settingsOpen: boolean
   settingsTab: SettingsTab
   pluginsOpen: boolean
@@ -59,12 +51,6 @@ interface UiStore {
   setSidebarMode(mode: SidebarMode): void
   /** Folds or unfolds a project in the sidebar; `key` is rootKey(folder). */
   toggleProject(key: string): void
-  togglePanel(): void
-  toggleRight(): void
-  setRightVisible(visible: boolean): void
-  setRightPanel(panel: RightPanel): void
-  setWorkspaceTab(tab: WorkspaceTab): void
-  setMainView(view: MainView): void
   setSettingsOpen(open: boolean): void
   openSettings(tab: SettingsTab): void
   setPluginsOpen(open: boolean): void
@@ -87,7 +73,6 @@ const LAYOUT_KEY = 'eNCode.layout.v1'
 
 interface Layout {
   sidebarVisible: boolean
-  rightVisible: boolean
   /** Projects folded in the sidebar, as folder keys (see rootKey). */
   collapsedProjects: string[]
 }
@@ -97,11 +82,10 @@ function savedLayout(): Layout {
     const raw = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') as Record<string, unknown>
     return {
       sidebarVisible: raw.sidebarVisible !== false,
-      rightVisible: raw.rightVisible !== false,
       collapsedProjects: Array.isArray(raw.collapsedProjects) ? raw.collapsedProjects.filter((key): key is string => typeof key === 'string') : [],
     }
   } catch {
-    return { sidebarVisible: true, rightVisible: true, collapsedProjects: [] }
+    return { sidebarVisible: true, collapsedProjects: [] }
   }
 }
 
@@ -114,17 +98,13 @@ function saveLayout(layout: Layout): void {
 }
 
 function layoutOf(state: Layout): Layout {
-  return { sidebarVisible: state.sidebarVisible, rightVisible: state.rightVisible, collapsedProjects: state.collapsedProjects }
+  return { sidebarVisible: state.sidebarVisible, collapsedProjects: state.collapsedProjects }
 }
 
 export const useUi = create<UiStore>((set, get) => ({
   sidebarView: 'explorer',
   ...savedLayout(),
   sidebarMode: 'projects',
-  panelVisible: false,
-  rightPanel: 'browse',
-  workspaceTab: 'files',
-  mainView: 'chat',
   settingsOpen: false,
   settingsTab: 'models',
   pluginsOpen: false,
@@ -147,18 +127,6 @@ export const useUi = create<UiStore>((set, get) => ({
     set({ collapsedProjects: folded.includes(key) ? folded.filter((item) => item !== key) : [...folded, key] })
     saveLayout(layoutOf(get()))
   },
-  togglePanel: () => set((state) => ({ panelVisible: !state.panelVisible })),
-  toggleRight: () => {
-    set((state) => ({ rightVisible: !state.rightVisible }))
-    saveLayout(layoutOf(get()))
-  },
-  setRightVisible: (visible) => {
-    set({ rightVisible: visible })
-    saveLayout({ ...layoutOf(get()), rightVisible: visible })
-  },
-  setRightPanel: (panel) => set({ rightPanel: panel, rightVisible: true }),
-  setWorkspaceTab: (tab) => set({ workspaceTab: tab, rightPanel: 'workspace', rightVisible: true }),
-  setMainView: (view) => set({ mainView: view }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   openSettings: (tab) => set({ settingsTab: tab, settingsOpen: true }),
   setPluginsOpen: (open) => set({ pluginsOpen: open }),

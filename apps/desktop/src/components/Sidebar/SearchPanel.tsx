@@ -3,7 +3,7 @@ import { CaseSensitive, Regex, Search } from '../../ui/icons'
 import type { SearchResult } from '@shared/types'
 import { api } from '../../api'
 import { useEditor } from '../../stores/editor'
-import { useUi } from '../../stores/ui'
+import { usePanels } from '../../stores/panels'
 import { useWorkspace } from '../../stores/workspace'
 
 export default function SearchPanel() {
@@ -63,7 +63,7 @@ export default function SearchPanel() {
   }, [result])
 
   const open = (path: string, line?: number) => {
-    useUi.getState().setWorkspaceTab('editor')
+    usePanels.getState().open('editor')
     void openFile(path, line)
   }
 
