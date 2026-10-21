@@ -343,6 +343,162 @@ describe('ModelRouter: the failover budget', () => {
   })
 })
 
+describe('ModelRouter: only free models enabled', () => {
+  const PAID = 'vendor/paid-model'
+  const CLAUDE = 'anthropic:claude-sonnet-5'
+  const keys = { openrouter: 'sk-or-v1-test-key-0123456789', anthropic: 'sk-ant-test-key-0123456789' }
+  const requirements = { promptTokens: 1_000, maxOutputTokens: 4_096, tools: false, images: false }
+
+  function guarded(roles: Record<string, string[]>, options: TestWorldOptions = {}): TestWorld {
+    return freeWorld({
+      settings: { providers: { openrouter: { type: 'openrouter' }, anthropic: { type: 'anthropic' } }, freeOnly: true, roles },
+      catalogs: { openrouter: [catalogEntry(A), catalogEntry(B), catalogEntry(C), catalogEntry(PAID)] },
+      keys,
+      ...options,
+    })
+  }
+
+  it('never sends a request to a model that is not free, and says how to fix a role that lists only those', async () => {
+    const world = guarded({ main: [CLAUDE, `openrouter:${PAID}`] })
+    const { outcome, events } = await world.complete()
+    assert.equal(outcome.kind === 'paused' && outcome.reason, 'no-model')
+    const message = outcome.kind === 'paused' ? outcome.message : ''
+    assert.match(message, /Only free models are enabled, and none of the main role's models is free/)
+    assert.match(message, /Add "@free" to the role in Settings, or turn off free-only mode/)
+    assert.deepEqual([world.calls.length, events.length], [0, 0])
+  })
+
+  it('answers from the free pool when a role lists paid models first, without a word about them', async () => {
+    const world = guarded({ main: [CLAUDE, `openrouter:${PAID}`, '@free'] })
+    const { text, events } = await world.complete()
+    assert.equal(text, `hello from ${A}`)
+    assert.deepEqual(types(events), ['attempt', 'text'], 'a model that is refused is not tried, so there is nothing to switch from')
+    assert.deepEqual(world.calls.map((call) => call.model), [A])
+    assert.deepEqual(world.calls[0].target.serverFallbacks, [B, C], 'OpenRouter may try only free models in its place')
+  })
+
+  it('does not fall back to a paid model when the free tier is closed or every free model fails', async () => {
+    const closed = guarded({ main: ['@free', CLAUDE, `openrouter:${PAID}`] }, { behavior: { [A]: faults.quotaExhausted() } })
+    const first = await closed.complete()
+    assert.equal(first.outcome.kind === 'paused' && first.outcome.reason, 'quota')
+    assert.deepEqual(closed.calls.map((call) => call.model), [A])
+
+    const failing = guarded({ main: ['@free', CLAUDE, `openrouter:${PAID}`] }, { behavior: { [A]: faults.serverError(), [B]: faults.serverError(), [C]: faults.serverError() } })
+    const second = await failing.complete()
+    assert.equal(second.outcome.kind === 'paused' && second.outcome.reason, 'unavailable')
+    assert.ok(failing.calls.length > 0 && failing.calls.every((call) => call.model.endsWith(':free')), `calls: ${failing.calls.map((call) => call.model).join(', ')}`)
+  })
+
+  it('takes a setting change at once, in either direction', async () => {
+    const world = guarded({ main: [CLAUDE] })
+    assert.equal((await world.complete()).outcome.kind, 'paused')
+    world.router.configure({ ...world.router.settings, freeOnly: false })
+    assert.equal(world.router.status().freeOnly, false)
+    assert.equal((await world.complete()).text, 'hello from claude-sonnet-5')
+    world.router.configure({ ...world.router.settings, freeOnly: true })
+    assert.equal(world.router.status().freeOnly, true)
+    assert.equal((await world.complete()).outcome.kind, 'paused')
+    assert.equal(world.calls.length, 1)
+  })
+
+  it('looks again after the key is read, in case the catalog changed in between', async () => {
+    let world: TestWorld
+    const flipping = {
+      has: () => true,
+      get: async () => {
+        // The provider starts charging for the model while its key is being fetched.
+        world.router.registry.setCatalog('openrouter', [catalogEntry(A, { free: false, price: { input: 1, output: 2 } })], world.clock.now())
+        return keys.openrouter
+      },
+    }
+    const logs: string[] = []
+    world = guarded({ main: ['@free'] }, { keys: flipping, catalogs: { openrouter: [catalogEntry(A)] }, router: { onLog: (entry) => logs.push(`${entry.level}: ${entry.message}`) } })
+    const { outcome } = await world.complete()
+    assert.equal(outcome.kind === 'paused' && outcome.reason, 'no-model')
+    assert.equal(outcome.kind === 'paused' && outcome.message, 'The free pool has no model for the main role right now.')
+    assert.equal(world.calls.length, 0, 'nothing was sent')
+    assert.deepEqual(logs, [`warn: ${A} is not a free model, and only free models are enabled`])
+  })
+
+  it('refuses to test a model that is not free, before it reads the key', async () => {
+    let reads = 0
+    const counting = {
+      has: () => true,
+      get: async () => {
+        reads++
+        return keys.openrouter
+      },
+    }
+    const world = guarded({}, { keys: counting, behavior: { [A]: faults.toolCall('echo', { text: 'eNCode' }) } })
+    const listed = await world.router.checkModel(`openrouter:${PAID}`)
+    assert.equal(listed.ok, false)
+    assert.match(listed.message, new RegExp(`${PAID} is not a free model, and only free models are enabled`))
+    const unlisted = await world.router.checkModel(CLAUDE)
+    assert.match(unlisted.message, /not in the provider's list of free models/)
+    assert.deepEqual([reads, world.calls.length], [0, 0])
+    const free = await world.clock.run(world.router.checkModel(`openrouter:${A}`))
+    assert.deepEqual([free.ok, free.toolCall, world.calls.length], [true, true, 1])
+  })
+
+  it('shows the refusal in the preview, the status and the budget', async () => {
+    const world = guarded({ main: [CLAUDE, `openrouter:${PAID}`] })
+    const { candidates, skipped } = world.router.preview('main', requirements)
+    assert.deepEqual(candidates, [])
+    assert.deepEqual(skipped.map((skip) => [skip.key, skip.reason]), [[CLAUDE, 'not-free'], [`openrouter:${PAID}`, 'not-free']])
+    assert.equal(world.router.status().freeOnly, true)
+    // With nothing to run, the budget does not pretend a refused model is the one that will.
+    assert.equal((await world.router.budget('main')).model, '@free')
+  })
+})
+
+describe('ModelRouter: a bill for a model listed as free', () => {
+  it('keeps the reply, then counts the model as paid and says so once', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.reply('answered', { cost: 0.0021 }) } })
+    assert.equal((await world.complete()).text, 'answered')
+    assert.deepEqual(world.alerts.map((alert) => alert.type), ['billed'])
+    assert.equal(world.alerts[0].message, `openrouter billed $0.0021 for a request to ${A}, which is listed as free. eNCode now treats ${A} as a paid model.`)
+    assert.equal(world.router.registry.get('openrouter', A).free, false)
+    // The pool moves on to the next model, and never asks the first again.
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1)
+    assert.equal(world.alerts.length, 1)
+  })
+
+  it('stays quiet about a model that is free and costs nothing', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.reply('free', { cost: 0 }), [B]: faults.reply('no figure') } })
+    assert.equal((await world.complete()).text, 'free')
+    assert.equal((await world.complete({ sticky: 's1' })).text, 'free')
+    assert.deepEqual(world.alerts, [])
+    assert.equal(world.router.registry.get('openrouter', A).free, true)
+  })
+
+  it('refuses a billed model for good in free-only mode, even when a role names it', async () => {
+    const settings = { providers: { openrouter: { type: 'openrouter' } }, freeOnly: true, roles: { main: [`openrouter:${A}`, '@free'] } }
+    const world = freeWorld({ settings, behavior: { [A]: faults.reply('answered', { cost: 0.5 }) } })
+    assert.equal((await world.complete()).text, 'answered')
+    assert.match(world.alerts[0].message, /and will not use it\.$/)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.router.preview('main', { promptTokens: 1_000, maxOutputTokens: 4_096, tools: false, images: false }).skipped[0].reason, 'not-free')
+    assert.equal(world.callsTo(A).length, 1)
+  })
+
+  it('reports the cost of a check, and remembers across restarts what it learned', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.toolCall('echo', { text: 'eNCode' }, { cost: 0.01 }), [B]: faults.toolCall('echo', { text: 'eNCode' }, { cost: 0 }) } })
+    const billed = await world.clock.run(world.router.checkModel(`openrouter:${A}`))
+    assert.deepEqual([billed.ok, billed.toolCall, billed.cost], [true, true, 0.01])
+    assert.deepEqual(world.alerts.map((alert) => alert.type), ['billed'])
+    assert.equal((await world.clock.run(world.router.checkModel(`openrouter:${B}`))).cost, 0)
+
+    const snapshot = JSON.parse(JSON.stringify(world.router.snapshot()))
+    const restarted = freeWorld({ catalogs: {} })
+    restarted.router.restore(snapshot)
+    assert.equal(restarted.router.registry.get('openrouter', A).free, false)
+    assert.equal(restarted.router.registry.get('openrouter', B).free, true)
+    restarted.router.registry.unlearn(`openrouter:${A}`)
+    assert.equal(restarted.router.registry.get('openrouter', A).free, true, 'the user can forget what it learned')
+  })
+})
+
 describe('ModelRouter: sessions, abort and budget', () => {
   it("keeps a session on the model it moved to, while other sessions use the best one", async () => {
     const world = freeWorld({ behavior: { [A]: [faults.rateLimited(1_000), faults.reply('A')] } })

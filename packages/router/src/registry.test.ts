@@ -81,4 +81,18 @@ describe('ModelRegistry', () => {
     damaged.restore({ version: 2 })
     damaged.restore(null)
   })
+
+  it("does not take a snapshot's word that a model with a price is free", () => {
+    const value = registry()
+    value.restore({
+      version: 1,
+      catalogs: {
+        openrouter: {
+          fetchedAt: 1,
+          models: [catalogEntry('priced/model:free', { free: true, price: { input: 1, output: 4 } }), catalogEntry('no/price:free', { price: { input: Number.NaN, output: 0 } }), catalogEntry('ok:free')],
+        },
+      },
+    })
+    assert.deepEqual(value.list('openrouter').map((model) => [model.model, model.free]), [['ok:free', true]])
+  })
 })

@@ -20,6 +20,8 @@ interface SentRequest {
 /** OpenRouter's catalog and key endpoints, served from memory. */
 class FakeOpenRouter {
   status = 200
+  /** Models whose listing carries a price per request. */
+  fees = new Set<string>()
   readonly sent: SentRequest[] = []
 
   constructor(
@@ -38,7 +40,7 @@ class FakeOpenRouter {
           name: id,
           context_length: 131_072,
           architecture: { input_modalities: ['text'], output_modalities: ['text'] },
-          pricing: id.endsWith(':free') ? { prompt: '0', completion: '0' } : { prompt: '0.000001', completion: '0.000004' },
+          pricing: this.fees.has(id) ? { prompt: '0', completion: '0', request: '0.01' } : id.endsWith(':free') ? { prompt: '0', completion: '0' } : { prompt: '0.000001', completion: '0.000004' },
           top_provider: { context_length: 131_072, max_completion_tokens: 16_384 },
           supported_parameters: ['tools'],
         })),
@@ -66,6 +68,24 @@ describe('ModelRouter: catalogs and the free quota', () => {
     assert.equal(world.router.status().freeTiers[0].daily?.remaining, 990)
     assert.equal(openrouter.requests('/models')[0].headers.authorization, undefined)
     assert.equal(openrouter.requests('/key')[0].headers.authorization, `Bearer ${KEY}`)
+  })
+
+  it('says so when models claim to be free but none passes the check, instead of leaving the pool empty without a word', async () => {
+    const charging = new FakeOpenRouter([A, B])
+    charging.fees = new Set([A, B])
+    const logs: string[] = []
+    const world = new TestWorld({ fetch: charging.fetch, router: { onLog: (entry) => logs.push(`${entry.level}: ${entry.message}`) } })
+    await world.router.refresh()
+    assert.equal(catalogStatus(world)?.free, 0)
+    assert.deepEqual(logs, ['warn: openrouter lists 2 models with a :free id, but none passed the free check, so the free pool is empty. Run scripts/free-models.mjs to see each price.'])
+
+    const mixed = new FakeOpenRouter([A, B])
+    mixed.fees = new Set([A])
+    const quiet: string[] = []
+    const other = new TestWorld({ fetch: mixed.fetch, router: { onLog: (entry) => quiet.push(entry.message) } })
+    await other.router.refresh()
+    assert.equal(catalogStatus(other)?.free, 1)
+    assert.deepEqual(quiet, [])
   })
 
   it('waits for a missing catalog before the first request, then answers from the pool', async () => {

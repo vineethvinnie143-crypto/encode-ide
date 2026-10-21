@@ -11,10 +11,11 @@ import type { ModelInfo, ModelRegistry } from './registry'
 /**
  * Which models may take a call, in the order to try them. A role's list is
  * expanded (`@free` becomes the ranked free pool), then every entry that
- * cannot take this call right now is set aside with the reason: no key, a
- * blocked provider, a cooldown, a closed free tier, missing tools or vision,
- * or a window too small for the prompt plus room to answer. The reasons tell
- * the router whether to wait, compact or pause when nothing is left.
+ * cannot take this call right now is set aside with the reason: a model that
+ * is not free while only free models are enabled, no key, a blocked provider,
+ * a cooldown, a closed free tier, missing tools or vision, or a window too
+ * small for the prompt plus room to answer. The reasons tell the router
+ * whether to wait, compact or pause when nothing is left.
  */
 
 export interface Candidate {
@@ -33,6 +34,7 @@ export interface Candidate {
 }
 
 export type SkipReason =
+  | 'not-free'
   | 'no-key'
   | 'no-adapter'
   | 'provider-blocked'
@@ -90,6 +92,13 @@ export const scopes = {
   paid: (id: string) => `paid:${id}`,
 }
 
+/** Why free-only mode refuses a model. A model no catalog lists is unproven rather than known to be paid, and the message says so. */
+export function notFreeMessage(model: string, listed: boolean): string {
+  return listed
+    ? `${model} is not a free model, and only free models are enabled`
+    : `${model} is not in the provider's list of free models (which may not have loaded yet), and only free models are enabled`
+}
+
 /** The role's model list, with `@free` replaced by the pool's ranked members and duplicates dropped. */
 export function expandRefs(ctx: SelectionContext, request: Pick<SelectionRequest, 'role' | 'refs' | 'sticky'>): Array<{ info: ModelInfo; provider: ProviderConfig; fromPool: boolean }> {
   const seen = new Set<string>()
@@ -124,6 +133,11 @@ export function selectCandidates(ctx: SelectionContext, request: SelectionReques
   for (const { info, provider, fromPool } of expandRefs(ctx, request)) {
     const skip = (reason: SkipReason, message: string, extra: Partial<Skip> = {}) => skipped.push({ key: info.key, reason, message, ...extra })
 
+    // First of all: in free-only mode a model that is not free is never "tried", whatever else is true of it.
+    if (ctx.config.freeOnly && !info.free) {
+      skip('not-free', notFreeMessage(info.model, ctx.registry.listed(provider.id, info.model)))
+      continue
+    }
     if (request.exclude?.has(info.key) || request.exclude?.has(scopes.provider(provider.id))) {
       skip('tried', 'already tried for this request')
       continue

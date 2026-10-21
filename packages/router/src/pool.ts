@@ -72,13 +72,19 @@ export class FreePool {
     return this.canaries.get(key)
   }
 
-  private excluded(model: ModelInfo, config: FreePoolConfig): boolean {
-    if (!model.free) return true
-    if (model.contextWindow < config.minContextWindow) return true
-    if (model.expiresAt !== undefined && model.expiresAt <= this.clock.now()) return true
-    if (config.exclude.some((glob) => globToRegExp(glob).test(model.model))) return true
+  /** Why a model is kept out of the pool, or undefined when it may be in. */
+  exclusion(model: ModelInfo, config: FreePoolConfig): string | undefined {
+    if (!model.free) return 'it is not free'
+    if (model.contextWindow < config.minContextWindow) return `its window of ${model.contextWindow.toLocaleString('en-US')} tokens is below the pool's minimum of ${config.minContextWindow.toLocaleString('en-US')}`
+    if (model.expiresAt !== undefined && model.expiresAt <= this.clock.now()) return 'the provider retired it'
+    if (config.exclude.some((glob) => globToRegExp(glob).test(model.model))) return 'it is excluded in settings'
     const canary = this.canaries.get(model.key)
-    return canary?.status === 'failed' && this.clock.now() - canary.at < CANARY_RETRY_MS
+    if (canary?.status === 'failed' && this.clock.now() - canary.at < CANARY_RETRY_MS) return `it failed its tool-call check${canary.reason ? ` (${canary.reason})` : ''}`
+    return undefined
+  }
+
+  private excluded(model: ModelInfo, config: FreePoolConfig): boolean {
+    return this.exclusion(model, config) !== undefined
   }
 
   /** How strongly the pool prefers a model for a role. Higher is better. */

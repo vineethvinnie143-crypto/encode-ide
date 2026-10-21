@@ -28,9 +28,9 @@ import { originOf, redact, type KeySource } from './keys'
 import { fetchModelList } from './model-list'
 import { fetchFreeQuota, fetchOpenRouterCatalog, nextUtcMidnight, type Fetch } from './openrouter'
 import { FreePool, type PoolSnapshot } from './pool'
-import { FREE_POOL, modelKey, parseModelRef } from './refs'
+import { FREE_POOL, modelKey, parseModelRef, splitKey } from './refs'
 import { ModelRegistry, type CatalogEntry, type RegistrySnapshot } from './registry'
-import { scopes, selectCandidates, type Candidate, type SelectionContext, type Skip } from './select'
+import { notFreeMessage, scopes, selectCandidates, type Candidate, type SelectionContext, type Skip } from './select'
 
 /**
  * The model router: eNCode's ModelClient. Core asks it for a role; it picks
@@ -64,6 +64,8 @@ export type RouterAlert =
   | { type: 'quota'; provider: string; message: string; until?: number }
   /** The model catalog could not be fetched; the free pool may be empty. */
   | { type: 'catalog'; provider: string; message: string }
+  /** The provider billed a request to a model listed as free. The model counts as paid from now on. */
+  | { type: 'billed'; provider: string; model: string; cost: number; message: string }
 
 export interface RouterLogEntry {
   level: 'debug' | 'info' | 'warn'
@@ -109,6 +111,8 @@ export interface RouterOptions {
 }
 
 export interface RouterStatus {
+  /** Only free models may take a call (see RouterConfig.freeOnly). */
+  freeOnly: boolean
   models: ModelHealthReport[]
   blocks: Array<ScopeBlock & { scope: string }>
   freeTiers: FreeTierStatus[]
@@ -139,6 +143,8 @@ export interface CheckResult {
   ttftMs?: number
   /** The model made a valid tool call, as asked. */
   toolCall: boolean
+  /** What the provider billed for the call in US dollars, when it says. Zero for a free model. */
+  cost?: number
   message: string
 }
 
@@ -252,6 +258,12 @@ export class ModelRouter implements ModelClient {
   keysChanged(provider: string): void {
     this.health.unblock(scopes.provider(provider))
     this.health.unblock(scopes.paid(provider))
+  }
+
+  /** In free-only mode, why the model may not be sent a request, judged on the registry as it is right now. */
+  private paidRefusal(provider: ProviderConfig, model: string): string | undefined {
+    if (!this.config.freeOnly || this.registry.get(provider.id, model).free) return undefined
+    return notFreeMessage(model, this.registry.listed(provider.id, model))
   }
 
   /** OpenRouter's free tier for a provider; only OpenRouter accounts have one. */
@@ -440,6 +452,13 @@ export class ModelRouter implements ModelClient {
         state.excluded.add(key)
         return NEXT
       }
+      // Selection judged the model before the key was read; the catalog or the settings may have changed since.
+      const refusal = this.paidRefusal(provider, info.model)
+      if (refusal) {
+        this.log('warn', refusal, key)
+        state.excluded.add(key)
+        return NEXT
+      }
       if (info.free) this.freeTier(provider.id)?.record()
       const target = this.target(candidate, apiKey)
       const result = await runAttempt({
@@ -512,6 +531,7 @@ export class ModelRouter implements ModelClient {
   ): Step {
     const key = candidate.info.key
     const servedKey = this.servedKey(candidate, result.servedModel)
+    this.checkBill(servedKey, result.reply.usage)
     const { reply, schemaErrors } = this.validate(result.reply, result.rawArguments, request.validateToolCall)
     const finish = reply.finish
     const normalEnd = finish !== 'length' && finish !== 'content_filter'
@@ -546,6 +566,23 @@ export class ModelRouter implements ModelClient {
     if (kind === 'tool-json' && candidate.fromPool) this.pool.recordCanary(servedKey, 'failed', message)
     state.excluded.add(key)
     return this.costly(state, request)
+  }
+
+  /**
+   * A price is the provider's promise; the bill is what it did. When a model
+   * listed as free was billed, the promise was wrong (or the listing was
+   * misread): the model counts as paid from then on, so free-only mode never
+   * sends it another request, and the user is told.
+   */
+  private checkBill(key: string, usage: { cost?: number } | undefined): void {
+    const cost = usage?.cost
+    if (cost === undefined || !Number.isFinite(cost) || cost <= 0) return
+    const { provider, model } = splitKey(key)
+    if (!this.registry.get(provider, model).free) return
+    this.registry.learn(key, { free: false })
+    const message = `${provider} billed $${Number(cost.toPrecision(2))} for a request to ${model}, which is listed as free. eNCode now treats ${model} as a paid model${this.config.freeOnly ? ' and will not use it' : ''}.`
+    this.log('warn', message, key)
+    this.alert({ type: 'billed', provider, model, cost, message })
   }
 
   /**
@@ -818,20 +855,26 @@ export class ModelRouter implements ModelClient {
       const block = blocking.reason === 'free-closed' ? this.closureKind(blocking) : this.blockKind(blocking)
       return { reason: kindReason(block), message: `${blocking.message} Trying again at ${clockTime(blocking.until!)} UTC.` }
     }
-    if (!skips.length) {
+    // Models that free-only mode refused are not what stopped the call, unless they are all there is.
+    const rest = skips.filter((skip) => skip.reason !== 'not-free')
+    if (!rest.length) {
       const pooled = refs.includes(FREE_POOL)
       const missing = pooled ? this.config.freePool.providers.filter((id) => this.registry.catalogFetchedAt(id) === undefined) : []
       if (missing.length) return { reason: 'unavailable', message: `The free model list from ${missing.join(', ')} could not be loaded yet. Check the connection.` }
-      return { reason: 'no-model', message: `No model is set for the ${role} role. Choose one in Settings.` }
+      if (skips.length) {
+        const advice = pooled ? 'The free pool has no model to offer right now.' : `Add "${FREE_POOL}" to the role in Settings, or turn off free-only mode.`
+        return { reason: 'no-model', message: `Only free models are enabled, and none of the ${role} role's models is free. ${advice}` }
+      }
+      return { reason: 'no-model', message: pooled ? `The free pool has no model for the ${role} role right now.` : `No model is set for the ${role} role. Choose one in Settings.` }
     }
-    const noKey = [...new Set(skips.filter((skip) => skip.reason === 'no-key').map((skip) => parseModelRef(skip.key)?.provider ?? skip.key))]
-    if (noKey.length && skips.every((skip) => skip.reason === 'no-key' || skip.reason === 'no-adapter' || skip.reason === 'tried')) {
+    const noKey = [...new Set(rest.filter((skip) => skip.reason === 'no-key').map((skip) => parseModelRef(skip.key)?.provider ?? skip.key))]
+    if (noKey.length && rest.every((skip) => skip.reason === 'no-key' || skip.reason === 'no-adapter' || skip.reason === 'tried')) {
       return { reason: 'no-model', message: `Add a key for ${noKey.join(', ')} in Settings to use the ${role} role's models.` }
     }
-    if (skips.some((skip) => skip.reason === 'tools')) {
+    if (rest.some((skip) => skip.reason === 'tools')) {
       return { reason: 'no-model', message: `None of the ${role} role's models that are ready can use tools. Add one that can in Settings.` }
     }
-    if (skips.some((skip) => skip.reason === 'images')) {
+    if (rest.some((skip) => skip.reason === 'images')) {
       return { reason: 'no-model', message: `None of the ${role} role's models that are ready can read images.` }
     }
     return { reason: 'no-model', message: `No model for the ${role} role can take this request.` }
@@ -866,6 +909,8 @@ export class ModelRouter implements ModelClient {
       const parsed = ref === FREE_POOL ? undefined : parseModelRef(ref)
       if (parsed && this.config.providers[parsed.provider]) {
         const info = this.registry.get(parsed.provider, parsed.model)
+        // A model that free-only mode refuses will never run, so it is no guess at what will.
+        if (this.config.freeOnly && !info.free) continue
         return { model: info.model, contextWindow: info.contextWindow, maxOutputTokens: info.maxOutputTokens }
       }
       if (ref === FREE_POOL) {
@@ -972,6 +1017,11 @@ export class ModelRouter implements ModelClient {
         if (provider.type === 'openrouter') {
           models = await fetchOpenRouterCatalog({ fetch: fetchImpl, baseUrl: provider.baseUrl, signal })
           if (!models.length) throw new Error('The model catalog was empty.')
+          // An empty pool with no explanation would look like a bug: say what the free check saw.
+          const named = models.filter((model) => model.model.endsWith(':free')).length
+          if (named && !models.some((model) => model.free)) {
+            this.log('warn', `${id} lists ${named} ${named === 1 ? 'model' : 'models'} with a :free id, but none passed the free check, so the free pool is empty. Run scripts/free-models.mjs to see each price.`)
+          }
         } else {
           const apiKey = provider.needsKey ? await this.keys.get(id, originOf(provider.baseUrl)) : undefined
           if (provider.needsKey && !apiKey) return
@@ -1021,8 +1071,13 @@ export class ModelRouter implements ModelClient {
     if (!parsed || !provider) return { ok: false, key, toolCall: false, message: `"${ref}" does not name a configured provider's model.` }
     const adapter = this.adapters.get(provider.type)
     if (!adapter) return { ok: false, key, toolCall: false, message: `No adapter speaks ${provider.type}.` }
+    const early = this.paidRefusal(provider, parsed.model)
+    if (early) return { ok: false, key, toolCall: false, message: early }
     const apiKey = provider.needsKey ? await this.keys.get(provider.id, originOf(provider.baseUrl)) : undefined
     if (provider.needsKey && !apiKey) return { ok: false, key, toolCall: false, message: `No key is set for ${provider.id}.` }
+    // The registry may have changed while the key was read.
+    const late = this.paidRefusal(provider, parsed.model)
+    if (late) return { ok: false, key, toolCall: false, message: late }
     const info = this.registry.get(parsed.provider, parsed.model)
     const payload: ModelRequest = {
       system: [{ text: 'You are checking a connection. Call the tool you are given exactly once, and say nothing else.' }],
@@ -1062,12 +1117,14 @@ export class ModelRouter implements ModelClient {
     const call = result.reply.message.content.find((block): block is ToolUseBlock => block.type === 'tool-use')
     const toolCall = Boolean(call && !call.invalid && call.name === 'echo' && typeof call.input.text === 'string')
     this.health.success(key, { ttftMs: result.ttftMs })
+    this.checkBill(key, result.reply.usage)
     if (info.free) this.pool.recordCanary(key, toolCall ? 'passed' : 'failed', toolCall ? undefined : 'did not make a valid tool call')
     return {
       ok: true,
       key,
       model: result.reply.message.origin?.model ?? info.model,
       ...(result.ttftMs !== undefined ? { ttftMs: result.ttftMs } : {}),
+      ...(result.reply.usage.cost !== undefined ? { cost: result.reply.usage.cost } : {}),
       toolCall,
       message: toolCall ? 'The model answered and called a tool correctly.' : 'The model answered but did not call the tool correctly.',
     }
@@ -1101,6 +1158,7 @@ export class ModelRouter implements ModelClient {
   status(): RouterStatus {
     const report = this.health.report()
     return {
+      freeOnly: this.config.freeOnly,
       models: report.models,
       blocks: report.scopes,
       freeTiers: [...this.tiers.values()].map((tier) => tier.status()),

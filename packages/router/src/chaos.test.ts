@@ -19,6 +19,7 @@ import { catalogEntry, faults, TestWorld, type Script } from './testing'
  *  5. No more than 20 free requests go to OpenRouter in any minute.
  *  6. A request pauses only when its budget is spent or nothing can run.
  *  7. Every request ends within bounded simulated time.
+ *  8. With only free models enabled, no model that is not free is ever called, however the free ones fail.
  *
  * Seeded: ENCODE_PROPERTY_SEED replays a failure, ENCODE_PROPERTY_RUNS runs more cases.
  */
@@ -53,6 +54,8 @@ interface Step {
 interface Scenario {
   models: string[]
   paid: boolean
+  /** Only free models enabled: the paid model on the role's list must never be called. */
+  freeOnly: boolean
   behaviors: Step[][]
   requests: Array<{ gapMs: number; tools: boolean; sticky?: string; abortAtMs?: number }>
 }
@@ -72,6 +75,7 @@ const scenario: Gen<Scenario> = (random, size) => {
   return {
     models,
     paid: random() < 0.4,
+    freeOnly: random() < 0.5,
     behaviors: models.map(() => gen.array(step, 1, 6)(random, size)),
     requests: gen.array(
       gen.map(gen.tuple(gen.int(0, 120_000), gen.int(0, 9), gen.int(0, 2), gen.int(1, 100_000)), ([gapMs, toolRoll, session, abortRoll]) => ({
@@ -196,7 +200,7 @@ function lastAttemptText(events: Array<{ event: ClientEvent }>): { text: string;
 }
 
 /** What the runs exercised, so a generator change cannot quietly make the suite vacuous. */
-const seen = { faults: new Set<string>(), outcomes: new Set<string>(), events: new Set<string>() }
+const seen = { faults: new Set<string>(), outcomes: new Set<string>(), events: new Set<string>(), guardedRuns: 0 }
 
 async function runScenario(input: Scenario): Promise<void> {
   const played: Array<{ model: string; step: Step }> = []
@@ -215,7 +219,7 @@ async function runScenario(input: Scenario): Promise<void> {
   /** Calls the user stopped mid-way: not failures, so they set no cooldown. */
   const stopped = new Set<number>()
   const settings = input.paid
-    ? { providers: { openrouter: { type: 'openrouter' }, anthropic: { type: 'anthropic' } }, roles: { main: ['@free', 'anthropic:claude-test'] } }
+    ? { providers: { openrouter: { type: 'openrouter' }, anthropic: { type: 'anthropic' } }, freeOnly: input.freeOnly, roles: { main: ['@free', 'anthropic:claude-test'] } }
     : { providers: { openrouter: { type: 'openrouter' } } }
   const world = new TestWorld({
     settings,
@@ -321,6 +325,12 @@ async function runScenario(input: Scenario): Promise<void> {
   // 5. At most 20 free requests a minute.
   const free = calls.filter((call) => call.model.endsWith(':free')).map((call) => call.at)
   for (const at of free) assert.ok(free.filter((other) => other >= at && other < at + 60_000).length <= 20, 'more than 20 free requests in a minute')
+
+  // 8. Free-only mode never reaches the paid model on the list.
+  if (input.paid && input.freeOnly) {
+    seen.guardedRuns++
+    assert.deepEqual(calls.filter((call) => !call.model.endsWith(':free')).map((call) => call.model), [], 'a model that is not free was called in free-only mode')
+  }
 }
 
 describe('ModelRouter chaos', () => {
@@ -331,6 +341,7 @@ describe('ModelRouter chaos', () => {
     assert.deepEqual(faultsPlayed.filter((fault) => !seen.faults.has(fault)), [], 'every fault was played')
     for (const outcome of ['done', 'paused:unavailable', 'aborted']) assert.ok(seen.outcomes.has(outcome), `no request ended ${outcome}`)
     for (const event of ['attempt', 'text', 'tool-call', 'discard', 'switch', 'wait']) assert.ok(seen.events.has(event), `no ${event} event was seen`)
+    assert.ok(seen.guardedRuns > 0, 'no run had free-only mode on with a paid model listed')
     if (process.env.ENCODE_CHAOS_REPORT) console.log(JSON.stringify({ outcomes: [...seen.outcomes], events: [...seen.events] }))
   })
 })

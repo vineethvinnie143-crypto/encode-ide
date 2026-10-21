@@ -28,7 +28,7 @@ export interface ModelInfo {
   editFormat: EditFormat
   /** USD per million tokens. */
   price: { input: number; output: number }
-  /** Free to call, and on OpenRouter guaranteed so: a `:free` id with zero prices. */
+  /** Free to call. On OpenRouter that is a `:free` id whose every price is zero (see freeVerdict); on a free provider, every model. */
   free: boolean
   /** When the provider published it, epoch ms. */
   created?: number
@@ -50,6 +50,8 @@ export interface LearnedFacts {
   contextWindow?: number
   tools?: false
   images?: false
+  /** The provider billed a request to this model although it was listed as free. */
+  free?: false
 }
 
 export interface RegistrySnapshot {
@@ -126,6 +128,7 @@ function applyLearned(info: ModelInfo, learned: LearnedFacts | undefined): Model
       parallelTools: learned.tools === false ? false : info.capabilities.parallelTools,
       images: learned.images === false ? false : info.capabilities.images,
     },
+    free: learned.free === false ? false : info.free,
   }
 }
 
@@ -140,7 +143,11 @@ function validEntry(entry: unknown): entry is CatalogEntry {
     Boolean(value.capabilities) &&
     typeof value.capabilities.tools === 'boolean' &&
     Boolean(value.price) &&
-    typeof value.free === 'boolean'
+    Number.isFinite(value.price.input) &&
+    Number.isFinite(value.price.output) &&
+    typeof value.free === 'boolean' &&
+    // A snapshot comes from disk: it cannot vouch for a model that has a price.
+    (!value.free || (value.price.input === 0 && value.price.output === 0))
   )
 }
 
@@ -192,6 +199,7 @@ export class ModelRegistry {
     }
     if (facts.tools === false) current.tools = false
     if (facts.images === false) current.images = false
+    if (facts.free === false) current.free = false
     this.learned.set(key, current)
   }
 

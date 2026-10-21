@@ -88,6 +88,18 @@ describe('parseRouterConfig', () => {
     assert.deepEqual(problems.map((problem) => problem.path), ['limits.maxFailovers', 'limits.idleMs'])
   })
 
+  it('keeps free-only mode off unless asked, and on when the setting cannot be read', () => {
+    assert.equal(defaultRouterConfig().freeOnly, false)
+    assert.deepEqual(parseRouterConfig({ freeOnly: true }), { config: { ...defaultRouterConfig(), freeOnly: true }, problems: [] })
+    assert.equal(parseRouterConfig({ freeOnly: false }).config.freeOnly, false)
+    // A switch that guards against spending money must not fall back to off because of a typo.
+    for (const unreadable of ['true', 'false', 'yes', 1, 0, null, [], {}]) {
+      const { config, problems } = parseRouterConfig({ freeOnly: unreadable })
+      assert.equal(config.freeOnly, true, `freeOnly: ${JSON.stringify(unreadable)}`)
+      assert.deepEqual(problems.map((problem) => problem.path), ['freeOnly'])
+    }
+  })
+
   it('treats prototype keys as nothing at all', () => {
     const input = JSON.parse('{"providers":{"__proto__":{"type":"openrouter"},"constructor":{"type":"openrouter"}},"roles":{"__proto__":["@free"]}}')
     const { config } = parseRouterConfig(input)
@@ -101,7 +113,7 @@ describe('parseRouterConfig', () => {
     if (size <= 1 || random() < 0.35) return leaf(random, size)
     const child: Gen<unknown> = (r, s) => json(r, Math.floor(s / 2))
     if (random() < 0.4) return gen.array(child, 0, 4)(random, size)
-    const keys = gen.oneOf('providers', 'roles', 'tools', 'agents', 'models', 'freePool', 'limits', 'type', 'baseUrl', 'main', 'openrouter', 'role', 'models', '__proto__', 'constructor')
+    const keys = gen.oneOf('providers', 'roles', 'tools', 'agents', 'models', 'freePool', 'freeOnly', 'limits', 'type', 'baseUrl', 'main', 'openrouter', 'role', 'models', '__proto__', 'constructor')
     return Object.fromEntries(gen.array(gen.tuple(keys, child), 0, 5)(random, size))
   }
 
@@ -109,6 +121,9 @@ describe('parseRouterConfig', () => {
     await check(json, (input) => {
       const { config, problems } = parseRouterConfig(input)
       assert.ok(config.limits.maxAttempts >= 1)
+      assert.equal(typeof config.freeOnly, 'boolean')
+      const asked = (input as { freeOnly?: unknown } | null)?.freeOnly
+      if (asked !== undefined && typeof asked !== 'boolean') assert.equal(config.freeOnly, true, 'a setting that cannot be read turns free-only mode on')
       for (const problem of problems) assert.equal(typeof problem.message, 'string')
       for (const refs of Object.values(config.roles)) for (const ref of refs) assert.ok(ref === FREE_POOL || parseModelRef(ref))
     })

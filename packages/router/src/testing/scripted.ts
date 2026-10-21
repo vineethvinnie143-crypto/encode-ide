@@ -98,17 +98,17 @@ function textSteps(text: string, gapMs: number): ScriptStep[] {
 
 export const faults = {
   /** A clean reply. */
-  reply(text: string, options: { firstTokenMs?: number; gapMs?: number; model?: string } = {}): Script {
+  reply(text: string, options: { firstTokenMs?: number; gapMs?: number; model?: string; cost?: number } = {}): Script {
     return [
       ...(options.model ? [event({ type: 'model', model: options.model })] : []),
       ...(options.firstTokenMs ? [{ wait: options.firstTokenMs }] : []),
       ...textSteps(text, options.gapMs ?? 0),
-      event({ type: 'usage', usage: { inputTokens: 100, outputTokens: Math.max(1, Math.ceil(text.length / 4)) } }),
+      event({ type: 'usage', usage: { inputTokens: 100, outputTokens: Math.max(1, Math.ceil(text.length / 4)), ...(options.cost !== undefined ? { cost: options.cost } : {}) } }),
       event({ type: 'finish', reason: 'stop' }),
     ]
   },
   /** A clean tool call, its JSON sent in pieces. `args` may be raw text to send malformed JSON. */
-  toolCall(name: string, args: Record<string, unknown> | string, options: { id?: string; firstTokenMs?: number } = {}): Script {
+  toolCall(name: string, args: Record<string, unknown> | string, options: { id?: string; firstTokenMs?: number; cost?: number } = {}): Script {
     const json = typeof args === 'string' ? args : JSON.stringify(args)
     const pieces = json.match(/[\s\S]{1,10}/g) ?? ['']
     return [
@@ -116,6 +116,7 @@ export const faults = {
       ...pieces.map((piece, index) =>
         event(index === 0 ? { type: 'tool-call', index: 0, id: options.id ?? 'call_1', name, arguments: piece } : { type: 'tool-call', index: 0, arguments: piece }),
       ),
+      ...(options.cost !== undefined ? [event({ type: 'usage', usage: { inputTokens: 100, outputTokens: 10, cost: options.cost } })] : []),
       event({ type: 'finish', reason: 'tool_use' }),
     ]
   },

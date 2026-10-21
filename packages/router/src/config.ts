@@ -9,6 +9,7 @@ import { FREE_POOL, parseModelRef, PROVIDER_ID } from './refs'
  *
  *   {
  *     "providers": { "openrouter": { "type": "openrouter" }, "anthropic": { "type": "anthropic" } },
+ *     "freeOnly":  false,
  *     "roles":     { "main": ["openrouter:qwen/qwen3-coder", "@free"], "utility": ["@free"] },
  *     "tools":     { "WebFetch": { "role": "utility" } },
  *     "agents":    { "security-review": { "role": "reviewer" } }
@@ -103,6 +104,13 @@ export interface RouterConfig {
   tools: Record<string, Assignment>
   agents: Record<string, Assignment>
   models: Record<string, ModelOverride>
+  /**
+   * Only free models may take a call. A model that is not free is never sent
+   * a request, whatever a role lists and however far failover goes, so nothing
+   * can be billed. What counts as free is the registry's call: on OpenRouter a
+   * `:free` id with every price at zero, on a provider marked `free` all models.
+   */
+  freeOnly: boolean
   freePool: FreePoolConfig
   limits: RouterLimits
 }
@@ -232,6 +240,18 @@ function bool(value: unknown, fallback: boolean, path: string, problems: ConfigP
   if (typeof value === 'boolean') return value
   problems.push({ path, message: 'must be true or false' })
   return fallback
+}
+
+/**
+ * The free-only switch. It guards against spending money, so a value that
+ * cannot be read turns it on: the worst that happens is a model is refused,
+ * with a message, instead of a charge nobody expected.
+ */
+function parseFreeOnly(value: unknown, problems: ConfigProblem[]): boolean {
+  if (value === undefined) return false
+  if (typeof value === 'boolean') return value
+  problems.push({ path: 'freeOnly', message: 'must be true or false; free-only mode stays on until it is' })
+  return true
 }
 
 function stringList(value: unknown, path: string, problems: ConfigProblem[]): string[] {
@@ -489,6 +509,7 @@ export function parseRouterConfig(input: unknown): { config: RouterConfig; probl
     tools: parseAssignments(raw.tools, 'tools', providers, problems),
     agents: parseAssignments(raw.agents, 'agents', providers, problems),
     models: parseModels(raw.models, providers, problems),
+    freeOnly: parseFreeOnly(raw.freeOnly, problems),
     freePool: parseFreePool(raw.freePool, providers, problems),
     limits: parseLimits(raw.limits, problems),
   }

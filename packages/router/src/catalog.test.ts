@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ANTHROPIC_VERSION } from '@encode/providers'
 import { fetchModelList, modelListUrl, parseModelList } from './model-list'
-import { fetchFreeQuota, fetchOpenRouterCatalog, nextUtcMidnight, parseKeyInfo, parseOpenRouterCatalog, type Fetch } from './openrouter'
+import { fetchFreeQuota, fetchOpenRouterCatalog, freeVerdict, nextUtcMidnight, parseKeyInfo, parseOpenRouterCatalog, type Fetch } from './openrouter'
 
 const BASE = 'https://openrouter.ai/api/v1'
 const NOW = Date.UTC(2026, 9, 21, 12, 0, 0)
@@ -87,6 +87,62 @@ describe('OpenRouter catalog', () => {
         ['odd/model:free', { input: 1, output: 0 }, false, false],
       ],
     )
+  })
+
+  it('calls a model free only when its id says so and every price it quotes is zero', () => {
+    const zero = { prompt: '0', completion: '0' }
+    const models = parseOpenRouterCatalog({
+      data: [
+        item('every/field:free', { pricing: { ...zero, request: '0', image: '0', audio: '0', web_search: '0', internal_reasoning: '0', input_cache_read: '0', input_cache_write: '0', discount: 0.5 } }),
+        item('plain/numbers:free', { pricing: { prompt: 0, completion: 0, request: 0 } }),
+        item('fee/per-request:free', { pricing: { ...zero, request: '0.01' } }),
+        item('fee/per-image:free', { pricing: { ...zero, image: '0.004' } }),
+        item('fee/per-search:free', { pricing: { ...zero, web_search: '0.01' } }),
+        item('fee/reasoning:free', { pricing: { ...zero, internal_reasoning: '0.000002' } }),
+        item('fee/cache:free', { pricing: { ...zero, input_cache_read: '0.0000001' } }),
+        item('fee/unheard-of:free', { pricing: { ...zero, per_gpu_hour: '0.5' } }),
+        item('fee/words:free', { pricing: { ...zero, image: 'free' } }),
+        item('fee/null:free', { pricing: { ...zero, image: null } }),
+        item('fee/object:free', { pricing: { ...zero, image: { usd: 0 } } }),
+        item('fee/negative:free', { pricing: { ...zero, request: '-1' } }),
+        item('fee/fraction-of-a-cent:free', { pricing: { prompt: '0.0000000000001', completion: '0' } }),
+        item('zero/without-the-suffix', { pricing: zero }),
+      ],
+    })
+    assert.deepEqual(
+      models.map((model) => [model.model, model.free]),
+      [
+        ['every/field:free', true],
+        ['plain/numbers:free', true],
+        ['fee/per-request:free', false],
+        ['fee/per-image:free', false],
+        ['fee/per-search:free', false],
+        ['fee/reasoning:free', false],
+        ['fee/cache:free', false],
+        ['fee/unheard-of:free', false],
+        ['fee/words:free', false],
+        ['fee/null:free', false],
+        ['fee/object:free', false],
+        ['fee/negative:free', false],
+        ['fee/fraction-of-a-cent:free', false],
+        ['zero/without-the-suffix', false],
+      ],
+    )
+    // The registry rounds prices to a millionth of a dollar per million tokens; the free check does not.
+    assert.equal(models.find((model) => model.model === 'fee/fraction-of-a-cent:free')?.price.input, 0)
+  })
+
+  it('says why a model is not free', () => {
+    const zero = { prompt: '0', completion: '0' }
+    assert.deepEqual(freeVerdict('a/b:free', zero), { free: true, reasons: [] })
+    assert.deepEqual(freeVerdict('a/b', zero).reasons, ['its id does not end in :free'])
+    assert.deepEqual(freeVerdict('a/b:free', { prompt: '0.000001', completion: '0', request: 'x' }).reasons, ['its prompt price is "0.000001", not zero', 'its request price is "x", not zero'])
+    assert.deepEqual(freeVerdict('a/b:free', {}).reasons, ['no prompt price is listed', 'no completion price is listed'])
+    assert.deepEqual(freeVerdict('a/b:free', { ...zero, image: null, audio: [1], web_search: true }).reasons, ['its image price is null, not zero', 'its audio price is object, not zero', 'its web_search price is boolean, not zero'])
+    // A response is untrusted: a long value is cut short, and so is a long list.
+    assert.equal(freeVerdict('a/b:free', { ...zero, image: 'x'.repeat(500) }).reasons[0], `its image price is "${'x'.repeat(24)}…", not zero`)
+    const many = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`fee${index}`, '1']))
+    assert.equal(freeVerdict('a/b:free', { ...zero, ...many }).reasons.length, 8)
   })
 
   it('leaves out what it cannot use: image-only output, no window or price, bad ids and repeats', () => {

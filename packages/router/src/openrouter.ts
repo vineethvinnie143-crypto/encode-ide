@@ -33,6 +33,47 @@ function perMillion(value: unknown): number | undefined {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e12) / 1e6 : undefined
 }
 
+/** Fields of a `pricing` object that are not prices: a discount is a fraction off the price, not something charged. */
+const NOT_A_PRICE = new Set(['discount'])
+
+/** Zero as OpenRouter writes it, a string or a number. A price that cannot be read is not zero. */
+function isZeroPrice(value: unknown): boolean {
+  const n = typeof value === 'string' && value.trim() ? Number(value) : typeof value === 'number' ? value : Number.NaN
+  return n === 0
+}
+
+/** A pricing value for a message: short, and never more than the value itself says. */
+function shown(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value.length > 24 ? `${value.slice(0, 24)}…` : value)
+  if (typeof value === 'number') return String(value)
+  return value === null ? 'null' : typeof value
+}
+
+export interface FreeVerdict {
+  free: boolean
+  /** Why the model is not free; empty when it is. */
+  reasons: string[]
+}
+
+/**
+ * Whether OpenRouter promises that calling the model costs nothing. Only a
+ * `:free` id carries that promise (a model priced at zero today can be
+ * priced tomorrow), and every price OpenRouter quotes for it must be zero: not
+ * only the prompt and completion tokens but also a price per request, per
+ * image, per web search, for reasoning and for the cache. A price that is
+ * missing, unreadable or one this code has never heard of counts against the
+ * model, so a new kind of charge cannot slip through as free.
+ */
+export function freeVerdict(id: string, pricing: Record<string, unknown>): FreeVerdict {
+  const reasons: string[] = []
+  if (!id.endsWith(':free')) reasons.push('its id does not end in :free')
+  for (const name of ['prompt', 'completion']) if (pricing[name] === undefined) reasons.push(`no ${name} price is listed`)
+  for (const [name, value] of Object.entries(pricing)) {
+    if (!NOT_A_PRICE.has(name) && !isZeroPrice(value)) reasons.push(`its ${name} price is ${shown(value)}, not zero`)
+  }
+  return { free: reasons.length === 0, reasons: reasons.slice(0, 8) }
+}
+
 function positiveInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
@@ -99,8 +140,7 @@ export function parseOpenRouterCatalog(json: unknown): CatalogEntry[] {
       },
       editFormat: inferEditFormat(family, id),
       price: { input, output },
-      // Only a :free id with zero prices is guaranteed free; a zero price alone can change without notice.
-      free: id.endsWith(':free') && input === 0 && output === 0,
+      free: freeVerdict(id, pricing).free,
       created: created ? created * 1000 : undefined,
       expiresAt: Number.isFinite(expires) ? expires : undefined,
       roles: Array.isArray(m.roles) ? strings(m.roles).slice(0, 20) : undefined,

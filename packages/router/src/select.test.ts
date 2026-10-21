@@ -109,6 +109,48 @@ describe('selectCandidates', () => {
   })
 })
 
+describe('selectCandidates with only free models enabled', () => {
+  const providers = {
+    openrouter: { type: 'openrouter' },
+    anthropic: { type: 'anthropic' },
+    local: { type: 'openai-compatible', baseUrl: 'http://127.0.0.1:1234/v1', free: true },
+  }
+  const main = ['anthropic:claude-sonnet-5', 'openrouter:paid/model', 'openrouter:unlisted/model', 'openrouter:free/model:free', 'local:qwen']
+
+  it('sets every model that is not free aside before anything else, and leaves the free ones alone', () => {
+    const { ctx, registry, clock } = context({ freeOnly: true, providers, roles: { main } })
+    registry.setCatalog('openrouter', [catalogEntry('paid/model'), catalogEntry('free/model:free')], clock.now())
+    // The paid model was also tried already, and Anthropic has neither a key nor an adapter: it is still "not free" first.
+    const { candidates, skipped } = selectCandidates(ctx, { role: 'main', refs: main, requirements, exclude: new Set(['openrouter:paid/model']) })
+    assert.deepEqual(candidates.map((candidate) => candidate.info.key), ['openrouter:free/model:free', 'local:qwen'])
+    assert.deepEqual(
+      skipped.map((skip) => [skip.key, skip.reason]),
+      [
+        ['anthropic:claude-sonnet-5', 'not-free'],
+        ['openrouter:paid/model', 'not-free'],
+        ['openrouter:unlisted/model', 'not-free'],
+      ],
+    )
+    assert.match(skipped[1].message, /paid\/model is not a free model, and only free models are enabled/)
+    assert.match(skipped[2].message, /not in the provider's list of free models/)
+  })
+
+  it('changes nothing for the free pool, and nothing at all while the switch is off', () => {
+    const on = context({ freeOnly: true, providers })
+    on.registry.setCatalog('openrouter', [catalogEntry('paid/model'), catalogEntry('a:free'), catalogEntry('b:free')], on.clock.now())
+    const pooled = selectCandidates(on.ctx, { role: 'main', refs: ['@free'], requirements })
+    assert.deepEqual(pooled.candidates.map((candidate) => candidate.info.model).sort(), ['a:free', 'b:free'])
+    assert.deepEqual(pooled.candidates.map((candidate) => candidate.serverFallbacks.length), [1, 0], 'the first free model has the second as its server-side fallback')
+    assert.deepEqual(pooled.skipped, [])
+
+    const off = context({ providers, roles: { main } })
+    off.registry.setCatalog('openrouter', [catalogEntry('paid/model'), catalogEntry('free/model:free')], off.clock.now())
+    const { candidates, skipped } = selectCandidates(off.ctx, { role: 'main', refs: main, requirements })
+    assert.deepEqual(candidates.map((candidate) => candidate.info.key), ['openrouter:paid/model', 'openrouter:unlisted/model', 'openrouter:free/model:free', 'local:qwen'])
+    assert.deepEqual(skipped.map((skip) => skip.reason), ['no-adapter'])
+  })
+})
+
 describe('FreePool', () => {
   it('ranks by role fit first, then eval score, health and the canary', () => {
     const { registry, pool, health, clock, config } = context({})

@@ -21,7 +21,7 @@ const router = createRouter({
   config,
   adapters: [createOpenRouterAdapter(), createOpenAICompatibleAdapter(), createAnthropicAdapter()],
   keys, // a KeySource: OS keychain, environment, gateway token
-  onAlert: (alert) => ui.notify(alert), // key refused, sign in, payment, quota, catalog
+  onAlert: (alert) => ui.notify(alert), // key refused, sign in, payment, quota, catalog, billed
   onLog: (entry) => log[entry.level](entry.message),
   onTrace: (trace) => telemetry.request(trace), // once per request, however it ends
 })
@@ -53,9 +53,9 @@ Other methods, for the host and the Settings page:
 - `budget(role, query)`: the window and output limit of the model a call would use now, for compacting before sending.
 - `preview(role, requirements, query)`: the models a call would try, in order, and why each other one is left out.
 - `refresh({ providers?, force? })`: sync catalogs and the free quota. Single-flight per provider; forced refreshes at most once a minute.
-- `checkModel('provider:model')`: a tiny tool-call test, for the Test button; feeds health and the canary.
+- `checkModel('provider:model')`: a tiny tool-call test, for the Test button; feeds health and the canary. Reports what the provider billed for it (`cost`).
 - `runCanaries({ limit? })`: canary the free models nothing has vouched for lately. Runs only while OpenRouter reports at least 100 free requests left today, so on a 50-a-day account the pool learns from real calls instead.
-- `status()`: model health, provider blocks, free-tier counts and catalog state, for a status page.
+- `status()`: whether free-only mode is on, model health, provider blocks, free-tier counts and catalog state, for a status page.
 - `snapshot()` / `restore()`: catalogs, learned facts, health, canaries, free-tier counts. Persist it, version 1, JSON.
 - `configure(config)`: apply new settings live. Health, learned facts and counts carry over.
 - `keysChanged(provider)`: **the host must call this when the user changes a key or tops up credit.** It lifts the blocks a refused key or a payment failure set.
@@ -77,6 +77,7 @@ Other methods, for the host and the Settings page:
     "reviewer": ["openrouter:deepseek/deepseek-r1"],
     "utility": ["@free"]
   },
+  "freeOnly": false, // true: never send a request to a model that is not free (see below)
   "tools": { "WebFetch": { "role": "utility" } },
   "agents": { "security-review": { "models": ["anthropic:<model>"] } },
   "models": { "local:qwen3": { "contextWindow": 32000, "tools": true } },
@@ -91,6 +92,7 @@ Other methods, for the host and the Settings page:
 - **Keys never appear in settings.** They come from the `KeySource`.
 - **Overrides** (`models`) beat what failures taught (a window only ever shrinks), which beats the provider's catalog, which beats the shared model table. Unknown local models get a modest 32k window until an overflow says otherwise.
 - **Limits** are clamped; the defaults are in `DEFAULT_LIMITS`.
+- **`freeOnly`** is off unless set, and on whenever its value cannot be read (`"freeOnly": "true"` turns it on, with a problem saying so): a switch that guards against spending money must not fall back to off because of a typo.
 
 ## Failover policy
 
@@ -123,13 +125,37 @@ Every failure is classified once, by `@encode/providers`' `TransportError` (kind
 
 `@free` is the free models of the pool's providers (the user's OpenRouter account first, then providers marked `free`, such as eNCode's gateway), read from their catalogs at run time. Nothing is hard-coded, because the set changes every few weeks.
 
-- **Membership.** A model must be free (on OpenRouter: a `:free` id with zero prices), have a window of at least `minContextWindow`, not have retired, and not match `exclude`.
+- **Membership.** A model must be free (see [Only free models](#only-free-models)), have a window of at least `minContextWindow`, not have retired, and not match `exclude`.
 - **Ranking.** One weighted score: role fit dominates (gateway virtual models name their roles), then the eval score for the role (else a prior from window and age), health in this session, and whether it passed the canary. The session's current model leads, which keeps prompt caches warm; it changes only on failure.
 - **Canaries.** A model that cannot make a valid tool call fails its canary and stays out for a week. Passing is re-checked after 30 days. Real traffic feeds the canary too: a pooled model that returns a valid tool call has passed.
 - **Pacing.** A sliding 20-a-minute window; a wait up to `maxPacingWaitMs` (15 s) beats moving to a paid tier.
 - **Quota.** The daily count comes from OpenRouter's `GET /key` (`free_model_daily_requests`) plus eNCode's own tally, re-read every 15 minutes because other apps may share the key. A spent day closes the tier until midnight UTC.
 - **Server-side fallbacks.** OpenRouter's `models` parameter carries up to `serverFallbacks` further free models, tried before the first byte. Health and the canary are credited to the model that answered; a fallback never reaches a paid model.
 - **Data policy.** `freePool.dataCollection: "deny"` keeps prompts away from endpoints that train on them.
+
+## Only free models
+
+`"freeOnly": true` makes the router refuse every model that is not free. A role may list paid models, failover may run out of free ones, a free tier may close: none of it ever sends a request to a model that costs money. It pauses instead, with a message that says what to change.
+
+**What counts as free.** On OpenRouter, only an id that ends in `:free` carries the promise that calling it costs nothing, and every price OpenRouter lists for it must be zero: prompt and completion tokens, but also a price per request, per image, per web search, for reasoning and for the cache. A price that is missing, unreadable or not one this code has heard of counts against the model, so a new kind of charge cannot pass as free. A model priced at zero without the `:free` id is left out: a zero price can change without notice. On a provider marked `free` (eNCode's gateway, a server on this machine) every model is free. `freeVerdict(id, pricing)` says why a model is not.
+
+**Layers.** Selection sets a model that is not free aside before it looks at anything else (`not-free`, with a message). The router looks again right before it sends, because the catalog can change while a key is being read. `checkModel()` refuses too. OpenRouter's server-side fallbacks are only ever free models. A snapshot read back from disk cannot vouch for a model that has a price.
+
+**A bill for a model listed as free.** OpenRouter reports what each request cost. If a model the registry believes free is billed, the reply is kept, the model counts as paid from then on (learned, so it survives restarts; `registry.unlearn(key)` forgets it), free-only mode never sends it another request, and a `billed` alert tells the user. A listing is a promise; the bill is the evidence.
+
+**When nothing is free.** A request pauses as `no-model`: "Only free models are enabled, and none of the main role's models is free. Add "@free" to the role in Settings, or turn off free-only mode." If the free model list has not loaded yet, the pause says so instead.
+
+The strongest guard is not in this code: on openrouter.ai, give the key a credit limit of $0, and no call can ever be billed whatever any software does.
+
+**Checking it yourself.** `scripts/free-models.mjs` reads OpenRouter's public model list (no key needed), prints the models `@free` would try first with every price as OpenRouter wrote it, lists what it left out and why, and exits 1 if anything contradicts "every pick is free".
+
+```
+node scripts/free-models.mjs                       # the picks and their prices
+node scripts/free-models.mjs --file models.json    # the same from a saved copy of /api/v1/models, offline
+OPENROUTER_API_KEY=sk-or-... node scripts/free-models.mjs --test 3
+```
+
+With `--test`, it also makes real calls to the top picks through the router in free-only mode, and compares the key's credit usage and free-request count from before and after: the credits must be unchanged and the free count must have moved. The key is read from the environment only, goes to openrouter.ai and nowhere else, and is never printed. Behind a proxy (`HTTPS_PROXY`), run it with `NODE_USE_ENV_PROXY=1`: Node's `fetch` ignores the proxy otherwise.
 
 ## Keys (BYOK)
 
@@ -161,9 +187,9 @@ const world = new TestWorld({
 const { outcome, events, text } = await world.complete() // runs on a fake clock
 ```
 
-`FakeClock` jumps to the next timer whenever everything waits, so a 15-minute cooldown takes milliseconds and a hang is an error. `faults` builds what real providers do: `cutStream`, `midStreamError`, `stallAfter`, `slowFirstToken`, `keepaliveOnly`, `rateLimited`, `freeMinuteCap`, `quotaExhausted`, `serverError`, `overloaded`, `networkError`, `auth`, `payment`, `contextOverflow`, `notFound`, `noTools`, `badToolJson`, `emptyReply`, `contentFilter`, `hangIgnoringAbort`, `servedBy`.
+`FakeClock` jumps to the next timer whenever everything waits, so a 15-minute cooldown takes milliseconds and a hang is an error. `faults` builds what real providers do (`reply` and `toolCall` take a `cost` to play a provider that bills): `cutStream`, `midStreamError`, `stallAfter`, `slowFirstToken`, `keepaliveOnly`, `rateLimited`, `freeMinuteCap`, `quotaExhausted`, `serverError`, `overloaded`, `networkError`, `auth`, `payment`, `contextOverflow`, `notFound`, `noTools`, `badToolJson`, `emptyReply`, `contentFilter`, `hangIgnoringAbort`, `servedBy`.
 
-`chaos.test.ts` throws random combinations of those at random settings and checks seven invariants: `complete()` rejects only on abort; the event stream is well formed; only a clean finish commits; no model is called while it cools down and no free model while the free tier is closed; at most 20 free requests reach OpenRouter in any minute; a request pauses only when its budget is spent or nothing can run; every request ends in bounded simulated time. `ENCODE_PROPERTY_SEED` replays a failure, `ENCODE_PROPERTY_RUNS` runs more cases.
+`chaos.test.ts` throws random combinations of those at random settings and checks eight invariants: `complete()` rejects only on abort; the event stream is well formed; only a clean finish commits; no model is called while it cools down and no free model while the free tier is closed; at most 20 free requests reach OpenRouter in any minute; a request pauses only when its budget is spent or nothing can run; every request ends in bounded simulated time; and with free-only mode on, no model that is not free is ever called, however the free ones fail. `ENCODE_PROPERTY_SEED` replays a failure, `ENCODE_PROPERTY_RUNS` runs more cases.
 
 ```
 node scripts/test.mjs packages/router
@@ -177,5 +203,5 @@ Router sources use only `fetch`, timers, `AbortController` and the provider cont
 ## Integration notes
 
 - **Core.** Depend on `ModelClient` from `@encode/providers`, never on this package. Pass a `sticky` session key, `requirements` calibrated against reported usage, and `validateToolCall`. Call `budget()` before sending to decide when to compact.
-- **App and UI.** Subscribe to `onAlert` (`key-refused`, `sign-in`, `payment`, `quota`, `catalog`) for banners, `onEvent`'s `wait` and `switch` for the in-chat notice, and `status()` / `preview()` for the model indicator and the Settings page. Call `keysChanged()` when keys or credit change, `refresh({ force: true })` for a Refresh button, `checkModel()` for Test, and persist `snapshot()` periodically.
+- **App and UI.** Subscribe to `onAlert` (`key-refused`, `sign-in`, `payment`, `quota`, `catalog`, `billed`) for banners, `onEvent`'s `wait` and `switch` for the in-chat notice, and `status()` / `preview()` for the model indicator and the Settings page. Call `keysChanged()` when keys or credit change, `refresh({ force: true })` for a Refresh button, `checkModel()` for Test, and persist `snapshot()` periodically.
 - **Gateway.** eNCode's gateway is one more OpenAI-compatible provider with `free: true` and role-tagged virtual models (`encode/free-main`, `encode/free-fast`); `/v1/models` entries may carry `roles`, `context_length` and `supports_tools`. The router understands its error codes: `token_expired` (refresh, retry once), `invalid_token` (block, sign-in alert), `rate_limited` and `concurrency_limited` (cooldown), `daily_quota_exhausted`, `free_tier_exhausted` and `service_disabled` (skip the gateway tier until `retry_after`), `upstream_unavailable` (a server failure: the virtual model cools down), `model_not_found`.
