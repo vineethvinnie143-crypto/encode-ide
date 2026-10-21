@@ -1,6 +1,6 @@
 # 0003. Own code above the platform
 
-- Status: Accepted
+- Status: Accepted; the lucide-react exception is ended by [0013](0013-own-icons-tokens-and-bundled-fonts.md)
 - Date: 2026-10-21
 
 ## Context
