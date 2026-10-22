@@ -1209,8 +1209,19 @@ try {
     const at = () => Math.round(performance.now())
     HTMLElement.prototype.focus = function (...args) {
       const stack = String(new Error().stack).split('\\n').slice(2, 6).map((line) => line.trim().replace(/\\(.*[\\/\\\\]/, '('))
-      window.__focusLog.push({ t: at(), call: this.tagName + '.' + this.className, stack: stack.join(' | ') })
-      return focus.apply(this, args)
+      const result = focus.apply(this, args)
+      const style = getComputedStyle(this)
+      window.__focusLog.push({
+        t: at(),
+        call: this.tagName + '.' + this.className,
+        took: document.activeElement === this,
+        pageFocus: document.hasFocus(),
+        visibility: style.visibility,
+        display: style.display,
+        inert: !!this.closest('[inert]'),
+        stack: stack.join(' | '),
+      })
+      return result
     }
     for (const type of ['focusin', 'focusout']) document.addEventListener(type, (event) => window.__focusLog.push({ t: at(), [type]: event.target?.tagName + '.' + event.target?.className }), true)
     window.addEventListener('blur', () => window.__focusLog.push({ t: at(), window: 'blur' }))
