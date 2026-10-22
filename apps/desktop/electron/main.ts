@@ -145,6 +145,7 @@ if (!gotLock) {
       },
       onJobs: (jobs) => send('jobs:changed', jobs),
       onAlert: (alert) => send('models:alert', alert),
+      onMcp: () => send('mcp:changed', undefined),
     })
     const configureAgent = () => {
       const current = settings.get()

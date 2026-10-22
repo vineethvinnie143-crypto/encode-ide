@@ -90,6 +90,31 @@ should have, and any message you could not understand.
 What is most useful to hear: any change the rewind did not put back, any file it overwrote that you did not tell it
 to, and any hook that ran when the folder was not trusted.
 
+## MCP servers
+
+MCP servers give the agent more tools (a database, a browser, an issue tracker). **Settings → MCP** lists the servers
+of the open folder: yours, from `%USERPROFILE%\.encode\mcp.json`, and the project's, from `.mcp.json` or
+`.encode\mcp.json`, in the format Claude Code reads. Adding or removing a server means editing one of those files for
+now; eNCode reads them again as soon as you save, and the screen has a copyable example.
+
+- Servers start when you open a chat in the folder, never from just looking at it. Yours start on their own. A
+  project's server does not start until you **trust the folder** (Settings → Permissions) and press **Approve and
+  start** on its card, which shows the exact command or address and the variables it sets or reads (never their
+  values). A banner above the message box says when a folder asks to run one.
+- Try it on a copy of a project: put a server in its `.mcp.json`, open it, and check that the banner appears and
+  nothing runs yet. Trust the folder, approve the server and ask the agent to use one of its tools. Each call asks with
+  the server and tool named; **Always allow** saves a rule for that one tool.
+- Change the entry in the file: the server stops at once and asks to be approved again. **Turn off** and **Turn on**
+  stop and start it, **Restart** starts it again, **Take back approval** makes it ask again. A server that cannot start
+  shows what it printed.
+- The first message in a folder waits up to five seconds for servers that are still starting. A slower server's tools
+  join from the next message.
+- Whatever a server returns is shown to the model as coming from outside, and a server can still be wrong or hostile:
+  it runs with your rights, so approve only what you would run yourself.
+
+What is most useful to hear: any server that started without your approval, any card that did not tell you what it
+would run, and a server that would not start with no reason shown.
+
 ## Computer use
 
 **Settings → Agent → Let the agent use this computer** is off until you turn it on. With it on, ask the agent to do

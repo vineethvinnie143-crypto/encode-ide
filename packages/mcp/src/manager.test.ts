@@ -7,7 +7,7 @@ import { TrustStore } from '@encode/config'
 import type { ExternalTool } from './adapter'
 import { parseMcpFile, type McpServerEntry, type ServerSetup } from './config'
 import { fakeServer, type FakeServer, type FakeServerOptions } from './fake-server'
-import { McpManager, McpUnavailableError, type McpPolicy, type ServerStatus } from './manager'
+import { decideServer, McpManager, McpUnavailableError, type McpPolicy, type ServerStatus } from './manager'
 
 const ROOT = '/work/project'
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -447,5 +447,39 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     assert.equal(status.state, 'failed')
     assert.match(status.detail!, /"definitely-not-installed-anywhere" was not found/)
     assert.equal(registered.size, 0)
+  })
+})
+
+describe('decideServer', () => {
+  const none: McpPolicy = { enableAll: false, enabled: [], disabled: [] }
+  const [project] = entries('project', { risky: { command: 'x' } })
+  const [mine] = entries('user', { mine: { command: 'y' } })
+
+  it('lets the person’s own servers run unless the settings turn them off', () => {
+    assert.deepEqual(decideServer(mine, none, { trusted: false }), { run: true })
+    const off = decideServer(mine, { ...none, disabled: ['mine'] }, { trusted: true })
+    assert.equal(off.run, false)
+    assert.equal(off.run ? '' : off.state, 'disabled')
+  })
+
+  it('waits for trust, then for the approval of exactly this setup, unless the settings enable it', () => {
+    const untrusted = decideServer(project, none, { trusted: false })
+    assert.equal(untrusted.run ? '' : untrusted.state, 'needs-approval')
+    assert.match(untrusted.run ? '' : untrusted.detail, /not trusted/)
+    const trusted = decideServer(project, none, { trusted: true })
+    assert.match(trusted.run ? '' : trusted.detail, /asks to run an MCP server/)
+    assert.deepEqual(decideServer(project, none, { trusted: true, mcpServers: { risky: project.digest } }), { run: true })
+    const stale = decideServer(project, none, { trusted: true, mcpServers: { risky: 'an-older-digest' } })
+    assert.match(stale.run ? '' : stale.detail, /changed since you approved/)
+    assert.deepEqual(decideServer(project, { ...none, enableAll: true }, { trusted: true }), { run: true })
+    assert.deepEqual(decideServer(project, { ...none, enabled: ['risky'] }, { trusted: true }), { run: true })
+    assert.equal(decideServer(project, { ...none, enableAll: true }, { trusted: false }).run, false, 'trust comes first')
+    assert.equal(decideServer(project, { ...none, enableAll: true, disabled: ['risky'] }, { trusted: true }).run, false, 'off wins over enabled')
+  })
+
+  it('does not read an approval off the prototype', () => {
+    const [odd] = entries('project', { constructor_: { command: 'x' } })
+    const decision = decideServer({ ...odd, name: 'constructor' }, none, { trusted: true, mcpServers: {} })
+    assert.equal(decision.run, false)
   })
 })

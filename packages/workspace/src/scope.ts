@@ -116,10 +116,13 @@ export class Workspaces {
     return hub
   }
 
-  /** The folder's MCP servers as the Settings screen shows them. The folder may be given as any path to it. */
-  async mcpReport(root: string): Promise<McpReport> {
+  /**
+   * The folder's MCP servers as the Settings screen shows them. The folder may be given as any path to it. With
+   * `start: false` no server is started for the sake of looking (the banner above the composer does that).
+   */
+  async mcpReport(root: string, options: { start?: boolean } = {}): Promise<McpReport> {
     const config = this.config(await realPathOf(root))
-    return this.hub(config).report(await config.refresh())
+    return this.hub(config).report(await config.refresh(), options)
   }
 
   /** Does what the MCP screen asked in a folder, and returns how its servers stand afterwards. */

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { ExternalToolSource } from '@encode/core'
-import { describeSetup, mcpConfigFiles, McpManager, type ExternalTool, type McpManagerOptions, type McpPolicy, type McpServerEntry, type ServerState, type ServerStatus, type ToolSink } from '@encode/mcp'
+import { decideServer, describeSetup, mcpConfigFiles, McpManager, type ExternalTool, type McpManagerOptions, type McpPolicy, type McpServerEntry, type ServerDecision, type ServerState, type ServerStatus, type ToolSink } from '@encode/mcp'
 import type { Tool } from '@encode/tools'
 import type { ConfigSnapshot, WorkspaceConfig } from './config'
 
@@ -290,24 +290,35 @@ export class McpHub implements ExternalToolSource {
 
   // ---- what the screen asks for ----------------------------------------------------------------------
 
-  /** The servers as they stand, with the first moments of a start given time to show. */
-  async report(snapshot: ConfigSnapshot): Promise<McpReport> {
-    this.sync(snapshot)
+  /**
+   * The servers as they stand, with the first moments of a start given time to show. With `start: false` nothing is
+   * started for the sake of looking: servers that are not running are reported by what the settings and the person's
+   * approvals say of them.
+   */
+  async report(snapshot: ConfigSnapshot, options: { start?: boolean } = {}): Promise<McpReport> {
+    this.arm()
+    const looking = options.start === false
+    if (!looking) this.sync(snapshot)
     // Who may run is worked out in a few milliseconds; how long a server takes is its own business.
-    await Promise.race([this.starting, pause(200)])
+    if (!looking) await Promise.race([this.starting, pause(200)])
+    const decisions = looking || !this.manager ? await this.decisions(snapshot) : undefined
     const { config, platform } = this.options
     const api = platform === 'win32' ? path.win32 : path.posix
     const [user, project, encode] = mcpConfigFiles(config.home, config.root, api).map((entry) => entry.file)
     const statuses = new Map((this.manager?.status() ?? []).map((status) => [status.name, status]))
     const servers: McpServerView[] = snapshot.mcp.servers.map((entry) => {
-      const status: ServerStatus | undefined = statuses.get(entry.name)
-      const detail = status?.detail ?? snapshot.broken ?? undefined
+      // A look that starts nothing does not bring the servers in line with the files, so it trusts a status only for the setup it is about.
+      const known = statuses.get(entry.name)
+      const status: ServerStatus | undefined = known && (!looking || known.digest === entry.digest) ? known : undefined
+      const decision = decisions?.get(entry.name)
+      const waiting = decision && !decision.run ? decision : undefined
+      const detail = status?.detail ?? waiting?.detail ?? snapshot.broken ?? undefined
       return {
         name: entry.name,
         scope: entry.scope,
         file: entry.file,
-        state: status?.state ?? 'stopped',
-        ...(detail ? { detail } : {}),
+        state: status?.state ?? waiting?.state ?? 'stopped',
+        ...(detail ? { detail } : decision?.run ? { detail: 'It starts with your next chat in this folder.' } : {}),
         digest: entry.digest,
         ...describeSetup(entry.setup),
         variables: entry.variables,
@@ -330,6 +341,13 @@ export class McpHub implements ExternalToolSource {
       problems: snapshot.mcp.problems,
       files: { user, project, encode },
     }
+  }
+
+  /** Where each server stands by the settings and the person's approvals alone, for a look that starts nothing. */
+  private async decisions(snapshot: ConfigSnapshot): Promise<Map<string, ServerDecision>> {
+    const record = await this.options.config.trustStore.get(this.options.config.root).catch(() => ({ trusted: false }))
+    const { entries, policy } = this.plan(snapshot)
+    return new Map(entries.map((entry) => [entry.name, decideServer(entry, policy, record)]))
   }
 
   /** Records the person's approval of a project's server in exactly the setup they saw, and starts it. */

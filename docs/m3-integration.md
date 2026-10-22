@@ -3,9 +3,9 @@
 Status: written with the M3 pull request (permission rules, trust, hooks, checkpoints, MCP
 client). **Steps 1 to 3 and 7 below are wired into the app** (ADR 0055): settings and trust, the
 shell rules, the approval card's "Always allow", the Permissions screen and the banner above the
-composer. **Steps 4 and 5 (hooks, checkpoints and rewind) are wired too** (ADR 0056). **Step 6 (MCP)
-is not wired yet**; it is the next pull request and hangs off the same per-folder snapshot
-(`@encode/workspace`).
+composer. **Steps 4 and 5 (hooks, checkpoints and rewind) are wired too** (ADR 0056), and so is
+**step 6 (MCP)** (ADR 0057): it hangs off the same per-folder snapshot (`@encode/workspace`).
+What is left of M3 is in the table at the end.
 
 ## What was checked already
 
@@ -51,12 +51,18 @@ wiring pull request does, by using them:
    request and returns its text, and applying holds the session's controller so nothing runs meanwhile. The
    rewind dialog (a button on every request) and the notice's Undo are the UI. `pruneStore` runs once per
    folder per program run, in the background.
-6. **MCP (next).** `loadMcpConfig({ home, root, read, platform })`, then `new McpManager({ root, home,
-   entries, policy, trust, tools: registry, env, onStatus })` and `start()`. Call `update(entries,
-   policy)` when `.mcp.json`, `.encode/mcp.json` or the settings change. `McpManager.callTool`
-   is what `ExternalTool.run` calls. The approval policy turns `{ type: 'external', server }`
-   into the rule query `{ type: 'mcp', server, tool: tool.mcp.ruleTool }`. Add
-   `instructions()` to the system prompt as outside text, never as instructions.
+6. **MCP (done).** The folder's snapshot carries `loadMcpConfig(...)`'s entries and the policy from the settings
+   (the three MCP files are watched files). `McpHub` (`@encode/workspace`) is one per folder: it owns the
+   `McpManager`, calls `update(entries, policy)` when the snapshot's text changes and registers the servers' tools
+   into its own sink. `Workspaces.scope` hands a session the hub as `SessionScope.external`, an
+   `ExternalToolSource` of the core: the session reads `list()` and `key()` when a turn begins, waits in `ready()`
+   for servers that are starting (five seconds at most), and shows `instructions()` as `<mcp_server_notes>` outside
+   text, never as part of the system prompt. `McpManager.callTool` is what `ExternalTool.run` calls; the approval
+   policy turns `{ type: 'external', server }` into the rule query `{ type: 'mcp', server, tool }`. The MCP screen
+   (Settings, MCP) and the banner above the composer read the hub through `mcpReport` (the banner with
+   `start: false`, which starts nothing) and act through `mcpAct` (approve by digest, take the approval back,
+   restart, turn off and on). Turning off writes `disabledMcpjsonServers`; a write to the top-level `.mcp.json`
+   asks whatever a rule says.
 7. **Windows details the core owns (done).**
    - The git settings and `withGitSafety` live in `@encode/permissions`; the agent's environment, the
      terminal and the status bar's `git status` use them (and set `GIT_OPTIONAL_LOCKS=0`, so a status
@@ -75,6 +81,7 @@ wiring pull request does, by using them:
 
 ## Known limits carried into the wiring
 
-The ones that matter to the UI are in the threat model (RP1 to RP7). One needs UI work still:
-the MCP approval card must name the environment variables an entry reads (`ServerStatus.variables`).
-The rewind dialog already says, every time, that changes made by shell commands are not restored.
+The ones that matter to the UI are in the threat model (RP1 to RP8). The MCP approval card names the
+variables and headers an entry sets or reads (RP2), and the rewind dialog says, every time, that changes made by
+shell commands are not restored (RP4). Adding and removing an MCP server is still done in the files; the settings
+page of the interface work adds forms for it.

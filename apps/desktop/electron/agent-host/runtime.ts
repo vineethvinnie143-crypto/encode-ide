@@ -249,6 +249,13 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     workspaces = new Workspaces({
       home: init.home,
       warn: (message) => peer.notify('warn', message),
+      onMcpChange: (root) => {
+        try {
+          peer.notify('mcp', { root })
+        } catch (error) {
+          log(`could not pass on a change of MCP servers: ${describe(error)}`)
+        }
+      },
       ...(init.checkpointsDir ? { checkpoints: { dir: init.checkpointsDir } } : {}),
       // Hooks are told where the conversation is written, as Claude Code's are.
       transcriptPath: (sessionId) => path.join(init.dir, `${sessionId}.jsonl`),
@@ -314,12 +321,23 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     return workspaces.act(root, action)
   })
 
+  peer.handle('mcpReport', async ({ root, start }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.mcpReport(root, start === false ? { start: false } : {})
+  })
+
+  peer.handle('mcpAct', async ({ root, action }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.mcpAct(root, action)
+  })
+
   peer.handle('shutdown', async () => {
     const closing = host
     host = undefined
     if (stateTimer) clearInterval(stateTimer)
     stateTimer = undefined
-    await closing?.dispose()
+    // Both are quick for a program that is going away: the sessions stop their commands, the folders their MCP servers.
+    await Promise.all([closing?.dispose(), workspaces?.close()])
     saveState()
     if (options.onShutdown) setImmediate(options.onShutdown)
   })

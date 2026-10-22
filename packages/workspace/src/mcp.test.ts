@@ -303,6 +303,46 @@ describe('a folder’s MCP servers in a session', () => {
   })
 })
 
+describe('looking at the servers', () => {
+  it('starts nothing when asked only to look, and says where each server would stand', async () => {
+    const r = await rig({ user: { mine: { command: 'x' }, quiet: { command: 'q' } }, project: { theirs: { command: 'y' } }, files: { '.encode/settings.json': json({ disabledMcpjsonServers: ['quiet'] }) }, servers: { mine: listing('echo'), theirs: listing('push') } })
+    const cold = await r.workspaces.mcpReport(r.root, { start: false })
+    assert.deepEqual(r.starts, [], 'a look started a server')
+    assert.equal(view(cold, 'mine').state, 'stopped')
+    assert.match(view(cold, 'mine').detail ?? '', /next chat/)
+    assert.equal(view(cold, 'quiet').state, 'disabled')
+    assert.equal(view(cold, 'theirs').state, 'needs-approval')
+    assert.match(view(cold, 'theirs').detail ?? '', /not trusted/)
+
+    // Looking at the screen is what starts them.
+    const warm = await r.workspaces.mcpReport(r.root)
+    assert.equal(view(warm, 'mine').state, 'connected')
+    assert.deepEqual(r.starts, ['mine'])
+    // And once they run, a look that starts nothing still sees them as they are.
+    assert.equal(view(await r.workspaces.mcpReport(r.root, { start: false }), 'mine').state, 'connected')
+  })
+
+  it('starts nothing while a session has the servers running either, and shows what the files say now', async () => {
+    const r = await rig({ user: { mine: { command: 'x' } }, servers: { mine: listing('echo'), later: listing('more') } })
+    const scope = await r.open()
+    await scope.external.ready(signal())
+    assert.deepEqual(r.starts, ['mine'])
+
+    await r.write(path.join(r.home, '.encode', 'mcp.json'), json({ mcpServers: { mine: { command: 'x', args: ['--changed'] }, later: { command: 'z' } } }))
+    const looked = await r.workspaces.mcpReport(r.root, { start: false })
+    assert.deepEqual(r.starts, ['mine'], 'a look started or restarted a server')
+    assert.equal(view(looked, 'mine').state, 'stopped', 'a server whose entry changed is not shown as it was')
+    assert.match(view(looked, 'mine').summary, /--changed/)
+    assert.equal(view(looked, 'later').state, 'stopped')
+    assert.deepEqual(names(scope), ['mcp__mine__echo'])
+
+    // The session's own next call brings the servers in line with the files.
+    await scope.refresh()
+    await scope.external.ready(signal())
+    assert.deepEqual(r.starts, ['mine', 'mine', 'later'])
+  })
+})
+
 describe('the servers of a folder are shared and let go of', () => {
   it('start a server once for every session in the folder', async () => {
     const r = await rig({ user: { mine: { command: 'x' } }, servers: { mine: listing('echo') } })

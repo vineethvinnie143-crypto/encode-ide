@@ -6,6 +6,7 @@ import type {
   BackgroundJob,
   EncodeApi,
   ModelAlert,
+  McpAction,
   PermissionsAction,
   PlanRequest,
   RewindRequest,
@@ -113,6 +114,11 @@ const api: EncodeApi = {
   permissions: {
     report: () => invoke('permissions:report'),
     act: (action: PermissionsAction) => invoke('permissions:act', action),
+  },
+  mcp: {
+    report: (options) => invoke('mcp:report', options),
+    act: (action: McpAction) => invoke('mcp:act', action),
+    onChanged: (callback) => on('mcp:changed', callback),
   },
   agent: {
     sessions: () => invoke('agent:sessions'),
