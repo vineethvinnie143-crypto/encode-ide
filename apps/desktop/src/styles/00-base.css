@@ -100,12 +100,12 @@ select {
 
 
 
+/* A 4 px edge you can grab from 10 px away; the line shows after a short hover, so passing over it does not flicker. */
 .resizer {
   flex-shrink: 0;
   position: relative;
   z-index: 6;
   background: transparent;
-  transition: background 0.12s;
 }
 .resizer-v {
   width: 4px;
@@ -115,9 +115,36 @@ select {
   height: 4px;
   cursor: row-resize;
 }
-.resizer:hover,
-.is-resizing .resizer {
+.resizer::after {
+  content: '';
+  position: absolute;
+}
+.resizer-v::after {
+  inset: 0 -3px;
+}
+.resizer-h::after {
+  inset: -3px 0;
+}
+.resizer::before {
+  content: '';
+  position: absolute;
   background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.resizer-v::before {
+  inset: 0 1px;
+}
+.resizer-h::before {
+  inset: 1px 0;
+}
+.resizer:hover::before {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+.resizer[data-dragging]::before {
+  opacity: 1;
+  transition-delay: 0s;
 }
 
 .muted {

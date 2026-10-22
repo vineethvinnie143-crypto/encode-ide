@@ -12,6 +12,7 @@ import type {
 import { api } from '../api'
 import { enqueue, dequeue, moveQueued, removeQueued, takeQueued, mergeDraft, type Queued } from '../components/Chat/queue'
 import { getActiveSessionId } from './active'
+import { appendTexts, createDeltaBuffer } from './deltas'
 import { useSettings } from './settings'
 import { useUi } from './ui'
 
@@ -34,6 +35,8 @@ interface ChatStore {
   plan: PlanRequest | null
   usageTotals: { total: number; cached: number; prompt: number; completion: number }
   initialized: boolean
+  /** The session whose entries are shown; the thread starts at its end, and fades in, when this changes. */
+  loadedFor: string
   draft: string
   /** Messages sent while the agent worked, by session, waiting to go out one by one. */
   queues: Record<string, Queued[]>
@@ -68,6 +71,15 @@ function upsertEntry(entries: ConversationEntry[], entry: ConversationEntry): Co
   return next
 }
 
+/** Streamed text is applied once per frame (see deltas.ts), not once per piece. */
+const deltas = createDeltaBuffer(({ texts, firstAt, chars }) => {
+  useChat.setState((state) => ({
+    entries: appendTexts(state.entries, texts),
+    streamStartedAt: state.streamStartedAt || firstAt,
+    streamChars: state.streamChars + chars,
+  }))
+})
+
 export const useChat = create<ChatStore>((set, get) => ({
   entries: [],
   status: 'idle',
@@ -79,6 +91,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   plan: null,
   usageTotals: { total: 0, cached: 0, prompt: 0, completion: 0 },
   initialized: false,
+  loadedFor: '',
   draft: '',
   queues: {},
   tokensPerSecond: 0,
@@ -102,6 +115,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
 
   load: async (sessionId) => {
+    deltas.discard()
     try {
       const history = await api.agent.history(sessionId)
       let goal: SessionGoal | null = null
@@ -138,9 +152,10 @@ export const useChat = create<ChatStore>((set, get) => ({
         streamStartedAt: 0,
         streamChars: 0,
         initialized: true,
+        loadedFor: sessionId,
       })
     } catch {
-      set({ entries: [], status: 'idle', running: false })
+      set({ entries: [], status: 'idle', running: false, loadedFor: sessionId })
     }
   },
 
@@ -175,6 +190,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     } catch {
       /* ignore */
     }
+    deltas.discard()
     set({ entries: [], status: 'idle', running: false, approvals: [], ask: null })
   },
 
@@ -242,6 +258,12 @@ export const useChat = create<ChatStore>((set, get) => ({
 
   applyEvent: (event) => {
     if (event.sessionId && event.sessionId !== getActiveSessionId()) return
+    if (event.type === 'delta') {
+      deltas.push(event.entryId, event.text)
+      return
+    }
+    // Whatever was streaming comes first, so an event never lands on text that has not caught up with it.
+    deltas.flush()
     switch (event.type) {
       case 'status':
         set((state) => ({
@@ -254,15 +276,6 @@ export const useChat = create<ChatStore>((set, get) => ({
         break
       case 'entry':
         set((state) => ({ entries: upsertEntry(state.entries, event.entry) }))
-        break
-      case 'delta':
-        set((state) => ({
-          entries: state.entries.map((entry) =>
-            entry.id === event.entryId ? { ...entry, text: (entry.text ?? '') + event.text } : entry,
-          ),
-          streamStartedAt: state.streamStartedAt || Date.now(),
-          streamChars: state.streamChars + event.text.length,
-        }))
         break
       case 'approval-request':
         set((state) => ({

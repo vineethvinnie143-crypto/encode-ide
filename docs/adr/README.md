@@ -22,6 +22,7 @@ say so.
 | [0014](0014-one-command-registry-and-no-project-switch-under-a-running-agent.md) | One command registry, and no project switch under a running agent | Accepted |
 | [0015](0015-one-tab-model-for-the-side-and-bottom-panels.md) | One tab model for the side and bottom panels | Accepted |
 | [0016](0016-windows-fonts-by-default-our-own-one-setting-away.md) | Windows' fonts by default, eNCode's own one setting away | Accepted, amends 0013 |
+| [0017](0017-the-thread-draws-once-per-frame-and-only-what-changed.md) | The thread draws once per frame, and only what changed | Accepted |
 | [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |
 | [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |
 | [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |

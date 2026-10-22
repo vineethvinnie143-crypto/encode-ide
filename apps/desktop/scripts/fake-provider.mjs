@@ -81,6 +81,8 @@ const SCENARIOS = {
   ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
+  // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
+  'long-reply': [{ text: longReply(), streamDelayMs: 3 }],
   // The second request is refused as too long until the transcript carries a summary. Each step
   // reads a file, so there are older steps to summarize by the time the conversation is compacted.
   overflow: [
@@ -88,6 +90,39 @@ const SCENARIOS = {
     { text: 'Reading the readme.', call: { name: 'Read', args: { file_path: 'README.md' } } },
     { text: 'Compaction verified.', overflowUntilCompacted: true },
   ],
+}
+
+/**
+ * A long answer full of markdown (about 1,200 words: headings, lists, tables, code, quotes), for measuring how the
+ * thread copes with a big streamed reply. Deterministic, so two runs are comparable.
+ */
+function longReply() {
+  const topics = ['parser', 'scheduler', 'cache', 'router', 'renderer', 'store', 'watcher', 'planner']
+  const out = ['# A long review']
+  topics.forEach((topic, index) => {
+    const n = index + 1
+    out.push(
+      `## ${n}. The ${topic}`,
+      `The ${topic} keeps its state in a small \`Map\` and **never reads it twice**: a second read would see work that is *already half done*, and the ${topic} would have to decide again what the first read meant. See [the notes](https://example.com/${topic}) for the long version, which goes through every case one by one and says what each costs.`,
+      `- It starts from the value the caller passed, never from a copy of it\n- It writes each result once, in the order the calls arrived\n- It gives the next call the answer of the last one when nothing changed\n- It drops anything older than \`${n * 30}\` seconds`,
+      `1. Read the input once\n2. Check it against the last result\n3. Do the work only when it differs\n4. Hand back the result and the reason`,
+      `| Case | Cost | Notes |\n| --- | --- | --- |\n| Cold | ${n * 12} ms | Everything is built from nothing |\n| Warm | ${n} ms | Only what changed is built |\n| Same | 0 ms | The last result is handed back |`,
+      '```ts\n' +
+        `export function ${topic}(input: Input, last?: Result): Result {\n` +
+        `  if (last && same(input, last.input)) return last\n` +
+        `  const next = build(input, last)\n` +
+        `  cache.set(input.id, next)\n` +
+        `  return next\n` +
+        `}\n\n` +
+        `function same(a: Input, b: Input): boolean {\n` +
+        `  return a.id === b.id && a.revision === b.revision\n` +
+        `}\n` +
+        '```',
+      `> The ${topic} is the part that is easiest to get wrong and hardest to notice: when it is wrong everything still works, only slower.`,
+    )
+  })
+  out.push('## Summary', 'Eight parts, one idea: **do the work once, and say so when you did not.**')
+  return out.join('\n\n')
 }
 
 let requestCount = 0
@@ -117,8 +152,8 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body))
 }
 
-/** A plain text answer, streamed or not, with no tool calls. */
-async function sendText(response, body, text) {
+/** A plain text answer, streamed or not, with no tool calls. `delayMs` spaces the pieces of a streamed one. */
+async function sendText(response, body, text, delayMs = 0) {
   if (!body.stream) {
     sendJson(response, 200, {
       id: 'mock',
@@ -128,7 +163,10 @@ async function sendText(response, body, text) {
     return
   }
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
-  for (const part of text.match(/\S+\s*/g) ?? []) response.write(chunk({ content: part }))
+  for (const part of text.match(/\S+\s*/g) ?? []) {
+    response.write(chunk({ content: part }))
+    if (delayMs) await delay(delayMs)
+  }
   response.write(chunk({}, 'stop'))
   response.write('data: [DONE]\n\n')
   response.end()
@@ -282,7 +320,7 @@ const server = http.createServer(async (request, response) => {
     }
     console.log(`[fake-provider] ${body.model ?? '?'} scenario=${scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
     if (!step.call) {
-      await sendText(response, body, step.text)
+      await sendText(response, body, step.text, step.streamDelayMs)
       return
     }
     const callId = `call_${requestCount}_${step.call.name}`

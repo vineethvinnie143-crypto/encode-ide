@@ -40,7 +40,8 @@
 .icon-btn {
   transition:
     background var(--dur-1) var(--ease-out),
-    color var(--dur-1) var(--ease-out);
+    color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 .icon-btn.md {
   width: 28px;
@@ -581,4 +582,72 @@
     opacity: 0;
     transform: translateY(4px) scale(0.98);
   }
+}
+
+/* Collapse: a fold that grows and shrinks. The row's height is animated between 0fr and 1fr, so the content needs no measuring. */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-3) var(--ease-out);
+}
+.collapse.is-open {
+  grid-template-rows: 1fr;
+}
+.collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.collapse.is-open > .collapse-inner {
+  opacity: 1;
+}
+/* Settled, the fold clips nothing, so focus rings and shadows at the edge of its content show. */
+.collapse.is-settled > .collapse-inner {
+  overflow: visible;
+}
+
+/*
+ * Pressed: a control answers the press by sinking a little, the way a key does. Only the small controls
+ * that are buttons on their own do it; rows and tabs change their fill instead.
+ */
+.btn:active:not(:disabled),
+.icon-btn:active:not(:disabled),
+.rail-btn:active,
+.composer-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/*
+ * Colour changes of the rows and small controls that set no timing of their own take 90 ms instead of a cut.
+ * :where() keeps this at zero specificity: a rule that sets its own transition wins.
+ */
+:where(
+    .tree-row,
+    .tree-action,
+    .search-file,
+    .search-hit,
+    .git-change,
+    .editor-tab,
+    .tab-close,
+    .terminal-tab,
+    .terminal-tab-close,
+    .model-pill,
+    .tool-head,
+    .composer-attach,
+    .toast-close,
+    .code-copy,
+    .latest-btn,
+    .chip-remove,
+    .browser-nav,
+    .browser-go,
+    .newtab-page,
+    .goal-actions button,
+    .command-item
+  ) {
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    opacity var(--dur-1) var(--ease-out);
 }

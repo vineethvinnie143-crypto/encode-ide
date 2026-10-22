@@ -48,7 +48,8 @@
   color: var(--text-2);
   transition:
     background var(--dur-1) var(--ease-out),
-    color var(--dur-1) var(--ease-out);
+    color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 .rail-btn:hover {
   background: var(--hover);

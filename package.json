@@ -15,6 +15,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "node scripts/test.mjs",
     "e2e": "pnpm --filter @encode/desktop e2e",
+    "perf": "pnpm --filter @encode/desktop perf",
     "dist": "pnpm --filter @encode/desktop dist",
     "test:browser": "pnpm --filter @encode/editor-view test:browser"
   },

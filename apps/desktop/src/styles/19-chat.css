@@ -95,6 +95,17 @@
   flex-direction: column;
   gap: 12px;
 }
+/*
+ * A turn scrolled far out of sight is neither laid out nor painted until it comes near (its last height is
+ * remembered), so a long thread costs about what the screen shows: it opens, resizes and streams at the same
+ * speed at turn 5 and turn 500. The newest turns are always drawn. The clip margin keeps focus rings and
+ * shadows at the edge of a turn from being cut off by the containment.
+ */
+.thread > .turn:not(:nth-last-child(-n + 4)) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+  overflow-clip-margin: 12px;
+}
 
 .turn-user {
   display: flex;
