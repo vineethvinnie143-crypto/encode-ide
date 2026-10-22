@@ -1,3 +1,5 @@
+import { SERVER_TOOL_REFUSED_CODE } from '@encode/providers'
+
 /**
  * Refusals that belong to one model on one account, not to the key or to the
  * provider. OpenRouter answers HTTP 404 when the account's privacy or
@@ -20,6 +22,8 @@ export type RefusalKind =
   | 'app-only'
   /** Some other 403: refused for this model, and the provider said no more. */
   | 'forbidden'
+  /** The model is called through an OpenRouter preset whose server tool the chat-completions API does not take. */
+  | 'server-tool'
 
 export interface Refusal {
   kind: RefusalKind
@@ -27,10 +31,13 @@ export interface Refusal {
   ms: number
 }
 
-export const REFUSAL_KINDS: ReadonlySet<string> = new Set<RefusalKind>(['policy', 'app-only', 'forbidden'])
+export const REFUSAL_KINDS: ReadonlySet<string> = new Set<RefusalKind>(['policy', 'app-only', 'forbidden', 'server-tool'])
 
-const HOUR = 60 * 60_000
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
+/** Long enough not to fail the same request every turn, short enough that a fixed preset is picked up on its own. */
+const SERVER_TOOL_MS = 15 * MINUTE
 
 /**
  * "0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy" (404), and the older
@@ -47,9 +54,10 @@ const SETTINGS_LINK = /https:\/\/openrouter\.ai\/[A-Za-z0-9._~/%?=&#-]*[A-Za-z0-
 const CLASSIFIED_AS = new Set(['auth', 'not-found', 'invalid-request'])
 
 /** The refusal an OpenRouter error is, or undefined when it is something else. */
-export function refusalOf(providerType: string, error: { kind: string; status?: number; message: string }): Refusal | undefined {
+export function refusalOf(providerType: string, error: { kind: string; status?: number; code?: string; message: string }): Refusal | undefined {
   // A 401 is OpenRouter refusing the key, whatever else the message says.
   if (providerType !== 'openrouter' || error.status === 401 || !CLASSIFIED_AS.has(error.kind)) return undefined
+  if (error.code === SERVER_TOOL_REFUSED_CODE) return { kind: 'server-tool', ms: SERVER_TOOL_MS }
   if (APP_ONLY.test(error.message)) return { kind: 'app-only', ms: DAY }
   if (POLICY.test(error.message) && error.status !== 400) return { kind: 'policy', ms: DAY }
   if (error.status === 403 && error.kind === 'auth') return { kind: 'forbidden', ms: HOUR }
@@ -67,5 +75,8 @@ export function refusalMessage(kind: RefusalKind, model: string, text: string): 
       return `OpenRouter limits ${model} to the coding apps on its list and refused eNCode (HTTP 403). eNCode skips it for a day.`
     case 'forbidden':
       return `OpenRouter refused ${model} (HTTP 403: ${text.replace(/^HTTP 403:?\s*/, '').slice(0, 160) || 'no reason given'}). eNCode skips it for an hour; the key and the other models are not affected.`
+    case 'server-tool':
+      // The providers package wrote this text itself: it names the tool and says what to change in the preset.
+      return `${text.replace(/^HTTP 400:?\s*/, '').slice(0, 400)} eNCode skips ${model} for 15 minutes; the key and the other models are not affected.`
   }
 }

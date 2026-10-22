@@ -104,6 +104,32 @@ describe('DirectClient', () => {
     assert.deepEqual(outcome.kind === 'paused' && [outcome.reason, outcome.retryAt], ['rate-limit', 1_000_000 + 3_600_000])
   })
 
+  it('waits out a rate limit that names no time, with growing pauses, longer than it waits for other faults', async () => {
+    const plain = () => failing(new TransportError('rate-limit', 'HTTP 429: Provider returned error', { status: 429 }))
+    const clears = setup(scripted(plain(), plain(), plain(), plain(), reply('ok')))
+    assert.equal((await clears.client.complete(call())).kind, 'done')
+    assert.deepEqual(clears.sleeps, [1000, 2000, 4000, 8000])
+
+    const stays = scripted(plain(), plain(), plain(), plain(), plain(), plain(), reply('never reached'))
+    const gives = setup(stays)
+    const outcome = await gives.client.complete(call())
+    assert.deepEqual(outcome.kind === 'paused' && outcome.reason, 'rate-limit')
+    assert.equal(stays.calls, 6)
+    assert.deepEqual(gives.sleeps, [1000, 2000, 4000, 8000, 16000])
+
+    const down = scripted(failing(new TransportError('server', 'HTTP 500')), failing(new TransportError('server', 'HTTP 500')), failing(new TransportError('server', 'HTTP 500')), reply('never reached'))
+    const outcome500 = await setup(down).client.complete(call())
+    assert.equal(outcome500.kind === 'paused' && outcome500.reason, 'unavailable')
+    assert.equal(down.calls, 3, 'a fault that is not a limit keeps the shorter patience')
+  })
+
+  it('does not wait for a quota that is spent', async () => {
+    const adapter = scripted(failing(new TransportError('quota', 'HTTP 429: free-models-per-day', { status: 429 })), reply('never reached'))
+    const outcome = await setup(adapter).client.complete(call())
+    assert.equal(outcome.kind === 'paused' && outcome.reason, 'quota')
+    assert.equal(adapter.calls, 1)
+  })
+
   it('pauses at once on a rejected key, without retrying', async () => {
     const adapter = scripted(failing(new TransportError('auth', 'HTTP 401: invalid key', { status: 401 })))
     const { client } = setup(adapter)

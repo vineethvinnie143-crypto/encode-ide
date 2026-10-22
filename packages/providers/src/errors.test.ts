@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  SERVER_TOOL_REFUSED_CODE,
   TransportError,
   classifyHttpFailure,
   classifyNetworkFailure,
@@ -75,6 +76,51 @@ describe('classifyHttpFailure', () => {
     assert.match(classifyHttpFailure(400, undefined, body).message, /Provider returned error \(bad request upstream\)/)
     const leaky = classifyHttpFailure(401, undefined, 'Incorrect API key provided: sk-proj-abcdefghijklmnopqrstuvwxyz')
     assert.doesNotMatch(leaky.message, /abcdefghijklmnop/)
+  })
+})
+
+describe('classifyHttpFailure: a preset whose server tool the API does not take', () => {
+  // As OpenRouter answered a model called through `@preset/...` that has its Shell tool on; the user id is made up.
+  const body = JSON.stringify({
+    error: {
+      message: "Tool 'openrouter:shell' is not available for the 'chat-completions' API. It is only supported for: responses, anthropic-messages.",
+      code: 400,
+      metadata: { provider_name: null },
+    },
+    user_id: 'user_0000000000000000000000000000',
+  })
+
+  it('is a refusal of the request, said in words that point at the preset', () => {
+    const error = classifyHttpFailure(400, undefined, body)
+    assert.equal(error.kind, 'invalid-request')
+    assert.equal(error.status, 400)
+    assert.equal(error.code, SERVER_TOOL_REFUSED_CODE)
+    assert.match(error.message, /openrouter:shell/)
+    assert.match(error.message, /preset/)
+    assert.match(error.message, /chat-completions API/)
+    assert.doesNotMatch(error.message, /user_0000/, 'nothing but the tool and the API is taken from the body')
+  })
+
+  it('says which APIs do take the tool, so a client can ask one of them instead', () => {
+    assert.deepEqual(classifyHttpFailure(400, undefined, body).apis, ['responses', 'anthropic-messages'])
+    const one = classifyHttpFailure(400, undefined, "{\"error\":{\"message\":\"Tool 'openrouter:shell' is not available for the 'chat-completions' API. It is only supported for: responses.\"}}")
+    assert.deepEqual(one.apis, ['responses'])
+    const unsaid = classifyHttpFailure(400, undefined, "{\"error\":{\"message\":\"Tool 'openrouter:shell' is not available for the 'chat-completions' API\"}}")
+    assert.equal(unsaid.apis, undefined, 'a refusal that names no API says nothing about which would work')
+  })
+
+  it('is not mistaken for a model that cannot call tools, which would be learned and stay learned', () => {
+    // The body talks about a tool that is "not available", as the tools-unsupported pattern does.
+    assert.notEqual(classifyHttpFailure(400, undefined, body).kind, 'unsupported')
+    assert.equal(classifyHttpFailure(400, undefined, '{"error":{"message":"Tool use is not supported by this model"}}').kind, 'unsupported')
+  })
+
+  it('reads only the wording of this error, and only from a 400', () => {
+    assert.equal(classifyHttpFailure(404, undefined, body).code, undefined)
+    const other = classifyHttpFailure(400, undefined, "{\"error\":{\"message\":\"Tool 'lookup' is not available for the 'chat-completions' API\"}}")
+    assert.notEqual(other.code, SERVER_TOOL_REFUSED_CODE, 'a tool of the caller is not an OpenRouter server tool')
+    const hostile = classifyHttpFailure(400, undefined, `{"error":{"message":"Tool 'openrouter:${'x'.repeat(80)}' is not available for the 'chat-completions' API"}}`)
+    assert.notEqual(hostile.code, SERVER_TOOL_REFUSED_CODE, 'a name that is too long to be a tool is not echoed')
   })
 })
 

@@ -22,7 +22,7 @@ per role and no failover.
 | `assembler.ts` | Incremental events → `AssistantMessage`, with tool-call parsing and validation. |
 | `json-repair.ts` | Repairs malformed tool JSON; never completes a truncated value. |
 | `sse.ts`, `http.ts` | The event-stream reader and the HTTP plumbing adapters share. |
-| `openai.ts` | The chat-completions dialect: OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio, vLLM. |
+| `openai.ts` | The chat-completions dialect: OpenAI, OpenRouter, DeepSeek, Ollama, LM Studio, vLLM. OpenRouter's adapter asks its Messages API when a preset's server tool is refused (ADR 0035). |
 | `anthropic.ts` | Anthropic's Messages API. |
 | `models.ts` | Families, windows, output limits and capabilities eNCode knows offline; Claude's per-generation rules. |
 | `direct-client.ts` | `DirectClient`: one model per role, retries without failover. |

@@ -15,9 +15,17 @@ import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type
 import type { ModelRequest, ReasoningEffort, ToolResultContent } from './messages'
 import { anthropicTraits, type AnthropicTraits } from './models'
 import { readSse } from './sse'
+import { acceptingToolNames } from './tool-names'
 
 export interface AnthropicOptions {
   fetch?: FetchLike
+  /**
+   * The Anthropic-compatible endpoint of OpenRouter: the key goes as a bearer token, and the body leaves out
+   * what OpenRouter does not document for it (adaptive thinking, effort, sampling parameters).
+   */
+  openRouter?: boolean
+  /** Headers that go with every request, such as OpenRouter's app attribution. */
+  headers?: Record<string, string>
 }
 
 export const ANTHROPIC_VERSION = '2023-06-01'
@@ -166,7 +174,7 @@ function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: W
   }
 }
 
-export function buildAnthropicBody(target: TransportTarget, request: ModelRequest): Record<string, unknown> {
+export function buildAnthropicBody(target: TransportTarget, request: ModelRequest, options: Pick<AnthropicOptions, 'openRouter'> = {}): Record<string, unknown> {
   const traits = anthropicTraits(target.model)
   const maxTokens = Math.max(1, Math.min(request.maxOutputTokens ?? DEFAULT_MAX_TOKENS, target.maxOutputTokens))
   const messages = toAnthropicMessages(request)
@@ -192,16 +200,18 @@ export function buildAnthropicBody(target: TransportTarget, request: ModelReques
     if (request.toolChoice === 'none') body.tool_choice = { type: 'none' }
   }
 
+  // OpenRouter documents no thinking, effort or sampling parameters for its endpoint, and a request it refuses fails the whole call.
+  const plain = options.openRouter === true
   let thinking = false
-  if (traits.adaptiveThinking) {
+  if (!plain && traits.adaptiveThinking) {
     body.thinking = traits.thinkingDisplay ? { type: 'adaptive', display: 'summarized' } : { type: 'adaptive' }
     thinking = true
-  } else if (traits.budgetThinking && request.reasoning && maxTokens > 2_048 && lastToolTurnStartsWithThinking(messages)) {
+  } else if (!plain && traits.budgetThinking && request.reasoning && maxTokens > 2_048 && lastToolTurnStartsWithThinking(messages)) {
     body.thinking = { type: 'enabled', budget_tokens: budgetFor(request.reasoning, maxTokens) }
     thinking = true
   }
-  if (request.reasoning && traits.effort) body.output_config = { effort: effortFor(request.reasoning, traits) }
-  if (request.temperature !== undefined && traits.samplingParameters && !thinking) body.temperature = request.temperature
+  if (!plain && request.reasoning && traits.effort) body.output_config = { effort: effortFor(request.reasoning, traits) }
+  if (!plain && request.temperature !== undefined && traits.samplingParameters && !thinking) body.temperature = request.temperature
   if (target.capabilities.promptCache) markCache(body, request)
   return body
 }
@@ -372,16 +382,20 @@ function dropRebound(body: Record<string, unknown>, error: TransportError): bool
   return changed
 }
 
-export function createAnthropicAdapter(options: AnthropicOptions = {}): ProviderAdapter {
+/** One request to a Messages endpoint, streamed. Anthropic's adapter and OpenRouter's compatible endpoint both speak it. */
+export function createMessagesStream(options: AnthropicOptions = {}): (input: StreamInput) => AsyncGenerator<TransportEvent> {
   const fetchImpl = options.fetch ?? ((input, init) => fetch(input, init))
 
-  async function* stream({ target, request, signal }: StreamInput): AsyncGenerator<TransportEvent> {
+  return async function* stream({ target, request, signal }: StreamInput): AsyncGenerator<TransportEvent> {
     if (signal.aborted) throw signal.reason
     const url = messagesEndpoint(target.baseUrl)
     const where = describeEndpoint(url)
-    const headers: Record<string, string> = { accept: 'text/event-stream', 'anthropic-version': ANTHROPIC_VERSION }
-    if (target.apiKey) headers['x-api-key'] = target.apiKey
-    const body = buildAnthropicBody(target, request)
+    const headers: Record<string, string> = { accept: 'text/event-stream', 'anthropic-version': ANTHROPIC_VERSION, ...options.headers }
+    if (target.apiKey) {
+      if (options.openRouter) headers.authorization = `Bearer ${target.apiKey}`
+      else headers['x-api-key'] = target.apiKey
+    }
+    const body = buildAnthropicBody(target, request, options)
     let response: Response | undefined
     for (let tries = 0; !response; tries++) {
       try {
@@ -397,6 +411,8 @@ export function createAnthropicAdapter(options: AnthropicOptions = {}): Provider
     }
     yield* streamedReplyEvents(response, signal, where)
   }
+}
 
-  return { type: 'anthropic', stream }
+export function createAnthropicAdapter(options: AnthropicOptions = {}): ProviderAdapter {
+  return acceptingToolNames({ type: 'anthropic', stream: createMessagesStream(options) })
 }

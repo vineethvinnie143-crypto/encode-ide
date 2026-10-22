@@ -102,6 +102,7 @@ export const OPENROUTER_REFUSALS = {
   policy:
     '0 endpoints out of 1 requested are available matching your guardrail restrictions and data policy. We removed them for the following reasons (an endpoint may have matched multiple reasons): Free model training violation (guardrail): 1 endpoint excluded; configurable at https://openrouter.ai/workspaces/default/guardrails',
   appOnly: (model: string) => `${model} is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps`,
+  serverTool: (tool: string) => `Tool '${tool}' is not available for the 'chat-completions' API. It is only supported for: responses, anthropic-messages.`,
 }
 
 /** A failed response as the providers package classifies it, so tests see the kinds real calls get. */
@@ -189,6 +190,10 @@ export const faults = {
   /** OpenRouter: the model answers only the apps on its list. HTTP 403, which the providers package calls a refused key. */
   appOnly(model = 'vendor/gated:free'): Script {
     return [httpFailure(403, OPENROUTER_REFUSALS.appOnly(model))]
+  },
+  /** OpenRouter: the model is called through a preset that has a server tool the chat-completions API does not take. HTTP 400. */
+  serverTool(tool = 'openrouter:shell'): Script {
+    return [httpFailure(400, OPENROUTER_REFUSALS.serverTool(tool))]
   },
   /** A 403 that says nothing about why. */
   forbidden(message = 'Forbidden'): Script {

@@ -9,16 +9,20 @@
  */
 import { createHash } from 'node:crypto'
 import type { FinishReason, ProviderAdapter, StreamInput, TransportEvent, TransportTarget, Usage } from './contract'
-import { classifyStreamError, isTransportError, TransportError } from './errors'
+import { createMessagesStream } from './anthropic'
+import { classifyStreamError, isTransportError, SERVER_TOOL_REFUSED_CODE, TransportError } from './errors'
 import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type FetchLike } from './http'
 import type { AssistantMessage, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
 import { readSse } from './sse'
+import { acceptingToolNames } from './tool-names'
 
 export interface OpenAICompatibleOptions {
   fetch?: FetchLike
   /** Sent to OpenRouter as HTTP-Referer and X-Title, which name the app in its dashboards. */
   appUrl?: string
   appTitle?: string
+  /** The clock, ms since the epoch; OpenRouter's adapter remembers which models need the Messages API by it. */
+  now?: () => number
 }
 
 type ChatPart = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } } | { type: 'image_url'; image_url: { url: string } }
@@ -466,9 +470,77 @@ function createChatAdapter(type: 'openai-compatible' | 'openrouter', options: Op
 }
 
 export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions = {}): ProviderAdapter {
-  return createChatAdapter('openai-compatible', options)
+  return acceptingToolNames(createChatAdapter('openai-compatible', options))
 }
 
+/** How long a model whose preset needs the Messages API is asked there at once, without trying chat-completions first. */
+const MESSAGES_MEMORY_MS = 30 * 60_000
+
+/** True for a refusal of a server tool that the Messages API takes (or that does not say which APIs do). */
+function messagesWouldTakeIt(error: unknown): error is TransportError {
+  return isTransportError(error) && error.code === SERVER_TOOL_REFUSED_CODE && (error.apis === undefined || error.apis.includes('anthropic-messages'))
+}
+
+/** OpenRouter's Messages endpoint sits beside its chat-completions one: the same base, another path. */
+function messagesBase(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '')
+}
+
+/**
+ * OpenRouter through chat-completions, and through its Anthropic-compatible Messages API for a model whose
+ * preset carries a server tool that chat-completions refuses (Shell, for one). That refusal is a 400 before a
+ * byte of the reply, so the same request goes to the Messages API at once, and the model is asked there from
+ * then on for a while. When the Messages API cannot take it either, the refusal is what the user reads, with
+ * what the Messages API answered added, so a failure of the fallback is never taken for a bad key.
+ */
 export function createOpenRouterAdapter(options: OpenAICompatibleOptions = {}): ProviderAdapter {
-  return createChatAdapter('openrouter', options)
+  const chat = createChatAdapter('openrouter', options)
+  const messages = createMessagesStream({
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    openRouter: true,
+    headers: { 'HTTP-Referer': options.appUrl ?? 'https://encode.local', 'X-Title': options.appTitle ?? 'eNCode IDE' },
+  })
+  const now = options.now ?? Date.now
+  const onMessagesUntil = new Map<string, number>()
+
+  async function* stream(input: StreamInput): AsyncGenerator<TransportEvent> {
+    const { target, signal } = input
+    const viaMessages: StreamInput = { ...input, target: { ...target, baseUrl: messagesBase(target.baseUrl) } }
+    if ((onMessagesUntil.get(target.key) ?? 0) > now()) {
+      yield* messages(viaMessages)
+      return
+    }
+    let refusal: TransportError
+    let received = false
+    try {
+      for await (const event of chat.stream(input)) {
+        received = true
+        yield event
+      }
+      return
+    } catch (error) {
+      if (received || signal.aborted || !messagesWouldTakeIt(error)) throw error
+      refusal = error
+    }
+    let answered = false
+    try {
+      for await (const event of messages(viaMessages)) {
+        if (!answered) {
+          answered = true
+          onMessagesUntil.set(target.key, now() + MESSAGES_MEMORY_MS)
+        }
+        yield event
+      }
+    } catch (error) {
+      if (answered || signal.aborted || !isTransportError(error)) throw error
+      throw new TransportError(refusal.kind, `${refusal.message} eNCode then tried OpenRouter's Messages API, which answered: ${error.message}`, {
+        status: refusal.status,
+        code: refusal.code,
+        ...(refusal.apis ? { apis: refusal.apis } : {}),
+        cause: error,
+      })
+    }
+  }
+
+  return acceptingToolNames({ type: 'openrouter', stream })
 }
