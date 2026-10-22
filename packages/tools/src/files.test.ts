@@ -50,6 +50,72 @@ describe('Read', () => {
   })
 })
 
+describe('older ANSI files', () => {
+  const e = String.fromCodePoint(0xe9)
+  const original = Buffer.concat([Buffer.from('-- caf'), Buffer.from([0xe9]), Buffer.from('\r\nlocal price = 5 -- '), Buffer.from([0x80]), Buffer.from('\r\n')])
+
+  it('shows a Windows-1252 file as text, says so, and keeps every other byte when it is edited', async () => {
+    const root = await tempWorkspace({ 'old.lua': original })
+    const ctx = testContext(root)
+    const read = textOf((await readTool.run({ file_path: 'old.lua' }, ctx)).content)
+    assert.match(read, new RegExp(`caf${e}`))
+    assert.match(read, /older ANSI file, not UTF-8: it is shown as Windows-1252/)
+
+    const edited = await editTool.run({ file_path: 'old.lua', old_string: 'price = 5', new_string: `price = 6 -- ${e}t${e}` }, ctx)
+    assert.equal(edited.ok, true)
+    const expected = original.toString('latin1').replace('price = 5', `price = 6 -- ${e}t${e}`)
+    assert.deepEqual(await fs.readFile(path.join(root, 'old.lua')), Buffer.from(expected, 'latin1'))
+    // The file stays CRLF, and a whole-file write keeps its encoding too.
+    const written = await writeTool.run({ file_path: 'old.lua', content: `caf${e}\nnext\n` }, ctx)
+    assert.equal(written.ok, true)
+    assert.deepEqual(await fs.readFile(path.join(root, 'old.lua')), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0d, 0x0a, 0x6e, 0x65, 0x78, 0x74, 0x0d, 0x0a]))
+  })
+
+  it('refuses a character the file cannot hold, and leaves the file as it was', async () => {
+    const root = await tempWorkspace({ 'old.lua': original })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'old.lua' }, ctx)
+    const cjk = String.fromCodePoint(0x65e5)
+    const edit = await editTool.run({ file_path: 'old.lua', old_string: 'price = 5', new_string: `price = ${cjk}` }, ctx)
+    assert.equal(edit.ok, false)
+    assert.match(textOf(edit.content), /older ANSI text file \(Windows-1252, not UTF-8\) and cannot hold "/)
+    const write = await writeTool.run({ file_path: 'old.lua', content: cjk }, ctx)
+    assert.equal(write.ok, false)
+    assert.deepEqual(await fs.readFile(path.join(root, 'old.lua')), original)
+  })
+})
+
+describe('big files', () => {
+  it('does not load a file over 20 MB, and says how to look at part of it', async () => {
+    const root = await tempWorkspace({ 'big.log': 'x\n' })
+    await fs.truncate(path.join(root, 'big.log'), 21 * 1024 * 1024)
+    const ctx = testContext(root)
+    const read = await readTool.run({ file_path: 'big.log' }, ctx)
+    assert.equal(read.ok, false)
+    assert.match(textOf(read.content), /big\.log is 21 MB, more than the 20 MB that Read loads whole\. Search it with Grep, or look at part of it through Bash \(head -n 200/)
+    const edit = await editTool.run({ file_path: 'big.log', old_string: 'x', new_string: 'y' }, ctx)
+    assert.equal(edit.ok, false)
+    assert.match(textOf(edit.content), /that Edit and Write load whole\. Change it through Bash/)
+    assert.equal((await writeTool.run({ file_path: 'big.log', content: 'y' }, ctx)).ok, false)
+    assert.equal((await fs.stat(path.join(root, 'big.log'))).size, 21 * 1024 * 1024)
+  })
+
+  it('suggests PowerShell commands when that is the shell', async () => {
+    const root = await tempWorkspace({ 'big.log': 'x\n' })
+    await fs.truncate(path.join(root, 'big.log'), 21 * 1024 * 1024)
+    const ctx = testContext(root, { shell: { dialect: 'pwsh', program: 'pwsh', state: () => ({ cwd: root, env: {}, dialect: 'pwsh' }), run: async () => Promise.reject(new Error('not used')) } })
+    assert.match(textOf((await readTool.run({ file_path: 'big.log' }, ctx)).content), /Get-Content -TotalCount 200 or Get-Content -Tail 200/)
+  })
+
+  it('cuts one Read to about 100,000 characters and says where it stopped', async () => {
+    const root = await tempWorkspace({ 'wide.txt': `${`${'x'.repeat(99)}\n`.repeat(3000)}` })
+    const outcome = await readTool.run({ file_path: 'wide.txt' }, testContext(root))
+    const text = textOf(outcome.content)
+    assert.ok(text.length < 105_000, `${text.length} characters`)
+    assert.match(text, /\(Lines 1-\d+ of 3000, shortened to fit\. Pass offset and limit to read other lines\.\)/)
+  })
+})
+
 describe('Write', () => {
   it('creates new files, but refuses to overwrite a file it has not read', async () => {
     const root = await tempWorkspace({ 'old.txt': 'before\n' })
@@ -172,6 +238,34 @@ describe('applyEdit', () => {
   it('strips line-number prefixes copied from Read', () => {
     const outcome = applyEdit('x = 1\ny = 2\n', { old_string: '     1\tx = 1\n     2\ty = 2', new_string: '     1\tx = 10\n     2\ty = 20' })
     assert.deepEqual(outcome, { ok: true, text: 'x = 10\ny = 20\n', replacements: 1 })
+  })
+
+  it('points at the same text with other spacing, so the next try can copy it', () => {
+    const text = 'function a() {\n\treturn 1   \n}\nfunction b() {\n\treturn 2\n}\n'
+    const outcome = applyEdit(text, { old_string: 'function a() {\n  return 1\n}', new_string: 'x' }) as { ok: false; error: string }
+    assert.equal(outcome.ok, false)
+    assert.match(outcome.error, /old_string was not found in the file\./)
+    assert.match(outcome.error, /The same text is at lines 1-3 with different spacing/)
+    assert.ok(outcome.error.includes('function a() {\n\treturn 1   \n}'))
+  })
+
+  it('lists the places when the same text with other spacing is there more than once', () => {
+    const outcome = applyEdit('a\nx  =  1\nb\nx   =   1\n', { old_string: 'x = 1', new_string: 'y' }) as { ok: false; error: string }
+    assert.match(outcome.error, /The same text with different spacing is at lines 2, 4; copy the one you mean from Read, spacing included\./)
+  })
+
+  it('names the line where only the first line of old_string is found, and says nothing when nothing is close', () => {
+    const lead = applyEdit('const answer = compute()\nreturn answer\n', { old_string: 'const answer = compute()\nreturn other', new_string: 'x' }) as { ok: false; error: string }
+    assert.match(lead.error, /Line 1 of the file has the same text as line 1 of old_string, but the lines around it differ\./)
+    const nowhere = applyEdit('abc\n', { old_string: 'zzzzzzzzzz', new_string: 'x' }) as { ok: false; error: string }
+    assert.equal(nowhere.error, 'old_string was not found in the file. Read the file again and copy the text exactly, including indentation, without the line-number prefix.')
+  })
+
+  it('says where an ambiguous old_string occurs', () => {
+    const outcome = applyEdit('x\nfoo\nx\nbar\nx\n', { old_string: 'x', new_string: 'y' }) as { ok: false; error: string }
+    assert.match(outcome.error, /occurs 3 times \(lines 1, 3, 5\)\. Add surrounding lines/)
+    const many = applyEdit('x\n'.repeat(9), { old_string: 'x', new_string: 'y' }) as { ok: false; error: string }
+    assert.match(many.error, /occurs 9 times \(lines 1, 2, 3, 4, 5, …\)\./)
   })
 
   it('refuses identical strings, and reports which edit failed', () => {
