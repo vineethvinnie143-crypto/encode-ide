@@ -4,6 +4,7 @@
  * can be consumed from both tsconfig projects.
  */
 
+import type { Keybindings } from './keybindings'
 import type { Appearance } from './appearance'
 import type { SearchCheckResult, SearchProviderId } from './search'
 
@@ -77,6 +78,8 @@ export interface Settings {
   roles: Partial<Record<ModelRole, string[]>>
   /** How hard each role's models think; a role left out leaves it to the model. See shared/models.ts EFFORTS. */
   efforts: Partial<Record<ModelRole, ReasoningEffort>>
+  /** The shortcuts the person chose, by command id; see shared/keybindings.ts. */
+  keybindings: Keybindings
   /** Never send a request to a model that costs money, whatever the roles list. */
   freeOnly: boolean
   /** The OpenRouter profile whose key serves "@free"; null picks the first one that has a key. */

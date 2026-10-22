@@ -130,11 +130,11 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
 const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13 }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
-async function pressKey(key, { ctrl = false, shift = false } = {}) {
+async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
   const common = {
     key,
     code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
-    modifiers: (ctrl ? 2 : 0) | (shift ? 8 : 0),
+    modifiers: (alt ? 1 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0),
     windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
   }
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
@@ -2431,6 +2431,127 @@ async function runReviewerChecks() {
 }
 
 /**
+ * Changing shortcuts in Help > Keyboard shortcuts: a chord that cannot be one is refused with the reason, a free one
+ * works at once, in the menus and after a restart, one another command has asks first, Esc stops listening without
+ * closing the list, and Reset all puts every shortcut back, with an Undo that can be pressed over the dialog.
+ */
+async function runShortcutChecks() {
+  console.log('[smoke] --- changing shortcuts ---')
+  const row = (id) => `.shortcuts-row[data-shortcut="${id}"]`
+  const keysOf = (id) =>
+    evaluate(`[...document.querySelectorAll('${row(id)} .shortcuts-keys .ui-kbd-group')].map((group) => group.getAttribute('aria-label')).join(' or ')`)
+  const saved = () => evaluate('window.eNCode.settings.get().then((settings) => JSON.stringify(settings.keybindings))')
+  const bottomShown = "(!!document.querySelector('.bottom-panel') && !document.querySelector('.bottom-panel').classList.contains('is-closed'))"
+  const sidebarShown = "!!document.querySelector('.session-sidebar')"
+  const onTop = (selector) =>
+    evaluate(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)})
+      if (!node) return false
+      const box = node.getBoundingClientRect()
+      return node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))
+    })()`)
+  const openList = async () => {
+    await key({ key: '/', code: 'Slash', ctrlKey: true })
+    await waitFor("!!document.querySelector('.shortcuts-dialog .shortcuts-row')", 4000, 'Ctrl+/ opens the shortcuts')
+  }
+  const listen = async (id) => {
+    await click(`${row(id)} .shortcuts-keys`)
+    await waitFor(`document.activeElement?.matches('${row(id)} .shortcuts-recorder') === true`, 4000, `the ${id} row listens for a new shortcut`)
+  }
+
+  await openList()
+  await typeInto('.shortcuts-filter', 'bottom panel')
+  await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'the list finds the row by name')
+  await typeInto('.shortcuts-filter', 'ctrl j')
+  await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'and by its keys')
+  await listen('view.bottomPanel')
+  await pressKey('c', { ctrl: true })
+  await waitFor("/copies/.test(document.querySelector('.shortcuts-note.is-refused')?.textContent ?? '')", 4000, 'Ctrl+C is refused, and the row says why')
+  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('a refused chord closed the list')
+  await pressKey('j', { ctrl: true, shift: true })
+  await waitFor(`!document.querySelector('.shortcuts-recorder') && !!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Ctrl+Shift+J is taken')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl Shift J') throw new Error(`the bottom panel shows ${await keysOf('view.bottomPanel')}`)
+  await waitFor(`document.activeElement?.matches('${row('view.bottomPanel')} .shortcuts-keys') === true`, 4000, 'the focus is back on the row')
+  if ((await saved()) !== '{"view.bottomPanel":["Ctrl+Shift+J"]}') throw new Error(`the settings keep ${await saved()}`)
+
+  // A chord that another command has asks before it moves.
+  await typeInto('.shortcuts-filter', '')
+  await waitFor("document.querySelectorAll('.shortcuts-row').length > 30", 4000, 'every row again')
+  await listen('view.bottomPanel')
+  await pressKey('b', { ctrl: true })
+  await waitFor("/Toggle sidebar/.test(document.querySelector('.shortcuts-take')?.textContent ?? '')", 4000, 'Ctrl+B asks first: the sidebar has it')
+  await waitFor("document.activeElement?.matches('.shortcuts-take .btn.primary') === true", 4000, 'Use it here has the focus')
+  await sleep(300)
+  await screenshot('ui-dark-shortcuts-take.png')
+  await click('.shortcuts-take .btn.primary')
+  await waitFor(`!document.querySelector('.shortcuts-take')`, 4000, 'Use it here')
+  await waitFor(`${JSON.stringify('Ctrl B')} === [...document.querySelectorAll('${row('view.bottomPanel')} .shortcuts-keys .ui-kbd-group')].map((group) => group.getAttribute('aria-label')).join(' or ')`, 4000, 'the bottom panel has Ctrl+B')
+  if ((await keysOf('view.sidebar')) !== 'Ctrl Shift S') throw new Error(`the sidebar shows ${await keysOf('view.sidebar')}, not just Ctrl+Shift+S`)
+  if (!(await evaluate(`!!document.querySelector('${row('view.sidebar')} .shortcuts-changed')`))) throw new Error('the sidebar does not show that it changed')
+
+  // Esc stops listening and leaves the list open; a second Esc closes it.
+  await listen('view.sidebar')
+  await pressKey('Escape')
+  await waitFor(`!document.querySelector('.shortcuts-recorder') && document.activeElement?.matches('${row('view.sidebar')} .shortcuts-keys') === true`, 4000, 'Esc stops listening')
+  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('Esc while listening closed the list')
+  await sleep(300)
+  await screenshot('ui-dark-shortcuts-changed.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'a second Esc closes the list')
+
+  // The new shortcut works, the old one is gone, and the sidebar keeps the one it has left.
+  let shown = await evaluate(bottomShown)
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+B toggles the bottom panel now')
+  if (!(await evaluate(sidebarShown))) throw new Error('Ctrl+B still hid the sidebar')
+  await key({ key: 'j', ctrlKey: true })
+  await sleep(300)
+  if ((await evaluate(bottomShown)) !== !shown) throw new Error('Ctrl+J still toggles the bottom panel')
+  await key({ key: 'S', ctrlKey: true, shiftKey: true })
+  await waitFor(`!${sidebarShown}`, 4000, 'Ctrl+Shift+S still hides the sidebar')
+  await key({ key: 'S', ctrlKey: true, shiftKey: true })
+  await waitFor(sidebarShown, 4000, 'and shows it')
+
+  // After a restart: the menus show it, and it works.
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with changed shortcuts')
+  const menuKeys = "(() => { const item = [...document.querySelectorAll('.ui-menu .ui-menu-item')].find((node) => node.textContent.includes('Toggle bottom panel')); return item?.querySelector('.ui-menu-shortcut')?.getAttribute('aria-label') ?? '' })()"
+  await waitFor("!!document.querySelector('.tb-menu')", 8000, 'the menus')
+  await click('.tb-menu', 'View')
+  await waitFor(`${menuKeys} === 'Ctrl B'`, 8000, 'the View menu shows Ctrl+B for the bottom panel after a restart')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the menu')
+  shown = await evaluate(bottomShown)
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+B works after a restart')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${shown}`, 4000, 'and toggles back')
+
+  // Reset all, with an Undo pressed over the dialog, then reset again for the checks that follow.
+  await openList()
+  await click('.shortcuts-bar .btn', 'Reset all')
+  await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all clears every change')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl J' || (await keysOf('view.sidebar')) !== 'Ctrl B or Ctrl Shift S') throw new Error('Reset all did not bring the shipped shortcuts back')
+  await waitFor("!!document.querySelector('.toast .toast-action')", 4000, 'Reset all offers Undo')
+  if (!(await onTop('.toast .toast-action'))) throw new Error('the Undo of Reset all is under the dialog')
+  await click('.toast .toast-action')
+  await waitFor(`!!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Undo brings the changes back')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl B') throw new Error('Undo did not bring Ctrl+B back')
+  await click('.shortcuts-bar .btn', 'Reset all')
+  await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all again')
+  if ((await saved()) !== '{}') throw new Error(`the settings still keep ${await saved()}`)
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Esc closes the list')
+  await evaluate("document.querySelector('.toast-close')?.click()")
+  shown = await evaluate(bottomShown)
+  await key({ key: 'j', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+J toggles the bottom panel again')
+  await key({ key: 'j', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${shown}`, 4000, 'and back')
+  console.log('[smoke] changing shortcuts: ok')
+}
+
+/**
  * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
  * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
  */
@@ -3052,6 +3173,7 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runShortcutChecks()
   await runAboutChecks()
   await runPanelChecks()
   await runReviewChecks()

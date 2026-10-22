@@ -337,7 +337,7 @@ export default function Composer() {
     { kind: 'separator', id: 'sep-session' },
     { id: 'compact', label: 'Compact the conversation', onSelect: () => void agentActions.compact() },
     { id: 'export', label: 'Export session…', onSelect: () => void commandRegistry.run('session.export') },
-    { id: 'commands', label: 'Command palette…', shortcut: commandRegistry.shortcut('app.palette') ?? 'Ctrl+K', onSelect: () => useUi.getState().setPaletteOpen(true) },
+    { id: 'commands', label: 'Command palette…', shortcut: commandRegistry.shortcut('app.palette'), onSelect: () => useUi.getState().setPaletteOpen(true) },
   ]
 
   const policyEntries = (): MenuEntry[] => [

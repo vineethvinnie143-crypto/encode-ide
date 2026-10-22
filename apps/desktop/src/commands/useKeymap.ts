@@ -69,6 +69,8 @@ export function useKeymap(): void {
         event.preventDefault()
         return
       }
+      // A field that used the key itself (Ctrl+Enter in a comment, Ctrl+Z in the Review tab) keeps it.
+      if (event.defaultPrevented) return
       const command = commandRegistry.forEvent(event, isTyping(event.target), modalOpen())
       if (!command) return
       event.preventDefault()

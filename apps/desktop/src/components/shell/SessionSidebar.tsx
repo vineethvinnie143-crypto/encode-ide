@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { SessionSummary } from '@shared/types'
 import { commandRegistry, sessionActions } from '../../commands/app'
+import { useShortcuts } from '../../commands/useShortcuts'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import {
@@ -156,6 +157,7 @@ function ActivityRow({
 }
 
 export default function SessionSidebar() {
+  useShortcuts()
   const sessions = useSessions((state) => state.sessions)
   const activeId = useSessions((state) => state.activeId)
   const statuses = useStatus((state) => state.statusById)

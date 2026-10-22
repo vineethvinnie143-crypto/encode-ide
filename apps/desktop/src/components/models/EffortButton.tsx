@@ -1,6 +1,7 @@
 import { EFFORT_INFO, EFFORTS, modelMode } from '@shared/models'
 import type { ReasoningEffort } from '@shared/types'
 import { commandRegistry } from '../../commands/app'
+import { useShortcuts } from '../../commands/useShortcuts'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { ChevronDown, Gauge } from '../../ui/icons'
@@ -12,6 +13,7 @@ import { Pill } from '../../ui/Pill'
  * model answers; a model without a dial ignores the choice, which the list says.
  */
 export default function EffortButton() {
+  useShortcuts()
   const settings = useSettings((state) => state.settings)
   const request = useUi((state) => (state.menuRequest?.menu === 'effort' ? state.menuRequest.id : undefined))
   if (!settings || modelMode(settings) !== 'router') return null

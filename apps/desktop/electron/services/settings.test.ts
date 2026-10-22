@@ -422,6 +422,22 @@ describe('SettingsService models', () => {
     assert.deepEqual(settings.get().efforts, { main: 'high' })
   })
 
+  it('keeps the shortcuts the person chose across restarts, and only well-formed ones', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.get().keybindings, {}, 'a new install has the shortcuts eNCode ships with')
+    const chosen = { 'view.bottomPanel': ['Ctrl+Shift+J'], 'edit.find': [] }
+    assert.deepEqual(settings.save({ keybindings: chosen }).keybindings, chosen)
+    assert.deepEqual(settings.save({ maxSteps: 12 }).keybindings, chosen, 'a patch that does not name them leaves them')
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().keybindings, chosen)
+    const bad = { __proto__: ['Ctrl+J'], 'view.sidebar': 'Ctrl+B', 'edit.find': ['Ctrl+F', 3] }
+    assert.deepEqual(settings.save({ keybindings: bad as unknown as Settings['keybindings'] }).keybindings, { 'edit.find': ['Ctrl+F'] })
+    fs.writeFileSync(file(), JSON.stringify({ keybindings: ['Ctrl+J'] }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().keybindings, {})
+    const copy = settings.get()
+    copy.keybindings['edit.find'].push('F9')
+    assert.deepEqual(settings.get().keybindings, { 'edit.find': ['Ctrl+F'] }, 'the renderer gets a copy')
+  })
+
   it('ignores a free-only switch that is not true or false, from the renderer or from the file', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
     assert.equal(settings.save({ freeOnly: 'no' as unknown as boolean }).freeOnly, true)

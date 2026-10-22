@@ -10,7 +10,8 @@ interface SettingsStore {
   settings: Settings | null
   loading: boolean
   load(): Promise<void>
-  save(patch: Partial<Settings>): Promise<void>
+  /** False when the save failed; the reason has been shown. */
+  save(patch: Partial<Settings>): Promise<boolean>
   /** False when the key was refused; the reason has been shown. */
   setProfileKey(id: string, key: string): Promise<boolean>
   /** The same for the key of a search provider; an empty key removes it. */
@@ -47,8 +48,10 @@ export const useSettings = create<SettingsStore>((set, get) => ({
     try {
       const settings = await api.settings.save(patch)
       set({ settings })
+      return true
     } catch (error) {
       useUi.getState().notify('error', `Could not save settings: ${(error as Error).message}`)
+      return false
     }
   },
 

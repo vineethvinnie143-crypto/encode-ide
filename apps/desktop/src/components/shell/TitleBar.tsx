@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { api } from '../../api'
 import { commandRegistry } from '../../commands/app'
 import { MENUS, menuEntries } from '../../commands/menus'
+import { useShortcuts } from '../../commands/useShortcuts'
 import { useSessions } from '../../stores/sessions'
 import { canGoBack, canGoForward } from '../../stores/history'
 import { useUi } from '../../stores/ui'
@@ -123,6 +124,7 @@ function CaptionButtons() {
 
 /** The 44 px bar: logo, Back and Forward over the sessions you opened, the sidebar toggle, the menus, window buttons. */
 export default function TitleBar() {
+  useShortcuts()
   const back = useSessions((state) => canGoBack(state.history))
   const forward = useSessions((state) => canGoForward(state.history))
   const sidebarVisible = useUi((state) => state.sidebarVisible)

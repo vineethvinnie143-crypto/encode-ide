@@ -3,7 +3,7 @@
  * registers them; the title bar menus, the keymap and the shortcut list all
  * read `commandRegistry`.
  */
-import type { SessionSummary } from '@shared/types'
+import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
 import { useFind } from '../stores/find'
@@ -224,3 +224,12 @@ function createAppActions(): AppActions {
 
 export const commandRegistry = new CommandRegistry()
 commandRegistry.register(...buildCommands(createAppActions()))
+
+// The person's own shortcuts apply as soon as the settings load, and whenever they change.
+let appliedKeybindings: Settings['keybindings'] | undefined
+useSettings.subscribe(() => {
+  const keybindings = useSettings.getState().settings?.keybindings
+  if (!keybindings || keybindings === appliedKeybindings) return
+  appliedKeybindings = keybindings
+  commandRegistry.setOverrides(keybindings)
+})
