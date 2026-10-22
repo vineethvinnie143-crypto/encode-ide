@@ -29,6 +29,8 @@ import { OUTSIDE_NOTES_OPEN } from './external'
 
 /** Used when the router has no better number. */
 export const DEFAULT_CONTEXT_WINDOW = 64_000
+/** A window counts as no bigger than this unless the person sets a cap: every step pays for the whole prompt. */
+export const DEFAULT_CONTEXT_CAP = 200_000
 /** Compact once the prompt is estimated past this share of the window. */
 export const COMPACT_AT = 0.85
 /** After a summary, the verbatim tail is cut to about this share of the window. */
@@ -250,7 +252,10 @@ export function repairPairing(messages: readonly Message[]): Message[] {
     }
     push(repaired)
     const answers = calls.map((call) => results.get(call.id) ?? notRun(call.id))
-    push({ role: 'user', content: [...answers, ...rest] })
+    const answered = [...answers, ...rest]
+    // A message that is already as it should be stays the very object it was: callers tell a repair from no change by identity.
+    const unchanged = next?.role === 'user' && next.content.length === answered.length && next.content.every((block, index) => block === answered[index])
+    push(unchanged ? next : { role: 'user', content: answered })
     rest = []
   }
   return out

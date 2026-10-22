@@ -10,7 +10,7 @@ import { ComputerState } from './computer/state'
 import { DEFAULT_DESKTOP_OPTIONS, type DesktopBackend, type DesktopOptions } from './computer/contract'
 import type { DesktopHandle } from './computer/state'
 import { createFileStateTracker } from './file-state'
-import type { AgentShell, Interaction, JobManager, ToolContext, WebAccess } from './types'
+import type { AgentShell, Interaction, JobManager, Tool, ToolContext, WebAccess } from './types'
 
 function unexpected(name: string): never {
   throw new Error(`The test did not expect ${name} to be used.`)
@@ -108,4 +108,30 @@ export function testDesktop(
     permitted: (app) => (permitted ? permitted.has(app) : true),
     vision: () => options.vision ?? true,
   }
+}
+
+/**
+ * Tools shaped like an MCP server's: `mcp__<server>__<name>`, asking to be deferred, each with a description and a
+ * schema about `padding` characters long. `names` are the servers' own names for them.
+ */
+export function outsideTools(server: string, names: readonly string[], padding = 400, described: Record<string, string> = {}): Tool[] {
+  return names.map((name) => ({
+    definition: {
+      name: `mcp__${server}__${name}`,
+      description: `${described[name] ?? `Runs ${name.replace(/_/g, ' ')} on ${server}.`} ${'More detail about how it behaves. '.repeat(Math.ceil(padding / 34))}`.trim(),
+      inputSchema: {
+        type: 'object',
+        properties: { target: { type: 'string', description: 'What to act on. '.repeat(Math.ceil(padding / 17)).trim() } },
+        required: ['target'],
+        additionalProperties: false,
+      },
+    },
+    kind: 'other',
+    readOnly: false,
+    modes: ['code'],
+    defer: true,
+    access: () => ({ type: 'none' }),
+    describe: () => ({ title: `${name} (${server})` }),
+    run: async (input) => ({ ok: true, content: `${server}.${name} ran on ${String(input.target)}` }),
+  }))
 }

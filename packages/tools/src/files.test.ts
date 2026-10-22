@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { applyEdit, applyEdits } from './edit'
+import { createFileStateTracker, withoutSeen } from './file-state'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
 import { tempWorkspace, testContext, textOf } from './testing'
 
@@ -47,6 +48,81 @@ describe('Read', () => {
     const root = await tempWorkspace({ 'n.ipynb': JSON.stringify(notebook) })
     const outcome = await readTool.run({ file_path: 'n.ipynb' }, testContext(root))
     assert.equal(outcome.content, '<cell index="0" id="c1" type="code">\nprint(1)\n\n</cell>\n<outputs index="0">\n1\n\n</outputs>')
+  })
+})
+
+describe('Read of the same lines again', () => {
+  const long = Array.from({ length: 60 }, (_, index) => `line ${index + 1} of a file that is long enough to be worth pointing back to`).join('\n')
+
+  it('says the lines are unchanged instead of sending them again', async () => {
+    const root = await tempWorkspace({ 'a.txt': long })
+    const ctx = testContext(root)
+    const first = await readTool.run({ file_path: 'a.txt' }, ctx)
+    assert.match(textOf(first.content), /^ {5}1\tline 1 of/)
+    const again = await readTool.run({ file_path: 'a.txt' }, ctx)
+    assert.equal(again.ok, true)
+    assert.match(textOf(again.content), /^Unchanged: lines 1-60 of a\.txt are exactly as they were/)
+    assert.ok(textOf(again.content).length < 250)
+    // An explicit range that is the same range counts as the same.
+    assert.match(textOf((await readTool.run({ file_path: 'a.txt', offset: 1, limit: 2000 }, ctx)).content), /^Unchanged/)
+    // Its state is still that of a read, so Edit and Write keep working.
+    assert.equal(ctx.files.get(path.join(root, 'a.txt'))?.partial, false)
+  })
+
+  it('shows the lines again when they differ, when the file changed, or after the history was rewritten', async () => {
+    const root = await tempWorkspace({ 'a.txt': long })
+    const file = path.join(root, 'a.txt')
+    const ctx = testContext(root)
+    await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)
+    // Other lines of the file are new information.
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 20, limit: 40 }, ctx)).content), /^ {4}20\tline 20/)
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)).content), /^ {5}1\tline 1/)
+    // The same lines of a changed file are new information too, even when the size and the time stayed the same.
+    const changed = long.replace('line 3 of', 'line X of')
+    await fs.writeFile(file, changed)
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)).content), /line X of/)
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)).content), /^Unchanged/)
+    // The history was rewritten: what the earlier output showed may be gone.
+    ctx.files.forgetSeen()
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)).content), /^ {5}1\tline 1/)
+    assert.match(textOf((await readTool.run({ file_path: file, offset: 1, limit: 40 }, ctx)).content), /^Unchanged/)
+  })
+
+  it('shows the file again after the agent wrote it, because the output above is out of date', async () => {
+    const root = await tempWorkspace({ 'a.txt': long })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'a.txt' }, ctx)
+    const edit = await editTool.run({ file_path: 'a.txt', old_string: 'line 2 of a file', new_string: 'line two of a file' }, ctx)
+    assert.equal(edit.ok, true)
+    assert.match(textOf((await readTool.run({ file_path: 'a.txt' }, ctx)).content), /line two of a file/)
+  })
+
+  it('does not point back to a short output, which costs about as much as the note', async () => {
+    const root = await tempWorkspace({ 'short.txt': 'one\ntwo\n' })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'short.txt' }, ctx)
+    assert.equal((await readTool.run({ file_path: 'short.txt' }, ctx)).content, '     1\tone\n     2\ttwo')
+  })
+
+  it('does not point back to an output the loop cuts before the model sees it', async () => {
+    const huge = Array.from({ length: 1500 }, (_, index) => `line ${index} ${'x'.repeat(60)}`).join('\n')
+    const root = await tempWorkspace({ 'huge.txt': huge })
+    const ctx = testContext(root)
+    const first = await readTool.run({ file_path: 'huge.txt' }, ctx)
+    assert.ok(textOf(first.content).length > 55_000)
+    assert.ok(!textOf((await readTool.run({ file_path: 'huge.txt' }, ctx)).content).startsWith('Unchanged'))
+  })
+
+  it('is not inherited by a subagent, whose conversation never held the output', async () => {
+    const root = await tempWorkspace({ 'a.txt': long })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'a.txt' }, ctx)
+    const file = path.join(root, 'a.txt')
+    const copy = createFileStateTracker()
+    for (const [name, state] of ctx.files.entries()) copy.set(name, withoutSeen(state))
+    assert.equal(copy.get(file)?.seen, undefined)
+    assert.equal(copy.get(file)?.hash, ctx.files.get(file)?.hash)
+    assert.match(textOf((await readTool.run({ file_path: 'a.txt' }, testContext(root, { files: copy }))).content), /^ {5}1\tline 1/)
   })
 })
 

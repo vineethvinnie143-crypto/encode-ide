@@ -3,7 +3,7 @@
  * the OS shell (Git Bash or PowerShell on Windows, bash elsewhere); its
  * description tells the model which one it is talking to.
  */
-import { truncateMiddle } from './text'
+import { collapseRepeats, truncateMiddle } from './text'
 import type { ShellDialect, Tool, ToolOutcome } from './types'
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from './shell/run'
 
@@ -85,7 +85,7 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform)
 
       const result = await ctx.shell.run(input.command, { timeoutMs: input.timeout, signal: ctx.signal, onOutput: ctx.progress })
       const parts: string[] = []
-      const body = result.output.replace(/\s+$/, '')
+      const body = collapseRepeats(result.output.replace(/\s+$/, ''))
       parts.push(body ? truncateMiddle(body, BASH_OUTPUT_LIMIT) : '(no output)')
       if (result.timedOut) {
         const seconds = Math.round((input.timeout ?? DEFAULT_TIMEOUT_MS) / 1000)
@@ -152,7 +152,7 @@ export const bashOutputTool: Tool<BashOutputInput> = {
     }
     const { job, output } = read
     const status = job.status === 'running' ? 'running' : `${job.status}${job.exitCode !== undefined ? `, exit code ${job.exitCode}` : ''}`
-    const body = output.replace(/\s+$/, '')
+    const body = collapseRepeats(output.replace(/\s+$/, ''))
     return {
       ok: true,
       content: `Status: ${status}\n\n${body ? truncateMiddle(body, BASH_OUTPUT_LIMIT) : '(no new output)'}`,

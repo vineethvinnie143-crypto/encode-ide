@@ -43,6 +43,8 @@ export interface ExternalTool {
   readonly kind: 'other'
   readonly readOnly: false
   readonly modes: readonly ['code']
+  /** A server can offer dozens of tools: when their definitions are long, the model is sent their names and loads what it needs. */
+  readonly defer?: boolean
   readonly mcp?: McpToolIdentity
   access(input: Record<string, unknown>, context: ExternalToolContext): { type: 'external'; server: string; tool?: string }
   describe(input: Record<string, unknown>, context: ExternalToolContext): { title: string; detail?: string }
@@ -159,6 +161,7 @@ export function mcpTool(options: McpToolOptions): ExternalTool {
     kind: 'other',
     readOnly: false,
     modes: ['code'],
+    defer: true,
     mcp: { server, tool: tool.name, ruleTool, hints: tool.hints },
     // The tool's name as rules spell it, so that a rule (and "Always allow") can name this tool and not the whole server.
     access: () => ({ type: 'external', server, tool: ruleTool }),

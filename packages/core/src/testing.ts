@@ -8,6 +8,7 @@ import os from 'node:os'
 import type { Usage } from '@encode/providers'
 import { userText } from '@encode/providers'
 import {
+  addToolSearch,
   ComputerState,
   createToolRegistry,
   createFileStateTracker,
@@ -202,6 +203,7 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     { dialect: 'bash', platform: process.platform, web: false, completion: options.completion, computer: Boolean(options.services?.desktop) },
     options.extraTools ?? [],
   )
+  addToolSearch(registry)
   const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
   const approvedHosts = new Set<string>()
   const approvedApps = new Set<string>()

@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 import type { Message, ToolResultBlock, UserMessage } from '@encode/providers'
 import { textBlock, userText } from '@encode/providers'
 import type { Tool, ToolKind } from '@encode/tools'
+import { outsideTools } from '@encode/tools/testing'
 import { isPaired, NOT_RUN } from './compaction'
 import { CONTINUE_AFTER_LENGTH } from './prompt'
 import { loopHarness, type Harness } from './testing'
@@ -377,6 +378,68 @@ describe('the context window', () => {
     assert.doesNotMatch(end.kind === 'failed' ? end.message : '', /instructions and tools/)
   })
 
+  it('counts a window of a million tokens as 200,000 unless the person sets another cap', async () => {
+    const fill = async (h: Harness) => {
+      for (let i = 0; i < 6; i++) {
+        await h.conversation.add(userText(`question ${i} ${'x'.repeat(70_000)}`), { turnId: `t${i}` })
+        await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(70_000)}`)] }, { turnId: `t${i}` })
+      }
+    }
+    const script = (request: { role: string }) => (request.role === 'summarizer' ? { text: 'SUMMARY' } : { text: 'ok' })
+    // About 240,000 tokens: far inside a million-token window, and past the cap that every step would pay for.
+    const capped = await loopHarness({ client: { contextWindow: 1_000_000, maxOutputTokens: 8_192 }, script })
+    await fill(capped)
+    assert.deepEqual(await capped.run('and now?'), { kind: 'done', reply: 'ok' })
+    assert.deepEqual(capped.client.requests.map((request) => request.role), ['summarizer', 'main'])
+    assert.ok(isPaired(capped.conversation.messages()))
+
+    const free = await loopHarness({ client: { contextWindow: 1_000_000, maxOutputTokens: 8_192 }, settings: { contextCap: 900_000 }, script })
+    await fill(free)
+    assert.deepEqual(await free.run('and now?'), { kind: 'done', reply: 'ok' })
+    assert.deepEqual(free.client.requests.map((request) => request.role), ['main'])
+  })
+
+  it('leaves a window under the cap as it was', async () => {
+    const h = await loopHarness({ client: { contextWindow: 128_000, maxOutputTokens: 8_192 }, script: (request) => (request.role === 'summarizer' ? { text: 'SUMMARY' } : { text: 'ok' }) })
+    // About 85,000 tokens in a 128,000-token window: 85% of the window is 108,800, so nothing is shortened.
+    for (let i = 0; i < 3; i++) {
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(50_000)}`), { turnId: `t${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(50_000)}`)] }, { turnId: `t${i}` })
+    }
+    assert.deepEqual(await h.run('and now?'), { kind: 'done', reply: 'ok' })
+    assert.deepEqual(h.client.requests.map((request) => request.role), ['main'])
+  })
+
+  it('shows a file again after a compaction, because the output a repeated Read would point to is gone', async () => {
+    const file = Array.from({ length: 60 }, (_, index) => `line ${index + 1} of a file long enough to be worth pointing back to`).join('\n')
+    let main = 0
+    const h = await loopHarness({
+      files: { 'a.txt': file },
+      client: { contextWindow: 40_000, maxOutputTokens: 1_000 },
+      scriptFor: (root) => (request) => {
+        if (request.role === 'summarizer') return { text: 'SUMMARY' }
+        const read = { calls: [{ name: 'Read', input: { file_path: path.join(root, 'a.txt') } }] }
+        // read, answer; (the person compacts); read again, answer; read once more, answer.
+        return [read, { text: 'one' }, read, { text: 'two' }, read, { text: 'three' }][main++]
+      },
+    })
+    await h.run('read it')
+    for (let i = 0; i < 3; i++) {
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(3_000)}`), { turnId: `f${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(3_000)}`)] }, { turnId: `f${i}` })
+    }
+    const before = resultsOf(h.conversation.messages()).map((result) => result.text)
+    assert.match(before[0], /^ {5}1\tline 1 of/)
+    const { removed } = await h.loop.compact({ signal: new AbortController().signal, turnId: 'c1' })
+    assert.ok(removed > 0)
+    assert.ok(!resultsOf(h.conversation.messages()).some((result) => result.text.startsWith('     1\tline 1')), 'the first output was summarized away')
+    await h.run('read it again')
+    const second = resultsOf(h.conversation.messages()).at(-1)!
+    assert.match(second.text, /^ {5}1\tline 1 of/, 'shown in full, not pointed back to')
+    await h.run('and once more')
+    assert.match(resultsOf(h.conversation.messages()).at(-1)!.text, /^Unchanged: lines 1-60 of a\.txt/)
+  })
+
   it('compacts on request, keeping only the latest messages, with the user\'s instructions for the summary', async () => {
     const h = await loopHarness({ script: (request) => (request.role === 'summarizer' ? { text: 'MANUAL SUMMARY' } : { text: 'ok' }) })
     for (let i = 0; i < 4; i++) {
@@ -389,5 +452,72 @@ describe('the context window', () => {
     assert.equal(request.role, 'summarizer')
     assert.match((request.payload.messages[0].content[0] as { text: string }).text, /keep the file names/)
     assert.match((h.conversation.messages()[0].content[0] as { text: string }).text, /MANUAL SUMMARY/)
+  })
+})
+
+describe('deferred tools', () => {
+  const GITHUB = ['create_issue', 'list_issues', 'get_issue', 'create_pull_request', 'merge_pull_request', 'search_code', 'get_file_contents', 'list_commits']
+  const SLACK = ['post_message', 'list_channels', 'get_thread_replies', 'add_reaction']
+  const sent = (h: Harness, request: number) => h.client.requests[request].payload.tools.map((tool) => tool.name)
+
+  it('sends the names of many outside tools, loads those the model asks for, and keeps them for the conversation', async () => {
+    const h = await loopHarness({
+      extraTools: [...outsideTools('github', GITHUB, 900), ...outsideTools('slack', SLACK, 900)],
+      script: [
+        { calls: [{ name: 'ToolSearch', input: { query: 'github issue' } }] },
+        { calls: [{ name: 'mcp__github__create_issue', input: { target: 'repo' } }] },
+        { text: 'done' },
+      ],
+    })
+    assert.deepEqual(await h.run('open an issue'), { kind: 'done', reply: 'done' })
+    assert.ok(sent(h, 0).includes('ToolSearch'))
+    assert.ok(!sent(h, 0).some((name) => name.startsWith('mcp__')), 'nothing is loaded at first')
+    const loaded = sent(h, 1).filter((name) => name.startsWith('mcp__'))
+    assert.ok(loaded.includes('mcp__github__create_issue') && loaded.includes('mcp__github__list_issues'))
+    assert.ok(!loaded.some((name) => name.startsWith('mcp__slack__')), 'only what the query found')
+    assert.deepEqual(sent(h, 2).filter((name) => name.startsWith('mcp__')), loaded, 'and it stays')
+    const [search, run] = resultsOf(h.conversation.messages())
+    assert.match(search.text, /^Loaded \d tools\. They are in your tool list from the next step on/)
+    assert.equal(run.text, 'github.create_issue ran on repo')
+    const searchChars = JSON.stringify(h.client.requests[0].payload.tools.find((tool) => tool.name === 'ToolSearch')).length
+    const everything = JSON.stringify([...outsideTools('github', GITHUB, 900), ...outsideTools('slack', SLACK, 900)].map((tool) => tool.definition)).length
+    assert.ok(searchChars < everything / 10, `ToolSearch with all the names is ${searchChars} characters; the definitions are ${everything}`)
+  })
+
+  it('checks a call to a tool that was not loaded against its schema, and sends the tool from then on', async () => {
+    const h = await loopHarness({
+      extraTools: outsideTools('github', GITHUB, 900),
+      script: [
+        { calls: [{ name: 'mcp__github__get_issue', input: { wrong: 1 } }] },
+        { calls: [{ name: 'mcp__github__get_issue', input: { target: '7' } }] },
+        { text: 'done' },
+      ],
+    })
+    await h.run('look at issue 7')
+    assert.ok(!sent(h, 0).includes('mcp__github__get_issue'))
+    assert.ok(sent(h, 1).includes('mcp__github__get_issue'), 'the call named it, so its definition follows')
+    const [first, second] = resultsOf(h.conversation.messages())
+    assert.equal(first.error, true)
+    assert.match(first.text, /^Invalid input for mcp__github__get_issue: /)
+    assert.equal(second.text, 'github.get_issue ran on 7')
+  })
+
+  it('sends everything when the outside tools are few', async () => {
+    const h = await loopHarness({ extraTools: outsideTools('github', GITHUB.slice(0, 2), 100), script: [{ text: 'ok' }] })
+    await h.run('hi')
+    assert.ok(sent(h, 0).includes('mcp__github__create_issue'))
+    assert.ok(!sent(h, 0).includes('ToolSearch'))
+  })
+
+  it('loads again from the messages after the conversation was rebuilt, and drops what a rewind cut', async () => {
+    const extraTools = [...outsideTools('github', GITHUB, 900), ...outsideTools('slack', SLACK, 900)]
+    const h = await loopHarness({ extraTools, script: [{ calls: [{ name: 'ToolSearch', input: { query: 'select:mcp__slack__post_message' } }] }, { text: 'loaded' }, { text: 'again' }] })
+    await h.run('find slack')
+    await h.run('and now?')
+    assert.ok(sent(h, 2).includes('mcp__slack__post_message'))
+    // The messages are all there is to it: a conversation that lost the search has nothing loaded.
+    await h.conversation.replace(h.conversation.messages().slice(0, 1), { trigger: 'auto', summary: '', removed: 0, turnId: 'x' })
+    await h.run('once more')
+    assert.ok(!sent(h, 3).includes('mcp__slack__post_message'))
   })
 })

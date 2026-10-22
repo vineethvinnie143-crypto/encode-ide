@@ -18,7 +18,18 @@ export function createFileStateTracker(platform: NodeJS.Platform = process.platf
     set: (file, state) => void states.set(key(file), { path: file, state }),
     delete: (file) => void states.delete(key(file)),
     entries: () => [...states.values()].map(({ path: file, state }) => [file, state]),
+    forgetSeen: () => {
+      for (const entry of states.values()) {
+        if (entry.state.seen) entry.state = withoutSeen(entry.state)
+      }
+    },
   }
+}
+
+/** The state without the lines Read showed: what a subagent inherits, and what is left after the history was rewritten. */
+export function withoutSeen(state: FileState): FileState {
+  const { seen: _seen, ...rest } = state
+  return rest
 }
 
 export function stateOf(bytes: Uint8Array, stats: { mtimeMs: number; size: number }, partial: boolean, now = Date.now()): FileState {

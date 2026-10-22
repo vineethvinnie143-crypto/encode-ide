@@ -20,6 +20,10 @@ import type { Tool, ToolContext, ToolOutcome } from './types'
 export const READ_DEFAULT_LIMIT = 2000
 /** What one Read puts in the conversation: about 25,000 tokens. Longer ranges are cut to fit. */
 const READ_MAX_CHARS = 100_000
+/** A repeated Read is answered with a note only when what it would repeat is longer than the note. */
+const SEEN_MIN_CHARS = 600
+/** Longer output is cut before it reaches the model (the loop's own limit), so it cannot be pointed back to. */
+const SEEN_MAX_CHARS = 55_000
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024
 const SNIPPET_MAX_LINES = 40
 
@@ -277,7 +281,18 @@ export const readTool: Tool<ReadInput> = {
       cutForSize = true
     }
     const partial = offset > 1 || end < lines.length
-    ctx.files.set(file, stateOf(bytes, stats, partial))
+    const state = stateOf(bytes, stats, partial)
+    const before = ctx.files.get(file)
+    if (before?.seen && before.seen.from === offset && before.seen.to === end && before.hash === state.hash) {
+      // The same lines of a file that has not changed, and the conversation still holds them: pointing there costs far less than sending them again.
+      ctx.files.set(file, { ...state, seen: before.seen })
+      return {
+        ok: true,
+        content: `Unchanged: lines ${offset}-${end} of ${shown(file, ctx)} are exactly as they were when you read them earlier in this conversation. That output still applies; there is nothing new to show.`,
+        display: { output: 'Unchanged since the last read' },
+      }
+    }
+    ctx.files.set(file, body.length >= SEEN_MIN_CHARS && body.length <= SEEN_MAX_CHARS ? { ...state, seen: { from: offset, to: end, chars: body.length } } : state)
     const note = partial
       ? `\n\n(Lines ${offset}-${end} of ${lines.length}${cutForSize ? ', shortened to fit' : ''}. Pass offset and limit to read other lines.)`
       : ''
