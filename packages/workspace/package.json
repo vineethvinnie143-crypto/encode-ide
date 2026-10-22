@@ -1,0 +1,25 @@
+{
+  "name": "@encode/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Everything that depends on the folder a session works in: its settings, trust, permission rules, hooks and checkpoints, made into the scope the agent core asks for.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/config": "workspace:*",
+    "@encode/core": "workspace:*",
+    "@encode/permissions": "workspace:*",
+    "@encode/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

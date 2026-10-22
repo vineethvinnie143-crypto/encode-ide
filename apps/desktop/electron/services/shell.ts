@@ -10,11 +10,11 @@ import {
   isBuiltin,
   parseLine,
   resolveShellPath as resolveWithHost,
+  withGitSafety,
   type ShellSegment,
 } from '@encode/permissions'
 import type { ShellCreateOptions, ShellInfo, ShellPromptInfo } from '../../shared/types'
 import {
-  GIT_SAFETY_CONFIG,
   batchCommand,
   candidateNames,
   envKey,
@@ -58,17 +58,7 @@ function currentEnv(): Record<string, string> {
  * could answer.
  */
 export function agentEnvironment(): Record<string, string> {
-  const env = currentEnv()
-  const countKey = envKey(env, 'GIT_CONFIG_COUNT')
-  const count = Number(env[countKey] ?? 0)
-  let index = Number.isInteger(count) && count >= 0 ? count : 0
-  for (const [key, value] of GIT_SAFETY_CONFIG) {
-    env[`GIT_CONFIG_KEY_${index}`] = key
-    env[`GIT_CONFIG_VALUE_${index}`] = value
-    index++
-  }
-  env[countKey] = String(index)
-  env[envKey(env, 'GIT_TERMINAL_PROMPT')] = '0'
+  const env = withGitSafety(currentEnv(), process.platform === 'win32')
   // cmd.exe (npm scripts, batch files) must not look for bare program names in the project.
   if (process.platform === 'win32') env[envKey(env, 'NoDefaultCurrentDirectoryInExePath')] = '1'
   return env

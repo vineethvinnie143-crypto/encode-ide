@@ -1,9 +1,10 @@
 # Wiring M3 into the core
 
 Status: written with the M3 pull request (permission rules, trust, hooks, checkpoints, MCP
-client). **None of this is wired into the app yet.** The pull request adds libraries and
-touches no code of `apps/desktop`, `@encode/core` or `@encode/tools`. The core (#8) is in `main`
-now, so the wiring below can start; it is the next pull request.
+client). **Steps 1 to 3 and 7 below are wired into the app** (ADR 0055): settings and trust, the
+shell rules, the approval card's "Always allow", the Permissions screen and the banner above the
+composer. **Steps 4 to 6 (hooks, checkpoints, MCP) are not wired yet**; they are the next pull
+requests, in that order, and hang off the same per-folder snapshot (`@encode/workspace`).
 
 ## What was checked already
 
@@ -22,38 +23,41 @@ wiring pull request does, by using them:
 
 ## Wiring, in order
 
-1. **Settings and trust.** `loadSettingsSources({ home, root, read: readText })` then
+1. **Settings and trust (done).** `loadSettingsSources({ home, root, read: readText })` then
    `resolveSettings(sources, { folderApproved })`, where `folderApproved` comes from
    `new TrustStore(file, nodeTrustFs, windows).state(rootReal, folderConfigDigest(sources))`
    (`.configApproved`). Show `heldBack` and `problems` in Settings. Reload on file change.
-2. **Shell rules.** `createShellAssessor({ rules: new RuleSet(rules, { root, home, windows }),
+2. **Shell rules (done).** `createShellAssessor({ rules: new RuleSet(rules, { root, home, windows }),
    trusted, probe })` becomes the `ShellCommandAssessor`. `trusted` comes from the trust store:
    git runs unasked only there (threat model R3). Rules for `Read`, `Edit`, `WebFetch` and
    `mcp__*` are asked with `RuleSet.evaluate({ type: 'read' | 'write' | 'web' | 'mcp', ... })`
    from the policies of the file tools, web tools and `external` access.
-3. **Approval card.** "Always allow" calls `suggestRule(call)`; the buttons save with
+3. **Approval card (done).** "Always allow" calls `suggestRule(call)`; the buttons save with
    `saveRule({ scope, behavior, text, home, root, fs: nodeTrustFs, trust })` and show the
    result: `approved: false` means the rule is saved but held back until the user reviews the
    folder's settings. Approving an MCP server calls `McpManager.approve(name, digest)`.
-4. **Hooks.** `loadHookGroups(resolved.hooks)` then `createCommandHooks(groups, { env, runner:
+4. **Hooks (next).** `loadHookGroups(resolved.hooks)` then `createCommandHooks(groups, { env, runner:
    createProcessRunner(...), notice })`. Combine: `combineHooks(checkpointHooks(service),
    commandHooks, reviewer)` with the checkpoint hooks **first**.
-5. **Checkpoints.** One `CheckpointService` per session: `new CheckpointService({ fs:
+5. **Checkpoints (next).** One `CheckpointService` per session: `new CheckpointService({ fs:
    nodeCheckpointFs, dir: checkpointDir(base, rootReal), roots, sessionId })`. Pass
    `service.beforeWrite` as `ToolContext.beforeWrite`. `/rewind` and the rewind UI use
    `turns()`, `planRewind(turn)`, `apply(plan, { force })`, `canRedo()` and `planRedo()`; after
    a rewind, `SessionLog.truncateAfter` cuts the conversation. Run it only while the agent is
    idle. Call `pruneStore` on a schedule.
-6. **MCP.** `loadMcpConfig({ home, root, read, platform })`, then `new McpManager({ root, home,
+6. **MCP (next).** `loadMcpConfig({ home, root, read, platform })`, then `new McpManager({ root, home,
    entries, policy, trust, tools: registry, env, onStatus })` and `start()`. Call `update(entries,
    policy)` when `.mcp.json`, `.encode/mcp.json` or the settings change. `McpManager.callTool`
    is what `ExternalTool.run` calls. The approval policy turns `{ type: 'external', server }`
    into the rule query `{ type: 'mcp', server, tool: tool.mcp.ruleTool }`. Add
    `instructions()` to the system prompt as outside text, never as instructions.
-7. **Windows details the core owns.**
-   - `programs.ts` should use `GIT_SAFETY_CONFIG` and `withGitSafety` from `@encode/permissions`.
-   - PowerShell lookup must include `.ps1`.
-   - M0's skills read `.eNCode/skills` where settings use `.encode`; one spelling has to win.
+7. **Windows details the core owns (done).**
+   - The git settings and `withGitSafety` live in `@encode/permissions`; the agent's environment, the
+     terminal and the status bar's `git status` use them (and set `GIT_OPTIONAL_LOCKS=0`, so a status
+     does not rewrite the index and run the repository's hook). A test checks that the agent's
+     environment is one the rules accept for git.
+   - The program lookup the disk check uses includes `.ps1` scripts on Windows.
+   - Skills live in `.encode/skills`, as the settings do; the text that said `.eNCode` is corrected.
 
 ## Later M3 pull requests (not in this one)
 

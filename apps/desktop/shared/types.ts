@@ -203,14 +203,68 @@ export interface ApprovalRequest {
    * rest of the session. When it is set (true or false), the card also offers a note on a refusal.
    */
   grantable?: boolean
+  /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
+  always?: { label: string; rules: string[] }
 }
 
-/** What you answer to an approval: yes or no, with a note to the agent on a refusal, or "for this session". */
+/** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */
+export type RuleScope = 'user' | 'project' | 'local'
+
+/**
+ * What you answer to an approval: yes or no, with a note to the agent on a refusal, "for this session", or "always"
+ * (saves the rules the request offered in the settings file `scope` names; the private file of the project by default).
+ */
 export interface ApprovalAnswer {
   approved: boolean
   note?: string
-  remember?: 'session'
+  remember?: 'session' | 'always'
+  scope?: RuleScope
 }
+
+/** One permission rule as the Permissions screen lists it. */
+export interface PermissionRuleView {
+  behavior: 'allow' | 'ask' | 'deny'
+  text: string
+  /** Where it is written. */
+  scope: 'user' | 'project' | 'local' | 'cli'
+  /** False for a rule of the folder's that waits for the person to trust the folder and approve its settings. */
+  active: boolean
+}
+
+/** A folder's settings, trust and rules as the Permissions screen shows them. */
+export interface PermissionsReport {
+  root: string
+  trusted: boolean
+  /** Why trusting this folder deserves a second look (the home folder, a drive root), or null. */
+  trustWarning: string | null
+  /** Whether what the folder's own settings grant applies. */
+  configApproved: boolean
+  /** What the folder's settings would grant, one line per file, while it waits. */
+  heldBack: string[]
+  /** The text of what waits, to read before approving it. */
+  waiting: Array<{ file: string; text: string }>
+  problems: string[]
+  /** Why the agent may run nothing here until the settings are fixed, or null. */
+  broken: string | null
+  rules: PermissionRuleView[]
+  additionalDirectories: string[]
+  /** Names only. */
+  envNames: string[]
+  /** The mode settings ask sessions to start in, if any. */
+  defaultMode?: string
+  files: Record<'user' | 'project' | 'local', string>
+}
+
+/** What the Permissions screen can do to a folder's settings. */
+export type PermissionsAction =
+  | { type: 'trust'; acknowledged?: boolean }
+  | { type: 'approve' }
+  | { type: 'revoke' }
+  | { type: 'add-rule'; scope: RuleScope; behavior: 'allow' | 'ask' | 'deny'; text: string }
+  | { type: 'remove-rule'; scope: RuleScope; behavior: 'allow' | 'ask' | 'deny'; text: string }
+
+/** The folder as it is after an action, with what happened in words. */
+export type PermissionsOutcome = { ok: true; report: PermissionsReport; note?: string } | { ok: false; reason: string; report: PermissionsReport }
 
 export interface ToolCall {
   id: string
@@ -500,5 +554,11 @@ export interface EncodeApi {
     read(name: string): Promise<string>
     create(name: string, description?: string): Promise<SkillInfo>
     openFolder(): Promise<void>
+  }
+  permissions: {
+    /** The open folder's settings, trust and rules; null when no folder is open. */
+    report(): Promise<PermissionsReport | null>
+    /** Does something to the open folder's settings and answers with the folder as it stands. */
+    act(action: PermissionsAction): Promise<PermissionsOutcome>
   }
 }

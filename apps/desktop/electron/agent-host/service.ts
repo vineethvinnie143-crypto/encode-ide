@@ -9,7 +9,7 @@
  */
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
-import type { ModelAlert, ModelStatus } from '../../shared/types'
+import type { ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 
 export interface HostProcess {
@@ -115,6 +115,16 @@ export class AgentHostService {
   /** Lifts what a refused key or a payment problem set, and reads the model lists again. */
   async modelRecheck(): Promise<void> {
     await (await this.ready()).request('modelRecheck', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** A folder's settings, trust and permission rules. */
+  async permissionsReport(root: string): Promise<PermissionsReport> {
+    return (await this.ready()).request('permissionsReport', { root }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Does something to a folder's settings; the folder as it stands afterwards comes back. */
+  async permissionsAct(root: string, action: PermissionsAction): Promise<PermissionsOutcome> {
+    return (await this.ready()).request('permissionsAct', { root, action }, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
   private ready(): Promise<Peer<MainApi, DesktopHostApi>> {

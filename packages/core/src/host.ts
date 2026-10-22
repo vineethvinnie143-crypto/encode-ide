@@ -27,11 +27,11 @@ import {
   type ToolContext,
   type WebAccess,
 } from '@encode/tools'
-import { createDefaultAssessor } from './approval'
-import type { AgentHooks } from './hooks'
+import { createDefaultAssessor, refuseEverything, type RuleJudge } from './approval'
+import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
-import { AgentSession, type SessionEnv } from './session'
+import { AgentSession, type RememberResult, type SessionEnv } from './session'
 import type { SessionLog } from './session-records'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
@@ -45,10 +45,33 @@ import type {
   ApprovalAnswer,
   BackgroundJob,
   PlanRequest,
+  RuleScope,
   SessionGoal,
   SessionSummary,
   TodoItem,
 } from './ui'
+
+/**
+ * The parts of a session's environment that depend on the folder it works in and on the settings found there:
+ * which rules apply, whether the folder is trusted, which hooks run. Made once for each session when it opens
+ * (see `HostOptions.scope`); what changes later, a rule the user adds or a settings file that is edited, is read
+ * again by `refresh` before each tool call is judged.
+ */
+export interface SessionScope {
+  /** Run before the host's own hooks. */
+  hooks?: AgentHooks
+  /** Replaces the host's assessor of shell lines. */
+  assessor?: ShellCommandAssessor
+  rules?: RuleJudge
+  extraRoots?: () => readonly string[]
+  refresh?: () => Promise<void>
+  remember?(rules: string[], scope: RuleScope): Promise<RememberResult>
+  beforeWrite?: ToolContext['beforeWrite']
+  /** Options for this session's shells, asked for each time one is made, merged over the host's. */
+  shell?: () => Omit<AgentShellOptions, 'root'>
+  /** The session closed: let go of what was held for it. */
+  release?: () => Promise<void>
+}
 
 export interface HostOptions {
   /** Where the session logs live. */
@@ -66,6 +89,8 @@ export interface HostOptions {
   platform?: NodeJS.Platform
   hooks?: AgentHooks
   assessor?: ShellCommandAssessor
+  /** Settings, trust, rules, hooks and checkpoints of the folder a session works in. Asked once for each session that has a folder. */
+  scope?(request: { sessionId: string; root: string }): SessionScope | Promise<SessionScope>
   web?: WebAccess
   /** Options for the agent's shells: sandboxing, variables to keep. */
   shell?: Omit<AgentShellOptions, 'root'>
@@ -91,6 +116,11 @@ export interface HostOptions {
 }
 
 const NO_SESSION = 'That session does not exist.'
+
+/** The scope of a session whose settings could not be loaded: nothing runs until they can. */
+function refusing(error: unknown): SessionScope {
+  return refuseEverything(`The settings of this folder could not be loaded (${error instanceof Error ? error.message : String(error)}), so nothing runs here until they can.`)
+}
 
 async function realPath(dir: string): Promise<string> {
   try {
@@ -146,24 +176,39 @@ export class AgentHost {
     ]
   }
 
-  private envFor(root: string): SessionEnv {
+  private shellOptions(scope: SessionScope | undefined): Omit<AgentShellOptions, 'root'> {
+    const own = scope?.shell?.()
+    if (!own) return { ...this.o.shell }
+    const base = this.o.shell ?? {}
+    const keepEnv = [...(base.keepEnv ?? []), ...(own.keepEnv ?? [])]
+    const extraEnv = { ...base.extraEnv, ...own.extraEnv }
+    return { ...base, ...own, ...(keepEnv.length ? { keepEnv } : {}), ...(Object.keys(extraEnv).length ? { extraEnv } : {}) }
+  }
+
+  private envFor(root: string, scope?: SessionScope): SessionEnv {
     const { o } = this
+    const beforeWrite = scope?.beforeWrite ?? o.beforeWrite
     return {
       root,
       home: this.home,
       platform: this.platform,
       client: o.client,
       settings: o.settings,
-      hooks: o.hooks ?? {},
-      assessor: this.assessor,
+      hooks: scope?.hooks ? combineHooks(scope.hooks, o.hooks) : (o.hooks ?? {}),
+      assessor: scope?.assessor ?? this.assessor,
+      ...(scope?.rules ? { rules: scope.rules } : {}),
+      ...(scope?.extraRoots ? { extraRoots: scope.extraRoots } : {}),
+      ...(scope?.refresh ? { refresh: scope.refresh } : {}),
+      ...(scope?.remember ? { remember: scope.remember } : {}),
+      ...(scope?.release ? { release: scope.release } : {}),
       web: this.web,
-      createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...o.shell, root, platform: this.platform })),
+      createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
       skills: createSkills(() => this.skillSources(root)),
       agentSources: () => this.agentSources(root),
       userDir: this.userDir,
       // What the agent may read without asking besides the workspace: skills and the user's own folder.
       readRoots: () => [this.userDir, ...this.skillSources(root).map((source) => source.dir)],
-      ...(o.beforeWrite ? { beforeWrite: o.beforeWrite } : {}),
+      ...(beforeWrite ? { beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
       ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
       ...(o.reviewPlan ? { reviewPlan: o.reviewPlan } : {}),
@@ -179,7 +224,18 @@ export class AgentHost {
 
   private async make(log: SessionLog): Promise<AgentSession> {
     const project = log.snapshot().marks.projectRoot ?? this.workspaceRoot
-    const session = new AgentSession(log, this.envFor(project ? await realPath(project) : ''))
+    const root = project ? await realPath(project) : ''
+    let scope: SessionScope | undefined
+    if (root && this.o.scope) {
+      try {
+        scope = await this.o.scope({ sessionId: log.id, root })
+      } catch (error) {
+        // Without its rules a session must not run with the permissive defaults: it opens, and every tool call fails.
+        this.o.warn?.(`Could not load the settings of ${root}: ${error instanceof Error ? error.message : String(error)}`)
+        scope = refusing(error)
+      }
+    }
+    const session = new AgentSession(log, this.envFor(root, scope))
     this.bornAt.set(session, this.epoch)
     this.loaded.set(log.id, session)
     return session

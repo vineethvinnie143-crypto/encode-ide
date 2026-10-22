@@ -6,7 +6,7 @@
  */
 import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
-import type { ApprovalPolicy, ModelAlert, ModelStatus } from '../../shared/types'
+import type { ApprovalPolicy, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { RouterSettings } from './router-settings'
 
 /** What the host needs to know about the user's settings, and nothing else of them. */
@@ -60,6 +60,10 @@ export type DesktopHostRequests = HostRequests & {
   modelCheck: { params: { profileId: string; model: string }; result: ModelCheckResult }
   /** Lifts what a refused key or a payment problem set, reads the model lists again. */
   modelRecheck: { params: undefined; result: void }
+  /** A folder's settings, trust and permission rules, for the Permissions screen. */
+  permissionsReport: { params: { root: string }; result: PermissionsReport }
+  /** Does something to a folder's settings; answers with the folder as it stands afterwards. */
+  permissionsAct: { params: { root: string; action: PermissionsAction }; result: PermissionsOutcome }
 }
 
 /** What the host serves. */

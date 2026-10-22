@@ -51,6 +51,24 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
   pages the agent fetches. There is no telemetry and no update check.
 
+## Permissions and trust
+
+- A folder you open is **not trusted**. Its own settings (`.encode/settings.json`) cannot allow anything until you
+  trust the folder and approve what they say; they can still forbid things. Open **Settings → Permissions** to see
+  the folder's state, what its settings are waiting to grant, and every rule that applies.
+- Approve a command with **Always allow**. The card shows the rule it will save and where (by default
+  `.encode/settings.local.json`, which only you have, and git is asked to ignore it). Run the same command again: it
+  should not ask. A different command should.
+- Add a rule by hand under **Settings → Permissions** (for example, never allow `Read(./.env)`) and watch the agent
+  refuse it. Remove it again.
+- Change `.encode/settings.json` yourself, or pull a change to it: a banner should appear above the message box, and
+  the rules it adds should wait until you approve.
+- Put a typo in a settings file (`{ "permissions": ` and nothing else). Nothing should run in that folder, and the
+  banner and the Permissions tab should say which file and what is wrong. Fix the file; it should work again.
+
+What is most useful to hear: anything that asked when a rule said it would not, anything that did not ask when it
+should have, and any message you could not understand.
+
 ## Computer use
 
 **Settings → Agent → Let the agent use this computer** is off until you turn it on. With it on, ask the agent to do

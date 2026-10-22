@@ -23,6 +23,7 @@ import AppearanceSettings from './AppearanceSettings'
 import { uniqueName } from './models/connect'
 import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
 import RolesSettings from './models/RolesSettings'
+import PermissionsPane from './permissions/PermissionsPane'
 
 export default function SettingsModal() {
   const settings = useSettings((state) => state.settings)
@@ -230,6 +231,9 @@ export default function SettingsModal() {
             </button>
             <button className={tab === 'agent' ? 'is-on' : ''} onClick={() => setTab('agent')}>
               Agent
+            </button>
+            <button className={tab === 'permissions' ? 'is-on' : ''} onClick={() => setTab('permissions')}>
+              Permissions
             </button>
             <button className={tab === 'appearance' ? 'is-on' : ''} onClick={() => setTab('appearance')}>
               Appearance
@@ -529,6 +533,8 @@ export default function SettingsModal() {
                 />
               </div>
             </div>
+          ) : tab === 'permissions' ? (
+            <PermissionsPane />
           ) : (
             <AppearanceSettings
               value={draft.appearance}
@@ -539,15 +545,25 @@ export default function SettingsModal() {
 
         <footer className="settings-footer">
           <span className="settings-hint">
-            Model calls go straight from this app to your provider. No eNCode server is involved.
+            {tab === 'permissions'
+              ? 'Permission changes apply at once. Nothing here waits for Save.'
+              : 'Model calls go straight from this app to your provider. No eNCode server is involved.'}
           </span>
           <div className="settings-footer-actions">
-            <button className="btn ghost" onClick={close}>
-              Cancel
-            </button>
-            <button className="btn primary" onClick={() => void onSave()}>
-              Save
-            </button>
+            {tab === 'permissions' ? (
+              <button className="btn primary" onClick={close}>
+                Done
+              </button>
+            ) : (
+              <>
+                <button className="btn ghost" onClick={close}>
+                  Cancel
+                </button>
+                <button className="btn primary" onClick={() => void onSave()}>
+                  Save
+                </button>
+              </>
+            )}
           </div>
         </footer>
       </div>

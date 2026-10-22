@@ -1,7 +1,7 @@
 import { create } from '../store'
 
 export type SidebarView = 'explorer' | 'search' | 'git'
-export type SettingsTab = 'models' | 'roles' | 'agent' | 'appearance'
+export type SettingsTab = 'models' | 'roles' | 'agent' | 'permissions' | 'appearance'
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'
 

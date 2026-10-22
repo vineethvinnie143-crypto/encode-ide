@@ -79,6 +79,14 @@ const SCENARIOS = {
     { text: 'Creating the file.', call: { name: 'Write', args: { file_path: 'escalation.txt', content: 'must not exist\n' } } },
     { text: 'Subagent finished.' },
   ],
+  // A command asks the first time. "Always allow" saves a rule for it, so the same command runs without asking, and a
+  // different one still asks.
+  'always-allow': [
+    { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo always-allow-ok', description: 'Echo a word' } } },
+    { text: 'Running it again.', call: { name: 'Bash', args: { command: 'echo always-allow-ok', description: 'Echo a word' } } },
+    { text: 'Now another command.', call: { name: 'Bash', args: { command: 'echo another-command-ok', description: 'Echo another word' } } },
+    { text: 'Always allow check finished.' },
+  ],
   // The Computer tool lists the windows (nothing to approve), then a command waits for the person: the banner that says the
   // agent uses the computer reads "waiting" meanwhile, and its Stop button or Ctrl+Alt+Esc ends the turn (Windows only).
   'computer-check': [

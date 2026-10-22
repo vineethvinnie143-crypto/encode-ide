@@ -224,11 +224,27 @@ describe('createShellAssessor', () => {
     assert.equal((await assess('cat .env', context)).decision, 'deny')
     assert.equal((await assess('curl x', context)).decision, 'deny')
     assert.equal((await assess('git log', context)).decision, 'ask')
-    assert.deepEqual(await assess('npm test', context), { decision: 'allow', reason: 'Allowed by user rule Bash(npm test:*)', source: 'rule' })
+    assert.deepEqual(await assess('npm test', context), { decision: 'allow', reason: 'Allowed by user rule Bash(npm test:*)', source: 'rule', readOnly: false })
     const readOnly = await assess('cat README.md', context)
     assert.equal(readOnly.decision, 'allow')
     assert.equal(readOnly.source, 'read-only')
     assert.deepEqual(await assess('rm x', context), { decision: 'ask', reason: 'rm is not on the read-only list', source: 'default' })
+  })
+
+  it('says whether a line a rule allows is also proven read-only, which is all a Read Only policy runs', async () => {
+    const assess = createShellAssessor({
+      rules: rules({ allow: ['Bash(cat:*)', 'Bash(rm:*)'] }),
+      trusted: true,
+      platform: 'posix',
+      probe: { rootReal: '/ws', realPath: async (target) => target.replace('/ws/link', '/home/u'), locate: () => ['/usr/bin/cat'], exists: async () => false },
+    })
+    assert.equal((await assess('cat README.md', context)).readOnly, true)
+    assert.equal((await assess('rm x', context)).readOnly, false)
+    // The rule allows it; the disk says it reads outside the workspace, so nothing proves it read-only.
+    const outside = await assess('cat link/.bashrc', context)
+    assert.equal(outside.decision, 'allow')
+    assert.equal(outside.source, 'rule')
+    assert.equal(outside.readOnly, false)
   })
 
   it('checks read-only verdicts on disk when given a probe', async () => {

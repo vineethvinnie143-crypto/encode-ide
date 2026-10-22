@@ -47,6 +47,9 @@ importers:
       '@encode/tools':
         specifier: workspace:*
         version: link:../../packages/tools
+      '@encode/workspace':
+        specifier: workspace:*
+        version: link:../../packages/workspace
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -359,6 +362,31 @@ importers:
       '@encode/providers':
         specifier: workspace:*
         version: link:../providers
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/workspace:
+    dependencies:
+      '@encode/config':
+        specifier: workspace:*
+        version: link:../config
+      '@encode/core':
+        specifier: workspace:*
+        version: link:../core
+      '@encode/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      '@encode/tools':
+        specifier: workspace:*
+        version: link:../tools
     devDependencies:
       '@encode/testkit':
         specifier: workspace:*

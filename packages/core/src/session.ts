@@ -43,6 +43,7 @@ import {
 } from '@encode/tools'
 import { estimateTokens } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
+import type { RuleJudge } from './approval'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
@@ -53,7 +54,7 @@ import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
 import { builtinDefinitions, createSubagents, loadAgentDefinitions, type AgentSource } from './subagents'
 import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
-import { AgentAbortedError, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Surface, type TurnEnd } from './types'
+import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Surface, type TurnEnd } from './types'
 import {
   previewOf,
   type AgentEvent,
@@ -67,6 +68,7 @@ import {
   type BackgroundJob,
   type ConversationEntry,
   type PlanRequest,
+  type RuleScope,
   type SessionGoal,
   type SessionSummary,
   type TodoItem,
@@ -87,6 +89,16 @@ export interface SessionEnv {
   settings: () => AgentSettings
   hooks: AgentHooks
   assessor: ShellCommandAssessor
+  /** The user's rules for reads, edits, sites and outside tools (see approval.ts). */
+  rules?: RuleJudge
+  /** Folders outside the workspace the user counts as part of it. */
+  extraRoots?: () => readonly string[]
+  /** Brings the rules and trust up to date with their files; awaited before each tool call is judged. Never rejects. */
+  refresh?: () => Promise<void>
+  /** Saves the rules "Always allow" offered, in the settings file `scope` names. */
+  remember?(rules: string[], scope: RuleScope): Promise<RememberResult>
+  /** Called once when the session closes, for what the environment holds on its behalf. */
+  release?(): Promise<void>
   web: WebAccess
   /** A shell for one agent; each session (and each subagent) gets its own, so working directories do not mix. */
   createShell: () => ManagedShell
@@ -119,6 +131,12 @@ export interface SessionEnv {
   /** Name a session with one small call to the utility model once its first turn is over. Default true. */
   nameSessions?: boolean
 }
+
+/** What saving an "Always allow" rule came to. */
+export type RememberResult =
+  /** `where` names the file for people ("your user settings", ".encode/settings.local.json"); `approved` is false when the rule waits for the user to review the folder's settings. */
+  | { ok: true; where: string; approved: boolean; changed: boolean }
+  | { ok: false; reason: string }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -203,7 +221,7 @@ export class AgentSession {
   private current: Promise<unknown> = Promise.resolve()
   private chain: Promise<unknown> = Promise.resolve()
   private gateTail: Promise<unknown> = Promise.resolve()
-  private readonly approvals = new Map<string, { request: ApprovalRequest; grant?: string; finish: (result: ApprovalResult) => void }>()
+  private readonly approvals = new Map<string, { request: ApprovalRequest; grant?: string; always?: AlwaysAllow; finish: (result: ApprovalResult) => void }>()
   private readonly questions = new Map<string, { request: AskRequest; finish: (answer: string) => void }>()
   /** What the user approved for the rest of the session; never stored. */
   private readonly grants = new Set<string>()
@@ -501,6 +519,7 @@ export class AgentSession {
       input: prompt.input,
       ...(prompt.preview ? { preview: prompt.preview } : {}),
       grantable: Boolean(prompt.grant),
+      ...(prompt.always && this.env.remember ? { always: { label: prompt.always.label, rules: [...prompt.always.rules] } } : {}),
     }
     return new Promise<ApprovalResult>((resolve) => {
       const finish = (result: ApprovalResult) => {
@@ -510,7 +529,7 @@ export class AgentSession {
         if (!signal.aborted && !this.approvals.size && !this.questions.size) this.setStatus('running-tool')
       }
       const onAbort = () => finish({ approved: false })
-      this.approvals.set(id, { request, ...(prompt.grant ? { grant: prompt.grant } : {}), finish })
+      this.approvals.set(id, { request, ...(prompt.grant ? { grant: prompt.grant } : {}), ...(prompt.always && this.env.remember ? { always: prompt.always } : {}), finish })
       signal.addEventListener('abort', onAbort, { once: true })
       this.setStatus('awaiting-approval')
       this.send({ type: 'approval-request', request: structuredClone(request) })
@@ -546,7 +565,28 @@ export class AgentSession {
     const note = typeof detailed?.note === 'string' ? detailed.note.trim().slice(0, 2_000) : ''
     if (approved && detailed?.remember === 'session' && pending.grant) this.grants.add(pending.grant)
     pending.finish({ approved, ...(!approved && note ? { note } : {}) })
+    if (approved && detailed?.remember === 'always' && pending.always) this.saveRules(pending.always, detailed.scope)
     return true
+  }
+
+  /** Saves what "Always allow" offered, and says in the transcript where it went (or why it did not). */
+  private saveRules(always: AlwaysAllow, scope: RuleScope | undefined): void {
+    const remember = this.env.remember
+    if (!remember) return
+    const chosen: RuleScope = scope === 'user' || scope === 'project' || scope === 'local' ? scope : 'local'
+    const list = always.rules.join(', ')
+    void remember([...always.rules], chosen).then(
+      (result) => {
+        if (this.disposed) return
+        if (!result.ok) this.notice(`Could not save ${list}: ${result.reason}`, 'error')
+        else if (!result.changed) this.notice(`${list} was already in ${result.where}.`)
+        else if (result.approved) this.notice(`Saved ${list} in ${result.where}. eNCode will not ask about ${always.label} again.`)
+        else this.notice(`Saved ${list} in ${result.where}. It starts to apply once you review this folder's settings (Settings, Permissions).`)
+      },
+      (error) => {
+        if (!this.disposed) this.notice(`Could not save ${list}: ${errorMessage(error)}`, 'error')
+      },
+    )
   }
 
   resolveAnswer(requestId: string, answer: string): boolean {
@@ -680,6 +720,9 @@ export class AgentSession {
       createShell: env.createShell,
       approvedHosts: this.approvedHosts,
       assessor: env.assessor,
+      ...(env.rules ? { rules: env.rules } : {}),
+      ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
+      ...(env.refresh ? { refresh: env.refresh } : {}),
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
     })
     return new AgentLoop({
@@ -696,6 +739,9 @@ export class AgentSession {
       approvedHosts: this.approvedHosts,
       approvedApps: this.approvedApps,
       assessor: env.assessor,
+      ...(env.rules ? { rules: env.rules } : {}),
+      ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
+      ...(env.refresh ? { refresh: env.refresh } : {}),
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       preface: this.preface,
     })
@@ -1016,6 +1062,7 @@ export class AgentSession {
     await this.jobsManager.dispose().catch(() => undefined)
     await this.shell.dispose().catch(() => undefined)
     this.letGoOfDesktop()
+    await this.env.release?.().catch(() => undefined)
     await this.log.close().catch(() => undefined)
   }
 }

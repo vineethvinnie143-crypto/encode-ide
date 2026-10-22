@@ -19,4 +19,4 @@ export const POLICY_DESCRIPTIONS: Record<ApprovalPolicy, string> = {
 
 /** What asks under every policy but Full access; see electron/agent/approval.ts. */
 export const ALWAYS_ASKS_NOTE =
-  'Except under Full access, eNCode always asks before changing anything inside .git or .eNCode, and before the agent first contacts a website in a session.'
+  'Except under Full access, eNCode always asks before changing anything inside .git or .encode, and before the agent first contacts a website in a session.'

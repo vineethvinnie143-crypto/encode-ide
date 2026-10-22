@@ -57,6 +57,12 @@ export interface SettingsSource {
   settings: EncodeSettings
   /** What was wrong with the file or its entries; each entry was skipped. */
   problems: string[]
+  /**
+   * The problems after which a restriction may be missing: the file could not be read or parsed, or a deny or ask
+   * rule was skipped. Skipping an allow rule only withholds a convenience; skipping a deny rule lets through what
+   * the user meant to stop, so whoever applies the settings must not carry on as if nothing were lost.
+   */
+  unsafe: string[]
 }
 
 /** Reads a file as text; null when it does not exist. Injected so loading is testable. */
@@ -77,24 +83,36 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function stringList(value: unknown, where: string, problems: string[]): string[] | undefined {
+function stringList(value: unknown, where: string, problems: string[], unsafe?: string[]): string[] | undefined {
   if (value === undefined) return undefined
+  const report = (problem: string) => {
+    problems.push(problem)
+    unsafe?.push(problem)
+  }
   if (!Array.isArray(value)) {
-    problems.push(`${where} must be a list of strings`)
+    report(`${where} must be a list of strings`)
     return undefined
   }
   const out: string[] = []
   for (const [index, entry] of value.entries()) {
     if (typeof entry === 'string' && entry.trim()) out.push(entry)
-    else problems.push(`${where}[${index}] must be a non-empty string`)
+    else report(`${where}[${index}] must be a non-empty string`)
   }
   return out
 }
 
+/** The result of reading settings: what is valid, what was wrong, and which of that may have lost a restriction. */
+export interface ParsedSettings {
+  settings: EncodeSettings
+  problems: string[]
+  unsafe: string[]
+}
+
 /** Checks a parsed settings object; keeps what is valid, reports the rest. */
-export function validateSettings(raw: unknown): { settings: EncodeSettings; problems: string[] } {
+export function validateSettings(raw: unknown): ParsedSettings {
   const problems: string[] = []
-  if (!isObject(raw)) return { settings: {}, problems: ['settings must be a JSON object'] }
+  const unsafe: string[] = []
+  if (!isObject(raw)) return { settings: {}, problems: ['settings must be a JSON object'], unsafe: ['settings must be a JSON object'] }
   const settings: EncodeSettings = {}
   for (const [key, value] of Object.entries(raw)) {
     if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
@@ -105,11 +123,12 @@ export function validateSettings(raw: unknown): { settings: EncodeSettings; prob
       case 'permissions': {
         if (!isObject(value)) {
           problems.push('permissions must be an object')
+          unsafe.push('permissions must be an object')
           break
         }
         const permissions: PermissionSettings = {}
         for (const behavior of ['allow', 'ask', 'deny'] as const) {
-          const list = stringList(value[behavior], `permissions.${behavior}`, problems)
+          const list = stringList(value[behavior], `permissions.${behavior}`, problems, behavior === 'allow' ? undefined : unsafe)
           if (list) permissions[behavior] = list
         }
         if (value.defaultMode !== undefined) {
@@ -153,17 +172,18 @@ export function validateSettings(raw: unknown): { settings: EncodeSettings; prob
         settings[key] = value
     }
   }
-  return { settings, problems }
+  return { settings, problems, unsafe }
 }
 
 /** Parses a settings file's text: strict JSON, with a leading byte-order mark allowed. */
-export function parseSettings(text: string): { settings: EncodeSettings; problems: string[] } {
-  if (text.length > MAX_SETTINGS_BYTES) return { settings: {}, problems: ['the file is larger than 1 MB'] }
+export function parseSettings(text: string): ParsedSettings {
+  if (text.length > MAX_SETTINGS_BYTES) return { settings: {}, problems: ['the file is larger than 1 MB'], unsafe: ['the file is larger than 1 MB'] }
   let raw: unknown
   try {
     raw = JSON.parse(text.replace(/^\uFEFF/, ''))
   } catch (error) {
-    return { settings: {}, problems: [`not valid JSON: ${error instanceof Error ? error.message : String(error)}`] }
+    const problem = `not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    return { settings: {}, problems: [problem], unsafe: [problem] }
   }
   return validateSettings(raw)
 }
@@ -193,7 +213,8 @@ export async function loadSettingsSources(options: {
     try {
       text = await options.read(files[scope])
     } catch (error) {
-      sources.push({ scope, file: files[scope], settings: {}, problems: [`could not be read: ${error instanceof Error ? error.message : String(error)}`] })
+      const problem = `could not be read: ${error instanceof Error ? error.message : String(error)}`
+      sources.push({ scope, file: files[scope], settings: {}, problems: [problem], unsafe: [problem] })
       continue
     }
     if (text === null) continue
@@ -249,6 +270,8 @@ export interface EffectiveSettings {
   sandbox: Array<{ scope: SettingsScope; config: unknown }>
   /** Problems from every source, prefixed with the file they came from. */
   problems: string[]
+  /** The problems after which a restriction may be missing (see SettingsSource.unsafe), prefixed the same way. */
+  unsafe: string[]
   /** What folder settings would grant once approved; empty when they apply or grant nothing. */
   heldBack: string[]
 }
@@ -268,11 +291,13 @@ export function resolveSettings(sources: readonly SettingsSource[], options: { f
     mcp: { enableAll: false, enabled: [], disabled: [] },
     sandbox: [],
     problems: [],
+    unsafe: [],
     heldBack: [],
   }
   for (const source of sources) {
     const label = source.file ?? 'command line'
     for (const problem of source.problems) out.problems.push(`${label}: ${problem}`)
+    for (const problem of source.unsafe) out.unsafe.push(`${label}: ${problem}`)
     const { settings } = source
     const grants = !isFolderSource(source.scope) || options.folderApproved
     const ruleSource: RuleSource = source.scope

@@ -480,24 +480,28 @@ Status: **Mitigated**, or **Partial** (a residual risk is listed below).
 
 Written with the pull request that added `@encode/config`, `@encode/hooks`,
 `@encode/checkpoints` and `@encode/mcp` and extended `@encode/permissions`. These packages
-are libraries with their own tests; the core wires them in after it merges (RP7). The OS
-sandbox, search providers, subagent definitions and the reviewer gate are later M3 pull
-requests and get their rows when they land.
+are libraries with their own tests. The permission rules, workspace trust, "Always allow" and
+the Permissions screen are wired into the app (0055, P11 to P13); hooks, checkpoints and the
+MCP client are still waiting to be (RP7). The OS sandbox, search providers, subagent
+definitions and the reviewer gate are later M3 pull requests and get their rows when they land.
 
 ### Threats and controls
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Partial (RP7) |
+| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Mitigated for rules, environment and extra folders; hooks and MCP wait for their wiring (RP7) |
 | P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). | Partial (RP7) |
 | P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). | Partial (RP1) |
 | P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). | Partial (RP2) |
-| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Partial (RP7) |
-| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). | Partial (RP3) |
+| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Mitigated; the shell assessor is in the app (RP3 for what text cannot see) |
+| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). The file tools ask the rules about the real path. | Mitigated for the file tools; partial for shell words (RP3) |
 | P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0042). | Partial (RP6) |
 | P8 | Rewind overwrites the user's work or writes outside the workspace | Changed files are conflicts and need force. Each target is checked on its real path (inside the workspace, never in `.git` or `.encode`), restored bytes are checked against their hash, and the rewind is journaled first (0043). | Mitigated (RP4) |
 | P9 | A rewind plan is altered on its way through the UI | The plan carries a fingerprint, and applying it re-derives everything from the manifest and the disk (0043). | Mitigated |
-| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0040, 0041). | Mitigated |
+| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0040, 0041). The card shows the exact rules it will write and where, and the default is the person's private settings (0055). | Mitigated |
+| P11 | A settings file that cannot be read, or an entry that cannot be understood, leaves the app on defaults that allow what the file denied | The folder's snapshot is `broken` and every tool refuses with the reason; the Permissions screen and the banner above the composer say what is wrong. Reads are retried, and a missing file is not broken (0055). | Mitigated |
+| P12 | The assessor, the card and the Permissions screen disagree because each read the files on its own, or a stale picture decides | One snapshot per folder serves all three and is rebuilt when the text of any watched file differs from the text it was built from. A rule saved by "Always allow" applies after the card has been answered, and the notice says whether it applies now or waits (0055). | Mitigated |
+| P13 | The page, or something it loads, trusts a folder or saves a rule | Trust, approve, revoke and rule changes are one IPC handler that serves only the app's top frame and checks the action's shape and size; trusting a home folder or a drive root needs a second confirmation; the agent has no tool for any of it, and a write into `.encode/` changes the folder's digest, so what it grants waits for the person (0010, 0055). | Mitigated |
 
 ### Residual risks
 
@@ -519,10 +523,10 @@ requests and get their rows when they land.
 - **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
   for. A folder cannot install one without the user's approval, and the sandbox will not cover
   them.
-- **RP7. The packages are not in the app yet.** Until the core adopts them (the wiring pull
-  request, now that the core is in `main`), none of P1 to P10 acts in the product. `docs/m3-integration.md` lists the
-  wiring.
-  - Owner: the integration pull request.
+- **RP7. Hooks, checkpoints and the MCP client are not in the app yet.** Until they are wired,
+  P2 to P4, P7 to P9 and the hook and server halves of P1 and P4 do not act in the product.
+  `docs/m3-integration.md` lists the wiring; the rules, trust and "Always allow" are done.
+  - Owner: the integration pull requests that follow.
 
 ### Verification
 
@@ -539,5 +543,13 @@ requests and get their rows when they land.
 - `@encode/mcp` talks to an in-memory server, a real HTTP server (JSON, event streams, sessions,
   legacy SSE, redirects) and a real child process, and checks names, configuration, approval,
   the adapter and the manager's restarts.
+- `@encode/workspace` tests the snapshot: rebuilds only on changed text, a failing read retried,
+  a broken file that refuses everything and heals when fixed, a deny entry that cannot be
+  understood failing closed, the trust and approval flow, and the actions the screen may take
+  (shape, size and scope checked).
+- The end-to-end run drives the app: a command asks, "Always allow" saves one rule in the
+  private file and trusts the folder, the same command then runs unasked and a different one
+  asks, settings that arrive from a pull wait behind a banner and the Permissions screen shows
+  them before they are approved, a rule is added and removed by hand, and trust is taken back.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.

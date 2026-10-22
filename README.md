@@ -41,6 +41,12 @@ primary platform; the code stays cross-platform.
   - Full access: nothing asks.
 
   Approval cards say why they ask, and edits show their diff first.
+- **Rules you set, and folders you trust.** **Always allow** on an approval saves a rule for exactly what you
+  approved, in your private settings for the project unless you choose another place, and the same command runs
+  unasked from then on. **Settings → Permissions** lists the rules, takes new ones (allow, always ask, never allow)
+  and shows whether the folder is trusted. A folder you open is not trusted: its own settings can take
+  permissions away but cannot give any until you trust the folder and approve what they say, and a banner tells
+  you when a pull changed them. If a settings file cannot be read, nothing runs in that folder until it is fixed.
 - **Its own look.** Dark or light (or follow Windows), four accents, high contrast,
   compact density and reduced motion, under **Settings → Appearance**. Text is in Windows' own
   fonts at Codex's sizes (Segoe UI 14 px, Consolas 12 px); choose eNCode's Inter and
@@ -215,7 +221,7 @@ apps/desktop/                 the Electron app (@encode/desktop)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
 packages/checkpoints/         what the file tools changed, saved before each change, and put back on request
-packages/config/              settings files and workspace trust (not connected to the app yet)
+packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
 packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
@@ -230,6 +236,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web, and the Computer tool with its Windows helper
+packages/workspace/           a folder's permissions as one snapshot: settings, trust, rules, and what the Permissions screen may do
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
@@ -264,6 +271,9 @@ covers:
   earlier build's sessions;
 - sessions, subagents and Stop;
 - `WebFetch` approvals;
+- permissions: "Always allow" saving a rule and trusting the folder, the same command then running unasked while a
+  different one asks, settings that arrive from a pull waiting behind a banner, the Permissions screen, a rule added
+  and removed by hand, and trust taken back;
 - compaction, with a model whose window is only a little larger than eNCode's own instructions and tools;
 - the About box (version and commit) and the diagnostics report, which must hold no key.
 

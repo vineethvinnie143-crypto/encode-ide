@@ -5,6 +5,7 @@
  * breaks the other stops the build at this file.
  */
 import type * as Core from '@encode/core'
+import type * as Workspace from '@encode/workspace'
 import type * as Ui from '../../shared/types'
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
@@ -22,6 +23,8 @@ export type HostToRenderer = [
   Expect<Same<Core.SessionGoal, Ui.SessionGoal>>,
   Expect<Same<Core.TodoItem, Ui.TodoItem>>,
   Expect<Same<Core.PlanRequest, Ui.PlanRequest>>,
+  Expect<Same<Workspace.WorkspaceReport, Ui.PermissionsReport>>,
+  Expect<Same<Workspace.PermissionsOutcome, Ui.PermissionsOutcome>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -31,4 +34,5 @@ export type RendererToHost = [
   Expect<Same<Exclude<Core.ApprovalAnswer, boolean>, Ui.ApprovalAnswer>>,
   Expect<Same<Core.ApprovalPolicy, Ui.ApprovalPolicy>>,
   Expect<Same<Core.AgentMode, Ui.AgentMode>>,
+  Expect<Same<Workspace.PermissionsAction, Ui.PermissionsAction>>,
 ]

@@ -139,7 +139,7 @@ const PATCH: JsonSchema = {
 const ANSWER: JsonSchema = {
   type: 'object',
   required: ['approved'],
-  properties: { approved: { type: 'boolean' }, note: text(4_000), remember: { const: 'session' } },
+  properties: { approved: { type: 'boolean' }, note: text(4_000), remember: { enum: ['session', 'always'] }, scope: { enum: ['user', 'project', 'local'] } },
 }
 
 /** Request parameters per method; methods without an entry take none. */

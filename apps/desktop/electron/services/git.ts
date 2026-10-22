@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { GIT_SAFETY_CONFIG, withGitSafety } from '@encode/permissions'
 import type { GitChange, GitStatus } from '../../shared/types'
-import { GIT_SAFETY_CONFIG, isFile, searchPath } from './programs'
+import { isFile, searchPath } from './programs'
 import type { WorkspaceService } from './workspace'
 
 const execFileAsync = promisify(execFile)
@@ -14,8 +15,6 @@ function locateGit(): string | null {
   return gitPath
 }
 
-const SAFETY_ARGS = GIT_SAFETY_CONFIG.flatMap(([key, value]) => ['-c', `${key}=${value}`])
-
 const STATUS_LABEL: Record<string, string> = {
   M: 'modified',
   A: 'added',
@@ -25,6 +24,17 @@ const STATUS_LABEL: Record<string, string> = {
   U: 'updated',
   '?': 'untracked',
   '!': 'ignored',
+}
+
+/** The same settings as command-line config too: git before 2.31 knows only that. */
+const SAFETY_ARGS = GIT_SAFETY_CONFIG.flatMap(([key, value]) => ['-c', `${key}=${value}`])
+
+function definedEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') env[key] = value
+  }
+  return env
 }
 
 export class GitService {
@@ -40,7 +50,8 @@ export class GitService {
         timeout: 8000,
         windowsHide: true,
         maxBuffer: 4 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        // The settings that stop the repository's config from starting programs, and no index rewrite (which would run its hooks).
+        env: withGitSafety(definedEnv(), process.platform === 'win32'),
       })
       return this.parse(stdout)
     } catch {

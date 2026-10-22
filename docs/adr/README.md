@@ -44,6 +44,7 @@ say so.
 | [0052](0052-every-model-call-goes-through-the-router-keys-are-asked-for-by-origin.md) | Every model call goes through the router, and keys are asked for by origin | Accepted |
 | [0053](0053-the-windows-desktop-helper-is-our-own-program-built-on-the-machine-from-source-in-the-repository.md) | The Windows desktop helper is our own program, built on the machine from source in the repository | Accepted |
 | [0054](0054-computer-use-is-opt-in-visible-while-it-runs-and-stoppable-from-anywhere.md) | Computer use is opt-in, visible while it runs, and stoppable from anywhere | Accepted |
+| [0055](0055-a-folders-permissions-are-one-snapshot-that-fails-closed.md) | A folder's permissions are one snapshot that fails closed | Accepted, builds on 0040 and 0041 |
 
 ## Template
 

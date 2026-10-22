@@ -7,7 +7,8 @@
  * anywhere, so variables that look like credentials are removed unless the
  * user keeps them by name.
  */
-import { GIT_SAFETY_CONFIG, envKey } from './programs'
+import { withGitSafety } from '@encode/permissions'
+import { envKey } from './programs'
 
 /** Variables kept although their names look like secrets: they point at agents, not keys. */
 const ALWAYS_KEEP = new Set(['SSH_AUTH_SOCK', 'SSH_AGENT_PID', 'GPG_AGENT_INFO', 'SSH_ASKPASS', 'GIT_ASKPASS'])
@@ -90,7 +91,7 @@ export interface AgentEnvironment {
 export function agentEnvironment(base: NodeJS.ProcessEnv | Record<string, string | undefined>, options: AgentEnvironmentOptions = {}): AgentEnvironment {
   const platform = options.platform ?? process.platform
   const keep = new Set((options.keep ?? []).map((name) => name.toUpperCase()))
-  const env: Record<string, string> = {}
+  const own: Record<string, string> = {}
   const removed: string[] = []
   for (const [name, value] of Object.entries(base)) {
     if (typeof value !== 'string') continue
@@ -99,24 +100,16 @@ export function agentEnvironment(base: NodeJS.ProcessEnv | Record<string, string
       removed.push(name)
       continue
     }
-    env[name] = value
+    own[name] = value
   }
 
-  const countKey = envKey(env, 'GIT_CONFIG_COUNT', platform)
-  const count = Number(env[countKey] ?? 0)
-  let index = Number.isInteger(count) && count >= 0 ? count : 0
-  for (const [key, value] of GIT_SAFETY_CONFIG) {
-    env[`GIT_CONFIG_KEY_${index}`] = key
-    env[`GIT_CONFIG_VALUE_${index}`] = value
-    index++
-  }
-  env[countKey] = String(index)
-
+  // The settings that stop a repository's config from starting programs are the permission rules' own: git runs
+  // unasked only in an environment that has exactly these (see gitSafetyProblem).
+  const env = withGitSafety(own, platform === 'win32')
   const set = (name: string, value: string) => {
     env[envKey(env, name, platform)] = value
   }
   // Nobody can answer a prompt or close a pager or an editor.
-  set('GIT_TERMINAL_PROMPT', '0')
   set('GIT_PAGER', 'cat')
   set('PAGER', 'cat')
   set('GIT_EDITOR', 'true')

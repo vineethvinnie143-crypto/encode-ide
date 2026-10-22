@@ -43,6 +43,16 @@ export interface ApprovalPrompt {
   preview?: DiffHunk[]
   /** Names what the user would approve for the rest of the session; absent when each call must be asked. */
   grant?: string
+  /** The rules "Always allow" would save for this call; absent when no rule could vouch for it. */
+  always?: AlwaysAllow
+}
+
+/** What "Always allow" would save: the rules, and what they say in a phrase. */
+export interface AlwaysAllow {
+  /** "npm run build, and anything after it". */
+  label: string
+  /** In permission-rule syntax, as they will be written to the settings file. */
+  rules: string[]
 }
 
 export interface ApprovalResult {
