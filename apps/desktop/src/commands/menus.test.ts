@@ -80,6 +80,23 @@ describe('the command map', () => {
     assert.equal(keys('app.settings'), 'Ctrl+,')
   })
 
+  it('puts the side panel on browser-style tab shortcuts, and the first nine tabs on Ctrl+1 to Ctrl+9', () => {
+    const keys = (id: string) => registry.get(id)?.keys?.[0]
+    assert.equal(keys('panel.newTab'), 'Ctrl+T')
+    assert.equal(keys('panel.closeTab'), 'Ctrl+W')
+    assert.equal(keys('panel.reopenTab'), 'Ctrl+Shift+T')
+    assert.equal(keys('panel.nextTab'), 'Ctrl+Shift+]')
+    assert.equal(keys('panel.prevTab'), 'Ctrl+Shift+[')
+    assert.equal(keys('panel.cycle'), 'Ctrl+Shift+B')
+    assert.equal(keys('panel.full'), 'Ctrl+Alt+F')
+    assert.equal(keys('view.bottomPanel'), 'Ctrl+J')
+    assert.equal(keys('view.terminal'), 'Ctrl+`')
+    for (let n = 1; n <= 9; n++) {
+      assert.deepEqual(registry.get(`panel.tab${n}`)?.keys, [`Ctrl+${n}`])
+      assert.equal(registry.get(`panel.tab${n}`)?.hidden, true)
+    }
+  })
+
   it('lets quit, zoom and full screen work while a dialog is open, and nothing else', () => {
     const global = registry
       .all()
@@ -140,6 +157,15 @@ describe('menus', () => {
     const live = registryWith({ newSession: () => void ran++ })
     itemOf(menuEntries(live, MENUS[0]), 'file.newSession').onSelect()
     assert.equal(ran, 1)
+  })
+
+  it('disable Close tab with no tab open and Reopen with none closed', () => {
+    const none = registryWith({ canClosePanelTab: () => false, canReopenPanelTab: () => false })
+    assert.equal(none.isEnabled('panel.closeTab'), false)
+    assert.equal(none.isEnabled('panel.reopenTab'), false)
+    const some = registryWith({ canClosePanelTab: () => true, canReopenPanelTab: () => true })
+    assert.equal(some.isEnabled('panel.closeTab'), true)
+    assert.equal(some.isEnabled('panel.reopenTab'), true)
   })
 
   it('disable session commands when there is no session', () => {

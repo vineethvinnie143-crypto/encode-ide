@@ -1,19 +1,31 @@
 import { useState } from 'react'
+import { hostOf, usePanels } from '../stores/panels'
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from '../ui/icons'
 
-export default function BrowserPanel() {
-  const [address, setAddress] = useState('')
-  const [src, setSrc] = useState('')
-  const [history, setHistory] = useState<string[]>([])
-  const [index, setIndex] = useState(-1)
+/**
+ * One page in a Browser tab. The tab remembers its address, so it comes back on that page after
+ * Reopen or a restart, and takes the site's name as its title. Back and Forward walk the pages
+ * this tab has shown since it was opened.
+ */
+export default function BrowserPanel({ tabId }: { tabId: string }) {
+  const [start] = useState(() => usePanels.getState().side.tabs.find((tab) => tab.id === tabId)?.url ?? '')
+  const [address, setAddress] = useState(start)
+  const [src, setSrc] = useState(start)
+  const [history, setHistory] = useState<string[]>(start ? [start] : [])
+  const [index, setIndex] = useState(start ? 0 : -1)
   const [reloadKey, setReloadKey] = useState(0)
+
+  const show = (target: string) => {
+    setSrc(target)
+    setAddress(target)
+    usePanels.getState().visit(tabId, target, hostOf(target))
+  }
 
   const navigate = (raw: string) => {
     const value = raw.trim()
     if (!value) return
     const target = /^https?:\/\//i.test(value) ? value : `https://${value}`
-    setSrc(target)
-    setAddress(target)
+    show(target)
     setHistory((previous) => [...previous.slice(0, index + 1), target])
     setIndex((previous) => previous + 1)
   }
@@ -22,8 +34,7 @@ export default function BrowserPanel() {
     const next = index + offset
     if (next < 0 || next >= history.length) return
     setIndex(next)
-    setSrc(history[next])
-    setAddress(history[next])
+    show(history[next])
   }
 
   return (
@@ -43,6 +54,7 @@ export default function BrowserPanel() {
             value={address}
             placeholder="Enter an HTTP(S) address"
             spellCheck={false}
+            aria-label="Address"
             onChange={(event) => setAddress(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') navigate(address)

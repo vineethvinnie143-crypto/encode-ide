@@ -1,0 +1,23 @@
+{
+  "name": "@encode/router",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's model router: roles as ordered model lists, the model registry, health and failover, and the free model pool.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/providers": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

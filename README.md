@@ -6,7 +6,8 @@ node-pty.
 
 ![eNCode](docs/images/overview.png)
 
-**Status:** private development, milestone M0 (foundation and security). Not released yet.
+**Status:** private development. M0 (foundation and security) is in, and the agent engine (M1)
+is landing as packages: the app still runs M0's agent until it is switched over. Not released yet.
 Windows is the primary platform; the code stays cross-platform.
 
 ## What it does
@@ -99,6 +100,19 @@ supported. The agent moves to the OS shell in M1
 ([ADR 0011](docs/adr/0011-agent-commands-run-in-the-os-shell.md)). The eNCode Shell stays
 the terminal's shell.
 
+## The side panel and the bottom panel
+
+The side panel holds tabs: **Files** (the explorer, search and source control), **Editor**,
+**Browser**, **Terminal** and **Trajectory**. `Ctrl+T` opens a New tab page to choose from, and a
+Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was.
+`Ctrl+Alt+F` makes the panel full width, `Ctrl+Shift+B` cycles split, full and hidden, and
+`Ctrl+Alt+B` hides it. A hidden panel stays alive: a browser keeps its page and a terminal its
+shell.
+
+`Ctrl+J` shows the bottom panel, which holds the terminal and the background jobs the agent
+started. Tabs, layout and widths are remembered between runs
+([ADR 0015](docs/adr/0015-one-tab-model-for-the-side-and-bottom-panels.md)).
+
 ## Shortcuts
 
 `Ctrl+/` lists every shortcut and the menus show them next to each command. The main ones:
@@ -110,10 +124,13 @@ the terminal's shell.
 | Go to file | `Ctrl+P` |
 | Save the active file | `Ctrl+S` |
 | Settings | `Ctrl+,` |
-| Show or hide the sidebar / the side panel | `Ctrl+B` / `Ctrl+Alt+B` |
+| Show or hide the sidebar / the side panel / the bottom panel | `Ctrl+B` / `Ctrl+Alt+B` / `Ctrl+J` |
+| New / close / reopen a side panel tab | `Ctrl+T` / `Ctrl+W` / `Ctrl+Shift+T` |
+| Next / previous tab, tab 1 to 9 | `Ctrl+Shift+]` / `Ctrl+Shift+[`, `Ctrl+1` to `Ctrl+9` |
+| Side panel full width / cycle split, full, hidden | `Ctrl+Alt+F` / `Ctrl+Shift+B` |
 | Activity view | `Ctrl+Alt+U` |
 | Search across files | `Ctrl+Shift+F` |
-| Show files / chat / the Shell | `Ctrl+Shift+E` / `Ctrl+Shift+X` / `` Ctrl+` `` |
+| Show files / chat / the terminal | `Ctrl+Shift+E` / `Ctrl+Shift+X` / `` Ctrl+` `` |
 | Back / forward over the sessions you opened | `Ctrl+[` / `Ctrl+]` (or the mouse buttons) |
 | Next / previous recent session | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to session 1 to 9 | `Alt+1` to `Alt+9` |
@@ -132,11 +149,14 @@ wrong project. Stop it or let it finish first.
 ```
 apps/desktop/                 the Electron app (@encode/desktop)
   electron/                   main process: window, IPC, services, agent
-    agent/                    loop, tools, approval, compaction, provider, prompt
+    agent/                    M0's loop, tools, approval, compaction, provider, prompt (replaced by packages/core)
+    agent-host/               the main process side of the agent host in a utility process (not wired in yet)
     services/                 shell, workspace, settings and key vault, web, git, programs
   src/                        renderer: components, stores, editor, terminal, markdown
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
+    components/panels/        the side and bottom panels: tab strip, pages, New tab
+    panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)
     ui/                       eNCode's icons, logo and shared controls
@@ -146,9 +166,13 @@ apps/desktop/                 the Electron app (@encode/desktop)
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
+packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
 packages/permissions/         shell grammar, command policy, egress and path rules
+packages/protocol/            RPC over any message port, and the JSON Schema checks
+packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
 packages/testkit/             seeded property testing
+packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model

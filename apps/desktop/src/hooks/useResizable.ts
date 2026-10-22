@@ -8,13 +8,15 @@ interface Options {
   axis: 'x' | 'y'
   invert?: boolean
   persistKey: string
+  /** The size on screen, for a panel that CSS holds under the saved size: a drag then starts from what the user sees. */
+  measure?: () => number | undefined
 }
 
 /**
  * Pointer-driven panel sizing with clamped bounds and localStorage memory.
  * `invert` flips the delta for panels anchored to the right/bottom edge.
  */
-export function useResizable({ initial, min, max, axis, invert = false, persistKey }: Options) {
+export function useResizable({ initial, min, max, axis, invert = false, persistKey, measure }: Options) {
   const [size, setSizeState] = useState(() => {
     try {
       const raw = localStorage.getItem(persistKey)
@@ -27,6 +29,8 @@ export function useResizable({ initial, min, max, axis, invert = false, persistK
 
   const sizeRef = useRef(size)
   sizeRef.current = size
+  const measureRef = useRef(measure)
+  measureRef.current = measure
 
   const setSize = useCallback(
     (value: number) => {
@@ -45,7 +49,8 @@ export function useResizable({ initial, min, max, axis, invert = false, persistK
     (event: ReactPointerEvent) => {
       event.preventDefault()
       const startPos = axis === 'x' ? event.clientX : event.clientY
-      const startSize = sizeRef.current
+      const shown = measureRef.current?.()
+      const startSize = shown !== undefined && Number.isFinite(shown) && shown > 0 ? shown : sizeRef.current
 
       const move = (ev: PointerEvent) => {
         const delta = (axis === 'x' ? ev.clientX : ev.clientY) - startPos

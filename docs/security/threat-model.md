@@ -1,8 +1,9 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0. It covers the desktop app as built from this
-repository. The free-tier gateway and accounts (M5) have their own section at the end. The
-CLI and the router get theirs when they land.
+repository. The free-tier gateway and accounts (M5) and the permission rules, trust, hooks,
+checkpoints and MCP client (M3) have their own sections at the end. The CLI and the router get
+theirs when they land.
 
 Review this document whenever a change touches a trust boundary below, and at the end of
 every milestone.
@@ -63,6 +64,11 @@ Out of scope for v1:
    the workspace ([ADR 0005](../adr/0005-programs-from-absolute-path-entries.md)).
 5. **Repository to CI.** The workflow token is read-only and actions are pinned by hash
    ([ADR 0012](../adr/0012-windows-first-ci.md)).
+6. **Main process to the agent host.** The agent runs in a utility process the main process
+   supervises ([ADR 0030](../adr/0030-the-agent-runs-in-a-host-that-clients-drive.md)). Neither
+   end trusts the other's messages: envelopes are shape-checked and params are validated against a
+   schema before any handler runs. The host asks for a key only when a model call starts, and the
+   key vault stays in the main process.
 
 ## Threats and controls
 
@@ -94,6 +100,11 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T21 | A tampered build or update | Code signing and signed updates | Planned, M6 |
 | T22 | Runaway runs, rate limits and hung streams | Step cap, output caps and timeouts on commands and fetches | Partial (R10) |
 | T23 | Lost or corrupted sessions | Atomic private writes | Partial (R11) |
+| T24 | A crash or a hang in the agent takes the app, or the conversation, with it | The agent runs in its own process, restarted with a growing pause, and the user is told which sessions were mid-turn (0030). Sessions are append-only logs: a crash costs at most the line being written (0031). | Mitigated once the app uses the host (M1) |
+| T25 | Hostile or malformed messages between the main process and the host | Both ends check the envelope and validate params against a schema before a handler runs. Errors cross as a code and a message, never a stack (0030). | Mitigated once the app uses the host (M1) |
+| T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). | Partial (R1) |
+| T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
+| T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
 
 ## Residual risks
 
@@ -101,7 +112,9 @@ Each item names what remains, why it is acceptable for now, and who closes it.
 
 - **R1. Full access means full access.** Under that policy nothing asks. It is an explicit
   user choice, labeled in the composer.
-  - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux.
+  - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux. It is
+    the next M3 pull request, after the one that holds the rules, trust, hooks, checkpoints and
+    MCP client.
   - Windows has no equivalent yet. Approvals are the only control there, and the plan's risk
     table says so.
 - **R2. Prompt injection inside allowed actions.** Injected text can still steer which
@@ -110,20 +123,24 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - Compaction summaries are produced from transcripts that may contain injected text, and
     the summary sits in a user message (0009). The summarizer is told the transcript is
     data, and approvals still gate every action.
-  - Owner: M3 (reviewer gate, workspace trust).
+  - Owner: M3. Workspace trust is built ([0041](../adr/0041-folder-settings-grant-only-when-approved.md));
+    the reviewer gate follows in the next M3 pull request.
 - **R3. Git in a folder whose `.git/config` someone else wrote.** Under Auto review,
   "read-only" git commands such as `git diff`, `git log -p` and `git show` can still start
   programs configured in that file: `diff.external`, textconv drivers, clean filters, a
   pager. The status bar's `git status` can run clean filters too.
   - This needs a hostile `.git/config`, which a clone does not deliver but a copied or
     shared folder can.
-  - Owner: M3 workspace trust. Untrusted folders get git with these keys neutralized, or no
-    git at all.
+  - Owner: M3 workspace trust. Done in the libraries: the bash and PowerShell policies ask
+    for git unless the folder is trusted (the trust store is in `@encode/config`) and eNCode's
+    git settings are in effect (`core.fsmonitor=false`, `safe.bareRepository=explicit`).
+    It acts in the product once the core adopts the new assessor and passes `trusted` (RP7).
 - **R4. Repository discovery above the workspace.** Opening a subfolder of a repository
   makes git use the parent's `.git`. Then `git show HEAD:../other/file` can read committed
   files outside the opened folder.
-  - Owner: M3. Treat `<rev>:<path>` arguments as paths, and set `GIT_CEILING_DIRECTORIES`
-    when the workspace is not itself a repository root.
+  - Owner: M3. Done in the libraries: a git command asks when its repository starts above the
+    workspace (the disk check, `confirmOnDisk`), and `<rev>:<path>` operands that name `..` or
+    an absolute path ask. It acts in the product once the core adopts them (RP7).
 - **R5. Same-user malware can decrypt keys.** DPAPI and the macOS Keychain protect keys
   against other users and offline disk theft, not against code already running as the user.
   Accepted, as for every desktop app.
@@ -152,6 +169,11 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   large sessions block the UI. A capture cut short by Stop is persisted only with a later
   event, and nothing is flushed on quit.
   - Owner: M1 JSONL sessions (append-only, flushed per event).
+  - Status: `@encode/core` has the store (0031). This closes when the app runs on it.
+- **R12. Logs keep what the agent saw.** A session log holds file contents, command output and
+  anything the user typed, secrets included, and nothing prunes it (0031). It is as exposed as
+  the user's own files, and same-user malware reads those too (R5).
+  - Owner: M1, a storage view with explicit deletion.
 
 ## Verification
 
@@ -277,3 +299,69 @@ Status: **Mitigated**, or **Partial** (a residual risk is listed below).
   through sign-in, streaming, failover, refresh, sign-out, the cron job, the kill switch and a
   suspension, then checks every request the fake OpenRouter received against the firewall's
   promises. CI runs it on Windows.
+
+## Permission rules, trust, hooks, checkpoints and the MCP client (M3)
+
+Written with the pull request that added `@encode/config`, `@encode/hooks`,
+`@encode/checkpoints` and `@encode/mcp` and extended `@encode/permissions`. These packages
+are libraries with their own tests; the core wires them in after it merges (RP7). The OS
+sandbox, search providers, subagent definitions and the reviewer gate are later M3 pull
+requests and get their rows when they land.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Partial (RP7) |
+| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). | Partial (RP7) |
+| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). | Partial (RP1) |
+| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). | Partial (RP2) |
+| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Partial (RP7) |
+| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). | Partial (RP3) |
+| P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0042). | Partial (RP6) |
+| P8 | Rewind overwrites the user's work or writes outside the workspace | Changed files are conflicts and need force. Each target is checked on its real path (inside the workspace, never in `.git` or `.encode`), restored bytes are checked against their hash, and the rewind is journaled first (0043). | Mitigated (RP4) |
+| P9 | A rewind plan is altered on its way through the UI | The plan carries a fingerprint, and applying it re-derives everything from the manifest and the disk (0043). | Mitigated |
+| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0040, 0041). | Mitigated |
+
+### Residual risks
+
+- **RP1. Labels on MCP results are advisory.** A server can still put instructions in a result.
+  The control is that every call asks, with the server and tool named, and that a result
+  cannot change a permission.
+- **RP2. `${VAR}` in an approved project MCP entry can send an environment value to the URL
+  the entry configures.** The approval card must name the variables the entry reads.
+  - Owner: the app's approval card.
+- **RP3. Rules read shell words as text.** A link inside the workspace that points at a denied
+  file is not recognised in a shell word, and PowerShell 5.1's `-Recurse` follows directory
+  junctions. The file tools resolve real paths before they consult the rules.
+  - Owner: the OS sandbox (next M3 pull request) on macOS and Linux. Windows keeps prompts.
+- **RP4. Checkpoints see only the file tools.** A shell command's side effects are not
+  recorded, the agent must be idle while a rewind runs, and file modes and owners are not
+  saved. Redo restores files, not the conversation.
+- **RP5. MCP over HTTP has no OAuth.** A server that needs it does not connect. Redirects are not
+  followed, so a server behind one fails instead of leaking headers.
+- **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
+  for. A folder cannot install one without the user's approval, and the sandbox will not cover
+  them.
+- **RP7. The packages are not in the app yet.** Until the core adopts them (the wiring pull
+  request, now that the core is in `main`), none of P1 to P10 acts in the product. `docs/m3-integration.md` lists the
+  wiring.
+  - Owner: the integration pull request.
+
+### Verification
+
+- `@encode/permissions` tests the rules engine, with fixed-seed property tests where a rule
+  has a definition to check against: the line splitter (bash and PowerShell), prefix and
+  wildcard matching, run-time words, redirects, fed commands, path normalization, and
+  `suggestRule` (every suggestion parses, allows its own line and nothing more).
+- `@encode/config` tests settings loading, the held-back grants, digests that ignore key order,
+  trust that is not inherited, MCP server approval, the atomic store, and `saveRule`.
+- `@encode/hooks` runs real child processes for exit codes, JSON answers, timeouts and tree kills.
+- `@encode/checkpoints` is tested against an in-memory disk, against a model of the definition
+  under random sessions with and without outside edits (mutations of the service make it fail),
+  and on a real disk including links and private file modes.
+- `@encode/mcp` talks to an in-memory server, a real HTTP server (JSON, event streams, sessions,
+  legacy SSE, redirects) and a real child process, and checks names, configuration, approval,
+  the adapter and the manager's restarts.
+- CI runs all of it on Windows. The packages were also type-checked against the core pull
+  request's seams in a scratch merge.
