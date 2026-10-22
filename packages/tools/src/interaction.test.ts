@@ -62,7 +62,7 @@ describe('interaction tools', () => {
   it('runs subagents through the context, and lists the types it offers', async () => {
     const root = await tempWorkspace()
     const task = createTaskTool(BUILTIN_SUBAGENT_TYPES)
-    assert.deepEqual((task.definition.inputSchema.properties as Record<string, { enum?: string[] }>).subagent_type.enum, ['general-purpose', 'Explore'])
+    assert.deepEqual((task.definition.inputSchema.properties as Record<string, { enum?: string[] }>).subagent_type.enum, ['general-purpose', 'Explore', 'Plan', 'Review'])
     const ctx = testContext(root, {
       subagents: { types: () => [...BUILTIN_SUBAGENT_TYPES], run: async (request) => ({ ok: true, report: `did ${request.type}: ${request.prompt}` }) },
     })

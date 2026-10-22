@@ -34,7 +34,9 @@ import {
   type ToolUseBlock,
   type UserBlock,
 } from '@encode/providers'
+import { screenCommand, type Screened } from '@encode/permissions'
 import {
+  isInsideReal,
   truncateMiddle,
   type AgentShell,
   type DesktopServices,
@@ -75,8 +77,10 @@ import {
 import type { AgentHooks, HookEvent } from './hooks'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { withoutScreensFrom } from './screens'
-import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
-import type { ConversationEntry } from './ui'
+import type { AutoReviewer } from './reviewer'
+import { formatFindings, scanHunks, scanText, warningNote } from './scan'
+import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
+import type { ConversationEntry, ToolReview } from './ui'
 
 /** What a call may ask of the model for its answer. */
 const MAX_OUTPUT_TOKENS = 32_000
@@ -94,6 +98,8 @@ const MAX_UI_OUTPUT = 20_000
 const MAX_UI_STRING = 8_000
 const MAX_PREVIEW_HUNKS = 4
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
+const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
+const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
 
 export interface LoopServices {
   root: string
@@ -144,6 +150,10 @@ export interface LoopOptions {
   preface?: () => Promise<string[]> | string[]
   /** Steps per turn, in place of the setting. */
   maxSteps?: number
+  /** Under Auto review, answers the commands the assessor could not prove read-only, once the fixed checks have passed them. */
+  reviewer?: AutoReviewer
+  /** What the user asked recently, in their words, for the Reviewer. A subagent is given its parent's: its own prompt was written by a model. */
+  requests?: () => readonly string[]
 }
 
 interface Prepared {
@@ -242,6 +252,13 @@ function relativeToRoot(root: string, file: string, platform: NodeJS.Platform): 
 function specifierOf(tool: string, input: Record<string, unknown>): { specifier?: string } {
   const value = tool === 'Skill' ? input.skill : tool === 'Task' ? input.subagent_type : undefined
   return typeof value === 'string' && value ? { specifier: value } : {}
+}
+
+/** A reason from the fixed checks ("the command starts curl, which ...") as a sentence. */
+function sentence(reason: string): string {
+  const text = reason.trim()
+  const capital = text.charAt(0).toUpperCase() + text.slice(1)
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`
 }
 
 export class AgentLoop {
@@ -635,8 +652,8 @@ export class AgentLoop {
     const { o } = this
     const entry = o.surface.entry({ kind: 'tool', tool: { name: block.name, input: trimInput(block.input), state: 'running' } })
     this.inflight.add(entry)
-    const refuse = (shown: string, ui: 'error' | 'rejected', told = shown): undefined => {
-      this.settleEntry(entry, { state: ui, ok: false, output: shown })
+    const refuse = (shown: string, ui: 'error' | 'rejected', told = shown, review?: ToolReview): undefined => {
+      this.settleEntry(entry, { state: ui, ok: false, output: shown, ...(review ? { review } : {}) })
       state.results.set(block.id, failed(block.id, told))
       return undefined
     }
@@ -675,6 +692,7 @@ export class AgentLoop {
     let ask: string | undefined
     let grant: string | undefined
     let always: AlwaysAllow | undefined
+    let passedOn: ApprovalPrompt['review']
     if (verdict.kind === 'ask') {
       ask = pre?.decision === 'allow' ? undefined : verdict.reason
       // A hook that asked wants to see each call.
@@ -684,6 +702,32 @@ export class AgentLoop {
         always = alwaysAllowFor(access, { root: o.services.root, platform: o.services.platform, dialect: o.services.shell.state().dialect }) ?? undefined
       }
     } else if (pre?.decision === 'ask') ask = pre.reason || 'A hook asks for approval.'
+
+    // Auto review: a command the assessor could not prove read-only goes through the fixed checks and then to the Reviewer.
+    // Not when a hook wants to see the call, and not when the user already allowed it for the session.
+    if (
+      ask !== undefined &&
+      verdict.kind === 'ask' &&
+      verdict.reviewable &&
+      access.type === 'command' &&
+      o.reviewer &&
+      pre?.decision !== 'ask' &&
+      !(grant && o.surface.granted?.(grant))
+    ) {
+      const reviewed = await this.review(access, { tool: block.name, reason: verdict.reason, grant }, entry, turn)
+      if (reviewed.outcome === 'approved') {
+        ask = undefined
+        entry.tool = { ...entry.tool!, state: 'running', review: { by: 'reviewer', verdict: 'approved', risk: 'low', reason: reviewed.reason } }
+        o.surface.update(entry)
+      } else if (reviewed.outcome === 'declined') {
+        const review: ToolReview = { by: 'reviewer', verdict: 'declined', risk: reviewed.risk, reason: reviewed.reason }
+        return refuse(`Declined by the Reviewer: ${reviewed.reason}`, 'rejected', `${DECLINED} ${reviewed.reason} ${DECLINED_ADVICE}`, review)
+      } else {
+        passedOn = { by: reviewed.by, reason: reviewed.reason }
+        entry.tool = { ...entry.tool!, review: { by: reviewed.by, verdict: 'asked', reason: reviewed.reason } }
+      }
+    }
+
     if (ask !== undefined) {
       entry.tool = { ...entry.tool!, state: 'waiting' }
       o.surface.update(entry)
@@ -697,6 +741,7 @@ export class AgentLoop {
       if (summary.preview && summary.preview.length > MAX_PREVIEW_HUNKS) {
         detail += `${detail ? '\n' : ''}Showing ${MAX_PREVIEW_HUNKS} of ${summary.preview.length} changed regions.`
       }
+      const warnings = this.warningsFor(access, summary.preview)
       const answer = await o.surface.approve(
         {
           entryId: entry.id,
@@ -708,9 +753,13 @@ export class AgentLoop {
           preview: summary.preview?.slice(0, MAX_PREVIEW_HUNKS),
           ...(grant ? { grant } : {}),
           ...(always ? { always } : {}),
+          ...(passedOn ? { review: passedOn } : {}),
+          ...(warnings ? { warnings } : {}),
         },
         turn.signal,
       )
+      // The person has the last word, and a run of declines is over once they have spoken.
+      o.reviewer?.answered()
       if (!answer.approved) {
         if (turn.signal.aborted) throw new AgentAbortedError()
         const note = answer.note?.trim().slice(0, 2_000)
@@ -727,6 +776,66 @@ export class AgentLoop {
     if (access.type === 'desktop' && verdict.kind === 'ask') this.approvedApps.add(access.app)
 
     return { block, tool, input, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent' }
+  }
+
+  /** The fixed checks, then the Reviewer, for one command. Nothing here ever allows more than the checks do. */
+  private async review(
+    access: Extract<ToolAccess, { type: 'command' }>,
+    call: { tool: string; reason: string; grant?: string },
+    entry: ConversationEntry,
+    turn: Turn,
+  ): Promise<{ outcome: 'approved'; reason: string } | { outcome: 'declined'; risk: 'low' | 'medium' | 'high'; reason: string } | { outcome: 'person'; by: 'floor' | 'reviewer'; reason: string }> {
+    const { o } = this
+    entry.tool = { ...entry.tool!, state: 'reviewing' }
+    o.surface.update(entry)
+
+    let screened: Screened
+    try {
+      screened = await screenCommand(access.command, {
+        root: o.services.root,
+        cwd: access.cwd,
+        home: o.services.home,
+        dialect: o.services.shell.state().dialect,
+        platform: o.services.platform === 'win32' ? 'win32' : 'posix',
+        extraRoots: o.extraRoots?.() ?? [],
+        inside: isInsideReal,
+      })
+    } catch (error) {
+      return { outcome: 'person', by: 'floor', reason: `eNCode could not check the command (${errorMessage(error)}).` }
+    }
+    if (!screened.reviewable) return { outcome: 'person', by: 'floor', reason: sentence(screened.reason) }
+
+    const root = o.services.root
+    const review = await o.reviewer!.review({
+      ...(call.grant ? { key: call.grant } : {}),
+      tool: call.tool,
+      command: access.command,
+      cwd: access.cwd === root ? '.' : relativeToRoot(root, access.cwd, o.services.platform),
+      reason: call.reason,
+      requests: o.requests?.() ?? [],
+      signal: turn.signal,
+    })
+    if (review.outcome === 'approved') return { outcome: 'approved', reason: review.reason }
+    if (review.outcome === 'declined') return { outcome: 'declined', risk: review.risk, reason: review.reason }
+    return { outcome: 'person', by: 'reviewer', reason: review.reason }
+  }
+
+  /** What the person should know before approving: hidden or look-alike characters in what the call adds or runs. */
+  private warningsFor(access: ToolAccess, preview: DiffHunk[] | undefined): string[] | undefined {
+    const lines: string[] = []
+    if (access.type === 'write' && preview?.length) lines.push(...formatFindings(scanHunks(preview, access.paths[0] ?? '')))
+    if (access.type === 'command') lines.push(...formatFindings(scanText(access.command, { code: true })))
+    return lines.length ? lines : undefined
+  }
+
+  /** The characters a successful write left in the file, for the model to fix and the person to see. */
+  private scanWritten(outcome: ToolOutcome): { note: string; lines: string[] } | undefined {
+    const diff = outcome.display?.diff
+    const file = outcome.changed?.[0]
+    if (!outcome.ok || !diff?.length || !file) return undefined
+    const result = scanHunks(diff, file)
+    if (!result.findings.length) return undefined
+    return { note: warningNote(relativeToRoot(this.o.services.root, file, this.o.services.platform), result), lines: formatFindings(result) }
   }
 
   private async execute(prepared: Prepared, turn: Turn, state: StepState): Promise<void> {
@@ -752,6 +861,8 @@ export class AgentLoop {
     let content = modelContent(outcome)
     let isError = !outcome.ok
     const output = outcome.display?.output ?? textOf(content)
+    const found = this.scanWritten(outcome)
+    if (found) content = [...content, textBlock(found.note)]
     const post = await this.hook('postToolUse', { ...this.event(turn), tool: block.name, toolUseId: block.id, input, ok: outcome.ok, output: textOf(content) })
     if (post?.block) {
       content = [...content, textBlock(`A hook did not accept this result: ${post.block}`)]
@@ -765,6 +876,7 @@ export class AgentLoop {
       ok: outcome.ok,
       output: truncateMiddle(output, MAX_UI_OUTPUT),
       ...(outcome.display?.diff ? { diff: outcome.display.diff } : {}),
+      ...(found ? { warnings: found.lines } : {}),
     })
     for (const file of outcome.changed ?? []) o.surface.fileChanged(relativeToRoot(o.services.root, file, o.services.platform))
     if (outcome.stop) {

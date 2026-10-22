@@ -15,7 +15,7 @@ export const ROLE_INFO: Readonly<Record<ModelRole, { label: string; hint: string
   main: { label: 'Main', hint: 'Writes the code and talks to you.' },
   explore: { label: 'Explore', hint: 'Searches and reads for the main model.', follows: 'main' },
   planner: { label: 'Plan', hint: 'Drafts the plan in Plan mode.', follows: 'main' },
-  reviewer: { label: 'Review', hint: 'Checks finished work.', follows: 'main' },
+  reviewer: { label: 'Review', hint: 'Checks finished work, and judges low-risk commands under Auto review.', follows: 'main' },
   summarizer: { label: 'Compaction', hint: 'Summarizes old turns to make room.', follows: 'utility' },
   utility: { label: 'Small tasks', hint: 'Names sessions and summarizes pages.', follows: 'main' },
 }

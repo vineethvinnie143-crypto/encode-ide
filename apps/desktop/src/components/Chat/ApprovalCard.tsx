@@ -7,9 +7,10 @@ import { modalOpen } from '../../commands/useKeymap'
 import { DEFAULT_ALWAYS_SCOPE, SCOPE_CHOICES, alwaysRulesText, ruleTiming, scopeNote, trustOffer } from '../../panels/permissions'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { ChevronLeft, ChevronRight, ShieldAlert } from '../../ui/icons'
+import { AlertTriangle, ChevronLeft, ChevronRight, ShieldAlert, ShieldCheck } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import DiffView from './DiffView'
+import { reviewLine } from './review-text'
 
 /**
  * What the agent wants to do and why it asks, docked above the composer. Enter approves and
@@ -17,6 +18,8 @@ import DiffView from './DiffView'
  * "Approve for this session" and a note on a refusal appear when the agent supports them.
  * "Always allow" shows the exact rules it would save and which settings file they go to, then
  * saves them with the approval; it appears only where a rule can stand for the call.
+ * Under Auto review it says who left the question to the person, and any invisible or look-alike
+ * characters in what the call adds are listed above the buttons.
  */
 export default function ApprovalCard() {
   const approvals = useChat((state) => state.approvals)
@@ -118,7 +121,26 @@ export default function ApprovalCard() {
         )}
       </div>
       {approval.reason && <div className="approval-reason">{approval.reason}</div>}
+      {approval.review && (
+        <div className="approval-review">
+          <ShieldCheck size={14} />
+          <span>{reviewLine(approval.review)}</span>
+        </div>
+      )}
       <pre className="approval-detail">{approval.detail}</pre>
+      {approval.warnings && approval.warnings.length > 0 && (
+        <div className="approval-warnings" role="note">
+          <AlertTriangle size={14} />
+          <div>
+            Invisible or look-alike characters in this action
+            <ul>
+              {approval.warnings.map((line, position) => (
+                <li key={position}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
       {approval.preview && approval.preview.length > 0 && (
         <div className="approval-preview">
           <DiffView diff={approval.preview} />

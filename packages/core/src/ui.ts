@@ -16,7 +16,18 @@ export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | '
 
 export type EntryKind = 'user' | 'assistant' | 'tool' | 'notice' | 'error'
 
-export type ToolState = 'running' | 'waiting' | 'done' | 'rejected' | 'error'
+/** `reviewing`: under Auto review, the call waits for the Reviewer. */
+export type ToolState = 'running' | 'waiting' | 'reviewing' | 'done' | 'rejected' | 'error'
+
+/** What Auto review made of a call. */
+export interface ToolReview {
+  /** Who looked: the Reviewer model, or the fixed checks that come before it. */
+  by: 'reviewer' | 'floor'
+  /** `approved`: it ran on this review. `declined`: it did not run. `asked`: the person was asked. */
+  verdict: 'approved' | 'declined' | 'asked'
+  risk?: 'low' | 'medium' | 'high'
+  reason: string
+}
 
 export interface ConversationEntry {
   id: string
@@ -31,6 +42,9 @@ export interface ConversationEntry {
     ok?: boolean
     diff?: DiffHunk[]
     state?: ToolState
+    review?: ToolReview
+    /** Hidden or look-alike characters found in what the call wrote, one line each. */
+    warnings?: string[]
   }
   /** The model that wrote an assistant entry. */
   model?: string
@@ -52,6 +66,10 @@ export interface ApprovalRequest {
   grantable?: boolean
   /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
   always?: { label: string; rules: string[] }
+  /** Under Auto review: why the Reviewer passed the question to the person. */
+  review?: { by: 'floor' | 'reviewer'; reason: string }
+  /** Hidden or look-alike characters in what the call adds, one line each. */
+  warnings?: string[]
 }
 
 /** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */

@@ -9,12 +9,19 @@
  * `.encode/agents/` (the workspace's) or `~/.encode/agents/`:
  *
  *   ---
- *   name: reviewer
+ *   name: security-reviewer
  *   description: Reviews a diff for bugs and missing tests.
  *   tools: Read, Grep, Glob, Bash
+ *   disallowedTools: WebFetch
  *   role: reviewer
+ *   maxTurns: 20
+ *   color: blue
  *   ---
  *   Instructions that follow the brief...
+ *
+ * `model` is read as `role` (which model the work goes to); the names of other tools' models (sonnet, opus, inherit)
+ * mean nothing here and leave the main agent's. A repository fills the workspace's folder, so it is read with care:
+ * regular files only, no links out of the workspace, nothing large, and no more than a few dozen.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -34,6 +41,8 @@ import type { RuleJudge } from './approval'
 import { memoryConversation } from './conversation'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
+import type { AutoReviewer } from './reviewer'
+import { readSmallFile, staysInProject } from './safe-files'
 import { parseFrontMatter } from './skills'
 import { AgentAbortedError, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface } from './types'
 import type { AgentStatus, ConversationEntry } from './ui'
@@ -43,6 +52,12 @@ export interface SubagentDefinition extends SubagentType {
   role?: ModelRole
   /** Instructions added to the subagent's system prompt. */
   prompt?: string
+  /** Tools taken away from `tools` (or from all of them when `tools` is absent). */
+  disallowedTools?: string[]
+  /** Steps before it must report, in place of the usual limit. */
+  maxTurns?: number
+  /** An accent for the lists that show it. */
+  color?: string
   source: 'builtin' | 'user' | 'workspace'
 }
 
@@ -55,6 +70,12 @@ export const SUBAGENT_EXCLUDED: readonly string[] = ['Task', 'ExitPlanMode', 'Cr
 /** The most steps a subagent takes before it must report. */
 const MAX_SUBAGENT_STEPS = 40
 const MAX_REPORT_CHARS = 30_000
+const MAX_AGENT_FILES = 64
+const MAX_AGENT_BYTES = 64 * 1024
+const MAX_TURNS_SETTING = 100
+const COLORS = new Set(['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'])
+/** What other tools call their models. They name nothing here, so they leave the main agent's model in place. */
+const FOREIGN_MODELS = new Set(['inherit', 'sonnet', 'opus', 'haiku', 'fable'])
 
 export const SUBAGENT_PROMPT = `# You are a subagent
 
@@ -65,8 +86,34 @@ The main agent started you to do one self-contained piece of work. Your first me
 - Finish with a report and no tool call: what you found or changed, the absolute paths involved, and anything the main agent needs to go on. Be complete and brief; no preamble, no repeating the brief.
 - If you could not finish, say what is missing and what you tried.`
 
+const PLAN_PROMPT = `# Your work: plan, do not build
+
+Read what you need, then return a plan the main agent can carry out without asking you anything.
+
+- Open with the goal in one sentence and the approach you chose, with the reason and the alternatives you turned down in two or three lines.
+- List the steps in order. For each: the files (absolute paths) and what changes in them, naming the functions, types and tests involved.
+- Say what could go wrong, what to verify, and the commands that run the checks.
+- If the brief leaves out something that changes the plan, say so instead of guessing.
+- Never change a file.`
+
+const REVIEW_PROMPT = `# Your work: review, do not fix
+
+Judge what the brief gives you to review, and read the code around it where a finding depends on it.
+
+- Report findings by severity: blocking (wrong or unsafe), should fix, minor. For each: the file and line, what is wrong, how it fails (the input and what happens), and the smallest fix.
+- Report only what you checked and can show. No style notes to fill space, and nothing about code you did not read.
+- Say which tests cover what you reviewed and which cases have none.
+- End with a verdict: ready, or what must change first.
+- Never change a file.`
+
+const BUILTIN_EXTRAS: Record<string, { role?: ModelRole; prompt?: string }> = {
+  Explore: { role: 'explore' },
+  Plan: { role: 'planner', prompt: PLAN_PROMPT },
+  Review: { role: 'reviewer', prompt: REVIEW_PROMPT },
+}
+
 export function builtinDefinitions(): SubagentDefinition[] {
-  return BUILTIN_SUBAGENT_TYPES.map((type) => ({ ...type, source: 'builtin' as const, ...(type.name === 'Explore' ? { role: 'explore' } : {}) }))
+  return BUILTIN_SUBAGENT_TYPES.map((type) => ({ ...type, source: 'builtin' as const, ...BUILTIN_EXTRAS[type.name] }))
 }
 
 export interface AgentSource {
@@ -74,38 +121,53 @@ export interface AgentSource {
   source: 'user' | 'workspace'
 }
 
+/** A front-matter list: `Read, Grep`, `[Read, Grep]` or quoted names. */
+function listOf(value: string | undefined): string[] {
+  if (!value) return []
+  return value
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((item) => item.trim().replace(/^(["'])(.*)\1$/, '$2').trim())
+    .filter(Boolean)
+}
+
 /** The agents defined in the folders; later folders override earlier ones, and none may reuse a built-in name. */
 export function loadAgentDefinitions(sources: readonly AgentSource[]): SubagentDefinition[] {
   const builtin = new Set(BUILTIN_SUBAGENT_TYPES.map((type) => type.name))
   const found = new Map<string, SubagentDefinition>()
   for (const { dir, source } of sources) {
+    // The workspace's folder is filled by the repository, so it must not lead out of the workspace.
+    if (source === 'workspace' && !staysInProject(dir)) continue
     let names: string[]
     try {
-      names = fs.readdirSync(dir)
+      names = fs.readdirSync(dir).sort()
     } catch {
       continue
     }
+    let read = 0
     for (const file of names) {
       if (!file.toLowerCase().endsWith('.md')) continue
-      let text: string
-      try {
-        text = fs.readFileSync(path.join(dir, file), 'utf8')
-      } catch {
-        continue
-      }
+      if (read++ >= MAX_AGENT_FILES) break
+      const text = readSmallFile(path.join(dir, file), { maxBytes: MAX_AGENT_BYTES, followLinks: source !== 'workspace' })
+      if (text === null) continue
       const { fields, body } = parseFrontMatter(text)
       const name = (fields.name || file.replace(/\.md$/i, '')).trim()
       const description = fields.description?.trim()
       if (!/^[A-Za-z][\w-]{0,40}$/.test(name) || builtin.has(name) || !description) continue
-      const tools = fields.tools
-        ?.split(',')
-        .map((tool) => tool.trim())
-        .filter(Boolean)
+      const tools = listOf(fields.tools)
+      const disallowed = listOf(fields.disallowedtools ?? fields['disallowed-tools'])
+      const turns = Number.parseInt(fields.maxturns ?? fields['max-turns'] ?? '', 10)
+      const requested = (fields.role ?? fields.model ?? '').trim()
+      const role = requested && !FOREIGN_MODELS.has(requested.toLowerCase()) ? requested : ''
+      const color = fields.color?.trim().toLowerCase()
       found.set(name, {
         name,
         description: description.slice(0, 300),
-        ...(tools?.length ? { tools } : {}),
-        ...(fields.role ? { role: fields.role.trim() } : {}),
+        ...(tools.length ? { tools } : {}),
+        ...(disallowed.length ? { disallowedTools: disallowed } : {}),
+        ...(role ? { role } : {}),
+        ...(Number.isFinite(turns) && turns > 0 ? { maxTurns: Math.min(turns, MAX_TURNS_SETTING) } : {}),
+        ...(color && COLORS.has(color) ? { color } : {}),
         ...(body.trim() ? { prompt: body.trim() } : {}),
         source,
       })
@@ -135,6 +197,10 @@ export interface SubagentsOptions {
   refresh?: () => Promise<void>
   readRoots?: () => readonly string[]
   preface?: () => Promise<string[]> | string[]
+  /** The session's Reviewer: a subagent's commands are judged by it too. */
+  reviewer?: AutoReviewer
+  /** What the user asked, for the Reviewer: the session's, since a subagent's own prompt was written by a model. */
+  requests?: () => readonly string[]
 }
 
 /** One line for what a tool call is about, for the progress shown on the Task card. */
@@ -185,6 +251,10 @@ class SubagentSurface implements Surface {
     return this.parent.approve({ ...prompt, entryId: this.request.entryId ?? prompt.entryId, title: `Subagent: ${prompt.title}` }, signal)
   }
 
+  granted(grant: string): boolean {
+    return this.parent.granted?.(grant) ?? false
+  }
+
   ask(entryId: string, question: Parameters<Surface['ask']>[1], signal: AbortSignal): Promise<string> {
     return this.parent.ask(this.request.entryId ?? entryId, question, signal)
   }
@@ -205,8 +275,11 @@ export function cloneTracker(source: FileStateTracker): FileStateTracker {
 
 function allowedTools(definition: SubagentDefinition, registry: ToolRegistry): string[] {
   const offered = registry.list().map((tool) => tool.definition.name)
-  const wanted = definition.tools ? definition.tools.filter((name) => offered.includes(name)) : offered
-  return wanted.filter((name) => !SUBAGENT_EXCLUDED.includes(name))
+  // Tool names are matched without regard to case: a definition that says "read" means Read.
+  const named = (name: string) => offered.find((candidate) => candidate.toLowerCase() === name.toLowerCase())
+  const wanted = definition.tools ? definition.tools.map(named).filter((name): name is string => name !== undefined) : offered
+  const denied = new Set([...SUBAGENT_EXCLUDED, ...(definition.disallowedTools ?? []).map(named).filter((name): name is string => name !== undefined)])
+  return wanted.filter((name) => !denied.has(name))
 }
 
 export function createSubagents(options: SubagentsOptions): Subagents {
@@ -245,7 +318,10 @@ export function createSubagents(options: SubagentsOptions): Subagents {
         ...(options.refresh ? { refresh: options.refresh } : {}),
         ...(options.readRoots ? { readRoots: options.readRoots } : {}),
         ...(options.preface ? { preface: options.preface } : {}),
-        maxSteps: Math.min(options.settings().maxSteps, MAX_SUBAGENT_STEPS),
+        ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+        ...(options.requests ? { requests: options.requests } : {}),
+        // A definition can shorten the run, never lengthen it past the person's own limit: a repository fills the workspace's folder.
+        maxSteps: Math.min(definition.maxTurns ?? MAX_SUBAGENT_STEPS, options.settings().maxSteps, MAX_SUBAGENT_STEPS),
       })
       try {
         const end = await loop.run({ turnId: agentId, mode: request.mode, signal })

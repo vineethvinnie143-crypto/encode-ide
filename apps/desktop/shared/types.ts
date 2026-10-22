@@ -210,6 +210,10 @@ export interface ApprovalRequest {
   grantable?: boolean
   /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
   always?: { label: string; rules: string[] }
+  /** Under Auto review: why the Reviewer passed the question to the person. */
+  review?: { by: 'floor' | 'reviewer'; reason: string }
+  /** Hidden or look-alike characters in what the call adds, one line each. */
+  warnings?: string[]
 }
 
 /** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */
@@ -450,9 +454,23 @@ export interface ConversationEntry {
     output?: string
     ok?: boolean
     diff?: DiffHunk[]
-    state?: 'running' | 'waiting' | 'done' | 'rejected' | 'error'
+    /** `reviewing`: under Auto review, the call waits for the Reviewer. */
+    state?: 'running' | 'waiting' | 'reviewing' | 'done' | 'rejected' | 'error'
+    /** What Auto review made of the call. */
+    review?: ToolReview
+    /** Hidden or look-alike characters found in what the call wrote, one line each. */
+    warnings?: string[]
   }
   createdAt: number
+}
+
+/** What Auto review made of a call: who looked (the Reviewer model, or the fixed checks before it), and the verdict. */
+export interface ToolReview {
+  by: 'reviewer' | 'floor'
+  /** `approved`: it ran on this review. `declined`: it did not run. `asked`: the person was asked. */
+  verdict: 'approved' | 'declined' | 'asked'
+  risk?: 'low' | 'medium' | 'high'
+  reason: string
 }
 
 export type GoalStatus = 'active' | 'paused' | 'complete' | 'blocked'

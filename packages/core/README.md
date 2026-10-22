@@ -68,13 +68,21 @@ up to `maxGoalRounds`.
 | --- | --- | --- | --- |
 | Read Only | run | refused | only those proved read-only |
 | Workspace Write | run | run | every command asks |
-| Auto review | run | run | proved read-only run, the rest ask |
+| Auto review | run | run | proved read-only run; the rest pass fixed checks and the Reviewer, then ask |
 | Full access | run | run | run |
 
 Under every policy but Full access, a write to a protected folder (`.git` or `.encode`) asks, as
 does touching anything outside the workspace and the first fetch from each site in a session. A rule the user wrote (the assessor's `deny`) holds even under Full access.
 The decision is `allow`, `ask` (with the reason, and whether the user may grant it for the rest of
 the session) or `deny`. Protected folders are never grantable.
+
+Under Auto review a command that asks on its own account (no rule, no hook) goes through
+`screenCommand` in `@encode/permissions`, which stops everything a model must not decide, and then to
+the Reviewer (`reviewer.ts`): one small model call on the `reviewer` role that sees the user's recent
+requests and the command, and approves, declines or leaves the question to the user. Every failure
+leaves it to the user ([ADR 0059](../../docs/adr/0059-auto-review-asks-a-model-about-low-risk-commands-behind-checks-the-model-cannot-overrule.md)).
+`scan.ts` finds invisible and look-alike characters in what a call adds and reports them on the
+card, in the step and to the model ([ADR 0060](../../docs/adr/0060-text-that-reads-differently-from-how-it-runs-is-shown-to-the-person-and-told-to-the-model.md)).
 
 The user answers with a boolean, or `{ approved, note?, remember? }`: a note on a refusal goes back
 to the model, and `remember: 'session'` allows the request's like for the rest of the session. Several
@@ -104,12 +112,15 @@ Skills are `skills/<name>/SKILL.md` or `skills/<name>.md` in `~/.encode` and in 
 `.encode`; the model sees each one's `description` until it loads it with `Skill`.
 
 Subagents run the same loop on a conversation of their own, in memory, with the brief as their
-first message and a report as their last. The built-in types are `general-purpose` and `Explore`
-(read-only). Users add their own as Markdown in `agents/`: a front matter with `name` and a
-required `description`, optionally `tools` (comma-separated) and `role`, then the instructions. A
-subagent never gets `Task`, `ExitPlanMode`, the goal tools or `TodoWrite`, inherits its parent's
-approval authority ([ADR 0006](../../docs/adr/0006-subagents-inherit-their-parents-authority.md)),
-and its approvals and questions reach the user under the `Task` call.
+first message and a report as their last. The built-in types are `general-purpose`, `Explore`, `Plan`
+and `Review` (the last three read-only). Users add their own as Markdown in `agents/`: a front matter
+with `name` and a required `description`, optionally `tools`, `disallowedTools`, `maxTurns`, `role`
+(`model` is read as a role) and `color`, then the instructions. A subagent never gets `Task`,
+`ExitPlanMode`, the goal tools or `TodoWrite`, inherits its parent's approval authority
+([ADR 0006](../../docs/adr/0006-subagents-inherit-their-parents-authority.md)), and its approvals and
+questions reach the user under the `Task` call. Files a repository fills (agents, skills, instruction
+files) are read as regular files of bounded size and never through a link that leaves the project
+([ADR 0061](../../docs/adr/0061-subagents-are-defined-in-markdown-and-what-a-repository-fills-is-read-as-a-stranger-s-file.md)).
 
 ## Hooks
 

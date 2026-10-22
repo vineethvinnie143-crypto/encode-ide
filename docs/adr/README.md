@@ -48,6 +48,9 @@ say so.
 | [0056](0056-hooks-run-from-the-trusted-snapshot-and-every-write-is-kept-before-it-is-made.md) | Hooks run from the trusted snapshot, and every write is kept before it is made | Accepted, builds on 0042, 0043 and 0055 |
 | [0057](0057-mcp-servers-run-from-the-folders-files-one-hub-per-folder-and-looking-starts-nothing.md) | MCP servers run from the folder's files, one hub per folder, and looking starts nothing | Accepted, builds on 0044, 0055 and 0056 |
 | [0058](0058-web-search-goes-through-the-provider-the-person-chose-and-its-key-goes-to-that-provider-alone.md) | Web search goes through the provider the person chose, and its key goes to that provider alone | Accepted, builds on 0007, 0008 and 0052 |
+| [0059](0059-auto-review-asks-a-model-about-low-risk-commands-behind-checks-the-model-cannot-overrule.md) | Auto review asks a model about low-risk commands, behind checks the model cannot overrule | Accepted, builds on 0004, 0040 and 0055 |
+| [0060](0060-text-that-reads-differently-from-how-it-runs-is-shown-to-the-person-and-told-to-the-model.md) | Text that reads differently from how it runs is shown to the person and told to the model | Accepted, builds on 0004, 0012 and 0032 |
+| [0061](0061-subagents-are-defined-in-markdown-and-what-a-repository-fills-is-read-as-a-stranger-s-file.md) | Subagents are defined in Markdown, and what a repository fills is read as a stranger's file | Accepted, builds on 0006, 0041 and 0055 |
 
 ## Template
 

@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   FileText,
@@ -11,6 +12,7 @@ import {
   Network,
   Pencil,
   Search,
+  ShieldCheck,
   SquareTerminal,
   XCircle,
 } from '../../ui/icons'
@@ -19,6 +21,7 @@ import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import { TAKEN_OVER, computerStep } from './computer-step'
 import DiffView from './DiffView'
+import { reviewLine } from './review-text'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
 const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
@@ -80,6 +83,7 @@ const QUIET_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Bash', 'BashOutput', 'read
 const STATE_LABEL: Record<string, string> = {
   running: 'Running',
   waiting: 'Waiting for you',
+  reviewing: 'Being reviewed',
   done: 'Done',
   rejected: 'Declined',
   error: 'Failed',
@@ -143,15 +147,49 @@ function detailOf(entry: ConversationEntry): string {
   }
 }
 
+/** What Auto review made of a step, and any invisible or look-alike characters it wrote. */
+function StepNotes({ tool }: { tool: NonNullable<ConversationEntry['tool']> }) {
+  const { review, warnings } = tool
+  if (!review && !warnings?.length) return null
+  return (
+    <div className="step-notes">
+      {review && (
+        <div className={cx('step-note', `is-${review.verdict}`)}>
+          {review.verdict === 'declined' ? <XCircle size={13} /> : <ShieldCheck size={13} />}
+          <span>{reviewLine(review)}</span>
+        </div>
+      )}
+      {warnings && warnings.length > 0 && (
+        <div className="step-note is-warn">
+          <AlertTriangle size={13} />
+          <div>
+            Invisible or look-alike characters
+            <ul className="step-note-list">
+              {warnings.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
 function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
   const tool = entry.tool
-  const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting')
+  // A step the Reviewer declined opens by itself: the person was not asked, so the reason is the first thing they want.
+  const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting' || tool?.review?.verdict === 'declined')
 
   useEffect(() => {
     if (tool?.diff?.length) setExpanded(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.diff])
+
+  useEffect(() => {
+    if (tool?.review?.verdict === 'declined') setExpanded(true)
+  }, [tool?.review?.verdict])
 
   if (!tool) return null
 
@@ -164,7 +202,13 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
   const computer = isComputer ? computerStep(tool.input ?? {}, tool.output, tool.state) : null
   const label = computer?.label ?? meta.label
   const detail = computer ? computer.detail : detailOf(entry)
-  const hasBody = isComputer ? state === 'error' && Boolean(tool.output) && tool.output !== TAKEN_OVER : Boolean(tool.output || tool.diff?.length || !QUIET_TOOLS.has(tool.name))
+  const hasBody = isComputer
+    ? state === 'error' && Boolean(tool.output) && tool.output !== TAKEN_OVER
+    : Boolean(tool.output || tool.diff?.length || tool.review || tool.warnings?.length || !QUIET_TOOLS.has(tool.name))
+  // A declined step's output is the Reviewer's reason, which the notes already give.
+  const output = tool.review?.verdict === 'declined' ? '' : tool.output
+  const approved = tool.review?.by === 'reviewer' && tool.review.verdict === 'approved'
+  const warned = Boolean(tool.warnings?.length)
   const additions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'add').length, 0) ?? 0
   const deletions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'del').length, 0) ?? 0
   const content = tool.input.content
@@ -188,7 +232,22 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
             <span className="del-stat">−{deletions}</span>
           </span>
         )}
-        {state === 'running' && <Loader2 size={13} className="spin tool-row-state" />}
+        {state === 'reviewing' && <span className="tool-row-note">Being reviewed</span>}
+        {(approved || warned) && (
+          <span className="tool-row-marks">
+            {warned && (
+              <span className="tool-row-mark is-warn" title="Invisible or look-alike characters">
+                <AlertTriangle size={13} />
+              </span>
+            )}
+            {approved && tool.review && (
+              <span className="tool-row-mark is-ok" title={reviewLine(tool.review)}>
+                <ShieldCheck size={13} />
+              </span>
+            )}
+          </span>
+        )}
+        {(state === 'running' || state === 'reviewing') && <Loader2 size={13} className="spin tool-row-state" />}
         {state === 'waiting' && <ChevronRight size={13} className="tool-row-state" />}
         {(state === 'rejected' || state === 'error') && <XCircle size={13} className="tool-row-state is-bad" />}
       </button>
@@ -202,13 +261,15 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
                 <span className="step-card-command">{detail}</span>
                 <span className={cx('step-status', `is-${state}`)}>{STATE_LABEL[state] ?? state}</span>
               </div>
-              {tool.output && <pre className="tool-row-output">{tool.output}</pre>}
+              <StepNotes tool={tool} />
+              {output && <pre className="tool-row-output">{output}</pre>}
             </>
           ) : (
             <>
+              <StepNotes tool={tool} />
               {tool.diff && tool.diff.length > 0 && <DiffView diff={tool.diff} />}
-              {tool.output && <pre className="tool-row-output">{tool.output}</pre>}
-              {!tool.diff?.length && !tool.output && Object.keys(tool.input ?? {}).length > 0 && (
+              {output && <pre className="tool-row-output">{output}</pre>}
+              {!tool.diff?.length && !output && !tool.review && Object.keys(tool.input ?? {}).length > 0 && (
                 <pre className="tool-row-output">{JSON.stringify(tool.input, null, 2)}</pre>
               )}
             </>
@@ -223,7 +284,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
 function GroupRowView({ kind, entries }: { kind: StepKind; entries: ConversationEntry[] }) {
   const [open, setOpen] = useState(false)
   const Icon = KIND_ICON[kind]
-  const running = entries.some((entry) => entry.tool?.state === 'running')
+  const running = entries.some((entry) => entry.tool?.state === 'running' || entry.tool?.state === 'reviewing')
   return (
     <div className="tool-row tool-group">
       <button type="button" className="tool-row-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>

@@ -37,7 +37,8 @@ primary platform; the code stays cross-platform.
 - **Review before it acts.** Four approval policies decide what runs unasked:
   - Read Only: edits and commands are refused.
   - Workspace Write: every command asks.
-  - Auto review: only provably read-only commands run unasked.
+  - Auto review: provably read-only commands run unasked, and a second model, the Reviewer, approves other low-risk
+    commands that fit your request. Everything else asks you, and some commands are never put to the Reviewer.
   - Full access: nothing asks.
 
   Approval cards say why they ask, and edits show their diff first.

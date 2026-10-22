@@ -102,6 +102,74 @@
   word-break: break-word;
 }
 
+/* Auto review: who looked at a step, and what was found in it */
+.tool-row-note {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.tool-row-marks {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-row-marks + .tool-row-state {
+  margin-left: 0;
+}
+.tool-row-mark {
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+}
+.tool-row-mark.is-ok {
+  color: var(--success);
+}
+.tool-row-mark.is-warn {
+  color: var(--warning);
+}
+.step-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tool-row-body.is-card .step-notes {
+  padding: 8px 12px 0;
+}
+.step-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.step-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.step-note.is-approved svg {
+  color: var(--success);
+}
+.step-note.is-declined svg {
+  color: var(--danger);
+}
+.step-note.is-warn svg {
+  color: var(--warning);
+}
+.step-note > span,
+.step-note > div {
+  min-width: 0;
+  word-break: break-word;
+}
+.step-note-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  color: var(--text-3);
+}
+
 /* A shell step: a 32 px header with the command and its status, then the output */
 .tool-row-body.is-card {
   padding: 0;
@@ -139,6 +207,7 @@
   color: var(--danger);
 }
 .step-status.is-running,
+.step-status.is-reviewing,
 .step-status.is-waiting {
   color: var(--warning);
 }

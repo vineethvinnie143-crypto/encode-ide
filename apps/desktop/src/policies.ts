@@ -13,7 +13,7 @@ export const POLICY_LABELS: Record<ApprovalPolicy, string> = {
 export const POLICY_DESCRIPTIONS: Record<ApprovalPolicy, string> = {
   'read-only': 'Reads and searches only. Edits and commands are blocked.',
   'workspace-write': 'Edits workspace files without asking. Asks before every command.',
-  'auto-review': 'Like Workspace Write, and runs read-only commands such as ls, cat or git status without asking.',
+  'auto-review': 'Runs read-only commands without asking. A second model, the Reviewer, approves other low-risk commands that fit your request, and asks you about the rest.',
   'full-access': 'Edits files and runs commands without asking. Use it only in workspaces you trust.',
 }
 

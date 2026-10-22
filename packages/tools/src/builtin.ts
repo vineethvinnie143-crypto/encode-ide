@@ -86,4 +86,16 @@ export const BUILTIN_SUBAGENT_TYPES: readonly SubagentType[] = [
       'Finds things fast in a codebase without changing anything: files by pattern, code by keyword, how something works. Say how thorough to be: quick, medium or very thorough.',
     tools: [...READ_ONLY_TOOL_NAMES],
   },
+  {
+    name: 'Plan',
+    description:
+      'Works out how to carry out a change without making it: reads the code, weighs the options and returns steps with the files to touch and the risks. Say what to plan and what constrains it.',
+    tools: [...READ_ONLY_TOOL_NAMES],
+  },
+  {
+    name: 'Review',
+    description:
+      'Reviews changes for bugs, risks and missing tests without altering anything. Say what to review (a diff, some files, a branch) and what matters most. Returns findings by severity, each with file and line.',
+    tools: [...READ_ONLY_TOOL_NAMES],
+  },
 ]

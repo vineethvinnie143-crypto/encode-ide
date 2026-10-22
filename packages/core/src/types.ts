@@ -45,6 +45,10 @@ export interface ApprovalPrompt {
   grant?: string
   /** The rules "Always allow" would save for this call; absent when no rule could vouch for it. */
   always?: AlwaysAllow
+  /** Under Auto review, why the Reviewer did not answer: the fixed checks' reason, or the Reviewer's own. */
+  review?: { by: 'floor' | 'reviewer'; reason: string }
+  /** Hidden or look-alike characters in what the call adds, one line each. */
+  warnings?: string[]
 }
 
 /** What "Always allow" would save: the rules, and what they say in a phrase. */
@@ -81,6 +85,8 @@ export interface Surface {
   fileChanged(path: string): void
   /** Resolves approved when the user approves; not approved when they refuse or the signal aborts. */
   approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<ApprovalResult>
+  /** Whether the user already allowed this grant for the rest of the session, so nothing needs to judge it again. */
+  granted?(grant: string): boolean
   /** One answer to one question. */
   ask(entryId: string, question: Question, signal: AbortSignal): Promise<string>
   proposePlan(entryId: string, plan: string, signal: AbortSignal): Promise<PlanVerdict>

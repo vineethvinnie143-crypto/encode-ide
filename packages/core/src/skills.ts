@@ -7,6 +7,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SkillSummary, Skills } from '@encode/tools'
+import { isFolderSync, readSmallFile, staysInProject } from './safe-files'
+
+/** The most of a skill file that is read. */
+const MAX_SKILL_BYTES = 256 * 1024
+/** Skills in a repository's folder are read with care: no links, so a skill cannot be a window onto another file. */
+const readSkill = (file: string, source: SkillSource['source']): string | null => readSmallFile(file, { maxBytes: MAX_SKILL_BYTES, followLinks: source !== 'workspace' })
 
 export interface SkillSource {
   dir: string
@@ -48,16 +54,16 @@ export function scanSkills(sources: readonly SkillSource[]): SkillEntry[] {
     } catch {
       continue
     }
+    // The folder a repository fills must not lead out of it.
+    if (source === 'workspace' && !staysInProject(dir)) continue
     for (const entry of entries) {
-      const file = entry.isDirectory() ? path.join(dir, entry.name, 'SKILL.md') : entry.name.toLowerCase().endsWith('.md') ? path.join(dir, entry.name) : ''
+      // The user's own folder may hold links to skills kept elsewhere; a repository's may not.
+      const folder = entry.isDirectory() || (source !== 'workspace' && entry.isSymbolicLink() && isFolderSync(path.join(dir, entry.name)))
+      const file = folder ? path.join(dir, entry.name, 'SKILL.md') : entry.name.toLowerCase().endsWith('.md') ? path.join(dir, entry.name) : ''
       if (!file) continue
-      const name = entry.isDirectory() ? entry.name : entry.name.replace(/\.md$/i, '')
-      let text: string
-      try {
-        text = fs.readFileSync(file, 'utf8')
-      } catch {
-        continue
-      }
+      const name = folder ? entry.name : entry.name.replace(/\.md$/i, '')
+      const text = readSkill(file, source)
+      if (text === null) continue
       found.set(name, { name, description: describe(text, name), source, file })
     }
   }
@@ -73,7 +79,8 @@ export function createSkills(sources: () => readonly SkillSource[]): Skills & { 
     async load(name) {
       const skill = entries().find((entry) => entry.name === name)
       if (!skill) return undefined
-      const text = await fs.promises.readFile(skill.file, 'utf8')
+      const text = readSkill(skill.file, skill.source)
+      if (text === null) return undefined
       return { name: skill.name, directory: path.dirname(skill.file), body: parseFrontMatter(text).body.trim() }
     },
   }

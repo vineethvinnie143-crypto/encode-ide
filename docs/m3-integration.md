@@ -5,7 +5,8 @@ client). **Steps 1 to 3 and 7 below are wired into the app** (ADR 0055): setting
 shell rules, the approval card's "Always allow", the Permissions screen and the banner above the
 composer. **Steps 4 and 5 (hooks, checkpoints and rewind) are wired too** (ADR 0056), and so is
 **step 6 (MCP)** (ADR 0057): it hangs off the same per-folder snapshot (`@encode/workspace`).
-What is left of M3 is in the table at the end.
+The Reviewer under Auto review, the scan for hidden characters and subagent definitions are done too (ADR 0059 to
+0061). What is left of M3 is in the table at the end.
 
 ## What was checked already
 
@@ -40,7 +41,7 @@ wiring pull request does, by using them:
 4. **Hooks (done).** `workspaceHooks(config)` (`@encode/workspace`) reads the folder's snapshot, builds
    `createCommandHooks(groups, { env, runner, notice })` only from hooks that apply (the person's own, and the
    folder's once trusted and approved) and runs them in the agent's shell and environment. `Workspaces.scope`
-   combines `combineHooks(recordingHooks(service), workspaceHooks(config))` (the reviewer gate joins later) with
+   combines `combineHooks(recordingHooks(service), workspaceHooks(config))` with
    the recording hooks **first**; they cannot throw, so a failing store never skips a prompt hook. A hooks entry that cannot be
    read under `PreToolUse` makes the folder `broken` (ADR 0042, 0056). Hooks stop with the turn
    (`HookEvent.signal`).
@@ -77,11 +78,11 @@ wiring pull request does, by using them:
 | --- | --- |
 | OS sandbox: Seatbelt on macOS, bubblewrap on Linux, an allowlist proxy, and the Windows evaluation | A package of its own, with a `SpawnWrapper` for the core's shell. Until it lands, R1 stays open and prompts are the control on every platform. |
 | Search providers (Brave, Tavily, Exa) | Done (0058): `@encode/tools` serves them behind `WebAccess.search`, the app chooses one in Settings → Agent and keeps its key sealed; the host asks for the key at each search. |
-| Subagent definitions (`.encode/agents/*.md`) and the reviewer gate | Map onto the core's `Subagents` and hook points. |
+| Subagent definitions (`.encode/agents/*.md`) and the reviewer gate | Done (0059 to 0061). The Reviewer is not a hook: it sits in the loop, between the assessor's question and the person (`reviewer.ts`, with the fixed checks in `@encode/permissions`), and one Reviewer per session also serves its subagents. Definitions are read by `loadAgentDefinitions` (`Plan` and `Review` are built in), and `Settings → Roles` chooses the model of the `reviewer` and `planner` roles. |
 
 ## Known limits carried into the wiring
 
-The ones that matter to the UI are in the threat model (RP1 to RP8). The MCP approval card names the
+The ones that matter to the UI are in the threat model (RP1 to RP11). The MCP approval card names the
 variables and headers an entry sets or reads (RP2), and the rewind dialog says, every time, that changes made by
 shell commands are not restored (RP4). Adding and removing an MCP server is still done in the files; the settings
 page of the interface work adds forms for it.

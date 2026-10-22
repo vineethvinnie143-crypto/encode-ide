@@ -121,6 +121,16 @@ const SCENARIOS = {
     { text: 'Now the other tool.', call: { name: 'mcp__fake__add', args: { a: 2, b: 3 } } },
     { text: 'MCP check finished.' },
   ],
+  // Under Auto review a second model call, the Reviewer (answered by reviewerAnswer below), is asked about each command the
+  // assessor could not prove read-only: it approves the first, declines the second and passes the third to the person.
+  // The fixed checks keep the force-push for the person without asking the Reviewer at all.
+  'auto-review': [
+    { text: 'Writing the first note.', call: { name: 'Bash', args: { command: 'echo review-approved > review-approved.txt', description: 'Write a note' } } },
+    { text: 'Writing the second note.', call: { name: 'Bash', args: { command: 'echo review-declined > review-declined.txt', description: 'Write another note' } } },
+    { text: 'Writing the third note.', call: { name: 'Bash', args: { command: 'echo review-asked > review-asked.txt', description: 'Write a third note' } } },
+    { text: 'Now publishing.', call: { name: 'Bash', args: { command: 'git push --force origin main', description: 'Publish' } } },
+    { text: 'Auto review check finished.' },
+  ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
@@ -193,7 +203,9 @@ let requestCount = 0
 let lastAuthorization = null
 /** The tools offered and the messages sent in the latest request that offered tools, so the smoke can check the contract. */
 let lastRequest = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0 }
+/** The latest request of the Reviewer: what it was given, so the smoke can check it sees little and has no tools. */
+let lastReviewer = null
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0 }
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -296,6 +308,26 @@ function pairingProblem(messages) {
   return null
 }
 
+/** The call of the Reviewer: Auto review asks a model whether a command is low risk and part of what the user asked. */
+const REVIEWER_SYSTEM = 'You are the Reviewer for a coding agent.'
+const isReviewer = (messages) => messages.some((message) => message.role === 'system' && JSON.stringify(message.content ?? '').includes(REVIEWER_SYSTEM))
+
+const textOf = (content) => (typeof content === 'string' ? content : Array.isArray(content) ? content.map((part) => part?.text ?? '').join('') : '')
+
+/** The verdict by the command in the action block: the scenario names its files after the answer it wants. */
+function reviewerAnswer(user) {
+  const action = /<action-[0-9a-f]+>\n([\s\S]*?)\n<\/action-[0-9a-f]+>/.exec(user)
+  let command = ''
+  try {
+    command = String(JSON.parse(action?.[1] ?? '{}').command ?? '')
+  } catch {
+    /* an action block the Reviewer cannot read gets the cautious answer */
+  }
+  if (command.includes('review-approved')) return JSON.stringify({ verdict: 'approve', risk: 'low', reason: 'It writes a note in the project, as you asked.' })
+  if (command.includes('review-declined')) return JSON.stringify({ verdict: 'decline', risk: 'medium', reason: 'Nothing you asked for needs this file.' })
+  return JSON.stringify({ verdict: 'ask', risk: 'medium', reason: 'It writes a file you did not mention.' })
+}
+
 /** The small call that names a session once its first turn is over. */
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
@@ -312,6 +344,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-request') {
       sendJson(response, 200, lastRequest)
+      return
+    }
+    if (request.url === '/__last-reviewer') {
+      sendJson(response, 200, lastReviewer)
       return
     }
     if (request.url === '/__stats') {
@@ -358,6 +394,14 @@ const server = http.createServer(async (request, response) => {
       stats.titleRequests += 1
       // Quoted and closed with a full stop, as models do: eNCode must take both off.
       await sendText(response, body, '"Provider path check."')
+      return
+    }
+
+    if (isReviewer(messages)) {
+      stats.reviewerRequests += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastReviewer = { model: body.model ?? null, tools: body.tools ?? [], messages: messages.length, system: messages.filter((message) => message.role === 'system').map((message) => textOf(message.content)).join('\n'), user }
+      await sendText(response, body, reviewerAnswer(user))
       return
     }
 

@@ -95,17 +95,22 @@ async function withImports(file: string, content: string, allowed: string, home:
   return out
 }
 
-async function load(file: string, scope: MemoryScope, allowed: string, home: string): Promise<MemoryFile | undefined> {
+/**
+ * `base` is the folder the file is meant to live in. A repository's file that is a link leading out of it is skipped:
+ * it would put whatever it points at (a key, a token) in front of the model.
+ */
+async function load(file: string, scope: MemoryScope, allowed: string, home: string, base?: string): Promise<MemoryFile | undefined> {
+  const real = await realPathOf(file)
+  if (scope !== 'user' && base !== undefined && !(await isInsideReal(base, real))) return undefined
   const text = await readText(file)
   if (text === undefined || !text.trim()) return undefined
-  const real = await realPathOf(file)
   const content = await withImports(file, text, allowed, home, new Set([real]), 0)
   return { path: file, scope, content: truncateMiddle(content.trim(), MAX_FILE_CHARS) }
 }
 
 async function firstOf(dir: string, names: readonly string[], scope: MemoryScope, allowed: string, home: string): Promise<MemoryFile | undefined> {
   for (const name of names) {
-    const found = await load(path.join(dir, name), scope, allowed, home)
+    const found = await load(path.join(dir, name), scope, allowed, home, dir)
     if (found) return found
   }
   return undefined
@@ -143,7 +148,7 @@ export async function loadMemory(options: MemoryOptions): Promise<MemoryFile[]> 
   for (const dir of dirs) {
     const project = await firstOf(dir, NAMES, 'project', options.root, options.home)
     if (project) files.push(project)
-    const local = await load(path.join(dir, LOCAL), 'local', options.root, options.home)
+    const local = await load(path.join(dir, LOCAL), 'local', options.root, options.home, dir)
     if (local) files.push(local)
   }
 
