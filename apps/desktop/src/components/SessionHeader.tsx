@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type ComponentProps } from 'react'
 import type { AgentMode, BackgroundJob } from '@shared/types'
 import { api } from '../api'
 import { commandRegistry, sessionActions } from '../commands/app'
+import { activeKind } from '../panels/model'
 import { useChat } from '../stores/chat'
 import { useGit } from '../stores/git'
+import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
@@ -48,8 +50,8 @@ export default function SessionHeader() {
   const save = useSettings((state) => state.save)
   const branch = useGit((state) => state.status.branch)
   const workspace = useWorkspace((state) => state.workspace)
-  const mainView = useUi((state) => state.mainView)
-  const rightVisible = useUi((state) => state.rightVisible)
+  const panelShown = usePanels((state) => state.side.layout !== 'hidden')
+  const trajectoryShown = usePanels((state) => state.side.layout !== 'hidden' && activeKind(state.side) === 'trajectory')
   const [jobs, setJobs] = useState<BackgroundJob[]>([])
 
   useEffect(() => {
@@ -82,28 +84,18 @@ export default function SessionHeader() {
       label: 'Files changed',
       description: totals.files ? `${totals.files} file${totals.files === 1 ? '' : 's'}, +${totals.additions} −${totals.deletions}` : 'None yet',
       disabled: !totals.files,
-      onSelect: () => {
-        useUi.getState().setSidebarView('git')
-        useUi.getState().setWorkspaceTab('files')
-      },
+      onSelect: () => usePanels.getState().open('files', { view: 'git' }),
     },
-    { id: 'commands', label: 'Commands run', description: String(commands), onSelect: () => useUi.getState().setMainView('trajectory') },
-    { id: 'subagents', label: 'Subagents', description: String(subagents), onSelect: () => useUi.getState().setMainView('trajectory') },
+    { id: 'commands', label: 'Commands run', description: String(commands), onSelect: () => usePanels.getState().open('trajectory') },
+    { id: 'subagents', label: 'Subagents', description: String(subagents), onSelect: () => usePanels.getState().open('trajectory') },
     {
       id: 'jobs',
       label: 'Background jobs',
       description: runningJobs.length ? `${runningJobs.length} running` : 'None running',
-      disabled: !runningJobs.length,
-      onSelect: () => {
-        for (const job of runningJobs) void api.jobs.kill(job.id)
-      },
+      onSelect: () => usePanels.getState().openBottom('jobs'),
     },
     { kind: 'separator', id: 'sep-trajectory' },
-    {
-      id: 'trajectory',
-      label: mainView === 'trajectory' ? 'Show the conversation' : 'Show the trajectory',
-      onSelect: () => useUi.getState().setMainView(mainView === 'trajectory' ? 'chat' : 'trajectory'),
-    },
+    { id: 'trajectory', label: 'Show the trajectory', onSelect: () => usePanels.getState().open('trajectory') },
   ]
 
   const actionEntries = (): MenuEntry[] => {
@@ -174,10 +166,10 @@ export default function SessionHeader() {
           )}
         />
         {runningJobs.length > 0 && (
-          <span className="ui-chip tone-accent">
+          <ChipButton className="tone-accent" title="Show the background jobs" onClick={() => usePanels.getState().openBottom('jobs')}>
             <Activity size={12} />
             {runningJobs.length} job{runningJobs.length === 1 ? '' : 's'} running
-          </span>
+          </ChipButton>
         )}
       </div>
 
@@ -199,7 +191,7 @@ export default function SessionHeader() {
           width={300}
           entries={summaryEntries}
           trigger={(props) => (
-            <IconButton label="Summary" size="md" active={mainView === 'trajectory'} {...props}>
+            <IconButton label="Summary" size="md" active={trajectoryShown} {...props}>
               <Activity size={16} />
             </IconButton>
           )}
@@ -219,7 +211,7 @@ export default function SessionHeader() {
           label="Show or hide the side panel"
           shortcut={commandRegistry.shortcut('view.sidePanel')}
           size="md"
-          active={rightVisible}
+          active={panelShown}
           onClick={() => commandRegistry.run('view.sidePanel')}
         >
           <PanelRight size={16} />

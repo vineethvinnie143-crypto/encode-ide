@@ -1,0 +1,27 @@
+{
+  "name": "@encode/editor-view",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's editor component: a virtualized, framework-free DOM view over @encode/editor, themed through --enc-editor-* and --enc-tok-* variables.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test:browser": "node test/browser/run.mjs"
+  },
+  "dependencies": {
+    "@encode/diff": "workspace:*",
+    "@encode/editor": "workspace:*",
+    "@encode/text": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

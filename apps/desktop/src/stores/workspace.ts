@@ -1,7 +1,8 @@
 import { create } from '../store'
 import type { FileEntry, OpenWorkspace } from '@shared/types'
 import { api } from '../api'
-import { SWITCH_BLOCKED, canSwitchProject } from './sidebar-model'
+import { useEditor } from './editor'
+import { SWITCH_BLOCKED, canSwitchProject, sameRoot } from './sidebar-model'
 import { useStatus } from './status'
 import { useUi } from './ui'
 
@@ -55,9 +56,12 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       useUi.getState().notify('info', SWITCH_BLOCKED)
       return
     }
+    // Open files are paths in this folder: they cannot outlive it, so unsaved changes are settled first.
+    if (!(await useEditor.getState().confirmDiscardAll())) return
     try {
       const workspace = await api.workspace.openDialog()
       if (!workspace) return
+      if (!sameRoot(workspace.root, get().workspace?.root)) useEditor.getState().dropAll()
       set({ workspace, children: {}, expanded: {}, selected: null })
       await get().loadDir('')
     } catch (error) {
@@ -72,8 +76,11 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       useUi.getState().notify('info', check.reason ?? SWITCH_BLOCKED)
       return
     }
+    const switching = !sameRoot(path, get().workspace?.root)
+    if (switching && !(await useEditor.getState().confirmDiscardAll())) return
     try {
       const workspace = await api.workspace.openPath(path)
+      if (!sameRoot(workspace.root, get().workspace?.root)) useEditor.getState().dropAll()
       set({ workspace, children: {}, expanded: {}, selected: null })
       await get().loadDir('')
     } catch (error) {
@@ -82,11 +89,13 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
   },
 
   close: async () => {
+    if (!(await useEditor.getState().confirmDiscardAll())) return
     try {
       await api.workspace.close()
     } catch {
       /* ignore */
     }
+    useEditor.getState().dropAll()
     set({ workspace: null, children: {}, expanded: {}, selected: null })
   },
 
@@ -151,7 +160,8 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
 
   rename: async (rel, newName) => {
     try {
-      await api.workspace.rename(rel, newName)
+      const renamed = await api.workspace.rename(rel, newName)
+      useEditor.getState().renamePath(rel, renamed.path)
       await get().refreshAll()
       useUi.getState().notify('success', `Renamed to ${newName}`)
     } catch (error) {

@@ -1,0 +1,723 @@
+/*
+ * The editor's structure and its default look. The host themes it by setting
+ * the --enc-editor-*, --enc-tok-* and --enc-editor-ui-font-family variables
+ * on :root or any ancestor; nothing here is meant to be overridden by
+ * selector. The values after each comma are the defaults.
+ */
+
+.enc-editor {
+  --e-bg: var(--enc-editor-bg, #14161a);
+  --e-fg: var(--enc-editor-fg, #d7dae0);
+  --e-gutter-bg: var(--enc-editor-gutter-bg, var(--e-bg));
+  --e-gutter-fg: var(--enc-editor-gutter-fg, #4b5160);
+  --e-gutter-active-fg: var(--enc-editor-gutter-active-fg, #9aa3b5);
+  --e-active-line: var(--enc-editor-active-line-bg, rgba(255, 255, 255, 0.035));
+  --e-selection: var(--enc-editor-selection-bg, rgba(88, 129, 255, 0.3));
+  --e-selection-inactive: var(--enc-editor-selection-inactive-bg, rgba(140, 150, 170, 0.18));
+  --e-cursor: var(--enc-editor-cursor, #7fa6ff);
+  --e-match: var(--enc-editor-match-bg, rgba(245, 181, 74, 0.22));
+  --e-match-active: var(--enc-editor-match-active-bg, rgba(245, 181, 74, 0.45));
+  --e-bracket: var(--enc-editor-bracket-match-bg, rgba(127, 166, 255, 0.22));
+  --e-guide: var(--enc-editor-indent-guide, rgba(255, 255, 255, 0.07));
+  --e-whitespace: var(--enc-editor-whitespace, rgba(255, 255, 255, 0.25));
+  --e-error: var(--enc-editor-error, #ff6b6b);
+  --e-warning: var(--enc-editor-warning, #f5b54a);
+  --e-info: var(--enc-editor-info, #6b98ff);
+  --e-inserted: var(--enc-editor-inserted-bg, rgba(60, 203, 127, 0.28));
+  --e-inserted-line: var(--enc-editor-inserted-line-bg, rgba(60, 203, 127, 0.1));
+  --e-deleted: var(--enc-editor-deleted-bg, rgba(255, 107, 107, 0.28));
+  --e-deleted-line: var(--enc-editor-deleted-line-bg, rgba(255, 107, 107, 0.1));
+  --e-widget-bg: var(--enc-editor-widget-bg, #1d2027);
+  --e-widget-fg: var(--enc-editor-widget-fg, #d7dae0);
+  --e-widget-border: var(--enc-editor-widget-border, rgba(255, 255, 255, 0.1));
+  --e-widget-shadow: var(--enc-editor-widget-shadow, 0 8px 28px rgba(0, 0, 0, 0.45));
+  --e-accent: var(--enc-editor-accent, #4f7cff);
+  --e-accent-fg: var(--enc-editor-accent-fg, #ffffff);
+  --e-scrollbar: var(--enc-editor-scrollbar, rgba(150, 160, 180, 0.28));
+  --e-scrollbar-hover: var(--enc-editor-scrollbar-hover, rgba(150, 160, 180, 0.5));
+  --e-radius: var(--enc-editor-radius, 8px);
+  --e-ui-font: var(--enc-editor-ui-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
+
+  --e-tok-comment: var(--enc-tok-comment, #6b7385);
+  --e-tok-string: var(--enc-tok-string, #8fd19e);
+  --e-tok-number: var(--enc-tok-number, #f0a96a);
+  --e-tok-keyword: var(--enc-tok-keyword, #c4a1ff);
+  --e-tok-type: var(--enc-tok-type, #6fd0e6);
+  --e-tok-function: var(--enc-tok-function, #7fb0ff);
+  --e-tok-punct: var(--enc-tok-punct, #8b93a5);
+  --e-tok-operator: var(--enc-tok-operator, #a6aebf);
+  --e-tok-tag: var(--enc-tok-tag, #ff8b8b);
+  --e-tok-attr: var(--enc-tok-attr, #f0c674);
+  --e-tok-value: var(--enc-tok-value, #8fd19e);
+  --e-tok-key: var(--enc-tok-key, #7fb0ff);
+  --e-tok-bool: var(--enc-tok-bool, #f0a96a);
+  --e-tok-heading: var(--enc-tok-heading, #7fb0ff);
+  --e-tok-emphasis: var(--enc-tok-emphasis, var(--e-fg));
+  --e-tok-strong: var(--enc-tok-strong, var(--e-fg));
+  --e-tok-variable: var(--enc-tok-variable, var(--e-fg));
+  --e-tok-link: var(--enc-tok-link, #7fb0ff);
+  --e-tok-meta: var(--enc-tok-meta, #6fd0e6);
+  --e-tok-regexp: var(--enc-tok-regexp, #f09a9a);
+  --e-tok-escape: var(--enc-tok-escape, #f0c674);
+  --e-tok-property: var(--enc-tok-property, #a8c7ff);
+  --e-tok-constant: var(--enc-tok-constant, #f0a96a);
+  --e-tok-inserted: var(--enc-tok-inserted, #8fd19e);
+  --e-tok-deleted: var(--enc-tok-deleted, #ff8b8b);
+  --e-tok-code: var(--enc-tok-code, #8fd19e);
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--e-bg);
+  color: var(--e-fg);
+  font: var(--enc-editor-font-size, 13px) / var(--enc-editor-line-height, 20px)
+    var(--enc-editor-font-family, 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, Menlo, monospace);
+  font-kerning: none;
+  -webkit-user-select: none;
+  user-select: none;
+  contain: layout paint;
+}
+
+.enc-scroller {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  overscroll-behavior: contain;
+  cursor: text;
+}
+
+.enc-scroller::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.enc-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+.enc-scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.enc-scroller::-webkit-scrollbar-thumb {
+  background-color: var(--e-scrollbar);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+.enc-scroller::-webkit-scrollbar-thumb:hover {
+  background-color: var(--e-scrollbar-hover);
+}
+
+.enc-sizer {
+  position: relative;
+  display: flex;
+  min-width: 100%;
+}
+
+/* Gutter */
+
+.enc-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  overflow: hidden;
+  background: var(--e-gutter-bg);
+  cursor: default;
+}
+.enc-no-numbers .enc-gutter-num {
+  display: none;
+}
+.enc-gutter-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+}
+.enc-gutter-num {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--enc-line-h);
+  line-height: var(--enc-line-h);
+  padding-right: 12px;
+  text-align: right;
+  color: var(--e-gutter-fg);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+.enc-gutter-num.enc-active {
+  color: var(--e-gutter-active-fg);
+}
+.enc-gutter-num.enc-gutter-error {
+  color: var(--e-error);
+}
+.enc-gutter-num.enc-gutter-warning {
+  color: var(--e-warning);
+}
+.enc-gutter-inserted::after,
+.enc-gutter-modified::after,
+.enc-gutter-deleted::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 1px;
+}
+.enc-gutter-inserted::after {
+  background: var(--e-tok-inserted);
+}
+.enc-gutter-modified::after {
+  background: var(--e-info);
+}
+.enc-gutter-deleted::after {
+  top: 0;
+  bottom: auto;
+  height: 3px;
+  width: 8px;
+  right: 1px;
+  background: var(--e-tok-deleted);
+}
+
+/* Content layers */
+
+.enc-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.enc-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0;
+}
+.enc-bg,
+.enc-marks,
+.enc-selection,
+.enc-lines,
+.enc-zones,
+.enc-cursors {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0;
+}
+.enc-rect {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.enc-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--enc-line-h);
+  line-height: var(--enc-line-h);
+  padding-left: var(--enc-pad-x, 12px);
+  white-space: pre;
+  tab-size: var(--enc-tab-size, 4);
+  -moz-tab-size: var(--enc-tab-size, 4);
+  font-variant-ligatures: none;
+  pointer-events: none;
+  /* Text reads in the order it is stored: nothing in a line can reorder what follows it. */
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+.enc-ligatures .enc-line {
+  font-variant-ligatures: contextual;
+}
+
+.enc-line-active {
+  background: var(--e-active-line);
+}
+.enc-selection-rect {
+  background: var(--e-selection-inactive);
+}
+.enc-focused .enc-selection-rect {
+  background: var(--e-selection);
+}
+.enc-guides {
+  background-image: linear-gradient(to right, var(--e-guide) 1px, transparent 1px);
+  background-repeat: repeat-x;
+}
+
+.enc-mark-find {
+  background: var(--e-match);
+  border-radius: 2px;
+}
+.enc-mark-find-active {
+  background: var(--e-match-active);
+  box-shadow: 0 0 0 1px var(--e-match-active);
+}
+.enc-mark-bracket {
+  background: var(--e-bracket);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-cursor) 55%, transparent);
+  border-radius: 2px;
+}
+.enc-line-inserted {
+  background: var(--e-inserted-line);
+}
+.enc-line-deleted {
+  background: var(--e-deleted-line);
+}
+.enc-mark-inserted {
+  background: var(--e-inserted);
+  border-radius: 2px;
+}
+.enc-mark-deleted {
+  background: var(--e-deleted);
+  border-radius: 2px;
+}
+
+.enc-squiggle-error,
+.enc-squiggle-warning,
+.enc-squiggle-info,
+.enc-squiggle-hint {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.4 Q1.5 0.1 3 1.4 T6 2.4' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left bottom / 6px 3px;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.4 Q1.5 0.1 3 1.4 T6 2.4' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left bottom / 6px 3px;
+}
+.enc-squiggle-error {
+  background: var(--e-error);
+}
+.enc-squiggle-warning {
+  background: var(--e-warning);
+}
+.enc-squiggle-info {
+  background: var(--e-info);
+}
+.enc-squiggle-hint {
+  background: var(--e-gutter-fg);
+}
+
+/* Cursors */
+
+.enc-cursors {
+  z-index: 5;
+}
+.enc-cursor {
+  position: absolute;
+  pointer-events: none;
+}
+.enc-cursor-line {
+  background: var(--e-cursor);
+}
+.enc-cursor-block {
+  background: color-mix(in srgb, var(--e-cursor) 60%, transparent);
+}
+.enc-cursor-underline {
+  background: var(--e-cursor);
+}
+
+/* The hidden textarea: invisible, except while an input method composes text in it. */
+
+.enc-input {
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: var(--enc-line-h);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0;
+  white-space: pre;
+  font: inherit;
+  line-height: var(--enc-line-h);
+  -webkit-user-select: text;
+  user-select: text;
+  /* Only the keyboard and the input method talk to it; a click at the caret must reach the text. */
+  pointer-events: none;
+}
+.enc-composing .enc-input {
+  opacity: 1;
+  min-width: 2px;
+  color: var(--e-fg);
+  background: var(--e-bg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Control and invisible characters, drawn as markers */
+
+.enc-ctrl {
+  font-size: 0;
+}
+.enc-ctrl::before {
+  content: attr(data-label);
+  display: inline-block;
+  box-sizing: border-box;
+  /* Centred in the line whatever the font: the text of the marker's own span has no size. */
+  margin: calc((var(--enc-line-h, 20px) - 14px) / 2) 1px 0;
+  padding: 0 4px;
+  border: 1px solid var(--e-warning);
+  border-radius: 3px;
+  color: var(--e-warning);
+  font: 600 9px / 12px var(--e-ui-font);
+  vertical-align: top;
+  letter-spacing: 0.02em;
+}
+
+/* Token colours */
+
+.tok-comment {
+  color: var(--e-tok-comment);
+  font-style: italic;
+}
+.tok-string {
+  color: var(--e-tok-string);
+}
+.tok-number {
+  color: var(--e-tok-number);
+}
+.tok-keyword {
+  color: var(--e-tok-keyword);
+}
+.tok-type {
+  color: var(--e-tok-type);
+}
+.tok-function {
+  color: var(--e-tok-function);
+}
+.tok-punct {
+  color: var(--e-tok-punct);
+}
+.tok-operator {
+  color: var(--e-tok-operator);
+}
+.tok-tag {
+  color: var(--e-tok-tag);
+}
+.tok-attr {
+  color: var(--e-tok-attr);
+}
+.tok-value {
+  color: var(--e-tok-value);
+}
+.tok-key {
+  color: var(--e-tok-key);
+}
+.tok-bool {
+  color: var(--e-tok-bool);
+}
+.tok-heading {
+  color: var(--e-tok-heading);
+  font-weight: 600;
+}
+.tok-emphasis {
+  color: var(--e-tok-emphasis);
+  font-style: italic;
+}
+.tok-strong {
+  color: var(--e-tok-strong);
+  font-weight: 600;
+}
+.tok-variable {
+  color: var(--e-tok-variable);
+}
+.tok-link {
+  color: var(--e-tok-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.tok-meta {
+  color: var(--e-tok-meta);
+}
+.tok-regexp {
+  color: var(--e-tok-regexp);
+}
+.tok-escape {
+  color: var(--e-tok-escape);
+}
+.tok-property {
+  color: var(--e-tok-property);
+}
+.tok-constant {
+  color: var(--e-tok-constant);
+}
+.tok-inserted {
+  color: var(--e-tok-inserted);
+}
+.tok-deleted {
+  color: var(--e-tok-deleted);
+}
+.tok-code {
+  color: var(--e-tok-code);
+}
+
+/* Zones: blocks between lines, used for the removed lines of a review hunk */
+
+.enc-zones {
+  z-index: 2;
+}
+.enc-zone {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  overflow: visible;
+}
+.enc-zone-removed {
+  background: var(--e-deleted-line);
+}
+.enc-zone-line {
+  box-sizing: border-box;
+  height: var(--enc-line-h);
+  line-height: var(--enc-line-h);
+  padding-left: var(--enc-pad-x, 12px);
+  white-space: pre;
+  tab-size: var(--enc-tab-size, 4);
+  font-variant-ligatures: none;
+  position: relative;
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+.enc-zone-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--e-tok-deleted);
+  opacity: 0.7;
+}
+.enc-zone-mark {
+  background: var(--e-deleted);
+  border-radius: 2px;
+}
+.enc-zone-pin {
+  position: sticky;
+  left: var(--enc-gutter-w, 0px);
+  width: calc(var(--enc-view-w, 100%) - var(--enc-gutter-w, 0px));
+  height: 0;
+  z-index: 4;
+}
+
+.enc-hunk-actions {
+  position: absolute;
+  right: 18px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--e-widget-bg);
+  border: 1px solid var(--e-widget-border);
+  border-radius: var(--e-radius);
+  box-shadow: var(--e-widget-shadow);
+  font: 500 11px / 20px var(--e-ui-font);
+  opacity: 0.92;
+}
+.enc-hunk-actions:hover,
+.enc-hunk-actions:focus-within {
+  opacity: 1;
+}
+.enc-hunk-action {
+  height: 20px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--e-radius) - 3px);
+  background: transparent;
+  color: var(--e-widget-fg);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+.enc-hunk-action:hover,
+.enc-hunk-action:focus-visible {
+  background: color-mix(in srgb, var(--e-widget-fg) 12%, transparent);
+  outline: none;
+}
+.enc-hunk-action-keep {
+  color: var(--e-tok-inserted);
+}
+.enc-hunk-action-undo {
+  color: var(--e-tok-deleted);
+}
+
+/* Widgets that stay put while the text scrolls */
+
+.enc-widgets {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.enc-find {
+  position: absolute;
+  top: 8px;
+  right: 22px;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: calc(100% - 44px);
+  padding: 4px 6px 4px 2px;
+  background: var(--e-widget-bg);
+  color: var(--e-widget-fg);
+  border: 1px solid var(--e-widget-border);
+  border-radius: var(--e-radius);
+  box-shadow: var(--e-widget-shadow);
+  font: 12px / 20px var(--e-ui-font);
+  pointer-events: auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.enc-find-expand {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.enc-find-expand:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--e-widget-fg) 10%, transparent);
+}
+.enc-find-expand svg {
+  transition: transform 120ms ease;
+}
+.enc-replace-open .enc-find-expand svg {
+  transform: rotate(90deg);
+}
+.enc-find-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.enc-find-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.enc-find-replace-row {
+  display: none;
+}
+.enc-replace-open .enc-find-replace-row {
+  display: flex;
+}
+.enc-find-field {
+  display: flex;
+  align-items: center;
+  /* 240px, less when the editor is narrow: the rest of the row (expand, count, buttons) takes about 220px of the width. */
+  width: clamp(64px, calc(var(--enc-view-w, 800px) - 220px), 240px);
+  height: 26px;
+  padding: 0 2px 0 8px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--e-widget-fg) 7%, transparent);
+}
+.enc-find-field:focus-within {
+  border-color: var(--e-accent);
+}
+.enc-find[data-state='error'] .enc-find-row:first-child .enc-find-field {
+  border-color: var(--e-error);
+}
+.enc-find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.enc-find-input::placeholder {
+  color: color-mix(in srgb, var(--e-widget-fg) 45%, transparent);
+}
+.enc-find-option,
+.enc-find-button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: 600 11px / 22px var(--e-ui-font);
+  opacity: 0.75;
+  cursor: pointer;
+}
+.enc-find-button {
+  width: 24px;
+  height: 24px;
+}
+.enc-find-option:hover,
+.enc-find-button:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--e-widget-fg) 12%, transparent);
+}
+.enc-find-option[aria-pressed='true'] {
+  opacity: 1;
+  background: color-mix(in srgb, var(--e-accent) 28%, transparent);
+  color: var(--e-widget-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-accent) 60%, transparent);
+}
+.enc-find-count {
+  flex: none;
+  min-width: 64px;
+  padding: 0 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--e-widget-fg) 70%, transparent);
+  white-space: nowrap;
+}
+.enc-find[data-state='empty'] .enc-find-count,
+.enc-find[data-state='error'] .enc-find-count {
+  color: var(--e-error);
+}
+
+/* Measuring */
+
+.enc-probe {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+}
+.enc-probe-row {
+  white-space: pre;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enc-find-expand svg {
+    transition: none;
+  }
+}

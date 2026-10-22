@@ -1,0 +1,19 @@
+{
+  "name": "@encode/hooks",
+  "version": "0.0.0",
+  "private": true,
+  "description": "User hooks in Claude Code's format: commands that run at points of the agent's life and can block, allow or add context.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

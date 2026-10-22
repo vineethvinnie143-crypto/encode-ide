@@ -31,6 +31,19 @@ function rendererUrl(appearance: Appearance): string {
   return url.toString()
 }
 
+/**
+ * A page can ask for permissions (camera, location, notifications, the list of installed fonts). eNCode's
+ * own page may list the fonts, for Settings > Appearance; no other page or frame, such as one in the
+ * browser panel, gets anything.
+ */
+function restrictPermissions(win: BrowserWindow): void {
+  const allowed = (permission: string, url: string | undefined, mainFrame: boolean | undefined) =>
+    permission === 'local-fonts' && mainFrame === true && url !== undefined && isRendererUrl(url)
+  const session = win.webContents.session
+  session.setPermissionRequestHandler((_contents, permission, callback, details) => callback(allowed(permission, details.requestingUrl, details.isMainFrame)))
+  session.setPermissionCheckHandler((_contents, permission, _origin, details) => allowed(permission, details.requestingUrl, details.isMainFrame))
+}
+
 /** Call after applyNativeAppearance, so the window starts in the colour of the chosen theme. */
 export function createMainWindow(appearance: Appearance): BrowserWindow {
   const win = new BrowserWindow({
@@ -53,6 +66,8 @@ export function createMainWindow(appearance: Appearance): BrowserWindow {
       webviewTag: false,
     },
   })
+
+  restrictPermissions(win)
 
   win.once('ready-to-show', () => {
     win.show()

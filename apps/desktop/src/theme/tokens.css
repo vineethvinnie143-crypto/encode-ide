@@ -69,16 +69,23 @@
   --focus: color-mix(in srgb, var(--accent) 60%, transparent);
 
   /* Type */
-  --font-ui: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
-  --fs-11: 11px;
-  --fs-12: 12px;
-  --fs-13: 13px;
-  --fs-14: 14px;
-  --fs-16: 16px;
-  --fs-20: 20px;
-  --fs-24: 24px;
-  --fs-32: 32px;
+  /* The fonts and sizes come from Settings > Appearance (src/theme/appearance.ts sets these on <html>);
+     the values here are the defaults: Windows' own fonts at Codex's sizes. Sizes below are written for
+     14 px text: --ui-delta moves them all with the UI size, and --ui-small gives text under 14 px one
+     more pixel in Windows' font, which sets about 8% narrower than Inter. */
+  --font-ui: system-ui, 'Segoe UI', sans-serif;
+  --font-mono: Consolas, ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', monospace;
+  --ui-delta: 0px;
+  --ui-small: 1px;
+  --code-size: 12px;
+  --fs-11: calc(11px + var(--ui-small));
+  --fs-12: calc(12px + var(--ui-small));
+  --fs-13: calc(13px + var(--ui-small));
+  --fs-14: calc(14px + var(--ui-delta));
+  --fs-16: calc(16px + var(--ui-delta));
+  --fs-20: calc(20px + var(--ui-delta));
+  --fs-24: calc(24px + var(--ui-delta));
+  --fs-32: calc(32px + var(--ui-delta));
 
   /* Shape and rhythm */
   --r-4: 4px;
@@ -215,13 +222,19 @@
   --border-strong: #a3abb9;
 }
 
-/* Reduce motion: System follows Windows, On always, Off never. */
+/*
+ * Reduce motion: System follows Windows, On always, Off never. Animations shrink to one frame
+ * (animationend still fires). Transitions are removed, not shortened: a transition of 0.01ms
+ * still keeps an element that was just shown at `visibility: hidden` until the next frame, and
+ * a hidden element cannot take focus, so a menu opened by a user who reduces motion would not
+ * answer the keyboard.
+ */
 :root[data-motion='reduce'] *,
 :root[data-motion='reduce'] *::before,
 :root[data-motion='reduce'] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) *,
@@ -229,6 +242,6 @@
   :root:not([data-motion='full']) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
   }
 }

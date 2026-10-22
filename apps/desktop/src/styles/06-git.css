@@ -10,7 +10,7 @@
 
 .git-summary {
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--text-3);
   display: flex;
   gap: 10px;
@@ -30,7 +30,7 @@
   gap: 8px;
   padding: 5px 12px;
   text-align: left;
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   color: var(--text-2);
 }
 .git-change:hover {
@@ -41,7 +41,7 @@
   width: 16px;
   text-align: center;
   font-weight: 700;
-  font-size: 11px;
+  font-size: calc(var(--code-size) - 1px);
   font-family: var(--font-mono);
 }
 .git-status.mod {

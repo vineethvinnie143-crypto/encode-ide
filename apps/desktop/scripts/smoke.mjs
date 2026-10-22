@@ -8,7 +8,7 @@
  *
  * ENCODE_DEBUG_PORT and ENCODE_FAKE_PROVIDER_PORT override the ports (9222, 8787).
  *
- * Exercises the hand-built editor (overlay integrity, save round-trip, find,
+ * Exercises the in-house editor (what it draws, typing, save and undo round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
  * scripts/fake-provider.mjs including approvals, diffs and command execution, and
  * last the appearance settings, capturing dark and light at 1280 x 800 and 1920 x 1080.
@@ -143,6 +143,31 @@ async function typeInto(selector, value) {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     return true
   })()`)
+}
+
+/** The lines the editor has drawn, top to bottom. They are pooled, so DOM order is not line order. */
+const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
+  .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+  .map((line) => line.textContent)`
+
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13 }
+
+/** A key chord through the browser's own input path, to whatever has focus. */
+async function pressKey(key, { ctrl = false, shift = false } = {}) {
+  const common = {
+    key,
+    code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+    modifiers: (ctrl ? 2 : 0) | (shift ? 8 : 0),
+    windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
+  }
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...common })
+}
+
+async function focusEditor() {
+  if (!(await evaluate("(() => { const input = document.querySelector('.enc-input'); input?.focus(); return Boolean(input) })()"))) {
+    throw new Error('The editor is not on screen')
+  }
 }
 
 /**
@@ -640,7 +665,17 @@ async function runSubagentChecks() {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
 }
 
-const DEFAULT_APPEARANCE = { mode: 'dark', accent: 'blue', contrast: 'standard', density: 'comfortable', motion: 'system' }
+const DEFAULT_APPEARANCE = {
+  mode: 'dark',
+  accent: 'blue',
+  contrast: 'standard',
+  density: 'comfortable',
+  motion: 'system',
+  uiFont: '@system',
+  codeFont: '@system',
+  uiSize: 14,
+  codeSize: 12,
+}
 const theme = () => evaluate('document.documentElement.dataset.theme')
 
 /** The window at the two sizes the UI pull requests are reviewed at. */
@@ -789,6 +824,163 @@ async function runSessionViewChecks() {
 }
 
 /**
+ * The side panel and the bottom panel: tabs and the New tab page, a Browser tab that remembers its
+ * page, the three layouts, resizing, and the shortcuts that drive them.
+ */
+async function runPanelChecks() {
+  console.log('[smoke] --- panels ---')
+  // The layout rules below depend on the window's size, and a runner's screen can be smaller than the window: fix it.
+  const windowSize = { width: 1480, height: 920 }
+  const sizeWindow = (size) => send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false })
+  await sizeWindow(windowSize)
+  await sleep(300)
+  const titles = () => evaluate("[...document.querySelectorAll('.side-panel .panel-tab-title')].map((node) => node.textContent)")
+  const inFront = "document.querySelector('.side-panel .panel-tab.is-active .panel-tab-title')?.textContent"
+  const layoutIs = (name) => `document.querySelector('.side-panel')?.dataset.layout === '${name}' && !document.querySelector('.right-wrap').classList.contains('is-hidden')`
+  const panelHidden = "document.querySelector('.right-wrap')?.classList.contains('is-hidden') === true"
+  const width = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().width`)
+  const drag = (selector, moveX, moveY) =>
+    evaluate(`(() => {
+      const handle = document.querySelector(${JSON.stringify(selector)})
+      const box = handle.getBoundingClientRect()
+      const x = box.left + box.width / 2
+      const y = box.top + box.height / 2
+      const at = (offsetX, offsetY) => ({ bubbles: true, cancelable: true, clientX: x + offsetX, clientY: y + offsetY })
+      handle.dispatchEvent(new PointerEvent('pointerdown', at(0, 0)))
+      window.dispatchEvent(new PointerEvent('pointermove', at(${moveX}, ${moveY})))
+      window.dispatchEvent(new PointerEvent('pointerup', at(${moveX}, ${moveY})))
+    })()`)
+
+  // The strip: 30 px tabs, none wider than 170 px, one selected.
+  const strip = await evaluate(`(() => {
+    const tabs = [...document.querySelectorAll('.side-panel .panel-tab')]
+    return {
+      count: tabs.length,
+      height: tabs[0]?.getBoundingClientRect().height,
+      widest: Math.max(...tabs.map((node) => node.getBoundingClientRect().width)),
+      selected: document.querySelectorAll('.side-panel [role="tab"][aria-selected="true"]').length,
+    }
+  })()`)
+  console.log('[smoke] strip:', JSON.stringify(strip))
+  if (strip.count < 1 || strip.height !== 30 || strip.widest > 170 || strip.selected !== 1) throw new Error('the side panel tabs are not the specified size')
+
+  // Ctrl+T opens a New tab page; choosing Browser turns that page into a Browser tab.
+  const start = await titles()
+  await key({ key: 't', code: 'KeyT', ctrlKey: true })
+  await waitFor("!!document.querySelector('.newtab')", 4000, 'Ctrl+T opens a New tab page')
+  await waitFor(`${inFront} === 'New tab'`, 4000, 'the New tab page is in front')
+  await sleep(300)
+  await screenshot('ui-dark-newtab.png')
+  if (!(await click('.newtab-card', 'Browser'))) throw new Error('the New tab page has no Browser')
+  await waitFor("!document.querySelector('.newtab') && !!document.querySelector('.browser-address input')", 4000, 'the page became a Browser tab')
+  if ((await titles()).length !== start.length + 1) throw new Error('choosing Browser added a tab instead of using the New tab page')
+
+  // An address that needs no network: nothing listens on port 8, so the frame shows its error page.
+  await typeInto('.browser-address input', 'http://127.0.0.1:8/')
+  await evaluate("document.querySelector('.browser-address input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await waitFor(`${inFront} === '127.0.0.1:8'`, 4000, 'the tab is named after the page')
+
+  // Ctrl+W closes it and Ctrl+Shift+T brings it back on the same page, in the same place.
+  const withBrowser = await titles()
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.browser-address')", 4000, 'Ctrl+W closes the tab')
+  if ((await titles()).length !== start.length) throw new Error('Ctrl+W did not close exactly one tab')
+  await key({ key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true })
+  await waitFor("document.querySelector('.browser-address input')?.value === 'http://127.0.0.1:8/'", 4000, 'Ctrl+Shift+T brings the tab back on its page')
+  if (JSON.stringify(await titles()) !== JSON.stringify(withBrowser)) throw new Error('the reopened tab is not where it was')
+
+  // The page is also listed on the New tab page.
+  await key({ key: 't', code: 'KeyT', ctrlKey: true })
+  await waitFor("[...document.querySelectorAll('.newtab-page')].some((node) => node.textContent.includes('127.0.0.1:8'))", 4000, 'the New tab page lists the recent page')
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.newtab')", 4000, 'an empty New tab page closes')
+
+  // Tabs by number and by step.
+  await key({ key: '1', code: 'Digit1', ctrlKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'Ctrl+1 goes to the first tab')
+  await key({ key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(withBrowser[1])}`, 4000, 'Ctrl+Shift+] goes to the next tab')
+  await key({ key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'Ctrl+Shift+[ goes to the previous tab')
+
+  // Layouts: full width covers the thread (which stays mounted), Ctrl+Shift+B cycles split, full, hidden.
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor(layoutIs('full'), 4000, 'Ctrl+Alt+F makes the panel full width')
+  if ((await evaluate("getComputedStyle(document.querySelector('.app-main')).display")) !== 'none') throw new Error('a full-width panel does not cover the thread')
+  if (!(await evaluate("!!document.querySelector('.composer-input')"))) throw new Error('the thread was unmounted under the full-width panel')
+  await sleep(300)
+  await screenshot('ui-dark-panel-full.png')
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor(layoutIs('split'), 4000, 'Ctrl+Alt+F goes back to split')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(layoutIs('full'), 4000, 'Ctrl+Shift+B: split to full')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(panelHidden, 4000, 'Ctrl+Shift+B: full to hidden')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(layoutIs('split'), 4000, 'Ctrl+Shift+B: hidden to split')
+
+  // Drag the divider: the panel follows the pointer, and keeps its width for the next run.
+  const wide = await width('.right-wrap')
+  await drag('.workrow > .resizer-v', -60, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide + 60}) < 2`, 4000, 'dragging the divider left widens the panel')
+  if ((await evaluate("localStorage.getItem('eNCode.sidepanel.v1')")) !== String(Math.round(wide + 60))) throw new Error('the panel width was not saved')
+  await drag('.workrow > .resizer-v', 60, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'dragging the divider right narrows the panel')
+
+  // In a narrow window the panel is held under 60% of the row, and a drag starts from the width on screen, not the saved one.
+  await sizeWindow({ width: 1024, height: 768 })
+  await waitFor("document.querySelector('.right-wrap').getBoundingClientRect().width <= document.querySelector('.workrow').getBoundingClientRect().width * 0.6 + 1", 4000, 'a narrow window holds the panel under 60% of the row')
+  const held = await width('.right-wrap')
+  if (held >= wide - 2) throw new Error(`the panel was not held back in a narrow window (${held} px, saved ${wide} px)`)
+  await drag('.workrow > .resizer-v', 40, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${held - 40}) < 2`, 4000, 'a drag in a narrow window starts from the width on screen')
+  await sizeWindow(windowSize)
+  await sleep(300)
+  await drag('.workrow > .resizer-v', Math.round((await width('.right-wrap')) - wide), 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'the panel is back at its width')
+
+  // Bottom panel: the shell stays alive while the panel is hidden, and the panel resizes.
+  const bottomShown = "!!document.querySelector('.bottom-panel') && !document.querySelector('.bottom-panel').classList.contains('is-closed')"
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor(`${bottomShown} && !!document.querySelector('.bottom-panel .terminal-lines')`, 15000, 'Ctrl+` shows the terminal in the bottom panel')
+  await waitFor("(document.querySelector('.bottom-panel .term-prompt')?.textContent ?? '').trim().length > 0", 15000, 'the shell has started')
+  await typeInto('.bottom-panel .term-input', 'echo kept-ok')
+  await sleep(250)
+  await evaluate("document.querySelector('.bottom-panel .term-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await waitFor("document.querySelector('.bottom-panel .terminal-lines')?.textContent.includes('kept-ok')", 10000, 'the shell answers')
+  await key({ key: 'j', code: 'KeyJ', ctrlKey: true })
+  await waitFor("document.querySelector('.bottom-panel')?.classList.contains('is-closed')", 4000, 'Ctrl+J hides the bottom panel')
+  await key({ key: 'j', code: 'KeyJ', ctrlKey: true })
+  await waitFor(bottomShown, 4000, 'Ctrl+J shows the bottom panel')
+  if (!(await evaluate("document.querySelector('.bottom-panel .terminal-lines').textContent.includes('kept-ok')"))) throw new Error('hiding the bottom panel cleared the terminal')
+  const tall = await evaluate("document.querySelector('.bottom-panel').getBoundingClientRect().height")
+  await drag('.bottom-panel > .resizer-h', 0, -80)
+  await waitFor(`Math.abs(document.querySelector('.bottom-panel').getBoundingClientRect().height - ${tall + 80}) < 2`, 4000, 'dragging the handle up raises the bottom panel')
+  await drag('.bottom-panel > .resizer-h', 0, 80)
+  await waitFor(`Math.abs(document.querySelector('.bottom-panel').getBoundingClientRect().height - ${tall}) < 2`, 4000, 'dragging the handle down lowers it')
+
+  // Background jobs open beside the terminal, from the session summary.
+  if (!(await click('.session-actions button[aria-label="Summary"]'))) throw new Error('Summary button not found')
+  await waitFor(menuOpen('Summary'), 4000, 'Summary menu')
+  if (!(await click('.ui-menu [role^="menuitem"]', 'Background jobs'))) throw new Error('Summary has no Background jobs')
+  await waitFor("[...document.querySelectorAll('.bottom-panel .panel-tab-title')].some((node) => node.textContent === 'Jobs')", 4000, 'Background jobs opens the Jobs tab')
+  await waitFor("document.querySelector('.bottom-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Jobs'", 4000, 'Jobs is in front')
+  await sleep(300)
+  await screenshot('ui-dark-bottom-panel.png')
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor("document.querySelector('.bottom-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Terminal'", 4000, 'Ctrl+` brings the terminal forward')
+
+  // Leave the side panel as it was found: the Browser tab closed, the first tab in front.
+  if (!(await click('.side-panel .panel-tab-main', '127.0.0.1:8'))) throw new Error('the Browser tab is gone')
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.browser-address')", 4000, 'the Browser tab closed')
+  await key({ key: '1', code: 'Digit1', ctrlKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'back on the first tab')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+}
+
+/**
  * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
  * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
  */
@@ -820,9 +1012,9 @@ async function runShellChecks() {
   await key({ key: 'b', ctrlKey: true })
   await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sidebar')
   await key({ key: 'b', ctrlKey: true, altKey: true })
-  await waitFor("!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B hides the side panel')
+  await waitFor("document.querySelector('.right-wrap')?.classList.contains('is-hidden')", 4000, 'Ctrl+Alt+B hides the side panel')
   await key({ key: 'b', ctrlKey: true, altKey: true })
-  await waitFor("!!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B shows the side panel')
+  await waitFor("document.querySelector('.right-wrap') && !document.querySelector('.right-wrap').classList.contains('is-hidden')", 4000, 'Ctrl+Alt+B shows the side panel')
   const ratioBefore = await evaluate('window.devicePixelRatio')
   await key({ key: '=', code: 'Equal', ctrlKey: true })
   await waitFor(`window.devicePixelRatio > ${ratioBefore}`, 4000, 'Ctrl+= zooms in')
@@ -948,6 +1140,84 @@ async function runAppearanceChecks() {
   if ((await theme()) !== 'dark') throw new Error('saving Dark did not switch back')
 }
 
+/** Chooses an option of a native select by its label and tells the page, as a click on the option would. */
+const chooseOption = (selectLabel, optionLabel) =>
+  evaluate(`(() => {
+    const select = document.querySelector('select[aria-label=${JSON.stringify(selectLabel)}]')
+    const option = select && [...select.options].find((item) => item.textContent === ${JSON.stringify(optionLabel)})
+    if (!option) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    setter.call(select, option.value)
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  })()`)
+const cssVar = (name) => evaluate(`document.documentElement.style.getPropertyValue(${JSON.stringify(name)}).trim()`)
+const bodyFont = () => evaluate('getComputedStyle(document.body).fontFamily')
+const sizeOf = (selector) => evaluate(`parseFloat(getComputedStyle(document.querySelector(${JSON.stringify(selector)})).fontSize)`)
+
+/**
+ * Settings > Appearance > Fonts: Windows' own fonts at Codex's sizes by default, Inter and JetBrains Mono
+ * one choice away, the installed fonts listed, sizes that move the whole interface, Cancel putting
+ * the old fonts back, and a saved choice drawn right from the first frame after a reload.
+ */
+async function runFontChecks() {
+  console.log('[smoke] --- fonts ---')
+  if (!(await bodyFont()).startsWith('system-ui')) throw new Error(`the default interface font is not the system font: ${await bodyFont()}`)
+  if (!(await cssVar('--font-mono')).startsWith('Consolas')) throw new Error('the default code font is not Consolas')
+  const smallSystem = await sizeOf('.session-sidebar .sb-row .meta')
+  const inputSystem = await sizeOf('.composer-input')
+  console.log('[smoke] system font sizes:', JSON.stringify({ smallSystem, inputSystem }))
+  if (inputSystem !== 14) throw new Error(`the thread text is ${inputSystem} px, not Codex's 14`)
+
+  await openAppearanceSettings()
+  // The installed fonts arrive a moment after the page opens.
+  await waitFor("document.querySelectorAll('select[aria-label=\"Interface font\"] option').length >= 4", 15000, 'the installed fonts')
+  const options = await evaluate("[...document.querySelectorAll('select[aria-label=\"Interface font\"] option')].map((node) => node.textContent)")
+  console.log('[smoke] interface font choices:', options.length, JSON.stringify(options.slice(0, 5)))
+  if (options[0] !== 'System' || options[1] !== 'eNCode (Inter)') throw new Error('the built-in font choices are not first')
+  if (options.length < 4) throw new Error('the installed fonts are not listed')
+  await screenshotSizes('ui-dark-fonts')
+
+  // Inter: the same sizes minus the pixel Windows' font gets on small text.
+  if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
+  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('Inter')", 4000, 'Inter preview')
+  await waitFor("document.documentElement.style.getPropertyValue('--ui-small').trim() === '0px'", 4000, 'Inter takes no extra pixel')
+  const smallInter = await sizeOf('.session-sidebar .sb-row .meta')
+  if (smallInter !== smallSystem - 1) throw new Error(`Inter's small text is ${smallInter} px, the system font's is ${smallSystem} px`)
+  if ((await sizeOf('.composer-input')) !== inputSystem) throw new Error('Inter changed the size of the thread text')
+
+  // The sizes move the whole interface.
+  if (!(await chooseOption('Interface size', '16 px'))) throw new Error('no 16 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--ui-delta').trim() === '2px'", 4000, '16 px preview')
+  if ((await sizeOf('.composer-input')) !== 16) throw new Error('the thread text did not follow the interface size')
+  if (!(await chooseOption('Code size', '14 px'))) throw new Error('no 14 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--code-size').trim() === '14px'", 4000, 'code size preview')
+  if (!(await chooseOption('Code font', 'eNCode (JetBrains Mono)'))) throw new Error('no JetBrains Mono choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--font-mono').trim().startsWith(\"'JetBrains Mono'\")", 4000, 'JetBrains Mono preview')
+
+  // Cancel puts Windows' fonts back.
+  await click('.settings-footer .btn', 'Cancel')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('system-ui') && parseFloat(getComputedStyle(document.querySelector('.composer-input')).fontSize) === 14", 4000, 'Cancel puts the fonts back')
+
+  // Saved, Inter is there from the first frame of the next load.
+  await openAppearanceSettings()
+  if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
+  const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
+  if (saved.uiFont !== '@encode' || saved.uiSize !== 14) throw new Error(`the fonts were not saved: ${JSON.stringify(saved)}`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with Inter')
+  if (!(await bodyFont()).startsWith('Inter')) throw new Error('Inter did not survive a reload')
+  await screenshot('ui-dark-inter.png')
+
+  await evaluate(`window.eNCode.settings.save({ appearance: ${JSON.stringify(DEFAULT_APPEARANCE)} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with the system fonts')
+  if (!(await bodyFont()).startsWith('system-ui')) throw new Error('saving the defaults did not bring the system font back')
+}
+
 try {
   await send('Page.enable')
   await send('Runtime.enable')
@@ -983,61 +1253,68 @@ try {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'file tree after profile pin')
   await evaluate('window.eNCode.agent.reset()')
   await sleep(400)
-  await click('.right-tab', 'Workspace')
-  await waitFor("!!document.querySelector('.files-switcher')", 8000, 'workspace drawer')
+  await waitFor("!!document.querySelector('.files-switcher')", 8000, 'the Files tab')
   await screenshot('02-explorer.png')
 
   if (!(await click('.tree-row', 'README.md'))) throw new Error('README.md row not found')
-  await waitFor("document.querySelector('.code-input')?.value.includes('Demo Project')", 15000, 'README loaded')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('Demo Project')`, 15000, 'README loaded')
   await sleep(450)
 
-  const integrity = await evaluate(`(() => {
-    const source = document.querySelector('.code-input').value
-    const rendered = document.querySelector('.code-highlight code').textContent
+  const integrity = await evaluate(`(async () => {
+    const lines = ${RENDERED_LINES}
+    const file = await window.eNCode.workspace.read('README.md')
+    const expected = file.content.replace(/\\r\\n?/g, '\\n').split('\\n').slice(0, lines.length)
     return {
-      equal: source === rendered,
-      tokens: document.querySelectorAll('.code-highlight .tok-heading, .code-highlight .tok-meta').length,
+      equal: lines.join('\\n') === expected.join('\\n'),
+      lines: lines.length,
+      tokens: document.querySelectorAll('.enc-line .tok-heading, .enc-line .tok-meta').length,
+      numbers: document.querySelectorAll('.enc-gutter-num').length,
     }
   })()`)
-  console.log('[smoke] overlay integrity:', JSON.stringify(integrity))
-  if (!integrity.equal) throw new Error('highlight overlay does not match the source text')
+  console.log('[smoke] editor content:', JSON.stringify(integrity))
+  if (!integrity.lines || !integrity.equal) throw new Error('the editor does not draw the file as it is on disk')
   if (integrity.tokens < 1) throw new Error('markdown tokens were not rendered')
+  if (integrity.numbers < integrity.lines) throw new Error('the gutter does not number the lines')
   await screenshot('03-editor.png')
 
-  // Save round-trip through the custom editor.
-  const original = await evaluate("document.querySelector('.code-input').value")
-  await typeInto('.code-input', original + '\n\nEdited by the eNCode smoke test.\n')
+  // Typing, saving and undo through the editor, with the file checked on disk.
+  const original = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: '\n\nEdited by the eNCode smoke test.\n' })
   await sleep(450)
   const dirty = await evaluate("!!document.querySelector('.editor-tab.is-dirty')")
-  await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))")
+  await pressKey('s', { ctrl: true })
   await sleep(800)
   const savedOnDisk = await evaluate(
     "window.eNCode.workspace.read('README.md').then((file) => file.content.includes('Edited by the eNCode smoke test'), () => false)",
   )
-  console.log(`[smoke] save round-trip dirty=${dirty} disk=${savedOnDisk}`)
-  if (!dirty || !savedOnDisk) throw new Error('editor save round-trip failed')
+  const cleanAfterSave = await evaluate("!document.querySelector('.editor-tab.is-dirty')")
+  console.log(`[smoke] save round-trip dirty=${dirty} disk=${savedOnDisk} cleanAfterSave=${cleanAfterSave}`)
+  if (!dirty || !savedOnDisk || !cleanAfterSave) throw new Error('editor save round-trip failed')
 
-  await typeInto('.code-input', original)
-  await sleep(300)
-  await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))")
-  await sleep(600)
+  // Undo goes back to the text the file had, which is no longer what is on disk: unsaved until saved again.
+  await pressKey('z', { ctrl: true })
+  await sleep(350)
+  const dirtyAfterUndo = await evaluate("!!document.querySelector('.editor-tab.is-dirty')")
+  if (!dirtyAfterUndo) throw new Error('undoing the edit did not mark the document as unsaved')
+  await pressKey('s', { ctrl: true })
+  await sleep(700)
+  const restored = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  if (restored !== original) throw new Error('undo and save did not restore README.md')
 
   // In-file find.
-  await evaluate(`(() => {
-    const textarea = document.querySelector('.code-input')
-    textarea.focus()
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }))
-    return true
-  })()`)
-  await waitFor("!!document.querySelector('.find-bar')", 6000, 'find bar')
-  await typeInto('.find-input', 'Scripts')
+  await focusEditor()
+  await pressKey('f', { ctrl: true })
+  await waitFor("!!document.querySelector('.enc-find')", 6000, 'find widget')
+  await send('Input.insertText', { text: 'Scripts' })
   await sleep(500)
-  const findCount = await evaluate("document.querySelector('.find-count')?.textContent")
+  const findCount = await evaluate("document.querySelector('.enc-find-count')?.textContent")
   console.log('[smoke] find count:', findCount)
-  if (!findCount || findCount === '0/0') throw new Error('find bar did not find matches')
+  if (!findCount || !/\d/.test(findCount)) throw new Error('find did not find matches')
   await screenshot('04-find.png')
-  await evaluate("document.querySelectorAll('.find-bar .icon-btn').forEach((button) => button.click())")
-  await sleep(300)
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.enc-find')", 4000, 'find widget closed')
 
   // Quick open → open src/utils.ts.
   await evaluate(
@@ -1056,16 +1333,114 @@ try {
     item.click()
     return true
   })()`)
-  await waitFor("document.querySelector('.code-input')?.value.includes('export function add')", 15000, 'utils.ts open')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('export function add')`, 15000, 'utils.ts open')
   await sleep(500)
   const tsStats = await evaluate(`(() => ({
-    keywords: document.querySelectorAll('.code-highlight .tok-keyword').length,
-    functions: document.querySelectorAll('.code-highlight .tok-function').length,
+    keywords: document.querySelectorAll('.enc-line .tok-keyword').length,
+    functions: document.querySelectorAll('.enc-line .tok-function').length,
     language: (document.querySelector('.editor-footer')?.textContent ?? '').includes('typescript'),
+    tabs: document.querySelectorAll('.editor-tab').length,
   }))()`)
   console.log('[smoke] typescript tokens:', JSON.stringify(tsStats))
   if (tsStats.keywords < 1) throw new Error('TypeScript tokens were not rendered')
+  if (!tsStats.language) throw new Error('the footer does not show the language')
+  if (tsStats.tabs !== 2) throw new Error(`expected two tabs, saw ${tsStats.tabs}`)
   await screenshot('06-editor-ts.png')
+
+  // Switching back keeps the document: its place, its undo history.
+  await click('.editor-tab', 'README.md')
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('Demo Project')`, 8000, 'README shown again')
+
+  // Go to line: the editor asks, the footer follows.
+  await focusEditor()
+  await pressKey('g', { ctrl: true })
+  await waitFor("!!document.querySelector('.prompt-dialog')", 6000, 'go to line prompt')
+  await typeInto('.prompt-dialog .text-input', '5:3')
+  await sleep(150)
+  await pressKey('Enter')
+  await waitFor("(document.querySelector('.editor-footer')?.textContent ?? '').includes('Ln 5, Col 3')", 6000, 'cursor moved by go to line')
+  // A closed dialog gives focus back to where it was a moment later; a menu opened before that would lose it again.
+  await waitFor("!document.querySelector('.prompt-dialog') && document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor')
+  await sleep(400)
+
+  // Right-click opens the editor's own menu, and the menu takes keyboard focus. That must hold when
+  // the system reduces motion too (the runner's Windows does): a transition, however short, keeps an
+  // element that was just shown at visibility hidden for a frame, and a hidden element cannot be focused.
+  for (const reduce of [false, true]) {
+    const how = reduce ? ' with reduced motion' : ''
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduce ? 'reduce' : 'no-preference' }] })
+    await evaluate(`(() => {
+      const scroller = document.querySelector('.enc-scroller')
+      const rect = scroller.getBoundingClientRect()
+      scroller.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 140, clientY: rect.top + 70 }))
+      return true
+    })()`)
+    await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu' + how)
+    if (!reduce) await screenshot('06b-editor-menu.png')
+    await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu' + how)
+    await pressKey('Escape')
+    await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed' + how)
+    await waitFor("document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor after Escape' + how)
+  }
+  await send('Emulation.setEmulatedMedia', { features: [] })
+
+  // A change on disk (here a write through the app's API, as the agent's are) reaches the open document and keeps the cursor.
+  const readme = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  const cursorBefore = /Ln \d+, Col \d+/.exec(await evaluate("document.querySelector('.editor-footer')?.textContent ?? ''"))?.[0]
+  await evaluate(
+    `window.eNCode.workspace.write('README.md', ${JSON.stringify(readme.replace('Demo Project', 'Demo Project (changed on disk)'))})`,
+  )
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('changed on disk')`, 10000, 'change on disk shown')
+  const afterExternal = await evaluate(`(() => ({
+    dirty: Boolean(document.querySelector('.editor-tab.is-dirty')),
+    footer: document.querySelector('.editor-footer')?.textContent ?? '',
+  }))()`)
+  console.log('[smoke] after change on disk:', JSON.stringify(afterExternal))
+  if (afterExternal.dirty) throw new Error('a change from disk marked the document as edited')
+  if (!cursorBefore || !afterExternal.footer.includes(cursorBefore)) throw new Error(`a change from disk moved the cursor from ${cursorBefore}`)
+  await evaluate(`window.eNCode.workspace.write('README.md', ${JSON.stringify(readme)})`)
+  await waitFor(`!${RENDERED_LINES}.join('\\n').includes('changed on disk')`, 10000, 'change on disk undone')
+
+  // Closing a tab with unsaved changes asks first, and Cancel keeps the changes.
+  await focusEditor()
+  await send('Input.insertText', { text: 'unsaved' })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'unsaved mark')
+  await click('.editor-tab.is-active .tab-close')
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'discard prompt')
+  await screenshot('06c-discard.png')
+  await click('.ui-dialog-foot button', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'discard prompt closed')
+  if (!(await evaluate("!!document.querySelector('.editor-tab.is-dirty')"))) throw new Error('Cancel threw the changes away')
+  await pressKey('z', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 4000, 'undo back to the saved text')
+
+  // A file that someone else changed since it was read is not overwritten unasked.
+  const readDisk = () => evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
+  await focusEditor()
+  await send('Input.insertText', { text: 'mine ' })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'unsaved mark before the overwrite check')
+  await evaluate(`window.eNCode.workspace.write('README.md', ${JSON.stringify(`${readme}\nTheirs.\n`)})`)
+  await pressKey('s', { ctrl: true })
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'overwrite prompt')
+  await screenshot('06d-overwrite.png')
+  await click('.ui-dialog-foot button', 'Cancel')
+  await waitFor("!document.querySelector('.ui-dialog')", 4000, 'overwrite prompt closed')
+  const afterCancel = await readDisk()
+  if (!afterCancel.includes('Theirs.') || afterCancel.includes('mine ')) throw new Error('Cancel still wrote the file')
+  if (!(await evaluate("!!document.querySelector('.editor-tab.is-dirty')"))) throw new Error('Cancel marked the document as saved')
+  await pressKey('s', { ctrl: true })
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 6000, 'overwrite prompt again')
+  await click('.ui-dialog-foot button', 'Overwrite')
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, 'saved after Overwrite')
+  const afterOverwrite = await readDisk()
+  if (!afterOverwrite.includes('mine ') || afterOverwrite.includes('Theirs.')) throw new Error('Overwrite did not write the typed version')
+  // Back through the editor: the file is what the editor wrote last, so saving asks nothing.
+  await pressKey('z', { ctrl: true })
+  await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, 'undo makes the document differ from the file')
+  await pressKey('s', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, 'saved without a prompt')
+  if (await evaluate("!!document.querySelector('.ui-dialog')")) throw new Error('a file the editor wrote last was reported as changed')
+  if ((await readDisk()) !== readme) throw new Error('the file was not put back')
 
   // Settings modal.
   if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
@@ -1110,9 +1485,9 @@ try {
     ),
   )
 
-  await click('.right-tab', 'Workspace')
-  if (!(await click('.workspace-tabs button', 'Shell'))) throw new Error('Shell workspace tab not found')
-  await waitFor("!!document.querySelector('.terminal-lines')", 15000, 'eNCode shell')
+  // Ctrl+` opens the shell in the bottom panel.
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor("!!document.querySelector('.bottom-panel .terminal-lines')", 15000, 'eNCode shell')
   await sleep(500)
   await typeInto('.term-input', 'echo shell-ok')
   await sleep(250)
@@ -1163,6 +1538,8 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runPanelChecks()
+  await runFontChecks()
   await runAppearanceChecks()
 
   if (errors.length) {

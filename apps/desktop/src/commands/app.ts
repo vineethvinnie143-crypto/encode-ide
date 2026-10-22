@@ -6,6 +6,7 @@
 import type { SessionSummary } from '@shared/types'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
+import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
 import { useStatus } from '../stores/status'
@@ -16,6 +17,7 @@ import { buildCommands, type AppActions } from './commands'
 import { CommandRegistry } from './registry'
 
 const ui = () => useUi.getState()
+const panels = () => usePanels.getState()
 const sessions = () => useSessions.getState()
 const activeSession = (): SessionSummary | undefined => sessions().sessions.find((session) => session.id === sessions().activeId)
 
@@ -97,24 +99,19 @@ function createAppActions(): AppActions {
         /* the focused element may not support it */
       }
     },
-    searchInFiles: () => {
-      ui().setSidebarView('search')
-      ui().setRightPanel('workspace')
-      ui().setWorkspaceTab('files')
-    },
+    searchInFiles: () => panels().open('files', { view: 'search' }),
 
     toggleSidebar: () => ui().toggleSidebar(),
-    toggleSidePanel: () => ui().toggleRight(),
+    toggleSidePanel: () => panels().toggleHidden(),
+    toggleBottomPanel: () => panels().toggleBottom(),
     showActivity: () => ui().setSidebarMode(ui().sidebarMode === 'activity' ? 'projects' : 'activity'),
     showChat: () => {
-      ui().setMainView('chat')
+      // A full-width side panel covers the thread.
+      if (panels().side.layout === 'full') panels().setLayout('split')
       document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus()
     },
-    showFiles: () => {
-      ui().setSidebarView('explorer')
-      ui().setWorkspaceTab('files')
-    },
-    showTerminal: () => ui().setWorkspaceTab('shell'),
+    showFiles: () => panels().open('files', { view: 'explorer' }),
+    showTerminal: () => panels().openBottom('terminal'),
     zoom: (action) => void api.window.zoom(action),
     toggleFullScreen: () => void api.window.toggleFullScreen(),
 
@@ -135,6 +132,22 @@ function createAppActions(): AppActions {
       else ui().notify('info', 'No other session is waiting for you.')
     },
     goToSession: (position) => go(sidebarOrder()[position - 1]),
+
+    canClosePanelTab: () => panels().side.layout !== 'hidden' && panels().side.tabs.length > 0,
+    canReopenPanelTab: () => panels().side.closed.length > 0,
+    newPanelTab: () => panels().open('new'),
+    closePanelTab: () => {
+      const id = panels().side.activeId
+      if (id) panels().close(id)
+    },
+    reopenPanelTab: () => panels().reopen(),
+    stepPanelTab: (direction) => panels().step(direction),
+    goToPanelTab: (position) => {
+      if (panels().side.layout === 'hidden') return
+      panels().activateAt(position - 1)
+    },
+    cyclePanelLayout: () => panels().cycleLayout(),
+    toggleFullPanel: () => panels().toggleFull(),
 
     showShortcuts: () => ui().setShortcutsOpen(true),
     showAbout: () => ui().setAboutOpen(true),

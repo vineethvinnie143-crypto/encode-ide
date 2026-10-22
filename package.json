@@ -15,7 +15,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "node scripts/test.mjs",
     "e2e": "pnpm --filter @encode/desktop e2e",
-    "dist": "pnpm --filter @encode/desktop dist"
+    "dist": "pnpm --filter @encode/desktop dist",
+    "test:browser": "pnpm --filter @encode/editor-view test:browser"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

@@ -1,8 +1,9 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0. It covers the desktop app as built from this
-repository. The free-tier gateway and accounts (M5) have their own section at the end. The
-CLI and the router get theirs when they land.
+repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
+permission rules, trust, hooks, checkpoints and MCP client (M3) have their own sections at the
+end. The CLI and the router get theirs when they land.
 
 Review this document whenever a change touches a trust boundary below, and at the end of
 every milestone.
@@ -111,7 +112,9 @@ Each item names what remains, why it is acceptable for now, and who closes it.
 
 - **R1. Full access means full access.** Under that policy nothing asks. It is an explicit
   user choice, labeled in the composer.
-  - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux.
+  - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux. It is
+    the next M3 pull request, after the one that holds the rules, trust, hooks, checkpoints and
+    MCP client.
   - Windows has no equivalent yet. Approvals are the only control there, and the plan's risk
     table says so.
 - **R2. Prompt injection inside allowed actions.** Injected text can still steer which
@@ -120,20 +123,24 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - Compaction summaries are produced from transcripts that may contain injected text, and
     the summary sits in a user message (0009). The summarizer is told the transcript is
     data, and approvals still gate every action.
-  - Owner: M3 (reviewer gate, workspace trust).
+  - Owner: M3. Workspace trust is built ([0041](../adr/0041-folder-settings-grant-only-when-approved.md));
+    the reviewer gate follows in the next M3 pull request.
 - **R3. Git in a folder whose `.git/config` someone else wrote.** Under Auto review,
   "read-only" git commands such as `git diff`, `git log -p` and `git show` can still start
   programs configured in that file: `diff.external`, textconv drivers, clean filters, a
   pager. The status bar's `git status` can run clean filters too.
   - This needs a hostile `.git/config`, which a clone does not deliver but a copied or
     shared folder can.
-  - Owner: M3 workspace trust. Untrusted folders get git with these keys neutralized, or no
-    git at all.
+  - Owner: M3 workspace trust. Done in the libraries: the bash and PowerShell policies ask
+    for git unless the folder is trusted (the trust store is in `@encode/config`) and eNCode's
+    git settings are in effect (`core.fsmonitor=false`, `safe.bareRepository=explicit`).
+    It acts in the product once the core adopts the new assessor and passes `trusted` (RP7).
 - **R4. Repository discovery above the workspace.** Opening a subfolder of a repository
   makes git use the parent's `.git`. Then `git show HEAD:../other/file` can read committed
   files outside the opened folder.
-  - Owner: M3. Treat `<rev>:<path>` arguments as paths, and set `GIT_CEILING_DIRECTORIES`
-    when the workspace is not itself a repository root.
+  - Owner: M3. Done in the libraries: a git command asks when its repository starts above the
+    workspace (the disk check, `confirmOnDisk`), and `<rev>:<path>` operands that name `..` or
+    an absolute path ask. It acts in the product once the core adopts them (RP7).
 - **R5. Same-user malware can decrypt keys.** DPAPI and the macOS Keychain protect keys
   against other users and offline disk theft, not against code already running as the user.
   Accepted, as for every desktop app.
@@ -292,3 +299,181 @@ Status: **Mitigated**, or **Partial** (a residual risk is listed below).
   through sign-in, streaming, failover, refresh, sign-out, the cron job, the kill switch and a
   suspension, then checks every request the fake OpenRouter received against the firewall's
   promises. CI runs it on Windows.
+
+## The editor and documents
+
+Version 1, 2026-10-21, written with M4. It covers `packages/text`, `packages/diff`,
+`packages/editor`, `packages/editor-view` and the desktop app's open documents
+([0033](../adr/0033-the-editor-is-our-own-engine.md),
+[0034](../adr/0034-documents-live-outside-the-ui-store.md)). The terminal, the language
+server client and the review of the agent's edits get their entries when they land.
+
+### What we protect here
+
+| Asset | Why it matters |
+| --- | --- |
+| The user's unsaved work | An edit that exists only in memory. Losing it, or writing it over a newer file, cannot be undone. |
+| The files on disk | A save writes the document's text to a path. It must be the file the user opened, in the project they opened it in. |
+| What the user sees | Review depends on the screen showing what the file holds. If text can read differently from how it is stored, a reviewer approves code they did not read. |
+| The renderer | File content is untrusted input to the code that draws it, and the renderer holds the bridge (R7). |
+| The window's responsiveness | A file that freezes the editor costs the user their session. |
+
+Who we defend against: a repository or a pull request that hides behavior in text, which the
+agent reads as well as the user; a file that is huge or built to be slow; text that arrives
+through the clipboard or a drop; and programs the user runs (the agent, a formatter, git)
+writing to a file that is open.
+
+### Trust boundaries
+
+```
+ disk ──workspace.read (UTF-8, 12 MiB cap)──► open documents ──► editor state ──► view ──► DOM (text nodes only)
+ view ──edits──► editor state ──► snapshot ──workspace.write (path resolved in main)──► disk
+ clipboard, drop ──text/plain only──► view
+```
+
+1. **Disk to document.** The main process reads the file. It refuses files over 12 MiB and
+   files that are binary or not valid UTF-8, so the editor never holds bytes it cannot write
+   back.
+2. **Document to screen.** Text reaches the DOM as text nodes. The characters that would make
+   it read differently never reach the DOM at all: the view draws a marker in their place.
+3. **Document to disk.** A save sends a workspace-relative path and the text. The main process
+   resolves the path against the root and checks it (T6, T7). The path was the one the
+   document was opened under, and documents are dropped when the project changes.
+
+### Threats and controls
+
+Status: **Mitigated**, or **Partial** (a residual risk is listed below).
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| E1 | A file reads differently from how it runs, or hides text: bidi controls, zero-width and filler characters, hidden ASCII in the tag block (T18 for the repository's own sources) | Control, bidi, zero-width, filler and tag characters are drawn as labelled markers (`U+202E`) and the character itself never reaches the DOM. Every line is laid out in stored order (`unicode-bidi: bidi-override`), so a bidi control that did slip through could not reorder what follows. Markers take the place of the characters in cursor movement and clicks, and copying still copies the real text. | Partial (ER1, ER2) |
+| E2 | File content, a paste or a drop runs as markup or script in the renderer | The view writes text nodes and class names only. Highlighting yields token kinds as numbers, never markup. Paste and drop take `text/plain` and nothing else, and dropped files are left to the main process, which cancels navigation (0010). CSP without inline script or eval. | Mitigated |
+| E3 | A save lands in the wrong file or project | Documents are keyed by workspace-relative path. Renaming a file or folder moves its documents, deleting one closes them, and opening, switching or closing the project settles unsaved changes and then drops every document. The main process resolves every write against the workspace root (T6). | Mitigated |
+| E4 | Edits are lost without the user deciding so | "Unsaved" is derived from the text and the history point, never a flag that can go stale. A save marks exactly the snapshot it wrote, so typing during the write stays unsaved. Closing a tab, the others or all of them, and changing project, ask first. Undo history survives tab switches and the panel being hidden. | Partial (ER6) |
+| E5 | A file changes on disk under an open document (the agent, a formatter, git), and the editor shows or saves stale text | A change the workspace watcher or the agent reports reaches a document without unsaved changes as a line diff of its own, so the cursor and scroll stay and it can be undone. A document with unsaved changes keeps the user's text, and its save first reads the file and compares it with the text last read or written there. If someone else changed it, the save asks before overwriting. Cancel leaves the changes unsaved. | Partial (ER3, ER4) |
+| E6 | A huge or pathological file freezes the window | Files over 12 MiB do not open. Only the lines in view are drawn, long lines in pieces, and the scroll range is scaled so a million-line file scrolls natively. Highlighting runs on a time budget, stops where states converge, and tokenizes at most the first 10,000 characters of a line. Counting find results is time-sliced. | Partial (ER5) |
+| E7 | The editor reaches beyond itself: clipboard, drag and drop | The clipboard is read and written only inside the user's own copy, cut and paste events, on the hidden textarea. A drag that carries files is not handled by the editor. | Mitigated |
+
+### Residual risks
+
+- **ER1. Right-to-left text is shown in stored order.** That is deliberate: the display
+  cannot be used to disguise code. It costs readability for Hebrew, Arabic and similar
+  scripts.
+  - Owner: M4. An opt-in view that reorders text but keeps every marker is possible later.
+- **ER2. Look-alikes and invisible variation selectors are not marked.** Letters that look
+  alike across scripts (Cyrillic `a` for Latin `a`), a no-break space, an ideographic space
+  and the braille blank draw like the characters they imitate. Variation selectors (U+FE00 to
+  U+FE0F, U+E0100 to U+E01EF) are invisible, but emoji and some Japanese text need them, so
+  marking them would flag ordinary text.
+  - The agent reads these files too. Stripping or flagging hidden characters in what tools
+    return to the model belongs to the agent's side, not to the editor.
+  - Owner: M3 (reviewer gate: flag identifiers that mix scripts, report hidden characters in
+    diffs), and M4 for an opt-in "show non-ASCII" mode.
+- **ER3. A change on disk while a document has unsaved changes is not shown.** The editor
+  keeps the user's text and the save asks before overwriting, but the prompt only names the
+  file: there is no comparison to look at. The check and the write are two steps, so a change
+  in the milliseconds between them is lost. The watcher can miss events too (it stops on an
+  error and skips some folders), which the save-time check covers.
+  - Owner: M4 follow-up. A "compare with disk" view built on the review machinery, and a
+    write that fails when the file's modification time moved.
+- **ER4. Encoding and line-ending fidelity.** Files are UTF-8 only. A byte order mark is
+  dropped on save, a file with mixed line endings is written back with one (CRLF if any line
+  has it), and a lone carriage return becomes a line feed. Git shows these as changes.
+  - Owner: M4 follow-up. Keep the encoding, the byte order mark and each line's ending in
+    the document.
+- **ER5. A user-supplied regular expression can backtrack for as long as it likes.** Counting
+  is time-sliced between matches, but nothing can interrupt one `RegExp` call in the
+  renderer, so a pattern with catastrophic backtracking on a long line freezes the window
+  until it returns. The pattern is the user's own.
+  - Owner: M4. Run the counting in a worker with a deadline, or refuse nested quantifiers.
+- **ER6. Unsaved text is held in memory only.** A crash or a killed process loses what was
+  typed since the last save. There is no recovery file.
+  - Owner: M4 follow-up, with the conflict check: write recoverable copies of dirty
+    documents to the profile folder.
+
+### Verification
+
+- `@encode/text`, `@encode/diff` and `@encode/editor` have unit and property tests: change
+  sets against a plain-string model, diffs that reproduce their target and hunks that apply and
+  unapply, editing commands, history, search, the highlighter (including where it stops) and
+  `reload`.
+- `line.test.ts` checks that control, bidi, filler and tag characters become markers of their
+  own and that highlighting never loses a character, in nine languages. `docs.test.ts` covers
+  the open documents: unsaved from the text, saves that outlive typing, changes from outside
+  (the cursor stays and the document is never reported as edited), whether the file is still
+  the one that was read, and renames.
+- 34 browser scenarios drive the view in a real Chromium over the DevTools protocol: caret and
+  mouse, a million and a half lines, IME, the clipboard, long lines, find and replace, review,
+  fractional display scaling, a hidden container, switching documents and the Tab escape. One
+  checks that none of the characters the markers stand for is in the DOM. CI runs them on
+  Windows.
+- The end-to-end smoke types into the real app, saves, undoes and checks the file on disk,
+  checks that a change from disk keeps the cursor, the discard prompts and that a file
+  changed behind the editor's back is not overwritten until the user says so (Cancel writes
+  nothing, Overwrite does), and opens the editor's own menu.
+
+## Permission rules, trust, hooks, checkpoints and the MCP client (M3)
+
+Written with the pull request that added `@encode/config`, `@encode/hooks`,
+`@encode/checkpoints` and `@encode/mcp` and extended `@encode/permissions`. These packages
+are libraries with their own tests; the core wires them in after it merges (RP7). The OS
+sandbox, search providers, subagent definitions and the reviewer gate are later M3 pull
+requests and get their rows when they land.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Partial (RP7) |
+| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). | Partial (RP7) |
+| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). | Partial (RP1) |
+| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). | Partial (RP2) |
+| P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Partial (RP7) |
+| P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). | Partial (RP3) |
+| P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0042). | Partial (RP6) |
+| P8 | Rewind overwrites the user's work or writes outside the workspace | Changed files are conflicts and need force. Each target is checked on its real path (inside the workspace, never in `.git` or `.encode`), restored bytes are checked against their hash, and the rewind is journaled first (0043). | Mitigated (RP4) |
+| P9 | A rewind plan is altered on its way through the UI | The plan carries a fingerprint, and applying it re-derives everything from the manifest and the disk (0043). | Mitigated |
+| P10 | "Always allow" saves a rule wider than the user expects, or damages a settings file | `suggestRule` proposes a prefix only for everyday commands, the exact command for shells, interpreters and the like, and nothing for lines no rule can describe. `saveRule` validates the rule, refuses a file it cannot read as settings, writes atomically, and approves a folder's new digest only if it was approved just before (0040, 0041). | Mitigated |
+
+### Residual risks
+
+- **RP1. Labels on MCP results are advisory.** A server can still put instructions in a result.
+  The control is that every call asks, with the server and tool named, and that a result
+  cannot change a permission.
+- **RP2. `${VAR}` in an approved project MCP entry can send an environment value to the URL
+  the entry configures.** The approval card must name the variables the entry reads.
+  - Owner: the app's approval card.
+- **RP3. Rules read shell words as text.** A link inside the workspace that points at a denied
+  file is not recognised in a shell word, and PowerShell 5.1's `-Recurse` follows directory
+  junctions. The file tools resolve real paths before they consult the rules.
+  - Owner: the OS sandbox (next M3 pull request) on macOS and Linux. Windows keeps prompts.
+- **RP4. Checkpoints see only the file tools.** A shell command's side effects are not
+  recorded, the agent must be idle while a rewind runs, and file modes and owners are not
+  saved. Redo restores files, not the conversation.
+- **RP5. MCP over HTTP has no OAuth.** A server that needs it does not connect. Redirects are not
+  followed, so a server behind one fails instead of leaking headers.
+- **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
+  for. A folder cannot install one without the user's approval, and the sandbox will not cover
+  them.
+- **RP7. The packages are not in the app yet.** Until the core adopts them (the wiring pull
+  request, now that the core is in `main`), none of P1 to P10 acts in the product. `docs/m3-integration.md` lists the
+  wiring.
+  - Owner: the integration pull request.
+
+### Verification
+
+- `@encode/permissions` tests the rules engine, with fixed-seed property tests where a rule
+  has a definition to check against: the line splitter (bash and PowerShell), prefix and
+  wildcard matching, run-time words, redirects, fed commands, path normalization, and
+  `suggestRule` (every suggestion parses, allows its own line and nothing more).
+- `@encode/config` tests settings loading, the held-back grants, digests that ignore key order,
+  trust that is not inherited, MCP server approval, the atomic store, and `saveRule`.
+- `@encode/hooks` runs real child processes for exit codes, JSON answers, timeouts and tree kills.
+- `@encode/checkpoints` is tested against an in-memory disk, against a model of the definition
+  under random sessions with and without outside edits (mutations of the service make it fail),
+  and on a real disk including links and private file modes.
+- `@encode/mcp` talks to an in-memory server, a real HTTP server (JSON, event streams, sessions,
+  legacy SSE, redirects) and a real child process, and checks names, configuration, approval,
+  the adapter and the manager's restarts.
+- CI runs all of it on Windows. The packages were also type-checked against the core pull
+  request's seams in a scratch merge.
