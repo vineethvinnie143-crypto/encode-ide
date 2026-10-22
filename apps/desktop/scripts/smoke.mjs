@@ -698,6 +698,19 @@ async function evaluateInBanner(expression, timeoutMs = 15000) {
   }
 }
 
+/** Waits until no banner page is left; if one stays, says what the page is showing and what else is listed. */
+async function waitForBannerToGo(label, timeoutMs = 15000) {
+  const started = Date.now()
+  while ((await bannerTargets()).length) {
+    if (Date.now() - started > timeoutMs) {
+      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+      const shown = await evaluateInBanner(BANNER_STATE, 3000).catch((error) => `unreadable: ${error.message}`)
+      throw new Error(`The banner is still up ${timeoutMs} ms after the turn ended (${label}): ${JSON.stringify({ shown, targets: targets.map((t) => ({ type: t.type, title: t.title, url: t.url.slice(0, 40) })) })}`)
+    }
+    await sleep(250)
+  }
+}
+
 const BANNER_STATE = `({ mode: document.body.dataset.mode, text: document.getElementById('text').textContent, hint: document.getElementById('hint').textContent, stop: Boolean(document.getElementById('stop')) })`
 
 /** Presses Ctrl+Alt+Esc the way a keyboard does, from outside the app. */
@@ -752,7 +765,7 @@ async function runComputerChecks() {
     await stop()
     await waitFor("!document.querySelector('.approval-card')", 15000, `the card goes with the turn (${label})`)
     await waitFor("['idle', 'done'].includes(document.querySelector('.chat-panel')?.dataset.status)", 15000, `the turn ends (${label})`)
-    await waitFor('fetch("http://127.0.0.1:' + port + '/json/list").then((r) => r.json()).then((list) => !list.some((t) => t.url.startsWith("data:text/html")))', 15000, `the banner goes (${label})`)
+    await waitForBannerToGo(label)
     console.log(`[smoke] stopped from ${label}`)
   }
 

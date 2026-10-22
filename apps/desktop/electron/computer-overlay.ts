@@ -113,6 +113,7 @@ export class Banner implements Overlay {
     this.pageReady = false
     this.visible = false
     this.width = OVERLAY_MIN_WIDTH
+    this.o.log?.('the computer banner opens')
 
     // Above everything, including a full-screen program, and invisible to screenshots and screen sharing.
     win.setAlwaysOnTop(true, 'screen-saver')
@@ -156,6 +157,7 @@ export class Banner implements Overlay {
     const win = this.win
     this.release()
     if (win && !win.isDestroyed()) {
+      this.o.log?.('the computer banner closes')
       win.removeAllListeners('closed')
       win.destroy()
     }

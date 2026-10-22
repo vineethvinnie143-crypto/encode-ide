@@ -53,6 +53,7 @@ export class ComputerControl {
   setActivity(activity: ComputerActivity): void {
     if (this.disposed) return
     this.activity = activity
+    this.o.log?.(activity.active ? `the computer is in use by ${activity.sessions.length} session(s)${activity.waiting ? ', all waiting for the person' : ''}` : 'the computer is not in use')
     if (!activity.active) {
       this.release()
       return
