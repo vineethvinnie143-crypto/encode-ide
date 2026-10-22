@@ -34,8 +34,10 @@ Windows is the primary platform; the code stays cross-platform.
 
   Approval cards say why they ask, and edits show their diff first.
 - **Its own look.** Dark or light (or follow Windows), four accents, high contrast,
-  compact density and reduced motion, under **Settings → Appearance**. The icons and the
-  Trace N logo are drawn for eNCode, and Inter and JetBrains Mono are bundled.
+  compact density and reduced motion, under **Settings → Appearance**. Text is in Windows' own
+  fonts at Codex's sizes (Segoe UI 14 px, Consolas 12 px); choose eNCode's Inter and
+  JetBrains Mono, any installed font, or other sizes there. The icons and the Trace N logo are
+  drawn for eNCode.
 - **Any model.** It works with any OpenAI-compatible endpoint and OpenRouter's catalog
   (including free models), with presets for DeepSeek, OpenAI, Ollama and LM Studio. Long
   sessions are compacted into a summary instead of failing at the context limit.
@@ -256,4 +258,5 @@ auto-update and Electron fuses.
 MIT, see [LICENSE](LICENSE). The license for a public release is still to be confirmed.
 
 The bundled fonts, Inter and JetBrains Mono, are under the SIL Open Font License 1.1; their
-licences are in [apps/desktop/src/theme/fonts](apps/desktop/src/theme/fonts).
+licences are in [apps/desktop/src/theme/fonts](apps/desktop/src/theme/fonts). They are used
+when chosen in Settings; the default is Windows' own fonts, which eNCode does not ship.

@@ -7,7 +7,7 @@
 
 body {
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: calc(14px + var(--ui-delta));
   line-height: 22px;
 }
 
@@ -28,17 +28,20 @@ body {
 .tool-row-toggle,
 .ask-option,
 .goal-text {
-  font-size: 13px;
+  font-size: calc(13px + var(--ui-small));
 }
 
 .session-chip,
 .workspace-tabs button,
 .files-switcher button,
+.browser-address input {
+  font-size: calc(12px + var(--ui-small));
+}
+
 .trajectory-preview,
-.browser-address input,
 .tool-row-detail,
 .markdown code {
-  font-size: 12px;
+  font-size: var(--code-size);
 }
 
 .tool-row-size,
@@ -48,26 +51,26 @@ body {
 .attachment-chip,
 .trajectory-index,
 .trajectory-time {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
 }
 
 .terminal-lines {
-  font-size: 12px;
+  font-size: var(--code-size);
 }
 
 /* Font surfaces: code font only for code, numbers and paths */
 .composer-stats, .tool-row-size, .diff-stats { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .browser-address input { font-family: var(--font-ui); }
-.terminal-lines { font-size: 11px; }
+.terminal-lines { font-size: var(--code-size); }
 
-.approval-detail, .trajectory-detail pre, .diff-view { font-size: 11px; }
+.approval-detail, .trajectory-detail pre, .diff-view { font-size: var(--code-size); }
 .term-line { min-height: 19px; }
 
 /* Tool-change card + diff metrics */
-.diff-view { border-radius: 8px; border-color: var(--border); font-size: 11px; line-height: 16px; }
-.diff-hunk-header { padding: 2px 8px; font-size: 11px; line-height: 16px; background: var(--surface-1); }
+.diff-view { border-radius: 8px; border-color: var(--border); font-size: var(--code-size); line-height: 16px; }
+.diff-hunk-header { padding: 2px 8px; font-size: calc(var(--code-size) - 1px); line-height: 16px; background: var(--surface-1); }
 .diff-line { padding: 0 8px; line-height: 16px; }
-.tool-row-detail { font-size: 12px; }
+.tool-row-detail { font-size: var(--code-size); }
 
 /* Detail pass: control typography (strong 500 variants) */
 .session-chip, .right-tab, .workspace-tabs button, .files-switcher button, .plugin-badge { font-weight: 500; line-height: 18px; }
@@ -81,29 +84,29 @@ body {
 
 /* Meta text uses the UI font with tabular numerals, not the code font */
 .composer-stats, .chat-meta, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
-.goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: 11px; }
+.goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: calc(11px + var(--ui-small)); }
 
 /* Command palette */
 .command-palette { width: min(680px, 92vw); background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-pop); }
-.command-input { width: 100%; height: 44px; padding: 0 14px; background: var(--surface-2); border: 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); font-size: 14px; outline: none; }
+.command-input { width: 100%; height: 44px; padding: 0 14px; background: var(--surface-2); border: 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); font-size: calc(14px + var(--ui-delta)); outline: none; }
 .command-list { max-height: 60vh; overflow: auto; padding: 6px; }
-.command-group-title { padding: 8px 10px 4px; font-size: 11px; color: var(--text-3); }
+.command-group-title { padding: 8px 10px 4px; font-size: calc(11px + var(--ui-small)); color: var(--text-3); }
 .command-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; text-align: left; color: var(--text-2); }
 .command-item:hover { background: var(--hover); color: var(--text-1); }
-.command-label { font-size: 13px; font-weight: 500; color: var(--text-1); }
-.command-detail { margin-left: auto; font-size: 11.5px; color: var(--text-3); }
+.command-label { font-size: calc(13px + var(--ui-small)); font-weight: 500; color: var(--text-1); }
+.command-detail { margin-left: auto; font-size: calc(11.5px + var(--ui-small)); color: var(--text-3); }
 
-.job-preview { display: block; width: 100%; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.job-preview { display: block; width: 100%; font-family: var(--font-mono); font-size: calc(var(--code-size) - 1.5px); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 
 /* Policy menu (Read Only / Workspace Write / Full access / Auto review) */
 .policy-menu { min-width: 208px; }
 .policy-menu button { justify-content: flex-start; }
-.policy-menu button span { margin-left: auto; font-size: 10px; color: var(--accent); }
+.policy-menu button span { margin-left: auto; font-size: calc(10px + var(--ui-small)); color: var(--accent); }
 
 /* Approval reason and policy picker */
 .approval-reason {
   margin-top: 5px;
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   line-height: 1.45;
   color: var(--text-2);
 }
@@ -140,12 +143,12 @@ body {
   gap: 2px;
 }
 .policy-option-label {
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   font-weight: 500;
   color: var(--text-1);
 }
 .policy-option-description {
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   line-height: 1.45;
   color: var(--text-2);
 }

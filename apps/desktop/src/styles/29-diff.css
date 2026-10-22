@@ -3,7 +3,7 @@
   background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 10.5px;
+  font-size: var(--code-size);
 }
 .diff-hunk-header {
   background: var(--surface-2);

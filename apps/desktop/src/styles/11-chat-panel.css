@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   font-weight: 600;
   min-width: 0;
 }
@@ -32,7 +32,7 @@
 }
 
 .chat-status {
-  font-size: 10px;
+  font-size: calc(10px + var(--ui-small));
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--pressed);
@@ -86,7 +86,7 @@
 .mode-btn {
   padding: 3px 10px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--text-3);
   font-weight: 600;
 }
@@ -111,7 +111,7 @@
   border-radius: 6px;
   background: var(--surface-1);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   overflow: hidden;
 }
 .model-pill:hover {
@@ -128,7 +128,7 @@
 .model-id {
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(var(--code-size) - 2px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -151,7 +151,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-3);
-  font-size: 10.5px;
+  font-size: calc(10.5px + var(--ui-small));
   white-space: nowrap;
 }
 .auto-toggle.is-on {
@@ -162,12 +162,12 @@
 
 .chat-empty h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(15px + var(--ui-delta));
   color: var(--text-1);
 }
 
 .chat-empty-note {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
@@ -259,7 +259,7 @@
 }
 .markdown table {
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   margin: 8px 0;
 }
 .markdown th,
@@ -291,7 +291,7 @@
   padding: 7px 9px;
   text-align: left;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
 }
 .tool-head:hover {
   background: var(--pressed);
@@ -320,7 +320,7 @@
 
 .tool-summary {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(var(--code-size) - 1.5px);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -345,7 +345,7 @@
   display: flex;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(var(--code-size) - 2px);
   flex-shrink: 0;
 }
 .add-stat {
@@ -372,7 +372,7 @@
 }
 
 .tool-label {
-  font-size: 9.5px;
+  font-size: calc(9.5px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-3);
@@ -385,7 +385,7 @@
   border-radius: 6px;
   padding: 7px 9px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--code-size);
   line-height: 1.5;
   color: var(--text-2);
   white-space: pre-wrap;
@@ -402,7 +402,7 @@
   overflow: auto;
   max-height: 260px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--code-size);
   line-height: 1.5;
 }
 
@@ -456,7 +456,7 @@
   gap: 6px;
   padding: 0 12px 6px;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   flex-shrink: 0;
 }
 
@@ -480,7 +480,7 @@
 
 .link-btn {
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   text-decoration: underline;
 }
 
@@ -528,7 +528,7 @@
 }
 
 .composer-hint {
-  font-size: 10px;
+  font-size: calc(10px + var(--ui-small));
   color: var(--text-3);
   text-align: right;
 }

@@ -10,6 +10,7 @@ redistribute them; it does not let anyone sell the fonts on their own.
 | `JetBrainsMono-Variable.woff2` | JetBrains Mono 2, variable, weights 100–800 | https://github.com/JetBrains/JetBrainsMono, `fonts/webfonts/JetBrainsMono[wght].woff2` | `31ec365b93e4bad6f202ce23352a56d01ca4462b2afc782ed2cf6fa42ca9ac0e` |
 
 `Inter-OFL.txt` and `JetBrainsMono-OFL.txt` are each project's own `LICENSE.txt`
-and `OFL.txt`. `../fonts.css` declares the faces; `../tokens.css` puts them
-first in `--font-ui` and `--font-mono`, with Segoe UI Variable and Cascadia
-Mono behind them.
+and `OFL.txt`. `../fonts.css` declares the faces. The default fonts are Windows' own
+(ADR 0016), so these load only when Settings > Appearance chooses eNCode's fonts:
+`shared/appearance.ts` puts Inter or JetBrains Mono first in `--font-ui` or `--font-mono`
+for that choice, with the system fonts behind them.
