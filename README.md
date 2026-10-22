@@ -6,9 +6,10 @@ node-pty.
 
 ![eNCode](docs/images/overview.png)
 
-**Status:** private development. M0 (foundation and security) is in, and the agent engine (M1)
-is landing as packages: the app still runs M0's agent until it is switched over. Not released yet.
-Windows is the primary platform; the code stays cross-platform.
+**Status:** private development, for the owner and a few testers. M0 (foundation and security),
+the agent engine (M1) and the editor (M4) are in, and the app runs the agent in its own process.
+The model router (M2) is built but not connected to the app yet. Not released. Windows is the
+primary platform; the code stays cross-platform.
 
 ## What it does
 
@@ -17,15 +18,17 @@ Windows is the primary platform; the code stays cross-platform.
   needs you). Beside them are a conversation with a tool timeline (Chat and Trajectory views),
   a composer with mode, approval-policy and model chips, and a Browse and Workspace panel with
   Files, Editor and Shell.
-- **A coding agent with real tools.** The agent has these tools:
-  - files: `glob`, `grep`, `read`, `edit`, `write`;
-  - commands: `pwsh` (with background jobs: `job_list`, `job_output`, `job_kill`);
-  - delegation: subagents through `task`;
-  - planning: `todo_write`, goals, `exit_plan_mode`;
-  - knowledge: `skill`, `web_search`, `web_fetch`;
-  - questions: `ask_user_question`.
+- **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
+  - files: `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`;
+  - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
+    `KillShell`);
+  - delegation: subagents through `Task`;
+  - planning: `TodoWrite`, goals, `ExitPlanMode`;
+  - knowledge: `Skill`, `WebSearch`, `WebFetch`;
+  - questions: `AskUserQuestion`.
 
-  It works in Code, Ask and Plan modes, and every session is persisted and can be forked.
+  It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
+  the window, and every session is an append-only log that survives a crash and can be forked.
 - **Review before it acts.** Four approval policies decide what runs unasked:
   - Read Only: edits and commands are refused.
   - Workspace Write: every command asks.
@@ -94,18 +97,27 @@ any other form. Where no keychain is usable, Settings says so and keeps the key 
 current session only. A key is bound to its server: pointing a profile at another server
 drops it.
 
-## The eNCode Shell
+The agent runs in a separate process. It asks the main process for the key when a model request
+starts, gets it only for the server it was entered for, and does not keep it. That process uses
+Node's networking, which does not read Windows' proxy settings, so a network that requires a
+proxy does not work yet ([ADR 0030](docs/adr/0030-the-agent-runs-in-a-host-that-clients-drive.md)).
 
-The terminal and the agent's `pwsh` tool share one hand-written shell. It supports
-pipelines, `>` and `>>`, `;`, `&&`, `||`, quoting and its own built-ins (`ls`, `cat`, `echo`,
-`cd`, `mkdir`, `cp`, `mv`, `rm`, `head`, `tail`, `wc`, `which`, `env`, `set`, …). Other
-programs are found only in absolute `PATH` entries and started by absolute path. npm-style
-`.cmd` shims run through cmd.exe only when their arguments are plain.
+## The eNCode Shell and the agent's shell
+
+The terminal panel runs a hand-written shell. It supports pipelines, `>` and `>>`, `;`, `&&`,
+`||`, quoting and its own built-ins (`ls`, `cat`, `echo`, `cd`, `mkdir`, `cp`, `mv`, `rm`,
+`head`, `tail`, `wc`, `which`, `env`, `set`, …). Other programs are found only in absolute
+`PATH` entries and started by absolute path. npm-style `.cmd` shims run through cmd.exe only
+when their arguments are plain.
 
 It is line-oriented, not a PTY, so full-screen programs such as vim and less are not
-supported. The agent moves to the OS shell in M1
-([ADR 0011](docs/adr/0011-agent-commands-run-in-the-os-shell.md)). The eNCode Shell stays
-the terminal's shell.
+supported.
+
+The agent's `Bash` tool does not use it. It runs the operating system's own shell, so commands
+mean what models and project scripts expect: Git Bash on Windows (then PowerShell 7, then
+Windows PowerShell), bash elsewhere, or the shell that `ENCODE_SHELL` names
+([ADR 0011](docs/adr/0011-agent-commands-run-in-the-os-shell.md)). Approvals read the command
+before it runs.
 
 ## The side panel and the bottom panel
 
@@ -165,10 +177,9 @@ wrong project. Stop it or let it finish first.
 
 ```
 apps/desktop/                 the Electron app (@encode/desktop)
-  electron/                   main process: window, IPC, services, agent
-    agent/                    M0's loop, tools, approval, compaction, provider, prompt (replaced by packages/core)
-    agent-host/               the main process side of the agent host in a utility process (not wired in yet)
-    services/                 shell, workspace, settings and key vault, web, git, programs
+  electron/                   main process: window, IPC, services, the supervisor of the agent host
+    agent-host/               the agent host's program (a utility process) and the main process side that runs it
+    services/                 shell, workspace, settings and key vault, models, git, programs, skills, schedules
   src/                        renderer: components, stores, editor, terminal, markdown
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
@@ -184,14 +195,19 @@ apps/desktop/                 the Electron app (@encode/desktop)
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
+packages/checkpoints/         what the file tools changed, saved before each change, and put back on request
+packages/config/              settings files and workspace trust (not connected to the app yet)
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
 packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
+packages/hooks/               user hooks in Claude Code's format
+packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
 packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
+packages/router/              roles as ordered model lists, health and failover, the free model pool (not connected to the app yet)
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web
@@ -220,10 +236,13 @@ covers:
   cursor, and the discard prompts;
 - the demo agent;
 - the shell, running `node` and `npm`;
-- a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs;
+- a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs, and what the
+  model is sent: Claude Code's tool names, and the project's instructions as a reminder;
 - the key path;
+- the session logs on disk (readable only by the user, no key in them) and the import of an
+  earlier build's sessions;
 - sessions, subagents and Stop;
-- web_fetch approvals;
+- `WebFetch` approvals;
 - compaction.
 
 Screenshots and the Electron log land in `apps/desktop/screenshots`. Set

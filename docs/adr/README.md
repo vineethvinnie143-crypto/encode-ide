@@ -16,7 +16,7 @@ say so.
 | [0008](0008-api-keys-in-the-os-keychain-only.md) | API keys in the OS keychain only | Accepted |
 | [0009](0009-compaction-keeps-every-tool-call-answered.md) | Compaction keeps every tool call answered | Accepted |
 | [0010](0010-renderer-isolation.md) | A sandboxed renderer that only the app's page can use | Accepted |
-| [0011](0011-agent-commands-run-in-the-os-shell.md) | The agent's commands run in the OS shell | Accepted, lands in M1 |
+| [0011](0011-agent-commands-run-in-the-os-shell.md) | The agent's commands run in the OS shell | Accepted |
 | [0012](0012-windows-first-ci.md) | Windows-first CI with a sandboxed end-to-end smoke | Accepted |
 | [0013](0013-own-icons-tokens-and-bundled-fonts.md) | Own icons, one token set and bundled fonts | Accepted, amends 0003 |
 | [0014](0014-one-command-registry-and-no-project-switch-under-a-running-agent.md) | One command registry, and no project switch under a running agent | Accepted |
