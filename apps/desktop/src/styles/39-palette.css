@@ -1,0 +1,194 @@
+/* ============================================================
+   Command palette (Ctrl+K) and the message box's / @ $ pickers
+   ============================================================ */
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(56px, 14vh) 16px 16px;
+  background: var(--backdrop);
+  animation: ui-fade var(--dur-2) var(--ease-out);
+}
+
+.palette {
+  width: min(560px, 100%);
+  max-height: min(560px, 72vh);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-14);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: ui-pop-down var(--dur-3) var(--ease-out);
+}
+
+.palette-search {
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+}
+.palette-input::placeholder {
+  color: var(--text-3);
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+  overscroll-behavior: contain;
+}
+
+.palette-group {
+  padding: 8px 10px 4px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--row-h);
+  padding: 4px 10px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  cursor: default;
+  user-select: none;
+}
+.palette-row.is-active {
+  background: var(--row-selected);
+}
+
+.palette-icon {
+  width: 16px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+.palette-row.is-active .palette-icon {
+  color: var(--text-2);
+}
+
+.palette-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-detail {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+.palette-keys {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.palette-empty {
+  padding: 20px 12px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  text-align: center;
+}
+
+.palette-foot {
+  flex-shrink: 0;
+  display: flex;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.palette-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The message box's picker: the same rows, above the box. */
+.composer-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-14);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: ui-pop-up var(--dur-3) var(--ease-out);
+}
+.composer-picker .palette-list {
+  padding: 6px;
+}
+.composer-picker .palette-title {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+.picker-name {
+  font-family: var(--font-mono);
+  font-size: calc(var(--fs-13) - 0.5px);
+}
+.picker-args {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.picker-note {
+  padding: 6px 12px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+/* Esc once while the agent works: a second press stops it. */
+.composer-hint {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  box-shadow: var(--shadow-pop);
+  animation: ui-fade var(--dur-2) var(--ease-out);
+}

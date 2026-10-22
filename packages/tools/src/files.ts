@@ -15,7 +15,7 @@ import { applyEdit, applyEdits, changedRegion, type EditSpec } from './edit'
 import { stateOf, staleness } from './file-state'
 import { displayPath, realPathOf, resolveInputPath } from './paths'
 import { decodeText, encodeText, lineEndingOf, MAX_TEXT_FILE_BYTES, numberLines, plural, splitLines, UnencodableTextError, type TextEncodingName } from './text'
-import type { Tool, ToolContext, ToolOutcome } from './types'
+import type { FileStateTracker, Tool, ToolContext, ToolOutcome } from './types'
 
 export const READ_DEFAULT_LIMIT = 2000
 /** What one Read puts in the conversation: about 25,000 tokens. Longer ranges are cut to fit. */
@@ -299,6 +299,41 @@ export const readTool: Tool<ReadInput> = {
     const ansi = decoded.encoding === 'windows-1252' ? '\n\n(This is an older ANSI file, not UTF-8: it is shown as Windows-1252, and an edit writes it back the same way.)' : ''
     return { ok: true, content: body + note + ansi, display: { output: `${plural(end - offset + 1, 'line')}${partial ? ` of ${lines.length}` : ''}` } }
   },
+}
+
+/** What an `@` mention in the user's message brings of a file: its first lines as Read numbers them, or word that they are unchanged. */
+export type MentionedFile =
+  | { kind: 'text'; body: string; to: number; total: number; ansi: boolean }
+  /** The conversation still holds these lines as Read showed them, and the file has not changed since. */
+  | { kind: 'unchanged'; to: number }
+
+/**
+ * A file the user named in their message, from its first line as Read shows it, recorded as read so that the model
+ * can edit it straight away. Undefined for what Read would not show as numbered text: a missing file, a folder, a
+ * pipe, an image, a PDF, a notebook, a binary or very large file. `maxChars` bounds the lines shown.
+ */
+export async function readMentioned(file: string, files: FileStateTracker, maxChars = READ_MAX_CHARS): Promise<MentionedFile | undefined> {
+  const stats = await statOf(file).catch(() => undefined)
+  const extension = path.extname(file).toLowerCase()
+  if (!stats?.isFile() || stats.size > MAX_TEXT_FILE_BYTES || IMAGE_TYPES[extension] || extension === '.pdf' || extension === '.ipynb') return undefined
+  const bytes = await fs.readFile(file)
+  const decoded = decodeText(bytes)
+  if (!decoded) return undefined
+  const lines = splitLines(decoded.text)
+  let end = Math.min(lines.length, READ_DEFAULT_LIMIT)
+  let body = numberLines(lines.slice(0, end), 1)
+  while (body.length > maxChars && end > 1) {
+    end = Math.max(1, Math.floor(end / 2))
+    body = numberLines(lines.slice(0, end), 1)
+  }
+  const state = stateOf(bytes, stats, end < lines.length)
+  const before = files.get(file)
+  if (end > 0 && before?.seen && before.seen.from === 1 && before.seen.to === end && before.hash === state.hash) {
+    files.set(file, { ...state, seen: before.seen })
+    return { kind: 'unchanged', to: end }
+  }
+  files.set(file, body.length >= SEEN_MIN_CHARS && body.length <= SEEN_MAX_CHARS ? { ...state, seen: { from: 1, to: end, chars: body.length } } : state)
+  return { kind: 'text', body, to: end, total: lines.length, ansi: decoded.encoding === 'windows-1252' }
 }
 
 // ---------------------------------------------------------------------------

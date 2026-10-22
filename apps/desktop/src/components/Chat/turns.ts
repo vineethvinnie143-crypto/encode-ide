@@ -101,6 +101,21 @@ export function buildTurns(entries: readonly ConversationEntry[], running: boole
   })
 }
 
+/** The latest request that edited files: its change card offers Undo, and /undo takes its changes back. */
+export function latestEditTurn<T extends Pick<Turn, 'user' | 'log'>>(turns: readonly T[]): T | null {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index]
+    if (turn.user && turn.log.some((entry) => entry.tool?.diff?.length)) return turn
+  }
+  return null
+}
+
+/** The latest request of the conversation. */
+export function latestRequest<T extends Pick<Turn, 'user'>>(turns: readonly T[]): T | null {
+  for (let index = turns.length - 1; index >= 0; index--) if (turns[index].user) return turns[index]
+  return null
+}
+
 const sameEntries = (a: readonly ConversationEntry[], b: readonly ConversationEntry[]) => a.length === b.length && a.every((entry, index) => entry === b[index])
 
 /**

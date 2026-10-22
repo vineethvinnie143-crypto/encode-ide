@@ -215,6 +215,19 @@ What is most useful to hear: any hunk that was staged or reverted differently fr
 every line changed when only a few did (line endings), a Last turn view that shows something the request did not do
 (or misses something it did with its file tools), and anything slow in a large change.
 
+## The palette, commands and mentions
+
+`Ctrl+K` opens the palette: type a few letters of a session, an action or a settings page ("theme", "api keys", "undo")
+and press `Enter`. In the message box, type `/` for the commands (`/status` shows what the session runs with and how
+much context it uses), `@` to pick a file and `$` to pick a skill. Mention a file and ask for a change to it: the agent
+should edit it without reading it first. Ask about a file outside the folder ("what is in `@C:\Windows\win.ini`?"): it
+should not come with the message, and the agent should ask you before it reads the file. While the agent works, press
+`Esc` once (the box says what a second press does), then twice to stop it.
+
+What is most useful to hear: anything the palette does not find by the word you would use, a picker that stays open
+or picks the wrong row, a mentioned file the agent still reads first, and an `Esc` that stopped something you did not
+mean to stop.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,

@@ -23,6 +23,9 @@ export interface ConfirmRequest {
   resolve: (confirmed: boolean) => void
 }
 
+/** A menu in the message box that a shortcut or the palette asks to open: the model list or the permissions. */
+export type ComposerMenu = 'model' | 'policy'
+
 export interface ToastAction {
   label: string
   run: () => void
@@ -50,8 +53,16 @@ interface UiStore {
   pluginsOpen: boolean
   automationOpen: boolean
   quickOpenOpen: boolean
+  /** The command palette (Ctrl+K). */
+  paletteOpen: boolean
   shortcutsOpen: boolean
   aboutOpen: boolean
+  /** The session's status: model, permissions, context and tokens (/status). */
+  statusOpen: boolean
+  /** The latest request to open a menu of the message box; `id` grows with each request. */
+  menuRequest: { menu: ComposerMenu; id: number } | null
+  /** Esc was pressed once while the agent works: a second press stops it. */
+  stopArmed: boolean
   prompt: PromptRequest | null
   confirm: ConfirmRequest | null
   toast: Toast | null
@@ -66,8 +77,12 @@ interface UiStore {
   setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean): void
+  setPaletteOpen(open: boolean): void
   setShortcutsOpen(open: boolean): void
   setAboutOpen(open: boolean): void
+  setStatusOpen(open: boolean): void
+  requestMenu(menu: ComposerMenu): void
+  setStopArmed(armed: boolean): void
   askText(title: string, placeholder?: string, value?: string): Promise<string | null>
   resolvePrompt(value: string | null): void
   askConfirm(options: { title: string; body: string; confirmLabel?: string; danger?: boolean }): Promise<boolean>
@@ -121,8 +136,12 @@ export const useUi = create<UiStore>((set, get) => ({
   pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
+  paletteOpen: false,
   shortcutsOpen: false,
   aboutOpen: false,
+  statusOpen: false,
+  menuRequest: null,
+  stopArmed: false,
   prompt: null,
   confirm: null,
   toast: null,
@@ -144,8 +163,12 @@ export const useUi = create<UiStore>((set, get) => ({
   setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setAboutOpen: (open) => set({ aboutOpen: open }),
+  setStatusOpen: (open) => set({ statusOpen: open }),
+  requestMenu: (menu) => set((state) => ({ menuRequest: { menu, id: (state.menuRequest?.id ?? 0) + 1 } })),
+  setStopArmed: (armed) => set({ stopArmed: armed }),
 
   askText: (title, placeholder = '', value = '') =>
     new Promise<string | null>((resolve) => {

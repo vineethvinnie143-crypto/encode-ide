@@ -86,16 +86,6 @@ body {
 .composer-stats, .chat-meta, .plugin-badge { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
 .goal-status, .todo-head { font-family: var(--font-ui); text-transform: none; letter-spacing: 0; font-size: calc(11px + var(--ui-small)); }
 
-/* Command palette */
-.command-palette { width: min(680px, 92vw); background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-pop); }
-.command-input { width: 100%; height: 44px; padding: 0 14px; background: var(--surface-2); border: 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-1); font-size: calc(14px + var(--ui-delta)); outline: none; }
-.command-list { max-height: 60vh; overflow: auto; padding: 6px; }
-.command-group-title { padding: 8px 10px 4px; font-size: calc(11px + var(--ui-small)); color: var(--text-3); }
-.command-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; text-align: left; color: var(--text-2); }
-.command-item:hover { background: var(--hover); color: var(--text-1); }
-.command-label { font-size: calc(13px + var(--ui-small)); font-weight: 500; color: var(--text-1); }
-.command-detail { margin-left: auto; font-size: calc(11.5px + var(--ui-small)); color: var(--text-3); }
-
 .job-preview { display: block; width: 100%; font-family: var(--font-mono); font-size: calc(var(--code-size) - 1.5px); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 
 /* Policy menu (Read Only / Workspace Write / Full access / Auto review) */

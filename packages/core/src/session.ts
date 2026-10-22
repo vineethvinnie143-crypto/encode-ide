@@ -49,6 +49,7 @@ import type { RuleJudge } from './approval'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
+import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, systemParts } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { pruneScreens, withoutScreens } from './screens'
@@ -898,6 +899,23 @@ export class AgentSession {
     } catch (error) {
       this.notice(`The userPromptSubmit hook failed: ${errorMessage(error)}`)
     }
+
+    // What the message points at with @ and $ comes with it, as Read and the Skill tool would bring it.
+    const mentioned = await mentionBlocks(text, {
+      root: env.root,
+      home: env.home,
+      platform: env.platform,
+      extraRoots: env.extraRoots?.() ?? [],
+      ...(env.rules ? { rules: env.rules } : {}),
+      ...(env.refresh ? { refresh: env.refresh } : {}),
+      files: this.files,
+      skills: env.skills,
+      holds: (block) => this.messages.some((message) => message.role === 'user' && message.content.some((part) => part.type === 'text' && part.text === block)),
+    }).catch((error: unknown) => {
+      this.notice(`What the message mentions could not be attached: ${errorMessage(error)}`)
+      return []
+    })
+    for (const block of mentioned) blocks.push(textBlock(block))
 
     const attached = (input.attachments ?? [])
       .filter((file) => file.content)

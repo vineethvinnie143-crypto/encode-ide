@@ -60,4 +60,19 @@ describe('the skill list', () => {
     await skills.openFolder()
     assert.deepEqual(opened, [path.join(userDir, 'skills')])
   })
+
+  it('lists a name once, as the agent loads it: the project\'s skill over the user\'s', () => {
+    const userDir = temp()
+    const root = temp()
+    fs.mkdirSync(path.join(userDir, 'skills'))
+    fs.writeFileSync(path.join(userDir, 'skills', 'release.md'), '---\ndescription: My release\n---\nmine')
+    fs.mkdirSync(path.join(root, '.encode', 'skills'), { recursive: true })
+    fs.writeFileSync(path.join(root, '.encode', 'skills', 'release.md'), '---\ndescription: The project release\n---\nours')
+    const skills = new SkillService(() => root, userDir)
+    assert.deepEqual(
+      skills.list().map((skill) => [skill.name, skill.source, skill.description]),
+      [['release', 'workspace', 'The project release']],
+    )
+    assert.match(skills.read('release'), /ours/)
+  })
 })

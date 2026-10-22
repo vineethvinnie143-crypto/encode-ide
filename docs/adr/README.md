@@ -55,6 +55,7 @@ say so.
 | [0063](0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md) | The agent's commands run in the operating system's sandbox, and the person is told what it does not hold back | Accepted, builds on 0004, 0011, 0041, 0053 and 0059 |
 | [0064](0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md) | The Review tab reads git itself, and stages a hunk the way `git add -p` does | Accepted, builds on 0033, 0060 and 0063 |
 | [0065](0065-the-turn-view-reads-the-agents-record-and-writes-back-only-over-what-the-person-saw.md) | The Turn view reads the agent's record, and writes back only over what the person saw | Accepted, builds on 0056 and 0064 |
+| [0066](0066-what-a-message-mentions-comes-from-the-core-under-the-tools-rules-and-the-palette-runs-the-menus-actions.md) | What a message mentions comes from the core under the tools' rules, and the palette runs the menus' actions | Accepted, builds on 0055, 0059 and 0062 |
 
 ## Template
 

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
 import RewindDialog from './components/Chat/RewindDialog'
+import { StatusDialog } from './components/Chat/StatusDialog'
 import { alertGate, toastOf } from './components/models/alerts'
 import ConnectModelDialog from './components/models/ConnectModelDialog'
 import BottomPanel from './components/panels/BottomPanel'
@@ -11,6 +12,7 @@ import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
 import SessionHeader from './components/SessionHeader'
 import SettingsModal from './components/SettingsModal'
+import { CommandPalette } from './components/shell/CommandPalette'
 import { AboutDialog, ConfirmDialog, ShortcutsDialog } from './components/shell/Dialogs'
 import IconRail from './components/shell/IconRail'
 import SessionSidebar from './components/shell/SessionSidebar'
@@ -181,6 +183,8 @@ export default function App() {
       <RewindDialog />
       <PromptDialog />
       <ShortcutsDialog />
+      <StatusDialog />
+      <CommandPalette />
       <AboutDialog />
       <ConfirmDialog />
       <Toasts />

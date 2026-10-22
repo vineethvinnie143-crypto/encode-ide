@@ -37,6 +37,7 @@
 }
 
 .composer-card {
+  position: relative;
   padding: 12px 12px 8px 16px;
   border: 1px solid var(--border);
   border-radius: var(--r-18);

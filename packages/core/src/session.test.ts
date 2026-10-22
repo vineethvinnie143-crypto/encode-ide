@@ -4,6 +4,7 @@ import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import type { CompletionRequest, Message } from '@encode/providers'
 import { tempWorkspace } from '@encode/tools/testing'
+import { createSkills } from './skills'
 import { closeHarnesses, sessionHarness, type SessionHarness } from './testing'
 
 after(closeHarnesses)
@@ -145,6 +146,32 @@ describe('a session', () => {
     await h.session.start({ text: 'two', mode: 'code' })
     const users = h.client.requests.at(-1)!.payload.messages.filter((message) => message.role === 'user').map(text)
     assert.match(users[1], /Today's date is now \d{4}-\d{2}-\d{2}\./)
+  })
+
+  it('brings the files and skills a message mentions, and counts a mentioned file as read', async () => {
+    const skills = await tempWorkspace({ 'deploy/SKILL.md': '---\ndescription: Ship it\n---\nRun the deploy script.' })
+    const h = await sessionHarness({
+      files: { 'src/a.ts': 'export const a = 1\n' },
+      env: { skills: createSkills(() => [{ dir: skills, source: 'user' }]) },
+      scriptFor: (root) => [
+        // The file came with the message, so an edit works without a Read first.
+        { calls: [{ name: 'Edit', input: { file_path: path.join(root, 'src', 'a.ts'), old_string: 'a = 1', new_string: 'a = 2' } }] },
+        { text: 'done' },
+        { text: 'again' },
+      ],
+    })
+    await h.session.start({ text: 'use $deploy on @src/a.ts', mode: 'code' })
+    assert.equal(await fs.readFile(path.join(h.root, 'src', 'a.ts'), 'utf8'), 'export const a = 2\n')
+    const first = text(h.client.requests[0].payload.messages[0])
+    assert.match(first, /<mentioned_files>[\s\S]*<file path="src\/a\.ts">\n {5}1\texport const a = 1/)
+    assert.match(first, /<invoked_skill name="deploy">[\s\S]*Run the deploy script\./)
+    await h.session.start({ text: 'again with $deploy', mode: 'code' })
+    const users = h.client.requests.at(-1)!.payload.messages.filter((message) => message.role === 'user').map(text)
+    assert.match(users.at(-1)!, /called this skill again/)
+    assert.doesNotMatch(users.at(-1)!, /Run the deploy script/)
+    // The transcript and the title keep what the user typed.
+    assert.equal(h.session.history().entries.find((entry) => entry.kind === 'user')?.text, 'use $deploy on @src/a.ts')
+    assert.equal(h.session.summary().title, 'use $deploy on @src/a.ts')
   })
 
   it('lets a hook refuse a request before the model sees it', async () => {

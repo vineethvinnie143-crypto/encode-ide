@@ -11,7 +11,7 @@ import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
 import TurnView from './TurnView'
-import { buildTurns, reuseTurns, type Turn } from './turns'
+import { buildTurns, latestEditTurn, reuseTurns, type Turn } from './turns'
 
 const SUGGESTIONS = [
   'Explain the structure of this project',
@@ -42,13 +42,7 @@ export default function ChatPanel() {
   const shown = useRef<Turn[]>([])
   const turns = useMemo(() => (shown.current = reuseTurns(shown.current, buildTurns(entries, running))), [entries, running])
   // The last request that edited files: its change card offers Undo.
-  const latestEdit = useMemo(() => {
-    for (let index = turns.length - 1; index >= 0; index--) {
-      const turn = turns[index]
-      if (turn.user && turn.log.some((entry) => entry.tool?.diff?.length)) return turn.id
-    }
-    return null
-  }, [turns])
+  const latestEdit = useMemo(() => latestEditTurn(turns)?.id ?? null, [turns])
 
   const scrollToEnd = (smooth = false) => {
     const list = listRef.current

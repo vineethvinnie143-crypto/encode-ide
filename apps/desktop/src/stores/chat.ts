@@ -72,6 +72,9 @@ function upsertEntry(entries: ConversationEntry[], entry: ConversationEntry): Co
   return next
 }
 
+/** The tokens of a conversation that has used none: a new, loaded or reset one counts from here. */
+const NO_USAGE = { total: 0, cached: 0, prompt: 0, completion: 0 } as const
+
 /** Streamed text is applied once per frame (see deltas.ts), not once per piece. */
 const deltas = createDeltaBuffer(({ texts, firstAt, chars }) => {
   useChat.setState((state) => ({
@@ -90,7 +93,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   goal: null,
   todos: [],
   plan: null,
-  usageTotals: { total: 0, cached: 0, prompt: 0, completion: 0 },
+  usageTotals: NO_USAGE,
   initialized: false,
   loadedFor: '',
   draft: '',
@@ -148,7 +151,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         goal,
         todos,
         plan,
-        usageTotals: { total: 0, cached: 0, prompt: 0, completion: 0 },
+        usageTotals: NO_USAGE,
         tokensPerSecond: 0,
         streamStartedAt: 0,
         streamChars: 0,
@@ -192,7 +195,7 @@ export const useChat = create<ChatStore>((set, get) => ({
       /* ignore */
     }
     deltas.discard()
-    set({ entries: [], status: 'idle', running: false, approvals: [], ask: null })
+    set({ entries: [], status: 'idle', running: false, approvals: [], ask: null, usageTotals: NO_USAGE })
   },
 
   answerApproval: async (answer, id) => {
@@ -318,6 +321,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           running: false,
           approvals: [],
           ask: null,
+          usageTotals: NO_USAGE,
           tokensPerSecond: 0,
           streamStartedAt: 0,
           streamChars: 0,

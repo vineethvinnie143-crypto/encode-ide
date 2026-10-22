@@ -23,7 +23,7 @@ function shortcutRows(): { group: string; rows: ShortcutRow[] }[] {
       .all()
       .filter((command) => command.group === group && !command.hidden && (command.keys?.length || command.hint))
       .map((command) => ({ title: commandRegistry.titleOf(command.id), keys: command.keys ?? [command.hint as string] }))
-    if (group === 'Session') rows.push({ title: 'Go to session 1 to 9', keys: ['Alt+1 … Alt+9'] })
+    if (group === 'Session') rows.push({ title: 'Go to session 1 to 9', keys: ['Alt+1 … Alt+9'] }, { title: 'Stop the agent (press twice)', keys: ['Esc'] })
     return { group, rows }
   }).filter((entry) => entry.rows.length)
 }
