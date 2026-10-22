@@ -1,7 +1,8 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0, and updated on 2026-10-22 when the desktop app moved
-onto the agent host (T23 to T25, R11). It covers the desktop app as built from this
+onto the agent host (T23 to T25, R11) and when the Browser tab began lifting framing rules
+(T29, R13). It covers the desktop app as built from this
 repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
 permission rules, trust, hooks, checkpoints and MCP client (M3) have their own sections at the
 end. The CLI and the router get theirs when they land.
@@ -106,6 +107,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). | Partial (R1) |
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
+| T29 | A page in the Browser tab reaches the app, or the tab drops a protection the page relied on | The page is another origin, in a frame sandboxed without top navigation, and it has no bridge. Only the responses of the main window's own sub-frames lose X-Frame-Options and `frame-ancestors`, so the tab can show them; every other header and directive stays, and no other request is touched. | Partial (R13) |
 
 ## Residual risks
 
@@ -177,6 +179,12 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   anything the user typed, secrets included, and nothing prunes it (0031). It is as exposed as
   the user's own files, and same-user malware reads those too (R5).
   - Owner: M1, a storage view with explicit deletion.
+- **R13. The Browser tab is a frame of the app window.** A site that forbids framing is shown
+  anyway (T29), which also lets it be framed by a page it did not choose to be framed by,
+  inside this window only. The frame keeps `allow-same-origin` with scripts, as any site
+  needs, so a page can read its own cookies and storage, and it can still open pop-ups.
+  - Owner: the browser view of UI-7, which is its own surface with its own session, permission
+    denial and no header rewriting.
 
 ## Verification
 
