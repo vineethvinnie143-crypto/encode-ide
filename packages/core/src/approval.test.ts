@@ -20,6 +20,7 @@ async function context(policy: ApprovalPolicy, overrides: Partial<ApprovalContex
     home: os.homedir(),
     platform: process.platform,
     approvedHosts: new Set(),
+    approvedApps: new Set(),
     shell: { cwd: root, env: { PATH: process.env.PATH ?? '' }, dialect: 'bash' },
     assessor: allowing,
     ...overrides,
@@ -174,6 +175,59 @@ describe('the web', () => {
     assert.equal(hostOf('http://127.0.0.1:3000/'), null)
     const full = await context('full-access')
     assert.equal((await decideApproval({ type: 'web', url: 'https://new.example.org/' }, full)).kind, 'allow')
+  })
+})
+
+describe('the desktop', () => {
+  const use = (app: string, label: string, blocked?: string): ToolAccess => ({ type: 'desktop', app, label, title: `${label} window`, ...(blocked ? { blocked } : {}) })
+
+  it('asks the first time an application is used, and never again once it is allowed', async () => {
+    for (const policy of ['workspace-write', 'auto-review'] as const) {
+      const approved = new Set<string>()
+      const ctx = await context(policy, { approvedApps: approved })
+      const first = await decideApproval(use('notepad.exe', 'Notepad'), ctx)
+      assert.equal(first.kind, 'ask', policy)
+      assert.equal(first.kind === 'ask' && first.grantable, false, 'the loop remembers the application, so there is nothing to grant')
+      assert.match(first.kind === 'ask' ? first.reason : '', /Approving allows Notepad until the session ends/)
+      approved.add('notepad.exe')
+      assert.equal((await decideApproval(use('notepad.exe', 'Notepad'), ctx)).kind, 'allow')
+      assert.equal((await decideApproval(use('calc.exe', 'Calculator'), ctx)).kind, 'ask', 'another application is another question')
+    }
+  })
+
+  it('warns when an application can carry instructions or cannot undo what is sent', async () => {
+    const ctx = await context('workspace-write')
+    const browser = await decideApproval(use('chrome.exe', 'Google Chrome'), ctx)
+    assert.match(browser.kind === 'ask' ? browser.reason : '', /signed in to your accounts/)
+    const chat = await decideApproval(use('slack.exe', 'Slack'), ctx)
+    assert.match(chat.kind === 'ask' ? chat.reason : '', /cannot be taken back/)
+    const plain = await decideApproval(use('notepad.exe', 'Notepad'), ctx)
+    assert.doesNotMatch(plain.kind === 'ask' ? plain.reason : '', /accounts|taken back/)
+  })
+
+  it('is allowed under Full access without asking', async () => {
+    const ctx = await context('full-access')
+    assert.equal((await decideApproval(use('notepad.exe', 'Notepad'), ctx)).kind, 'allow')
+  })
+
+  it('is refused under Read Only, with a reason the model can relay', async () => {
+    const ctx = await context('read-only', { approvedApps: new Set(['notepad.exe']) })
+    const decision = await decideApproval(use('notepad.exe', 'Notepad'), ctx)
+    assert.equal(decision.kind, 'deny')
+    assert.match(decision.kind === 'deny' ? decision.reason : '', /Read Only/)
+  })
+
+  it('refuses the applications that are never used under every policy, like a deny rule', async () => {
+    for (const policy of ['read-only', 'workspace-write', 'auto-review', 'full-access'] as const) {
+      const ctx = await context(policy, { approvedApps: new Set(['windowsterminal.exe']) })
+      const decision = await decideApproval(use('windowsterminal.exe', 'Windows Terminal', 'terminals and shells run commands without the command approval'), ctx)
+      assert.equal(decision.kind, 'deny', policy)
+      assert.match(decision.kind === 'deny' ? decision.reason : '', /Windows Terminal is never used: terminals and shells/)
+    }
+  })
+
+  it('is not something to approve for the rest of the session by grant', () => {
+    assert.equal(grantKey(use('notepad.exe', 'Notepad')), undefined)
   })
 })
 

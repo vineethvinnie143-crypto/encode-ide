@@ -3,6 +3,7 @@
  * stored in its log (see session.ts).
  */
 import type { Message, SystemPart, ToolDefinition } from '@encode/providers'
+import { pruneScreens } from './screens'
 import type { Conversation } from './types'
 
 export interface MemoryConversation extends Conversation {
@@ -12,7 +13,8 @@ export interface MemoryConversation extends Conversation {
 
 /**
  * A conversation kept in memory. `messages()` returns a fresh array after
- * every change, so a caller holding one sees the conversation as it was.
+ * every change, so a caller holding one sees the conversation as it was. Only
+ * the newest screenshot a tool returned is kept (screens.ts).
  */
 export function memoryConversation(initial: readonly Message[] = []): MemoryConversation {
   let messages: Message[] = [...initial]
@@ -23,7 +25,7 @@ export function memoryConversation(initial: readonly Message[] = []): MemoryConv
     },
     messages: () => messages,
     async add(message) {
-      messages = [...messages, message]
+      messages = [...pruneScreens([...messages, message])]
     },
     async replace(next) {
       messages = [...next]

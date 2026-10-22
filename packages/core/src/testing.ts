@@ -7,7 +7,23 @@
 import os from 'node:os'
 import type { Usage } from '@encode/providers'
 import { userText } from '@encode/providers'
-import { createToolRegistry, createFileStateTracker, type AgentShell, type JobManager, type ManagedShell, type PlanVerdict, type Question, type Tool, type TodoInput, type WebAccess } from '@encode/tools'
+import {
+  ComputerState,
+  createToolRegistry,
+  createFileStateTracker,
+  DEFAULT_DESKTOP_OPTIONS,
+  type AgentShell,
+  type DesktopBackend,
+  type DesktopOptions,
+  type DesktopServices,
+  type JobManager,
+  type ManagedShell,
+  type PlanVerdict,
+  type Question,
+  type Tool,
+  type TodoInput,
+  type WebAccess,
+} from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { createDefaultAssessor } from './approval'
 import { createSkills } from './skills'
@@ -127,6 +143,11 @@ export const stubWeb: WebAccess = {
   },
 }
 
+/** What a session hands the Computer tool, over a backend a test controls (the pointer jumps instead of gliding). */
+export function desktopServices(backend: DesktopBackend, options: Partial<DesktopOptions> = {}): DesktopServices {
+  return { backend, state: new ComputerState(), options: { ...DEFAULT_DESKTOP_OPTIONS, pace: 'instant', ...options } }
+}
+
 export interface Harness {
   root: string
   surface: RecordingSurface
@@ -135,6 +156,7 @@ export interface Harness {
   loop: AgentLoop
   settings: AgentSettings
   approvedHosts: Set<string>
+  approvedApps: Set<string>
   /** Adds a user prompt and runs the loop on it. */
   run(prompt: string, mode?: 'code' | 'ask' | 'plan', signal?: AbortSignal): Promise<TurnEnd>
 }
@@ -161,9 +183,13 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
   const surface = new RecordingSurface()
   const conversation = memoryConversation()
   const client = createScriptedClient(options.scriptFor ? options.scriptFor(root) : (options.script ?? []), options.client)
-  const registry = createToolRegistry({ dialect: 'bash', platform: process.platform, web: false, completion: options.completion }, options.extraTools ?? [])
+  const registry = createToolRegistry(
+    { dialect: 'bash', platform: process.platform, web: false, completion: options.completion, computer: Boolean(options.services?.desktop) },
+    options.extraTools ?? [],
+  )
   const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
   const approvedHosts = new Set<string>()
+  const approvedApps = new Set<string>()
   const loop = new AgentLoop({
     agentId: 'main',
     role: 'main',
@@ -175,6 +201,7 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     surface,
     conversation,
     approvedHosts,
+    approvedApps,
     assessor: createDefaultAssessor(),
     ...(options.tools ? { tools: options.tools } : {}),
     ...(options.maxSteps ? { maxSteps: options.maxSteps } : {}),
@@ -200,6 +227,7 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     loop,
     settings,
     approvedHosts,
+    approvedApps,
     async run(prompt, mode = 'code', signal = new AbortController().signal) {
       const turnId = `turn${++turns}`
       await conversation.add(userText(prompt), { turnId })

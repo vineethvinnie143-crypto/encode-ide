@@ -18,6 +18,8 @@ export interface AgentSettings {
   temperature?: number
   /** Offer attempt_completion, for models that do not end a turn by themselves. */
   completionTool?: boolean
+  /** Offer the Computer tool (mouse, keyboard and screen), where the host has a desktop to give. Applies from the next turn. */
+  computer?: boolean
   /** Compact before the prompt passes this many tokens, whatever the window. */
   contextCap?: number
 }

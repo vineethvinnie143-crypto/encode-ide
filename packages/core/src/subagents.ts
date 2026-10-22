@@ -45,8 +45,11 @@ export interface SubagentDefinition extends SubagentType {
   source: 'builtin' | 'user' | 'workspace'
 }
 
-/** What a subagent never gets: it must not start more agents, or touch what only the main agent owns. */
-export const SUBAGENT_EXCLUDED: readonly string[] = ['Task', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal', 'TodoWrite', 'attempt_completion']
+/**
+ * What a subagent never gets: it must not start more agents, or touch what only the main agent owns. The Computer
+ * tool is one of those: up to four subagents run side by side, and there is one mouse.
+ */
+export const SUBAGENT_EXCLUDED: readonly string[] = ['Task', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal', 'TodoWrite', 'attempt_completion', 'Computer']
 
 /** The most steps a subagent takes before it must report. */
 const MAX_SUBAGENT_STEPS = 40

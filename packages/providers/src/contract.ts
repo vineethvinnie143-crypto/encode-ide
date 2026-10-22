@@ -171,6 +171,8 @@ export interface ModelBudget {
   model: string
   contextWindow: number
   maxOutputTokens: number
+  /** Whether the model reads images. Absent when the client cannot tell. */
+  images?: boolean
 }
 
 export interface BudgetQuery {

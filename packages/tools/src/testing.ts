@@ -5,6 +5,9 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { ComputerState } from './computer/state'
+import { DEFAULT_DESKTOP_OPTIONS, type DesktopBackend, type DesktopOptions } from './computer/contract'
+import type { DesktopHandle } from './computer/state'
 import { createFileStateTracker } from './file-state'
 import type { AgentShell, Interaction, JobManager, ToolContext, WebAccess } from './types'
 
@@ -70,4 +73,24 @@ export async function tempWorkspace(files: Record<string, string | Buffer> = {})
 
 export function textOf(content: string | readonly { type: string; text?: string }[]): string {
   return typeof content === 'string' ? content : content.map((block) => block.text ?? `[${block.type}]`).join('\n')
+}
+
+export { FakeDesktop, type FakeElement, type FakeWindow } from './computer/fake'
+
+/**
+ * What a session hands the Computer tool, over a backend a test controls. `permitted` is the set of
+ * applications the user allowed; `vision` says whether the model reads images.
+ */
+export function testDesktop(
+  backend: DesktopBackend,
+  options: { permitted?: Iterable<string> | 'all'; vision?: boolean; options?: Partial<DesktopOptions>; state?: ComputerState } = {},
+): DesktopHandle {
+  const permitted = options.permitted === 'all' ? undefined : new Set(options.permitted ?? [])
+  return {
+    backend,
+    state: options.state ?? new ComputerState(),
+    options: { ...DEFAULT_DESKTOP_OPTIONS, pace: 'instant', ...options.options },
+    permitted: (app) => (permitted ? permitted.has(app) : true),
+    vision: () => options.vision ?? true,
+  }
 }

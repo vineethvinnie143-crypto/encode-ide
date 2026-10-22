@@ -39,6 +39,11 @@ export interface ImageBlock {
   mediaType: ImageMediaType
   /** Base64, without a data: prefix. */
   data: string
+  /**
+   * Shows something that keeps changing, such as a screen: only the newest few are worth sending,
+   * and none is worth keeping in a stored log. Providers ignore the flag.
+   */
+  transient?: true
 }
 
 export interface ThinkingBlock {

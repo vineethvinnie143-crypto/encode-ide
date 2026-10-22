@@ -27,6 +27,7 @@ import {
   createToolRegistry,
   type AgentMode,
   type BackgroundJobs,
+  type DesktopServices,
   type FileStateTracker,
   type Goals,
   type ManagedShell,
@@ -46,6 +47,7 @@ import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { dateReminder, environmentReminder, goalReminder, modeReminder, reminder, systemParts } from './prompt'
+import { pruneScreens, withoutScreens } from './screens'
 import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
 import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
@@ -98,6 +100,12 @@ export interface SessionEnv {
   beforeWrite?: ToolContext['beforeWrite']
   /** Tools from outside eNCode, offered besides the built-in ones. */
   extraTools?: readonly Tool[]
+  /**
+   * The desktop the Computer tool works on, made for one session. Absent where there is no desktop to use. The
+   * session calls `backend.dispose()` when it stops using it (stop, reset, close), so a desktop shared between
+   * sessions must hand out a view whose `dispose` lets go without stopping the desktop (see createDesktopBroker).
+   */
+  desktop?: (sessionId: string) => DesktopServices
   /** Every event, tagged with the session. */
   emit(event: AgentEvent): void
   /** A session's background jobs changed. */
@@ -171,7 +179,11 @@ export class AgentSession {
   private jobsManager: BackgroundJobs
   private files: FileStateTracker = createFileStateTracker()
   private readonly approvedHosts = new Set<string>()
+  private readonly approvedApps = new Set<string>()
   private loop: AgentLoop | undefined
+  /** The settings the loop's tools were chosen by; a change builds a new loop between turns. */
+  private loopKey = ''
+  private desktop: DesktopServices | undefined
   private messages: Message[] = []
   private records: MessageRecord[] = []
   private entries: ConversationEntry[] = []
@@ -387,14 +399,15 @@ export class AgentSession {
   private readonly conversation: Conversation = {
     messages: () => this.messages,
     add: async (message, meta) => {
+      // The log keeps no screenshots, and the conversation keeps the newest one only (screens.ts).
       const record = (await this.write({
         type: 'message',
-        message,
+        message: withoutScreens(message),
         turnId: meta.turnId,
         agentId: 'main',
         ...(meta.usage ? { usage: meta.usage } : {}),
       })) as MessageRecord
-      this.messages = [...this.messages, message]
+      this.messages = [...pruneScreens([...this.messages, message])]
       this.records = [...this.records, record]
     },
     replace: async (messages, rewrite) => {
@@ -402,7 +415,7 @@ export class AgentSession {
       this.messages.forEach((message, index) => known.set(message, this.records[index]))
       const at = Date.now()
       const records: MessageRecord[] = messages.map(
-        (message) => known.get(message) ?? { type: 'message', id: newRecordId(), at, message, turnId: rewrite.turnId, agentId: 'main' },
+        (message) => known.get(message) ?? { type: 'message', id: newRecordId(), at, message: withoutScreens(message), turnId: rewrite.turnId, agentId: 'main' },
       )
       const record: Omit<CompactionRecord, 'id' | 'at'> = { type: 'compaction', trigger: rewrite.trigger, summary: rewrite.summary, removed: rewrite.removed, messages: records }
       await this.write(record)
@@ -562,6 +575,7 @@ export class AgentSession {
         subagentTypes: definitions,
         skills: this.env.skills.list().slice(0, 20),
         completion: settings.completionTool,
+        computer: this.desktop !== undefined,
       },
       [...(this.env.extraTools ?? [])],
     )
@@ -604,12 +618,37 @@ export class AgentSession {
     return messageText(outcome.message)
   }
 
+  /** What decides the tool list: a change takes effect with the next turn. */
+  private toolsKey(): string {
+    const settings = this.env.settings()
+    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer)])
+  }
+
   private getLoop(): AgentLoop {
-    return (this.loop ??= this.buildLoop())
+    const key = this.toolsKey()
+    if (this.loop && key !== this.loopKey) this.dropLoop()
+    if (!this.loop) {
+      this.loopKey = key
+      this.loop = this.buildLoop()
+    }
+    return this.loop
+  }
+
+  /** Forgets the loop and lets go of the desktop it held; the next turn builds a new one. */
+  private dropLoop(): void {
+    this.loop = undefined
+    this.letGoOfDesktop()
+  }
+
+  private letGoOfDesktop(): void {
+    const desktop = this.desktop
+    this.desktop = undefined
+    desktop?.backend.dispose().catch(() => undefined)
   }
 
   private buildLoop(): AgentLoop {
     const { env } = this
+    this.desktop = env.desktop && env.settings().computer ? env.desktop(this.id) : undefined
     const definitions = this.definitions()
     const registry = this.buildRegistry(definitions)
     const goals: Goals = { get: () => this.goal(), set: (goal) => this.setGoal(goal) }
@@ -624,6 +663,7 @@ export class AgentSession {
       web: env.web,
       skills: env.skills,
       goals,
+      ...(this.desktop ? { desktop: this.desktop } : {}),
       ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}),
       summarize: this.summarizePage,
     }
@@ -654,6 +694,7 @@ export class AgentSession {
       conversation: this.conversation,
       services: { ...services, subagents },
       approvedHosts: this.approvedHosts,
+      approvedApps: this.approvedApps,
       assessor: env.assessor,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       preface: this.preface,
@@ -834,6 +875,8 @@ export class AgentSession {
 
   cancel(): void {
     this.controller?.abort()
+    // Stopping hands the mouse and keyboard back at once; the next call takes them again.
+    this.desktop?.backend.dispose().catch(() => undefined)
   }
 
   /** Resolves when no turn is running. */
@@ -868,8 +911,9 @@ export class AgentSession {
   }
 
   private forgetRuntimeState(): void {
-    this.loop = undefined
+    this.dropLoop()
     this.approvedHosts.clear()
+    this.approvedApps.clear()
     this.grants.clear()
     for (const [file] of this.files.entries()) this.files.delete(file)
   }
@@ -971,6 +1015,7 @@ export class AgentSession {
     await this.flush().catch(() => undefined)
     await this.jobsManager.dispose().catch(() => undefined)
     await this.shell.dispose().catch(() => undefined)
+    this.letGoOfDesktop()
     await this.log.close().catch(() => undefined)
   }
 }

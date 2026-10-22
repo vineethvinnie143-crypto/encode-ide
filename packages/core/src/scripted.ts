@@ -34,6 +34,8 @@ export interface ScriptedStep {
 export interface ScriptedOptions {
   contextWindow?: number
   maxOutputTokens?: number
+  /** Whether the model reads images. Absent: the client cannot tell. */
+  images?: boolean
   /** Pause between streamed chunks, ms. */
   delayMs?: number
 }
@@ -77,7 +79,12 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
   return {
     requests,
     async budget(_role: ModelRole): Promise<ModelBudget> {
-      return { model: 'scripted', contextWindow: options.contextWindow ?? 200_000, maxOutputTokens: options.maxOutputTokens ?? 8_192 }
+      return {
+        model: 'scripted',
+        contextWindow: options.contextWindow ?? 200_000,
+        maxOutputTokens: options.maxOutputTokens ?? 8_192,
+        ...(options.images !== undefined ? { images: options.images } : {}),
+      }
     },
     async complete(request): Promise<CompletionOutcome> {
       requests.push(request)

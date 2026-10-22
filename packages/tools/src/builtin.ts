@@ -5,6 +5,7 @@
  * stable.
  */
 import { bashOutputTool, createBashTool, killShellTool } from './bash'
+import { computerTool } from './computer/tool'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
 import {
   askUserQuestionTool,
@@ -35,6 +36,8 @@ export interface BuiltinToolOptions {
   completion?: boolean
   /** WebFetch and WebSearch. Default true. */
   web?: boolean
+  /** The Computer tool, for sessions that have a desktop to use. Default false. */
+  computer?: boolean
   /** Only these tools, by name. */
   only?: readonly string[]
 }
@@ -52,6 +55,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
     writeTool as Tool,
   ]
   if (options.web ?? true) tools.push(webFetchTool as Tool, webSearchTool as Tool)
+  if (options.computer) tools.push(computerTool as Tool)
   tools.push(todoWriteTool as Tool, askUserQuestionTool as Tool, exitPlanModeTool as Tool)
   if (options.subagentTypes?.length) tools.push(createTaskTool(options.subagentTypes) as Tool)
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
