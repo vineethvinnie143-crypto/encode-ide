@@ -52,7 +52,14 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
+        env:
+          ENCODE_TEST_DIGEST: ${{ runner.temp }}/digest.txt
         run: pnpm test
+
+      # Only what failed, a few lines each, so the end of a long log says what went wrong.
+      - name: What failed
+        if: failure()
+        run: if (Test-Path "$env:RUNNER_TEMP/digest.txt") { Get-Content "$env:RUNNER_TEMP/digest.txt" }
 
       # The editor view is checked in the browser Windows already has.
       - name: Editor browser tests

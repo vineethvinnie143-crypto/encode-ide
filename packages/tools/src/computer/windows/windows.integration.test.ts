@@ -727,8 +727,12 @@ describe('the Windows helper with more than one window', { skip: onWindows ? fal
 
   before(async () => {
     if (!onWindows) return
-    // On top of the first window, over its canvas.
+    // On top of the first window, over its canvas. A program started in the background does not take the front on its
+    // own (another window may be above it, such as the console the tests run in), so it is brought there.
     b = await launch('eNCode Fixture B', 200, 200)
+    const second = await b.window()
+    await desktop.focus({ window: second.id, allowed: [second.app] }, SIGNAL)
+    await b.until((now) => now.focused, 'the second window to be in front')
   })
 
   after(async () => {
