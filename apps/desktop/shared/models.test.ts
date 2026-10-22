@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { isLoopbackUrl, normalizeBaseUrl } from '@encode/router'
-import { FREE_REF, MAX_ROLE_MODELS, addressProblem, cleanRoles, demoPatch, freeProfile, isFreeRef, isLocalUrl, labelOfRef, mainLabel, mainPatch, mainRefs, modelMode, modelRef, parseRef } from './models'
+import {
+  EFFORTS,
+  EFFORT_INFO,
+  FREE_REF,
+  MAX_ROLE_MODELS,
+  addressProblem,
+  cleanEfforts,
+  cleanRoles,
+  demoPatch,
+  freeProfile,
+  isEffort,
+  isFreeRef,
+  isLocalUrl,
+  labelOfRef,
+  mainLabel,
+  mainPatch,
+  mainRefs,
+  modelMode,
+  modelRef,
+  parseRef,
+  withEffort,
+} from './models'
 import type { ModelProfile, Settings } from './types'
 
 const demo: ModelProfile = { id: 'demo', name: 'Demo (offline)', kind: 'demo', baseUrl: '', model: 'eNCode-demo' }
@@ -150,6 +171,32 @@ describe('role lists', () => {
     assert.equal(cleanRoles({ main: many }, profiles).main?.length, MAX_ROLE_MODELS)
     for (const junk of [null, undefined, 'main', 4, [], [['or:a']]]) assert.deepEqual(cleanRoles(junk, profiles), {})
     assert.deepEqual(cleanRoles(JSON.parse('{"__proto__": ["or:a"], "main": ["or:a"]}'), profiles), { main: ['or:a'] })
+  })
+})
+
+describe('efforts', () => {
+  it('keep known roles at known levels, and nothing else', () => {
+    assert.deepEqual(cleanEfforts({ main: 'max', explore: 'low', reviewer: 'HIGH', planner: 'extreme', utility: 3, nonsense: 'low' }), { main: 'max', explore: 'low' })
+    for (const junk of [null, undefined, 'max', 4, [], ['max']]) assert.deepEqual(cleanEfforts(junk), {})
+    assert.deepEqual(cleanEfforts(JSON.parse('{"__proto__": "max", "constructor": "low", "summarizer": "xhigh"}')), { summarizer: 'xhigh' })
+  })
+
+  it('know the five levels, least first, each with a name and a hint', () => {
+    assert.deepEqual(EFFORTS, ['low', 'medium', 'high', 'xhigh', 'max'])
+    for (const effort of EFFORTS) {
+      assert.ok(isEffort(effort))
+      assert.ok(EFFORT_INFO[effort].label && EFFORT_INFO[effort].hint)
+    }
+    for (const other of ['', 'Max', 'minimal', 'none', null, 2]) assert.equal(isEffort(other), false)
+  })
+
+  it('set one role and keep the others; none hands the role back to its model', () => {
+    const efforts = { main: 'high', reviewer: 'low' } as const
+    assert.deepEqual(withEffort(efforts, 'main', 'max'), { main: 'max', reviewer: 'low' })
+    assert.deepEqual(withEffort(efforts, 'explore', 'low'), { main: 'high', reviewer: 'low', explore: 'low' })
+    assert.deepEqual(withEffort(efforts, 'main', null), { reviewer: 'low' })
+    assert.deepEqual(withEffort({}, 'planner', null), {})
+    assert.deepEqual(efforts, { main: 'high', reviewer: 'low' }, 'the list it was given is left as it was')
   })
 })
 

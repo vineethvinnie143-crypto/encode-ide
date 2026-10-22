@@ -51,6 +51,12 @@ describe('the host configuration', () => {
     assert.equal(hostConfigOf(settings({ profiles: [demo, profile({})], activeProfileId: 'p' })).model, 'router')
   })
 
+  it('passes on the effort chosen for each role, and nothing for a settings object from before efforts', () => {
+    assert.deepEqual(hostConfigOf(settings({ efforts: { main: 'max', explore: 'low' } })).efforts, { main: 'max', explore: 'low' })
+    assert.deepEqual(hostConfigOf(settings({})).efforts, {})
+    assert.deepEqual(hostConfigOf(settings({ efforts: { main: 'turbo' } as never })).efforts, {}, 'a level the models do not know is not passed on')
+  })
+
   it('lists no provider for the demo, or for a profile with no address', () => {
     const config = hostConfigOf(settings({ profiles: [demo, profile({ id: 'blank', baseUrl: '' })], activeProfileId: 'demo' }))
     assert.deepEqual(config.providers, {})

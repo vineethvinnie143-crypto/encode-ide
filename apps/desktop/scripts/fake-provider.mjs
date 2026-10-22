@@ -445,7 +445,7 @@ const server = http.createServer(async (request, response) => {
 
     // The connection check asks for one call to a tool named echo, the way a person's first message would ask for work.
     const check = body.tools.some((tool) => (tool.function?.name ?? tool.name) === 'echo')
-    if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages }
+    if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages, model: body.model ?? null, effort: body.reasoning_effort ?? null }
     const step = check ? { text: '', call: { name: 'echo', args: { text: 'eNCode' } } } : stepOf(messages)
     const used = tokensOf(raw)
     const window = !check && step.overflowUntilCompacted ? overflowWindow(body, messages) : Infinity

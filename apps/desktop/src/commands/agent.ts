@@ -2,6 +2,7 @@
  * What the agent's commands do, shared by the message box (its + menu and its slash commands), the command palette
  * and the menus, so each works the same way from everywhere.
  */
+import { modelMode } from '@shared/models'
 import { api } from '../api'
 import { buildTurns, latestEditTurn, latestRequest } from '../components/Chat/turns'
 import { errorText } from '../ipc-error'
@@ -92,10 +93,17 @@ export const agentActions = {
     void chat().stop()
   },
 
-  /** Opens the model list or the permissions menu of the message box. */
+  /** Opens the model list, the effort menu or the permissions menu of the message box. */
   openMenu(menu: ComposerMenu): void {
     revealThread()
     ui().requestMenu(menu)
+  },
+
+  /** The effort menu, which is there while a real model answers: the offline demo has nothing to set. */
+  chooseEffort(): void {
+    const settings = useSettings.getState().settings
+    if (settings && modelMode(settings) === 'router') agentActions.openMenu('effort')
+    else ui().notify('info', 'Connect a model first. Effort is how hard a model thinks, and the offline demo has no such dial.')
   },
 
   /** Sends a request as the person's message, or queues it while the agent works. False when there is no folder. */

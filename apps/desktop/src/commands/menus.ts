@@ -65,6 +65,7 @@ export const MENUS: readonly MenuSpec[] = [
       'agent.plan',
       'agent.goal',
       'agent.model',
+      'agent.effort',
       'agent.permissions',
       'agent.compact',
       'agent.stop',

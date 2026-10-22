@@ -24,7 +24,7 @@ export interface ConfirmRequest {
 }
 
 /** A menu in the message box that a shortcut or the palette asks to open: the model list or the permissions. */
-export type ComposerMenu = 'model' | 'policy'
+export type ComposerMenu = 'model' | 'policy' | 'effort'
 
 export interface ToastAction {
   label: string

@@ -506,6 +506,16 @@
   font-size: var(--fs-13);
   font-weight: 600;
 }
+.role-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.role-effort select {
+  height: 28px;
+  font-size: var(--fs-12);
+}
 .role-hint {
   color: var(--text-3);
   font-size: var(--fs-12);

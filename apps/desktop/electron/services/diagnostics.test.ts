@@ -41,6 +41,7 @@ const settings: Settings = {
   followUp: 'queue',
   appearance: { ...DEFAULT_APPEARANCE },
   roles: { reviewer: ['paid:big-model'] },
+  efforts: {},
   freeOnly: false,
   freeProfileId: null,
   setupDone: true,

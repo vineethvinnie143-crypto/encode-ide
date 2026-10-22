@@ -14,6 +14,7 @@ import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Menu, type MenuEntry } from '../../ui/Menu'
 import { Pill } from '../../ui/Pill'
+import EffortButton from '../models/EffortButton'
 import ModelButton from '../models/ModelButton'
 import { ComposerPicker } from './ComposerPicker'
 import { fileMention, fileOptions, findSlash, indexFiles, parseSlash, replaceTrigger, skillOptions, slashOptions, triggerAt, type FileIndex, type PickerOption, type SkillLike } from './picker'
@@ -520,6 +521,7 @@ export default function Composer() {
           <span className="composer-spacer" />
 
           <ModelButton />
+          <EffortButton />
 
           {running && !ask ? (
             <>

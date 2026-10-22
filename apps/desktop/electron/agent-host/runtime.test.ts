@@ -196,6 +196,35 @@ describe('model calls in the agent host', () => {
   })
 })
 
+describe('the effort chosen for a role', () => {
+  /** The main role on a model with a thinking dial. */
+  const thinking = (efforts?: HostConfig['efforts']): HostConfig => {
+    const base = config()
+    return { ...base, router: { ...base.router, roles: { main: ['p-local:gpt-5-mini'] } }, ...(efforts ? { efforts } : {}) }
+  }
+  const sent = () => seen.filter((request) => chat(request.url)).map((request) => request.body.reasoning_effort)
+
+  it('reaches that role\'s model, and a level past the model\'s own goes as its highest', async () => {
+    reply = say('Thought it through')
+    const f = await fixture()
+    f.service.configure(thinking({ main: 'low' }))
+    assert.equal((await turn(f)).reply, 'Thought it through')
+    f.service.configure(thinking({ main: 'max' }))
+    await turn(f, 'again')
+    assert.deepEqual(sent(), ['low', 'high'])
+  })
+
+  it('is left to the model while the role has none, whatever another role is set to', async () => {
+    reply = say('Plain')
+    const f = await fixture()
+    f.service.configure(thinking({ explore: 'max' }))
+    await turn(f)
+    f.service.configure(thinking())
+    await turn(f, 'again')
+    assert.deepEqual(sent(), [undefined, undefined])
+  })
+})
+
 /** Two connections to the same test server, told apart by their path: /v1 is "local", /v2 is "other". */
 function twoConnections(roles: Record<string, string[]>, freePool: string[] = []): HostConfig {
   const base = config()

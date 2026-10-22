@@ -63,6 +63,7 @@ export interface AppActions {
   compact(): void
   stop(): void
   chooseModel(): void
+  chooseEffort(): void
   choosePermissions(): void
   reviewLastTurn(): void
   canUndo(): boolean
@@ -182,6 +183,7 @@ export function buildCommands(a: AppActions): Command[] {
     },
     { id: 'agent.goal', title: 'Set a goal…', keywords: 'objective long task', run: () => a.setGoal(), ...session },
     { id: 'agent.model', title: 'Choose model…', group: 'Session', keys: ['Alt+M'], keywords: 'models provider builder', run: () => a.chooseModel() },
+    { id: 'agent.effort', title: 'Choose effort…', group: 'Session', keys: ['Ctrl+Shift+M'], keywords: 'reasoning thinking effort low medium high max', run: () => a.chooseEffort() },
     { id: 'agent.permissions', title: 'Choose permissions…', group: 'Session', keywords: 'approval policy access ask', run: () => a.choosePermissions() },
     { id: 'agent.compact', title: 'Compact the conversation', keywords: 'context summary free up', run: () => a.compact(), ...session },
     { id: 'agent.stop', title: 'Stop the agent', group: 'Session', keywords: 'cancel interrupt', enabled: () => a.isRunning() === true, run: () => a.stop() },

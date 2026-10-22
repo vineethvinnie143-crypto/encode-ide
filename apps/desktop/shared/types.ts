@@ -28,6 +28,9 @@ export type ProfileKind = 'custom' | 'openrouter' | 'demo'
 /** The jobs a model can be given; the names core and the model router use. */
 export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility'
 
+/** How hard a model thinks before it answers. The providers map it to their own dial; a model without one ignores it. */
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 export interface ModelProfile {
   id: string
   name: string
@@ -72,6 +75,8 @@ export interface Settings {
    * (see shared/models.ts), and main without one uses the active profile's model.
    */
   roles: Partial<Record<ModelRole, string[]>>
+  /** How hard each role's models think; a role left out leaves it to the model. See shared/models.ts EFFORTS. */
+  efforts: Partial<Record<ModelRole, ReasoningEffort>>
   /** Never send a request to a model that costs money, whatever the roles list. */
   freeOnly: boolean
   /** The OpenRouter profile whose key serves "@free"; null picks the first one that has a key. */

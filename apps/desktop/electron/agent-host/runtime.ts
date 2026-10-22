@@ -29,7 +29,7 @@ import { SearchError, createSearchProvider, createWebAccess, type KeySource as S
 import { Sandbox } from '@encode/sandbox'
 import { Workspaces } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
-import type { ModelAlert, ModelStatus } from '../../shared/types'
+import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import { draftCommitMessage } from './commit-message'
@@ -238,7 +238,10 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     budget: (role: ModelRole, query?: BudgetQuery): Promise<ModelBudget> => pick().budget(role, query),
     async complete(request: CompletionRequest): Promise<CompletionOutcome> {
       const onEvent = request.onEvent
-      const outcome = await pick().complete(onEvent ? { ...request, onEvent: (event) => onEvent(humanizeEvent(event)) } : request)
+      // The effort the person chose for the role wins over the one the caller asked for; the adapter drops it for a model without a dial.
+      const effort = (config?.efforts as Record<string, ReasoningEffort | undefined> | undefined)?.[request.role]
+      const asked = effort ? { ...request, payload: { ...request.payload, reasoning: effort } } : request
+      const outcome = await pick().complete(onEvent ? { ...asked, onEvent: (event) => onEvent(humanizeEvent(event)) } : asked)
       return outcome.kind === 'paused' ? { ...outcome, message: humanize(outcome.message) } : outcome
     },
   }

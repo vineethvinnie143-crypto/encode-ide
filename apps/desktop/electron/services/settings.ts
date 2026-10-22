@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
-import { cleanRoles, isLocalUrl } from '../../shared/models'
+import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
 import type { AgentMode, ApprovalPolicy, FollowUp, ModelProfile, ProfileKind, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
@@ -45,6 +45,7 @@ function defaults(): StoredSettings {
     followUp: 'queue',
     appearance: { ...DEFAULT_APPEARANCE },
     roles: {},
+    efforts: {},
     freeOnly: true,
     freeProfileId: null,
     setupDone: false,
@@ -195,6 +196,7 @@ export class SettingsService {
       followUp: isFollowUp(input.followUp) ? input.followUp : base.followUp,
       appearance: normalizeAppearance(input.appearance),
       roles: cleanRoles(input.roles, profiles),
+      efforts: cleanEfforts(input.efforts),
       freeOnly: typeof input.freeOnly === 'boolean' ? input.freeOnly : !usesRealModel,
       freeProfileId: freeProfileOf(input.freeProfileId, profiles),
       setupDone: typeof input.setupDone === 'boolean' ? input.setupDone : usesRealModel,
@@ -230,6 +232,7 @@ export class SettingsService {
       followUp: this.data.followUp,
       appearance: { ...this.data.appearance },
       roles: structuredClone(this.data.roles),
+      efforts: { ...this.data.efforts },
       freeOnly: this.data.freeOnly,
       freeProfileId: this.data.freeProfileId,
       setupDone: this.data.setupDone,
@@ -304,6 +307,7 @@ export class SettingsService {
 
     // Models for the roles; a profile that went away takes the entries that named it.
     next.roles = cleanRoles(patch.roles !== undefined ? patch.roles : next.roles, next.profiles)
+    if (patch.efforts !== undefined) next.efforts = cleanEfforts(patch.efforts)
     if (typeof patch.freeOnly === 'boolean') next.freeOnly = patch.freeOnly
     next.freeProfileId = freeProfileOf(patch.freeProfileId !== undefined ? patch.freeProfileId : next.freeProfileId, next.profiles)
     if (typeof patch.setupDone === 'boolean') next.setupDone = patch.setupDone

@@ -88,11 +88,13 @@
 }
 
 .policy-chip,
-.model-chip {
+.model-chip,
+.effort-chip {
   height: 28px;
   font-size: var(--fs-12);
 }
-.policy-chip {
+.policy-chip,
+.effort-chip {
   flex-shrink: 0;
 }
 /* A narrow thread (a wide side panel beside it) shortens the model name instead of pushing Send out. */

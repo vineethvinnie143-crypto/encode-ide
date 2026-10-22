@@ -608,6 +608,7 @@ async function runProviderPhase() {
   await runMentionChecks()
   await runStopChecks()
   await runSteerChecks()
+  await runEffortChecks()
   await runSubagentChecks()
   await runWebChecks()
   await runSearchChecks()
@@ -1615,6 +1616,78 @@ async function runSteerChecks() {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the steering checks')
   console.log('[smoke] steering: ok')
+}
+
+/**
+ * Effort: the chip under the message box sets how hard the main model thinks, Ctrl+Shift+M and /effort reach the same
+ * choice, each role has its own under Settings, Roles, and the level goes out with the request to a model that has a
+ * thinking dial.
+ */
+async function runEffortChecks() {
+  console.log('[smoke] --- effort ---')
+  const efforts = async () => JSON.stringify(await evaluate('window.eNCode.settings.get().then((settings) => settings.efforts)'))
+  const chip = "(document.querySelector('.effort-chip')?.textContent ?? '')"
+  const pick = (label) =>
+    evaluate(`(() => {
+      const item = [...document.querySelectorAll('.ui-menu [role^="menuitem"]')].find((node) => node.querySelector('.ui-menu-label')?.textContent === ${JSON.stringify(label)})
+      item?.click()
+      return Boolean(item)
+    })()`)
+
+  await evaluate('window.eNCode.agent.reset()')
+  await waitFor(`${chip} === 'Effort'`, 8000, 'the effort chip, with the effort left to the model')
+  await click('.effort-chip')
+  await waitFor(menuOpen('Effort'), 4000, 'the effort menu')
+  const levels = await evaluate("[...document.querySelectorAll('.ui-menu [role=menuitemcheckbox] .ui-menu-label')].map((node) => node.textContent).join()")
+  if (levels !== 'Model default,Low,Medium,High,Extra high,Max') throw new Error(`the effort menu lists ${levels}`)
+  await sleep(250)
+  await screenshot('ui-dark-effort-menu.png')
+  if (!(await pick('High'))) throw new Error('no High in the effort menu')
+  await waitFor(`${chip} === 'High'`, 4000, 'the chip names the level chosen')
+  if ((await efforts()) !== '{"main":"high"}') throw new Error(`the efforts are ${await efforts()}`)
+
+  // Ctrl+Shift+M from the message box opens the same menu, with the level in use checked.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true })
+  await waitFor(menuOpen('Effort'), 4000, 'Ctrl+Shift+M opens the effort menu')
+  const checked = await evaluate("document.querySelector('.ui-menu [aria-checked=true] .ui-menu-label')?.textContent ?? ''")
+  if (checked !== 'High') throw new Error(`the effort menu checks ${checked}`)
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the effort menu')
+
+  // /effort with a level sets it and says so, and empties the box.
+  await typeInto('.composer-input', '/effort low')
+  await sleep(250)
+  await composerKey({ key: 'Enter' })
+  await waitFor(`${chip} === 'Low' && document.querySelector('.composer-input').value === ''`, 4000, '/effort low sets Low')
+  await waitFor("[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'The model thinks at Low effort.')", 4000, '/effort says what it set')
+
+  // Each role has its own effort, saved with the other settings.
+  await click('.effort-chip')
+  await waitFor(menuOpen('Effort'), 4000, 'the effort menu again')
+  if (!(await pick('Effort for each role…'))) throw new Error('no way from the effort menu to the roles')
+  await waitFor("!!document.querySelector('.settings-modal .settings-roles .role-effort')", 8000, 'the Roles settings with an effort for each role')
+  const shown = await evaluate("[...document.querySelectorAll('.role-row')].map((row) => row.dataset.role + '=' + row.querySelector('.role-effort select').value).join()")
+  if (shown !== 'main=low,explore=default,planner=default,reviewer=default,summarizer=default,utility=default') throw new Error(`the roles show ${shown}`)
+  await selectOption('.role-row[data-role="explore"] .role-effort select', 'max')
+  await sleep(250)
+  await screenshot('ui-dark-role-efforts.png')
+  await click('.settings-footer .btn.primary', 'Save')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
+  if ((await efforts()) !== '{"main":"low","explore":"max"}') throw new Error(`the efforts are ${await efforts()} after Save`)
+
+  // A model with a thinking dial is sent the main role's level, not Explore's.
+  const before = await evaluate('window.eNCode.settings.get().then((settings) => settings.roles)')
+  await evaluate("window.eNCode.settings.save({ roles: { main: ['local-mock:gpt-5-mock'] } })")
+  await sendPrompt('[scenario:follow-up] Think it over.')
+  await driveAgent('16-effort')
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  if (sent.model !== 'gpt-5-mock' || sent.effort !== 'low') throw new Error(`the model was sent ${JSON.stringify({ model: sent.model, effort: sent.effort })}`)
+
+  await evaluate(`window.eNCode.settings.save({ roles: ${JSON.stringify(before)}, efforts: {} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the effort checks')
+  console.log('[smoke] effort: ok')
 }
 
 async function runSubagentChecks() {

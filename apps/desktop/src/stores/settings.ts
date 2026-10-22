@@ -1,7 +1,7 @@
 import { create } from '../store'
-import { FREE_REF, demoPatch, labelOfRef, mainPatch, parseRef } from '@shared/models'
+import { FREE_REF, demoPatch, labelOfRef, mainPatch, parseRef, withEffort } from '@shared/models'
 import type { SearchProviderId } from '@shared/search'
-import type { AgentMode, Settings } from '@shared/types'
+import type { AgentMode, ModelRole, ReasoningEffort, Settings } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
 import { useUi } from './ui'
@@ -23,6 +23,8 @@ interface SettingsStore {
   chooseMain(ref: string, free: boolean): Promise<boolean>
   /** Hands the main role back to the offline demo. */
   chooseDemo(): Promise<void>
+  /** How hard a role's models think; none leaves it to the model. */
+  setEffort(role: ModelRole, effort: ReasoningEffort | null): Promise<void>
   activeProfile(): Settings['profiles'][number] | null
 }
 
@@ -100,6 +102,12 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   chooseDemo: async () => {
     const settings = get().settings
     if (settings) await get().save(demoPatch(settings))
+  },
+
+  setEffort: async (role, effort) => {
+    const current = get().settings
+    if (!current || (current.efforts[role] ?? null) === effort) return
+    await get().save({ efforts: withEffort(current.efforts, role, effort) })
   },
 
   activeProfile: () => {

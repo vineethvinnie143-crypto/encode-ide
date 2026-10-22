@@ -394,6 +394,34 @@ describe('SettingsService models', () => {
     assert.equal(settings.save({ profiles: profiles().filter((profile) => profile.id !== 'or') }).freeProfileId, null)
   })
 
+  it('leaves every role\'s effort to its model until the person picks one, and keeps a pick across restarts', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.get().efforts, {})
+    assert.deepEqual(settings.save({ efforts: { main: 'max', explore: 'low' } }).efforts, { main: 'max', explore: 'low' })
+    assert.deepEqual(settings.save({ maxSteps: 12 }).efforts, { main: 'max', explore: 'low' }, 'a patch that does not name them leaves them')
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, { main: 'max', explore: 'low' })
+    assert.deepEqual(settings.save({ efforts: {} }).efforts, {})
+  })
+
+  it('takes only known roles at known levels, from the renderer or from the file', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    const bad = { main: 'ultra', reviewer: 'high', dreamer: 'max', utility: 2 }
+    assert.deepEqual(settings.save({ efforts: bad as unknown as Settings['efforts'] }).efforts, { reviewer: 'high' })
+    assert.deepEqual(settings.save({ efforts: 'max' as unknown as Settings['efforts'] }).efforts, {})
+    fs.writeFileSync(file(), JSON.stringify({ efforts: { main: 'low', planner: ['max'] } }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, { main: 'low' })
+    fs.writeFileSync(file(), JSON.stringify({ efforts: ['low'] }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, {})
+  })
+
+  it('hands the renderer a copy of the efforts', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ efforts: { main: 'high' } })
+    const copy = settings.get()
+    copy.efforts.main = 'max'
+    assert.deepEqual(settings.get().efforts, { main: 'high' })
+  })
+
   it('ignores a free-only switch that is not true or false, from the renderer or from the file', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
     assert.equal(settings.save({ freeOnly: 'no' as unknown as boolean }).freeOnly, true)

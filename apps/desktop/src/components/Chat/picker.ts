@@ -73,6 +73,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'goal', args: '[goal | clear]', description: "Set, see or clear the session's goal" },
   { name: 'compact', description: 'Compact older history to free context' },
   { name: 'model', description: 'Choose the model' },
+  { name: 'effort', args: '[low | medium | high | xhigh | max | default]', description: 'How hard the model thinks' },
   { name: 'policy', aliases: ['permissions'], description: 'Choose what eNCode may do without asking' },
   { name: 'status', description: 'Model, permissions, context and tokens of this session' },
   { name: 'diff', description: 'Open the Review tab' },

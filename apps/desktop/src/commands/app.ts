@@ -172,6 +172,7 @@ function createAppActions(): AppActions {
     compact: () => void agentActions.compact(),
     stop: agentActions.stop,
     chooseModel: () => agentActions.openMenu('model'),
+    chooseEffort: () => agentActions.chooseEffort(),
     choosePermissions: () => agentActions.openMenu('policy'),
     reviewLastTurn: agentActions.reviewLastTurn,
     canUndo: agentActions.canUndo,

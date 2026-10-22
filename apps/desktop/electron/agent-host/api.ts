@@ -7,7 +7,7 @@
 import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
-import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { CommitDraftInput } from './commit-message'
 import type { RouterSettings } from './router-settings'
 
@@ -22,6 +22,8 @@ export interface HostConfig {
   model: ModelMode
   /** The model router's settings; no keys. */
   router: RouterSettings
+  /** How hard each role's models think; a role left out (or all, when absent) is left to the model. */
+  efforts?: Partial<Record<ModelRole, ReasoningEffort>>
   /**
    * The router's providers by id: the profile each is, its name for messages, and a number that changes with its
    * key (null: no key is stored). The key itself stays in the main process until a request needs it.
