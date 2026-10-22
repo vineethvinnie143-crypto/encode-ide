@@ -86,8 +86,11 @@ interface ReviewStore {
    * folder do. It shows the working tree's changes (in `kind` when given), and the file once a read finds it there.
    */
   showFile(target: string, from: 'repository' | 'folder', kind?: 'unstaged' | 'staged'): void
-  /** Opens the Review tab on what one request of the open conversation changed, at a file named as the agent's tools name it. */
-  showTurn(turn: string, target?: string): void
+  /**
+   * Opens the Review tab on what one request of the open conversation changed (null: the latest that changed files),
+   * at a file named as the agent's tools name it.
+   */
+  showTurn(turn: string | null, target?: string): void
   /** The file asked for is in view. */
   revealed(): void
   /** The last Review tab closed: the next one opens on the scope the person chose, and the Turn view on the latest request. */

@@ -133,6 +133,13 @@ const SCENARIOS = {
   ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
+  // The message mentions src/utils.ts with @, so the file comes with it and counts as read: an Edit works without a Read first.
+  'mention-check': [
+    { text: 'Swapping the operands.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + b', new_string: 'return b + a' } } },
+    { text: 'Mention check finished.' },
+  ],
+  // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
+  'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
   'long-reply': [{ text: longReply(), streamDelayMs: 3 }],
   // The fourth request is refused as too long: the first two steps wrote and read back a long survey, and the model's
@@ -238,10 +245,15 @@ async function sendText(response, body, text, delayMs = 0) {
     return
   }
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+  // A client that stops reading (Stop in eNCode) closes the connection: nothing more is written to it.
+  let gone = false
+  response.on('close', () => (gone = true))
   for (const part of text.match(/\S+\s*/g) ?? []) {
+    if (gone) return
     response.write(chunk({ content: part }))
     if (delayMs) await delay(delayMs)
   }
+  if (gone) return
   response.write(chunk({}, 'stop'))
   response.write('data: [DONE]\n\n')
   response.end()

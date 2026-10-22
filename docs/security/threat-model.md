@@ -757,3 +757,39 @@ checkpoint record, with no git involved.
   picture refused with nothing written, read-only files, and a busy session.
 - The end-to-end run opens the view from the change card in a folder without git, reverts one change and deletes a
   created file, and Undo brings each back; the change card's Undo then opens the Rewind dialog on the files alone.
+
+## Mentions, the palette and slash commands (UI-5a)
+
+Written with the pull request that added the command palette and the message box's `/`, `@` and `$` pickers
+([0066](../adr/0066-what-a-message-mentions-comes-from-the-core-under-the-tools-rules-and-the-palette-runs-the-menus-actions.md)).
+It covers the new read path: files and skills that come with a message without a tool call.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| W1 | A mention reads a file the agent would have had to ask for (`@~/.ssh/id_ed25519`, `@C:\secrets.txt`, a file a rule refuses) | The renderer only writes text; the core resolves mentions when the message is sent. A file comes only from inside the workspace or an extra root, or when a rule allows it, and never when a rule denies or asks (the folder's rules are brought up to date first, on the real path). Anything else is named in a "Not attached" list, so the model reads it through Read, where the rules and the approval apply. | Mitigated |
+| W2 | A mentioned file's text poses as the person's instructions | It comes in a `<mentioned_files>` block that calls it the project's text, not instructions, apart from the person's words; the thread, the title, the request digest and compaction treat the block as eNCode's. Labels are advisory. | Partial (R2) |
+| W3 | Mentions fill the context or the bill | At most 8 files and folders, 100,000 characters each and 120,000 in all, read the way Read reads them (no images, PDFs, notebooks, binary or very large files); a folder lists up to 200 entries; a file mentioned again unchanged comes as one line. Skills: at most 3, 32,000 characters each, and one already in the conversation comes as a short note. | Mitigated |
+| W4 | `$name` brings instructions a rule keeps from the agent | A rule about `Skill(name)` that is not an allow leaves the skill to the Skill tool, where it applies. Skills come only from the person's folder and the workspace's `.encode/skills`, as the Skill tool finds them. | Mitigated |
+| W5 | Text in the message, or a code sample, attaches a file nobody pointed at | Mentions inside code spans and blocks are ignored; only whole words that start with `@` or `$` count, and a path that does not exist is left as text. | Mitigated |
+| W6 | A palette entry or slash command does something its menu item would not, or while it should not | The palette and the slash commands run the command registry's actions, under the same enabled checks as the menus; a word that is no command is not sent at the first Enter. | Mitigated |
+| W7 | The agent is stopped by a stray Esc | The first Esc only arms Stop and says so; a second within 1.5 s stops. An Esc a field, menu, picker or card used does not count, and approvals and questions keep Esc for themselves. | Mitigated |
+
+### Residual risks
+
+- **A mention inside the workspace is read without asking**, as Read is under every policy: a repository's own files
+  can still carry instructions (R2).
+
+### Verification
+
+- The core's tests cover finding mentions (quotes, trailing punctuation, code spans), files and folders attached,
+  "Unchanged" on a repeated mention, the notes for a denied, asked, non-text and outside file, an allow rule for a file
+  outside, skills called once and again, a long skill cut, and the limit of three; the session's test sends a message
+  with both and has the model edit the mentioned file without a Read.
+- The renderer's tests cover the pickers' triggers, ranking and writing, the palette's ranking and recent picks, every
+  slash command having a runner, and the command map (Ctrl+K and Ctrl+Shift+P, Alt+M, nothing bound twice).
+- The end-to-end run opens the palette from the message box, runs Session status from it and from `/status`, refuses an
+  unknown command at the first Enter, opens a settings page found by its words and the model list with Alt+M, sends a
+  message with a file and a skill picked from the lists and checks both reached the model and the edit needed no Read,
+  and stops a streaming answer with Esc twice after one Esc did not.

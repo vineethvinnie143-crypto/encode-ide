@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { scanSkills } from '@encode/core/skills'
 import type { SkillInfo } from '../../shared/types'
 
 const TEMPLATE = (name: string, description: string): string =>
@@ -30,39 +31,9 @@ export class SkillService {
     return list
   }
 
-  private describe(file: string, fallback: string): string {
-    try {
-      const text = fs.readFileSync(file, 'utf8')
-      const front = /description\s*:\s*(.+)/i.exec(text)
-      if (front) return front[1].trim()
-      const heading = text.split(/\r?\n/).find((line) => line.trim() && !line.startsWith('---') && !line.startsWith('#'))
-      return heading?.trim().slice(0, 120) ?? fallback
-    } catch {
-      return fallback
-    }
-  }
-
+  /** The skills the agent can load, as its Skill tool lists them: a repository's skills cannot be links, and its own override the user's of the same name. */
   list(): SkillInfo[] {
-    const skills: SkillInfo[] = []
-    for (const { dir, source } of this.dirs()) {
-      let entries: fs.Dirent[]
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true })
-      } catch {
-        continue
-      }
-      for (const entry of entries) {
-        const file = entry.isDirectory()
-          ? path.join(dir, entry.name, 'SKILL.md')
-          : entry.name.toLowerCase().endsWith('.md')
-            ? path.join(dir, entry.name)
-            : ''
-        if (!file || !fs.existsSync(file)) continue
-        const name = entry.isDirectory() ? entry.name : entry.name.replace(/\.md$/i, '')
-        skills.push({ name, description: this.describe(file, name), source, path: file })
-      }
-    }
-    return skills.sort((a, b) => a.name.localeCompare(b.name))
+    return scanSkills(this.dirs()).map(({ name, description, source, file }) => ({ name, description, source, path: file }))
   }
 
   read(name: string): string {

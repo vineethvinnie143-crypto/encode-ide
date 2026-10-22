@@ -13,6 +13,7 @@ import { useStatus } from '../stores/status'
 import { adjacentRecent, buildSidebar, nextAttention, visibleOrder } from '../stores/sidebar-model'
 import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
+import { agentActions } from './agent'
 import { buildCommands, type AppActions } from './commands'
 import { CommandRegistry } from './registry'
 
@@ -134,6 +135,17 @@ function createAppActions(): AppActions {
     showTerminal: () => panels().openBottom('terminal'),
     zoom: (action) => void api.window.zoom(action),
     toggleFullScreen: () => void api.window.toggleFullScreen(),
+    showPalette: () => ui().setPaletteOpen(true),
+    theme: () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'),
+    toggleTheme: () => {
+      const settings = useSettings.getState()
+      const appearance = settings.settings?.appearance
+      if (!appearance) return
+      const light = document.documentElement.dataset.theme === 'light'
+      void settings.save({ appearance: { ...appearance, mode: light ? 'dark' : 'light' } })
+    },
+    showPlugins: () => ui().setPluginsOpen(true),
+    showAutomations: () => ui().setAutomationOpen(true),
 
     renameSession: withActive(sessionActions.rename),
     togglePin: withActive(sessionActions.togglePin),
@@ -153,6 +165,22 @@ function createAppActions(): AppActions {
     },
     goToSession: (position) => go(sidebarOrder()[position - 1]),
 
+    isRunning: agentActions.isRunning,
+    inPlanMode: agentActions.inPlanMode,
+    togglePlan: agentActions.togglePlan,
+    setGoal: () => void agentActions.setGoal(),
+    compact: () => void agentActions.compact(),
+    stop: agentActions.stop,
+    chooseModel: () => agentActions.openMenu('model'),
+    choosePermissions: () => agentActions.openMenu('policy'),
+    reviewLastTurn: agentActions.reviewLastTurn,
+    canUndo: agentActions.canUndo,
+    undoLastTurn: agentActions.undo,
+    canRewind: agentActions.canRewind,
+    rewind: agentActions.rewind,
+    showStatus: () => ui().setStatusOpen(true),
+    writeInstructions: agentActions.writeInstructions,
+
     canClosePanelTab: () => panels().side.layout !== 'hidden' && panels().side.tabs.length > 0,
     canReopenPanelTab: () => panels().side.closed.length > 0,
     newPanelTab: () => panels().open('new'),
@@ -171,6 +199,7 @@ function createAppActions(): AppActions {
 
     showShortcuts: () => ui().setShortcutsOpen(true),
     showAbout: () => ui().setAboutOpen(true),
+    feedback: () => void agentActions.feedback(),
     saveDiagnostics: () => void helpActions.saveDiagnostics(),
     showLogs: () => void helpActions.showLogs(),
   }

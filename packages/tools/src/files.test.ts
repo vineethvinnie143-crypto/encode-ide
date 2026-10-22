@@ -4,7 +4,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { applyEdit, applyEdits } from './edit'
 import { createFileStateTracker, withoutSeen } from './file-state'
-import { editTool, multiEditTool, readTool, writeTool } from './files'
+import { editTool, multiEditTool, readMentioned, readTool, writeTool } from './files'
 import { tempWorkspace, testContext, textOf } from './testing'
 
 describe('Read', () => {
@@ -123,6 +123,31 @@ describe('Read of the same lines again', () => {
     assert.equal(copy.get(file)?.seen, undefined)
     assert.equal(copy.get(file)?.hash, ctx.files.get(file)?.hash)
     assert.match(textOf((await readTool.run({ file_path: 'a.txt' }, testContext(root, { files: copy }))).content), /^ {5}1\tline 1/)
+  })
+
+  it('counts a file the user mentioned as read, and its lines as seen', async () => {
+    const root = await tempWorkspace({ 'a.txt': long })
+    const file = path.join(root, 'a.txt')
+    const ctx = testContext(root)
+    const mentioned = await readMentioned(file, ctx.files)
+    assert.equal(mentioned?.kind, 'text')
+    assert.match(mentioned?.kind === 'text' ? mentioned.body : '', /^ {5}1\tline 1 of/)
+    assert.deepEqual(mentioned?.kind === 'text' ? [mentioned.to, mentioned.total] : [], [60, 60])
+    // The model can edit it at once, and a Read of the same lines points back to the message.
+    assert.match(textOf((await readTool.run({ file_path: 'a.txt' }, ctx)).content), /^Unchanged/)
+    assert.deepEqual(await readMentioned(file, ctx.files), { kind: 'unchanged', to: 60 })
+    assert.equal((await editTool.run({ file_path: 'a.txt', old_string: 'line 2 of a file', new_string: 'line two of a file' }, ctx)).ok, true)
+    assert.equal((await readMentioned(file, ctx.files))?.kind, 'text', 'written since: shown again')
+  })
+
+  it('brings only numbered text, within the size it is given', async () => {
+    const png = Buffer.from('89504e470d0a1a0a', 'hex')
+    const root = await tempWorkspace({ 'a.txt': long, 'logo.png': png, 'blob.bin': Buffer.from([0, 1, 2, 0]), 'src/x.ts': 'x' })
+    const files = createFileStateTracker()
+    for (const name of ['logo.png', 'blob.bin', 'src', 'missing.txt']) assert.equal(await readMentioned(path.join(root, name), files), undefined, name)
+    const cut = await readMentioned(path.join(root, 'a.txt'), files, 1_000)
+    assert.ok(cut?.kind === 'text' && cut.body.length <= 1_000 && cut.to < 60 && cut.total === 60)
+    assert.equal(files.get(path.join(root, 'a.txt'))?.partial, true)
   })
 })
 

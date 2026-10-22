@@ -235,7 +235,10 @@ export interface MenuTriggerProps {
   'aria-expanded': boolean
 }
 
-/** A menu that opens from a trigger: `trigger` draws the button and spreads the props it is given. */
+/**
+ * A menu that opens from a trigger: `trigger` draws the button and spreads the props it is given. A new
+ * `openRequest` number opens it from elsewhere (a shortcut or the palette), with its first item active.
+ */
 export function Menu({
   trigger,
   entries,
@@ -244,6 +247,7 @@ export function Menu({
   align = 'start',
   width,
   className,
+  openRequest,
 }: {
   trigger: (props: MenuTriggerProps) => ReactNode
   entries: readonly MenuEntry[] | (() => readonly MenuEntry[])
@@ -252,6 +256,7 @@ export function Menu({
   align?: Align
   width?: number
   className?: string
+  openRequest?: number
 }) {
   const triggerNode = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState<{ start: 'none' | 'first' | 'last'; anchor: Rect } | null>(null)
@@ -260,6 +265,13 @@ export function Menu({
     const box = triggerNode.current?.getBoundingClientRect()
     if (box) setOpen({ start, anchor: { left: box.left, top: box.top, width: box.width, height: box.height } })
   }
+  // Only a request made after this menu was drawn opens it.
+  const handled = useRef(openRequest)
+  useEffect(() => {
+    if (openRequest === undefined || openRequest === handled.current) return
+    handled.current = openRequest
+    show('first')
+  }, [openRequest])
   const close = useCallback((refocus: boolean) => {
     setOpen(null)
     if (refocus) triggerNode.current?.focus()

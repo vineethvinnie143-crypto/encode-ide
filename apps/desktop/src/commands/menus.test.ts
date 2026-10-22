@@ -78,6 +78,22 @@ describe('the command map', () => {
     assert.equal(keys('edit.searchInFiles'), 'Ctrl+Shift+F')
     assert.equal(keys('help.shortcuts'), 'Ctrl+/')
     assert.equal(keys('app.settings'), 'Ctrl+,')
+    assert.deepEqual(registry.get('app.palette')?.keys, ['Ctrl+K', 'Ctrl+Shift+P'])
+    assert.equal(keys('agent.model'), 'Alt+M')
+    assert.equal(registry.get('agent.plan')?.hint, 'Shift+Tab')
+  })
+
+  it('leaves out of the palette what only makes sense in a field, and the palette itself', () => {
+    const left = registry
+      .all()
+      .filter((command) => command.palette === false)
+      .map((command) => command.id)
+    assert.ok(left.includes('app.palette'))
+    assert.ok(left.every((id) => id === 'app.palette' || id.startsWith('edit.')), left.join(', '))
+  })
+
+  it('runs Ctrl+K while typing, so the palette opens from the message box', () => {
+    assert.equal(registry.forEvent({ key: 'k', code: 'KeyK', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, true)?.id, 'app.palette')
   })
 
   it('puts the side panel on browser-style tab shortcuts, and the first nine tabs on Ctrl+1 to Ctrl+9', () => {

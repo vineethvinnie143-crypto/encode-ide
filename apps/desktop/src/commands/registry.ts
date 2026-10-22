@@ -1,5 +1,5 @@
 /**
- * One registry of commands behind the menus, the shortcuts and (in UI-5) the
+ * One registry of commands behind the menus, the shortcuts and the command
  * palette, so a command has one title, one shortcut and one implementation.
  * Free of React and the DOM for unit tests.
  */
@@ -18,6 +18,10 @@ export interface Command {
   hint?: string
   /** Leave it out of menus and lists (one of a numbered family, for example). */
   hidden?: boolean
+  /** More words the command palette finds it by. */
+  keywords?: string
+  /** False leaves it out of the command palette, where it means nothing (Copy, or the palette itself). */
+  palette?: boolean
   /** Still works while a dialog is open: quitting, zoom and full screen. */
   global?: boolean
   enabled?: () => boolean

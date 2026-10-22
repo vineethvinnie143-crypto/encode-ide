@@ -605,6 +605,8 @@ async function runProviderPhase() {
   if (!featureCheck.skillListed || !featureCheck.skillText) throw new Error('skill create/read failed')
   if (!featureCheck.jobsArray || !featureCheck.planNull) throw new Error('jobs/plan surface failed')
 
+  await runMentionChecks()
+  await runStopChecks()
   await runSubagentChecks()
   await runWebChecks()
   await runSearchChecks()
@@ -1453,6 +1455,83 @@ async function sendPrompt(text) {
   if (!(await click('.composer-send'))) throw new Error('composer send button not found')
 }
 
+/**
+ * @ and $ in a message: the pickers write the mention, the file and the skill go to the model with the message, the
+ * thread shows only what was typed, and the file counts as read, so the agent edits it without a Read first.
+ */
+async function runMentionChecks() {
+  console.log('[smoke] --- @ and $ mentions ---')
+  const utilsFile = path.join(demoPath, 'src', 'utils.ts')
+  const original = await fs.readFile(utilsFile, 'utf8')
+  await evaluate('window.eNCode.agent.reset()')
+
+  await typeInto('.composer-input', '[scenario:mention-check] Swap the operands in @utils')
+  await waitFor(`${pickedOption} === 'utils.ts'`, 8000, '@utils chooses src/utils.ts')
+  const folder = await evaluate("document.querySelector('.composer-picker [role=option][aria-selected=true] .palette-detail')?.textContent ?? ''")
+  if (folder !== 'src') throw new Error(`the file is shown in "${folder}", not src`)
+  await sleep(300)
+  await screenshot('ui-dark-mention.png')
+  await composerKey({ key: 'Enter' })
+  const withFile = '[scenario:mention-check] Swap the operands in @src/utils.ts '
+  await waitFor(`document.querySelector('.composer-input').value === ${JSON.stringify(withFile)} && !document.querySelector('.composer-picker')`, 4000, 'the pick writes the file’s path and closes the list')
+
+  await typeInto('.composer-input', `${withFile}following $smoke`)
+  await waitFor(`${pickedOption} === '$smoke-skill'`, 8000, '$smoke chooses the skill')
+  await composerKey({ key: 'Enter' })
+  const typed = `${withFile}following $smoke-skill `
+  // The key press that picks also reports the field's old caret: the list must still close.
+  await waitFor(`document.querySelector('.composer-input').value === ${JSON.stringify(typed)} && !document.querySelector('.composer-picker')`, 4000, 'the pick writes the skill’s name and closes the list')
+  await pressEnterInComposer()
+
+  const approvals = await driveAgent('15-mentions')
+  if (approvals.length) throw new Error(`An edit in the folder should not ask: ${JSON.stringify(approvals)}`)
+  const edit = (await toolOutputs()).find((entry) => entry.name === 'Edit')
+  console.log('[smoke] edit after the mention:', JSON.stringify(edit))
+  if (!edit || edit.state !== 'done') throw new Error('The mentioned file did not count as read: the Edit failed')
+  if (!(await fs.readFile(utilsFile, 'utf8')).includes('return b + a')) throw new Error('src/utils.ts was not changed')
+
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const userText = sent.messages
+    .filter((message) => message.role === 'user')
+    .map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+    .join('\n')
+  if (!userText.includes('<mentioned_files>') || !userText.includes('export function add(a: number, b: number)')) throw new Error('The mentioned file did not go with the message')
+  if (!userText.includes('<invoked_skill name="smoke-skill">')) throw new Error('The mentioned skill did not go with the message')
+  const shown = await evaluate("document.querySelector('.turn-user')?.textContent ?? ''")
+  if (!shown.includes('@src/utils.ts') || !shown.includes('$smoke-skill') || shown.includes('mentioned_files')) throw new Error(`The thread shows the message as ${JSON.stringify(shown)}`)
+
+  await fs.writeFile(utilsFile, original)
+  console.log('[smoke] mentions: ok')
+}
+
+/** Esc twice stops the agent: the first press says what a second does, and the note goes when no second comes. */
+async function runStopChecks() {
+  console.log('[smoke] --- Esc twice ---')
+  const running = "!!document.querySelector('.composer-send.is-stop')"
+  const hint = "(document.querySelector('.composer-hint')?.textContent ?? '')"
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:slow-reply] Write a long review.')
+  await waitFor(`${running} && document.body.textContent.includes('The parser')`, 20000, 'the long answer streams')
+
+  await composerKey({ key: 'Escape' })
+  await waitFor(`${hint} === 'Press Esc again to stop'`, 2000, 'the first Esc says what a second does')
+  await screenshot('ui-dark-stop-hint.png')
+  await waitFor(`${hint} === ''`, 4000, 'the note goes when no second Esc comes')
+  if (!(await evaluate(running))) throw new Error('One Esc stopped the agent')
+
+  await composerKey({ key: 'Escape' })
+  await composerKey({ key: 'Escape' })
+  await waitFor(`!${running} && ${hint} === ''`, 10000, 'Esc twice stops the agent')
+  if (await evaluate("document.body.textContent.includes('do the work once')")) throw new Error('The answer ran to its end: Esc twice did not stop it')
+  const status = await evaluate('window.eNCode.agent.history().then((history) => history.status)')
+  if (status !== 'idle') throw new Error(`Esc twice left the agent ${status}`)
+
+  // What was cut off still makes a conversation the provider accepts.
+  await sendPrompt('[scenario:follow-up] Carry on after Esc.')
+  await driveAgent('15-after-esc')
+  console.log('[smoke] Esc twice: ok')
+}
+
 async function runSubagentChecks() {
   console.log('[smoke] --- subagents ---')
 
@@ -1586,6 +1665,14 @@ async function chooseFromSessionMenu(item) {
 
 const pressEnterInComposer = () =>
   evaluate("document.querySelector('.composer-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+/** A key pressed in the message box: the box's own handler sees it first, then the window's shortcuts. */
+const composerKey = (init) =>
+  evaluate(`document.querySelector('.composer-input').dispatchEvent(new KeyboardEvent('keydown', Object.assign({ bubbles: true, cancelable: true }, ${JSON.stringify(init)})))`)
+const composerValue = () => evaluate("document.querySelector('.composer-input')?.value ?? ''")
+const paletteKey = (name) =>
+  evaluate(`document.querySelector('.palette-input').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`)
+/** The title of the row the picker above the message box has chosen. */
+const pickedOption = "document.querySelector('.composer-picker [role=option][aria-selected=true] .palette-title')?.textContent ?? ''"
 
 /** While an approval card shows: the card's keys, and a message queued, edited back into the composer and queued again. */
 async function queueWhileWaiting() {
@@ -1640,6 +1727,110 @@ async function runComposerChecks() {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the composer checks')
   console.log('[smoke] composer checks passed')
+}
+
+/**
+ * Ctrl+K from the message box: the palette finds actions and settings pages by their words, runs the pick, starts
+ * with it next time and gives focus back on Esc; the sidebar's Search opens it too. Then the message box's slash
+ * commands (the list, /status, an unknown command, Esc) and Alt+M for the model list.
+ */
+async function runPaletteChecks() {
+  console.log('[smoke] --- palette and slash commands ---')
+  const titles = () => evaluate("[...document.querySelectorAll('.palette .palette-row .palette-title')].map((node) => node.textContent)")
+  const activeRow = "document.querySelector('.palette-row.is-active .palette-title')?.textContent ?? ''"
+  const facts = () =>
+    evaluate("Object.fromEntries([...document.querySelectorAll('.status-facts > div')].map((row) => [row.querySelector('dt').textContent, row.querySelector('dd').textContent]))")
+
+  // Ctrl+K works while typing in the message box, and the palette's field takes the keys.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: 'k', code: 'KeyK', ctrlKey: true })
+  await waitFor("!!document.querySelector('.palette') && document.activeElement?.classList.contains('palette-input')", 4000, 'Ctrl+K opens the palette with its field focused')
+  const groups = await evaluate("[...document.querySelectorAll('.palette .palette-group')].map((node) => node.textContent)")
+  if (!groups.includes('Actions') || !groups.includes('Settings')) throw new Error(`the palette lists ${groups}`)
+  await sleep(300)
+  await screenshot('ui-dark-palette.png')
+
+  // Found by their words: the theme command names the theme it would switch to, next to the Appearance page.
+  await typeInto('.palette-input', 'theme')
+  await waitFor(`${activeRow} !== ''`, 4000, 'results for "theme"')
+  const themed = await titles()
+  if (!themed.includes('Switch to light theme') || !themed.includes('Appearance')) throw new Error(`"theme" finds ${themed}`)
+
+  // Enter runs the pick once the palette is gone: here the session's status.
+  await typeInto('.palette-input', 'status')
+  await waitFor(`${activeRow} === 'Session status'`, 4000, '"status" finds Session status first')
+  await paletteKey('Enter')
+  await waitFor("!document.querySelector('.palette') && !!document.querySelector('.status-dialog .status-facts')", 4000, 'Enter runs the command: the status opens')
+  const status = await facts()
+  console.log('[smoke] status:', JSON.stringify(status))
+  for (const label of ['Session', 'Folder', 'Model', 'Mode', 'Permissions', 'Context', 'Usage']) {
+    if (!(label in status)) throw new Error(`the status has no ${label}: ${JSON.stringify(status)}`)
+  }
+  if (status.Permissions !== 'Workspace Write' || status.Mode !== 'Code') throw new Error('the status does not show the session’s permissions and mode')
+  if (status.Folder.split(/[\\/]/).pop() !== path.basename(demoPath)) throw new Error(`the status shows the folder ${status.Folder}`)
+  if (!/^\d+% of \d+k tokens$/.test(status.Context)) throw new Error(`the status shows the context as ${status.Context}`)
+  await sleep(300)
+  await screenshot('ui-dark-status.png')
+  await key({ key: 'Escape' })
+  await waitFor("!document.querySelector('.status-dialog')", 4000, 'Escape closes the status')
+
+  // Ctrl+Shift+P opens it too, starting with the last pick; the arrows move, and Esc gives focus back.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true })
+  await waitFor("!!document.querySelector('.palette')", 4000, 'Ctrl+Shift+P opens the palette')
+  const recent = await evaluate("(() => { const group = document.querySelector('.palette [role=group]'); return group ? [group.getAttribute('aria-label'), group.querySelector('.palette-title')?.textContent] : null })()")
+  if (JSON.stringify(recent) !== JSON.stringify(['Recent', 'Session status'])) throw new Error(`the palette does not start with the last pick: ${JSON.stringify(recent)}`)
+  await paletteKey('ArrowDown')
+  await waitFor("document.querySelector('.palette-row.is-active')?.dataset.row === '1'", 2000, 'ArrowDown moves to the next row')
+  await typeInto('.palette-input', 'qzxq')
+  await waitFor("document.querySelector('.palette-empty')?.textContent === 'Nothing matches “qzxq”.'", 2000, 'the palette says when nothing matches')
+  await paletteKey('Escape')
+  await waitFor("!document.querySelector('.palette') && document.activeElement?.classList.contains('composer-input')", 4000, 'Esc closes the palette and gives focus back to the message box')
+
+  // The sidebar's Search opens it, and a settings page is found by its words.
+  if (!(await click('.session-sidebar [aria-label="Search"]'))) throw new Error('the sidebar has no Search')
+  await waitFor("!!document.querySelector('.palette')", 4000, 'Search in the sidebar opens the palette')
+  await typeInto('.palette-input', 'isolation')
+  await waitFor(`${activeRow} === 'Sandbox'`, 4000, '"isolation" finds the Sandbox settings')
+  await paletteKey('Enter')
+  await waitFor("document.querySelector('.settings-modal .settings-tabs button.is-on')?.textContent === 'Sandbox'", 6000, 'the settings open on that page')
+  await click('.settings-header .icon-btn')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'the settings close')
+
+  // Slash commands: / lists them, more letters narrow the list, Enter runs the chosen one and empties the box.
+  await typeInto('.composer-input', '/')
+  await waitFor("document.querySelectorAll('.composer-picker [role=option]').length >= 20", 4000, '/ lists the commands')
+  if ((await evaluate(pickedOption)) !== '/plan') throw new Error(`the commands start with ${await evaluate(pickedOption)}`)
+  await sleep(300)
+  await screenshot('ui-dark-slash.png')
+  await typeInto('.composer-input', '/sta')
+  await waitFor(`${pickedOption} === '/status'`, 4000, '/sta chooses /status')
+  await composerKey({ key: 'Enter' })
+  await waitFor("!!document.querySelector('.status-dialog') && document.querySelector('.composer-input').value === ''", 4000, 'Enter runs /status and empties the box')
+  await key({ key: 'Escape' })
+  await waitFor("!document.querySelector('.status-dialog')", 4000, 'Escape closes the status again')
+
+  // A word that is no command is not sent at the first Enter.
+  await typeInto('.composer-input', '/qzxq')
+  await waitFor("document.querySelector('.composer-picker .picker-note')?.textContent === 'No command matches “/qzxq”.'", 4000, 'the list says when no command matches')
+  await composerKey({ key: 'Enter' })
+  await waitFor("[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === '/qzxq is not a command. Press Enter again to send it as a message.')", 4000, 'the first Enter on an unknown command explains')
+  if ((await composerValue()) !== '/qzxq') throw new Error('an unknown command left the message box')
+
+  // Esc closes the list and keeps what was typed.
+  await typeInto('.composer-input', '/')
+  await waitFor("!!document.querySelector('.composer-picker')", 4000, 'the command list again')
+  await composerKey({ key: 'Escape' })
+  await waitFor("!document.querySelector('.composer-picker')", 4000, 'Esc closes the command list')
+  if ((await composerValue()) !== '/') throw new Error('Esc changed what was typed')
+  await typeInto('.composer-input', '')
+
+  // Alt+M opens the model list, and Esc closes it.
+  await key({ key: 'm', code: 'KeyM', altKey: true })
+  await waitFor("!!document.querySelector('.model-picker')", 4000, 'Alt+M opens the model list')
+  await evaluate("document.querySelector('.model-picker').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
+  await waitFor("!document.querySelector('.model-picker')", 4000, 'Esc closes the model list')
+  console.log('[smoke] palette and slash command checks passed')
 }
 
 /** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
@@ -2496,6 +2687,7 @@ try {
   await screenshot('08-agent.png')
   await runSessionViewChecks()
   await runComposerChecks()
+  await runPaletteChecks()
 
   console.log(
     '[smoke] demo file bytes:',

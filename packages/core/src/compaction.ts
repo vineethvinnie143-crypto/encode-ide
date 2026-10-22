@@ -26,6 +26,7 @@
 import type { AssistantBlock, AssistantMessage, Message, ModelRequest, ToolResultBlock, ToolUseBlock, UserBlock, UserMessage } from '@encode/providers'
 import { textBlock, userText } from '@encode/providers'
 import { OUTSIDE_NOTES_OPEN } from './external'
+import { INVOKED_SKILL_OPEN, MENTIONED_FILES_OPEN } from './mentions'
 
 /** Used when the router has no better number. */
 export const DEFAULT_CONTEXT_WINDOW = 64_000
@@ -146,11 +147,11 @@ function hasVisibleContent(message: AssistantMessage): boolean {
   return message.content.some((block) => (block.type === 'text' && block.text.trim()) || block.type === 'tool-use')
 }
 
-/** A block eNCode added (a reminder, or the notes of the MCP servers), as opposed to what the user wrote. */
+/** A block eNCode added (a reminder, the notes of the MCP servers, what an @ or $ in the message brought), as opposed to what the user wrote. */
 export function isReminder(block: UserBlock): boolean {
   if (block.type !== 'text') return false
   const text = block.text.trimStart()
-  return text.startsWith('<system-reminder>') || text.startsWith(OUTSIDE_NOTES_OPEN)
+  return text.startsWith('<system-reminder>') || text.startsWith(OUTSIDE_NOTES_OPEN) || text.startsWith(MENTIONED_FILES_OPEN) || text.startsWith(INVOKED_SKILL_OPEN)
 }
 
 function mergeInto(last: Message, next: Message): Message {

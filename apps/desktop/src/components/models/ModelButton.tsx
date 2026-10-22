@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FREE_REF, mainLabel, mainRefs, modelMode } from '@shared/models'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
@@ -24,6 +24,15 @@ export default function ModelButton() {
     const box = trigger.current?.getBoundingClientRect()
     if (box) setAnchor({ left: box.left, top: box.top, width: box.width, height: box.height })
   }
+
+  // Alt+M, the palette and /model ask for the list from elsewhere.
+  const request = useUi((state) => (state.menuRequest?.menu === 'model' ? state.menuRequest.id : undefined))
+  const handled = useRef(request)
+  useEffect(() => {
+    if (request === undefined || request === handled.current) return
+    handled.current = request
+    if (!anchor) toggle()
+  }, [request])
 
   const pick = (item: PickerItem) => {
     const store = useSettings.getState()

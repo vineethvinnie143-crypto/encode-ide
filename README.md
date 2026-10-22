@@ -18,6 +18,12 @@ primary platform; the code stays cross-platform.
   needs you). Beside them are a conversation with a tool timeline (Chat and Trajectory views),
   a composer with mode, approval-policy and model chips, and a Browse and Workspace panel with
   Files, Editor and Shell.
+- **Everything from the keyboard.** `Ctrl+K` finds any session, action or settings page by its words. In the
+  message box, `/` lists the commands (`/status`, `/model`, `/undo`, `/rewind`, `/init` and more), `@` picks a file
+  and `$` a skill. A file you mention comes with your message, as the Read tool would show it, and counts as read,
+  so the agent can edit it at once; only files it may read without asking come this way (inside the folder, or
+  allowed by a rule), and the rest are named for the agent to read through its tools. A skill you call with `$`
+  brings its instructions. `Esc` twice stops the agent.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
   - files: `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
@@ -200,9 +206,13 @@ card's view lasts until you close the tab; the tab opens again on the scope you 
 
 | Action | Shortcut |
 | --- | --- |
+| Command palette: sessions, actions and settings pages | `Ctrl+K` or `Ctrl+Shift+P` |
 | New session | `Ctrl+N` |
 | Open a folder | `Ctrl+O` |
 | Go to file | `Ctrl+P` |
+| Choose the model | `Alt+M` |
+| Plan mode on or off | `Shift+Tab` (in the message box) |
+| Stop the agent | `Esc` twice (in the message box or on the conversation) |
 | Save the active file | `Ctrl+S` |
 | Settings | `Ctrl+,` |
 | Show or hide the sidebar / the side panel / the bottom panel | `Ctrl+B` / `Ctrl+Alt+B` / `Ctrl+J` |

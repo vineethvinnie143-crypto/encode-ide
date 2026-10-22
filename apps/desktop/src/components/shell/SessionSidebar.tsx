@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { SessionSummary } from '@shared/types'
 import { commandRegistry, sessionActions } from '../../commands/app'
 import { useSessions } from '../../stores/sessions'
@@ -163,22 +163,15 @@ export default function SessionSidebar() {
   const recentRoots = useSettings((state) => state.settings?.recentWorkspaces)
   const mode = useUi((state) => state.sidebarMode)
   const collapsed = useUi((state) => state.collapsedProjects)
-  const [filter, setFilter] = useState('')
-  const [searching, setSearching] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; session: SessionSummary } | null>(null)
-  const filterRef = useRef<HTMLInputElement>(null)
 
   const model = useMemo(
-    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: recentRoots ?? [], filter }),
-    [sessions, workspace?.root, recentRoots, filter],
+    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: recentRoots ?? [] }),
+    [sessions, workspace?.root, recentRoots],
   )
   const groups = useMemo(() => activityGroups(sessions, statuses), [sessions, statuses])
   const archived = useMemo(() => sessions.filter((session) => session.archived).sort((a, b) => b.updatedAt - a.updatedAt), [sessions])
-
-  useEffect(() => {
-    if (searching) filterRef.current?.focus()
-  }, [searching])
 
   const statusOf = (session: SessionSummary): RowStatus => rowStatus(session, statuses[session.id])
   const open = (session: SessionSummary) => void useSessions.getState().select(session.id)
@@ -268,16 +261,7 @@ export default function SessionSidebar() {
         >
           <Bell size={16} />
         </IconButton>
-        <IconButton
-          label="Search sessions"
-          size="md"
-          active={searching}
-          onClick={() => {
-            useUi.getState().setSidebarMode('projects')
-            setSearching((value) => !value)
-            setFilter('')
-          }}
-        >
+        <IconButton label="Search" shortcut={commandRegistry.shortcut('app.palette')} size="md" onClick={() => commandRegistry.run('app.palette')}>
           <Search size={16} />
         </IconButton>
       </div>
@@ -285,23 +269,6 @@ export default function SessionSidebar() {
       <div className="sb-list">
         {mode === 'projects' && (
           <>
-            {searching && (
-              <input
-                ref={filterRef}
-                className="sb-filter"
-                type="search"
-                placeholder="Filter sessions"
-                aria-label="Filter sessions"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    setFilter('')
-                    setSearching(false)
-                  }
-                }}
-              />
-            )}
             <button type="button" className="sb-row sb-new" onClick={() => commandRegistry.run('file.newSession')}>
               <PenSquare size={16} className="ic" />
               <span className="title">New session</span>
@@ -328,7 +295,7 @@ export default function SessionSidebar() {
               </div>
               {model.projects.map((project) => {
                 const key = rootKey(project.root)
-                const folded = collapsed.includes(key) && !filter
+                const folded = collapsed.includes(key)
                 const current = sameRoot(project.root, workspace?.root)
                 return (
                   <div key={key} className="sb-project">
@@ -361,7 +328,7 @@ export default function SessionSidebar() {
                 ))}
               </section>
             )}
-            {empty && <div className="sb-empty">{filter ? `No session matches “${filter}”.` : 'No sessions yet.'}</div>}
+            {empty && <div className="sb-empty">No sessions yet.</div>}
           </>
         )}
 
