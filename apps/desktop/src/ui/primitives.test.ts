@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { cx } from './cx'
+import { weight } from './icon-weight'
 import { keyToMove, moveIndex, typeaheadIndex } from './nav'
 import { place } from './place'
 import { shortcutKeys, shortcutLabel, tooltipDelay } from './shortcut'
@@ -106,5 +107,23 @@ describe('cx', () => {
   it('joins only real class names', () => {
     assert.equal(cx('btn', false, 'primary', null, undefined, '', 'sm'), 'btn primary sm')
     assert.equal(cx(), '')
+  })
+})
+
+describe('icon weight', () => {
+  const onScreen = (px: number) => (weight(px) * px) / 24
+
+  it('draws the same line at every size from 16 px up, a little finer below', () => {
+    for (const px of [16, 18, 20, 24]) assert.ok(Math.abs(onScreen(px) - 1.5) < 0.01, `${px} px`)
+    assert.ok(Math.abs(onScreen(14) - 1.4) < 0.01)
+    assert.ok(Math.abs(onScreen(12) - 1.3) < 0.01)
+    assert.ok(onScreen(12) < onScreen(16))
+  })
+
+  it('takes a size written as a string and falls back to the old weight for nonsense', () => {
+    assert.equal(weight('18'), weight(18))
+    assert.equal(weight('big'), 1.75)
+    assert.equal(weight(0), 1.75)
+    assert.equal(weight(-4), 1.75)
   })
 })

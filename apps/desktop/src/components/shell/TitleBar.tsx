@@ -91,6 +91,27 @@ function MenuBar() {
   )
 }
 
+interface ControlsOverlay extends EventTarget {
+  readonly visible: boolean
+}
+
+/**
+ * True when the system draws the window buttons over the title bar (Windows). Their corner is then
+ * not ours: the bar leaves it free (01-titlebar.css) and draws no buttons of its own.
+ */
+function useNativeCaptions(): boolean {
+  const overlay = (navigator as Navigator & { windowControlsOverlay?: ControlsOverlay }).windowControlsOverlay
+  const [native, setNative] = useState(overlay?.visible === true)
+  useEffect(() => {
+    if (!overlay) return
+    const update = () => setNative(overlay.visible)
+    update()
+    overlay.addEventListener('geometrychange', update)
+    return () => overlay.removeEventListener('geometrychange', update)
+  }, [overlay])
+  return native
+}
+
 function CaptionButtons() {
   const [maximized, setMaximized] = useState(false)
   useEffect(() => api.window.onStateChange((state) => setMaximized(state.maximized)), [])
@@ -119,10 +140,11 @@ export default function TitleBar() {
   const back = useSessions((state) => canGoBack(state.history))
   const forward = useSessions((state) => canGoForward(state.history))
   const sidebarVisible = useUi((state) => state.sidebarVisible)
+  const nativeCaptions = useNativeCaptions()
   const shortcut = (id: string) => commandRegistry.shortcut(id)
 
   return (
-    <header className="titlebar">
+    <header className={cx('titlebar', nativeCaptions && 'has-native-captions')}>
       <LogoMark size={22} className="titlebar-logo" />
       <IconButton label="Back" shortcut={shortcut('session.back')} size="md" disabled={!back} onClick={() => commandRegistry.run('session.back')}>
         <ArrowLeft size={16} />
@@ -142,7 +164,7 @@ export default function TitleBar() {
       <span className="tb-sep" />
       <MenuBar />
       <div className="tb-drag" />
-      <CaptionButtons />
+      {!nativeCaptions && <CaptionButtons />}
     </header>
   )
 }

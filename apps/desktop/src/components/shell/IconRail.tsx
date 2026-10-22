@@ -8,7 +8,7 @@ import { attentionCount } from '../../stores/sidebar-model'
 import { useStatus } from '../../stores/status'
 import { useUi } from '../../stores/ui'
 import { cx } from '../../ui/cx'
-import { Bot, Clock, GitPullRequest, Home, MoreHorizontal, Puzzle, Settings } from '../../ui/icons'
+import { Bot, Clock, Gear, GitPullRequest, Home, MoreHorizontal, Puzzle } from '../../ui/icons'
 import { Menu, type MenuEntry } from '../../ui/Menu'
 import { Tooltip } from '../../ui/Tooltip'
 
@@ -87,23 +87,23 @@ export default function IconRail() {
           ui().setAutomationOpen(false)
         }}
       >
-        <Home size={18} />
+        <Home size={20} />
       </RailButton>
       <RailButton label="Automations" active={automationOpen} onClick={() => ui().setAutomationOpen(true)}>
-        <Clock size={18} />
+        <Clock size={20} />
       </RailButton>
       <RailButton
         label="Review"
         active={reviewOpen}
         onClick={() => usePanels.getState().open('files', { view: 'git' })}
       >
-        <GitPullRequest size={18} />
+        <GitPullRequest size={20} />
       </RailButton>
       <RailButton label="Plugins and skills" active={pluginsOpen} onClick={() => ui().setPluginsOpen(true)}>
-        <Puzzle size={18} />
+        <Puzzle size={20} />
       </RailButton>
       <RailButton label="Models and roles" active={settingsOpen && settingsTab === 'models'} onClick={() => ui().openSettings('models')}>
-        <Bot size={18} />
+        <Bot size={20} />
       </RailButton>
       <Menu
         label="More"
@@ -113,7 +113,7 @@ export default function IconRail() {
         entries={moreEntries}
         trigger={(props) => (
           <RailButton label="More" {...props}>
-            <MoreHorizontal size={18} />
+            <MoreHorizontal size={20} />
           </RailButton>
         )}
       />
@@ -121,7 +121,7 @@ export default function IconRail() {
       <div className="rail-spacer" />
 
       <RailButton label="Settings" shortcut={shortcut('app.settings')} active={settingsOpen && settingsTab !== 'models'} onClick={run('app.settings')}>
-        <Settings size={18} />
+        <Gear size={20} />
       </RailButton>
       <Menu
         label="Account"

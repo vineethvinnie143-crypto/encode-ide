@@ -1038,7 +1038,7 @@ async function runShellChecks() {
     return { titlebar: box('.titlebar')?.height, rail: box('.icon-rail')?.width, railButton: box('.rail-btn')?.width, sidebar: box('.sidebar-wrap')?.width }
   })()`)
   console.log('[smoke] shell sizes:', JSON.stringify(sizes))
-  if (sizes.titlebar !== 44 || sizes.rail !== 52 || sizes.railButton !== 36) throw new Error('the title bar or icon rail is not the specified size')
+  if (sizes.titlebar !== 44 || sizes.rail !== 52 || sizes.railButton !== 38) throw new Error('the title bar or icon rail is not the specified size')
   if (sizes.sidebar < 220 || sizes.sidebar > 480) throw new Error('the sidebar is outside its 220 to 480 px range')
 
   // Menus: a click opens, the arrow keys move to the next menu, Escape closes.

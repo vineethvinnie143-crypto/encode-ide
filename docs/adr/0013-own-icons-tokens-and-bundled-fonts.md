@@ -15,8 +15,10 @@ another product's icons, colours or fonts would be a trade dress risk once eNCod
 
 ## Decision
 
-- **Icons.** `apps/desktop/src/ui/icons.tsx` holds eNCode's own line icons: a 24 px grid, a
-  1.75 px stroke with round ends, coloured by `currentColor`. They take lucide's prop shape
+- **Icons.** `apps/desktop/src/ui/icons.tsx` holds eNCode's own line icons: a 24 px grid, round
+  ends, coloured by `currentColor`, and a stroke sized to the size they are drawn at so the line
+  is 1.5 px on screen from 16 px up and a little finer below (`icon-weight.ts`; first written as
+  a fixed 1.75 px stroke, which drew 1 px lines at 14 px and looked faint). They take lucide's prop shape
   (`size`, `className`, `strokeWidth`, `fill`), so call sites changed only their import.
   lucide-react is removed. A new icon is drawn in that file to the same rules; no icon
   package is added.

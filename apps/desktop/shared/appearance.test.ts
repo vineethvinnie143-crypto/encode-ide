@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  CAPTION_SYMBOL,
   DEFAULT_APPEARANCE,
   FONT_ENCODE,
   FONT_SYSTEM,
@@ -14,8 +15,22 @@ import {
   resolveTheme,
   sameAppearance,
   uiFontStack,
+  WINDOW_BACKGROUND,
   type Appearance,
 } from './appearance'
+
+/** WCAG relative luminance of a #rrggbb colour. */
+function luminance(hex: string): number {
+  const channel = (offset: number) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+}
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
 
 describe('appearance', () => {
   it('resolves System from the operating system, and Light and Dark as themselves', () => {
@@ -138,5 +153,13 @@ describe('fonts', () => {
     assert.equal(large['--ui-small'], '3px')
     const custom = fontVariables({ ...DEFAULT_APPEARANCE, uiFont: 'Calibri', uiSize: 12 })
     assert.equal(custom['--ui-small'], '-2px', 'a font picked by name gets the size change only')
+  })
+
+  it('draws the native window buttons in colours that read on the title bar', () => {
+    for (const theme of ['dark', 'light'] as const) {
+      assert.match(WINDOW_BACKGROUND[theme], /^#[0-9a-f]{6}$/)
+      assert.match(CAPTION_SYMBOL[theme], /^#[0-9a-f]{6}$/)
+      assert.ok(contrast(CAPTION_SYMBOL[theme], WINDOW_BACKGROUND[theme]) >= 7, `${theme}: the glyphs need 7:1 on the title bar`)
+    }
   })
 })

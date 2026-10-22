@@ -215,7 +215,7 @@ export function MenuPanel({
               <span className="ui-menu-label">{action.label}</span>
               {action.description && <span className="ui-menu-description">{action.description}</span>}
             </span>
-            {action.shortcut && <Kbd keys={action.shortcut} className="ui-menu-shortcut" />}
+            {action.shortcut && <Kbd keys={action.shortcut} plain className="ui-menu-shortcut" />}
           </button>
         )
       })}
