@@ -19,6 +19,7 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     policy: settings.policy,
     maxSteps: settings.maxSteps,
     maxGoalRounds: settings.maxGoalRounds,
+    computer: settings.computer && settings.computerSupported,
     model: modelMode(settings),
     router: routerSettingsOf(settings),
     providers,

@@ -156,6 +156,7 @@ describe('steps', () => {
     assert.equal(stepKind('WebFetch'), 'web')
     assert.equal(stepKind('Task'), 'subagent')
     assert.equal(stepKind('AskUserQuestion'), 'ask')
+    assert.equal(stepKind('Computer'), 'computer')
     assert.equal(stepKind('TodoWrite'), 'other')
     assert.equal(isCommandTool('Bash'), true)
     assert.equal(isCommandTool('pwsh'), true)
@@ -177,6 +178,16 @@ describe('steps', () => {
       tool('Bash', { command: 'ls' }),
     ]
     assert.equal(summarizeSteps(steps), 'Read 1 file, edited 2 files, ran 1 command')
+  })
+
+  it('counts the steps taken on the desktop, one by one, and keeps each as its own row', () => {
+    const steps = [tool('Read', { file_path: '/w/a' }), tool('Computer', { action: 'screenshot' }), tool('Computer', { action: 'left_click' }), tool('Computer', { action: 'key' })]
+    assert.equal(summarizeSteps(steps), 'Read 1 file, used the computer 3 times')
+    assert.equal(summarizeSteps([tool('Computer', { action: 'windows' })]), 'Used the computer 1 time')
+    assert.deepEqual(
+      logItems(steps).map((item) => item.type),
+      ['step', 'step', 'step', 'step'],
+    )
   })
 
   it('summarises what a turn did, in order, counting an edited file once', () => {

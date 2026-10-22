@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createToolRegistry } from '../builtin'
 import { FakeDesktop, testContext, testDesktop, textOf, type FakeElement, type FakeWindow } from '../testing'
 import type { ToolContext, ToolOutcome } from '../types'
-import { computerTool, type ComputerInput } from './tool'
+import { computerTool, TAKEN_OVER_DISPLAY, type ComputerInput } from './tool'
 
 /** A text editor with a menu, an edit field and a status bar. */
 function editor(): { window: FakeWindow; menu: FakeElement; file: FakeElement; field: FakeElement; saveAs: FakeElement } {
@@ -142,6 +142,7 @@ describe('Computer: input', () => {
     assert.equal(outcome.ok, true)
     const text = textOf(outcome.content)
     assert.match(text, /Clicked e2 menuitem "File" through its own interface \(invoke\)\./)
+    assert.equal(outcome.display?.output, 'click e2 menuitem "File" in Notepad', 'the work log says what was clicked and in which application')
     assert.match(text, /Changes in w1:/)
     assert.match(text, /\+ e\d+ menuitem "Save as…"/)
     assert.equal(images(outcome).length, 1, 'the window changed, so a screenshot comes with it')
@@ -305,10 +306,12 @@ describe('Computer: limits and safety', () => {
     const stopped = await call({ action: 'mouse_move', coordinate: [60, 60] })
     assert.equal(stopped.ok, false)
     assert.match(textOf(stopped.content), /not where I left it\. I stopped\. Wait for the user to say whether to go on\./)
+    assert.equal(stopped.display?.output, TAKEN_OVER_DISPLAY, 'the work log says the person took over')
     assert.equal(desktop.state.takenOverIn, 'turn')
     const calls = backend.calls.length
     const again = await call({ action: 'mouse_move', coordinate: [60, 60] })
     assert.match(textOf(again.content), /The user took over/)
+    assert.equal(again.display?.output, TAKEN_OVER_DISPLAY)
     assert.equal(backend.calls.length, calls, 'the backend was not asked')
     backend.cursorAt = [60, 60]
     assert.equal((await call({ action: 'mouse_move', coordinate: [61, 61] }, { turnId: 'after the user spoke' })).ok, true)

@@ -33,6 +33,8 @@ const settings: Settings = {
   policy: 'workspace-write',
   maxSteps: 30,
   maxGoalRounds: 8,
+  computer: false,
+  computerSupported: true,
   recentWorkspaces: ['C:\\Users\\ana\\private-project', 'D:\\clients\\secret'],
   lastWorkspace: 'C:\\Users\\ana\\private-project',
   agentMode: 'code',

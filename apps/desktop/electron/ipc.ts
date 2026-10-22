@@ -44,6 +44,8 @@ export interface IpcDeps {
   logs: LogService
   /** The text of a diagnostics report, made at the moment the user asks for one. */
   diagnostics: () => Promise<string>
+  /** A session was removed; whatever follows its events can let go of it. */
+  onSessionRemoved?: (sessionId: string) => void
 }
 
 /** What the renderer is allowed to send as an answer to an approval: a yes or no, a short note, "for this session". */
@@ -235,7 +237,10 @@ export function registerIpc(deps: IpcDeps): void {
   })
   handle('agent:cancel', (sessionId: string) => host.cancel(String(sessionId)))
   handle('agent:reset', (sessionId?: string) => host.reset(sessionId ? String(sessionId) : undefined))
-  handle('agent:remove', (sessionId: string) => host.remove(String(sessionId)))
+  handle('agent:remove', async (sessionId: string) => {
+    await host.remove(String(sessionId))
+    deps.onSessionRemoved?.(String(sessionId))
+  })
   handle('agent:fork', (sessionId: string) => host.fork(String(sessionId)))
   handle('agent:rename', (sessionId: string, title: string) => host.rename(String(sessionId), String(title)))
   handle('agent:goal', (sessionId: string) => host.goal(String(sessionId)))

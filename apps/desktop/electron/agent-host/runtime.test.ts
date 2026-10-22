@@ -73,6 +73,7 @@ function config(patch: { model?: HostConfig['model']; keyRevision?: number | nul
     policy: 'workspace-write',
     maxSteps: 30,
     maxGoalRounds: 8,
+    computer: false,
     model: patch.model ?? 'router',
     router: {
       providers: { 'p-local': { type: 'openai-compatible', baseUrl, needsKey: patch.keyRevision !== null, free: patch.free ?? true } },

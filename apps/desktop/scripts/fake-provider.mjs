@@ -79,6 +79,13 @@ const SCENARIOS = {
     { text: 'Creating the file.', call: { name: 'Write', args: { file_path: 'escalation.txt', content: 'must not exist\n' } } },
     { text: 'Subagent finished.' },
   ],
+  // The Computer tool lists the windows (nothing to approve), then a command waits for the person: the banner that says the
+  // agent uses the computer reads "waiting" meanwhile, and its Stop button or Ctrl+Alt+Esc ends the turn (Windows only).
+  'computer-check': [
+    { text: 'Looking at what is open.', call: { name: 'Computer', args: { action: 'windows' } } },
+    { text: 'Now a command.', call: { name: 'Bash', args: { command: 'echo computer-check-ok' } } },
+    { text: 'Computer check finished.' },
+  ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.

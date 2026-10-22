@@ -35,7 +35,7 @@ function fail(message) {
   process.exit(1)
 }
 
-for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/renderer/index.html']) {
+for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/electron/overlay-preload.cjs', 'dist/renderer/index.html']) {
   if (!fs.existsSync(path.join(root, built))) fail(`${built} is missing. Run pnpm build first.`)
 }
 

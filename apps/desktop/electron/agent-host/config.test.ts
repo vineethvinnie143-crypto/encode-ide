@@ -7,7 +7,7 @@ const demo: ModelProfile = { id: 'demo', name: 'Demo (offline)', kind: 'demo', b
 const profile = (patch: Partial<ModelProfile>): ModelProfile => ({ id: 'p', name: 'P', kind: 'custom', baseUrl: 'https://example.test/v1', model: 'm', hasApiKey: true, ...patch })
 
 const settings = (patch: Partial<Settings>): Settings =>
-  ({ profiles: [profile({})], activeProfileId: 'p', policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8, recentWorkspaces: [], lastWorkspace: null, agentMode: 'code', roles: {}, freeOnly: true, freeProfileId: null, setupDone: true, keyStorage: { mode: 'keychain' }, ...patch }) as Settings
+  ({ profiles: [profile({})], activeProfileId: 'p', policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8, computer: false, computerSupported: true, recentWorkspaces: [], lastWorkspace: null, agentMode: 'code', roles: {}, freeOnly: true, freeProfileId: null, setupDone: true, keyStorage: { mode: 'keychain' }, ...patch }) as Settings
 
 describe('the host configuration', () => {
   it('carries the limits, which model answers and the router\'s settings, and never a key', () => {
@@ -19,6 +19,12 @@ describe('the host configuration', () => {
     assert.deepEqual(config.router.roles, { main: ['p-p:m'] })
     assert.deepEqual(config.providers, { 'p-p': { profile: 'p', name: 'P', keyRevision: 4 } })
     assert.doesNotMatch(JSON.stringify(config), /hasApiKey|apiKey/)
+  })
+
+  it('tells the host whether the Computer tool is on, and never on a computer that has no way to run it', () => {
+    assert.equal(hostConfigOf(settings({})).computer, false)
+    assert.equal(hostConfigOf(settings({ computer: true })).computer, true)
+    assert.equal(hostConfigOf(settings({ computer: true, computerSupported: false })).computer, false)
   })
 
   it('says a provider has no key by giving it no revision, and a new key by a new one', () => {

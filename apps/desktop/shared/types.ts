@@ -47,6 +47,11 @@ export interface Settings {
   policy: ApprovalPolicy
   maxSteps: number
   maxGoalRounds: number
+  /**
+   * Lets the agent see and operate other applications on this computer (the Computer tool). Off until the person turns it
+   * on; each application still asks the first time it is used. Windows only.
+   */
+  computer: boolean
   recentWorkspaces: string[]
   lastWorkspace: string | null
   agentMode: AgentMode
@@ -66,6 +71,8 @@ export interface Settings {
   setupDone: boolean
   /** Read only; reported by the main process and ignored on save. */
   keyStorage: KeyStorage
+  /** Read only: this computer has a way for the agent to see and operate other applications (Windows). */
+  computerSupported: boolean
 }
 
 /** Something about a model connection the person should hear, from the model router. */

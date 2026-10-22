@@ -14,6 +14,8 @@ export interface HostConfig {
   policy: ApprovalPolicy
   maxSteps: number
   maxGoalRounds: number
+  /** The Computer tool is offered to the agent; see Settings.computer. */
+  computer: boolean
   /** What answers the model calls: the scripted demo, nothing yet, or real models through the router. */
   model: ModelMode
   /** The model router's settings; no keys. */
