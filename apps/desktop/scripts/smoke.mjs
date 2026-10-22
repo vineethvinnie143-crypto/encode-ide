@@ -1202,6 +1202,20 @@ try {
   await waitFor("!document.querySelector('.prompt-dialog') && document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor')
   await sleep(400)
 
+  // Who moves focus while the menu is open: logged on failure, so a runner that behaves differently can be read from its log.
+  await evaluate(`(() => {
+    window.__focusLog = []
+    const focus = HTMLElement.prototype.focus
+    const at = () => Math.round(performance.now())
+    HTMLElement.prototype.focus = function (...args) {
+      const stack = String(new Error().stack).split('\\n').slice(2, 6).map((line) => line.trim().replace(/\\(.*[\\/\\\\]/, '('))
+      window.__focusLog.push({ t: at(), call: this.tagName + '.' + this.className, stack: stack.join(' | ') })
+      return focus.apply(this, args)
+    }
+    for (const type of ['focusin', 'focusout']) document.addEventListener(type, (event) => window.__focusLog.push({ t: at(), [type]: event.target?.tagName + '.' + event.target?.className }), true)
+    window.addEventListener('blur', () => window.__focusLog.push({ t: at(), window: 'blur' }))
+    window.addEventListener('focus', () => window.__focusLog.push({ t: at(), window: 'focus' }))
+  })()`)
   // Right-click opens the editor's own menu.
   await evaluate(`(() => {
     const scroller = document.querySelector('.enc-scroller')
@@ -1215,6 +1229,7 @@ try {
   await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
     menuHasFocus = false
     deferred.push(error.message)
+    console.log('[smoke] focus log:', JSON.stringify(await evaluate('window.__focusLog')))
     console.log(
       '[smoke] focus is on:',
       await evaluate(`(() => {
