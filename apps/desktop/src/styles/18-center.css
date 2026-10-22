@@ -63,50 +63,6 @@
   color: var(--text-1);
 }
 
-/* Popovers of the composer's chips (until the composer moves to the shared Menu) */
-.session-chip-wrap {
-  position: relative;
-}
-
-.session-popover {
-  position: absolute;
-  top: 29px;
-  left: 0;
-  z-index: 80;
-  min-width: 230px;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-pop);
-}
-.session-popover.right {
-  left: auto;
-  right: 0;
-}
-.session-popover button {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 9px;
-  border-radius: var(--r-6);
-  font-size: var(--fs-12);
-  color: var(--text-2);
-  text-align: left;
-}
-.session-popover button span {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--text-3);
-}
-.session-popover button:hover,
-.session-popover button.is-selected {
-  background: var(--hover);
-  color: var(--text-1);
-}
-
 .main-body {
   flex: 1;
   min-height: 0;

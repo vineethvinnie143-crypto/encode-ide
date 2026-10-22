@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { GitBranch, RefreshCw } from '../../ui/icons'
 import { useEditor } from '../../stores/editor'
 import { useGit } from '../../stores/git'
-import { useUi } from '../../stores/ui'
+import { usePanels } from '../../stores/panels'
 import { useWorkspace } from '../../stores/workspace'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -77,7 +77,7 @@ export default function GitPanel() {
             key={`${change.path}:${change.status}`}
             className="git-change"
             onClick={() => {
-              useUi.getState().setWorkspaceTab('editor')
+              usePanels.getState().open('editor')
               void openFile(change.path)
             }}
             title={`${change.status}: ${change.path}`}

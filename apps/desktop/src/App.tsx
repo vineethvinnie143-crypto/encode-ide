@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
+import BottomPanel from './components/panels/BottomPanel'
+import SidePanel from './components/panels/SidePanel'
 import PluginsModal from './components/PluginsModal'
 import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
-import RightPanel, { TrajectoryView } from './components/RightPanel'
 import SessionHeader from './components/SessionHeader'
 import SettingsModal from './components/SettingsModal'
 import { AboutDialog, ConfirmDialog, ShortcutsDialog } from './components/shell/Dialogs'
@@ -18,11 +19,13 @@ import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useEditor } from './stores/editor'
 import { useGit } from './stores/git'
+import { usePanels } from './stores/panels'
 import { useSessions } from './stores/sessions'
 import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
 import { useWorkspace } from './stores/workspace'
 import { applyAppearance } from './theme/appearance'
+import { cx } from './ui/cx'
 
 async function refreshOpenTab(path: string): Promise<void> {
   const editor = useEditor.getState()
@@ -37,18 +40,39 @@ async function refreshOpenTab(path: string): Promise<void> {
 }
 
 export default function App() {
-  const rightVisible = useUi((state) => state.rightVisible)
   const sidebarVisible = useUi((state) => state.sidebarVisible)
   const settingsOpen = useUi((state) => state.settingsOpen)
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
-  const mainView = useUi((state) => state.mainView)
+  const layout = usePanels((state) => state.side.layout)
+  const bottomTabs = usePanels((state) => state.bottom.tabs.length)
+  const bottomOpen = usePanels((state) => state.bottom.open)
   const appearance = useSettings((state) => state.settings?.appearance)
   const workspaceRoot = useWorkspace((state) => state.workspace?.root)
 
   const sidebar = useResizable({ initial: 272, min: 220, max: 480, axis: 'x', persistKey: 'eNCode.sidebar.v1' })
-  const right = useResizable({ initial: 380, min: 320, max: 900, axis: 'x', invert: true, persistKey: 'eNCode.right.v2' })
+  // The side panel is also held under 60% of the window in CSS, so a big saved width cannot cover the thread.
+  const sideRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLElement>(null)
+  const side = useResizable({
+    initial: 440,
+    min: 360,
+    max: 1400,
+    axis: 'x',
+    invert: true,
+    persistKey: 'eNCode.sidepanel.v1',
+    measure: () => sideRef.current?.getBoundingClientRect().width,
+  })
+  const bottom = useResizable({
+    initial: 280,
+    min: 140,
+    max: 720,
+    axis: 'y',
+    invert: true,
+    persistKey: 'eNCode.bottompanel.v1',
+    measure: () => bottomRef.current?.getBoundingClientRect().height,
+  })
 
   useKeymap()
 
@@ -109,19 +133,25 @@ export default function App() {
             </>
           )}
 
-          <main className="app-main">
-            <SessionHeader />
-            <div className="main-body">{mainView === 'chat' ? <ChatPanel /> : <TrajectoryView />}</div>
-          </main>
+          <div className="workarea">
+            <div className="workrow">
+              {/* The thread stays mounted under a full-width panel, so a draft in the composer survives. */}
+              <main className={cx('app-main', layout === 'full' && 'is-covered')}>
+                <SessionHeader />
+                <div className="main-body">
+                  <ChatPanel />
+                </div>
+              </main>
 
-          {rightVisible && (
-            <>
-              <div className="resizer resizer-v" onPointerDown={right.onPointerDown} />
-              <div className="right-wrap" style={{ width: right.size }}>
-                <RightPanel />
+              {/* The panel stays mounted while hidden, so a browser keeps its page and a terminal its shells. */}
+              {layout === 'split' && <div className="resizer resizer-v" onPointerDown={side.onPointerDown} />}
+              <div ref={sideRef} className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
+                <SidePanel />
               </div>
-            </>
-          )}
+            </div>
+
+            {bottomTabs > 0 && <BottomPanel panelRef={bottomRef} open={bottomOpen} height={bottom.size} onResizeStart={bottom.onPointerDown} />}
+          </div>
         </div>
       </div>
 

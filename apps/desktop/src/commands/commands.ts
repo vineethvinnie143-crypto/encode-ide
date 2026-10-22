@@ -26,6 +26,7 @@ export interface AppActions {
 
   toggleSidebar(): void
   toggleSidePanel(): void
+  toggleBottomPanel(): void
   showActivity(): void
   showChat(): void
   showFiles(): void
@@ -46,6 +47,17 @@ export interface AppActions {
   previousRecent(): void
   nextAttention(): void
   goToSession(position: number): void
+
+  /** The side panel's tabs: a tab is open to close, one was closed to bring back. */
+  canClosePanelTab(): boolean
+  canReopenPanelTab(): boolean
+  newPanelTab(): void
+  closePanelTab(): void
+  reopenPanelTab(): void
+  stepPanelTab(direction: 1 | -1): void
+  goToPanelTab(position: number): void
+  cyclePanelLayout(): void
+  toggleFullPanel(): void
 
   showShortcuts(): void
   showAbout(): void
@@ -80,10 +92,18 @@ export function buildCommands(a: AppActions): Command[] {
 
     { id: 'view.sidebar', title: 'Toggle sidebar', group: 'View', keys: ['Ctrl+B', 'Ctrl+Shift+S'], run: () => a.toggleSidebar() },
     { id: 'view.sidePanel', title: 'Toggle side panel', group: 'View', keys: ['Ctrl+Alt+B'], run: () => a.toggleSidePanel() },
+    { id: 'view.bottomPanel', title: 'Toggle bottom panel', group: 'View', keys: ['Ctrl+J'], run: () => a.toggleBottomPanel() },
     { id: 'view.activity', title: 'Activity view', group: 'View', keys: ['Ctrl+Alt+U'], run: () => a.showActivity() },
     { id: 'view.chat', title: 'Show chat', group: 'View', keys: ['Ctrl+Shift+X'], run: () => a.showChat() },
     { id: 'view.files', title: 'Show files', group: 'View', keys: ['Ctrl+Shift+E'], enabled: () => a.hasWorkspace(), run: () => a.showFiles() },
     { id: 'view.terminal', title: 'Show terminal', group: 'View', keys: ['Ctrl+`'], run: () => a.showTerminal() },
+    { id: 'panel.newTab', title: 'New tab', group: 'View', keys: ['Ctrl+T'], run: () => a.newPanelTab() },
+    { id: 'panel.closeTab', title: 'Close tab', group: 'View', keys: ['Ctrl+W'], enabled: () => a.canClosePanelTab(), run: () => a.closePanelTab() },
+    { id: 'panel.reopenTab', title: 'Reopen closed tab', group: 'View', keys: ['Ctrl+Shift+T'], enabled: () => a.canReopenPanelTab(), run: () => a.reopenPanelTab() },
+    { id: 'panel.nextTab', title: 'Next tab', group: 'View', keys: ['Ctrl+Shift+]'], run: () => a.stepPanelTab(1) },
+    { id: 'panel.prevTab', title: 'Previous tab', group: 'View', keys: ['Ctrl+Shift+['], run: () => a.stepPanelTab(-1) },
+    { id: 'panel.cycle', title: 'Cycle side panel layout', group: 'View', keys: ['Ctrl+Shift+B'], run: () => a.cyclePanelLayout() },
+    { id: 'panel.full', title: 'Side panel full width', group: 'View', keys: ['Ctrl+Alt+F'], run: () => a.toggleFullPanel() },
     { id: 'view.zoomIn', title: 'Zoom in', group: 'View', keys: ['Ctrl+=', 'Ctrl+Shift+=', 'Ctrl+Plus'], global: true, run: () => a.zoom('in') },
     { id: 'view.zoomOut', title: 'Zoom out', group: 'View', keys: ['Ctrl+-'], global: true, run: () => a.zoom('out') },
     { id: 'view.zoomReset', title: 'Actual size', group: 'View', keys: ['Ctrl+0'], global: true, run: () => a.zoom('reset') },
@@ -121,6 +141,14 @@ export function buildCommands(a: AppActions): Command[] {
       keys: [`Alt+${position}`],
       hidden: true,
       run: () => a.goToSession(position),
+    })
+    commands.push({
+      id: `panel.tab${position}`,
+      title: `Go to tab ${position}`,
+      group: 'View',
+      keys: [`Ctrl+${position}`],
+      hidden: true,
+      run: () => a.goToPanelTab(position),
     })
   }
   return commands

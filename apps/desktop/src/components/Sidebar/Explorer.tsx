@@ -13,6 +13,7 @@ import {
 } from '../../ui/icons'
 import type { FileEntry } from '@shared/types'
 import { useEditor } from '../../stores/editor'
+import { usePanels } from '../../stores/panels'
 import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
 
@@ -46,7 +47,7 @@ function TreeRow({ entry, depth }: { entry: FileEntry; depth: number }) {
             void toggleDir(entry.path)
           } else {
             void openFile(entry.path)
-            useUi.getState().setWorkspaceTab('editor')
+            usePanels.getState().open('editor')
           }
         }}
         title={entry.path}

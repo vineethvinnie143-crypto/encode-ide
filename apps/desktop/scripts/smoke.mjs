@@ -718,6 +718,163 @@ async function runSessionViewChecks() {
 }
 
 /**
+ * The side panel and the bottom panel: tabs and the New tab page, a Browser tab that remembers its
+ * page, the three layouts, resizing, and the shortcuts that drive them.
+ */
+async function runPanelChecks() {
+  console.log('[smoke] --- panels ---')
+  // The layout rules below depend on the window's size, and a runner's screen can be smaller than the window: fix it.
+  const windowSize = { width: 1480, height: 920 }
+  const sizeWindow = (size) => send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false })
+  await sizeWindow(windowSize)
+  await sleep(300)
+  const titles = () => evaluate("[...document.querySelectorAll('.side-panel .panel-tab-title')].map((node) => node.textContent)")
+  const inFront = "document.querySelector('.side-panel .panel-tab.is-active .panel-tab-title')?.textContent"
+  const layoutIs = (name) => `document.querySelector('.side-panel')?.dataset.layout === '${name}' && !document.querySelector('.right-wrap').classList.contains('is-hidden')`
+  const panelHidden = "document.querySelector('.right-wrap')?.classList.contains('is-hidden') === true"
+  const width = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().width`)
+  const drag = (selector, moveX, moveY) =>
+    evaluate(`(() => {
+      const handle = document.querySelector(${JSON.stringify(selector)})
+      const box = handle.getBoundingClientRect()
+      const x = box.left + box.width / 2
+      const y = box.top + box.height / 2
+      const at = (offsetX, offsetY) => ({ bubbles: true, cancelable: true, clientX: x + offsetX, clientY: y + offsetY })
+      handle.dispatchEvent(new PointerEvent('pointerdown', at(0, 0)))
+      window.dispatchEvent(new PointerEvent('pointermove', at(${moveX}, ${moveY})))
+      window.dispatchEvent(new PointerEvent('pointerup', at(${moveX}, ${moveY})))
+    })()`)
+
+  // The strip: 30 px tabs, none wider than 170 px, one selected.
+  const strip = await evaluate(`(() => {
+    const tabs = [...document.querySelectorAll('.side-panel .panel-tab')]
+    return {
+      count: tabs.length,
+      height: tabs[0]?.getBoundingClientRect().height,
+      widest: Math.max(...tabs.map((node) => node.getBoundingClientRect().width)),
+      selected: document.querySelectorAll('.side-panel [role="tab"][aria-selected="true"]').length,
+    }
+  })()`)
+  console.log('[smoke] strip:', JSON.stringify(strip))
+  if (strip.count < 1 || strip.height !== 30 || strip.widest > 170 || strip.selected !== 1) throw new Error('the side panel tabs are not the specified size')
+
+  // Ctrl+T opens a New tab page; choosing Browser turns that page into a Browser tab.
+  const start = await titles()
+  await key({ key: 't', code: 'KeyT', ctrlKey: true })
+  await waitFor("!!document.querySelector('.newtab')", 4000, 'Ctrl+T opens a New tab page')
+  await waitFor(`${inFront} === 'New tab'`, 4000, 'the New tab page is in front')
+  await sleep(300)
+  await screenshot('ui-dark-newtab.png')
+  if (!(await click('.newtab-card', 'Browser'))) throw new Error('the New tab page has no Browser')
+  await waitFor("!document.querySelector('.newtab') && !!document.querySelector('.browser-address input')", 4000, 'the page became a Browser tab')
+  if ((await titles()).length !== start.length + 1) throw new Error('choosing Browser added a tab instead of using the New tab page')
+
+  // An address that needs no network: nothing listens on port 8, so the frame shows its error page.
+  await typeInto('.browser-address input', 'http://127.0.0.1:8/')
+  await evaluate("document.querySelector('.browser-address input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await waitFor(`${inFront} === '127.0.0.1:8'`, 4000, 'the tab is named after the page')
+
+  // Ctrl+W closes it and Ctrl+Shift+T brings it back on the same page, in the same place.
+  const withBrowser = await titles()
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.browser-address')", 4000, 'Ctrl+W closes the tab')
+  if ((await titles()).length !== start.length) throw new Error('Ctrl+W did not close exactly one tab')
+  await key({ key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true })
+  await waitFor("document.querySelector('.browser-address input')?.value === 'http://127.0.0.1:8/'", 4000, 'Ctrl+Shift+T brings the tab back on its page')
+  if (JSON.stringify(await titles()) !== JSON.stringify(withBrowser)) throw new Error('the reopened tab is not where it was')
+
+  // The page is also listed on the New tab page.
+  await key({ key: 't', code: 'KeyT', ctrlKey: true })
+  await waitFor("[...document.querySelectorAll('.newtab-page')].some((node) => node.textContent.includes('127.0.0.1:8'))", 4000, 'the New tab page lists the recent page')
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.newtab')", 4000, 'an empty New tab page closes')
+
+  // Tabs by number and by step.
+  await key({ key: '1', code: 'Digit1', ctrlKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'Ctrl+1 goes to the first tab')
+  await key({ key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(withBrowser[1])}`, 4000, 'Ctrl+Shift+] goes to the next tab')
+  await key({ key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'Ctrl+Shift+[ goes to the previous tab')
+
+  // Layouts: full width covers the thread (which stays mounted), Ctrl+Shift+B cycles split, full, hidden.
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor(layoutIs('full'), 4000, 'Ctrl+Alt+F makes the panel full width')
+  if ((await evaluate("getComputedStyle(document.querySelector('.app-main')).display")) !== 'none') throw new Error('a full-width panel does not cover the thread')
+  if (!(await evaluate("!!document.querySelector('.composer-input')"))) throw new Error('the thread was unmounted under the full-width panel')
+  await sleep(300)
+  await screenshot('ui-dark-panel-full.png')
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor(layoutIs('split'), 4000, 'Ctrl+Alt+F goes back to split')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(layoutIs('full'), 4000, 'Ctrl+Shift+B: split to full')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(panelHidden, 4000, 'Ctrl+Shift+B: full to hidden')
+  await key({ key: 'B', code: 'KeyB', ctrlKey: true, shiftKey: true })
+  await waitFor(layoutIs('split'), 4000, 'Ctrl+Shift+B: hidden to split')
+
+  // Drag the divider: the panel follows the pointer, and keeps its width for the next run.
+  const wide = await width('.right-wrap')
+  await drag('.workrow > .resizer-v', -60, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide + 60}) < 2`, 4000, 'dragging the divider left widens the panel')
+  if ((await evaluate("localStorage.getItem('eNCode.sidepanel.v1')")) !== String(Math.round(wide + 60))) throw new Error('the panel width was not saved')
+  await drag('.workrow > .resizer-v', 60, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'dragging the divider right narrows the panel')
+
+  // In a narrow window the panel is held under 60% of the row, and a drag starts from the width on screen, not the saved one.
+  await sizeWindow({ width: 1024, height: 768 })
+  await waitFor("document.querySelector('.right-wrap').getBoundingClientRect().width <= document.querySelector('.workrow').getBoundingClientRect().width * 0.6 + 1", 4000, 'a narrow window holds the panel under 60% of the row')
+  const held = await width('.right-wrap')
+  if (held >= wide - 2) throw new Error(`the panel was not held back in a narrow window (${held} px, saved ${wide} px)`)
+  await drag('.workrow > .resizer-v', 40, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${held - 40}) < 2`, 4000, 'a drag in a narrow window starts from the width on screen')
+  await sizeWindow(windowSize)
+  await sleep(300)
+  await drag('.workrow > .resizer-v', Math.round((await width('.right-wrap')) - wide), 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'the panel is back at its width')
+
+  // Bottom panel: the shell stays alive while the panel is hidden, and the panel resizes.
+  const bottomShown = "!!document.querySelector('.bottom-panel') && !document.querySelector('.bottom-panel').classList.contains('is-closed')"
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor(`${bottomShown} && !!document.querySelector('.bottom-panel .terminal-lines')`, 15000, 'Ctrl+` shows the terminal in the bottom panel')
+  await waitFor("(document.querySelector('.bottom-panel .term-prompt')?.textContent ?? '').trim().length > 0", 15000, 'the shell has started')
+  await typeInto('.bottom-panel .term-input', 'echo kept-ok')
+  await sleep(250)
+  await evaluate("document.querySelector('.bottom-panel .term-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await waitFor("document.querySelector('.bottom-panel .terminal-lines')?.textContent.includes('kept-ok')", 10000, 'the shell answers')
+  await key({ key: 'j', code: 'KeyJ', ctrlKey: true })
+  await waitFor("document.querySelector('.bottom-panel')?.classList.contains('is-closed')", 4000, 'Ctrl+J hides the bottom panel')
+  await key({ key: 'j', code: 'KeyJ', ctrlKey: true })
+  await waitFor(bottomShown, 4000, 'Ctrl+J shows the bottom panel')
+  if (!(await evaluate("document.querySelector('.bottom-panel .terminal-lines').textContent.includes('kept-ok')"))) throw new Error('hiding the bottom panel cleared the terminal')
+  const tall = await evaluate("document.querySelector('.bottom-panel').getBoundingClientRect().height")
+  await drag('.bottom-panel > .resizer-h', 0, -80)
+  await waitFor(`Math.abs(document.querySelector('.bottom-panel').getBoundingClientRect().height - ${tall + 80}) < 2`, 4000, 'dragging the handle up raises the bottom panel')
+  await drag('.bottom-panel > .resizer-h', 0, 80)
+  await waitFor(`Math.abs(document.querySelector('.bottom-panel').getBoundingClientRect().height - ${tall}) < 2`, 4000, 'dragging the handle down lowers it')
+
+  // Background jobs open beside the terminal, from the session summary.
+  if (!(await click('.session-actions button[aria-label="Summary"]'))) throw new Error('Summary button not found')
+  await waitFor(menuOpen('Summary'), 4000, 'Summary menu')
+  if (!(await click('.ui-menu [role^="menuitem"]', 'Background jobs'))) throw new Error('Summary has no Background jobs')
+  await waitFor("[...document.querySelectorAll('.bottom-panel .panel-tab-title')].some((node) => node.textContent === 'Jobs')", 4000, 'Background jobs opens the Jobs tab')
+  await waitFor("document.querySelector('.bottom-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Jobs'", 4000, 'Jobs is in front')
+  await sleep(300)
+  await screenshot('ui-dark-bottom-panel.png')
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor("document.querySelector('.bottom-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Terminal'", 4000, 'Ctrl+` brings the terminal forward')
+
+  // Leave the side panel as it was found: the Browser tab closed, the first tab in front.
+  if (!(await click('.side-panel .panel-tab-main', '127.0.0.1:8'))) throw new Error('the Browser tab is gone')
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.browser-address')", 4000, 'the Browser tab closed')
+  await key({ key: '1', code: 'Digit1', ctrlKey: true })
+  await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'back on the first tab')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+}
+
+/**
  * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
  * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
  */
@@ -749,9 +906,9 @@ async function runShellChecks() {
   await key({ key: 'b', ctrlKey: true })
   await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sidebar')
   await key({ key: 'b', ctrlKey: true, altKey: true })
-  await waitFor("!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B hides the side panel')
+  await waitFor("document.querySelector('.right-wrap')?.classList.contains('is-hidden')", 4000, 'Ctrl+Alt+B hides the side panel')
   await key({ key: 'b', ctrlKey: true, altKey: true })
-  await waitFor("!!document.querySelector('.right-wrap')", 4000, 'Ctrl+Alt+B shows the side panel')
+  await waitFor("document.querySelector('.right-wrap') && !document.querySelector('.right-wrap').classList.contains('is-hidden')", 4000, 'Ctrl+Alt+B shows the side panel')
   const ratioBefore = await evaluate('window.devicePixelRatio')
   await key({ key: '=', code: 'Equal', ctrlKey: true })
   await waitFor(`window.devicePixelRatio > ${ratioBefore}`, 4000, 'Ctrl+= zooms in')
@@ -909,8 +1066,7 @@ try {
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'file tree after profile pin')
   await evaluate('window.eNCode.agent.reset()')
   await sleep(400)
-  await click('.right-tab', 'Workspace')
-  await waitFor("!!document.querySelector('.files-switcher')", 8000, 'workspace drawer')
+  await waitFor("!!document.querySelector('.files-switcher')", 8000, 'the Files tab')
   await screenshot('02-explorer.png')
 
   if (!(await click('.tree-row', 'README.md'))) throw new Error('README.md row not found')
@@ -1036,9 +1192,9 @@ try {
     ),
   )
 
-  await click('.right-tab', 'Workspace')
-  if (!(await click('.workspace-tabs button', 'Shell'))) throw new Error('Shell workspace tab not found')
-  await waitFor("!!document.querySelector('.terminal-lines')", 15000, 'eNCode shell')
+  // Ctrl+` opens the shell in the bottom panel.
+  await key({ key: '`', code: 'Backquote', ctrlKey: true })
+  await waitFor("!!document.querySelector('.bottom-panel .terminal-lines')", 15000, 'eNCode shell')
   await sleep(500)
   await typeInto('.term-input', 'echo shell-ok')
   await sleep(250)
@@ -1089,6 +1245,7 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runPanelChecks()
   await runAppearanceChecks()
 
   if (errors.length) {
