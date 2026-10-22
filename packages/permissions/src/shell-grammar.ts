@@ -205,14 +205,44 @@ export function isBuiltin(name: string): boolean {
 export interface ShellHost {
   home: string
   path: PathApi
+  /**
+   * Turns a path as the shell writes it into one for `path`, such as Git
+   * Bash's `/c/Users` into `C:\\Users`. Applied after `~` expansion.
+   */
+  translate?: (target: string) => string
+}
+
+/** `~` expansion, then the host's own spelling of paths. */
+function expandShellPath(target: string, host: ShellHost): string {
+  let expanded = target
+  if (target === '~') expanded = host.home
+  else if (target.startsWith('~/') || target.startsWith('~\\')) expanded = host.path.join(host.home, target.slice(2))
+  return host.translate ? host.translate(expanded) : expanded
 }
 
 /** How the interpreter turns a path argument into an absolute path, including `~` expansion. */
 export function resolveShellPath(cwd: string, target: string, host: ShellHost): string {
   if (!target) return cwd
   const api = host.path
-  let expanded = target
-  if (target === '~') expanded = host.home
-  else if (target.startsWith('~/') || target.startsWith('~\\')) expanded = api.join(host.home, target.slice(2))
+  const expanded = expandShellPath(target, host)
   return api.isAbsolute(expanded) ? api.normalize(expanded) : api.resolve(cwd, expanded)
+}
+
+const PARENT_SEGMENT = /(^|[\\/])\.\.([\\/]|$)/
+
+/**
+ * The same path with its `..` segments left in place, or null when it has
+ * none. `resolveShellPath` folds `link/..` away as text, but on macOS and
+ * Linux the kernel walks `..` from wherever `link` points, so `cat link/../x`
+ * can read a file outside the folder that `link/../x` stays in on paper.
+ * Callers check this form on disk too: realpath walks it the way the kernel
+ * does. (Windows folds `..` as text before it touches the disk, so there
+ * both forms name the same file and the extra check costs nothing.)
+ */
+export function unfoldedShellPath(cwd: string, target: string, host: ShellHost): string | null {
+  if (!target) return PARENT_SEGMENT.test(cwd) ? cwd : null
+  const api = host.path
+  const expanded = expandShellPath(target, host)
+  const joined = api.isAbsolute(expanded) ? expanded : cwd.endsWith(api.sep) ? cwd + expanded : cwd + api.sep + expanded
+  return PARENT_SEGMENT.test(joined) ? joined : null
 }

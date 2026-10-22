@@ -187,6 +187,16 @@ describe('assessCommand', () => {
     }
   })
 
+  it('keeps the unfolded form of paths that go through .., for the realpath check', () => {
+    // On macOS and Linux the kernel walks `..` from where `link` points, so /ws/link/../x may not be /ws/x.
+    const verdict = assessCommand('cat link/../x.txt && cd sub/.. && ls', POSIX)
+    assert.equal(verdict.decision, 'allow')
+    for (const expected of ['/ws/x.txt', '/ws/link/../x.txt', '/ws/sub/..']) {
+      assert.ok(verdict.paths.includes(expected), `missing ${expected} in ${verdict.paths}`)
+    }
+    assert.deepEqual(verdict.cwds?.sort(), ['/ws', '/ws/sub/..'])
+  })
+
   it('asks when the line starts outside the workspace', () => {
     assert.equal(decide('ls', { ...POSIX, cwd: '/' }), 'ask')
     assert.equal(decide('ls', { ...POSIX, cwd: '/ws/sub' }), 'allow')

@@ -1,0 +1,23 @@
+{
+  "name": "@encode/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's own MCP client: JSON-RPC over stdio, Streamable HTTP and legacy SSE, server configuration, and per-server approval.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/config": "workspace:*",
+    "@encode/hooks": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
