@@ -94,6 +94,8 @@ export class AgentHost {
   private readonly store: FileSessionStore
   private readonly loaded = new Map<string, AgentSession>()
   private readonly opening = new Map<string, Promise<AgentSession>>()
+  /** Sessions being closed, by id: a session is opened again only after the one before it has let go of its log. */
+  private readonly retiring = new Map<string, Promise<void>>()
   private readonly timers = new Set<NodeJS.Timeout>()
   private workspaceRoot: string | null
   /** Counts the changes of the open folder; a session made before the latest one may be pointing at the wrong folder. */
@@ -179,17 +181,32 @@ export class AgentHost {
     return session.marks().projectRoot === null && this.bornAt.get(session) !== this.epoch && this.idle(session)
   }
 
+  /** Closes a session that is no longer wanted. It is out of the map at once; `open` waits for the close before it makes another. */
+  private retire(id: string, session: AgentSession): Promise<void> {
+    if (this.loaded.get(id) === session) this.loaded.delete(id)
+    const closing: Promise<void> = session
+      .dispose()
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.retiring.get(id) === closing) this.retiring.delete(id)
+      })
+    this.retiring.set(id, closing)
+    return closing
+  }
+
   private async open(id: string): Promise<AgentSession> {
     if (this.disposed) throw new Error('The agent host is closed.')
+    const retiring = this.retiring.get(id)
+    if (retiring) {
+      await retiring
+      if (this.disposed) throw new Error('The agent host is closed.')
+    }
     const cached = this.loaded.get(id)
     if (cached && !this.stale(cached)) return cached
     const pending = this.opening.get(id)
     if (pending) return pending
     const task = (async () => {
-      if (cached) {
-        this.loaded.delete(id)
-        await cached.dispose()
-      }
+      if (cached) await this.retire(id, cached)
       const log = await this.store.open(id)
       if (!log) throw new Error(NO_SESSION)
       return this.make(log)
@@ -206,11 +223,7 @@ export class AgentHost {
   async setWorkspace(root: string | null): Promise<void> {
     this.workspaceRoot = root
     this.epoch++
-    for (const [id, session] of [...this.loaded]) {
-      if (!this.stale(session)) continue
-      this.loaded.delete(id)
-      await session.dispose()
-    }
+    await Promise.all([...this.loaded].filter(([, session]) => this.stale(session)).map(([id, session]) => this.retire(id, session)))
   }
 
   // ------------------------------------------------------------ the renderer's API
@@ -254,10 +267,7 @@ export class AgentHost {
     await session.update(patch)
     const summary = session.summary()
     // Moved to another project: its shell and tools belong to the old folder, so the next use opens it afresh.
-    if (session.marks().projectRoot !== before && !session.isRunning()) {
-      this.loaded.delete(sessionId)
-      await session.dispose()
-    }
+    if (session.marks().projectRoot !== before && !session.isRunning()) await this.retire(sessionId, session)
     return summary
   }
 
@@ -299,9 +309,9 @@ export class AgentHost {
   }
 
   async remove(sessionId: string): Promise<void> {
+    await this.retiring.get(sessionId)
     const session = this.loaded.get(sessionId)
-    this.loaded.delete(sessionId)
-    await session?.dispose()
+    if (session) await this.retire(sessionId, session)
     await this.store.remove(sessionId)
     this.reportJobs()
   }
@@ -431,7 +441,7 @@ export class AgentHost {
     this.disposed = true
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
-    await Promise.all([...this.loaded.values()].map((session) => session.dispose()))
+    await Promise.all([...this.retiring.values(), ...[...this.loaded.values()].map((session) => session.dispose())])
     this.loaded.clear()
     await this.store.dispose()
   }

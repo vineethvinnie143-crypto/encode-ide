@@ -196,6 +196,7 @@ export class AgentSession {
   /** What the user approved for the rest of the session; never stored. */
   private readonly grants = new Set<string>()
   private disposed = false
+  private disposing: Promise<void> | undefined
 
   constructor(
     private readonly log: SessionLog,
@@ -956,8 +957,13 @@ export class AgentSession {
     return this.naming
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) return
+  /** Stops the session and closes its log. Everyone who asks waits for the same close. */
+  dispose(): Promise<void> {
+    this.disposing ??= this.shutdown()
+    return this.disposing
+  }
+
+  private async shutdown(): Promise<void> {
     this.cancel()
     this.namingController.abort()
     await this.idle()
