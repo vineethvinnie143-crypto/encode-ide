@@ -15,7 +15,7 @@ import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outdir = path.join(root, '.test-dist')
@@ -76,6 +76,8 @@ try {
     format: 'esm',
     sourcemap: 'inline',
     logLevel: 'silent',
+    // The Windows desktop helper's C# sources are embedded in the bundle as text.
+    loader: { '.cs': 'text', '.manifest': 'text' },
     plugins: [forbidElectron],
   })
 } catch (error) {
@@ -89,7 +91,11 @@ try {
 
 const bundles = files.map((file) => path.join(outdir, path.relative(root, file)).replace(/\.ts$/, '.mjs'))
 console.log(`Running ${bundles.length} test file${bundles.length === 1 ? '' : 's'}`)
-const child = spawn(process.execPath, ['--test', '--test-reporter=spec', '--enable-source-maps', ...bundles], {
+// ENCODE_TEST_DIGEST=<file> also writes only what failed, a few lines each, for the end of a long CI log.
+const digest = process.env.ENCODE_TEST_DIGEST
+const reporters = ['--test-reporter=spec', '--test-reporter-destination=stdout']
+if (digest) reporters.push(`--test-reporter=${pathToFileURL(path.join(root, 'scripts', 'test-digest.mjs')).href}`, `--test-reporter-destination=${digest}`)
+const child = spawn(process.execPath, ['--test', ...reporters, '--enable-source-maps', ...bundles], {
   cwd: root,
   stdio: 'inherit',
 })

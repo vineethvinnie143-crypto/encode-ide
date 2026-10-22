@@ -61,6 +61,8 @@ export function mainBuildOptions({ production = true } = {}) {
     format: 'cjs',
     sourcemap: production ? false : 'inline',
     external,
+    // The Windows desktop helper's C# sources are embedded in the host bundle as text.
+    loader: { '.cs': 'text', '.manifest': 'text' },
     define: {
       'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
       __ENCODE_BUILD__: JSON.stringify(buildStamp()),
