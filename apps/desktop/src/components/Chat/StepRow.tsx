@@ -16,9 +16,28 @@ import {
 import type { ConversationEntry } from '@shared/types'
 import { cx } from '../../ui/cx'
 import DiffView from './DiffView'
-import { stepKind, summarizeSteps, type StepKind } from './turns'
+import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
 const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
+  Read: { label: 'Read', icon: FileText },
+  Write: { label: 'Wrote', icon: Pencil },
+  Edit: { label: 'Edited', icon: Pencil },
+  MultiEdit: { label: 'Edited', icon: Pencil },
+  Glob: { label: 'Listed', icon: ListTree },
+  Grep: { label: 'Searched', icon: Search },
+  Bash: { label: 'Ran', icon: SquareTerminal },
+  BashOutput: { label: 'Read output', icon: SquareTerminal },
+  KillShell: { label: 'Stopped', icon: SquareTerminal },
+  WebFetch: { label: 'Fetched', icon: Globe },
+  WebSearch: { label: 'Searched the web', icon: Globe },
+  Task: { label: 'Subagent', icon: Network },
+  AskUserQuestion: { label: 'Asked', icon: MessageCircleQuestion },
+  TodoWrite: { label: 'Updated tasks', icon: ListTree },
+  ExitPlanMode: { label: 'Proposed a plan', icon: ListTree },
+  Skill: { label: 'Skill', icon: FileText },
+  CreateGoal: { label: 'Goal', icon: CheckCircle2 },
+  UpdateGoal: { label: 'Goal', icon: CheckCircle2 },
+  GetGoal: { label: 'Goal', icon: CheckCircle2 },
   read: { label: 'Read', icon: FileText },
   read_file: { label: 'Read', icon: FileText },
   write: { label: 'Wrote', icon: Pencil },
@@ -51,7 +70,7 @@ const KIND_ICON: Record<StepKind, typeof FileText> = {
 }
 
 /** Tools whose header line says enough until they produce output. */
-const QUIET_TOOLS = new Set(['read', 'read_file', 'glob', 'list_files', 'grep', 'search_files', 'pwsh', 'run_command'])
+const QUIET_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Bash', 'BashOutput', 'read', 'read_file', 'glob', 'list_files', 'grep', 'search_files', 'pwsh', 'run_command'])
 
 const STATE_LABEL: Record<string, string> = {
   running: 'Running',
@@ -66,31 +85,54 @@ function detailOf(entry: ConversationEntry): string {
   if (!tool) return ''
   const input = tool.input ?? {}
   switch (tool.name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
     case 'read':
     case 'read_file':
     case 'write':
     case 'write_file':
     case 'edit':
     case 'replace_in_file':
-      return String(input.path ?? '')
+      return toolPath(input) ?? ''
+    case 'Glob':
+      return String(input.pattern ?? '')
     case 'glob':
     case 'list_files':
       return String(input.path || '.')
+    case 'Grep':
+      return String(input.pattern ?? '')
     case 'grep':
     case 'search_files':
       return String(input.query ?? '')
+    case 'Bash':
     case 'pwsh':
     case 'run_command':
       return String(input.command ?? '')
+    case 'BashOutput':
+      return String(input.bash_id ?? '')
+    case 'KillShell':
+      return String(input.shell_id ?? '')
+    case 'AskUserQuestion': {
+      const first = Array.isArray(input.questions) ? (input.questions[0] as { question?: unknown } | undefined) : undefined
+      return String(first?.question ?? '')
+    }
     case 'ask_user_question':
     case 'ask_followup_question':
       return String(input.question ?? '')
+    case 'WebFetch':
     case 'web_fetch':
       return String(input.url ?? '')
+    case 'WebSearch':
     case 'web_search':
       return String(input.query ?? '')
+    case 'Task':
+      return String(input.description || String(input.prompt ?? '').split('\n', 1)[0])
     case 'task':
       return String(input.prompt ?? '').split('\n', 1)[0]
+    case 'Skill':
+      return String(input.skill ?? '')
     default:
       return ''
   }

@@ -1,6 +1,7 @@
 # eNCode threat model
 
-Version 1, 2026-10-21, written with M0. It covers the desktop app as built from this
+Version 1, 2026-10-21, written with M0, and updated on 2026-10-22 when the desktop app moved
+onto the agent host (T23 to T25, R11). It covers the desktop app as built from this
 repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
 permission rules, trust, hooks, checkpoints and MCP client (M3) have their own sections at the
 end. The CLI and the router get theirs when they land.
@@ -28,7 +29,7 @@ every milestone.
 2. **A hostile repository.** A folder the user opens may contain planted executables,
    `.git/config` entries that start programs, symlinks out of the workspace, or skill and
    instruction files.
-3. **A hostile web page** in the browser panel, or one fetched by `web_fetch`.
+3. **A hostile web page** in the browser panel, or one fetched by `WebFetch`.
 4. **A network attacker** between eNCode and a model provider. Providers are reached over
    HTTPS, except the local servers the user configures.
 5. **The supply chain.** That means npm packages, GitHub Actions and the Electron binary.
@@ -57,7 +58,7 @@ Out of scope for v1:
 2. **Renderer to main.** IPC is accepted only from the main window's top frame showing the
    app's own page ([ADR 0010](../adr/0010-renderer-isolation.md)).
 3. **Main to network.** Model requests go to the profile's base URL with the key bound to
-   that origin ([ADR 0008](../adr/0008-api-keys-in-the-os-keychain-only.md)). `web_fetch`
+   that origin ([ADR 0008](../adr/0008-api-keys-in-the-os-keychain-only.md)). `WebFetch`
    reaches public addresses only, after per-site approval
    ([ADR 0007](../adr/0007-web-fetch-asks-per-site.md)).
 4. **Workspace to programs.** Programs come only from absolute `PATH` entries, never from
@@ -99,9 +100,9 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T20 | Abuse of the free tier's shared key | The key never ships in the client. Gateway quotas, a `:free`-only cost firewall and a kill switch (0020). Threats G1 to G15 below. | Partial (GR1) |
 | T21 | A tampered build or update | Code signing and signed updates | Planned, M6 |
 | T22 | Runaway runs, rate limits and hung streams | Step cap, output caps and timeouts on commands and fetches | Partial (R10) |
-| T23 | Lost or corrupted sessions | Atomic private writes | Partial (R11) |
-| T24 | A crash or a hang in the agent takes the app, or the conversation, with it | The agent runs in its own process, restarted with a growing pause, and the user is told which sessions were mid-turn (0030). Sessions are append-only logs: a crash costs at most the line being written (0031). | Mitigated once the app uses the host (M1) |
-| T25 | Hostile or malformed messages between the main process and the host | Both ends check the envelope and validate params against a schema before a handler runs. Errors cross as a code and a message, never a stack (0030). | Mitigated once the app uses the host (M1) |
+| T23 | Lost or corrupted sessions | Append-only logs in an owner-only folder, so a crash costs at most the line being written (0031). Settings and the key vault use atomic private writes. | Partial (R11) |
+| T24 | A crash or a hang in the agent takes the app, or the conversation, with it | The agent runs in its own process, restarted with a growing pause, and the user is told which sessions were mid-turn (0030). Sessions are append-only logs: a crash costs at most the line being written (0031). | Mitigated |
+| T25 | Hostile or malformed messages between the main process and the host | Both ends check the envelope and validate params against a schema before a handler runs. Errors cross as a code and a message, never a stack (0030). | Mitigated |
 | T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). | Partial (R1) |
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
@@ -165,11 +166,13 @@ Each item names what remains, why it is acceptable for now, and who closes it.
 - **R10. Provider resilience.** There is no backoff on 429 and 5xx, no first-token or idle
   watchdog on streams, and no failover.
   - Owner: M2 router (breakers, cooldowns, watchdogs, mid-stream failover).
-- **R11. Session persistence.** Sessions are written synchronously on the main thread, so
-  large sessions block the UI. A capture cut short by Stop is persisted only with a later
-  event, and nothing is flushed on quit.
-  - Owner: M1 JSONL sessions (append-only, flushed per event).
-  - Status: `@encode/core` has the store (0031). This closes when the app runs on it.
+- **R11. Session persistence.** The agent host appends each record to the session's log as it
+  happens, off the UI thread, and syncs the file to disk when the session closes, not after
+  every record. A crash of the app or the host costs at most the line being written. A power cut
+  or a system crash can cost what the operating system had not yet written.
+  - Owner: hardening, a sync at the end of each turn.
+  - Status: the prototype's single synchronous session file is gone with the switch to the host
+    (0030, 0031).
 - **R12. Logs keep what the agent saw.** A session log holds file contents, command output and
   anything the user typed, secrets included, and nothing prunes it (0031). It is as exposed as
   the user's own files, and same-user malware reads those too (R5).
@@ -185,8 +188,10 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - a key stored through the real `safeStorage` reaching the provider, and never the
     renderer;
   - Plan-mode subagents unable to write;
-  - the web_fetch approval and private-address refusal;
-  - compaction after an overflow refusal.
+  - the `WebFetch` approval and private-address refusal;
+  - compaction after an overflow refusal;
+  - what the model is sent (the project's instructions arrive as a reminder, never in the
+    system prompt) and the session logs on disk (owner-only, no key in them).
 
 ## The free-tier gateway and accounts
 

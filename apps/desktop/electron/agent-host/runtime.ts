@@ -38,11 +38,11 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   const client = createProfileClient({
     profile: () => config?.profile ?? null,
     // Asked for at every call: the key is held here only while a request is being made.
-    apiKey: async (profileId) => {
+    apiKey: async (profile) => {
       try {
-        return (await peer.request('key', { profileId }, { timeoutMs: options.keyTimeoutMs ?? 10_000 })) || undefined
+        return (await peer.request('key', { profileId: profile.id, baseUrl: profile.baseUrl }, { timeoutMs: options.keyTimeoutMs ?? 10_000 })) || undefined
       } catch (error) {
-        log(`could not get the key for ${profileId}: ${error instanceof Error ? error.message : String(error)}`)
+        log(`could not get the key for ${profile.id}: ${error instanceof Error ? error.message : String(error)}`)
         return undefined
       }
     },

@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ConversationEntry, DiffHunk } from '@shared/types'
-import { buildTurns, editTotals, editedFiles, formatClock, formatDuration, logItems, stepKind, stepsOf, summarizeSteps } from './turns'
+import {
+  buildTurns,
+  editTotals,
+  editedFiles,
+  formatClock,
+  formatDuration,
+  isCommandTool,
+  isSubagentTool,
+  logItems,
+  stepKind,
+  stepsOf,
+  summarizeSteps,
+  toolPath,
+} from './turns'
 
 let counter = 0
 function entry(kind: ConversationEntry['kind'], patch: Partial<ConversationEntry> = {}): ConversationEntry {
@@ -78,6 +91,39 @@ describe('steps', () => {
     assert.equal(stepKind('web_fetch'), 'web')
     assert.equal(stepKind('task'), 'subagent')
     assert.equal(stepKind('todo_write'), 'other')
+  })
+
+  it('knows the tools of the agent engine as well as those of earlier builds', () => {
+    assert.equal(stepKind('Read'), 'read')
+    assert.equal(stepKind('Grep'), 'search')
+    assert.equal(stepKind('Glob'), 'search')
+    assert.equal(stepKind('Write'), 'edit')
+    assert.equal(stepKind('MultiEdit'), 'edit')
+    assert.equal(stepKind('Bash'), 'shell')
+    assert.equal(stepKind('WebFetch'), 'web')
+    assert.equal(stepKind('Task'), 'subagent')
+    assert.equal(stepKind('AskUserQuestion'), 'ask')
+    assert.equal(stepKind('TodoWrite'), 'other')
+    assert.equal(isCommandTool('Bash'), true)
+    assert.equal(isCommandTool('pwsh'), true)
+    assert.equal(isCommandTool('BashOutput'), false)
+    assert.equal(isSubagentTool('Task'), true)
+    assert.equal(isSubagentTool('task'), true)
+    assert.equal(isSubagentTool('Skill'), false)
+    assert.equal(toolPath({ file_path: '/w/a.ts' }), '/w/a.ts')
+    assert.equal(toolPath({ path: 'a.ts' }), 'a.ts')
+    assert.equal(toolPath({ command: 'ls' }), undefined)
+  })
+
+  it('counts an edited file once whichever tool and name for the path it used', () => {
+    const steps = [
+      tool('Read', { file_path: '/w/a' }),
+      tool('Edit', { file_path: '/w/a' }),
+      tool('MultiEdit', { file_path: '/w/a' }),
+      tool('Write', { file_path: '/w/b' }),
+      tool('Bash', { command: 'ls' }),
+    ]
+    assert.equal(summarizeSteps(steps), 'Read 1 file, edited 2 files, ran 1 command')
   })
 
   it('summarises what a turn did, in order, counting an edited file once', () => {

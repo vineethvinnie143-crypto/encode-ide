@@ -274,12 +274,81 @@ async function checkKeyStorage() {
   return secret
 }
 
+/**
+ * The session file of the earlier build, which e2e.mjs seeds in the profile, comes into the session
+ * store at the first start, with its transcript, and is set aside so it is not imported twice.
+ */
+async function checkLegacyImport() {
+  const profileDir = process.env.ENCODE_USER_DATA_DIR
+  if (!profileDir) {
+    console.log('[smoke] note: ENCODE_USER_DATA_DIR is not set, so the import of earlier sessions was not checked')
+    return
+  }
+  const sessions = await evaluate('window.eNCode.agent.sessions()')
+  const earlier = sessions.find((session) => session.id === 'legacy-smoke')
+  if (!earlier || earlier.title !== 'An earlier session' || earlier.entryCount !== 2) {
+    throw new Error(`The session of the earlier build was not imported: ${JSON.stringify(earlier)}`)
+  }
+  const history = await evaluate("window.eNCode.agent.history('legacy-smoke')")
+  if (history.entries.map((entry) => entry.kind).join() !== 'user,assistant' || history.entries[1].text !== 'It adds two numbers.') {
+    throw new Error('The imported session lost its transcript')
+  }
+  const files = await fs.readdir(profileDir)
+  if (files.includes('eNCode-sessions.json') || !files.includes('eNCode-sessions.json.migrated')) {
+    throw new Error('The session file of the earlier build was not set aside after the import')
+  }
+  console.log('[smoke] earlier sessions imported:', JSON.stringify({ title: earlier.title, entries: earlier.entryCount }))
+}
+
+/**
+ * What the model was sent in its latest request: Claude Code's tool names, and the project's
+ * instructions (ENCODE.md) as a reminder in the conversation rather than in the system prompt.
+ */
+async function checkRequestContract(marker) {
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const offered = ['Bash', 'BashOutput', 'KillShell', 'Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task']
+  const missing = offered.filter((name) => !request.tools.includes(name))
+  if (missing.length) throw new Error(`The model was not offered ${missing.join(', ')}; it was offered ${request.tools.join(', ')}`)
+  const legacy = request.tools.filter((name) => ['run_command', 'write_file', 'read_file', 'pwsh', 'web_fetch'].includes(name))
+  if (legacy.length) throw new Error(`The model was offered tools of the earlier build: ${legacy.join(', ')}`)
+  const text = (message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content))
+  const system = request.messages.filter((message) => message.role === 'system').map(text).join('\n')
+  const users = request.messages.filter((message) => message.role === 'user').map(text).join('\n')
+  if (!users.includes(marker)) throw new Error('The project instructions (ENCODE.md) did not reach the model')
+  if (system.includes(marker)) throw new Error('The project instructions are in the system prompt, which must stay the same from turn to turn')
+  if (!users.includes('<system-reminder>')) throw new Error('The environment did not reach the model as a reminder')
+  console.log('[smoke] request contract:', JSON.stringify({ tools: request.tools.length, instructions: true }))
+}
+
+/** Sessions are plain files that only the user can read, and a key never rests in them. */
+async function checkSessionFiles(secret) {
+  const profileDir = process.env.ENCODE_USER_DATA_DIR
+  if (!profileDir) return
+  const dir = path.join(profileDir, 'sessions')
+  const names = await fs.readdir(dir)
+  const logs = names.filter((name) => name.endsWith('.jsonl'))
+  if (!logs.length) throw new Error('No session log was written')
+  let ran = false
+  for (const name of names) {
+    const text = await fs.readFile(path.join(dir, name), 'utf8')
+    if (text.includes(secret)) throw new Error(`${name} holds the API key`)
+    if (text.includes('provider-command-ok')) ran = true
+    if (process.platform !== 'win32' && (await fs.stat(path.join(dir, name))).mode & 0o077) throw new Error(`${name} can be read by other users`)
+  }
+  if (process.platform !== 'win32' && (await fs.stat(dir)).mode & 0o077) throw new Error('The sessions folder can be read by other users')
+  if (!ran) throw new Error('The command the agent ran is not in any session log')
+  console.log('[smoke] session logs:', JSON.stringify({ logs: logs.length }))
+}
+
 async function runProviderPhase() {
   console.log('[smoke] --- provider phase (local OpenAI-compatible server) ---')
   await ensureFakeProvider()
 
   await evaluate('window.eNCode.agent.reset()')
   await evaluate("window.eNCode.workspace.delete('provider-check.txt').catch(() => null)")
+  // Project instructions: the next conversation starts with them.
+  const marker = `smoke-instructions-${Date.now().toString(36)}`
+  await evaluate(`window.eNCode.workspace.write('ENCODE.md', ${JSON.stringify(`# Smoke project\n\nAlways mention ${marker}.\n`)})`)
   const current = await evaluate('window.eNCode.settings.get()')
   const profiles = current.profiles.filter((profile) => profile.id !== 'local-mock')
   profiles.push({
@@ -336,11 +405,13 @@ async function runProviderPhase() {
     throw new Error('provider-check.txt was not written with the streamed content')
   }
   if (stats.diffs < 1) throw new Error('No diff rendered for the provider-driven write')
-  if (!stats.tools || !stats.commandOutput) throw new Error('run_command output missing')
+  if (!stats.tools || !stats.commandOutput) throw new Error('Bash output missing')
   if (!stats.completion) throw new Error('completion summary missing')
 
   const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-authorization`)).json()
   if (seen.authorization !== `Bearer ${secret}`) throw new Error('The stored key did not reach the provider')
+  await checkRequestContract(marker)
+  await checkSessionFiles(secret)
 
   const statsText = await evaluate("document.querySelector('.composer-stats')?.textContent ?? ''")
   console.log('[smoke] usage stats:', JSON.stringify(statsText.trim()))
@@ -431,7 +502,7 @@ async function runProviderPhase() {
     }
   })()`)
   console.log('[smoke] features:', JSON.stringify(featureCheck))
-  if (featureCheck.todoCount !== 1 || featureCheck.todoStatus !== 'in_progress') throw new Error('todo_write surface failed')
+  if (featureCheck.todoCount !== 1 || featureCheck.todoStatus !== 'in_progress') throw new Error('TodoWrite surface failed')
   if (featureCheck.scheduled < 1 || featureCheck.remaining !== featureCheck.scheduled - 1) {
     throw new Error('schedule create/remove failed')
   }
@@ -483,20 +554,20 @@ async function runCompactionChecks() {
 }
 
 async function runWebChecks() {
-  console.log('[smoke] --- web_fetch ---')
+  console.log('[smoke] --- WebFetch ---')
   // A new site asks once per session; localhost then fails the address check, so nothing is fetched.
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:web-check] Fetch two pages from one site.')
   const approvals = await driveAgent('15-web')
   console.log('[smoke] web approvals:', JSON.stringify(approvals))
-  if (approvals.length !== 1 || approvals[0].title !== 'Fetch from localhost') {
+  if (approvals.length !== 1 || approvals[0].title !== 'Fetch localhost') {
     throw new Error('Expected one approval for the first fetch from localhost')
   }
   if (!approvals[0].reason.includes('until the session ends')) throw new Error('The web approval does not explain itself')
-  const fetches = (await toolOutputs()).filter((entry) => entry.name === 'web_fetch')
+  const fetches = (await toolOutputs()).filter((entry) => entry.name === 'WebFetch')
   console.log('[smoke] web fetches:', JSON.stringify(fetches.map((entry) => entry.output.slice(0, 120))))
   if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
-    throw new Error('web_fetch reached a private address')
+    throw new Error('WebFetch reached a private address')
   }
 }
 
@@ -534,7 +605,7 @@ async function runSubagentChecks() {
     throw new Error('Expected one approval for the subagent command, on the parent card')
   }
   if (!approvals[0].detail.includes('echo subagent-command-ok')) throw new Error('The subagent approval does not show the command')
-  const task = (await toolOutputs()).find((entry) => entry.name === 'task')
+  const task = (await toolOutputs()).find((entry) => entry.name === 'Task')
   console.log('[smoke] subagent task:', JSON.stringify(task))
   if (!task || task.state !== 'done' || !task.output.includes('Subagent ran the command')) {
     throw new Error('The subagent report did not reach the parent')
@@ -586,7 +657,7 @@ async function runSubagentChecks() {
   const escalation = await evaluate(
     "window.eNCode.workspace.read('escalation.txt').then(() => 'written', () => 'absent')",
   )
-  const planTask = (await toolOutputs()).find((entry) => entry.name === 'task')
+  const planTask = (await toolOutputs()).find((entry) => entry.name === 'Task')
   console.log('[smoke] plan mode subagent:', JSON.stringify({ approvals: planApprovals.length, escalation, task: planTask }))
   if (escalation !== 'absent') throw new Error('A subagent wrote a file while the session was in Plan mode')
   await evaluate("window.eNCode.settings.save({ agentMode: 'code', policy: 'workspace-write' })")
@@ -968,6 +1039,8 @@ async function runShellChecks() {
   if ((await activeTitle()) !== 'New session') throw new Error('the new session is not the open one')
   await key({ key: '[', code: 'BracketLeft', ctrlKey: true })
   await waitFor(`document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === ${JSON.stringify(firstTitle)}`, 6000, 'Back returns to the first session')
+  // The open session changes before the position in the history does: Forward counts once its button is enabled.
+  await waitFor("document.querySelector('.titlebar [aria-label=\"Forward\"]')?.disabled === false", 6000, 'Forward is available after Back')
   await key({ key: ']', code: 'BracketRight', ctrlKey: true })
   await waitFor("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session'", 6000, 'Forward returns to the new session')
 
@@ -1162,6 +1235,7 @@ try {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'file tree')
   console.log('[smoke] tree rows:', await evaluate("document.querySelectorAll('.tree-row').length"))
+  await checkLegacyImport()
 
   // Pin the offline demo profile and auto-approval so this run is deterministic.
   const initialSettings = await evaluate('window.eNCode.settings.get()')
@@ -1376,16 +1450,16 @@ try {
   await sleep(300)
 
   // Offline demo agent.
-  await evaluate("window.eNCode.workspace.delete('.eNCode/demo-note.md').catch(() => null)")
+  await evaluate("window.eNCode.workspace.delete('.encode/demo-note.md').catch(() => null)")
   await typeInto('.composer-input', 'Create a short note that says hello from eNCode')
   await sleep(350)
   console.log('[smoke] demo send clicked:', await click('.composer-send'))
 
-  // The demo writes into .eNCode, a protected folder, so even Workspace Write asks first.
+  // The demo writes into .encode, a protected folder, so even Workspace Write asks first.
   const demoApprovals = await driveAgent('08-demo')
   console.log('[smoke] demo approvals:', JSON.stringify(demoApprovals))
-  if (demoApprovals.length !== 1 || !demoApprovals[0].title.includes('.eNCode/demo-note.md')) {
-    throw new Error('Expected one approval for the protected .eNCode write')
+  if (demoApprovals.length !== 1 || !demoApprovals[0].title.includes('.encode/demo-note.md')) {
+    throw new Error('Expected one approval for the protected .encode write')
   }
   if (!demoApprovals[0].reason.includes('protected')) throw new Error('The approval card does not say why it asks')
   await sleep(600)
@@ -1407,7 +1481,7 @@ try {
   console.log(
     '[smoke] demo file bytes:',
     await evaluate(
-      "window.eNCode.workspace.read('.eNCode/demo-note.md').then((file) => file.content.length, (error) => 'ERR: ' + error.message)",
+      "window.eNCode.workspace.read('.encode/demo-note.md').then((file) => file.content.length, (error) => 'ERR: ' + error.message)",
     ),
   )
 

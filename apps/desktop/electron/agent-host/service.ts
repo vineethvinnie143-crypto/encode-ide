@@ -23,8 +23,8 @@ export interface AgentHostServiceOptions {
   spawn(): HostProcess
   /** Where things are now; the configuration is added by the service. */
   init(): Omit<HostInit, 'config'>
-  /** The key stored for a profile, or an empty string. */
-  apiKey(profileId: string): string | Promise<string>
+  /** The key stored for a profile when it is about to be sent to `baseUrl`, or an empty string. */
+  apiKey(profileId: string, baseUrl: string): string | Promise<string>
   onEvent(event: AgentEvent): void
   onJobs(jobs: BackgroundJob[]): void
   log?(message: string): void
@@ -43,6 +43,14 @@ const REQUEST_TIMEOUT_MS = 60_000
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000
 const INIT_TIMEOUT_MS = 30_000
 const SHUTDOWN_TIMEOUT_MS = 4_000
+
+/** What the host may ask for: the host is a separate process, so its requests are checked like any other input. */
+const KEY_REQUEST = {
+  type: 'object',
+  required: ['profileId', 'baseUrl'],
+  additionalProperties: false,
+  properties: { profileId: { type: 'string', minLength: 1, maxLength: 200 }, baseUrl: { type: 'string', maxLength: 2_000 } },
+}
 
 const STILL_WORKING: ReadonlySet<AgentStatus> = new Set(['thinking', 'running-tool', 'awaiting-approval', 'awaiting-user'])
 
@@ -108,13 +116,17 @@ export class AgentHostService {
     const child = this.o.spawn()
     const peer = new Peer<MainApi, DesktopHostApi>(child.port, { onProtocolError: (error) => this.log(error.message) })
     this.child = child
-    peer.handle('key', async ({ profileId }) => {
-      try {
-        return (await this.o.apiKey(profileId)) || ''
-      } catch {
-        return ''
-      }
-    })
+    peer.handle(
+      'key',
+      async ({ profileId, baseUrl }) => {
+        try {
+          return (await this.o.apiKey(profileId, baseUrl)) || ''
+        } catch {
+          return ''
+        }
+      },
+      { schema: KEY_REQUEST },
+    )
     peer.on('event', (event) => {
       this.track(event)
       this.o.onEvent(event)

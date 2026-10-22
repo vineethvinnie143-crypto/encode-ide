@@ -7,7 +7,22 @@ import type { ConversationEntry } from '@shared/types'
 
 export type StepKind = 'read' | 'search' | 'edit' | 'shell' | 'web' | 'subagent' | 'ask' | 'other'
 
+// The agent's tools follow Claude Code's names (Read, Bash, ...). The lower-case names are those of
+// earlier builds, which sessions imported from them still carry.
 const KINDS: Record<string, StepKind> = {
+  Read: 'read',
+  Glob: 'search',
+  Grep: 'search',
+  Write: 'edit',
+  Edit: 'edit',
+  MultiEdit: 'edit',
+  Bash: 'shell',
+  BashOutput: 'shell',
+  KillShell: 'shell',
+  WebFetch: 'web',
+  WebSearch: 'web',
+  Task: 'subagent',
+  AskUserQuestion: 'ask',
   read: 'read',
   read_file: 'read',
   glob: 'search',
@@ -29,6 +44,19 @@ const KINDS: Record<string, StepKind> = {
 
 export function stepKind(toolName: string): StepKind {
   return KINDS[toolName] ?? 'other'
+}
+
+/** Tools that start a command, as opposed to reading the output of one or stopping one. */
+const COMMAND_TOOLS: ReadonlySet<string> = new Set(['Bash', 'pwsh', 'run_command'])
+export const isCommandTool = (toolName: string): boolean => COMMAND_TOOLS.has(toolName)
+
+/** Tools that start a subagent. */
+export const isSubagentTool = (toolName: string): boolean => toolName === 'Task' || toolName === 'task'
+
+/** The file a tool call works on: Claude Code's tools call it `file_path`, earlier builds' `path`. */
+export function toolPath(input: Record<string, unknown>): string | undefined {
+  const value = input.file_path ?? input.path
+  return value === undefined || value === null ? undefined : String(value)
 }
 
 export interface Turn {
@@ -83,7 +111,7 @@ export function summarizeSteps(steps: readonly ConversationEntry[]): string {
     if (!tool) continue
     const kind = stepKind(tool.name)
     if (kind === 'edit') {
-      const path = String(tool.input.path ?? step.id)
+      const path = toolPath(tool.input) ?? step.id
       if (edited.has(path)) continue
       edited.add(path)
     }
@@ -190,7 +218,7 @@ export function editTotals(entries: readonly ConversationEntry[]): { files: numb
   for (const entry of entries) {
     const diff = entry.tool?.diff
     if (!diff?.length) continue
-    files.add(String(entry.tool?.input.path ?? entry.id))
+    files.add((entry.tool && toolPath(entry.tool.input)) ?? entry.id)
     for (const hunk of diff) {
       for (const line of hunk.lines) {
         if (line.type === 'add') additions += 1

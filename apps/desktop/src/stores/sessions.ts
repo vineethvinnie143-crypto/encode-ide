@@ -65,6 +65,18 @@ export const useSessions = create<SessionsStore>((set, get) => {
     return sameRoot(useWorkspace.getState().workspace?.root, session.projectRoot)
   }
 
+  /**
+   * Opens the session the history points at. The history moves first: opening takes a moment (the
+   * folder, the transcript), and a second Back or Forward in that time, from a held key or a fast
+   * hand, must continue from here instead of repeating the step or being lost. If the session cannot
+   * be opened the history goes back, unless something else moved it meanwhile.
+   */
+  const stepTo = async (target: History<string>, before: History<string>): Promise<void> => {
+    set({ history: target })
+    const opened = await get().select(target.entries[target.index], { remember: false })
+    if (!opened && get().history === target) set({ history: before })
+  }
+
   /** The session to open when the open one goes away: one in the open folder, so nothing switches project. */
   const fallbackFor = (goneId: string): SessionSummary | undefined => {
     const root = useWorkspace.getState().workspace?.root ?? null
@@ -163,15 +175,15 @@ export const useSessions = create<SessionsStore>((set, get) => {
     },
 
     back: async () => {
-      const previous = goBack(get().history)
-      if (previous === get().history) return
-      if (await get().select(previous.entries[previous.index], { remember: false })) set({ history: previous })
+      const before = get().history
+      const previous = goBack(before)
+      if (previous !== before) await stepTo(previous, before)
     },
 
     forward: async () => {
-      const next = goForward(get().history)
-      if (next === get().history) return
-      if (await get().select(next.entries[next.index], { remember: false })) set({ history: next })
+      const before = get().history
+      const next = goForward(before)
+      if (next !== before) await stepTo(next, before)
     },
 
     canGoBack: () => canGoBack(get().history),

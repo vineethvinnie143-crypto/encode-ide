@@ -11,7 +11,12 @@ const external = ['electron']
 export async function buildMain({ production = true } = {}) {
   return await esbuild({
     absWorkingDir: root,
-    entryPoints: [path.join(root, 'electron/main.ts'), path.join(root, 'electron/preload.ts')],
+    entryPoints: {
+      main: path.join(root, 'electron/main.ts'),
+      preload: path.join(root, 'electron/preload.ts'),
+      // The agent runs in a utility process of its own.
+      'agent-host': path.join(root, 'electron/agent-host/entry.ts'),
+    },
     outdir: path.join(root, 'dist/electron'),
     outExtension: { '.js': '.cjs' },
     bundle: true,
@@ -34,7 +39,7 @@ async function main() {
     console.log('[build] renderer (vite)')
     await viteBuild({ configFile: path.join(root, 'vite.config.ts') })
   }
-  console.log('[build] electron main + preload (esbuild)')
+  console.log('[build] electron main, preload and agent host (esbuild)')
   await buildMain({ production: true })
   console.log('[build] done')
 }

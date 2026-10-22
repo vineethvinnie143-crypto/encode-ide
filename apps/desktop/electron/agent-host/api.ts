@@ -41,8 +41,11 @@ export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents
 /** What the main process serves to the host. */
 export type MainApi = {
   requests: {
-    /** The key stored for a model profile; empty when there is none. */
-    key: { params: { profileId: string }; result: string }
+    /**
+     * The key stored for a model profile, for a call to `baseUrl`; empty when there is none, or when the
+     * profile's key was entered for another server (a key is bound to its server).
+     */
+    key: { params: { profileId: string; baseUrl: string }; result: string }
   }
   events: {}
 }

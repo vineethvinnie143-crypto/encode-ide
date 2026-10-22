@@ -2,9 +2,10 @@ import { BrowserWindow, app, dialog, ipcMain, type IpcMainInvokeEvent } from 'el
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
-import type { AgentManager } from './agent/manager'
+import { isRpcError } from '@encode/protocol'
+import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
+import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
-import type { JobService } from './services/jobs'
 import type { ModelsService } from './services/models'
 import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
@@ -15,9 +16,11 @@ import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
 import type {
   AgentStartInput,
+  ApprovalAnswer,
   PlanRequest,
   SearchOptions,
   SessionGoal,
+  SessionPatch,
   Settings,
   ShellCreateOptions,
   TodoItem,
@@ -28,16 +31,34 @@ export interface IpcDeps {
   settings: SettingsService
   workspace: WorkspaceService
   shell: ShellService
-  jobs: JobService
   schedules: ScheduleService
   skills: SkillService
   models: ModelsService
   git: GitService
-  agent: AgentManager
+  agent: AgentHostService
+  /** Tells the agent host the settings changed. */
+  configureAgent: () => void
+}
+
+/** What the renderer is allowed to send as an answer to an approval: a yes or no, a short note, "for this session". */
+export function approvalAnswerOf(answer: unknown): ApprovalAnswer {
+  if (typeof answer !== 'object' || answer === null) return { approved: Boolean(answer) }
+  const given = answer as { approved?: unknown; note?: unknown; remember?: unknown }
+  return {
+    approved: given.approved === true,
+    ...(typeof given.note === 'string' && given.note.trim() ? { note: given.note.slice(0, 2_000) } : {}),
+    ...(given.remember === 'session' ? { remember: 'session' as const } : {}),
+  }
+}
+
+/** The host going away is not the caller's fault: say what happened, in words the user can act on. */
+function hostFailure(error: unknown): Error {
+  return isRpcError(error) && error.code === 'closed' ? new Error(HOST_STOPPED_MESSAGE) : error instanceof Error ? error : new Error(String(error))
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, jobs, schedules, skills, models, git, agent } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, agent, configureAgent } = deps
+  const host = agent.client
 
   /**
    * Only the app's own page may call the main process: the top frame of the
@@ -66,10 +87,19 @@ export function registerIpc(deps: IpcDeps): void {
     win.webContents.send(channel, payload)
   }
 
+  /** The host learns the open folder. If it is down it reads the folder again when it starts, so a failure here is only logged. */
+  const tellHostFolder = async (root: string | null): Promise<void> => {
+    try {
+      await host.setWorkspace(root)
+    } catch (error) {
+      console.error('[agent-host] could not tell it the open folder:', error)
+    }
+  }
+
   const openWorkspaceAt = async (rootPath: string) => {
-    agent.reset()
     const opened = await workspace.open(rootPath)
     settings.touchWorkspace(opened.root)
+    await tellHostFolder(opened.root)
     return opened
   }
 
@@ -118,10 +148,10 @@ export function registerIpc(deps: IpcDeps): void {
   handle('workspace:open-path', (rootPath: string) => openWorkspaceAt(String(rootPath)))
   handle('workspace:get', () => workspace.current)
   handle('workspace:close', async () => {
-    agent.reset()
     shell.disposeAll()
     await workspace.close()
     settings.setLastWorkspace(null)
+    await tellHostFolder(null)
   })
   handle('workspace:recent', () => settings.get().recentWorkspaces)
   handle('workspace:list', (rel: string) => workspace.list(String(rel ?? '')))
@@ -139,12 +169,22 @@ export function registerIpc(deps: IpcDeps): void {
   handle('settings:save', (patch: Partial<Settings>) => {
     const saved = settings.save(patch)
     if (patch?.appearance !== undefined) applyNativeAppearance(saved.appearance, getWindow())
+    configureAgent()
     return saved
   })
   handle('settings:set-key', (profileId: string, key: string) => settings.setProfileKey(String(profileId), String(key ?? '')))
 
-  handle('models:openrouter', (freeOnly?: boolean) => models.openRouter(Boolean(freeOnly)))
-  handle('models:provider', (profileId: string) => models.provider(String(profileId)))
+  // A fetched catalog tells the host the context window of the OpenRouter model in use.
+  handle('models:openrouter', async (freeOnly?: boolean) => {
+    const list = await models.openRouter(Boolean(freeOnly))
+    configureAgent()
+    return list
+  })
+  handle('models:provider', async (profileId: string) => {
+    const list = await models.provider(String(profileId))
+    configureAgent()
+    return list
+  })
   handle('models:test', (profileId: string) => models.test(String(profileId)))
 
   handle('git:status', () => git.status())
@@ -161,45 +201,46 @@ export function registerIpc(deps: IpcDeps): void {
   handle('shell:close', (id: string) => shell.close(String(id)))
   handle('shell:complete', (id: string, line: string) => shell.complete(String(id), String(line)))
 
-  handle('agent:sessions', () => agent.list())
+  handle('agent:sessions', () => host.sessions())
   handle('agent:create', (options?: { projectRoot?: unknown }) => {
     const projectRoot = options?.projectRoot
-    return agent.create(undefined, projectRoot === null || typeof projectRoot === 'string' ? projectRoot : undefined)
+    return host.create(projectRoot === null || typeof projectRoot === 'string' ? { projectRoot } : undefined)
   })
-  handle('agent:update', (sessionId: string, patch: unknown) => agent.update(String(sessionId), patch))
-  handle('agent:statuses', () => agent.statuses())
-  handle('agent:history', (sessionId?: string) => agent.history(sessionId ? String(sessionId) : undefined))
-  handle('agent:start', (sessionId: string, input: AgentStartInput) => agent.start(String(sessionId), input))
-  handle('agent:cancel', (sessionId: string) => agent.cancel(String(sessionId)))
-  handle('agent:reset', (sessionId?: string) => agent.reset(sessionId ? String(sessionId) : undefined))
-  handle('agent:remove', (sessionId: string) => agent.remove(String(sessionId)))
-  handle('agent:fork', (sessionId: string) => agent.fork(String(sessionId)))
-  handle('agent:rename', (sessionId: string, title: string) => agent.rename(String(sessionId), String(title)))
-  handle('agent:goal', (sessionId: string) => agent.goal(String(sessionId)))
-  handle('agent:set-goal', (sessionId: string, goal: SessionGoal | null) =>
-    agent.setGoal(String(sessionId), goal ?? null),
-  )
-  handle('agent:todos', (sessionId: string) => agent.todos(String(sessionId)))
-  handle('agent:set-todos', (sessionId: string, todos: TodoItem[]) =>
-    agent.setTodos(String(sessionId), Array.isArray(todos) ? todos : []),
-  )
-  handle('agent:plan', (sessionId: string) => agent.plan(String(sessionId)))
-  handle('agent:set-plan', (sessionId: string, plan: PlanRequest | null) =>
-    agent.setPlan(String(sessionId), plan ?? null),
-  )
+  handle('agent:update', (sessionId: string, patch: SessionPatch) => host.update(String(sessionId), patch))
+  handle('agent:statuses', () => host.statuses())
+  handle('agent:history', (sessionId?: string) => host.history(sessionId ? String(sessionId) : undefined))
+  handle('agent:start', async (sessionId: string, input: AgentStartInput) => {
+    try {
+      await host.start(String(sessionId), input)
+    } catch (error) {
+      throw hostFailure(error)
+    }
+  })
+  handle('agent:cancel', (sessionId: string) => host.cancel(String(sessionId)))
+  handle('agent:reset', (sessionId?: string) => host.reset(sessionId ? String(sessionId) : undefined))
+  handle('agent:remove', (sessionId: string) => host.remove(String(sessionId)))
+  handle('agent:fork', (sessionId: string) => host.fork(String(sessionId)))
+  handle('agent:rename', (sessionId: string, title: string) => host.rename(String(sessionId), String(title)))
+  handle('agent:goal', (sessionId: string) => host.goal(String(sessionId)))
+  handle('agent:set-goal', (sessionId: string, goal: SessionGoal | null) => host.setGoal(String(sessionId), goal ?? null))
+  handle('agent:todos', (sessionId: string) => host.todos(String(sessionId)))
+  handle('agent:set-todos', (sessionId: string, todos: TodoItem[]) => host.setTodos(String(sessionId), Array.isArray(todos) ? todos : []))
+  handle('agent:plan', (sessionId: string) => host.plan(String(sessionId)))
+  handle('agent:set-plan', (sessionId: string, plan: PlanRequest | null) => host.setPlan(String(sessionId), plan ?? null))
 
-  handle('agent:compact', (sessionId: string) => agent.compact(String(sessionId)))
-  handle('agent:export', (sessionId: string, targetPath?: string) =>
-    agent.exportSession(String(sessionId), targetPath ? String(targetPath) : undefined),
+  handle('agent:compact', (sessionId: string) => host.compact(String(sessionId)))
+  // The host writes the transcript; the save dialog and the file are the main process's.
+  handle('agent:export', async (sessionId: string, targetPath?: string) =>
+    exportSessionZip(await host.exportData(String(sessionId)), targetPath ? String(targetPath) : undefined),
   )
   handle('app:feedback', (text: string) => {
     const file = join(app.getPath('userData'), 'feedback.jsonl')
     appendFileSync(file, `${JSON.stringify({ at: Date.now(), text: String(text) })}\n`)
   })
 
-  handle('jobs:list', () => jobs.list())
-  handle('jobs:output', (id: string) => jobs.output(String(id)))
-  handle('jobs:kill', (id: string) => jobs.kill(String(id)))
+  handle('jobs:list', () => host.jobs())
+  handle('jobs:output', (id: string) => host.jobOutput(String(id)))
+  handle('jobs:kill', (id: string) => host.killJob(String(id)))
 
   handle('schedules:list', () => schedules.list())
   handle('schedules:create', (input: { prompt: string; sessionId: string; afterSeconds?: number; everySeconds?: number }) =>
@@ -214,9 +255,11 @@ export function registerIpc(deps: IpcDeps): void {
     skills.create(String(name), description ? String(description) : undefined),
   )
   handle('skills:open-folder', () => skills.openFolder())
-  // The answer is yes or no, or an object with a note and "for this session"; the current agent honours the yes or no.
-  handle('agent:approve', (id: string, answer: unknown) =>
-    agent.resolveApproval(String(id), typeof answer === 'object' && answer !== null ? Boolean((answer as { approved?: unknown }).approved) : Boolean(answer)),
-  )
-  handle('agent:answer', (id: string, answer: string) => agent.resolveAnswer(String(id), String(answer)))
+  // The answer is yes or no, or an object with a note and "for this session".
+  handle('agent:approve', async (id: string, answer: unknown) => {
+    await host.approve(String(id), approvalAnswerOf(answer))
+  })
+  handle('agent:answer', async (id: string, answer: string) => {
+    await host.answer(String(id), String(answer))
+  })
 }

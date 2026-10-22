@@ -15,7 +15,7 @@ import { cx } from '../ui/cx'
 import { Activity, ChevronDown, ExternalLink, GitBranch, MoreHorizontal, PanelRight, ShieldCheck, Sparkles, ScrollText } from '../ui/icons'
 import { Menu, type MenuEntry } from '../ui/Menu'
 import { Spinner } from '../ui/Spinner'
-import { editTotals } from './Chat/turns'
+import { editTotals, isCommandTool, isSubagentTool } from './Chat/turns'
 
 const MODES: { value: AgentMode; label: string; description: string }[] = [
   { value: 'code', label: 'Standard mode', description: 'Reads, edits and runs commands.' },
@@ -69,8 +69,8 @@ export default function SessionHeader() {
   }, [session?.title])
 
   const totals = useMemo(() => editTotals(entries), [entries])
-  const commands = entries.filter((entry) => entry.tool && (entry.tool.name === 'pwsh' || entry.tool.name === 'run_command')).length
-  const subagents = entries.filter((entry) => entry.tool?.name === 'task').length
+  const commands = entries.filter((entry) => entry.tool && isCommandTool(entry.tool.name)).length
+  const subagents = entries.filter((entry) => entry.tool && isSubagentTool(entry.tool.name)).length
 
   const openInEntries = (): MenuEntry[] => [
     { id: 'explorer', label: 'File Explorer', disabled: !workspace, onSelect: () => void api.workspace.reveal('') },

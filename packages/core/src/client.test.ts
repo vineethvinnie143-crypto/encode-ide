@@ -49,8 +49,8 @@ describe('the profile client', () => {
     const asked: string[] = []
     const client = createProfileClient({
       profile: () => custom,
-      apiKey: (id) => {
-        asked.push(id)
+      apiKey: (profile) => {
+        asked.push(`${profile.id} ${profile.baseUrl}`)
         return key
       },
       direct: { adapters: { 'openai-compatible': adapter } },
@@ -64,6 +64,7 @@ describe('the profile client', () => {
     assert.equal(adapter.inputs[0].target.model, 'local-model')
     assert.equal(adapter.inputs[0].target.provider, 'local')
     assert.ok(asked.length >= 2)
+    assert.ok(asked.every((entry) => entry === 'local http://127.0.0.1:9/v1'))
     assert.equal((await client.budget('main')).contextWindow, 32_000)
   })
 

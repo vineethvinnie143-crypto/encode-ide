@@ -49,7 +49,7 @@ function str(value: unknown, fallback = ''): string {
 }
 
 /** The server a profile's requests, and so its key, go to. */
-function serverOf(baseUrl: string): string {
+export function serverOf(baseUrl: string): string {
   try {
     return new URL(baseUrl.trim()).origin
   } catch {

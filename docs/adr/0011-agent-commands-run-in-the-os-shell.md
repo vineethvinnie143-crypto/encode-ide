@@ -1,6 +1,6 @@
 # 0011. The agent's commands run in the OS shell
 
-- Status: Accepted (decided by the owner on 2026-10-21); lands in M1
+- Status: Accepted (decided by the owner on 2026-10-21); in effect since the desktop app runs the agent host
 - Date: 2026-10-21
 
 ## Context
@@ -19,7 +19,9 @@ between keeping the eNCode Shell for the agent and running the OS shell.
   reads.
 - Spawning a shell the user already has is not outside code under
   [0003](0003-own-code-above-the-platform.md).
-- Until M1 ships, M0's agent keeps running commands in the eNCode Shell.
+- The prototype's `pwsh` tool, which ran commands in the eNCode Shell, is gone: the desktop
+  app's agent runs `Bash` in the OS shell since it moved to the agent host
+  ([0030](0030-the-agent-runs-in-a-host-that-clients-drive.md)).
 
 ## Consequences
 

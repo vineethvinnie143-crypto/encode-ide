@@ -107,12 +107,14 @@ function check(value: unknown, schema: JsonSchema, path: string, errors: SchemaE
     const properties = (schema.properties && typeof schema.properties === 'object' ? schema.properties : {}) as Record<string, JsonSchema>
     if (Array.isArray(schema.required)) {
       for (const key of schema.required) {
-        if (typeof key === 'string' && !Object.hasOwn(record, key)) {
+        if (typeof key === 'string' && record[key] === undefined) {
           if (errors.length < MAX_ERRORS) errors.push({ path: child(path, key), message: `${child(path, key)} is required` })
         }
       }
     }
     for (const [key, field] of Object.entries(record)) {
+      // An undefined value is an absent one, as it would be after JSON; a port that clones structurally keeps it.
+      if (field === undefined) continue
       if (Object.hasOwn(properties, key)) {
         check(field, properties[key], child(path, key), errors)
       } else if (schema.additionalProperties === false) {

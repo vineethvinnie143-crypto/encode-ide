@@ -42,6 +42,19 @@ describe('validate', () => {
     assert.equal(errors[1].path, 'todos[0].status')
   })
 
+  it('reads an undefined value as an absent one, which is what JSON would make of it', () => {
+    const schema: JsonSchema = {
+      type: 'object',
+      properties: { text: { type: 'string' }, attachments: { type: 'array', items: { type: 'string' } } },
+      required: ['text'],
+      additionalProperties: false,
+    }
+    assert.deepEqual(validate({ text: 'hi', attachments: undefined }, schema), [])
+    assert.deepEqual(validate({ text: 'hi', other: undefined }, schema), [])
+    assert.equal(validationMessage({ text: undefined }, schema), 'text is required')
+    assert.equal(validationMessage({ text: 'hi', attachments: 'x' }, schema), 'attachments must be an array, not string')
+  })
+
   it('reports missing required fields and wrong types', () => {
     assert.equal(validationMessage({}, TODOS), 'todos is required')
     assert.equal(validationMessage({ todos: 'x' }, TODOS), 'todos must be an array, not string')
