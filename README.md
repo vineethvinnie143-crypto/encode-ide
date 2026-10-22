@@ -241,7 +241,7 @@ packages/providers/           the model conversation, adapters (OpenAI-compatibl
 packages/router/              roles as ordered model lists, health and failover, the free model pool
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
-packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web, and the Computer tool with its Windows helper
+packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web (fetch, and search through DuckDuckGo, Brave Search, Tavily or Exa), and the Computer tool with its Windows helper
 packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose

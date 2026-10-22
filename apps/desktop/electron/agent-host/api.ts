@@ -6,6 +6,7 @@
  */
 import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
+import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { RouterSettings } from './router-settings'
 
@@ -25,6 +26,8 @@ export interface HostConfig {
    * key (null: no key is stored). The key itself stays in the main process until a request needs it.
    */
   providers: Record<string, { profile: string; name: string; keyRevision: number | null }>
+  /** Who answers the agent's web searches. Its key, if it needs one, is asked for at every search. */
+  searchProvider: SearchProviderId
 }
 
 export interface HostInit {
@@ -62,6 +65,8 @@ export type DesktopHostRequests = HostRequests & {
   modelCheck: { params: { profileId: string; model: string }; result: ModelCheckResult }
   /** Lifts what a refused key or a payment problem set, reads the model lists again. */
   modelRecheck: { params: undefined; result: void }
+  /** One search through the provider in use, the way the agent makes it, for the Settings screen's test. */
+  searchCheck: { params: undefined; result: SearchCheckResult }
   /** A folder's settings, trust and permission rules, for the Permissions screen. */
   permissionsReport: { params: { root: string }; result: PermissionsReport }
   /** Does something to a folder's settings; answers with the folder as it stands afterwards. */
@@ -83,6 +88,11 @@ export type MainApi = {
      * profile's key was entered for another server (a key is bound to its server).
      */
     key: { params: { profileId: string; baseUrl: string }; result: string }
+    /**
+     * The API key of a search provider, for a search about to be sent to that provider's own address (fixed in the
+     * code, never a setting); empty when there is none.
+     */
+    searchKey: { params: { provider: KeyedSearchProviderId }; result: string }
   }
   events: {}
 }

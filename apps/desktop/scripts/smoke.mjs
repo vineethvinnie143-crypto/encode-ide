@@ -603,6 +603,7 @@ async function runProviderPhase() {
 
   await runSubagentChecks()
   await runWebChecks()
+  await runSearchChecks()
   await runPermissionChecks()
   await runRewindChecks()
   await runMcpChecks()
@@ -683,6 +684,89 @@ async function runWebChecks() {
   if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
     throw new Error('WebFetch reached a private address')
   }
+}
+
+/**
+ * The web search provider is chosen in Settings > Agent. A search asks first and names the provider's own host, a change of
+ * provider applies to the next search, and a key is sealed on disk and never comes back to the page. Nothing here reaches a
+ * search service: every search is refused at the approval, and the test button is pressed while no key is stored.
+ */
+async function runSearchChecks() {
+  console.log('[smoke] --- web search ---')
+  const card = () =>
+    evaluate(`(() => {
+      const card = document.querySelector('.approval-card')
+      return card ? { title: card.querySelector('.approval-head')?.textContent ?? '', reason: card.querySelector('.approval-reason')?.textContent ?? '' } : null
+    })()`)
+  const askedBy = async (label, host) => {
+    await sendPrompt('[scenario:search-check] Look something up.')
+    await waitFor("!!document.querySelector('.approval-card')", 60000, `the search asks (${label})`)
+    const asking = await card()
+    console.log(`[smoke] search approval (${label}):`, JSON.stringify(asking))
+    if (!asking.title.includes('Search the web for eNCode search check')) throw new Error(`The approval does not say what is searched: ${JSON.stringify(asking)}`)
+    if (!asking.reason.includes(`Approving allows ${host} until the session ends`)) throw new Error(`The approval should name ${host}: ${JSON.stringify(asking.reason)}`)
+    if (!(await click('.approval-card .btn', 'Deny'))) throw new Error('The approval card offers no Deny')
+    await waitFor("!document.querySelector('.approval-card')", 8000, 'the card goes')
+    const more = await driveAgent(`15-search-${label}`)
+    if (more.length) throw new Error(`A refused search should not ask again: ${JSON.stringify(more)}`)
+  }
+
+  await evaluate('window.eNCode.agent.reset()')
+  const initial = await evaluate('window.eNCode.settings.get()')
+  if (initial.searchProvider !== 'duckduckgo' || initial.searchKeys.length) throw new Error(`A new install searches with DuckDuckGo and holds no search key: ${JSON.stringify([initial.searchProvider, initial.searchKeys])}`)
+  await askedBy('duckduckgo', 'html.duckduckgo.com')
+
+  // Settings > Agent: pick Brave Search. Its key field shows, and the test says there is no key without sending anything.
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await waitFor("!!document.querySelector('input[name=\"search-provider\"]')", 4000, 'the search providers')
+  const options = await evaluate(`[...document.querySelectorAll('.policy-option')].filter((node) => node.querySelector('input[name="search-provider"]')).map((node) => node.querySelector('.policy-option-label')?.textContent ?? '')`)
+  console.log('[smoke] search providers:', JSON.stringify(options))
+  if (options.join('|') !== 'DuckDuckGo|Brave Search Needs a key|Tavily Needs a key|Exa Needs a key') throw new Error(`The search providers read ${JSON.stringify(options)}`)
+  if (await evaluate("!!document.querySelector('.search-key')")) throw new Error('DuckDuckGo needs no key, so no key field should show')
+  if (!(await click('input[name="search-provider"][value="brave"]'))) throw new Error('Brave Search is not offered')
+  await waitFor("!!document.querySelector('.search-key .key-field')", 4000, 'the key field of Brave Search')
+  const field = await evaluate(`({ label: document.querySelector('.search-key .key-field-label')?.textContent, note: document.querySelector('.search-key .key-field-note')?.textContent, link: document.querySelector('.search-link a')?.href })`)
+  // Where there is no keychain the note says the key stays in memory; where there is one it says whom the key goes to.
+  const noteOk = /sent only to Brave Search/.test(field.note) || /Kept in memory until eNCode closes/.test(field.note)
+  if (field.label !== 'Brave Search API key' || !noteOk || field.link !== 'https://brave.com/search/api/') throw new Error(`The key field reads ${JSON.stringify(field)}`)
+  if (!(await click('.search-test .btn', 'Test search'))) throw new Error('No Test search button')
+  await waitFor("!!document.querySelector('.settings-agent [role=\"status\"].error-text')", 20000, 'the test to answer')
+  const noKey = await evaluate("document.querySelector('.settings-agent [role=\"status\"]').textContent")
+  if (noKey !== 'There is no API key for Brave Search. Paste one above, then press Test search.') throw new Error(`The test without a key says ${JSON.stringify(noKey)}`)
+  await evaluate("document.querySelector('.settings-agent [role=\"status\"]')?.scrollIntoView({ block: 'end' })")
+  await sleep(250)
+  await screenshot('15-search-settings.png')
+
+  // Type a key and save: the page learns only that one is stored, and the disk holds it sealed.
+  const secret = `brave-smoke-${Date.now().toString(36)}`
+  if (!(await typeInto('.search-key .text-input', secret))) throw new Error('No key field')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  const saved = await evaluate('window.eNCode.settings.get()')
+  if (saved.searchProvider !== 'brave' || saved.searchKeys.join() !== 'brave') throw new Error(`Brave Search was not saved with its key: ${JSON.stringify([saved.searchProvider, saved.searchKeys])}`)
+  if (JSON.stringify(saved).includes(secret)) throw new Error('Settings handed the search key to the page')
+  const profileDir = process.env.ENCODE_USER_DATA_DIR
+  if (profileDir) {
+    const disk = await fs.readFile(path.join(profileDir, 'eNCode-settings.json'), 'utf8')
+    if (disk.includes(secret)) throw new Error('The settings file holds a readable search key')
+    const sealed = JSON.parse(disk).searchKeysEnc?.brave
+    if (saved.keyStorage.mode === 'keychain' && !sealed?.startsWith('enc:')) throw new Error('The keychain is available but the search key was not sealed on disk')
+    if (saved.keyStorage.mode === 'session' && sealed !== undefined) throw new Error('Without a keychain the search key must stay out of the settings file')
+  }
+
+  // The change applies to the next search, with no restart; and another provider is another host.
+  await askedBy('brave', 'api.search.brave.com')
+  await evaluate("window.eNCode.settings.save({ searchProvider: 'tavily' })")
+  await askedBy('tavily', 'api.tavily.com')
+
+  // Tidy up: back to the default, and the key removed.
+  await evaluate("window.eNCode.settings.save({ searchProvider: 'duckduckgo' })")
+  const after = await evaluate("window.eNCode.settings.setSearchKey('brave', '')")
+  if (after.searchKeys.length) throw new Error(`The key was not removed: ${JSON.stringify(after.searchKeys)}`)
+  await evaluate('window.eNCode.agent.reset()')
+  console.log('[smoke] web search: ok')
 }
 
 /**

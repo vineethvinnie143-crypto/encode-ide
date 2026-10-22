@@ -6,6 +6,7 @@
 import { truncateMiddle } from '../text'
 import type { Tool, ToolOutcome } from '../types'
 import { WebError, upgradeUrl } from './access'
+import { SEARCH_ENDPOINTS } from './search'
 
 const PAGE_FOR_MODEL = 100_000
 const PAGE_WITHOUT_SUMMARY = 20_000
@@ -143,7 +144,7 @@ export const webSearchTool: Tool<WebSearchInput> = {
   kind: 'web',
   readOnly: true,
   check: (input) => (input.allowed_domains?.length && input.blocked_domains?.length ? 'give allowed_domains or blocked_domains, not both.' : undefined),
-  access: () => ({ type: 'web', url: 'https://html.duckduckgo.com/html/' }),
+  access: (_input, ctx) => ({ type: 'web', url: ctx.web.searchTarget?.() ?? SEARCH_ENDPOINTS.duckduckgo }),
   describe: (input) => ({ title: `Search the web for ${input.query}` }),
   async run(input, ctx) {
     let hits

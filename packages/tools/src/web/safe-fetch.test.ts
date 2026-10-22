@@ -41,6 +41,13 @@ before(async () => {
     } else if (path === '/elsewhere') {
       response.writeHead(301, { location: 'https://other.example/landing?from=test' })
       response.end()
+    } else if (path === '/echo') {
+      const chunks: Buffer[] = []
+      request.on('data', (chunk: Buffer) => chunks.push(chunk))
+      request.on('end', () => {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ method: request.method, headers: request.headers, body: Buffer.concat(chunks).toString('utf8') }))
+      })
     } else if (path === '/stall') {
       response.writeHead(200, { 'content-type': 'text/plain' })
       response.write('partial')
@@ -145,6 +152,30 @@ describe('safeFetch responses', () => {
       status: 301,
       location: 'https://other.example/landing?from=test',
     })
+  })
+
+  it('sends a method, headers and a body, and follows no redirect with them', async () => {
+    const posted = await safeFetch(`${origin}/echo`, {
+      allowAddress: everywhere,
+      method: 'POST',
+      headers: { Authorization: 'Bearer abc', 'Content-Type': 'application/json' },
+      body: '{"q":"café"}',
+    })
+    assert.equal(posted.kind, 'response')
+    const echoed = JSON.parse((posted as { text: string }).text) as { method: string; headers: Record<string, string>; body: string }
+    assert.equal(echoed.method, 'POST')
+    assert.equal(echoed.headers.authorization, 'Bearer abc')
+    assert.equal(echoed.headers['content-type'], 'application/json')
+    assert.equal(echoed.headers['content-length'], String(Buffer.byteLength('{"q":"café"}')))
+    assert.equal(echoed.body, '{"q":"café"}')
+
+    // The same redirect a plain fetch follows is handed back when the request carries a key.
+    const plain = await safeFetch(`${origin}/hop/1`, { allowAddress: everywhere })
+    assert.equal(plain.kind, 'response')
+    const keyed = await safeFetch(`${origin}/hop/1`, { allowAddress: everywhere, headers: { 'X-Api-Key': 'k' } })
+    assert.deepEqual(keyed, { kind: 'redirect', url: `${origin}/hop/1`, status: 302, location: `${origin}/hop/0` })
+    const post = await safeFetch(`${origin}/hop/1`, { allowAddress: everywhere, method: 'POST', body: '{}' })
+    assert.equal(post.kind, 'redirect')
   })
 
   it('times out a stalled response and can be cancelled', async () => {

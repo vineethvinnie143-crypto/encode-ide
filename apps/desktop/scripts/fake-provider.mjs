@@ -75,6 +75,11 @@ const SCENARIOS = {
     },
     { text: 'Web check finished.' },
   ],
+  // WebSearch asks first, naming the host of the provider chosen in Settings. The check refuses it, so no search is sent.
+  'search-check': [
+    { text: 'Searching the web.', call: { name: 'WebSearch', args: { query: 'eNCode search check' } } },
+    { text: 'Search check finished.' },
+  ],
   'subagent-write': [
     { text: 'Creating the file.', call: { name: 'Write', args: { file_path: 'escalation.txt', content: 'must not exist\n' } } },
     { text: 'Subagent finished.' },

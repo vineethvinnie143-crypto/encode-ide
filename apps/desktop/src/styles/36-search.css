@@ -1,0 +1,46 @@
+/* Settings > Agent > Web search: the provider list reuses the approval policy list; these are the extras. */
+
+.search-option-state {
+  margin-left: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 400;
+}
+.search-option-state.is-ready {
+  color: var(--accent);
+}
+
+.search-key {
+  display: grid;
+  gap: 6px;
+}
+.search-key .text-input {
+  height: 36px;
+  font-size: var(--fs-13);
+}
+.search-link {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.search-link:empty {
+  display: none;
+}
+.search-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.search-link a:hover {
+  text-decoration: underline;
+}
+
+.search-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.search-test-time {
+  color: var(--text-3);
+}

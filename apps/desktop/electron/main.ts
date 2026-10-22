@@ -139,6 +139,8 @@ if (!gotLock) {
         const server = serverOf(baseUrl)
         return profile && server && serverOf(profile.baseUrl) === server ? settings.keyFor(profileId) : ''
       },
+      // A search key has no address to check: where a search goes is fixed in the code, not a setting.
+      searchKey: (provider) => settings.searchKeyFor(provider),
       onEvent: (event) => {
         send('agent:event', event)
         if (computerOn) computerWatch.see(event)

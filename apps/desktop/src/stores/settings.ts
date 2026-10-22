@@ -1,5 +1,6 @@
 import { create } from '../store'
 import { FREE_REF, demoPatch, labelOfRef, mainPatch, parseRef } from '@shared/models'
+import type { SearchProviderId } from '@shared/search'
 import type { AgentMode, Settings } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
@@ -12,6 +13,8 @@ interface SettingsStore {
   save(patch: Partial<Settings>): Promise<void>
   /** False when the key was refused; the reason has been shown. */
   setProfileKey(id: string, key: string): Promise<boolean>
+  /** The same for the key of a search provider; an empty key removes it. */
+  setSearchKey(provider: SearchProviderId, key: string): Promise<boolean>
   setMode(mode: AgentMode): Promise<void>
   /**
    * Makes `ref` ("@free" or "<profile id>:<model id>") the only main model. A billed one asks first while only free
@@ -50,6 +53,17 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   setProfileKey: async (id, key) => {
     try {
       const settings = await api.settings.setProfileKey(id, key)
+      set({ settings })
+      return true
+    } catch (error) {
+      useUi.getState().notify('error', `Could not store the key: ${errorText(error)}`)
+      return false
+    }
+  },
+
+  setSearchKey: async (provider, key) => {
+    try {
+      const settings = await api.settings.setSearchKey(provider, key)
       set({ settings })
       return true
     } catch (error) {

@@ -120,6 +120,9 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T39 | The desktop helper is replaced or altered, or reads what the user types | The helper is built on the machine from sources that are in the repository and embedded in the app, into a folder named by their hash; the hash of the built file is recorded beside it and checked before every start, so a changed or half-written copy is built again, never run. It starts with a short list of environment variables and no network code, and its input hooks read only the "injected" flag of an event (never a key, a position or text) and exist only while an action runs (0053). | Partial (R17) |
 | T40 | The agent works on the person's computer and they cannot tell, or cannot make it stop | Computer use is off until the person turns it on in Settings. While a session uses it, a banner is in front of everything, without taking the keyboard, with a Stop button and Ctrl+Alt+Esc, a combination registered only for that time and one the Computer tool refuses to press. Stop cancels every session that uses the computer, the way the chat's Stop does; the person's own mouse or keyboard stops the agent too (0053, 0054). | Partial (R18) |
 | T41 | The banner is read, clicked or spoofed by the agent, or its page is used to reach the app | The banner is left out of screenshots and, as a window of eNCode, is never used by the Computer tool. Its page runs one script allowed by hash under `default-src 'none'`, in a sandboxed process with a session of its own that grants no permission and cancels every request, and cannot navigate or open windows. The main process answers only the banner's own top frame on its four channels, and the renderer's channels refuse it (0054). | Mitigated |
+| T42 | A web search key reaches a place the person did not choose: the host's configuration, a log, a redirect, or another address | The key is sealed by the keychain under `search:<provider>` like a model key, or held in memory only, and is among the secrets logs and reports are scrubbed of. The host's configuration names the provider and carries no key; the host asks the main process for it at each search, in a request that allows Brave, Tavily and Exa and nothing else, and holds it for the length of the request. Addresses are fixed in the code (there is no setting for one), and a request that carries a key follows no redirect (0058). | Partial (R5, R19) |
+| T43 | The words the agent searches for go to a service the person did not pick, or a failing search quietly moves to another provider | One provider is chosen in Settings, and a search never moves to another: a failure says what happened and points to Settings. The first search of a session asks and names the provider's host, and choosing another provider asks again (0007, 0058). Full access skips the question (R1). | Partial (R1) |
+| T44 | A search result (a title, a snippet, an address) carries instructions, markup or a non-web address | Results are cut to eight, with a title and a snippet of bounded length, tags and entities taken out of the words, only http and https addresses kept, and the model's allowed and blocked domains applied again to what comes back. The list reaches the model inside the untrusted web content block with its closing tag neutralised (0032, 0058). Labels are advisory (R2). | Partial (R2) |
 
 ## Residual risks
 
@@ -230,6 +233,12 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   it does not undo what the agent already did. None of this lets the agent act without the person having turned the feature
   on and allowed each application, and the person's own input stops it from inside the helper.
   - Owner: the banner window (`electron/computer-overlay.ts`, 0054).
+- **R19. A web search key is in the host for the length of a search, and a compromised host can ask for it again.** The
+  main process answers `searchKey` for the three providers that use one, to the host and to nothing else, and cannot tell
+  a search from a request made to send the key away; the host is the process that reads web pages and tool output. The
+  key opens searches on the person's account with that provider and nothing else, which is also what a model key held by
+  the same host for the length of a call opens at its provider (0052). Use a key with a spending limit.
+  - Owner: whoever changes `electron/agent-host/runtime.ts` or the sandbox of the host (M3, OS sandbox).
 
 ## Verification
 
@@ -242,6 +251,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
     renderer;
   - Plan-mode subagents unable to write;
   - the `WebFetch` approval and private-address refusal;
+  - the `WebSearch` approval naming the host of the provider chosen in Settings, a change of provider applying to the
+    next search, and a search key sealed on disk and never handed to the page (0058);
   - compaction after an overflow refusal;
   - what the model is sent (the project's instructions arrive as a reminder, never in the
     system prompt) and the session logs on disk (owner-only, no key in them);

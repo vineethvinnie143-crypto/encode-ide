@@ -9,6 +9,7 @@
  */
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
+import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
 import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 
@@ -26,6 +27,8 @@ export interface AgentHostServiceOptions {
   init(): Omit<HostInit, 'config'>
   /** The key stored for a profile when it is about to be sent to `baseUrl`, or an empty string. */
   apiKey(profileId: string, baseUrl: string): string | Promise<string>
+  /** The key of a search provider that needs one, or an empty string. */
+  searchKey(provider: KeyedSearchProviderId): string | Promise<string>
   onEvent(event: AgentEvent): void
   onJobs(jobs: BackgroundJob[]): void
   /** The model router has something the person should hear: a key was refused, a quota is spent, a model is closed to the account. */
@@ -55,6 +58,13 @@ const KEY_REQUEST = {
   required: ['profileId', 'baseUrl'],
   additionalProperties: false,
   properties: { profileId: { type: 'string', minLength: 1, maxLength: 200 }, baseUrl: { type: 'string', maxLength: 2_000 } },
+}
+
+const SEARCH_KEY_REQUEST = {
+  type: 'object',
+  required: ['provider'],
+  additionalProperties: false,
+  properties: { provider: { type: 'string', enum: [...KEYED_SEARCH_PROVIDER_IDS] } },
 }
 
 const STILL_WORKING: ReadonlySet<AgentStatus> = new Set(['thinking', 'running-tool', 'awaiting-approval', 'awaiting-user'])
@@ -119,6 +129,11 @@ export class AgentHostService {
     await (await this.ready()).request('modelRecheck', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
+  /** One search through the provider in use, the way the agent makes it. */
+  async searchCheck(): Promise<SearchCheckResult> {
+    return (await this.ready()).request('searchCheck', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
   /** A folder's settings, trust and permission rules. */
   async permissionsReport(root: string): Promise<PermissionsReport> {
     return (await this.ready()).request('permissionsReport', { root }, { timeoutMs: REQUEST_TIMEOUT_MS })
@@ -166,6 +181,17 @@ export class AgentHostService {
         }
       },
       { schema: KEY_REQUEST },
+    )
+    peer.handle(
+      'searchKey',
+      async ({ provider }) => {
+        try {
+          return (await this.o.searchKey(provider)) || ''
+        } catch {
+          return ''
+        }
+      },
+      { schema: SEARCH_KEY_REQUEST },
     )
     peer.on('event', (event) => {
       this.track(event)
@@ -264,4 +290,5 @@ const NO_CONFIG: HostConfig = {
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},
+  searchProvider: DEFAULT_SEARCH_PROVIDER,
 }

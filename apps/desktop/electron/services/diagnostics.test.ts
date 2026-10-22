@@ -43,6 +43,8 @@ const settings: Settings = {
   freeOnly: false,
   freeProfileId: null,
   setupDone: true,
+  searchProvider: 'brave',
+  searchKeys: ['brave'],
   keyStorage: { mode: 'keychain' },
 }
 
@@ -77,6 +79,13 @@ describe('diagnostics report', () => {
     assert.match(text, /API keys +sealed by the operating system/)
     assert.match(text, /Process +running, 0 stops in a row, 1 sessions working/)
     assert.match(text, /Sessions +12 \(3 archived\)/)
+  })
+
+  it('says which search provider answers and whether its key is stored, never the key', () => {
+    assert.match(diagnosticsReport(input()), /Web search +Brave Search, key stored/)
+    const missing = diagnosticsReport(input({ settings: { ...settings, searchKeys: [] } }))
+    assert.match(missing, /Web search +Brave Search, NO KEY/)
+    assert.match(diagnosticsReport(input({ settings: { ...settings, searchProvider: 'duckduckgo', searchKeys: [] } })), /Web search +DuckDuckGo, needs no key/)
   })
 
   it('lists each model with whether a key is stored, and marks the one in use', () => {

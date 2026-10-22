@@ -12,6 +12,9 @@ import { checkFetchUrl, isPublicAddress } from '@encode/permissions'
  * so a rebinding name cannot point a later request at the local network. It
  * follows redirects only on the same host (a hop to another host is handed
  * back, so it goes through approval as a new fetch), and caps size and time.
+ *
+ * A request with headers of its own (an API key) or a body follows no redirect
+ * at all: what it carries goes only to the address it was made for.
  */
 
 export interface FetchOptions {
@@ -22,6 +25,12 @@ export interface FetchOptions {
   timeoutMs?: number
   /** Same-host redirects to follow. Default 5. */
   maxRedirects?: number
+  /** Default GET. */
+  method?: 'GET' | 'POST'
+  /** Added to the request, names in any case. Setting any makes the request follow no redirect. */
+  headers?: Record<string, string>
+  /** The body of a POST, sent as given. */
+  body?: string
   /** Addresses that may be contacted. Default: public unicast only. Tests widen it. */
   allowAddress?: (address: string) => boolean
   /** DNS resolution; tests inject it. */
@@ -146,11 +155,18 @@ async function readBody(response: IncomingMessage, maxBytes: number): Promise<{ 
   return { bytes: Buffer.concat(chunks, size), truncated }
 }
 
-function request(url: URL, lookup: LookupFunction, signal: AbortSignal): Promise<IncomingMessage> {
+interface RequestInit {
+  method: 'GET' | 'POST'
+  /** Names in lower case. */
+  headers: Record<string, string>
+  body?: string
+}
+
+function request(url: URL, lookup: LookupFunction, signal: AbortSignal, init: RequestInit): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http
     const outgoing = client.request(url, {
-      method: 'GET',
+      method: init.method,
       agent: false,
       lookup,
       signal,
@@ -158,11 +174,13 @@ function request(url: URL, lookup: LookupFunction, signal: AbortSignal): Promise
         'user-agent': USER_AGENT,
         accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.5',
         'accept-encoding': 'gzip, deflate, br',
+        ...init.headers,
+        ...(init.body === undefined ? {} : { 'content-length': String(Buffer.byteLength(init.body)) }),
       },
     })
     outgoing.on('response', resolve)
     outgoing.on('error', reject)
-    outgoing.end()
+    outgoing.end(init.body)
   })
 }
 
@@ -181,6 +199,14 @@ export async function safeFetch(rawUrl: string, options: FetchOptions = {}): Pro
     return error
   }
 
+  const init: RequestInit = {
+    method: options.method ?? 'GET',
+    headers: Object.fromEntries(Object.entries(options.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value])),
+    ...(options.body === undefined ? {} : { body: options.body }),
+  }
+  // What a request carries of its own (a key, a body) goes to the address it was made for and nowhere else.
+  const followsRedirects = init.method === 'GET' && Object.keys(init.headers).length === 0
+
   const first = checkFetchUrl(rawUrl, allowAddress)
   if (!first.ok) return { kind: 'refused', reason: first.reason }
   let url = first.url
@@ -188,7 +214,7 @@ export async function safeFetch(rawUrl: string, options: FetchOptions = {}): Pro
   for (let hop = 0; ; hop++) {
     let response: IncomingMessage
     try {
-      response = await request(url, lookup, signal)
+      response = await request(url, lookup, signal, init)
     } catch (error) {
       if (error instanceof BlockedAddressError) return { kind: 'refused', reason: error.message }
       throw failure(error)
@@ -206,7 +232,7 @@ export async function safeFetch(rawUrl: string, options: FetchOptions = {}): Pro
       }
       const sameHost = next.hostname === url.hostname
       const allowedScheme = next.protocol === url.protocol || (url.protocol === 'http:' && next.protocol === 'https:')
-      if (!sameHost || !allowedScheme) return { kind: 'redirect', url: url.href, status, location: next.href }
+      if (!followsRedirects || !sameHost || !allowedScheme) return { kind: 'redirect', url: url.href, status, location: next.href }
       if (hop >= maxRedirects) return { kind: 'refused', reason: `more than ${maxRedirects} redirects` }
       const checked = checkFetchUrl(next.href, allowAddress)
       if (!checked.ok) return { kind: 'refused', reason: checked.reason }

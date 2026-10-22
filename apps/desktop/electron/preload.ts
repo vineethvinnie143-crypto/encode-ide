@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { SearchProviderId } from '../shared/search'
 import type {
   AgentEvent,
   ApprovalAnswer,
@@ -70,6 +71,10 @@ const api: EncodeApi = {
     get: () => invoke('settings:get'),
     save: (patch: Partial<Settings>) => invoke('settings:save', patch),
     setProfileKey: (id: string, key: string) => invoke('settings:set-key', id, key),
+    setSearchKey: (provider: SearchProviderId, key: string) => invoke('settings:set-search-key', provider, key),
+  },
+  search: {
+    test: () => invoke('search:test'),
   },
   models: {
     openRouter: (freeOnly?: boolean) => invoke('models:openrouter', freeOnly),

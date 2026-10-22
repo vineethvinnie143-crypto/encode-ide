@@ -115,6 +115,27 @@ now; eNCode reads them again as soon as you save, and the screen has a copyable 
 What is most useful to hear: any server that started without your approval, any card that did not tell you what it
 would run, and a server that would not start with no reason shown.
 
+## Web search
+
+**Settings → Agent → Web search** chooses who answers the agent's searches. DuckDuckGo needs nothing but can fail or
+come back empty when it decides to slow searches from your computer. Brave Search, Tavily and Exa are steadier and
+need an API key of your own from their sites (the card links each one).
+
+- Pick a provider with a key, paste the key and press **Test search**: it saves what you changed and makes one real
+  search the way the agent does. A wrong key, a spent allowance and a service that is down each say so, naming the
+  provider. **Remove the stored key** takes it away at once.
+- The key is stored encrypted by your system keychain (kept only in memory where there is none, which the card says)
+  and is sent to that provider only. It never shows again, in the settings or in a diagnostics report; the report
+  names the provider and whether a key is stored.
+- Ask the agent something that needs the web. The first search in a chat asks and names the provider's address
+  (`api.search.brave.com`, `api.tavily.com`, `api.exa.ai`, `html.duckduckgo.com`); choosing another provider asks again.
+  If a search fails it says why and does not use another provider instead.
+- Whatever comes back is shown to the model as coming from outside. You can ask it to restrict a search to, or leave
+  out, a website ("only from docs.python.org").
+
+What is most useful to hear: a search that went to a provider you did not choose, a key that showed anywhere, and an
+error that did not say what to do.
+
 ## Computer use
 
 **Settings → Agent → Let the agent use this computer** is off until you turn it on. With it on, ask the agent to do

@@ -258,6 +258,8 @@ export interface SearchHit {
 export interface WebAccess {
   fetch(url: string, signal: AbortSignal): Promise<FetchedPage>
   search(query: string, options: { allowedDomains?: string[]; blockedDomains?: string[]; signal: AbortSignal }): Promise<SearchHit[]>
+  /** The address a search is sent to now, which is what the approval of a search names. */
+  searchTarget?(): string
 }
 
 // ---------------------------------------------------------------------------

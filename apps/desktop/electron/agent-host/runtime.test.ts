@@ -82,6 +82,7 @@ function config(patch: { model?: HostConfig['model']; keyRevision?: number | nul
       freePool: { providers: [] },
     },
     providers: { 'p-local': { profile: 'local', name: 'Local mock', keyRevision: patch.keyRevision === undefined ? 1 : patch.keyRevision } },
+    searchProvider: 'duckduckgo',
   }
 }
 
@@ -128,6 +129,7 @@ async function fixture(stateFile?: string): Promise<Fixture> {
       keysAsked.push(`${profileId} ${server}`)
       return (profileId === 'local' || profileId === 'other') && server === origin ? key.current : ''
     },
+    searchKey: () => '',
     onEvent: (event) => events.push(event),
     onJobs: () => undefined,
     onAlert: (alert) => alerts.push(alert),
