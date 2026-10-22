@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
-import type { Message } from '@encode/providers'
+import type { CompletionRequest, Message } from '@encode/providers'
 import { tempWorkspace } from '@encode/tools/testing'
 import { closeHarnesses, sessionHarness, type SessionHarness } from './testing'
 
@@ -440,6 +440,115 @@ describe('what a session keeps', () => {
     assert.equal(data.title, 'export me')
     assert.match(data.transcript, /^# export me\n\n## user\n\nexport me/)
     assert.equal(JSON.parse(data.json).entries.length, 2)
+  })
+})
+
+describe('naming a session', () => {
+  const FIRST = 'Create a short note that says hello from eNCode'
+  /** The main model answers "ok"; the utility model answers with `title`, which a function can also compute. */
+  const script = (title: string | ((request: CompletionRequest) => string)) => (request: CompletionRequest) => ({
+    text: request.role === 'utility' ? (typeof title === 'string' ? title : title(request)) : 'ok',
+  })
+  const naming = (h: SessionHarness) => h.client.requests.filter((request) => request.role === 'utility')
+
+  it('replaces the first words with a short name once the first turn is over, with one small call', async () => {
+    const h = await sessionHarness({ script: script('"Hello note."'), env: { nameSessions: true } })
+    await h.session.start({ text: FIRST, mode: 'code' })
+    await h.session.named()
+    assert.equal(h.session.summary().title, 'Hello note')
+    assert.deepEqual(h.of('title').map((event) => event.title), [FIRST, 'Hello note'])
+    assert.equal((await h.store.list()).find((session) => session.id === h.session.id)?.title, 'Hello note')
+
+    const [call] = naming(h)
+    assert.equal(naming(h).length, 1)
+    assert.equal(call.tool, 'Title')
+    assert.ok(call.payload.maxOutputTokens! <= 24)
+    assert.deepEqual(call.payload.tools, [])
+    assert.equal(call.requirements.tools, false)
+    assert.equal(text(call.payload.messages[0]), FIRST)
+    // The conversation the agent works on is untouched by it.
+    assert.deepEqual(shown(h), [['user', FIRST], ['assistant', 'ok']])
+    assert.ok(h.client.requests.filter((request) => request.role !== 'utility').every((request) => !JSON.stringify(request.payload).includes('Title')))
+  })
+
+  it('keeps the first words when the model gives no usable name', async () => {
+    const sentence = 'I would name this conversation a short note about saying hello to the world'
+    for (const reply of ['', sentence]) {
+      const h = await sessionHarness({ script: script(reply), env: { nameSessions: true } })
+      await h.session.start({ text: FIRST, mode: 'code' })
+      await h.session.named()
+      assert.equal(h.session.summary().title, FIRST)
+      assert.equal(naming(h).length, 1)
+    }
+  })
+
+  it('keeps the first words when no model can answer, and the turn still ends well', async () => {
+    const h = await sessionHarness({
+      script: (request) => (request.role === 'utility' ? { outcome: { kind: 'paused', reason: 'rate-limit', message: 'Slow down.' } } : { text: 'ok' }),
+      env: { nameSessions: true },
+    })
+    const end = await h.session.start({ text: FIRST, mode: 'code' })
+    await h.session.named()
+    assert.deepEqual(end, { kind: 'done', reply: 'ok' })
+    assert.equal(h.session.summary().title, FIRST)
+    assert.equal(h.session.history().status, 'done')
+  })
+
+  it('does not rename over a name the user chose meanwhile', async () => {
+    let h!: SessionHarness
+    h = await sessionHarness({
+      script: script(() => {
+        void h.session.rename('My own name')
+        return 'Hello note'
+      }),
+      env: { nameSessions: true },
+    })
+    await h.session.start({ text: FIRST, mode: 'code' })
+    await h.session.named()
+    assert.equal(h.session.summary().title, 'My own name')
+  })
+
+  it('does not spend a call on a message that is short enough to be a title, or on a command', async () => {
+    for (const first of ['Hi', 'fix the build', '/compact']) {
+      const h = await sessionHarness({ script: script('A name'), env: { nameSessions: true } })
+      await h.session.start({ text: first, mode: 'code' })
+      await h.session.named()
+      assert.equal(naming(h).length, 0, first)
+      assert.equal(h.session.summary().title, first)
+    }
+  })
+
+  it('names a session once, not again after later turns, and not a session that already has a name', async () => {
+    const h = await sessionHarness({ script: script('Hello note'), env: { nameSessions: true } })
+    await h.session.start({ text: FIRST, mode: 'code' })
+    await h.session.named()
+    await h.session.start({ text: 'And now write a second note about the weather today', mode: 'code' })
+    await h.session.named()
+    assert.equal(naming(h).length, 1)
+    assert.equal(h.session.summary().title, 'Hello note')
+
+    const reopened = await h.reopen()
+    await reopened.start({ text: 'And a third one, about the sea this time of the year', mode: 'code' })
+    await reopened.named()
+    assert.equal(naming(h).length, 1)
+  })
+
+  it('is off when the program around the session says so', async () => {
+    const h = await sessionHarness({ script: script('Hello note') })
+    await h.session.start({ text: FIRST, mode: 'code' })
+    await h.session.named()
+    assert.equal(naming(h).length, 0)
+    assert.equal(h.session.summary().title, FIRST)
+  })
+
+  it('does not name a turn that was stopped before it finished', async () => {
+    const h = await sessionHarness({ script: [{ text: 'a long answer that never arrives' }], client: { delayMs: 50 }, env: { nameSessions: true } })
+    const run = h.session.start({ text: FIRST, mode: 'code' })
+    await until(() => h.session.isRunning())
+    h.session.cancel()
+    await run
+    await h.session.named()
+    assert.equal(naming(h).length, 0)
   })
 })
 

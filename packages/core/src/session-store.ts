@@ -146,6 +146,7 @@ class FileSessionLog implements SessionLog {
   private state: Derived
   private queue: Promise<void> = Promise.resolve()
   private closed = false
+  private closing: Promise<void> | undefined
 
   constructor(
     readonly id: string,
@@ -176,6 +177,7 @@ class FileSessionLog implements SessionLog {
   }
 
   private write(record: SessionRecord): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('The session log is closed.'))
     const line = JSON.stringify(record)
     const task = this.queue.then(async () => {
       if (this.closed) throw new Error('The session log is closed.')
@@ -227,17 +229,30 @@ class FileSessionLog implements SessionLog {
     await this.truncate(this.live[first - 1].id)
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return
-    await this.queue
-    this.closed = true
+  /** True from the moment the log is asked to close: it takes no new writes, and the store no longer hands it out. */
+  get isClosing(): boolean {
+    return this.closing !== undefined
+  }
+
+  /** Finishes the writes already queued, then closes the file. Every caller waits for the same close. */
+  close(): Promise<void> {
+    this.closing ??= this.shutdown()
+    return this.closing
+  }
+
+  private async shutdown(): Promise<void> {
     try {
-      await this.handle.sync()
-    } catch {
-      /* not every file system can */
+      await this.queue
+      this.closed = true
+      try {
+        await this.handle.sync()
+      } catch {
+        /* not every file system can */
+      }
+      await this.handle.close()
+    } finally {
+      this.released()
     }
-    await this.handle.close()
-    this.released()
   }
 }
 
@@ -274,6 +289,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
   const { dir } = options
   const delay = options.indexDelayMs ?? 300
   const open = new Map<string, FileSessionLog>()
+  const opening = new Map<string, Promise<FileSessionLog | undefined>>()
   let index: Map<string, IndexEntry> | undefined
   let loading: Promise<Map<string, IndexEntry>> | undefined
   let timer: NodeJS.Timeout | undefined
@@ -374,7 +390,10 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     const header = log.live[0] as SessionHeader
     if (header.v > SESSION_FORMAT) throw new Error('This session was saved by a newer version of eNCode.')
     const handle = await fs.open(file, 'a', 0o600)
-    const created = new FileSessionLog(id, log.live, handle, !log.endsWithNewline, note, () => open.delete(id))
+    // A log that closes late must not take its successor out of the map.
+    const created: FileSessionLog = new FileSessionLog(id, log.live, handle, !log.endsWithNewline, note, () => {
+      if (open.get(id) === created) open.delete(id)
+    })
     open.set(id, created)
     return created
   }
@@ -419,15 +438,27 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     },
 
     async open(id) {
+      const file = fileOf(id)
+      // A log that is closing still has writes to finish: the file is read once it is done, and not before.
+      for (let closing = open.get(id); closing?.isClosing; closing = open.get(id)) await closing.close().catch(() => undefined)
       const existing = open.get(id)
       if (existing) return existing
-      const file = fileOf(id)
-      const log = await readLog(file)
-      if (!log) return undefined
-      const opened = await openLog(id, file, log)
-      const entries = await loadIndex()
-      if (!entries.has(id)) note(indexOf(derive(log.live)))
-      return opened
+      const pending = opening.get(id)
+      if (pending) return pending
+      const task = (async () => {
+        const log = await readLog(file)
+        if (!log) return undefined
+        const opened = await openLog(id, file, log)
+        const entries = await loadIndex()
+        if (!entries.has(id)) note(indexOf(derive(log.live)))
+        return opened
+      })()
+      opening.set(id, task)
+      try {
+        return await task
+      } finally {
+        opening.delete(id)
+      }
     },
 
     async remove(id) {

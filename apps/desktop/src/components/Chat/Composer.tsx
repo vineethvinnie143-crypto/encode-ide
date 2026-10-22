@@ -152,9 +152,6 @@ export default function Composer() {
       enqueue(text)
       return
     }
-    const sessions = useSessions.getState()
-    const current = sessions.sessions.find((session) => session.id === sessions.activeId)
-    if (current && current.title === 'New session') void sessions.rename(current.id, text)
     send(text, attachments)
     setAttachments([])
   }

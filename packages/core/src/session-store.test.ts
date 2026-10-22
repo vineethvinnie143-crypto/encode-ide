@@ -179,6 +179,42 @@ describe('the session store', () => {
     assert.equal(await store.open(log.id), log)
   })
 
+  it('opens a session again only once its log has finished closing, with everything the old log wrote', async () => {
+    const { store } = await fresh()
+    const log = await store.create({ root: '/a' })
+    await prompt(log, 'p', 'first')
+    // The last write is still queued when the close begins; the reader must see it.
+    const late = log.append({ type: 'title', title: 'Late' })
+    const closing = log.close()
+    const reopened = await store.open(log.id)
+    await Promise.all([late, closing])
+    assert.ok(reopened && reopened !== log)
+    assert.equal(reopened.snapshot().title, 'Late')
+    await reopened.append({ type: 'title', title: 'After' })
+    assert.equal(reopened.snapshot().title, 'After')
+    await assert.rejects(log.append({ type: 'title', title: 'Too late' }), /session log is closed/)
+  })
+
+  it('closes a log once, however many ask, and every asker waits for the close', async () => {
+    const { store } = await fresh()
+    const log = await store.create({ root: '/a' })
+    const first = log.close()
+    const second = log.close()
+    assert.equal(first, second)
+    await Promise.all([first, second])
+    const reopened = await store.open(log.id)
+    assert.ok(reopened && reopened !== log)
+  })
+
+  it('gives everyone who opens a session at the same moment the same log', async () => {
+    const { store } = await fresh()
+    const log = await store.create({ root: '/a' })
+    await log.close()
+    const opened = await Promise.all([store.open(log.id), store.open(log.id), store.open(log.id)])
+    assert.ok(opened[0])
+    assert.ok(opened.every((each) => each === opened[0]))
+  })
+
   it('writes the index after changes, so a restart lists them without reading every log', async () => {
     const { store, dir } = await fresh()
     const log = await store.create({ root: '/a' })

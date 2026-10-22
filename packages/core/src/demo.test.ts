@@ -51,4 +51,14 @@ describe('the offline demo', () => {
     })
     assert.equal(outcome.kind, 'done')
   })
+
+  it('gives a session no name of its own, so the first words of the request stay its title', async () => {
+    const h = await sessionHarness({ env: { client: createDemoClient({ delayMs: 0 }), nameSessions: true } })
+    const running = h.session.start({ text: 'show me what you can do with this workspace', mode: 'code' })
+    const { request } = await until(() => h.of('approval-request')[0])
+    h.session.resolveApproval(request.id, true)
+    assert.equal((await running).kind, 'done')
+    await h.session.named()
+    assert.equal(h.session.summary().title, 'show me what you can do with this workspace')
+  })
 })

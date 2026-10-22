@@ -48,6 +48,8 @@ function stepOf(messages: readonly Message[]): { step: number; failed: boolean }
 }
 
 export function demoStep(request: CompletionRequest): ScriptedStep {
+  // Naming a session takes a model that can say it in a few words: the demo gives no name, so the first words stay.
+  if (request.tool === 'Title') return {}
   const messages = request.payload.messages
   const root = rootOf(messages)
   const note = path.join(root, ...DEMO_NOTE.split('/'))

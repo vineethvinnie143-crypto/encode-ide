@@ -79,6 +79,44 @@ describe('sessions', () => {
     assert.doesNotMatch(told(3), /The workspace changed/)
   })
 
+  it('serves a session asked for while the folder change is still closing it, and the session can write', async () => {
+    const next = await tempWorkspace()
+    const h = await hostHarness({ script: [{ text: 'ok' }] })
+    const free = await h.host.create({ projectRoot: null })
+    await h.host.start(free.id, { text: 'one', mode: 'code' })
+    // The change starts closing the idle session; the window asks for it in the same moment.
+    const moving = h.host.setWorkspace(next)
+    const [history] = await Promise.all([h.host.history(free.id), moving])
+    assert.deepEqual(history.entries.map((entry) => entry.kind), ['user', 'assistant'])
+    await h.host.reset(free.id)
+    await h.host.rename(free.id, 'Renamed')
+    await h.host.start(free.id, { text: 'two', mode: 'code' })
+    assert.equal(rootSeen(h, 1), await fs.realpath(next))
+  })
+
+  it('closes cleanly while a folder change is still closing a session', async () => {
+    const next = await tempWorkspace()
+    const h = await hostHarness({ script: [{ text: 'ok' }] })
+    const free = await h.host.create({ projectRoot: null })
+    await h.host.start(free.id, { text: 'one', mode: 'code' })
+    const moving = h.host.setWorkspace(next)
+    await h.host.dispose()
+    await moving
+    await assert.rejects(h.host.history(free.id), /host is closed/)
+  })
+
+  it('removes a session that a folder change is closing, with its file', async () => {
+    const next = await tempWorkspace()
+    const h = await hostHarness({ script: [{ text: 'ok' }] })
+    const free = await h.host.create({ projectRoot: null })
+    await h.host.start(free.id, { text: 'one', mode: 'code' })
+    const moving = h.host.setWorkspace(next)
+    await h.host.remove(free.id)
+    await moving
+    assert.equal((await h.host.sessions()).some((session) => session.id === free.id), false)
+    await assert.rejects(h.host.history(free.id), /does not exist/)
+  })
+
   it('leaves a running session where it is, and moves it when it is next used', async () => {
     const next = await tempWorkspace()
     const h = await hostHarness({ client: { delayMs: 20 }, script: [{ text: 'one two three four five six seven eight' }] })
