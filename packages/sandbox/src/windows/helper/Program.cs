@@ -117,7 +117,8 @@ namespace Encode.Sandbox
             List<string> failures = new List<string>();
             foreach (string path in parsed.Paths)
             {
-                if (!Directory.Exists(LabelWalker.Extended(path))) throw new SandboxException("Not a folder: " + path);
+                bool folder;
+                if (!LabelWalker.Exists(path, out folder) || !folder) throw new SandboxException("Not a folder: " + path);
                 if (parsed.IfMissing && Labels.IsLow(path)) continue;
                 LabelWalker walker = LabelWalker.Run(path, parsed.Protect, Progress);
                 done.Add(path);
@@ -171,8 +172,9 @@ namespace Encode.Sandbox
                         if (parsed.Paths.Count == 0) throw new SandboxException("--path is required.");
                         DateTime begun = DateTime.UtcNow;
                         // What was protected goes first: the folders around it would otherwise hand their removal down to it.
-                        foreach (string item in parsed.Protect) if (Directory.Exists(LabelWalker.Extended(item)) || File.Exists(LabelWalker.Extended(item))) Labels.Apply(item, "");
-                        foreach (string path in parsed.Paths) if (Directory.Exists(LabelWalker.Extended(path))) Labels.Apply(path, "");
+                        bool folder;
+                        foreach (string item in parsed.Protect) if (LabelWalker.Exists(item, out folder)) Labels.Apply(item, "");
+                        foreach (string path in parsed.Paths) if (LabelWalker.Exists(path, out folder) && folder) Labels.Apply(path, "");
                         Say(new JsonObject().Bool("ok", true).Number("ms", (long)(DateTime.UtcNow - begun).TotalMilliseconds).ToString());
                         return 0;
                     }

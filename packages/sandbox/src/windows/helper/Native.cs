@@ -226,6 +226,17 @@ namespace Encode.Sandbox
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool GetFileInformationByHandle(IntPtr file, out BY_HANDLE_FILE_INFORMATION info);
 
+        // The Framework's own path functions (Path.GetFullPath, Directory.Exists) refuse "\\?\" paths and paths past
+        // 260 characters in a program built with csc, which runs with the old path rules: these are the system's.
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint GetFileAttributesW(string fileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint GetFullPathNameW(string fileName, uint bufferLength, StringBuilder buffer, IntPtr filePart);
+
+        public const uint INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF;
+        public const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
 

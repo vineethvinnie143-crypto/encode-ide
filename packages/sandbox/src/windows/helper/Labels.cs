@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -87,13 +86,6 @@ namespace Encode.Sandbox
             return label.Contains("OICI") && label.Contains(";NW;;;LW)") && !label.Contains("ID;NW");
         }
 
-        private static bool Exists(string path, out bool folder)
-        {
-            string extended = LabelWalker.Extended(path);
-            folder = Directory.Exists(extended);
-            return folder || File.Exists(extended);
-        }
-
         /// <summary>
         /// Gives the path a medium label of its own, so that a program at the low integrity level cannot change it
         /// even inside a folder that is labeled low. Returns false when there is nothing at the path.
@@ -101,7 +93,7 @@ namespace Encode.Sandbox
         public static bool Protect(string path)
         {
             bool folder;
-            if (!Exists(path, out folder)) return false;
+            if (!LabelWalker.Exists(path, out folder)) return false;
             string label = Get(path);
             // Its own label (not one passed down by the folder it is in) and the medium level: nothing to do.
             if (label.Contains(";NW;;;ME)") && !label.Contains("ID;NW")) return true;
@@ -117,13 +109,13 @@ namespace Encode.Sandbox
         public static void HoldChain(string path, HashSet<string> seen, List<IntPtr> held)
         {
             bool folder;
-            if (!Exists(path, out folder)) return;
+            if (!LabelWalker.Exists(path, out folder)) return;
             if (folder && seen.Add(path.TrimEnd('\\', '/').ToLowerInvariant())) held.Add(Hold(path));
-            string parent = Path.GetDirectoryName(path.TrimEnd('\\', '/'));
-            while (!string.IsNullOrEmpty(parent) && Get(parent).Contains(";NW;;;LW)"))
+            string parent = LabelWalker.ParentOf(path);
+            while (parent != null && Get(parent).Contains(";NW;;;LW)"))
             {
                 if (seen.Add(parent.TrimEnd('\\', '/').ToLowerInvariant())) held.Add(Hold(parent));
-                parent = Path.GetDirectoryName(parent);
+                parent = LabelWalker.ParentOf(parent);
             }
         }
 

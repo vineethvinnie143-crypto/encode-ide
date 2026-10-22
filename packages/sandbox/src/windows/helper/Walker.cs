@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Encode.Sandbox
 {
@@ -108,9 +108,44 @@ namespace Encode.Sandbox
         public static string Extended(string path)
         {
             if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
-            string full = Path.GetFullPath(path);
+            string full = FullPath(path);
             if (full.StartsWith(@"\\", StringComparison.Ordinal)) return @"\\?\UNC\" + full.Substring(2);
             return @"\\?\" + full;
+        }
+
+        /// <summary>The absolute, normalized path, by the system's own rules and without the 260-character limit.</summary>
+        public static string FullPath(string path)
+        {
+            uint size = 512;
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                StringBuilder buffer = new StringBuilder((int)size);
+                uint length = Native.GetFullPathNameW(path, size, buffer, IntPtr.Zero);
+                if (length == 0) throw SandboxException.Last("GetFullPathName(" + path + ")");
+                if (length < size) return buffer.ToString();
+                size = length + 1;
+            }
+            throw new SandboxException("GetFullPathName(" + path + ") kept growing.");
+        }
+
+        /// <summary>Whether anything is at the path, and whether it is a folder (a junction counts as one; it is not followed).</summary>
+        public static bool Exists(string path, out bool folder)
+        {
+            uint attributes = Native.GetFileAttributesW(Extended(path));
+            folder = attributes != Native.INVALID_FILE_ATTRIBUTES && (attributes & Native.FILE_ATTRIBUTE_DIRECTORY) != 0;
+            return attributes != Native.INVALID_FILE_ATTRIBUTES;
+        }
+
+        /// <summary>The folder that holds the path, or null at the root of a drive or a share. Text only, so no length limit applies.</summary>
+        public static string ParentOf(string path)
+        {
+            string trimmed = path.TrimEnd('\\', '/');
+            int at = trimmed.LastIndexOfAny(new char[] { '\\', '/' });
+            if (at <= 0) return null;
+            string parent = trimmed.Substring(0, at);
+            if (parent.Length == 2 && parent[1] == ':') return null;
+            if (parent.StartsWith(@"\\", StringComparison.Ordinal) && parent.Substring(2).Split(new char[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries).Length < 2) return null;
+            return parent;
         }
 
         private void Fail(string path, int error)
