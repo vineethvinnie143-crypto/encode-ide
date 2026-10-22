@@ -63,7 +63,9 @@ const imagesIn = (messages: readonly Message[]): number =>
 async function everythingStored(dir: string): Promise<string> {
   let all = ''
   for (const entry of await fs.readdir(dir, { withFileTypes: true, recursive: true })) {
-    if (entry.isFile()) all += await fs.readFile(path.join(entry.parentPath, entry.name), 'utf8')
+    // The index is rewritten in the background through a temp file that may be gone by the time it is read.
+    if (!entry.isFile() || entry.name.endsWith('.tmp')) continue
+    all += await fs.readFile(path.join(entry.parentPath, entry.name), 'utf8').catch(() => '')
   }
   return all
 }

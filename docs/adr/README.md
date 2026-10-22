@@ -40,6 +40,7 @@ say so.
 | [0043](0043-checkpoints-record-what-the-file-tools-change.md) | Checkpoints record what the file tools change, and rewinding never overwrites silently | Accepted |
 | [0044](0044-an-in-house-mcp-client-with-per-server-approval.md) | An in-house MCP client, with per-server approval | Accepted |
 | [0050](0050-the-desktop-is-used-through-one-tool-one-application-and-one-chat-at-a-time.md) | The desktop is used through one tool, one application and one chat at a time | Accepted |
+| [0051](0051-tester-builds-carry-their-commit-keep-a-scrubbed-log-and-report-in-one-file.md) | Tester builds carry their commit, keep a scrubbed log and report in one file | Accepted |
 
 ## Template
 

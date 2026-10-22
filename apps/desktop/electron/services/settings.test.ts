@@ -170,3 +170,39 @@ describe('SettingsService appearance', () => {
     assert.equal(settings.get().appearance.mode, 'dark')
   })
 })
+
+describe('SettingsService defaults and secrets', () => {
+  it('starts a new install where it is safe: the offline model, asking before commands, nothing remembered', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(settings.policy, 'workspace-write', 'never Full access until the user chooses it')
+    assert.equal(settings.activeProfileId, 'demo')
+    assert.deepEqual(settings.profiles.map((profile) => [profile.id, profile.kind, profile.hasApiKey]), [['demo', 'demo', false]])
+    assert.deepEqual(settings.recentWorkspaces, [])
+    assert.equal(settings.lastWorkspace, null)
+    assert.equal(settings.agentMode, 'code')
+  })
+
+  it('falls back to those defaults when the file is damaged', () => {
+    fs.writeFileSync(file(), '{ not json')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().policy, 'workspace-write')
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'everything', profiles: [] }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().policy, 'workspace-write', 'an unknown policy is not Full access')
+  })
+
+  it('lists the keys it holds, so a log or a report can be scrubbed of exactly those', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.secrets(), [])
+    settings.save({
+      profiles: [
+        { id: 'demo', name: 'Demo', kind: 'demo', baseUrl: '', model: 'eNCode-demo' },
+        { id: 'a', name: 'A', kind: 'custom', baseUrl: 'https://a.example/v1', model: 'm' },
+        { id: 'b', name: 'B', kind: 'custom', baseUrl: 'https://b.example/v1', model: 'm' },
+      ],
+    })
+    settings.setProfileKey('a', 'key-for-a-0001')
+    settings.setProfileKey('b', 'key-for-b-0002')
+    assert.deepEqual(settings.secrets().sort(), ['key-for-a-0001', 'key-for-b-0002'])
+    settings.setProfileKey('a', '')
+    assert.deepEqual(settings.secrets(), ['key-for-b-0002'])
+  })
+})

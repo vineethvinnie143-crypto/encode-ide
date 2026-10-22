@@ -112,6 +112,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T31 | Text on screen steers the model into input the user did not want, or into sending what cannot be taken back | The first use of each application asks, with a warning for browsers, chat and mail. Screen text arrives inside `<screen_content>` marked as data. Keys that leave the window and typing into password fields are refused, a turn is capped at 150 inputs, and moving the mouse or typing stops the agent until the user speaks (0050). | Partial (R2, R14) |
 | T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none (0050). | Mitigated |
 | T33 | Two chats drive the mouse at once and act on each other's screens | One chat at a time sends input; another is told the desktop is busy, and the hold ends after 30 seconds without input, on stop or on close (0050). | Mitigated |
+| T34 | A log or a diagnostics report that a tester sends to someone else carries a key, a conversation or the user's name | Every log line is scrubbed before it is kept: keys and tokens by shape, the stored keys by value, e-mail addresses and user names in paths. A report holds no file contents, conversations or remembered folders, is scrubbed again with the keys read fresh, is written only where the user says and is never sent by eNCode (0051). | Partial (R15) |
 
 ## Residual risks
 
@@ -198,6 +199,10 @@ Each item names what remains, why it is acceptable for now, and who closes it.
     narrows this, and the owner of the list is the Windows backend's record.
   - Owner: the Windows backend (masking of other programs' windows and password fields in
     screenshots, the stop key and the "agent is controlling" indicator).
+- **R15. A report is scrubbed by shape.** A key of a kind nobody has seen, that eNCode does not hold, can
+  get through; and a log line can name a file or folder when something went wrong with it. The report says so and is
+  plain text, so the tester reads it before sending it.
+  - Owner: whoever adds a log line, who logs no content; the patterns grow with the services eNCode talks to.
 
 ## Verification
 
@@ -212,7 +217,11 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - the `WebFetch` approval and private-address refusal;
   - compaction after an overflow refusal;
   - what the model is sent (the project's instructions arrive as a reminder, never in the
-    system prompt) and the session logs on disk (owner-only, no key in them).
+    system prompt) and the session logs on disk (owner-only, no key in them);
+  - the About box and a diagnostics report, which must hold no key that was just stored.
+- The same run packages the app, then starts the unpacked program, the portable program and the
+  installed program (installing and uninstalling it silently) and checks that the bundled
+  interface loads, the build names its commit, and the agent process answers (0051).
 
 ## The free-tier gateway and accounts
 

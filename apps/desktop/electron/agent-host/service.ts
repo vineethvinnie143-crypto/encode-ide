@@ -197,6 +197,11 @@ export class AgentHostService {
     }, delay)
   }
 
+  /** For a diagnostics report: whether the process is up, how many times in a row it stopped, how many sessions are working. */
+  health(): { running: boolean; failures: number; working: number } {
+    return { running: Boolean(this.peer && !this.peer.closed), failures: this.failures, working: this.working.size }
+  }
+
   /** Closes the sessions, then the process. */
   async dispose(): Promise<void> {
     if (this.disposed) return

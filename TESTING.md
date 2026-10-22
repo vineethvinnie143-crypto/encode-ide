@@ -1,0 +1,76 @@
+# Testing eNCode
+
+This is for the people trying the tester builds: the owner and a few friends. A tester build changes often, is not
+signed and does not update itself. Windows 10 or 11, 64-bit.
+
+## Get it
+
+Every build that reaches `main` is kept for 30 days as an artifact of its CI run (GitHub → Actions → the run →
+*Artifacts*), named `eNCode-windows-<commit>-run<number>`. It holds:
+
+| File | Use it when |
+| --- | --- |
+| `eNCode-<version>-setup.exe` | Normally. Installs for your user only, with no administrator prompt, and adds a Start menu entry. |
+| `eNCode-<version>-portable.exe` | You cannot or do not want to install. Nothing is installed, and it starts more slowly because it unpacks itself each time. |
+
+## First start
+
+1. Windows says **"Windows protected your PC"** because the build is not signed. Choose **More info**, then **Run
+   anyway**. This is expected for every tester build.
+2. Open **Help → About eNCode** and check that the commit matches what you were told you are testing.
+3. Without a key the **Demo (offline)** model runs a scripted plan against a folder you open, so approvals, diffs and
+   the shell can be tried at once.
+4. For a real model: profile menu at the bottom of the left rail → **Settings… → Models → Add provider → OpenRouter**,
+   paste your key and pick a model. Keys are sealed by Windows (DPAPI) and go only to the server they were entered for.
+
+## Stay safe
+
+- The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command
+  and before it touches anything outside the folder. Leave it there. **Full access** lets the agent run commands without
+  asking.
+- Open a **copy** of a project you care about, not the only copy.
+- eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
+  pages the agent fetches. There is no telemetry and no update check.
+
+## What to try
+
+Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
+run the tests and fix what fails, then review the diff. Stop it in the middle of a turn. Work in two sessions at once.
+Edit a file in the editor by hand while the agent works in the same folder. Change the theme, the text size and the
+Windows display scale (125%, 150%). Leave it open for an hour.
+
+What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
+the tools you use now.
+
+## When something goes wrong
+
+1. **Help → Save diagnostics…** and pick a place for the file.
+2. Send that file with what you did, what you expected and what happened. A screenshot helps.
+
+The report says which build this is and what it runs on, lists the models without their keys, counts the sessions and
+ends with the last 400 lines of the log. It has no API keys, no file contents and no conversations. Your user folder is
+shown as `~`. A log line can still name a file or folder when something went wrong with it, and the file is plain
+text: read it before you send it. **Help → Show log files** opens the folder the logs are in.
+
+## Where things are
+
+| What | Where |
+| --- | --- |
+| Settings, with keys sealed | `%APPDATA%\eNCode\eNCode-settings.json` |
+| Sessions | `%APPDATA%\eNCode\sessions\` |
+| Logs | `%APPDATA%\eNCode\logs\` |
+| Your instructions, skills and agents | `%USERPROFILE%\.encode\` |
+
+Updating means installing the next build over the last one: everything above stays.
+
+## Start over, or remove it
+
+- Uninstall from **Settings → Apps**. Your data stays.
+- For a clean slate, close eNCode and delete `%APPDATA%\eNCode`.
+
+## Known limits
+
+- Windows only for now; macOS and Linux are not tested.
+- Not signed, so SmartScreen warns on first start, and some antivirus programs look closely at a new program.
+- No automatic updates: a new build is a new download.
+- A network that needs a proxy does not work yet for model requests.

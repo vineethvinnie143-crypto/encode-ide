@@ -313,12 +313,40 @@ export interface AgentHistory {
 
 export type ZoomAction = 'in' | 'out' | 'reset'
 
+/** Which build this is and what it runs on; shown in About and at the top of a diagnostics report. */
+export interface AboutInfo {
+  name: string
+  version: string
+  /** The commit the build was made from: 40 hex characters, or empty for a build made outside a checkout. */
+  commit: string
+  /** The build was made from a working tree with changes in it. */
+  dirty: boolean
+  builtAt: string
+  /** "tester" for a build that is handed out, "dev" otherwise. */
+  channel: string
+  /** Installed and run as a program, not started from the sources. */
+  packaged: boolean
+  platform: string
+  arch: string
+  /** Operating system and release, for example "Windows 11 (10.0.26100)". */
+  os: string
+  electron: string
+  chrome: string
+  node: string
+}
+
 export interface EncodeApi {
   app: {
-    version(): Promise<string>
-    platform(): Promise<string>
+    about(): Promise<AboutInfo>
     user(): Promise<string>
     feedback(text: string): Promise<void>
+    /**
+     * Asks where to save a report for the person who looks after eNCode (build, system, settings without keys,
+     * recent log lines, counts) and writes it. Resolves to the file, or null when the dialog was cancelled.
+     */
+    exportDiagnostics(): Promise<string | null>
+    /** Shows the folder the log files are in. */
+    openLogs(): Promise<void>
   }
   window: {
     minimize(): Promise<void>

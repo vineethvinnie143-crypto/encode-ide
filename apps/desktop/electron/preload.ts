@@ -30,10 +30,11 @@ function on<T>(channel: string, callback: (payload: T) => void): () => void {
 
 const api: EncodeApi = {
   app: {
-    version: () => invoke('app:version'),
-    platform: () => invoke('app:platform'),
+    about: () => invoke('app:about'),
     user: () => invoke('app:user'),
     feedback: (text: string) => invoke('app:feedback', text),
+    exportDiagnostics: () => invoke('app:export-diagnostics'),
+    openLogs: () => invoke('app:open-logs'),
   },
   window: {
     minimize: () => invoke('window:minimize'),

@@ -69,6 +69,46 @@
   color: var(--text-3);
   font-size: var(--fs-12);
 }
+.about-facts {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  text-align: left;
+}
+.about-facts > div {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: center;
+  min-height: 24px;
+}
+.about-facts dt {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.about-facts dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.about-build {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  min-width: 0;
+}
+.about-mono {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  white-space: nowrap;
+}
 .about-body p {
   margin: 10px 0 0;
   color: var(--text-2);

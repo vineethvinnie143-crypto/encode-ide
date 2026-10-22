@@ -245,6 +245,11 @@ export class SettingsService {
     return this.get()
   }
 
+  /** Every stored key, so that a log or a report can be scrubbed of exactly these values. */
+  secrets(): string[] {
+    return this.data.profiles.map((profile) => this.vault.get(profile.id, profile.apiKeyEnc)).filter(Boolean)
+  }
+
   keyFor(profileId: string): string {
     const profile = this.data.profiles.find((p) => p.id === profileId)
     return profile ? this.vault.get(profile.id, profile.apiKeyEnc) : ''

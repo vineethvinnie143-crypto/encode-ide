@@ -4,9 +4,9 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electronPath from 'electron'
+import { mainBuildOptions } from './main-build.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const external = ['electron']
 
 let child = null
 let exiting = false
@@ -64,22 +64,8 @@ async function main() {
 
   // 2. esbuild watch for main + preload, restart electron on rebuild
   const ctx = await context({
-    absWorkingDir: root,
-    entryPoints: {
-      main: path.join(root, 'electron/main.ts'),
-      preload: path.join(root, 'electron/preload.ts'),
-      // The agent runs in a utility process of its own.
-      'agent-host': path.join(root, 'electron/agent-host/entry.ts'),
-    },
-    outdir: path.join(root, 'dist/electron'),
-    outExtension: { '.js': '.cjs' },
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'cjs',
-    sourcemap: 'inline',
-    external,
-    define: { 'process.env.NODE_ENV': '"development"' },
+    ...mainBuildOptions({ production: false }),
+    logLevel: 'warning',
     plugins: [
       {
         name: 'eNCode-restart',
