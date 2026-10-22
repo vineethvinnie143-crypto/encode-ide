@@ -4,16 +4,25 @@
  * own; the main process answers one, for keys. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
-import type { HostEvents, HostRequests, ProfileConfig } from '@encode/core'
-import type { ApprovalPolicy } from '../../shared/types'
+import type { HostEvents, HostRequests } from '@encode/core'
+import type { ModelMode } from '../../shared/models'
+import type { ApprovalPolicy, ModelAlert, ModelStatus } from '../../shared/types'
+import type { RouterSettings } from './router-settings'
 
 /** What the host needs to know about the user's settings, and nothing else of them. */
 export interface HostConfig {
   policy: ApprovalPolicy
   maxSteps: number
   maxGoalRounds: number
-  /** The model in use; null when none is set up. */
-  profile: ProfileConfig | null
+  /** What answers the model calls: the scripted demo, nothing yet, or real models through the router. */
+  model: ModelMode
+  /** The model router's settings; no keys. */
+  router: RouterSettings
+  /**
+   * The router's providers by id: the profile each is, its name for messages, and a number that changes with its
+   * key (null: no key is stored). The key itself stays in the main process until a request needs it.
+   */
+  providers: Record<string, { profile: string; name: string; keyRevision: number | null }>
 }
 
 export interface HostInit {
@@ -26,6 +35,16 @@ export interface HostInit {
   config: HostConfig
   /** A sessions file of an earlier build, imported once if it is there. */
   legacySessionsFile?: string
+  /** Where the router keeps what it has learned (model lists, health, free-tier counts) between runs. */
+  routerStateFile?: string
+}
+
+/** The result of a test call to one model. */
+export interface ModelCheckResult {
+  ok: boolean
+  message: string
+  /** What the model took to start answering, ms. */
+  ms?: number
 }
 
 export type DesktopHostRequests = HostRequests & {
@@ -33,10 +52,16 @@ export type DesktopHostRequests = HostRequests & {
   configure: { params: HostConfig; result: void }
   /** Closes the sessions and their commands, and flushes the logs; the process exits afterwards. */
   shutdown: { params: undefined; result: void }
+  /** How the model connections are doing. */
+  modelStatus: { params: undefined; result: ModelStatus }
+  /** A small tool call to one model, the way the agent will make it. */
+  modelCheck: { params: { profileId: string; model: string }; result: ModelCheckResult }
+  /** Lifts what a refused key or a payment problem set, reads the model lists again. */
+  modelRecheck: { params: undefined; result: void }
 }
 
 /** What the host serves. */
-export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents }
+export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert } }
 
 /** What the main process serves to the host. */
 export type MainApi = {

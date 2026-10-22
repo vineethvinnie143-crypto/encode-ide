@@ -35,6 +35,9 @@ importers:
       '@encode/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@encode/router':
+        specifier: workspace:*
+        version: link:../../packages/router
       '@encode/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit

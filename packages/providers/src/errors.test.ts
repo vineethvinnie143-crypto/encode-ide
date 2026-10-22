@@ -34,6 +34,15 @@ describe('classifyHttpFailure', () => {
     assert.equal(anthropic.used, 215001)
 
     assert.equal(classifyHttpFailure(413, undefined, '').kind, 'context-overflow')
+
+    // When the server splits what it counted, the prompt is the part the conversation can shrink.
+    const split = classifyHttpFailure(
+      400,
+      undefined,
+      JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (7568 in the messages, 1432 in the completion). Please reduce the length of the messages or completion." } }),
+    )
+    assert.equal(split.window, 8192)
+    assert.equal(split.used, 7568)
   })
 
   it('keeps auth, payment and missing models apart', () => {

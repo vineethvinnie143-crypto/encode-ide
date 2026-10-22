@@ -5,6 +5,7 @@ import type {
   AgentStartInput,
   BackgroundJob,
   EncodeApi,
+  ModelAlert,
   PlanRequest,
   SearchOptions,
   SessionGoal,
@@ -71,6 +72,9 @@ const api: EncodeApi = {
     openRouter: (freeOnly?: boolean) => invoke('models:openrouter', freeOnly),
     provider: (id: string) => invoke('models:provider', id),
     test: (id: string) => invoke('models:test', id),
+    status: () => invoke('models:status'),
+    recheck: () => invoke('models:recheck'),
+    onAlert: (callback) => on<ModelAlert>('models:alert', callback),
   },
   git: {
     status: () => invoke('git:status'),

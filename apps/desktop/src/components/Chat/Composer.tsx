@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, Paperclip, Pencil, Plus, Shield, Sparkles, Square, Target, Trash2, X } from '../../ui/icons'
+import { ArrowDown, ArrowUp, ChevronDown, Paperclip, Pencil, Plus, Shield, Square, Target, Trash2, X } from '../../ui/icons'
 import { api } from '../../api'
+import { errorText } from '../../ipc-error'
 import { POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
 import { useChat } from '../../stores/chat'
 import CommandPalette from '../CommandPalette'
@@ -14,6 +15,7 @@ import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Menu, type MenuEntry } from '../../ui/Menu'
 import { Pill } from '../../ui/Pill'
+import ModelButton from '../models/ModelButton'
 
 const MAX_LINES = 12
 const LINE = 22
@@ -60,7 +62,6 @@ export default function Composer() {
   const activePath = useEditor((state) => state.activePath)
   const settings = useSettings((state) => state.settings)
   const save = useSettings((state) => state.save)
-  const activeProfile = useSettings((state) => state.activeProfile())
   const workspace = useWorkspace((state) => state.workspace)
   const notify = useUi((state) => state.notify)
   const askText = useUi((state) => state.askText)
@@ -126,7 +127,7 @@ export default function Composer() {
       const result = await api.agent.compact(sessionId)
       notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact yet')
     } catch (error) {
-      notify('error', (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+      notify('error', errorText(error))
     }
   }
 
@@ -183,7 +184,7 @@ export default function Composer() {
         document.querySelector<HTMLButtonElement>('.policy-chip')?.click()
         break
       case 'model':
-        useUi.getState().openSettings('models')
+        document.querySelector<HTMLButtonElement>('.model-chip')?.click()
         break
       case 'export':
         await exportSession()
@@ -333,15 +334,7 @@ export default function Composer() {
 
           <span className="composer-spacer" />
 
-          <Pill
-            className="model-chip"
-            icon={<Sparkles size={13} />}
-            caret={<ChevronDown size={12} />}
-            title="Model settings"
-            onClick={() => useUi.getState().openSettings('models')}
-          >
-            {activeProfile ? `${activeProfile.name}: ${activeProfile.model || 'pick a model'}` : 'No model'}
-          </Pill>
+          <ModelButton />
 
           {running && !ask ? (
             <button type="button" className="composer-send is-stop" onClick={() => void stop()} title="Stop" aria-label="Stop">

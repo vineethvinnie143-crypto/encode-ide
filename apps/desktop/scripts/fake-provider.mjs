@@ -83,13 +83,34 @@ const SCENARIOS = {
   'follow-up': [{ text: 'Follow-up handled.' }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
   'long-reply': [{ text: longReply(), streamDelayMs: 3 }],
-  // The second request is refused as too long until the transcript carries a summary. Each step
-  // reads a file, so there are older steps to summarize by the time the conversation is compacted.
+  // The fourth request is refused as too long: the first two steps wrote and read back a long survey, and the model's
+  // window is only the instructions and tools plus a little more. The older steps are summarized and the survey's
+  // output is shortened, so the compacted transcript fits.
   overflow: [
-    { text: 'Looking around first.', call: { name: 'Glob', args: { pattern: '**/*' } } },
-    { text: 'Reading the readme.', call: { name: 'Read', args: { file_path: 'README.md' } } },
+    { text: 'Writing down what is here.', call: { name: 'Write', args: { file_path: 'survey.txt', content: survey() } } },
+    { text: 'Reading it back.', call: { name: 'Read', args: { file_path: 'survey.txt' } } },
+    { text: 'Looking around once more.', call: { name: 'Glob', args: { pattern: '**/*' } } },
     { text: 'Compaction verified.', overflowUntilCompacted: true },
   ],
+}
+
+/** About 36 KB of notes, enough to outgrow the window of the overflow scenario. */
+function survey() {
+  return Array.from({ length: 400 }, (_, index) => `Note ${String(index + 1).padStart(3, '0')}: the workspace was surveyed before reading anything, and nothing here needed changing.`).join('\n') + '\n'
+}
+
+/** Tokens as this server counts them: about three and a half characters each. */
+const tokensOf = (text) => Math.ceil(text.length / 3.5)
+
+/**
+ * The window of the model in the overflow scenario: what any request needs (the instructions, the tools and the first
+ * message) and room for a summary and the latest steps. Instructions and tools are most of a small request, so a
+ * window taken as a share of the whole request would leave no room for them once the conversation is compacted.
+ */
+function overflowWindow(body, messages) {
+  const first = messages.find((message) => message.role === 'user')
+  const base = { ...body, messages: [...messages.filter((message) => message.role === 'system'), ...(first ? [first] : [])] }
+  return tokensOf(JSON.stringify(base)) + 6_000
 }
 
 /**
@@ -191,8 +212,16 @@ function scenarioOf(messages) {
   return match && SCENARIOS[match[1]] ? match[1] : 'default'
 }
 
+/** True once eNCode has put a summary in the conversation (the system prompt only mentions the tag). */
+const compacted = (messages) =>
+  messages.some(
+    (message) => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<conversation_summary>'),
+  )
+
 function stepOf(messages) {
   const script = SCENARIOS[scenarioOf(messages)]
+  // Compacting drops the tool results the step count is made of, so a conversation that was compacted is at the end.
+  if (script.at(-1)?.overflowUntilCompacted && compacted(messages)) return script.at(-1)
   const done = messages.slice(lastUserIndex(messages) + 1).filter((message) => message.role === 'tool').length
   return script[Math.min(done, script.length - 1)]
 }
@@ -228,12 +257,6 @@ function pairingProblem(messages) {
 /** The small call that names a session once its first turn is over. */
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
-
-/** True once eNCode has put a summary in the conversation (the system prompt only mentions the tag). */
-const compacted = (messages) =>
-  messages.some(
-    (message) => message.role === 'user' && typeof message.content === 'string' && message.content.includes('<conversation_summary>'),
-  )
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -302,12 +325,15 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
-    lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages }
-    const step = stepOf(messages)
-    if (step.overflowUntilCompacted && !compacted(messages)) {
+    // The connection check asks for one call to a tool named echo, the way a person's first message would ask for work.
+    const check = body.tools.some((tool) => (tool.function?.name ?? tool.name) === 'echo')
+    if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages }
+    const step = check ? { text: '', call: { name: 'echo', args: { text: 'eNCode' } } } : stepOf(messages)
+    const used = tokensOf(raw)
+    const window = !check && step.overflowUntilCompacted ? overflowWindow(body, messages) : Infinity
+    if (used > window) {
       stats.overflowRefusals += 1
-      const used = Math.ceil(raw.length / 3.5)
-      const window = Math.floor(used * 0.8)
+      console.log(`[fake-provider] refused a prompt of ${used} tokens, window ${window}; messages: ${messages.map((message) => `${message.role}:${JSON.stringify(message).length}`).join(' ')}`)
       sendJson(response, 400, {
         error: {
           message: `This model's maximum context length is ${window} tokens. However, your messages resulted in ${used} tokens. Please reduce the length of the messages.`,
@@ -318,7 +344,7 @@ const server = http.createServer(async (request, response) => {
       })
       return
     }
-    console.log(`[fake-provider] ${body.model ?? '?'} scenario=${scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
+    console.log(`[fake-provider] ${body.model ?? '?'} scenario=${check ? 'check' : scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
     if (!step.call) {
       await sendText(response, body, step.text, step.streamDelayMs)
       return

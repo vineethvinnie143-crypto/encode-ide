@@ -1,6 +1,8 @@
 import { create } from '../store'
+import { FREE_REF, demoPatch, labelOfRef, mainPatch, parseRef } from '@shared/models'
 import type { AgentMode, Settings } from '@shared/types'
 import { api } from '../api'
+import { errorText } from '../ipc-error'
 import { useUi } from './ui'
 
 interface SettingsStore {
@@ -11,6 +13,13 @@ interface SettingsStore {
   /** False when the key was refused; the reason has been shown. */
   setProfileKey(id: string, key: string): Promise<boolean>
   setMode(mode: AgentMode): Promise<void>
+  /**
+   * Makes `ref` ("@free" or "<profile id>:<model id>") the only main model. A billed one asks first while only free
+   * models are allowed, since choosing it turns that off. False when the person said no.
+   */
+  chooseMain(ref: string, free: boolean): Promise<boolean>
+  /** Hands the main role back to the offline demo. */
+  chooseDemo(): Promise<void>
   activeProfile(): Settings['profiles'][number] | null
 }
 
@@ -44,8 +53,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       set({ settings })
       return true
     } catch (error) {
-      const message = (error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
-      useUi.getState().notify('error', `Could not store the key: ${message}`)
+      useUi.getState().notify('error', `Could not store the key: ${errorText(error)}`)
       return false
     }
   },
@@ -54,6 +62,30 @@ export const useSettings = create<SettingsStore>((set, get) => ({
     const current = get().settings
     if (current?.agentMode === mode) return
     await get().save({ agentMode: mode })
+  },
+
+  chooseMain: async (ref, free) => {
+    const settings = get().settings
+    if (!settings) return false
+    if (!free && ref !== FREE_REF && settings.freeOnly) {
+      const parsed = parseRef(ref, settings.profiles)
+      const provider = parsed?.kind === 'model' ? settings.profiles.find((profile) => profile.id === parsed.profileId)?.name : undefined
+      const allowed = await useUi.getState().askConfirm({
+        title: 'Use a billed model?',
+        body: `${labelOfRef(settings, ref)} is billed${provider ? ` by ${provider}` : ''} to your key. eNCode is set to use only free models, so choosing it turns that off. You can turn it back on in Settings, under Roles.`,
+        confirmLabel: 'Allow billed models',
+      })
+      if (!allowed) return false
+      await get().save({ ...mainPatch(settings, [ref]), freeOnly: false })
+      return true
+    }
+    await get().save(mainPatch(settings, [ref]))
+    return true
+  },
+
+  chooseDemo: async () => {
+    const settings = get().settings
+    if (settings) await get().save(demoPatch(settings))
   },
 
   activeProfile: () => {

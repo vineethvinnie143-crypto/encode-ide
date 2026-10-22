@@ -199,7 +199,7 @@ interface RequestState {
   retried: Set<string>
   /** Retry this model next. */
   forceKey?: string
-  /** After an overflow the server did not size: what it said it counted. */
+  /** After an overflow: the prompt size a server counted, which beats the estimate for every model tried next. */
   overflowUsed?: number
   lastFailure?: { key: string; kind: FailureKind; message: string; retryAt?: number }
   previousKey?: string
@@ -455,10 +455,12 @@ export class ModelRouter implements ModelClient {
       if (state.attempts >= limits.maxAttempts) return this.giveUp(state, role, refs, request.requirements)
 
       const sticky = request.sticky !== undefined ? this.sessions.get(request.sticky) : undefined
+      // After an overflow, what the server counted replaces an estimate that was too low.
+      const { requirements } = request
       const { candidates, skipped } = selectCandidates(this.selection, {
         role,
         refs,
-        requirements: request.requirements,
+        requirements: state.overflowUsed !== undefined && state.overflowUsed > requirements.promptTokens ? { ...requirements, promptTokens: state.overflowUsed } : requirements,
         sticky,
         exclude: state.excluded,
       })
@@ -808,12 +810,12 @@ export class ModelRouter implements ModelClient {
       }
       case 'context-overflow': {
         const retryKey = `${key}:overflow`
+        if (error.used !== undefined) state.overflowUsed = Math.max(state.overflowUsed ?? 0, error.used)
         if (error.window !== undefined) {
           this.registry.learn(key, { contextWindow: error.window })
         } else {
           // The server did not say; the prompt plus the output budget did not fit, so the window is smaller than that.
-          this.registry.learn(key, { contextWindow: request.requirements.promptTokens + candidate.maxOutputTokens })
-          state.overflowUsed = error.used ?? state.overflowUsed
+          this.registry.learn(key, { contextWindow: (error.used ?? request.requirements.promptTokens) + candidate.maxOutputTokens })
         }
         if (state.retried.has(retryKey)) state.excluded.add(key)
         else state.retried.add(retryKey)

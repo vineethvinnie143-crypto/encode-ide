@@ -177,20 +177,32 @@ export function registerIpc(deps: IpcDeps): void {
     configureAgent()
     return saved
   })
-  handle('settings:set-key', (profileId: string, key: string) => settings.setProfileKey(String(profileId), String(key ?? '')))
+  handle('settings:set-key', (profileId: string, key: string) => {
+    const saved = settings.setProfileKey(String(profileId), String(key ?? ''))
+    // The host learns that the key changed (not what it is), so the router tries a refused provider again.
+    configureAgent()
+    return saved
+  })
 
-  // A fetched catalog tells the host the context window of the OpenRouter model in use.
-  handle('models:openrouter', async (freeOnly?: boolean) => {
-    const list = await models.openRouter(Boolean(freeOnly))
-    configureAgent()
-    return list
+  handle('models:openrouter', (freeOnly?: boolean) => models.openRouter(Boolean(freeOnly)))
+  handle('models:provider', (profileId: string) => models.provider(String(profileId)))
+  // Whether the models can be listed, then a small tool call to the chosen model, as the agent makes it. The call is the test:
+  // a provider that does not list its models can still answer.
+  handle('models:test', async (profileId: string) => {
+    const id = String(profileId)
+    const listing = await models.test(id)
+    const profile = settings.raw().profiles.find((candidate) => candidate.id === id)
+    const model = profile?.model.trim() ?? ''
+    if (!profile || profile.kind === 'demo' || !model || !profile.baseUrl.trim()) return listing
+    try {
+      const check = await agent.modelCheck(id, model)
+      return { ok: check.ok, message: check.ok && listing.ok ? `${listing.message}. ${check.message}` : check.message }
+    } catch (error) {
+      return { ok: false, message: hostFailure(error).message }
+    }
   })
-  handle('models:provider', async (profileId: string) => {
-    const list = await models.provider(String(profileId))
-    configureAgent()
-    return list
-  })
-  handle('models:test', (profileId: string) => models.test(String(profileId)))
+  handle('models:status', () => agent.modelStatus().catch((error) => Promise.reject(hostFailure(error))))
+  handle('models:recheck', () => agent.modelRecheck().catch((error) => Promise.reject(hostFailure(error))))
 
   handle('git:status', () => git.status())
 

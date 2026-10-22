@@ -8,7 +8,14 @@ import type { HostConfig } from './api'
 import { runHostRuntime, type HostRuntime } from './runtime'
 import { AgentHostService, HOST_STOPPED_MESSAGE, type HostProcess } from './service'
 
-const config: HostConfig = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8, profile: null }
+const config: HostConfig = {
+  policy: 'workspace-write',
+  maxSteps: 30,
+  maxGoalRounds: 8,
+  model: 'none',
+  router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
+  providers: {},
+}
 
 async function until<T>(read: () => T | undefined | false, ms = 3_000): Promise<T> {
   const end = Date.now() + ms

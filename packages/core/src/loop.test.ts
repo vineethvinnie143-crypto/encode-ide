@@ -327,6 +327,22 @@ describe('the context window', () => {
     assert.ok(isPaired(h.conversation.messages()))
   })
 
+  it('keeps only a share of a small window for the answer, rather than compacting on every request', async () => {
+    // The instructions and tools take about 5,800 tokens and the conversation about 8,600. Reserving all 8,192 tokens an
+    // answer may take would leave a 20,000-token window 11,800 for the prompt, which is less than that; a quarter of it
+    // leaves 15,000.
+    const h = await loopHarness({
+      client: { contextWindow: 20_000, maxOutputTokens: 8_192 },
+      script: (request) => (request.role === 'summarizer' ? { text: 'SUMMARY' } : { text: 'ok' }),
+    })
+    for (let i = 0; i < 2; i++) {
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(7_500)}`), { turnId: `t${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(7_500)}`)] }, { turnId: `t${i}` })
+    }
+    assert.deepEqual(await h.run('and now?'), { kind: 'done', reply: 'ok' })
+    assert.deepEqual(h.client.requests.map((request) => request.role), ['main'])
+  })
+
   it('compacts and tries again when the provider says the prompt does not fit', async () => {
     const h = await loopHarness({
       script: (request, step) => {
@@ -348,7 +364,17 @@ describe('the context window', () => {
     const h = await loopHarness({ script: [{ outcome: { kind: 'compact', window: 100 } }] })
     const end = await h.run('go')
     assert.equal(end.kind, 'failed')
-    assert.match(end.kind === 'failed' ? end.message : '', /does not fit the model's context window/)
+    const message = end.kind === 'failed' ? end.message : ''
+    assert.match(message, /does not fit the model's context window \(100 tokens\)/)
+    assert.match(message, /instructions and tools alone take about [\d,]+ tokens/, 'the part that cannot be compacted is named when it is most of the window')
+    assert.match(message, /Choose a model with a larger window\.$/)
+  })
+
+  it('does not blame the instructions when the window is large enough for them', async () => {
+    const h = await loopHarness({ script: [{ outcome: { kind: 'compact', window: 10_000_000 } }] })
+    const end = await h.run('go')
+    assert.equal(end.kind, 'failed')
+    assert.doesNotMatch(end.kind === 'failed' ? end.message : '', /instructions and tools/)
   })
 
   it('compacts on request, keeping only the latest messages, with the user\'s instructions for the summary', async () => {

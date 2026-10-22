@@ -18,6 +18,9 @@ export type AgentStatus =
 
 export type ProfileKind = 'custom' | 'openrouter' | 'demo'
 
+/** The jobs a model can be given; the names core and the model router use. */
+export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility'
+
 export interface ModelProfile {
   id: string
   name: string
@@ -49,8 +52,49 @@ export interface Settings {
   agentMode: AgentMode
   /** Theme, accent, contrast, density and motion; see shared/appearance.ts. */
   appearance: Appearance
+  /**
+   * The models each role uses, best first; a later one takes over when the ones before it cannot answer.
+   * An entry is "<profile id>:<model id>", or "@free" for the free models. A role without a list follows another
+   * (see shared/models.ts), and main without one uses the active profile's model.
+   */
+  roles: Partial<Record<ModelRole, string[]>>
+  /** Never send a request to a model that costs money, whatever the roles list. */
+  freeOnly: boolean
+  /** The OpenRouter profile whose key serves "@free"; null picks the first one that has a key. */
+  freeProfileId: string | null
+  /** The first-run dialog has been answered: a model connected, the demo chosen, or "not now". */
+  setupDone: boolean
   /** Read only; reported by the main process and ignored on save. */
   keyStorage: KeyStorage
+}
+
+/** Something about a model connection the person should hear, from the model router. */
+export interface ModelAlert {
+  kind: 'key-refused' | 'sign-in' | 'payment' | 'quota' | 'catalog' | 'billed' | 'model-refused'
+  /** The profile it is about, when it is one of theirs. */
+  profileId: string | null
+  message: string
+  /** When the block ends, ms since the epoch. */
+  until?: number
+}
+
+/** How the model connections are doing, for the Models page. */
+export interface ModelStatus {
+  /** The router found nothing wrong with the settings it was given, or these problems. */
+  problems: string[]
+  providers: Array<{
+    profileId: string
+    name: string
+    /** Models the provider lists, and how many of them are free; undefined until the list has been read. */
+    models?: number
+    free?: number
+    /** Why the list could not be read. */
+    catalogError?: string
+    /** Why requests to this provider are held back, and until when (ms since the epoch). */
+    blocked?: { message: string; until: number }
+    /** Free requests left today, when the provider says. */
+    freeLeft?: number
+  }>
 }
 
 export interface FileEntry {
@@ -116,6 +160,8 @@ export interface ModelInfo {
   contextLength?: number
   free?: boolean
   pricing?: string
+  /** The provider lists tool calls among what the model supports; the agent needs them. Unset when the listing does not say. */
+  tools?: boolean
 }
 
 export interface ShellCreateOptions {
@@ -384,7 +430,12 @@ export interface EncodeApi {
   models: {
     openRouter(freeOnly?: boolean): Promise<ModelInfo[]>
     provider(id: string): Promise<ModelInfo[]>
+    /** Lists the models, then asks the chosen one for a tool call, the way the agent will. */
     test(id: string): Promise<{ ok: boolean; message: string }>
+    status(): Promise<ModelStatus>
+    /** Lifts what a refused key or a payment problem set, and asks again: after changing a key or adding credit. */
+    recheck(): Promise<void>
+    onAlert(cb: (alert: ModelAlert) => void): () => void
   }
   git: {
     status(): Promise<GitStatus>
