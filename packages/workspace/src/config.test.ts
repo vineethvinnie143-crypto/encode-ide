@@ -222,7 +222,8 @@ describe('a folder\'s settings', () => {
     assert.deepEqual((await config.refresh()).extraRoots, [])
     await config.trustStore.trust(root, folderConfigDigest(await loadSettingsSources({ home, root, read: nodeTrustFs.read })))
     const { extraRoots } = await config.refresh()
-    assert.deepEqual(extraRoots, [path.join(parent, 'shared'), path.join(home, 'docs'), path.resolve('/nowhere/at/all')])
+    // A rooted path with no drive letter is on the folder's drive, which is not always the one the tests run from.
+    assert.deepEqual(extraRoots, [path.join(parent, 'shared'), path.join(home, 'docs'), path.resolve(root, '/nowhere/at/all')])
   })
 
   it('let git run unasked only in a trusted folder', async () => {
