@@ -184,6 +184,154 @@ describe('a session', () => {
   })
 })
 
+describe('steering a turn', () => {
+  const lastUser = (request: CompletionRequest) => request.payload.messages.at(-1)!
+
+  it('takes a message sent while a step runs with that step\'s results, and shows it where it was taken', async () => {
+    // Set from inside the script, which the compiler cannot follow.
+    let steered = null as { id: string } | null
+    const h = await sessionHarness({
+      files: { 'src/a.ts': 'export const a = 1\n' },
+      scriptFor: (root) => (_request, step) => {
+        if (step === 0) {
+          steered = h.session.steer('  use tabs, not spaces  ')
+          return { text: 'Reading it.', calls: [{ name: 'Read', input: { file_path: path.join(root, 'src', 'a.ts') } }] }
+        }
+        return { text: 'Done, with tabs.' }
+      },
+    })
+    const end = await h.session.start({ text: 'tidy src/a.ts', mode: 'code' })
+    assert.deepEqual(end, { kind: 'done', reply: 'Done, with tabs.' })
+    assert.ok(steered)
+
+    // The model reads it right after the results of the step it came in during, in the same message.
+    const results = lastUser(h.client.requests[1])
+    assert.equal(results.role, 'user')
+    assert.deepEqual(results.content.map((block) => block.type), ['tool-result', 'text', 'text'])
+    assert.match(text(results), /while you were working/)
+    assert.match(text(results), /use tabs, not spaces$/)
+    assert.deepEqual(h.client.requests[1].payload.messages.map((message) => message.role), ['user', 'assistant', 'user'])
+
+    // The transcript shows it where the turn took it, under the id the caller was given, and keeps it.
+    const kinds = () => h.session.history().entries.map((entry) => entry.kind)
+    assert.deepEqual(kinds(), ['user', 'assistant', 'tool', 'steer', 'assistant'])
+    const entry = h.session.history().entries[3]
+    assert.equal(entry.id, steered!.id)
+    assert.equal(entry.text, 'use tabs, not spaces')
+    await h.reopen()
+    assert.deepEqual(kinds(), ['user', 'assistant', 'tool', 'steer', 'assistant'])
+  })
+
+  it('answers a message that came in while the reply was written, before the turn ends', async () => {
+    const h = await sessionHarness({
+      script: (_request, step) => {
+        if (step === 0) {
+          h.session.steer('and say bye')
+          return { text: 'Hello.' }
+        }
+        return { text: 'Bye.' }
+      },
+    })
+    const end = await h.session.start({ text: 'say hello', mode: 'code' })
+    assert.deepEqual(end, { kind: 'done', reply: 'Bye.' })
+    assert.equal(h.client.requests.length, 2)
+    const second = h.client.requests[1].payload.messages
+    assert.deepEqual(second.map((message) => message.role), ['user', 'assistant', 'user'])
+    assert.match(text(second[2]), /while you were working[\s\S]*and say bye$/)
+    assert.deepEqual(shown(h), [['user', 'say hello'], ['assistant', 'Hello.'], ['steer', 'and say bye'], ['assistant', 'Bye.']])
+  })
+
+  it('takes nothing when no turn runs, nor once the turn is past taking it', async () => {
+    let late: { id: string } | null | undefined
+    const h = await sessionHarness({
+      settings: { completionTool: true },
+      script: (_request, step) => {
+        // A tool ends this turn: a message sent during its step is left for the next request, not lost unread.
+        if (step === 0) {
+          late = h.session.steer('one more thing')
+          return { calls: [{ name: 'attempt_completion', input: { result: 'All done.' } }] }
+        }
+        return { text: 'never' }
+      },
+    })
+    assert.equal(h.session.steer('anyone there?'), null)
+    assert.throws(() => h.session.steer('   '), /Type a message first/)
+    const end = await h.session.start({ text: 'finish up', mode: 'code' })
+    assert.equal(end.kind, 'stopped')
+    assert.ok(late, 'the turn took the message while it ran')
+    assert.equal(h.client.requests.length, 1)
+    assert.ok(!h.session.history().entries.some((entry) => entry.kind === 'steer'))
+    assert.equal(h.session.steer('too late'), null)
+  })
+
+  it('puts a message through the userPromptSubmit hook, and brings what it mentions', async () => {
+    const prompts: string[] = []
+    const h = await sessionHarness({
+      files: { 'src/b.ts': 'export const b = 2\n' },
+      hooks: {
+        async userPromptSubmit(event) {
+          prompts.push(event.prompt)
+          return /secret/.test(event.prompt) ? { block: 'no secrets' } : undefined
+        },
+      },
+      script: (_request, step) => {
+        if (step === 0) {
+          h.session.steer('the secret is 42')
+          h.session.steer('look at @src/b.ts too')
+          return { calls: [{ name: 'Glob', input: { pattern: '**/*.ts' } }] }
+        }
+        return { text: 'ok' }
+      },
+    })
+    await h.session.start({ text: 'go', mode: 'code' })
+    assert.deepEqual(prompts, ['go', 'the secret is 42', 'look at @src/b.ts too'])
+    const sent = text(lastUser(h.client.requests[1]))
+    assert.doesNotMatch(sent, /secret/)
+    assert.match(sent, /<mentioned_files>[\s\S]*export const b = 2/)
+    assert.match(sent, /look at @src\/b\.ts too$/)
+    // Both are shown as sent; the refused one with the hook's reason after it.
+    const entries = h.session.history().entries
+    assert.deepEqual(entries.filter((entry) => entry.kind === 'steer').map((entry) => entry.text), ['the secret is 42', 'look at @src/b.ts too'])
+    assert.ok(entries.some((entry) => entry.kind === 'notice' && /A hook refused this message: no secrets/.test(entry.text ?? '')))
+  })
+
+  it('drops what a stopped turn did not take', async () => {
+    const h = await sessionHarness({ client: { delayMs: 15 }, script: [{ text: 'one two three four five six seven eight nine ten eleven twelve' }, { text: 'next' }] })
+    const running = h.session.start({ text: 'talk', mode: 'code' })
+    await until(() => h.of('delta')[0])
+    assert.ok(h.session.steer('wait'))
+    h.session.cancel()
+    assert.equal((await running).kind, 'cancelled')
+    assert.ok(!h.session.history().entries.some((entry) => entry.kind === 'steer'))
+    // The next turn starts clean: nothing left over from the stopped one reaches the model.
+    await h.session.start({ text: 'again', mode: 'code' })
+    assert.doesNotMatch(text(lastUser(h.client.requests.at(-1)!)), /wait/)
+  })
+
+  it('names the entry with the id the caller chose, and refuses an id that is not a fresh UUID', async () => {
+    const chosen = '0f8c2b1e-3d4a-4b5c-9d6e-7f8091a2b3c4'
+    const h = await sessionHarness({
+      script: (_request, step) => {
+        if (step === 0) {
+          const user = h.session.history().entries[0].id
+          assert.throws(() => h.session.steer('x', user), /cannot be used/)
+          assert.throws(() => h.session.steer('x', 'not-a-uuid'), /cannot be used/)
+          assert.throws(() => h.session.steer('x', chosen.toUpperCase()), /cannot be used/)
+          assert.deepEqual(h.session.steer('shorter', chosen), { id: chosen })
+          assert.throws(() => h.session.steer('again', chosen), /cannot be used/)
+          return { text: 'A long answer.' }
+        }
+        return { text: 'Short.' }
+      },
+    })
+    await h.session.start({ text: 'explain', mode: 'code' })
+    const steer = h.session.history().entries.find((entry) => entry.kind === 'steer')
+    assert.equal(steer?.id, chosen)
+    // Taken, the id names an entry, so it cannot steer again.
+    assert.throws(() => h.session.steer('later', chosen), /cannot be used/)
+  })
+})
+
 describe('approvals and questions', () => {
   const writeNote = (root: string) => [
     { calls: [{ name: 'Write', input: { file_path: path.join(root, '.encode', 'note.md'), content: 'x' } }] },

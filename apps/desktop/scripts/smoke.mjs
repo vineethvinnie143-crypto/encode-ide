@@ -607,6 +607,7 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runStopChecks()
+  await runSteerChecks()
   await runSubagentChecks()
   await runWebChecks()
   await runSearchChecks()
@@ -1530,6 +1531,90 @@ async function runStopChecks() {
   await sendPrompt('[scenario:follow-up] Carry on after Esc.')
   await driveAgent('15-after-esc')
   console.log('[smoke] Esc twice: ok')
+}
+
+/**
+ * Messages sent while the agent works. By default Enter queues and Ctrl+Enter steers: the Steering row shows until the
+ * request takes the message with the command's result, the model reads it, and the thread shows it between the two
+ * parts of the turn. With Steer chosen in Settings the keys swap, and a queued message can be steered with its button.
+ */
+async function runSteerChecks() {
+  console.log('[smoke] --- steering a running request ---')
+  const steeringRows = "document.querySelectorAll('.queue-row.is-steering').length"
+  const queuedRows = "document.querySelectorAll('.queue-row:not(.is-steering)').length"
+  const typeAndPress = async (text, init) => {
+    await typeInto('.composer-input', text)
+    await sleep(250)
+    await composerKey({ key: 'Enter', ...init })
+  }
+
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:steer-check] Run the check.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the command asks first')
+  const placeholder = await evaluate("document.querySelector('.composer-input').placeholder")
+  if (!placeholder.includes('Ctrl+Enter steers')) throw new Error(`the message box does not say how to steer: ${placeholder}`)
+  await typeAndPress('Also say tabs, please.', { ctrlKey: true })
+  await waitFor(`${steeringRows} === 1 && ${queuedRows} === 0`, 4000, 'Ctrl+Enter hands the message to the running request')
+  if ((await composerValue()) !== '') throw new Error('steering did not clear the message box')
+  await screenshot('ui-dark-steering.png')
+  await click('.approval-card .btn.primary')
+  await driveAgent('16-steer')
+  await waitFor("!document.querySelector('.queue-strip')", 4000, 'the Steering row goes once the request took the message')
+  await waitFor("document.body.textContent.includes('Steered by: Also say tabs, please. Steer check finished.')", 8000, 'the model read the message')
+
+  const kinds = await evaluate('window.eNCode.agent.history().then((history) => history.entries.map((entry) => entry.kind).join(" "))')
+  if (kinds !== 'user assistant tool steer assistant') throw new Error(`the steered turn holds ${kinds}`)
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const roles = sent.messages.filter((message) => message.role !== 'system').map((message) => message.role).join(' ')
+  if (roles !== 'user assistant tool user') throw new Error(`the provider was sent ${roles}`)
+  // One request: the message is a part of the turn, not a turn of its own, and sits between its two parts.
+  const thread = await evaluate(`(() => {
+    const turns = document.querySelectorAll('.thread > .turn')
+    const turn = turns[turns.length - 1]
+    const steer = turn?.querySelector('.turn-user.is-steer')
+    return {
+      turns: turns.length,
+      steer: steer?.querySelector('.chat-user-bubble')?.textContent ?? '',
+      tag: steer?.querySelector('.msg-steer-tag')?.textContent ?? '',
+      logBefore: Boolean(steer?.previousElementSibling?.classList.contains('worklog')),
+      answerAfter: steer?.nextElementSibling?.textContent ?? '',
+    }
+  })()`)
+  if (thread.steer !== 'Also say tabs, please.' || thread.tag !== 'Steered' || !thread.logBefore || !thread.answerAfter.includes('Steered by:')) {
+    throw new Error(`the thread shows the steered message as ${JSON.stringify(thread)}`)
+  }
+  await screenshot('ui-dark-steered-turn.png')
+
+  // Steer as the default: Enter steers and Ctrl+Enter queues; a queued message is steered with its button.
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await waitFor("!!document.querySelector('[aria-label=\"What Enter does while the agent works\"]')", 4000, 'the follow-up choice')
+  await click('[aria-label="What Enter does while the agent works"] .ui-segment', 'Steer')
+  await click('.settings-footer .btn.primary', 'Save')
+  await waitFor("window.eNCode.settings.get().then((settings) => settings.followUp === 'steer')", 4000, 'Steer is saved')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
+
+  await sendPrompt('[scenario:steer-check] Run it again.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the command asks again')
+  if (!(await evaluate("document.querySelector('.composer-input').placeholder")).includes('Ctrl+Enter queues')) throw new Error('the message box does not say Ctrl+Enter queues')
+  await typeAndPress('First note.', {})
+  await waitFor(`${steeringRows} === 1`, 4000, 'Enter steers when Steer is chosen')
+  await typeAndPress('Second note.', { ctrlKey: true })
+  await waitFor(`${queuedRows} === 1`, 4000, 'Ctrl+Enter queues when Steer is chosen')
+  await click('.queue-row:not(.is-steering) [aria-label^="Steer now"]')
+  await waitFor(`${steeringRows} === 2 && ${queuedRows} === 0`, 4000, 'Steer now hands the queued message over')
+  await click('.approval-card .btn.primary')
+  await driveAgent('16-steer-default')
+  await waitFor("document.body.textContent.includes('Steered by: Second note. Steer check finished.')", 8000, 'the model read both, in order')
+  const steered = await evaluate("[...document.querySelectorAll('.thread > .turn:last-child .turn-user.is-steer .chat-user-bubble')].map((node) => node.textContent).join(' | ')")
+  if (steered !== 'First note. | Second note.') throw new Error(`the thread shows the steered messages as ${steered}`)
+  if (await evaluate("!!document.querySelector('.queue-strip')")) throw new Error('a message was left waiting')
+
+  await evaluate("window.eNCode.settings.save({ followUp: 'queue' })")
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the steering checks')
+  console.log('[smoke] steering: ok')
 }
 
 async function runSubagentChecks() {

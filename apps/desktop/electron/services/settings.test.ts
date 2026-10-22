@@ -180,6 +180,16 @@ describe('SettingsService defaults and secrets', () => {
     assert.deepEqual(settings.recentWorkspaces, [])
     assert.equal(settings.lastWorkspace, null)
     assert.equal(settings.agentMode, 'code')
+    assert.equal(settings.followUp, 'queue', 'a message sent while the agent works waits, unless the person steers with it')
+  })
+
+  it('keeps what Enter does while the agent works, and nothing but its two values', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.save({ followUp: 'steer' }).followUp, 'steer')
+    assert.equal(settings.save({ followUp: 'now' as unknown as Settings['followUp'] }).followUp, 'steer')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().followUp, 'steer')
+    fs.writeFileSync(file(), JSON.stringify({ followUp: 42 }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().followUp, 'queue')
   })
 
   it('falls back to those defaults when the file is damaged', () => {

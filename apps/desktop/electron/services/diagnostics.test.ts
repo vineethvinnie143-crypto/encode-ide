@@ -38,6 +38,7 @@ const settings: Settings = {
   recentWorkspaces: ['C:\\Users\\ana\\private-project', 'D:\\clients\\secret'],
   lastWorkspace: 'C:\\Users\\ana\\private-project',
   agentMode: 'code',
+  followUp: 'queue',
   appearance: { ...DEFAULT_APPEARANCE },
   roles: { reviewer: ['paid:big-model'] },
   freeOnly: false,

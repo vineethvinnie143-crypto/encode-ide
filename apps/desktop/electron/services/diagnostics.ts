@@ -87,6 +87,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
   section('Settings', [
     ['What the agent may do', settings.policy],
     ['Agent mode', settings.agentMode],
+    ['Enter while it works', settings.followUp],
     ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],

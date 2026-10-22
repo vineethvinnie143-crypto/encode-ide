@@ -56,6 +56,8 @@ export const ExternalLink = icon('ExternalLink', <path d="M14 4h6v6 M20 4l-8.5 8
 export const RefreshCw = icon('RefreshCw', <path d="M19.5 9A8 8 0 0 0 5 7.5 M4.5 4v4h4 M4.5 15A8 8 0 0 0 19 16.5 M19.5 20v-4h-4" />)
 export const RotateCw = icon('RotateCw', <path d="M20 12a8 8 0 1 1-2.6-5.9 M20 4.5V9h-4.5" />)
 export const Undo2 = icon('Undo2', <path d="M9.5 6.5 5 11l4.5 4.5 M5 11h9.5a4.5 4.5 0 0 1 0 9H12" />)
+/** Into the flow: a message handed to the work that runs. */
+export const CornerDownRight = icon('CornerDownRight', <path d="M5.5 5v6a3.5 3.5 0 0 0 3.5 3.5h9.5 M14.5 10.5l4 4-4 4" />)
 export const Download = icon('Download', <path d="M12 4v11 M7.5 10.5 12 15l4.5-4.5 M5 19.5h14" />)
 export const Maximize2 = icon('Maximize2', <path d="M14 4h6v6 M10 20H4v-6 M20 4l-6.5 6.5 M4 20l6.5-6.5" />)
 

@@ -8,6 +8,9 @@
  *
  * Conversations follow a script. A `[scenario:<name>]` marker in the latest
  * user message picks it; the step is the number of tool results since then.
+ * A message the person sent while the agent worked (eNCode marks it) belongs
+ * to the request it came in during, so it neither picks a script nor resets
+ * the count.
  * Like OpenAI, it refuses a transcript whose tool calls and results do not
  * pair up, and a request without tools is answered as a summary request,
  * unless it asks for the name of a session.
@@ -133,6 +136,12 @@ const SCENARIOS = {
   ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
+  // The command asks first, and the person sends messages while its card waits. The request takes them with the
+  // command's result, and the next answer repeats the last one, so the smoke can tell the model read it.
+  'steer-check': [
+    { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo steer-check-ok', description: 'Echo a word' } } },
+    { text: 'Steer check finished.', answersSteer: true },
+  ],
   // The message mentions src/utils.ts with @, so the file comes with it and counts as read: an Edit works without a Read first.
   'mention-check': [
     { text: 'Swapping the operands.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + b', new_string: 'return b + a' } } },
@@ -267,9 +276,20 @@ function chunk(delta, finish = null) {
   })}\n\n`
 }
 
+/** What eNCode puts before a message the person sent while the agent worked. */
+const STEERED = 'sent the message below while you were working'
+const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
+
+/** The latest request of the person's: a message sent while the agent worked is part of the request before it. */
 function lastUserIndex(messages) {
-  for (let index = messages.length - 1; index >= 0; index--) if (messages[index].role === 'user') return index
+  for (let index = messages.length - 1; index >= 0; index--) if (messages[index].role === 'user' && !isSteer(messages[index])) return index
   return -1
+}
+
+/** The last thing the person said while the agent worked: the last paragraph of the latest such message. */
+function lastSteer(messages) {
+  const message = messages.findLast(isSteer)
+  return message ? textOf(message.content).split('\n\n').at(-1).trim() : ''
 }
 
 function scenarioOf(messages) {
@@ -444,7 +464,8 @@ const server = http.createServer(async (request, response) => {
     }
     console.log(`[fake-provider] ${body.model ?? '?'} scenario=${check ? 'check' : scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
     if (!step.call) {
-      await sendText(response, body, step.text, step.streamDelayMs)
+      const told = step.answersSteer ? lastSteer(messages) : ''
+      await sendText(response, body, told ? `Steered by: ${told} ${step.text}` : step.text, step.streamDelayMs)
       return
     }
     const callId = `call_${requestCount}_${step.call.name}`

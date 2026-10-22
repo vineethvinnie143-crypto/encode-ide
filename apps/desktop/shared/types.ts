@@ -8,6 +8,12 @@ import type { Appearance } from './appearance'
 import type { SearchCheckResult, SearchProviderId } from './search'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
+
+/**
+ * What Enter does with a message while the agent works: `queue` holds it until the request is done, `steer` hands it
+ * to the running request, which reads it after the step it is on. Ctrl+Enter does the other one.
+ */
+export type FollowUp = 'queue' | 'steer'
 export type AgentStatus =
   | 'idle'
   | 'thinking'
@@ -56,6 +62,8 @@ export interface Settings {
   recentWorkspaces: string[]
   lastWorkspace: string | null
   agentMode: AgentMode
+  /** What Enter does with a message while the agent works; see FollowUp. Default `queue`. */
+  followUp: FollowUp
   /** Theme, accent, contrast, density and motion; see shared/appearance.ts. */
   appearance: Appearance
   /**
@@ -628,7 +636,8 @@ export interface DiffHunk {
   lines: DiffLine[]
 }
 
-export type EntryKind = 'user' | 'assistant' | 'tool' | 'notice' | 'error'
+/** `steer`: a message the person sent while the agent worked, which the running request took in between two steps. */
+export type EntryKind = 'user' | 'steer' | 'assistant' | 'tool' | 'notice' | 'error'
 
 export interface ConversationEntry {
   id: string
@@ -894,6 +903,12 @@ export interface EncodeApi {
     history(sessionId?: string): Promise<AgentHistory>
     start(sessionId: string, input: AgentStartInput): Promise<void>
     cancel(sessionId: string): Promise<void>
+    /**
+     * Hands a message to the running request, which reads it after its current step and shows it as an entry with the
+     * id given (a fresh `crypto.randomUUID()`). Null when nothing is running that can take it: the turn is ending, or a
+     * tool stopped it; then it is the next request's.
+     */
+    steer(sessionId: string, text: string, id: string): Promise<{ id: string } | null>
     reset(sessionId?: string): Promise<void>
     remove(sessionId: string): Promise<void>
     fork(sessionId: string): Promise<SessionSummary>

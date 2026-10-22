@@ -199,3 +199,14 @@
   display: flex;
   flex-shrink: 0;
 }
+/* Handed to the running request, waiting for the step it is on to end */
+.queue-row.is-steering {
+  min-height: 28px;
+}
+.queue-row.is-steering .queue-text {
+  color: var(--text-2);
+}
+.queue-spinner {
+  flex-shrink: 0;
+  color: var(--accent);
+}

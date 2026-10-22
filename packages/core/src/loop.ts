@@ -81,7 +81,7 @@ import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, scanHunks, scanText, warningNote } from './scan'
-import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
+import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
 import type { ConversationEntry, ToolReview } from './ui'
 
 /** What a call may ask of the model for its answer. */
@@ -156,6 +156,8 @@ export interface LoopOptions {
   reviewer?: AutoReviewer
   /** What the user asked recently, in their words, for the Reviewer. A subagent is given its parent's: its own prompt was written by a model. */
   requests?: () => readonly string[]
+  /** Messages the user sends while the turn runs; the main agent's only. */
+  steers?: Steers
 }
 
 interface Prepared {
@@ -304,12 +306,29 @@ export class AgentLoop {
   }
 
   private async steps(turn: Turn): Promise<LoopEnd> {
+    try {
+      return await this.stepsOf(turn)
+    } finally {
+      // Decided in the same tick as the end, so a message sent from here on waits for the next turn and is never lost.
+      this.o.steers?.close()
+    }
+  }
+
+  private async stepsOf(turn: Turn): Promise<LoopEnd> {
     const { o } = this
     const { signal } = turn
     let mode = turn.mode
     const maxSteps = clamp(Math.floor(o.maxSteps ?? o.settings().maxSteps) || 30, 1, 100)
     let lengthRetries = 0
     let stopRounds = 0
+    /** A message the user sent while the reply was written: it is answered before the turn ends. */
+    const steered = async (): Promise<boolean> => {
+      if (!o.steers?.waiting()) return false
+      const blocks = await o.steers.take(signal)
+      if (!blocks.length) return false
+      await o.conversation.add({ role: 'user', content: blocks }, { turnId: turn.turnId })
+      return true
+    }
 
     for (let step = 0; step < maxSteps; step++) {
       this.checkAbort(signal)
@@ -324,22 +343,29 @@ export class AgentLoop {
           await o.conversation.add(userText(CONTINUE_AFTER_LENGTH), { turnId: turn.turnId })
           continue
         }
+        if (await steered()) continue
         const reply = messageText(message)
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
           await o.conversation.add(userText(stop.continue), { turnId: turn.turnId })
           continue
         }
+        if (await steered()) continue
         return { kind: 'done', reply }
       }
 
       const state: StepState = { results: new Map(), context: [] }
+      let ran = false
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
+        ran = true
       } finally {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
         const content: UserBlock[] = calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN))
         for (const text of state.context) content.push(textBlock(reminder(text)))
+        // What the user sent while the step ran goes with its results, so the model reads it before its next move. Not
+        // when the turn ends here anyway: unread, it would be lost; left waiting, it becomes the next request.
+        if (ran && state.stop === undefined && step + 1 < maxSteps && o.steers?.waiting()) content.push(...(await o.steers.take(signal)))
         await o.conversation.add({ role: 'user', content }, { turnId: turn.turnId })
       }
       if (state.mode) mode = state.mode

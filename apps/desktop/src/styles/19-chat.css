@@ -151,6 +151,25 @@
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
 }
+/* A message sent while the agent worked says so at all times; its time and Copy wait for hover like the others. */
+.turn-user.is-steer .msg-actions {
+  opacity: 1;
+}
+.turn-user.is-steer .msg-actions > :not(.msg-steer-tag) {
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.turn:hover .turn-user.is-steer .msg-actions > *,
+.turn-user.is-steer .msg-actions:focus-within > * {
+  opacity: 1;
+}
+.msg-steer-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  color: var(--text-3);
+}
 .msg-model {
   height: 20px;
   padding: 0 7px;

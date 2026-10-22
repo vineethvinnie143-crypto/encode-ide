@@ -81,6 +81,9 @@ export function goalReminder(goal: Pick<SessionGoal, 'text' | 'status' | 'rounds
 export const GOAL_CONTINUE_PROMPT =
   'Continue working toward the active goal. If it is genuinely finished, call UpdateGoal with status "complete"; if you cannot proceed, call UpdateGoal with status "blocked" and a reason.'
 
+/** Comes before a message the user sent while the agent worked, which the turn takes in between two steps. */
+export const STEER_NOTE = reminder('The user sent the message below while you were working. Take it into account now; carry on with the task unless it says otherwise.')
+
 /** Sent when a reply was cut off by the output limit. */
 export const CONTINUE_AFTER_LENGTH =
   'Your last reply was cut off by the output limit. Continue directly from where it stopped, with no apology and no recap. If you were writing a large file, split the work into smaller steps.'

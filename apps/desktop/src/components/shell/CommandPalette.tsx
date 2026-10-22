@@ -18,7 +18,7 @@ const RECENT_KEY = 'eNCode.palette.recent.v1'
 const SETTINGS_PAGES: readonly { tab: SettingsTab; title: string; keywords: string }[] = [
   { tab: 'models', title: 'Models', keywords: 'providers api keys openrouter free connect' },
   { tab: 'roles', title: 'Roles', keywords: 'builder reviewer tools small tasks model per role' },
-  { tab: 'agent', title: 'Agent', keywords: 'approval policy computer use steps limits' },
+  { tab: 'agent', title: 'Agent', keywords: 'approval policy computer use steps limits steer queue follow-up enter' },
   { tab: 'permissions', title: 'Permissions', keywords: 'rules trust protected folders allow deny' },
   { tab: 'mcp', title: 'MCP servers', keywords: 'mcp tools servers' },
   { tab: 'sandbox', title: 'Sandbox', keywords: 'isolation commands network' },

@@ -14,7 +14,8 @@ export type AgentStatus = 'idle' | 'thinking' | 'running-tool' | 'awaiting-appro
 
 export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | 'auto-review'
 
-export type EntryKind = 'user' | 'assistant' | 'tool' | 'notice' | 'error'
+/** `steer`: a message the user sent while the agent worked, which the running request took in between two steps. */
+export type EntryKind = 'user' | 'steer' | 'assistant' | 'tool' | 'notice' | 'error'
 
 /** `reviewing`: under Auto review, the call waits for the Reviewer. */
 export type ToolState = 'running' | 'waiting' | 'reviewing' | 'done' | 'rejected' | 'error'
