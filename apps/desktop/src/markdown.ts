@@ -39,7 +39,12 @@ function isTableSeparator(line: string): boolean {
   return /^\s*\|?[\s:-]*-[\s:|-]*\|?\s*$/.test(line) && line.includes('-')
 }
 
-export function renderMarkdown(source: string): string {
+/**
+ * The markdown as its top-level blocks, each one HTML element (a paragraph, a heading, a list, a table, a code
+ * block...). A streamed answer grows at its end, so the blocks before the last stay the same from one piece to
+ * the next, and a page that keeps them as they are (Chat/Markdown.tsx) redraws only the end.
+ */
+export function renderMarkdownBlocks(source: string): string[] {
   const lines = source.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
   let index = 0
@@ -157,5 +162,9 @@ export function renderMarkdown(source: string): string {
     html.push(`<p>${renderInline(paragraph.join(' '))}</p>`)
   }
 
-  return html.join('')
+  return html
+}
+
+export function renderMarkdown(source: string): string {
+  return renderMarkdownBlocks(source).join('')
 }

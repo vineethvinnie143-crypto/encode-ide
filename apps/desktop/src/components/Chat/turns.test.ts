@@ -10,6 +10,7 @@ import {
   isCommandTool,
   isSubagentTool,
   logItems,
+  reuseTurns,
   stepKind,
   stepsOf,
   summarizeSteps,
@@ -79,6 +80,58 @@ describe('turns', () => {
     assert.deepEqual(turn.log, [call])
     assert.deepEqual(turn.reply, [failure])
     assert.deepEqual(buildTurns([], false), [])
+  })
+})
+
+describe('reusing turns', () => {
+  const conversation = () => {
+    const user1 = entry('user', { text: 'first' })
+    const read = tool('Read', { file_path: 'a.ts' })
+    const answer1 = entry('assistant', { text: 'Done.' })
+    const user2 = entry('user', { text: 'second' })
+    const edit = tool('Edit', { file_path: 'b.ts' })
+    const answer2 = entry('assistant', { text: 'Wor', streaming: true })
+    return { all: [user1, read, answer1, user2, edit, answer2], answer2 }
+  }
+
+  it('hands back the turns that did not change, as the very same objects', () => {
+    const { all } = conversation()
+    const first = buildTurns(all, true)
+    const second = reuseTurns(first, buildTurns([...all], true))
+    assert.equal(second[0], first[0])
+    assert.equal(second[1], first[1])
+  })
+
+  it('replaces only the turn that grew, and keeps its finished work log', () => {
+    const { all, answer2 } = conversation()
+    const first = buildTurns(all, true)
+    const grown = all.map((item) => (item === answer2 ? { ...item, text: 'Working on it' } : item))
+    const second = reuseTurns(first, buildTurns(grown, true))
+    assert.equal(second[0], first[0], 'the finished turn is untouched')
+    assert.notEqual(second[1], first[1])
+    assert.equal(second[1].log, first[1].log, 'the steps before the answer are the same array')
+    assert.notEqual(second[1].reply, first[1].reply)
+    assert.equal(second[1].reply[0].text, 'Working on it')
+  })
+
+  it('notices a turn that stopped being live, and a turn that is new', () => {
+    const { all } = conversation()
+    const first = buildTurns(all, true)
+    const stopped = reuseTurns(first, buildTurns(all, false))
+    assert.equal(stopped[0], first[0])
+    assert.notEqual(stopped[1], first[1])
+    assert.equal(stopped[1].active, false)
+    const more = [...all, entry('user', { text: 'third' })]
+    const grown = reuseTurns(stopped, buildTurns(more, true))
+    assert.equal(grown.length, 3)
+    assert.equal(grown[0], first[0])
+    assert.equal(grown[2].user?.text, 'third')
+  })
+
+  it('has nothing to reuse the first time', () => {
+    const { all } = conversation()
+    const turns = buildTurns(all, false)
+    assert.equal(reuseTurns([], turns), turns)
   })
 })
 

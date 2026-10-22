@@ -25,6 +25,7 @@ import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
 import { useWorkspace } from './stores/workspace'
 import { applyAppearance } from './theme/appearance'
+import { throttle } from './throttle'
 import { cx } from './ui/cx'
 
 async function refreshOpenTab(path: string): Promise<void> {
@@ -51,7 +52,8 @@ export default function App() {
   const appearance = useSettings((state) => state.settings?.appearance)
   const workspaceRoot = useWorkspace((state) => state.workspace?.root)
 
-  const sidebar = useResizable({ initial: 272, min: 220, max: 480, axis: 'x', persistKey: 'eNCode.sidebar.v1' })
+  const sidebarRef = useRef<HTMLDivElement>(null)
+  const sidebar = useResizable({ initial: 272, min: 220, max: 480, axis: 'x', persistKey: 'eNCode.sidebar.v1', element: () => sidebarRef.current })
   // The side panel is also held under 60% of the window in CSS, so a big saved width cannot cover the thread.
   const sideRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLElement>(null)
@@ -63,6 +65,7 @@ export default function App() {
     invert: true,
     persistKey: 'eNCode.sidepanel.v1',
     measure: () => sideRef.current?.getBoundingClientRect().width,
+    element: () => sideRef.current,
   })
   const bottom = useResizable({
     initial: 280,
@@ -72,6 +75,7 @@ export default function App() {
     invert: true,
     persistKey: 'eNCode.bottompanel.v1',
     measure: () => bottomRef.current?.getBoundingClientRect().height,
+    element: () => bottomRef.current,
   })
 
   useKeymap()
@@ -93,10 +97,11 @@ export default function App() {
   }, [workspaceRoot])
 
   useEffect(() => {
-    const refresh = () => {
+    // An agent that writes a dozen files announces each one: the tree and git are read at the start of the burst and once at its end.
+    const refresh = throttle(() => {
       void useWorkspace.getState().refreshAll()
       void useGit.getState().refresh()
-    }
+    }, 300)
 
     const offAgent = api.agent.onEvent((event) => {
       useChat.getState().applyEvent(event)
@@ -113,6 +118,7 @@ export default function App() {
     return () => {
       offAgent()
       offFiles()
+      refresh.cancel()
     }
   }, [])
 
@@ -126,7 +132,7 @@ export default function App() {
         <div className="sheet">
           {sidebarVisible && (
             <>
-              <div className="sidebar-wrap" style={{ width: sidebar.size }}>
+              <div className="sidebar-wrap" ref={sidebarRef} style={{ width: sidebar.size }}>
                 <SessionSidebar />
               </div>
               <div className="resizer resizer-v" onPointerDown={sidebar.onPointerDown} />

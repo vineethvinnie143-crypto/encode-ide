@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import {
   CheckCircle2,
   ChevronRight,
@@ -14,6 +14,7 @@ import {
   XCircle,
 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
+import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import DiffView from './DiffView'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
@@ -139,7 +140,7 @@ function detailOf(entry: ConversationEntry): string {
 }
 
 /** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
-export default function StepRow({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
+function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
   const tool = entry.tool
   const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting')
 
@@ -184,7 +185,7 @@ export default function StepRow({ entry, nested }: { entry: ConversationEntry; n
         {(state === 'rejected' || state === 'error') && <XCircle size={13} className="tool-row-state is-bad" />}
       </button>
 
-      {expanded && hasBody && (
+      <Collapse open={expanded && hasBody}>
         <div className={cx('tool-row-body', isShell && 'is-card')}>
           {isShell ? (
             <>
@@ -205,13 +206,13 @@ export default function StepRow({ entry, nested }: { entry: ConversationEntry; n
             </>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   )
 }
 
 /** Several small steps of one kind as a single line ("Read 4 files") that opens into its rows. */
-export function GroupRow({ kind, entries }: { kind: StepKind; entries: ConversationEntry[] }) {
+function GroupRowView({ kind, entries }: { kind: StepKind; entries: ConversationEntry[] }) {
   const [open, setOpen] = useState(false)
   const Icon = KIND_ICON[kind]
   const running = entries.some((entry) => entry.tool?.state === 'running')
@@ -222,13 +223,18 @@ export function GroupRow({ kind, entries }: { kind: StepKind; entries: Conversat
         <span className="tool-row-label">{summarizeSteps(entries)}</span>
         {running ? <Loader2 size={13} className="spin tool-row-state" /> : <ChevronRight size={13} className={cx('tool-row-state', 'group-chevron', open && 'is-open')} />}
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="group-rows">
           {entries.map((entry) => (
             <StepRow key={entry.id} entry={entry} nested />
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
   )
 }
+
+/** Both skip a render when the entries they were given are the ones they drew last. */
+const StepRow = memo(StepRowView)
+export const GroupRow = memo(GroupRowView)
+export default StepRow

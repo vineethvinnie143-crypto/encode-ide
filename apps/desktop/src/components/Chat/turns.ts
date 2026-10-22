@@ -100,6 +100,36 @@ export function buildTurns(entries: readonly ConversationEntry[], running: boole
   })
 }
 
+const sameEntries = (a: readonly ConversationEntry[], b: readonly ConversationEntry[]) => a.length === b.length && a.every((entry, index) => entry === b[index])
+
+/**
+ * `next` with every turn that did not change replaced by the object it was before, and, in a turn that did, the
+ * work log or the reply that did not. While an answer streams only its own turn changes, and the page can then
+ * skip all the others (and the finished steps of this one) by comparing the objects. Entries are compared by
+ * identity: the stores replace an entry whenever it changes.
+ */
+export function reuseTurns(previous: readonly Turn[], next: Turn[]): Turn[] {
+  if (!previous.length) return next
+  const before = new Map(previous.map((turn) => [turn.id, turn]))
+  return next.map((turn) => {
+    const old = before.get(turn.id)
+    if (!old) return turn
+    const log = sameEntries(old.log, turn.log) ? old.log : turn.log
+    const reply = sameEntries(old.reply, turn.reply) ? old.reply : turn.reply
+    if (
+      log === old.log &&
+      reply === old.reply &&
+      old.user === turn.user &&
+      old.active === turn.active &&
+      old.startedAt === turn.startedAt &&
+      old.endedAt === turn.endedAt
+    ) {
+      return old
+    }
+    return { ...turn, log, reply }
+  })
+}
+
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 /** "Read 4 files, ran 2 commands, edited 1 file": what a run of steps did, in the order it began. */

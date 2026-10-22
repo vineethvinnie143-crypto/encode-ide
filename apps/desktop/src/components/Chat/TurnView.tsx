@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, GitFork, Info, Pencil } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { usePanels } from '../../stores/panels'
 import { useSessions } from '../../stores/sessions'
 import { Button, IconButton } from '../../ui/Button'
+import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
 import WorkLog from './WorkLog'
@@ -76,7 +77,7 @@ function ResultCard({ turn }: { turn: Turn }) {
           </IconButton>
         </span>
       </div>
-      {open && (
+      <Collapse open={open}>
         <div className="result-files">
           {files.map((file) => (
             <div className="result-file" key={file.path}>
@@ -90,13 +91,13 @@ function ResultCard({ turn }: { turn: Turn }) {
             </div>
           ))}
         </div>
-      )}
+      </Collapse>
     </div>
   )
 }
 
 /** One turn: your message, the work log, the reply, what it changed, and (on hover) copy, fork, time and model. */
-export default function TurnView({ turn }: { turn: Turn }) {
+function TurnView({ turn }: { turn: Turn }) {
   const replyEntries = turn.reply.filter((entry) => entry.kind !== 'assistant' || entry.text?.trim() || entry.streaming)
   const answer = turn.reply.filter((entry) => entry.kind === 'assistant' && entry.text?.trim())
   const lastAnswer = answer[answer.length - 1]
@@ -105,7 +106,7 @@ export default function TurnView({ turn }: { turn: Turn }) {
   return (
     <section className="turn" data-turn={turn.id}>
       {turn.user && <UserMessage entry={turn.user} />}
-      <WorkLog turn={turn} />
+      <WorkLog log={turn.log} active={turn.active} startedAt={turn.startedAt} endedAt={turn.endedAt} />
 
       {replyEntries.map((entry) => {
         if (entry.kind === 'assistant') {
@@ -155,3 +156,6 @@ export default function TurnView({ turn }: { turn: Turn }) {
     </section>
   )
 }
+
+/** Skips a turn whose object is the one it drew last (see reuseTurns). */
+export default memo(TurnView)

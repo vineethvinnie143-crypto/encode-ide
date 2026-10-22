@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { phaseFor } from './Collapse'
 import { cx } from './cx'
 import { weight } from './icon-weight'
 import { keyToMove, moveIndex, typeaheadIndex } from './nav'
@@ -125,5 +126,23 @@ describe('icon weight', () => {
     assert.equal(weight('big'), 1.75)
     assert.equal(weight(0), 1.75)
     assert.equal(weight(-4), 1.75)
+  })
+})
+
+describe('collapse phases', () => {
+  it('opens from closed through a start frame, and closes from wherever it is', () => {
+    assert.equal(phaseFor('closed', true), 'start')
+    assert.equal(phaseFor('open', false), 'closing')
+    assert.equal(phaseFor('opening', false), 'closing')
+    assert.equal(phaseFor('start', false), 'closing')
+  })
+
+  it('turns round in the middle of a move, and ignores what changes nothing', () => {
+    assert.equal(phaseFor('closing', true), 'opening')
+    assert.equal(phaseFor('open', true), 'open')
+    assert.equal(phaseFor('opening', true), 'opening')
+    assert.equal(phaseFor('start', true), 'start')
+    assert.equal(phaseFor('closed', false), 'closed')
+    assert.equal(phaseFor('closing', false), 'closing')
   })
 })

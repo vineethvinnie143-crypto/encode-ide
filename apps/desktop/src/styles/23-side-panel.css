@@ -40,6 +40,16 @@
 .right-wrap.is-hidden {
   display: none;
 }
+/* Shown again, the panel slides in from its edge instead of appearing. */
+.right-wrap:not(.is-hidden) {
+  animation: panel-in var(--dur-4) var(--ease-out);
+}
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
 
 .side-panel {
   flex: 1;

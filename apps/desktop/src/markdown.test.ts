@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { renderMarkdown } from './markdown'
+import { renderMarkdown, renderMarkdownBlocks } from './markdown'
 
 describe('markdown', () => {
   it('draws a fenced block with its language and a Copy button, with the code escaped', () => {
@@ -25,5 +25,38 @@ describe('markdown', () => {
 
   it('escapes raw html', () => {
     assert.doesNotMatch(renderMarkdown('<script>alert(1)</script>'), /<script>/)
+  })
+
+  const SAMPLE = [
+    '# A title',
+    'First paragraph with `code`, **bold** and a [link](https://example.com).\nIt goes on here.',
+    '- one\n- two\n- three',
+    '1. first\n2. second',
+    '| Case | Cost |\n| --- | --- |\n| Cold | 12 ms |\n| Warm | 1 ms |',
+    '```ts\nconst a = 1\n\nconst b = 2\n```',
+    '> quoted\n> twice',
+    '---',
+    'The last paragraph.',
+  ].join('\n\n')
+
+  it('splits into one element per block, which joined are the page', () => {
+    const blocks = renderMarkdownBlocks(SAMPLE)
+    assert.equal(blocks.length, 9)
+    assert.equal(blocks.join(''), renderMarkdown(SAMPLE))
+    for (const block of blocks) {
+      const tag = /^<([a-z0-9]+)/.exec(block)?.[1]
+      assert.ok(tag, block)
+      assert.ok(tag === 'hr' ? block === '<hr />' : block.endsWith(`</${tag}>`), `one ${tag} element: ${block}`)
+    }
+  })
+
+  it('keeps every block but the last two the same while an answer streams in', () => {
+    const final = renderMarkdownBlocks(SAMPLE)
+    for (let length = 1; length <= SAMPLE.length; length += 3) {
+      const blocks = renderMarkdownBlocks(SAMPLE.slice(0, length))
+      for (let index = 0; index < blocks.length - 2; index++) {
+        assert.equal(blocks[index], final[index], `block ${index} after ${length} characters`)
+      }
+    }
   })
 })

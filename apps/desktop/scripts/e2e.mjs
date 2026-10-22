@@ -4,6 +4,9 @@
  *
  *   pnpm build && pnpm e2e
  *
+ * `pnpm e2e perf.mjs` runs another script of this folder the same way (see
+ * scripts/perf.mjs, which measures how smooth the interface is).
+ *
  * The demo fixture is copied to a temporary workspace and eNCode gets a
  * temporary profile (ENCODE_USER_DATA_DIR) and a temporary home (ENCODE_HOME,
  * where ~/.encode would be), so neither the repository nor the real profile
@@ -23,6 +26,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const script = process.argv[2] ?? 'smoke.mjs'
 const shotsDir = path.join(root, 'screenshots')
 const isWindows = process.platform === 'win32'
 
@@ -147,7 +151,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 console.log(`[e2e] workspace ${workspace}`)
-const smoke = spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke.mjs'), workspace], {
+const smoke = spawnSync(process.execPath, [path.resolve(root, 'scripts', script), workspace], {
   cwd: root,
   env,
   stdio: 'inherit',

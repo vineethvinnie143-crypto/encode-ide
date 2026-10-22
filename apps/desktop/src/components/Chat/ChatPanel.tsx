@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, MessageCircleQuestion } from '../../ui/icons'
 import { useChat } from '../../stores/chat'
-import { useSessions } from '../../stores/sessions'
 import { useWorkspace } from '../../stores/workspace'
 import { LogoMark } from '../../ui/Logo'
+import { reducedMotion, scrollBehavior } from '../../ui/motion'
 import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
 import TurnView from './TurnView'
-import { buildTurns } from './turns'
+import { buildTurns, reuseTurns, type Turn } from './turns'
 
 const SUGGESTIONS = [
   'Explain the structure of this project',
@@ -30,18 +30,22 @@ export default function ChatPanel() {
   const answer = useChat((state) => state.answer)
   const setDraft = useChat((state) => state.setDraft)
   const workspace = useWorkspace((state) => state.workspace)
-  const activeId = useSessions((state) => state.activeId)
+  const loadedFor = useChat((state) => state.loadedFor)
 
   const listRef = useRef<HTMLDivElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
 
-  const turns = useMemo(() => buildTurns(entries, running), [entries, running])
+  // A turn that did not change stays the same object, so a streaming answer redraws only its own turn.
+  const shown = useRef<Turn[]>([])
+  const turns = useMemo(() => (shown.current = reuseTurns(shown.current, buildTurns(entries, running))), [entries, running])
 
-  const scrollToEnd = () => {
+  const scrollToEnd = (smooth = false) => {
     const list = listRef.current
-    if (list) list.scrollTop = list.scrollHeight
+    if (!list) return
+    if (smooth) list.scrollTo({ top: list.scrollHeight, behavior: scrollBehavior() })
+    else list.scrollTop = list.scrollHeight
   }
 
   // Stay at the bottom while the thread grows (streaming, a step opening, a log folding), unless you scrolled up.
@@ -55,17 +59,18 @@ export default function ChatPanel() {
     return () => observer.disconnect()
   }, [])
 
-  // A different session starts at its end.
+  // A different session starts at its end, and comes in with a short fade rather than a cut.
   useEffect(() => {
     follow.current = true
     setAtBottom(true)
     scrollToEnd()
-  }, [activeId])
+    if (loadedFor && !reducedMotion()) listRef.current?.animate({ opacity: [0.3, 1] }, { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
+  }, [loadedFor])
 
   const jumpTo = (id: string) => {
     follow.current = false
     setAtBottom(false)
-    listRef.current?.querySelector(`[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' })
+    listRef.current?.querySelector(`[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() })
   }
 
   return (
@@ -127,7 +132,7 @@ export default function ChatPanel() {
             onClick={() => {
               follow.current = true
               setAtBottom(true)
-              scrollToEnd()
+              scrollToEnd(!running)
             }}
           >
             <ArrowDown size={16} />

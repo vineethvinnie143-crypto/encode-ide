@@ -110,7 +110,9 @@
   border-radius: 50%;
   background: var(--accent-fill);
   color: var(--on-accent);
-  transition: background var(--dur-1) var(--ease-out);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 .composer-send:hover {
   background: var(--accent-fill-hover);

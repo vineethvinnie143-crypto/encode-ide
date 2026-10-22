@@ -228,6 +228,7 @@ pnpm test                     # unit tests (node:test); pnpm test shell compacti
 pnpm test:browser             # the editor view in a real Chromium over the DevTools protocol
 pnpm build                    # renderer with Vite, main and preload with esbuild
 pnpm e2e                      # the full smoke against the built app, in a throwaway sandbox
+pnpm perf                     # how smooth the interface is: frames while a long answer streams, scrolls and a panel is dragged
 ```
 
 `pnpm e2e` copies `apps/desktop/test/fixtures/demo-project` to a temporary folder, gives
@@ -250,6 +251,13 @@ covers:
 
 Screenshots and the Electron log land in `apps/desktop/screenshots`. Set
 `ENCODE_SMOKE_OFFLINE=1` to skip the one check that needs the internet.
+
+`pnpm perf` runs the same harness with `apps/desktop/scripts/perf.mjs`: it streams a long markdown
+answer (the fake provider's `long-reply`, about 2,000 pieces at 300 a second) into a thread that
+grows with each run, then scrolls the thread and drags the side panel's edge, and prints the
+frames drawn and the slowest ones (a frame is 16.7 ms at 60 Hz), with the script, layout and
+style time per second. It also checks that the streamed answer came out whole and in order.
+Compare runs on one machine: a machine without a GPU is slower than a PC.
 
 `pnpm test:browser` needs a Chromium-based browser (it finds Chrome or Edge, or takes
 `ENCODE_BROWSER`) and writes screenshots to the folder named by `ENCODE_SHOTS`.
