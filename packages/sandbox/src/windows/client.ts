@@ -14,7 +14,7 @@ export interface RunFlags {
   /** `low` (default): the program cannot write, delete or rename what is labeled higher. `medium`: it runs as an ordinary program of the person does (for the measurement). */
   integrity?: 'low' | 'medium'
   cwd?: string
-  /** Paths the program may not change: labeled medium, and kept from being renamed or deleted while it runs. Ones that do not exist are skipped. */
+  /** Paths the program may not write: labeled medium before it starts. Ones that do not exist are skipped. */
   protect?: readonly string[]
 }
 

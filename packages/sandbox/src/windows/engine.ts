@@ -5,9 +5,10 @@
  * documents, the registry, the Startup folder, scheduled tasks, the program files. The folders a command may change
  * (the project, the sandbox's temp and cache folders) are marked low once, by the helper (see build.ts), and what a
  * command must not change inside them (git's hooks and configuration, the project's own settings) is marked medium
- * again and kept from being renamed away while the command runs. Reads and the network are not restricted, nor
- * is the ending of the person's other programs. Nothing the command starts can outlive it: the helper's job object
- * kills the tree when the helper goes away.
+ * again before every command, so that it cannot be written; that holds for what is there, and is best effort (the
+ * folders around it are the command's to change). Reads and the network are not restricted, nor is the ending of
+ * the person's other programs. Nothing the command starts can outlive it: the helper's job object kills the tree
+ * when the helper goes away.
  *
  * Git Bash cannot run in it (see `unsupported`), so the shell that is confined is PowerShell.
  */
@@ -153,7 +154,7 @@ export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngin
 
   return {
     name: 'integrity-level',
-    limits: { reads: false, network: false, protectedPaths: 'exact', processes: false },
+    limits: { reads: false, network: false, protectedPaths: 'best-effort', processes: false },
     helperPath: () => exe,
 
     async probe(): Promise<EngineProbe> {

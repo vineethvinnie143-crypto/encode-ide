@@ -52,7 +52,7 @@ export function limitLines(report: SandboxReport): string[] {
   if (!report.limits.network) lines.push('Commands can still use the network. This system cannot block it for them.')
   if (!report.limits.processes) lines.push('Commands can still end other programs you run. The sandbox limits what they change, not what they stop.')
   if (report.limits.protectedPaths === 'best-effort') {
-    lines.push('.git/hooks, .git/config and .encode cannot be written by a command, but one that owns the folder around them could delete and recreate them.')
+    lines.push('.git/hooks, .git/config, .encode and .mcp.json cannot be written by a command, but one that owns the folder around them could delete and recreate them.')
   }
   return lines
 }

@@ -534,7 +534,7 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 | P27 | A cloned repository uses its agent, skill or instruction files to read another file on the disk (a link to a key), to hang eNCode (a named pipe) or to flood it (a huge file) | Those files are read as regular files of bounded size, without following links, without blocking, with at most 64 agent files per folder, and only if the folder stays inside the project once links are resolved. The user's own folders may use links (0061). | Partial (RP11) |
 | P28 | A subagent definition from a repository grants more than the parent has or runs without end | A definition can only narrow its tools; the tools no subagent may have stay excluded; the mode, policy, approvals and Reviewer are the parent's; its step limit can shorten the run and never lengthen it past the person's own (0006, 0061). | Mitigated |
 | P29 | A command changes what lies outside the project: the person's documents and settings, what runs at sign-in, the registry | Every command the agent runs is confined by the operating system: only the project folders, their git directories, a temp folder and the package caches are writable, under every approval policy (0063). | Mitigated on Linux and Windows; macOS until it has run on a Mac (RP16) |
-| P30 | A command plants what runs later outside the sandbox: a git hook, git's configuration, the folder's settings, an MCP server | Those paths stay read-only inside the writable folders on every system. On Windows they are marked again before every command, and the folders that hold them cannot be renamed while it runs. A repository without a hooks folder gets an empty one first (0063). | Partial (RP14) |
+| P30 | A command plants what runs later outside the sandbox: a git hook, git's configuration, the folder's settings, an MCP server | Those paths stay read-only inside the writable folders on every system. On Windows they are marked again before every command, and that hold is best effort, which the Sandbox screen says. A repository without a hooks folder gets an empty one first (0063). | Partial (RP12, RP14) |
 | P31 | The sandbox holds less than the person is told, or is off without their knowing | Each engine must pass a test at start (a write inside allowed, one outside refused); one that fails is unavailable, with its reason on the Sandbox screen, and the settings can require the sandbox so that no command runs without it. The screen names the engine and says in a sentence each thing it does not hold back on this system (0063). | Mitigated |
 | P32 | A repository's settings turn the sandbox off or widen it | A folder's files can only tighten it. `allowWrite` and `allowRead` are read from the person's own settings only, and a key a folder may not set is ignored and reported (0041, 0063). | Mitigated |
 | P33 | The agent takes a command out of the sandbox | Only the person can let a command run outside it: it asks under every policy, Full access included, Read Only refuses it, and no rule, "Always allow" or Reviewer answers for the person. The settings can forbid asking (0063). | Mitigated |
@@ -583,10 +583,12 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   pipe blocks the reader.
   - Owner: the hardening step after the sandbox.
 - **RP12. On Windows the sandbox holds writes only.** A command can read what the person can read, use the network and
-  end the person's other programs, so a key or a file it can read it can also send. The Sandbox screen says each of
-  these in a sentence. Linux holds all three back and macOS reads and the network.
+  end the person's other programs, so a key or a file it can read it can also send. Its hold on the protected paths
+  is best effort: they cannot be written, but the folders around them are the command's to change. The Sandbox screen
+  says each of these in a sentence. Linux holds all of it back and macOS reads, the network and the protected paths.
   - Owner: none planned. Hiding files and blocking the network for one program need more than a program without
-    administrator rights can set up.
+    administrator rights can set up. Where a project's hooks or settings matter, keep approvals on (Workspace Write or
+    Auto review): a command that changes them is still asked about.
 - **RP13. The marks on Windows stay.** A folder the sandbox marked can be written by any program of the person's that
   runs at the low integrity level, not only by eNCode's commands, until the marks are taken off. Few programs run at
   that level, and the folders that may be marked leave out the home folder, drives, settings folders and Windows' own.
@@ -663,9 +665,9 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   are unit tests, and bubblewrap runs for real on Linux where user namespaces are allowed (writes inside and not
   outside, the protected paths, hidden credentials, a private `/tmp`, other processes out of reach). On Windows the
   engine runs in CI against the real helper: writes, deletes and renames inside the project; writes outside it, in the
-  Startup folder and in the registry refused; the protected paths unchanged after attempts to write, delete, replace
-  or rename them or their folders; a git commit; nested programs; a leftover program ended; the start-up cost; the
-  marks taken off again. The shell, workspace and screen tests cover the PowerShell default, a folder that cannot turn
-  it off, leaving the sandbox only with the person's answer, and every sentence the screen shows.
+  Startup folder and in the registry refused; writes, deletes and replacements of the protected files refused; a git
+  commit; nested programs; a leftover program ended; the start-up cost; the marks taken off again. The shell,
+  workspace and screen tests cover the PowerShell default, a folder that cannot turn it off, leaving the sandbox only
+  with the person's answer, and every sentence the screen shows.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.

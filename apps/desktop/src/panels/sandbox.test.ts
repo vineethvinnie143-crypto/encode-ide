@@ -53,11 +53,12 @@ describe('what the screen says first', () => {
 describe('what this system does not hold back', () => {
   it('lists nothing where everything is held, and each gap where it is not', () => {
     assert.deepEqual(limitLines(report()), [])
-    const windows = limitLines(report({ engine: 'integrity-level', limits: { reads: false, network: false, protectedPaths: 'exact', processes: false } }))
-    assert.equal(windows.length, 3)
+    const windows = limitLines(report({ engine: 'integrity-level', limits: { reads: false, network: false, protectedPaths: 'best-effort', processes: false } }))
+    assert.equal(windows.length, 4)
     assert.match(windows[0], /read any file you can/)
     assert.match(windows[1], /use the network/)
     assert.match(windows[2], /end other programs you run/)
+    assert.match(windows[3], /\.mcp\.json cannot be written by a command/)
     const loose = limitLines(report({ limits: { reads: true, network: true, protectedPaths: 'best-effort', processes: true } }))
     assert.equal(loose.length, 1)
     assert.match(loose[0], /delete and recreate/)

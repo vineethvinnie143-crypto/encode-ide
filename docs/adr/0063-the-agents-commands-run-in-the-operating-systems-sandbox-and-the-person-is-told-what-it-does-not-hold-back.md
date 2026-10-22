@@ -47,11 +47,12 @@ agent's commands that way. The forces:
   level, inside a job object that ends everything it started when the helper ends, and where the system allows it
   without the clipboard and other programs' windows. The folders it may change are marked once, by the helper, so that
   low-integrity programs may write them; the protected paths inside are marked back to medium before every command,
-  and the folders that hold them are kept from being renamed while it runs. A folder too broad to mark is refused,
-  with words: a whole drive or share, the home folder or one that holds it, the folders where programs keep their
-  settings, Windows' own folders, the helper's folder and the program's. The marks stay after a command, so the next
-  one starts at once; the folders marked are listed in the sandbox's state file and `release` takes the marks off
-  again. Marking a large folder the first time takes a while, and the screen shows how far it is.
+  so that a command cannot write them. That is best effort, and said so (`protectedPaths: 'best-effort'`): the folders
+  around them are the command's to change. A folder too broad to mark is refused, with words: a whole drive or share,
+  the home folder or one that holds it, the folders where programs keep their settings, Windows' own folders, the
+  helper's folder and the program's. The marks stay after a command, so the next one starts at once; the folders
+  marked are listed in the sandbox's state file and `release` takes the marks off again. Marking a large folder the
+  first time takes a while, and the screen shows how far it is.
 - **PowerShell is the shell that is confined on Windows**, and on by default. Git Bash cannot run at the low
   integrity level next to another program of its runtime (an open Git Bash window, for one): the runtime shares a
   namespace with all of them and a lower-level program is refused it. Turned off, commands run in Git Bash outside the
@@ -76,8 +77,8 @@ agent's commands that way. The forces:
 
 - On Linux the sandbox holds writes, reads, the network and other programs; on macOS writes, reads and the network.
   On Windows it holds writes only: a command can still read what the person can read, use the network and end the
-  person's other programs, and the Sandbox screen says each of these in a sentence. A key or a document a command can
-  read, it can also send.
+  person's other programs, and its hold on the protected paths is best effort. The Sandbox screen says each of these
+  in a sentence. A key or a document a command can read, it can also send.
 - Hooks and approved MCP servers run outside the sandbox: they are the person's own programs (RP6).
 - On Windows, a file moved into the project from elsewhere keeps its own mark and commands cannot change it until the
   person copies it instead. Git's hook scripts, and by default its ssh, use Git Bash's runtime, so they can fail
@@ -87,9 +88,10 @@ agent's commands that way. The forces:
   `release`; they let low-integrity programs write there and nothing more.
 - Tests: the policy, the settings and the Linux and macOS arguments and profile are unit tests; bubblewrap runs for
   real where the machine allows it. On Windows the engine runs against the real helper in CI: writes, deletes and
-  renames inside, the same refused outside and on the protected paths, a git commit, nested programs, a leftover
-  program ended, the start-up cost, and the marks taken off again. A separate workflow runs the package's tests on
-  Windows whenever the package changes, with a table of everyday commands measured with and without the sandbox.
+  renames inside, the same refused outside, writes, deletes and replacements of the protected files refused, a git
+  commit, nested programs, a leftover program ended, the start-up cost, and the marks taken off again. A separate
+  workflow runs the package's tests on Windows whenever the package changes, with a table of everyday commands
+  measured with and without the sandbox.
 - Open: a way to take the marks off from the Sandbox screen, the submodule git folders under `.git/modules`, a Mac to
   run the Seatbelt profile on, and hiding files and blocking the network on Windows, which need more than an
   unprivileged program can do.

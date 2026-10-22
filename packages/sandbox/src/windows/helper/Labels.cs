@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Threading;
 
 namespace Encode.Sandbox
 {
@@ -99,47 +97,6 @@ namespace Encode.Sandbox
             if (label.Contains(";NW;;;ME)") && !label.Contains("ID;NW")) return true;
             Apply(path, folder ? "S:(ML;OICI;NW;;;ME)" : "S:(ML;;NW;;;ME)");
             return true;
-        }
-
-        /// <summary>
-        /// Holds the protected path if it is a folder, and the folders above it that carry the low label (the ones a
-        /// low program could rename to get a protected folder out of the way). Each is held once, whatever number of
-        /// protected paths lead through it.
-        /// </summary>
-        public static void HoldChain(string path, HashSet<string> seen, List<IntPtr> held)
-        {
-            bool folder;
-            if (!LabelWalker.Exists(path, out folder)) return;
-            if (folder && seen.Add(path.TrimEnd('\\', '/').ToLowerInvariant())) held.Add(Hold(path));
-            string parent = LabelWalker.ParentOf(path);
-            while (parent != null && Get(parent).Contains(";NW;;;LW)"))
-            {
-                if (seen.Add(parent.TrimEnd('\\', '/').ToLowerInvariant())) held.Add(Hold(parent));
-                parent = LabelWalker.ParentOf(parent);
-            }
-        }
-
-        /// <summary>
-        /// A handle on a folder that lets others read and write but not rename or delete it, for as long as it is
-        /// open. A low program can rename a medium folder that sits inside a low one (the label does not stop that),
-        /// and git's hooks are such a folder; files are not at risk, their own label stops a rename.
-        /// </summary>
-        public static IntPtr Hold(string path)
-        {
-            string extended = LabelWalker.Extended(path);
-            for (int attempt = 0; ; attempt++)
-            {
-                IntPtr handle = Native.CreateFileW(extended, Native.FILE_READ_ATTRIBUTES, Native.FILE_SHARE_READ | Native.FILE_SHARE_WRITE, IntPtr.Zero, Native.OPEN_EXISTING, Native.FILE_FLAG_BACKUP_SEMANTICS | Native.FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
-                if (handle != Native.InvalidHandle) return handle;
-                int error = Marshal.GetLastWin32Error();
-                // A scanner or an indexer may have the folder open for a moment.
-                if (error == 32 && attempt < 5)
-                {
-                    Thread.Sleep(100);
-                    continue;
-                }
-                throw new SandboxException("CreateFile(" + path + ")", error);
-            }
         }
 
         /// <summary>Who owns a running program, who may open it and the label it carries, in the text form Windows uses (for the measurement).</summary>

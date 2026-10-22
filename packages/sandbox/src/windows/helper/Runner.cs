@@ -13,7 +13,7 @@ namespace Encode.Sandbox
         public string Cwd;
         public string Program;
         public readonly List<string> Args = new List<string>();
-        /// <summary>Paths the program must not change: labeled medium, and kept from being renamed or deleted (a folder among them, and the folders above it) for as long as the program runs.</summary>
+        /// <summary>Paths the program must not write: labeled medium before it starts.</summary>
         public readonly List<string> Protect = new List<string>();
     }
 
@@ -120,20 +120,14 @@ namespace Encode.Sandbox
             IntPtr job = IntPtr.Zero;
             IntPtr attributes = IntPtr.Zero;
             IntPtr handleList = IntPtr.Zero;
-            List<IntPtr> held = new List<IntPtr>();
             PROCESS_INFORMATION process = new PROCESS_INFORMATION();
             bool started = false;
             try
             {
                 uint level = Level(options.Integrity);
-                // The protected paths are labeled and held before the program exists, so that there is no moment in
-                // which it could reach them.
-                HashSet<string> seen = new HashSet<string>();
-                foreach (string path in options.Protect)
-                {
-                    if (!Labels.Protect(path)) continue;
-                    Labels.HoldChain(path, seen, held);
-                }
+                // The protected paths are labeled before the program exists, so that there is no moment in which it
+                // could write them; one made again since the last command carried its folder's low label until now.
+                foreach (string path in options.Protect) Labels.Protect(path);
 
                 own = Tokens.OpenOwn();
                 token = Tokens.Lowered(own, level);
@@ -211,7 +205,6 @@ namespace Encode.Sandbox
                 if (token != IntPtr.Zero) Native.CloseHandle(token);
                 if (own != IntPtr.Zero) Native.CloseHandle(own);
                 // The job handle is closed by the helper ending: that is what kills what the program left behind.
-                // The protected folders stay held until then as well, so the program's own stragglers cannot rename them either.
             }
         }
     }

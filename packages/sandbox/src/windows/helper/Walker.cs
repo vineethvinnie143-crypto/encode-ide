@@ -136,18 +136,6 @@ namespace Encode.Sandbox
             return attributes != Native.INVALID_FILE_ATTRIBUTES;
         }
 
-        /// <summary>The folder that holds the path, or null at the root of a drive or a share. Text only, so no length limit applies.</summary>
-        public static string ParentOf(string path)
-        {
-            string trimmed = path.TrimEnd('\\', '/');
-            int at = trimmed.LastIndexOfAny(new char[] { '\\', '/' });
-            if (at <= 0) return null;
-            string parent = trimmed.Substring(0, at);
-            if (parent.Length == 2 && parent[1] == ':') return null;
-            if (parent.StartsWith(@"\\", StringComparison.Ordinal) && parent.Substring(2).Split(new char[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries).Length < 2) return null;
-            return parent;
-        }
-
         private void Fail(string path, int error)
         {
             Failed++;

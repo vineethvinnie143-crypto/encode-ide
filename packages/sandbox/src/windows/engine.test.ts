@@ -120,7 +120,7 @@ describe('the Windows engine', () => {
   it('says what it can and cannot hold', () => {
     const engine = make(fakeClient())
     assert.equal(engine.name, 'integrity-level')
-    assert.deepEqual(engine.limits, { reads: false, network: false, protectedPaths: 'exact', processes: false })
+    assert.deepEqual(engine.limits, { reads: false, network: false, protectedPaths: 'best-effort', processes: false })
   })
 
   it('passes its test when a program writes inside a marked folder and not outside', async () => {
