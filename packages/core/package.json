@@ -1,0 +1,26 @@
+{
+  "name": "@encode/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's agent: the loop, approvals, compaction, sessions and memory files, served to the desktop app and the CLI.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/permissions": "workspace:*",
+    "@encode/protocol": "workspace:*",
+    "@encode/providers": "workspace:*",
+    "@encode/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
