@@ -420,6 +420,59 @@ describe('which questions the Reviewer may answer', () => {
   })
 })
 
+describe('a command that asks to run outside the sandbox', () => {
+  const sandbox = (allowUnsandboxed: boolean) => ({ active: true, allowUnsandboxed })
+  const outside = (cwd: string): ToolAccess => ({ type: 'command', command: 'git push', cwd, background: false, unsandboxed: true })
+  const state = (root: string, view: ApprovalContext['shell']['sandbox']): ApprovalContext['shell'] => ({
+    cwd: root,
+    env: { PATH: process.env.PATH ?? '' },
+    dialect: 'bash',
+    ...(view ? { sandbox: view } : {}),
+  })
+
+  it('is the person’s to allow under every policy but Read Only, which refuses it, and the Reviewer never answers it', async () => {
+    for (const policy of ['workspace-write', 'auto-review', 'full-access'] as const) {
+      const base = await context(policy, { assessor: allowing })
+      const ctx = { ...base, shell: state(base.root, sandbox(true)) }
+      const decision = await decideApproval(outside(ctx.root), ctx)
+      assert.equal(decision.kind, 'ask', policy)
+      assert.equal(decision.kind === 'ask' && decision.reviewable, undefined, policy)
+      assert.equal(decision.kind === 'ask' && decision.grantable, true, policy)
+    }
+    const base = await context('read-only', { assessor: allowing })
+    const decision = await decideApproval(outside(base.root), { ...base, shell: state(base.root, sandbox(true)) })
+    assert.equal(decision.kind, 'deny')
+  })
+
+  it('is refused when the settings do not let a command leave the sandbox', async () => {
+    const base = await context('full-access', { assessor: allowing })
+    const decision = await decideApproval(outside(base.root), { ...base, shell: state(base.root, sandbox(false)) })
+    assert.equal(decision.kind, 'deny')
+    assert.match(decision.kind === 'deny' ? decision.reason : '', /do not let commands run outside the sandbox/)
+  })
+
+  it('is an ordinary command where there is no sandbox to leave, and still refused by a rule that denies it', async () => {
+    for (const view of [undefined, { active: false, allowUnsandboxed: true }]) {
+      const base = await context('full-access', { assessor: allowing })
+      const decision = await decideApproval(outside(base.root), { ...base, shell: state(base.root, view) })
+      assert.deepEqual(decision, { kind: 'allow' })
+    }
+    const base = await context('workspace-write', { assessor: denying })
+    assert.equal((await decideApproval(outside(base.root), { ...base, shell: state(base.root, sandbox(true)) })).kind, 'deny')
+  })
+
+  it('is not covered by an allow rule, an Always allow or a grant made for the same command inside the sandbox', async () => {
+    const byRule: ShellCommandAssessor = async () => ({ decision: 'allow', reason: 'Allowed by user rule Bash(git push:*)', source: 'rule' })
+    const base = await context('workspace-write', { assessor: byRule })
+    const ctx = { ...base, shell: state(base.root, sandbox(true)) }
+    assert.deepEqual(await decideApproval(command('git push', ctx.root), ctx), { kind: 'allow' })
+    assert.equal((await decideApproval(outside(ctx.root), ctx)).kind, 'ask')
+    assert.equal(alwaysAllowFor(outside(ctx.root), { root: ctx.root, platform: process.platform, dialect: 'bash' }), null)
+    assert.notEqual(grantKey(outside(ctx.root)), grantKey(command('git push', ctx.root)))
+    assert.equal(grantKey(outside(ctx.root)), grantKey(outside(ctx.root)))
+  })
+})
+
 describe('the rule behind Always allow', () => {
   const at = { root: path.resolve('/w'), platform: process.platform, dialect: 'bash' as const }
 

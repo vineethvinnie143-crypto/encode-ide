@@ -61,7 +61,7 @@ export function createJobManager(shell: ManagedShell, options: { onChange?(jobs:
         }
       }
       try {
-        job.handle = await shell.start(command, { cwd: path.resolve(cwd), onOutput: append })
+        job.handle = await shell.start(command, { cwd: path.resolve(cwd), ...(startOptions.unsandboxed ? { unsandboxed: true } : {}), onOutput: append })
       } catch (error) {
         append(`${error instanceof Error ? error.message : String(error)}\n`)
         job.info.status = 'error'

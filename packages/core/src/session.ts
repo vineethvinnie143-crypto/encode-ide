@@ -645,8 +645,15 @@ export class AgentSession {
     return this.env.system ?? systemParts()
   }
 
+  /** Whether Bash is told it runs in a sandbox, and whether it may ask to leave it. */
+  private sandboxOfShell(): { escapable: boolean } | undefined {
+    const view = this.shell.state().sandbox
+    return view?.active ? { escapable: view.allowUnsandboxed } : undefined
+  }
+
   private buildRegistry(definitions: ReturnType<AgentSession['definitions']>): ToolRegistry {
     const settings = this.env.settings()
+    const sandbox = this.sandboxOfShell()
     const registry = createToolRegistry(
       {
         dialect: this.shell.dialect,
@@ -655,6 +662,7 @@ export class AgentSession {
         skills: this.env.skills.list().slice(0, 20),
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
+        ...(sandbox ? { sandbox } : {}),
       },
       [...(this.env.extraTools ?? [])],
     )
@@ -716,7 +724,9 @@ export class AgentSession {
     const settings = this.env.settings()
     // The subagent definitions are part of it: the Task tool lists them, so a changed agent file takes effect with the next turn.
     const agents = createHash('sha256').update(JSON.stringify(this.definitions())).digest('hex')
-    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? '', agents])
+    // The sandbox is part of it too: Bash's description says whether commands are confined and may ask to leave.
+    const sandbox = this.sandboxOfShell()
+    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? '', agents, sandbox ? (sandbox.escapable ? 'escapable' : 'confined') : ''])
   }
 
   private getLoop(): AgentLoop {

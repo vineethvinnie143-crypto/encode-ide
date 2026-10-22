@@ -7,7 +7,8 @@
  *
  * The command reaches the shell in a private script file, not on the command
  * line, so no layer of command-line quoting can change what runs. A sandbox
- * can rewrite every spawn through `wrapSpawn`.
+ * can rewrite every spawn through `wrapSpawn`; a command the person has let
+ * leave it starts with `unsandboxed`.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs/promises'
@@ -15,7 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { isInside } from '@encode/permissions'
 import { collapseCarriageReturns, stripAnsi } from '../text'
-import type { AgentShell, ShellDialect, ShellResult, ShellRunOptions, ShellState, SpawnSpec, SpawnWrapper } from '../types'
+import type { AgentShell, SandboxView, ShellDialect, ShellResult, ShellRunOptions, ShellState, SpawnSpec, SpawnWrapper } from '../types'
 import { detectShell, type ShellProgram } from './detect'
 import { agentEnvironment } from './environment'
 import { windowsSystemProgram } from './programs'
@@ -151,6 +152,13 @@ export interface AgentShellOptions {
   extraEnv?: Record<string, string>
   /** Rewrites every spawn, to run commands inside a sandbox. */
   wrapSpawn?: SpawnWrapper
+  /** Whether that wrapper confines commands right now, and whether a command may ask to leave it. Read each time. */
+  sandbox?: () => SandboxView
+  /**
+   * Where the scripts of confined commands are kept, when the system's temp folder is not one a command can use
+   * (a sandbox gives commands a temp folder of their own). Undefined: the system's.
+   */
+  scratchRoot?: () => string | undefined | Promise<string | undefined>
   defaultTimeoutMs?: number
   maxTimeoutMs?: number
   platform?: NodeJS.Platform
@@ -167,7 +175,7 @@ export interface ManagedShell extends AgentShell {
   /** Names removed from the environment because they looked like secrets. */
   readonly removedEnv: readonly string[]
   /** Starts a command without waiting for it: background jobs use this. */
-  start(command: string, options: { cwd?: string; onOutput?(text: string): void }): Promise<RunningCommand>
+  start(command: string, options: { cwd?: string; unsandboxed?: boolean; onOutput?(text: string): void }): Promise<RunningCommand>
   /** Moves the working directory, if it is a directory inside the workspace. */
   setCwd(dir: string): Promise<boolean>
   dispose(): Promise<void>
@@ -195,10 +203,20 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
   const maxTimeout = options.maxTimeoutMs ?? MAX_TIMEOUT_MS
   let cwd = root
   let counter = 0
-  let scratch: Promise<string> | undefined
+  /** One scratch folder for each place scripts are kept: the system's temp folder, and the sandbox's. */
+  const scratch = new Map<string, Promise<string>>()
   const running = new Set<RunningCommand>()
 
-  const scratchDir = () => (scratch ??= fs.mkdtemp(path.join(os.tmpdir(), 'encode-shell-')))
+  const scratchDir = async (confined: boolean) => {
+    const base = (confined ? await options.scratchRoot?.() : undefined) ?? os.tmpdir()
+    let made = scratch.get(base)
+    if (!made) {
+      made = fs.mkdtemp(path.join(base, 'encode-shell-'))
+      scratch.set(base, made)
+      made.catch(() => scratch.delete(base))
+    }
+    return made
+  }
 
   let rootReal: Promise<string> | undefined
   /** Inside the workspace once links and short names are resolved (fs.promises.realpath is the native one): a link out of it does not count. */
@@ -208,8 +226,9 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     return isInside(await rootReal!, real, pathApi)
   }
 
-  async function start(command: string, startOptions: { cwd?: string; onOutput?(text: string): void }): Promise<RunningCommand> {
-    const dir = await scratchDir()
+  async function start(command: string, startOptions: { cwd?: string; unsandboxed?: boolean; onOutput?(text: string): void }): Promise<RunningCommand> {
+    const confined = Boolean(options.wrapSpawn) && !startOptions.unsandboxed
+    const dir = await scratchDir(confined)
     const id = ++counter
     const cwdFile = path.join(dir, `${id}.cwd`)
     const scriptFile = path.join(dir, program!.dialect === 'bash' ? `${id}.sh` : `${id}.ps1`)
@@ -227,7 +246,7 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     }
 
     let spec: SpawnSpec = { file: program!.file, args, env: { ...env, PWD: startOptions.cwd ?? cwd }, cwd: startOptions.cwd ?? cwd }
-    if (options.wrapSpawn) spec = await options.wrapSpawn(spec)
+    if (confined) spec = await options.wrapSpawn!(spec)
     if (!pathApi.isAbsolute(spec.file)) throw new Error(`The sandbox returned a program without an absolute path: ${spec.file}`)
 
     const child = spawn(spec.file, spec.args, {
@@ -306,6 +325,7 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     const timeoutMs = Math.min(maxTimeout, Math.max(1_000, runOptions.timeoutMs ?? defaultTimeout))
     const output = new OutputBuffer()
     const handle = await start(command, {
+      ...(runOptions.unsandboxed ? { unsandboxed: true } : {}),
       onOutput: (text) => {
         output.push(text)
         runOptions.onOutput?.(collapseCarriageReturns(stripAnsi(text)))
@@ -359,7 +379,7 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     dialect: program.dialect,
     program: program.file,
     removedEnv: removed,
-    state: (): ShellState => ({ cwd, env: { ...env }, dialect: program.dialect }),
+    state: (): ShellState => ({ cwd, env: { ...env }, dialect: program.dialect, ...(options.sandbox ? { sandbox: options.sandbox() } : {}) }),
     run,
     start,
     async setCwd(dir) {
@@ -370,7 +390,12 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     },
     async dispose() {
       await Promise.all([...running].map((handle) => handle.kill()))
-      if (scratch) await fs.rm(await scratch, { recursive: true, force: true }).catch(() => {})
+      await Promise.all(
+        [...scratch.values()].map(async (made) => {
+          const dir = await made.catch(() => undefined)
+          if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+        }),
+      )
     },
   }
 }
