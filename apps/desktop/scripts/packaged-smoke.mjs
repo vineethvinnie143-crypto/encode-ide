@@ -90,6 +90,8 @@ try {
   console.log('[packaged] page:', page.target.url)
   if (!page.target.url.startsWith('app://')) throw new Error(`the window shows ${page.target.url}, not the bundled interface`)
 
+  // A slow start (the portable program unpacks itself first) lists the page before its bridge exists.
+  await waitFor("typeof window.eNCode === 'object' && window.eNCode !== null", 60000, 'the bridge to the program')
   const about = await evaluate('window.eNCode.app.about()')
   console.log('[packaged] build:', JSON.stringify(about))
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
@@ -136,6 +138,9 @@ try {
   console.log('[packaged] PASS')
 } catch (error) {
   console.error(`[packaged] FAILED: ${error.message}`)
+  // What the page looked like when it failed: enough to tell a slow start from a broken bridge.
+  const state = await page?.evaluate("JSON.stringify({ url: location.href, ready: document.readyState, bridge: typeof window.eNCode, body: document.body?.children.length })").catch(() => undefined)
+  if (state) console.error(`[packaged] page state: ${state}`)
   const tail = fs.readFileSync(path.join(shotsDir, 'packaged.log'), 'utf8').split('\n').slice(-40).join('\n')
   console.error(`[packaged] log, last lines:\n${tail}`)
   process.exitCode = 1
