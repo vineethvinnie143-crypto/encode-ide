@@ -39,8 +39,8 @@ function fakeEngine(probe: EngineProbe = { ok: true }): Fake {
 }
 
 describe('the sandbox', () => {
-  let dir: string
-  let project: string
+  let dir = ''
+  let project = ''
   before(() => {
     dir = fs.realpathSync(fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'work-')))
     project = path.join(dir, 'project')
@@ -50,7 +50,7 @@ describe('the sandbox', () => {
 
   const make = (engine: SandboxEngine | undefined, over: Partial<ConstructorParameters<typeof Sandbox>[0]> = {}) =>
     new Sandbox({ platform: 'linux', home: path.join(dir, 'home'), dir: path.join(dir, 'sandbox'), ...(engine ? { engine } : {}), env: {}, ...over })
-  const spec: SpawnSpec = { file: '/bin/bash', args: ['x.sh'], env: { PATH: '/usr/bin' }, cwd: project }
+  const spec = (): SpawnSpec => ({ file: '/bin/bash', args: ['x.sh'], env: { PATH: '/usr/bin' }, cwd: project })
 
   it('checks the machine once and says what it found', async () => {
     const engine = fakeEngine()
@@ -88,7 +88,7 @@ describe('the sandbox', () => {
     const engine = fakeEngine()
     const sandbox = make(engine)
     const session = sandbox.session({ roots: () => [project], settings: () => settings() })
-    const wrapped = await session.wrapSpawn(spec)
+    const wrapped = await session.wrapSpawn(spec())
     assert.equal(wrapped.file, '/usr/bin/fake-sandbox')
     assert.deepEqual(wrapped.args, ['--', '/bin/bash', 'x.sh'])
     const policy = engine.wrapped[0]
@@ -102,11 +102,11 @@ describe('the sandbox', () => {
     const engine = fakeEngine()
     const sandbox = make(engine)
     const session = sandbox.session({ roots: () => [project], settings: () => settings() })
-    await session.wrapSpawn(spec)
-    await session.wrapSpawn(spec)
+    await session.wrapSpawn(spec())
+    await session.wrapSpawn(spec())
     assert.equal(engine.prepared.length, 1)
     const other = sandbox.session({ roots: () => [project, dir], settings: () => settings() })
-    await other.wrapSpawn(spec)
+    await other.wrapSpawn(spec())
     assert.equal(engine.prepared.length, 2)
   })
 
@@ -114,9 +114,9 @@ describe('the sandbox', () => {
     const engine = fakeEngine()
     const extra: string[] = []
     const session = make(engine).session({ roots: () => [project, ...extra], settings: () => settings() })
-    await session.wrapSpawn(spec)
+    await session.wrapSpawn(spec())
     extra.push(dir)
-    await session.wrapSpawn(spec)
+    await session.wrapSpawn(spec())
     assert.ok(engine.wrapped[1].writable.includes(dir))
     assert.ok(!engine.wrapped[0].writable.includes(dir))
   })
@@ -124,7 +124,7 @@ describe('the sandbox', () => {
   it('leaves the spawn alone when the settings turn it off', async () => {
     const engine = fakeEngine()
     const session = make(engine).session({ roots: () => [project], settings: () => settings({ enabled: false }) })
-    assert.deepEqual(await session.wrapSpawn(spec), spec)
+    assert.deepEqual(await session.wrapSpawn(spec()), spec())
     assert.equal(engine.probes, 0)
     assert.equal(session.state().active, false)
     assert.match(session.state().reason ?? '', /turned off/)
@@ -134,13 +134,13 @@ describe('the sandbox', () => {
   it('leaves the spawn alone where there is no sandbox, and says so, unless the settings require one', async () => {
     const engine = fakeEngine({ ok: false, reason: 'no namespaces' })
     const optional = make(engine).session({ roots: () => [project], settings: () => settings() })
-    assert.deepEqual(await optional.wrapSpawn(spec), spec)
+    assert.deepEqual(await optional.wrapSpawn(spec()), spec())
     assert.equal(optional.state().active, false)
     assert.equal(optional.state().reason, 'no namespaces')
     assert.equal(await optional.scratchRoot(), undefined)
 
     const required = make(engine).session({ roots: () => [project], settings: () => settings({ required: true }) })
-    await assert.rejects(required.wrapSpawn(spec), (error: unknown) => error instanceof SandboxError && error.code === 'unavailable' && /require the sandbox/.test(error.message) && /no namespaces/.test(error.message))
+    await assert.rejects(required.wrapSpawn(spec()), (error: unknown) => error instanceof SandboxError && error.code === 'unavailable' && /require the sandbox/.test(error.message) && /no namespaces/.test(error.message))
     assert.equal(required.state().required, true)
   })
 
