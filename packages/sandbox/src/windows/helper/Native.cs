@@ -135,6 +135,9 @@ namespace Encode.Sandbox
         public const uint DACL_SECURITY_INFORMATION = 0x00000004;
         public const uint GENERIC_ALL = 0x10000000;
         public const int UOI_NAME = 2;
+        public const uint READ_CONTROL = 0x00020000;
+        public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x00001000;
+        public const int SE_KERNEL_OBJECT = 6;
 
         public const uint CREATE_SUSPENDED = 0x00000004;
         public const uint DETACHED_PROCESS = 0x00000008;
@@ -239,6 +242,12 @@ namespace Encode.Sandbox
 
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
         public static extern uint GetNamedSecurityInfo(string name, int type, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+
+        [DllImport("advapi32.dll")]
+        public static extern uint GetSecurityInfo(IntPtr handle, int type, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
 
         [DllImport("kernel32.dll")]
         public static extern IntPtr LocalFree(IntPtr memory);

@@ -11,8 +11,8 @@ export const HELPER_FAILED = 125
 export interface RunFlags {
   /** SIDs or names (everyone, users, restricted, logon, authenticated, interactive) the token is restricted to. */
   restrict: readonly string[]
-  /** Run at the low integrity level: nothing labeled higher can be written, deleted or ended. */
-  integrity?: 'low'
+  /** Run at the low integrity level (nothing labeled higher can be written, deleted or ended), or at the medium one that a person's own programs run at (for the measurement). */
+  integrity?: 'low' | 'medium'
   /** The job's limits on the clipboard, other programs' windows and so on (default all). */
   jobUi?: 'all' | 'none'
   /** Whether programs the command starts may leave the job (default none). */
@@ -136,6 +136,13 @@ export async function readLabels(exe: string, paths: readonly string[], timeoutM
   const args = ['labels']
   for (const item of paths) args.push('--path', item)
   return (await helperJson<{ labels: string[] }>(exe, args, timeoutMs)).labels
+}
+
+/** Who may open the running programs and the label they carry, as "pid => O:...D:...S:(ML;...)" lines. */
+export async function processSecurity(exe: string, pids: readonly number[], timeoutMs = 20_000): Promise<string[]> {
+  const args = ['process-security']
+  for (const pid of pids) args.push('--pid', String(pid))
+  return (await helperJson<{ processes: string[] }>(exe, args, timeoutMs)).processes
 }
 
 /** The window station and desktop the helper is on, and who may use them, as the helper sees them. */

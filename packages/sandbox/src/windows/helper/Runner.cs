@@ -12,7 +12,7 @@ namespace Encode.Sandbox
         public bool WriteRestricted = true;
         public bool Lua = true;
         public bool UseJob = true;
-        /// <summary>"low": the program runs at the low integrity level and cannot write what is labeled higher. Empty: unchanged.</summary>
+        /// <summary>"low": the program runs at the low integrity level and cannot write what is labeled higher; "medium": at the level of an ordinary program of a person (for the measurement). Empty: unchanged.</summary>
         public string Integrity = "";
         /// <summary>"all": the job limits the clipboard, other programs' windows and so on; "none": it does not.</summary>
         public string JobUi = "all";
@@ -149,6 +149,7 @@ namespace Encode.Sandbox
                 foreach (SecurityIdentifier sid in restricting) if (!allowed.Contains(sid)) allowed.Add(sid);
                 Tokens.SetDefaultDacl(restricted, allowed);
                 if (options.Integrity == "low") Tokens.SetIntegrity(restricted, 0x1000);
+                else if (options.Integrity == "medium") Tokens.SetIntegrity(restricted, 0x2000);
                 else if (options.Integrity.Length > 0) throw new SandboxException("Unknown integrity level: " + options.Integrity);
                 return restricted;
             }

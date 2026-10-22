@@ -16,6 +16,7 @@ namespace Encode.Sandbox
     ///   unlabel --path P [--protect X]... takes the labels away
     ///   labels --path P...                the labels the paths carry
     ///   desktop-info                      the window station and desktop this process is on, and who may use them
+    ///   process-security --pid N...       who may open the running programs, and the label they carry
     ///   probe [options]                   whether a program can be started this way here
     ///
     /// Answers other than a program's own output are one line of JSON on standard output. A failure is a line on
@@ -49,6 +50,7 @@ namespace Encode.Sandbox
             public string Sid;
             public readonly List<string> Paths = new List<string>();
             public readonly List<string> Protect = new List<string>();
+            public readonly List<int> Pids = new List<int>();
             public bool IfMissing;
         }
 
@@ -80,6 +82,13 @@ namespace Encode.Sandbox
                     case "--sid": parsed.Sid = Value(args, ref i); break;
                     case "--path": parsed.Paths.Add(Value(args, ref i)); break;
                     case "--protect": parsed.Protect.Add(Value(args, ref i)); break;
+                    case "--pid":
+                    {
+                        int pid;
+                        if (!int.TryParse(Value(args, ref i), out pid)) throw new SandboxException("--pid needs a number.");
+                        parsed.Pids.Add(pid);
+                        break;
+                    }
                     case "--if-missing": parsed.IfMissing = true; break;
                     default: throw new SandboxException("Unknown option: " + arg);
                 }
@@ -104,7 +113,7 @@ namespace Encode.Sandbox
         {
             try
             {
-                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, label, unlabel, labels, desktop-info, probe or version.");
+                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, label, unlabel, labels, desktop-info, process-security, probe or version.");
                 switch (args[0])
                 {
                     case "version":
@@ -200,6 +209,15 @@ namespace Encode.Sandbox
                         List<string> found = new List<string>();
                         foreach (string path in parsed.Paths) found.Add(path + " => " + Labels.Get(path));
                         Say(new JsonObject().Bool("ok", true).List("labels", found).ToString());
+                        return 0;
+                    }
+                    case "process-security":
+                    {
+                        Parsed parsed = Parse(args, 1);
+                        if (parsed.Pids.Count == 0) throw new SandboxException("--pid is required.");
+                        List<string> found = new List<string>();
+                        foreach (int pid in parsed.Pids) found.Add(pid + " => " + Labels.OfProcess(pid));
+                        Say(new JsonObject().Bool("ok", true).List("processes", found).ToString());
                         return 0;
                     }
                     default:

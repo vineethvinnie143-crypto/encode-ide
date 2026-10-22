@@ -84,6 +84,46 @@ namespace Encode.Sandbox
             }
         }
 
+        /// <summary>Who owns a running program, who may open it and the label it carries, in the text form Windows uses (for the measurement).</summary>
+        public static string OfProcess(int pid)
+        {
+            IntPtr process = Native.OpenProcess(Native.READ_CONTROL | Native.PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)pid);
+            if (process == IntPtr.Zero) throw SandboxException.Last("OpenProcess(" + pid + ")");
+            try
+            {
+                IntPtr owner;
+                IntPtr group;
+                IntPtr dacl;
+                IntPtr sacl;
+                IntPtr descriptor;
+                uint information = Native.OWNER_SECURITY_INFORMATION | Native.DACL_SECURITY_INFORMATION | Native.LABEL_SECURITY_INFORMATION;
+                uint error = Native.GetSecurityInfo(process, Native.SE_KERNEL_OBJECT, information, out owner, out group, out dacl, out sacl, out descriptor);
+                if (error != 0) throw new SandboxException("GetSecurityInfo(" + pid + ")", (int)error);
+                try
+                {
+                    IntPtr text;
+                    uint length;
+                    if (!Native.ConvertSecurityDescriptorToStringSecurityDescriptor(descriptor, Native.SDDL_REVISION_1, information, out text, out length)) throw SandboxException.Last("ConvertSecurityDescriptorToStringSecurityDescriptor");
+                    try
+                    {
+                        return Marshal.PtrToStringUni(text) ?? "";
+                    }
+                    finally
+                    {
+                        Native.LocalFree(text);
+                    }
+                }
+                finally
+                {
+                    Native.LocalFree(descriptor);
+                }
+            }
+            finally
+            {
+                Native.CloseHandle(process);
+            }
+        }
+
         /// <summary>Whether the folder carries the low label for what is in it.</summary>
         public static bool IsLow(string path)
         {
