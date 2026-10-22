@@ -50,6 +50,7 @@ import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, Session
 import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
 import { builtinDefinitions, createSubagents, loadAgentDefinitions, type AgentSource } from './subagents'
+import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
 import { AgentAbortedError, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Surface, type TurnEnd } from './types'
 import {
   previewOf,
@@ -70,8 +71,8 @@ import {
 } from './ui'
 
 const MAX_ATTACHMENT_CHARS = 20_000
-const MAX_TITLE_CHARS = 60
 const JOB_PREVIEW_CHARS = 4_000
+const NAMING_TIMEOUT_MS = 20_000
 const CANCELLED = '(cancelled)'
 
 /** Everything a session needs from the program around it. */
@@ -107,15 +108,12 @@ export interface SessionEnv {
   system?: SystemPart[]
   /** Something went wrong that the user need not see in the conversation (a log that could not be written). */
   warn?(message: string): void
+  /** Name a session with one small call to the utility model once its first turn is over. Default true. */
+  nameSessions?: boolean
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function titleFrom(text: string): string {
-  const line = text.trim().split(/\r?\n/)[0].replace(/\s+/g, ' ')
-  return line.length > MAX_TITLE_CHARS ? `${line.slice(0, MAX_TITLE_CHARS - 1).trimEnd()}…` : line
 }
 
 /** An entry as the log kept it, made safe to show after a crash: nothing is still streaming or running. */
@@ -180,6 +178,10 @@ export class AgentSession {
   private contextRecord: ContextRecord | undefined
   private statusValue: AgentStatus = 'idle'
   private titleValue = DEFAULT_TITLE
+  /** The title this session was given from its first message, until it is named or renamed; null once it has been or never was. */
+  private provisionalTitle: string | null = null
+  private naming: Promise<void> = Promise.resolve()
+  private readonly namingController = new AbortController()
   private goalState: SessionGoal | null = null
   private todoList: TodoItem[] = []
   private planState: PlanRequest | null = null
@@ -319,6 +321,37 @@ export class AgentSession {
     if (!trimmed || trimmed === this.titleValue) return
     this.titleValue = trimmed
     await this.write({ type: 'title', title: trimmed })
+    this.send({ type: 'title', title: trimmed })
+  }
+
+  /**
+   * Replaces the first words of the first message with a short name once the first turn is over: one small
+   * call to the utility model. It runs after the turn, not beside it, so a rate limit it hits cannot sideline
+   * the model the turn used. The first words stay when the message is short enough to be a title, when the
+   * call fails or gives no name, and when the user renamed the session meanwhile.
+   */
+  private async nameSession(text: string): Promise<void> {
+    const provisional = this.provisionalTitle
+    this.provisionalTitle = null
+    if (!provisional || this.disposed || this.env.nameSessions === false || !worthNaming(text)) return
+    const payload: ModelRequest = {
+      system: [{ text: TITLE_SYSTEM }],
+      messages: [{ role: 'user', content: [textBlock(titlePrompt(text))] }],
+      tools: [],
+      maxOutputTokens: 24,
+    }
+    const outcome = await this.env.client.complete({
+      role: 'utility',
+      tool: 'Title',
+      payload,
+      requirements: { promptTokens: estimateTokens(payload.messages) + 60, maxOutputTokens: 24, tools: false, images: false },
+      sticky: this.id,
+      signal: AbortSignal.any([this.namingController.signal, AbortSignal.timeout(NAMING_TIMEOUT_MS)]),
+    })
+    if (outcome.kind !== 'done') return
+    this.surface.usage(outcome.usage)
+    const title = cleanTitle(messageText(outcome.message))
+    if (title && !this.disposed && this.titleValue === provisional) await this.rename(title)
   }
 
   private setStatus(status: AgentStatus): void {
@@ -730,11 +763,15 @@ export class AgentSession {
       const record = (await this.write({ type: 'message', id: turnId, message, turnId, agentId: 'main' })) as MessageRecord
       this.messages = [...this.messages, message]
       this.records = [...this.records, record]
-      if (this.titleValue === DEFAULT_TITLE) await this.rename(titleFrom(text))
+      if (this.titleValue === DEFAULT_TITLE) {
+        this.provisionalTitle = titleFrom(text)
+        await this.rename(this.provisionalTitle)
+      }
 
       const end = await this.getLoop().run({ turnId, mode, signal })
       this.finishStreaming()
       this.conclude(end)
+      if (end.kind === 'done' || end.kind === 'stopped') this.naming = this.nameSession(text).catch(() => undefined)
       return end
     } catch (error) {
       this.finishStreaming()
@@ -914,9 +951,15 @@ export class AgentSession {
     return this.log.snapshot().lastRecordId
   }
 
+  /** Resolves when the call that names the session, started at the end of its first turn, has finished. */
+  named(): Promise<void> {
+    return this.naming
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.cancel()
+    this.namingController.abort()
     await this.idle()
     this.disposed = true
     await this.flush().catch(() => undefined)

@@ -194,6 +194,10 @@ export const useSessions = create<SessionsStore>((set, get) => {
       if (!id) return
       if (event.type === 'status') useStatus.getState().set(id, event.status)
       if (event.type === 'session-reset') useStatus.getState().set(id, 'idle')
+      // A session was named, by the model or by you: the sidebar and the window title follow at once.
+      if (event.type === 'title') {
+        set((state) => ({ sessions: state.sessions.map((session) => (session.id === id ? { ...session, title: event.title } : session)) }))
+      }
       // The agent is free again: the next message you queued goes out.
       if (event.type === 'done') useChat.getState().drainQueue(id)
       if (event.type === 'done' || event.type === 'error') {

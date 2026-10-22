@@ -9,7 +9,8 @@
  * Conversations follow a script. A `[scenario:<name>]` marker in the latest
  * user message picks it; the step is the number of tool results since then.
  * Like OpenAI, it refuses a transcript whose tool calls and results do not
- * pair up, and a request without tools is answered as a summary request.
+ * pair up, and a request without tools is answered as a summary request,
+ * unless it asks for the name of a session.
  */
 import http from 'node:http'
 
@@ -94,7 +95,7 @@ let requestCount = 0
 let lastAuthorization = null
 /** The tools offered and the messages sent in the latest request that offered tools, so the smoke can check the contract. */
 let lastRequest = null
-const stats = { summaryRequests: 0, overflowRefusals: 0, invalidTranscripts: 0 }
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0 }
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -186,6 +187,10 @@ function pairingProblem(messages) {
   return null
 }
 
+/** The small call that names a session once its first turn is over. */
+const namesSession = (messages) =>
+  messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
+
 /** True once eNCode has put a summary in the conversation (the system prompt only mentions the tag). */
 const compacted = (messages) =>
   messages.some(
@@ -243,6 +248,13 @@ const server = http.createServer(async (request, response) => {
       stats.invalidTranscripts += 1
       console.log(`[fake-provider] refused an invalid transcript: ${problem}`)
       sendJson(response, 400, { error: { message: `Invalid parameter: ${problem}`, type: 'invalid_request_error' } })
+      return
+    }
+
+    if (namesSession(messages)) {
+      stats.titleRequests += 1
+      // Quoted and closed with a full stop, as models do: eNCode must take both off.
+      await sendText(response, body, '"Provider path check."')
       return
     }
 

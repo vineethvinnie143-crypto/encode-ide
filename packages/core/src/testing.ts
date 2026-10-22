@@ -282,6 +282,8 @@ export async function sessionHarness(options: SessionHarnessOptions = {}): Promi
     createShell: () => (options.createShell ?? stubManagedShell)(root),
     skills: createSkills(() => []),
     emit: (event) => events.push(event),
+    // The scripted model answers every request, so a naming call would only change what the tests count.
+    nameSessions: false,
     ...options.env,
   }
   const log = await store.create({ root })
@@ -355,6 +357,7 @@ export async function hostHarness(options: HostHarnessOptions = {}): Promise<Hos
     web: stubWeb,
     createShell: stubManagedShell,
     goalDelayMs: 0,
+    nameSessions: false,
     ...options.host,
   })
   openHosts.push(host)

@@ -548,10 +548,28 @@ async function runProviderPhase() {
   await runSubagentChecks()
   await runWebChecks()
   await runCompactionChecks()
+  await runNamingChecks()
 }
 
 async function providerStats() {
   return (await fetch(`http://127.0.0.1:${providerPort}/__stats`)).json()
+}
+
+/** Once its first turn is over a session is named by the model in a few words, and the name is kept. */
+async function runNamingChecks() {
+  console.log('[smoke] --- naming ---')
+  const before = await providerStats()
+  await key({ key: 'n', ctrlKey: true })
+  await waitFor("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'New session'", 6000, 'Ctrl+N opens a new session')
+  await sendPrompt('[scenario:follow-up] Name this session.')
+  await driveAgent('16-naming')
+  for (let attempt = 0; attempt < 40 && (await providerStats()).titleRequests === before.titleRequests; attempt++) await sleep(250)
+  const after = await providerStats()
+  if (after.titleRequests - before.titleRequests !== 1) throw new Error('The agent did not ask the model, once, to name the session')
+  await waitFor("document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === 'Provider path check'", 8000, 'the model names the session, without its quotes or full stop')
+  const titles = await evaluate('window.eNCode.agent.sessions().then((sessions) => sessions.map((session) => session.title))')
+  if (!titles.includes('Provider path check')) throw new Error('The name the model gave is not kept with the session')
+  console.log('[smoke] session named:', JSON.stringify({ before: before.titleRequests, after: after.titleRequests }))
 }
 
 async function notices() {

@@ -163,5 +163,6 @@ export type AgentEventBody =
   | { type: 'done'; summary: string }
   | { type: 'error'; message: string }
   | { type: 'session-reset' }
+  | { type: 'title'; title: string }
 
 export type AgentEvent = AgentEventBody & { sessionId: string }

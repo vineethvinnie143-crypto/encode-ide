@@ -76,6 +76,8 @@ export interface HostOptions {
   warn?(message: string): void
   /** The pause before an active goal restarts the agent, ms. Default 400. */
   goalDelayMs?: number
+  /** Name each session with one small call to the utility model after its first turn. Default true. */
+  nameSessions?: boolean
 }
 
 const NO_SESSION = 'That session does not exist.'
@@ -152,6 +154,7 @@ export class AgentHost {
       ...(o.reviewPlan ? { reviewPlan: o.reviewPlan } : {}),
       ...(o.system ? { system: o.system } : {}),
       ...(o.warn ? { warn: o.warn } : {}),
+      ...(o.nameSessions === false ? { nameSessions: false } : {}),
       emit: (event) => o.emit(event),
       jobsChanged: () => this.reportJobs(),
     }
