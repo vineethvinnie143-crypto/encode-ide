@@ -153,7 +153,7 @@ before it runs, and the operating system's sandbox limits what it can change
 ## The side panel and the bottom panel
 
 The side panel holds tabs: **Files** (the explorer, search and source control), **Editor**,
-**Browser**, **Terminal** and **Trajectory**. `Ctrl+T` opens a New tab page to choose from, and a
+**Review**, **Browser**, **Terminal** and **Trajectory**. `Ctrl+T` opens a New tab page to choose from, and a
 Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was. The tab
 shows a page in a frame and lifts the framing rules (`X-Frame-Options`, `frame-ancestors`) from
 what that frame loads, so sites that forbid framing do not leave it blank. That is a stopgap until
@@ -165,6 +165,26 @@ shell.
 `Ctrl+J` shows the bottom panel, which holds the terminal and the background jobs the agent
 started. Tabs, layout and widths are remembered between runs
 ([ADR 0015](docs/adr/0015-one-tab-model-for-the-side-and-bottom-panels.md)).
+
+## The Review tab
+
+**Review** (`Ctrl+Shift+G`, the rail's Review button, or **Review changes** under the agent's reply) shows the open
+repository's changes as diffs: **Unstaged**, **Staged**, the **Branch** against its base, or one **Commit**. Lines are
+coloured as in the editor, the words that changed are marked, and the layout is unified or side by side.
+
+- Stage, unstage or revert a whole file, or one hunk at a time. A hunk is put into git's index exactly as it is shown,
+  line endings included, and an action on a file that changed since it was shown is refused and the review is read
+  again. A revert can be undone with **Undo** on its notice or `Ctrl+Z` in the tab; a new file that is reverted goes
+  to the Recycle Bin.
+- Comment on any line with the `+` beside its number, then **Send** the comments to the agent as one message (they
+  wait for the end of a turn that is running).
+- **Commit…** drafts a message from the staged changes with the Small tasks model; edit it, then **Commit** or
+  **Commit and push**. Nothing is committed until you press one.
+- `F7` and `Shift+F7` move between changes. Lockfiles and other generated files start folded.
+
+The tab runs git itself, with the settings that stop a repository's config from starting programs when it is read
+([ADR 0064](docs/adr/0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md)). Committing
+runs the repository's hooks, as git does.
 
 ## Shortcuts
 
@@ -184,6 +204,7 @@ started. Tabs, layout and widths are remembered between runs
 | Activity view | `Ctrl+Alt+U` |
 | Search across files | `Ctrl+Shift+F` |
 | Show files / chat / the terminal | `Ctrl+Shift+E` / `Ctrl+Shift+X` / `` Ctrl+` `` |
+| Show the Review tab | `Ctrl+Shift+G` |
 | Back / forward over the sessions you opened | `Ctrl+[` / `Ctrl+]` (or the mouse buttons) |
 | Next / previous recent session | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Go to session 1 to 9 | `Alt+1` to `Alt+9` |
@@ -236,6 +257,7 @@ packages/diff/                Myers diff, hunks that apply and unapply, word dif
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
+packages/git/                 the Review tab's git: a scope's changes read and diffed, hunks staged and reverted, commits and pushes (@encode/git)
 packages/hooks/               user hooks in Claude Code's format, run in the agent's shell and environment
 packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval; the app runs it through the workspace package's hub
 packages/permissions/         shell grammar, command policy, egress and path rules

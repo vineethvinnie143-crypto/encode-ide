@@ -11,6 +11,8 @@ import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
 import type { ModelsService } from './services/models'
+import type { ReviewService } from './services/review'
+import { commitRequestOf, reviewActionOf, reviewOptionsOf, reviewScopeOf } from './services/review-input'
 import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
 import type { ShellService } from './services/shell'
@@ -43,6 +45,7 @@ export interface IpcDeps {
   skills: SkillService
   models: ModelsService
   git: GitService
+  review: ReviewService
   agent: AgentHostService
   /** Tells the agent host the settings changed. */
   configureAgent: () => void
@@ -76,7 +79,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, agent, configureAgent, logs, diagnostics } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics } = deps
   const host = agent.client
 
   /**
@@ -221,6 +224,15 @@ export function registerIpc(deps: IpcDeps): void {
   handle('models:recheck', () => agent.modelRecheck().catch((error) => Promise.reject(hostFailure(error))))
 
   handle('git:status', () => git.status())
+
+  // The Review tab is about the folder that is open; what the renderer sends is checked before git sees it.
+  handle('review:load', (scope: unknown, options: unknown) => review.load(reviewScopeOf(scope), reviewOptionsOf(options)))
+  handle('review:act', (scope: unknown, action: unknown, options: unknown) => review.act(reviewScopeOf(scope), reviewActionOf(action), reviewOptionsOf(options)))
+  handle('review:undo', (scope: unknown, options: unknown) => review.undo(reviewScopeOf(scope), reviewOptionsOf(options)))
+  handle('review:commits', () => review.commits())
+  handle('review:branches', () => review.branches())
+  handle('review:commit', (request: unknown) => review.commit(commitRequestOf(request)))
+  handle('review:draft', (options?: { all?: unknown }) => review.draft(options?.all === true))
 
   handle('shell:create', (options: ShellCreateOptions) =>
     shell.create(options, (id) => ({

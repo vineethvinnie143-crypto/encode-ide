@@ -17,7 +17,7 @@ export const ROLE_INFO: Readonly<Record<ModelRole, { label: string; hint: string
   planner: { label: 'Plan', hint: 'Drafts the plan in Plan mode.', follows: 'main' },
   reviewer: { label: 'Review', hint: 'Checks finished work, and judges low-risk commands under Auto review.', follows: 'main' },
   summarizer: { label: 'Compaction', hint: 'Summarizes old turns to make room.', follows: 'utility' },
-  utility: { label: 'Small tasks', hint: 'Names sessions and summarizes pages.', follows: 'main' },
+  utility: { label: 'Small tasks', hint: 'Names sessions, summarizes pages and drafts commit messages.', follows: 'main' },
 }
 
 /** The free models of the connection that serves them; the router spells it the same way. */

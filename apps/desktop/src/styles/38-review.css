@@ -1,0 +1,776 @@
+/* ============================================================
+   The Review tab: scope bar, the diff list (rows of fixed
+   heights that src/review/rows.ts and DiffList.tsx count on),
+   comments for the agent, the footer and the Commit dialog.
+   ============================================================ */
+
+.review-pane {
+  /* The editor's token colours (.tok-* read these), from the theme. */
+  --e-tok-comment: var(--enc-tok-comment);
+  --e-tok-string: var(--enc-tok-string);
+  --e-tok-number: var(--enc-tok-number);
+  --e-tok-keyword: var(--enc-tok-keyword);
+  --e-tok-type: var(--enc-tok-type);
+  --e-tok-function: var(--enc-tok-function);
+  --e-tok-punct: var(--enc-tok-punct);
+  --e-tok-operator: var(--enc-tok-operator);
+  --e-tok-tag: var(--enc-tok-tag);
+  --e-tok-attr: var(--enc-tok-attr);
+  --e-tok-value: var(--enc-tok-value);
+  --e-tok-key: var(--enc-tok-key);
+  --e-tok-bool: var(--enc-tok-bool);
+  --e-tok-heading: var(--enc-tok-heading);
+  --e-tok-emphasis: var(--enc-tok-emphasis);
+  --e-tok-strong: var(--enc-tok-strong);
+  --e-tok-variable: var(--enc-tok-variable);
+  --e-tok-link: var(--enc-tok-link);
+  --e-tok-meta: var(--enc-tok-meta);
+  --e-tok-regexp: var(--enc-tok-regexp);
+  --e-tok-escape: var(--enc-tok-escape);
+  --e-tok-property: var(--enc-tok-property);
+  --e-tok-constant: var(--enc-tok-constant);
+  --e-tok-inserted: var(--enc-tok-inserted);
+  --e-tok-deleted: var(--enc-tok-deleted);
+  --e-tok-code: var(--enc-tok-code);
+
+  --rv-add-line: var(--enc-editor-inserted-line-bg);
+  --rv-del-line: var(--enc-editor-deleted-line-bg);
+  --rv-add-gutter: color-mix(in srgb, var(--success) 16%, transparent);
+  --rv-del-gutter: color-mix(in srgb, var(--danger) 16%, transparent);
+  --rv-add-word: var(--enc-editor-inserted-bg);
+  --rv-del-word: var(--enc-editor-deleted-bg);
+  --rv-code-font: var(--code-size) / 20px var(--font-mono);
+
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+/* ---------- Scope bar ---------- */
+
+.rv-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  padding: 0 8px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rv-bar-fill {
+  flex: 1;
+  min-width: 4px;
+}
+
+.rv-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.rv-scope:hover,
+.rv-scope[aria-expanded='true'] {
+  background: var(--hover);
+}
+.rv-scope svg {
+  color: var(--text-3);
+}
+
+.rv-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--row-selected);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-chip-select {
+  min-width: 0;
+  max-width: 240px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.rv-chip-select:hover,
+.rv-chip-select[aria-expanded='true'] {
+  background: var(--hover);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+.rv-chip-select svg {
+  flex: none;
+  color: var(--text-3);
+}
+.rv-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-chip-mono {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: calc(var(--code-size) - 1px);
+}
+
+.rv-totals {
+  display: inline-flex;
+  gap: 6px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: calc(var(--code-size) - 0.5px);
+  font-variant-numeric: tabular-nums;
+}
+.rv-loading {
+  color: var(--text-3);
+  margin: 0 4px;
+}
+
+.rv-banner {
+  flex: none;
+  margin: 8px 10px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+
+.rv-skeleton {
+  padding: 18px 16px;
+}
+
+/* An empty state, a skeleton or an error takes the room the list would, so the footer stays at the bottom. */
+.review-pane > .panel-empty,
+.review-pane > .rv-skeleton {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: flex-start;
+}
+
+.rv-empty strong {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+/* ---------- The list ---------- */
+
+.rv-list {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Measures one character of the code font; never seen. */
+.rv-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  white-space: pre;
+  font: var(--rv-code-font);
+  pointer-events: none;
+}
+
+.rv-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  outline: none;
+  overscroll-behavior: contain;
+}
+.rv-scroll:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+.is-wrapped .rv-scroll {
+  overflow-x: hidden;
+}
+
+.rv-canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.rv-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Headers, notes and comments stay in view when the code scrolls sideways. */
+.rv-row-block > * {
+  position: sticky;
+  left: 0;
+  width: var(--rv-view-w);
+  box-sizing: border-box;
+}
+
+/* ---------- File header ---------- */
+
+.rv-file-head {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 4px;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--canvas);
+}
+.rv-file-head.is-pinned {
+  border-top-color: transparent;
+  box-shadow: 0 10px 18px -16px rgb(var(--shadow-rgb) / calc(0.9 * var(--shadow-alpha)));
+}
+
+.rv-fold {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  border-radius: var(--r-6);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.rv-fold:hover {
+  background: var(--hover);
+}
+.rv-fold:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+.rv-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.rv-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.rv-badge {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.rv-badge.is-mod {
+  background: var(--row-selected);
+  color: var(--text-2);
+}
+.rv-badge.is-add {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
+}
+.rv-badge.is-del {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.rv-badge.is-ren {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rv-badge.is-conflict {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+}
+
+/* The folder gives way first, so the file's name stays readable in a narrow panel. */
+.rv-path {
+  min-width: 0;
+  display: flex;
+  font-size: var(--fs-13);
+  white-space: nowrap;
+}
+.rv-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.rv-name {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.rv-stats {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: var(--font-mono);
+  font-size: calc(var(--code-size) - 1px);
+  font-variant-numeric: tabular-nums;
+}
+
+.rv-file-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.rv-file-head:hover .rv-file-actions,
+.rv-file-head:focus-within .rv-file-actions {
+  opacity: 1;
+}
+
+/* ---------- Notes and hunk headers ---------- */
+
+.rv-note {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 36px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rv-hunk-head {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  background: var(--surface-1);
+  color: var(--text-3);
+  font: calc(var(--code-size) - 1px) / 28px var(--font-mono);
+}
+.rv-hunk-range {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-hunk-actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0.7;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.rv-hunk-head:hover .rv-hunk-actions,
+.rv-hunk-actions:focus-within {
+  opacity: 1;
+}
+.rv-hunk-off {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  cursor: help;
+}
+
+.rv-chip {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--canvas);
+  color: var(--text-2);
+  font: 500 var(--fs-11) / 18px var(--font-ui);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.rv-chip:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+.rv-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- Lines ---------- */
+
+.rv-line,
+.rv-half {
+  display: flex;
+  align-items: stretch;
+  color: var(--text-1);
+  font: var(--rv-code-font);
+}
+.rv-line.is-add,
+.rv-half.is-add {
+  background: var(--rv-add-line);
+}
+.rv-line.is-del,
+.rv-half.is-del {
+  background: var(--rv-del-line);
+}
+.rv-line:hover,
+.rv-half:not(.is-empty):hover {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+.rv-gutter {
+  position: relative;
+  flex: none;
+  display: flex;
+  color: var(--text-disabled);
+  user-select: none;
+  background: var(--canvas);
+}
+/* Unwrapped, the numbers stay put while the code scrolls sideways; their tint is laid over an opaque ground. */
+.rv-line .rv-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.is-add > .rv-gutter {
+  background: linear-gradient(var(--rv-add-gutter), var(--rv-add-gutter)), var(--canvas);
+  color: color-mix(in srgb, var(--success) 70%, var(--text-3));
+}
+.is-del > .rv-gutter {
+  background: linear-gradient(var(--rv-del-gutter), var(--rv-del-gutter)), var(--canvas);
+  color: color-mix(in srgb, var(--danger) 70%, var(--text-3));
+}
+
+.rv-num {
+  width: var(--rv-num-w);
+  padding-right: 8px;
+  box-sizing: border-box;
+  text-align: right;
+  font-size: calc(var(--code-size) - 1px);
+  font-variant-numeric: tabular-nums;
+}
+.rv-sign {
+  width: var(--rv-sign-w);
+  text-align: center;
+  color: var(--text-3);
+}
+.is-add > .rv-gutter .rv-sign {
+  color: var(--success);
+}
+.is-del > .rv-gutter .rv-sign {
+  color: var(--danger);
+}
+
+.rv-code {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px 0 6px;
+  white-space: pre;
+  tab-size: 4;
+}
+/* Wrapped by the character, exactly as many columns as the list counted. */
+.is-wrapped .rv-code {
+  white-space: break-spaces;
+  line-break: anywhere;
+  word-break: break-all;
+  overflow: hidden;
+}
+
+.rv-word {
+  border-radius: 2px;
+}
+.is-add .rv-word {
+  background: var(--rv-add-word);
+}
+.is-del .rv-word {
+  background: var(--rv-del-word);
+}
+.rv-cut {
+  color: var(--text-3);
+}
+
+.rv-noeol {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  color: var(--text-3);
+  font: var(--fs-11) / 15px var(--font-ui);
+  vertical-align: 1px;
+  user-select: none;
+}
+/* Out of the text when lines wrap, so it never adds a line of its own. */
+.is-wrapped .rv-noeol {
+  position: absolute;
+  top: 2px;
+  right: 8px;
+  margin: 0;
+  background: var(--canvas);
+}
+
+/* The comment button sits over the sign, as you point at a line. */
+.rv-comment-btn {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-4);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+.rv-line:hover .rv-comment-btn,
+.rv-half:hover .rv-comment-btn,
+.rv-comment-btn:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+.rv-comment-btn:hover {
+  background: var(--accent-fill-hover);
+}
+
+/* ---------- Side by side ---------- */
+
+.rv-pair {
+  display: flex;
+}
+.rv-half {
+  position: relative;
+  flex: 0 0 50%;
+  width: 50%;
+  min-width: 0;
+  overflow: hidden;
+}
+.rv-half + .rv-half {
+  box-shadow: inset 1px 0 0 var(--border-subtle);
+}
+.rv-half.is-empty {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hover) 6px 7px);
+}
+.rv-half.is-ctx .rv-gutter {
+  background: transparent;
+}
+
+/* ---------- Comments ---------- */
+
+.rv-measured {
+  padding: 6px 12px 8px calc(var(--rv-num-w) * 2 + var(--rv-sign-w));
+}
+.is-split .rv-measured {
+  padding-left: calc(var(--rv-num-w) + var(--rv-sign-w));
+}
+
+.rv-comment,
+.rv-editor {
+  max-width: 680px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+  box-shadow: 0 6px 16px -14px rgb(var(--shadow-rgb) / calc(0.9 * var(--shadow-alpha)));
+}
+.rv-comment {
+  padding: 6px 8px 10px 12px;
+}
+.rv-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.rv-comment-where {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-comment-gone {
+  color: var(--warning);
+}
+.rv-comment-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.rv-comment:hover .rv-comment-actions,
+.rv-comment:focus-within .rv-comment-actions {
+  opacity: 1;
+}
+.rv-comment-text {
+  margin-top: 2px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-editor {
+  padding: 8px;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.rv-editor-input {
+  display: block;
+  width: 100%;
+  min-height: 60px;
+  max-height: 260px;
+  padding: 4px 6px;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: var(--text-1);
+  font: var(--fs-13) / 19px var(--font-ui);
+}
+.rv-editor-input::placeholder {
+  color: var(--text-3);
+}
+.rv-editor-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.rv-editor-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+
+/* ---------- Pinned header ---------- */
+
+.rv-pinned {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: var(--rv-view-w);
+  will-change: transform;
+}
+
+/* ---------- Footer ---------- */
+
+.rv-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--canvas);
+}
+
+/* ---------- Commit dialog ---------- */
+
+.commit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.commit-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.commit-label {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+.commit-message {
+  width: 100%;
+  min-height: 150px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  outline: none;
+  resize: vertical;
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: var(--code-size) / 20px var(--font-mono);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+.commit-message:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.commit-message::placeholder {
+  color: var(--text-3);
+  font-family: var(--font-ui);
+}
+.commit-error {
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+.commit-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+.commit-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+}
+.commit-count {
+  color: var(--text-3);
+}
+.commit-summary {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}

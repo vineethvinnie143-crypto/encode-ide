@@ -4,7 +4,7 @@ import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
 import { useChat } from '../../stores/chat'
-import { usePanels } from '../../stores/panels'
+import { useReview } from '../../stores/review'
 import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
 import { Button, IconButton } from '../../ui/Button'
@@ -85,10 +85,7 @@ function ResultCard({ turn }: { turn: Turn }) {
           <span className="del-stat">−{totals.deletions}</span>
         </span>
         <span className="result-actions">
-          <Button
-            size="sm"
-            onClick={() => usePanels.getState().open('files', { view: 'git' })}
-          >
+          <Button size="sm" onClick={() => useReview.getState().showFile(files[0].path, 'folder')}>
             Review changes
           </Button>
           <IconButton label={open ? 'Hide files' : 'Show files'} size="sm" onClick={() => setOpen((value) => !value)}>

@@ -15,7 +15,9 @@ import { diagnosticsReport } from './services/diagnostics'
 import { GitService } from './services/git'
 import { LogService } from './services/logs'
 import { ModelsService } from './services/models'
+import { isFile, searchPath } from './services/programs'
 import { redact } from './services/redact'
+import { ReviewService } from './services/review'
 import { ScheduleService } from './services/schedules'
 import { SettingsService, serverOf } from './services/settings'
 import { ShellService } from './services/shell'
@@ -221,6 +223,19 @@ if (!gotLock) {
       })
     }
 
+    // The Review tab: the open folder's repository, by git found on PATH. A reverted file git does not track goes to the
+    // Recycle Bin, and a commit message is drafted by the agent host's Small tasks model.
+    let reviewGit: string | null = null
+    const review = new ReviewService({
+      folder: () => workspace.current?.root ?? null,
+      git: () => {
+        if (!reviewGit || !isFile(reviewGit)) reviewGit = searchPath('git', process.env)
+        return reviewGit
+      },
+      trash: (file) => osShell.trashItem(file),
+      draft: (input) => agentHost.draftCommit(input),
+    })
+
     registerIpc({
       getWindow: () => mainWindow,
       settings,
@@ -230,6 +245,7 @@ if (!gotLock) {
       skills,
       models,
       git,
+      review,
       agent: agentHost,
       configureAgent,
       logs,

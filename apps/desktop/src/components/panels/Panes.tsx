@@ -6,7 +6,7 @@ import { usePanels } from '../../stores/panels'
 import { useUi } from '../../stores/ui'
 import type { SidebarView } from '../../stores/ui'
 import { Button } from '../../ui/Button'
-import { Activity, Code2, GitBranch, Files, Globe, ListTree, Search, SquareTerminal } from '../../ui/icons'
+import { Activity, Code2, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal } from '../../ui/icons'
 import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
 import EditorTabs from '../EditorTabs'
@@ -112,6 +112,7 @@ const CHOICES: { kind: PanelTabKind; label: string; description: string; icon: t
   { kind: 'terminal', label: 'Terminal', description: 'A shell in the project folder', icon: SquareTerminal },
   { kind: 'files', label: 'Files', description: 'The explorer, search and source control', icon: Files },
   { kind: 'editor', label: 'Editor', description: 'The files you have open', icon: Code2 },
+  { kind: 'review', label: 'Review', description: 'The changes to stage, commit or send back', icon: GitPullRequest },
   { kind: 'browser', label: 'Browser', description: 'Preview a page next to the thread', icon: Globe },
   { kind: 'trajectory', label: 'Trajectory', description: 'Every step this session took', icon: ListTree },
 ]

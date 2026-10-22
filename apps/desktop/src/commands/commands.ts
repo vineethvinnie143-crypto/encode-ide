@@ -30,6 +30,7 @@ export interface AppActions {
   showActivity(): void
   showChat(): void
   showFiles(): void
+  showReview(): void
   showTerminal(): void
   zoom(action: ZoomAction): void
   toggleFullScreen(): void
@@ -98,6 +99,7 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'view.activity', title: 'Activity view', group: 'View', keys: ['Ctrl+Alt+U'], run: () => a.showActivity() },
     { id: 'view.chat', title: 'Show chat', group: 'View', keys: ['Ctrl+Shift+X'], run: () => a.showChat() },
     { id: 'view.files', title: 'Show files', group: 'View', keys: ['Ctrl+Shift+E'], enabled: () => a.hasWorkspace(), run: () => a.showFiles() },
+    { id: 'view.review', title: 'Show review', group: 'View', keys: ['Ctrl+Shift+G'], enabled: () => a.hasWorkspace(), run: () => a.showReview() },
     { id: 'view.terminal', title: 'Show terminal', group: 'View', keys: ['Ctrl+`'], run: () => a.showTerminal() },
     { id: 'panel.newTab', title: 'New tab', group: 'View', keys: ['Ctrl+T'], run: () => a.newPanelTab() },
     { id: 'panel.closeTab', title: 'Close tab', group: 'View', keys: ['Ctrl+W'], enabled: () => a.canClosePanelTab(), run: () => a.closePanelTab() },

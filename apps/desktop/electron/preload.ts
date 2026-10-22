@@ -10,6 +10,10 @@ import type {
   McpAction,
   PermissionsAction,
   PlanRequest,
+  ReviewAction,
+  ReviewCommitRequest,
+  ReviewOptions,
+  ReviewScope,
   RewindRequest,
   SandboxAction,
   SearchOptions,
@@ -87,6 +91,15 @@ const api: EncodeApi = {
   },
   git: {
     status: () => invoke('git:status'),
+  },
+  review: {
+    load: (scope: ReviewScope, options: ReviewOptions) => invoke('review:load', scope, options),
+    act: (scope: ReviewScope, action: ReviewAction, options: ReviewOptions) => invoke('review:act', scope, action, options),
+    undo: (scope: ReviewScope, options: ReviewOptions) => invoke('review:undo', scope, options),
+    commits: () => invoke('review:commits'),
+    branches: () => invoke('review:branches'),
+    commit: (request: ReviewCommitRequest) => invoke('review:commit', request),
+    draft: (options?: { all?: boolean }) => invoke('review:draft', options),
   },
   shell: {
     create: (options: ShellCreateOptions) => invoke('shell:create', options),

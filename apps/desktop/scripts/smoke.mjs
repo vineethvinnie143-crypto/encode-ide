@@ -1772,6 +1772,86 @@ async function runPanelChecks() {
   await sleep(200)
 }
 
+/** Polls a check made in this process (on the disk, with git) until it holds. */
+async function until(check, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await check()) return
+    if (Date.now() > deadline) throw new Error(`timed out: ${label}`)
+    await sleep(150)
+  }
+}
+
+/**
+ * The Review tab on a repository: a change shows in the Unstaged view with its colours, one of its two hunks is
+ * staged and committed with a message typed over the drafted one, and a reverted file comes back with Ctrl+Z.
+ */
+async function runReviewChecks() {
+  console.log('[smoke] --- review ---')
+  const git = (...args) => execFileSync('git', args, { cwd: demoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
+  const sample = path.join(demoPath, 'src', 'review-me.ts')
+  const lines = Array.from({ length: 40 }, (_, index) => `export const value${index + 1} = ${index + 1}`)
+  await fs.writeFile(sample, lines.join('\n') + '\n')
+  // The folder becomes a repository with everything committed; the identity is the repository's own, for the app's commit too.
+  git('init', '-q')
+  git('config', 'user.name', 'eNCode smoke')
+  git('config', 'user.email', 'smoke@example.com')
+  git('config', 'commit.gpgsign', 'false')
+  git('add', '-A')
+  git('commit', '-q', '--no-verify', '-m', 'Baseline')
+  // Two changes far apart: two hunks.
+  lines[2] = 'export const value3 = 300 // first change'
+  lines[34] = 'export const value35 = 3500 // second change'
+  await fs.writeFile(sample, lines.join('\n') + '\n')
+
+  await key({ key: 'G', code: 'KeyG', ctrlKey: true, shiftKey: true })
+  await waitFor("document.querySelector('.side-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Review'", 6000, 'Ctrl+Shift+G opens the Review tab')
+  await waitFor("[...document.querySelectorAll('.review-pane .rv-file-head .rv-name')].some((node) => node.textContent === 'review-me.ts')", 15000, 'the change shows in Review')
+  await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 2", 6000, 'the change is two hunks')
+  const shown = await evaluate(`(() => ({
+    added: [...document.querySelectorAll('.review-pane .rv-line.is-add')].map((node) => node.textContent),
+    tokens: document.querySelectorAll('.review-pane .rv-line .tok-keyword').length,
+    files: document.querySelectorAll('.review-pane .rv-file-head:not(.is-pinned)').length,
+  }))()`)
+  console.log('[smoke] review shows:', JSON.stringify(shown))
+  if (shown.files !== 1) throw new Error(`the review lists ${shown.files} files, not the one that changed`)
+  if (!shown.added.some((text) => text.includes('first change')) || !shown.added.some((text) => text.includes('second change'))) throw new Error('the added lines are not shown')
+  if (shown.tokens < 1) throw new Error('the review does not colour the code')
+  await sleep(300)
+  await screenshot('ui-dark-review.png')
+
+  // Stage the first hunk alone.
+  if (!(await click('.review-pane .rv-hunk-head .rv-chip', 'Stage'))) throw new Error('the hunk has no Stage')
+  await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 1", 10000, 'one hunk is left to stage')
+  const staged = git('diff', '--cached')
+  if (!staged.includes('first change') || staged.includes('second change')) throw new Error(`staging one hunk staged something else:\n${staged}`)
+
+  // Commit it, with a message typed over the one being drafted.
+  if (!(await click('.review-pane .rv-commit'))) throw new Error('no Commit button')
+  await waitFor("!!document.querySelector('[role=\"dialog\"] .commit-message')", 4000, 'the Commit dialog')
+  await sleep(300)
+  await typeInto('.commit-message', 'Change value3 from the smoke')
+  await sleep(200)
+  if (!(await click('[role="dialog"] .ui-dialog-foot .btn.primary', 'Commit'))) throw new Error('the dialog has no Commit button')
+  await until(() => git('log', '-1', '--format=%s').trim() === 'Change value3 from the smoke', 15000, 'the commit is made with the typed message')
+  await waitFor("!document.querySelector('[role=\"dialog\"] .commit-message')", 6000, 'the Commit dialog closes')
+  if (git('diff', '--cached').trim()) throw new Error('something is still staged after the commit')
+  await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 1", 10000, 'the second change is still there to review')
+
+  // Revert the file, then take it back with Ctrl+Z.
+  if (!(await click('.review-pane .rv-file-head:not(.is-pinned) button[aria-label="Revert this file"]'))) throw new Error('no Revert this file')
+  await until(async () => !(await fs.readFile(sample, 'utf8')).includes('second change'), 10000, 'the file is reverted on disk')
+  await waitFor("!!document.querySelector('.review-pane .rv-empty')", 10000, 'nothing is left to review')
+  await evaluate("document.querySelector('.review-pane .rv-bar').dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))")
+  await until(async () => (await fs.readFile(sample, 'utf8')).includes('second change'), 10000, 'Ctrl+Z brings the reverted change back')
+  await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 1", 10000, 'the change shows again')
+  console.log('[smoke] review: staged a hunk, committed it, reverted a file and undid that')
+
+  // Leave the side panel as it was found.
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+}
+
 /**
  * The window shell: sizes from the spec, the menus by mouse and keyboard, every shortcut that
  * changes the layout, and sessions pinned, archived, deleted, with Back and Forward.
@@ -2394,6 +2474,7 @@ try {
   await runShellChecks()
   await runAboutChecks()
   await runPanelChecks()
+  await runReviewChecks()
   await runFontChecks()
   await runAppearanceChecks()
 

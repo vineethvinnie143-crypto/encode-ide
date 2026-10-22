@@ -671,3 +671,51 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   with the person's answer, and every sentence the screen shows.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.
+
+## The Review tab and the git eNCode runs itself (UI-4)
+
+Written with the pull request that added `@encode/git` and the Review tab
+([0064](../adr/0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md)). It covers the git
+commands eNCode runs on the person's behalf: reading a review, staging, unstaging and reverting files and hunks,
+committing and pushing. The agent's own git commands are the shell's (T-rows and P29 to P34).
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| G1 | The renderer, or a page that got into it, makes the main process run git with arguments of its choosing | The renderer sends scopes, actions and a message, never arguments. Each is checked in the main process: known kinds, branch names that cannot read as options, commit ids, hunk ids and fingerprints of fixed shapes, paths without NUL under 4 KB, a message under 64 KB. A path must name a file the scope lists and resolve inside the repository; options end at `--` or `--end-of-options`, and paths are taken literally. | Mitigated |
+| G2 | A repository's config starts a program when eNCode reads it | Every command carries `core.fsmonitor=false` and `safe.bareRepository=explicit`, which outrank every config file; reads run with `GIT_OPTIONAL_LOCKS=0`, so `git status` does not rewrite the index and run its hook; `log.showSignature=false`. Diffs are eNCode's own, so no diff driver or textconv runs. | Mitigated |
+| G3 | The wrong program, or another repository, is used | git is found on PATH by absolute path, never a `git.exe` in the folder. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, the object-store variables, `GIT_EXTERNAL_DIFF` and `GIT_DIFF_OPTS` are dropped. No terminal prompt can hang a command, and each has a time limit and an output limit. | Mitigated |
+| G4 | An action changes something other than what the person saw: the file changed since, or the hunk would land elsewhere | Each file carries a fingerprint of both sides as shown; an action reads them again and refuses when they differ, and a hunk must still be found in the fresh diff and still fit. Actions run one at a time. A hunk is put into the index by the same code that drew it. | Mitigated |
+| G5 | A revert destroys work | Revert all asks first. A revert keeps the files' bytes (up to 8 MB each, the last 20 reverts) and Undo puts them back when nothing changed them since; a new file goes to the Recycle Bin. | Partial (GR1) |
+| G6 | Committing or pushing runs code the agent planted | Hooks and filters run on commit, push and staging, as they do for the person's own git. The sandbox keeps the agent's commands from writing `.git/hooks` and `.git/config` (P29 to P34), on Windows best effort. | Partial (GR2) |
+| G7 | A drafted commit message is steered by the changes it describes | The changes, file names and subjects are framed as data and the model is told to ignore instructions in them. The draft is only text in a box: nothing is committed until the person presses Commit, and the drafting model has no tools. | Mitigated |
+| G8 | Review comments reach the agent as instructions the person did not write | Comments are typed by the person; the quoted line is marked as a quote. Sending them is a press of Send, shown in the thread like any message. | Mitigated |
+| G9 | A large or hostile review freezes the window | Files over 2 MB, or past 48 MB read in one review, are listed without lines; a diff that runs out of time is marked approximate; the list draws only the rows on screen and a line shows at most 2,000 characters. Text reaches the DOM as text nodes. | Mitigated |
+
+### Residual risks
+
+- **GR1. A revert of a file over 8 MB cannot be undone,** and neither can one whose file changed again after it.
+  - Owner: none planned; the Recycle Bin covers new files, and git still has what was committed or staged.
+- **GR2. Hooks run on commit.** On Windows the sandbox holds `.git/hooks` and `.git/config` best effort (RP12), a
+  command run outside the sandbox with the person's answer can write them, and the git folders of submodules and hooks
+  a repository keeps inside the project (husky's `.husky/`) are not held yet (RP14). Changes to the latter show in the
+  review before a commit runs them.
+  - Owner: the hardening step.
+- **GR3. Pushing uses the person's credentials** through git's credential helper, which may show its own window. The
+  Review tab pushes only the current branch, to its upstream or to `origin`.
+  - Owner: none; it is the person's push.
+
+### Verification
+
+- `@encode/git` runs against real repositories made in a temporary folder: staging, unstaging and reverting single
+  hunks while the rest stays, a stale picture refused, undo refused when the file moved on, endings kept on both sides,
+  renames, binary and large files, submodules, filters that force whole files, a repository opened from a folder
+  inside it, commit messages drafted from the staged changes within a budget, and the hunk header written as git
+  writes it. Its parsers (status, raw diff, objects) and hunk code have unit and property tests.
+- The main process's checks of every request have their own tests (branch names, commits, hunks, paths, messages).
+- The renderer's model of the list (rows, heights, wrapping by columns, folding, comments, paths between the folder and
+  the repository) is unit tested.
+- The end-to-end run makes the demo folder a repository and drives the tab: the change shows with its colours, one of
+  two hunks is staged and git agrees, it is committed with the message typed over the drafted one, a file is reverted
+  and Ctrl+Z brings it back.

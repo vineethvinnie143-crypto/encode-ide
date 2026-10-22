@@ -130,6 +130,7 @@ function createAppActions(): AppActions {
       document.querySelector<HTMLTextAreaElement>('.composer-input')?.focus()
     },
     showFiles: () => panels().open('files', { view: 'explorer' }),
+    showReview: () => panels().open('review'),
     showTerminal: () => panels().openBottom('terminal'),
     zoom: (action) => void api.window.zoom(action),
     toggleFullScreen: () => void api.window.toggleFullScreen(),

@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
-import { GitBranch, RefreshCw } from '../../ui/icons'
-import { useEditor } from '../../stores/editor'
+import { GitBranch, GitPullRequest, RefreshCw } from '../../ui/icons'
 import { useGit } from '../../stores/git'
 import { usePanels } from '../../stores/panels'
+import { useReview } from '../../stores/review'
 import { useWorkspace } from '../../stores/workspace'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -28,7 +28,6 @@ export default function GitPanel() {
   const status = useGit((state) => state.status)
   const refresh = useGit((state) => state.refresh)
   const workspace = useWorkspace((state) => state.workspace)
-  const openFile = useEditor((state) => state.openFile)
 
   useEffect(() => {
     if (workspace) void refresh()
@@ -59,6 +58,9 @@ export default function GitPanel() {
           <GitBranch size={13} /> {status.branch ?? 'detached'}
         </span>
         <div className="panel-actions">
+          <button className="icon-btn" onClick={() => usePanels.getState().open('review')} title="Review the changes">
+            <GitPullRequest size={13} />
+          </button>
           <button className="icon-btn" onClick={() => void refresh()} title="Refresh">
             <RefreshCw size={13} />
           </button>
@@ -76,11 +78,8 @@ export default function GitPanel() {
           <button
             key={`${change.path}:${change.status}`}
             className="git-change"
-            onClick={() => {
-              usePanels.getState().open('editor')
-              void openFile(change.path)
-            }}
-            title={`${change.status}: ${change.path}`}
+            onClick={() => useReview.getState().showFile(change.path, 'repository', change.unstaged ? 'unstaged' : 'staged')}
+            title={`${change.status}: ${change.path}. Show it in Review`}
           >
             <span className={`git-status ${STATUS_COLOR[change.status] ?? 'mod'}`}>
               {STATUS_LETTER[change.status] ?? 'M'}

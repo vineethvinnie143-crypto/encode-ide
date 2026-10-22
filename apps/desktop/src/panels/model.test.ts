@@ -45,6 +45,12 @@ describe('side panel tabs', () => {
     state = openSide(state, 'editor', id())
     assert.equal(state.side.activeId, editor)
     assert.deepEqual(kinds(state), ['files', 'editor'])
+    state = openSide(state, 'review', id())
+    const review = state.side.activeId
+    state = openSide(openSide(state, 'files', id()), 'review', id())
+    assert.equal(state.side.activeId, review, 'Review exists once too')
+    assert.deepEqual(kinds(state), ['files', 'editor', 'review'])
+    assert.equal(state.side.tabs[2].title, 'Review')
   })
 
   it('adds a terminal or a browser each time, numbering terminals', () => {

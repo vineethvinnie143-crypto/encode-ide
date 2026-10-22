@@ -8,6 +8,7 @@ import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { CommitDraftInput } from './commit-message'
 import type { RouterSettings } from './router-settings'
 
 /** What the host needs to know about the user's settings, and nothing else of them. */
@@ -81,6 +82,8 @@ export type DesktopHostRequests = HostRequests & {
   sandboxReport: { params: { root: string }; result: SandboxReport }
   /** Changes a switch of the sandbox or checks the machine again; answers with the sandbox as it stands afterwards. */
   sandboxAct: { params: { root: string; action: SandboxAction }; result: SandboxOutcome }
+  /** A commit message for the changes given, from the model of the Small tasks role. */
+  draftCommit: { params: CommitDraftInput; result: { message: string } }
 }
 
 /**
