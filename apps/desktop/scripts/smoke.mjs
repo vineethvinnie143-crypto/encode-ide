@@ -32,7 +32,6 @@ const shotsDir = path.join(root, 'screenshots')
 await fs.mkdir(shotsDir, { recursive: true })
 
 const errors = []
-const deferred = []
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function findTarget() {
@@ -1290,68 +1289,26 @@ try {
   await waitFor("!document.querySelector('.prompt-dialog') && document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor')
   await sleep(400)
 
-  // Who moves focus while the menu is open: logged on failure, so a runner that behaves differently can be read from its log.
-  await evaluate(`(() => {
-    window.__focusLog = []
-    const focus = HTMLElement.prototype.focus
-    const at = () => Math.round(performance.now())
-    HTMLElement.prototype.focus = function (...args) {
-      const stack = String(new Error().stack).split('\\n').slice(2, 6).map((line) => line.trim().replace(/\\(.*[\\/\\\\]/, '('))
-      const result = focus.apply(this, args)
-      const style = getComputedStyle(this)
-      window.__focusLog.push({
-        t: at(),
-        call: this.tagName + '.' + this.className,
-        took: document.activeElement === this,
-        pageFocus: document.hasFocus(),
-        visibility: style.visibility,
-        display: style.display,
-        inert: !!this.closest('[inert]'),
-        stack: stack.join(' | '),
-      })
-      return result
-    }
-    for (const type of ['focusin', 'focusout']) document.addEventListener(type, (event) => window.__focusLog.push({ t: at(), [type]: event.target?.tagName + '.' + event.target?.className }), true)
-    window.addEventListener('blur', () => window.__focusLog.push({ t: at(), window: 'blur' }))
-    window.addEventListener('focus', () => window.__focusLog.push({ t: at(), window: 'focus' }))
-  })()`)
-  // Right-click opens the editor's own menu.
-  await evaluate(`(() => {
-    const scroller = document.querySelector('.enc-scroller')
-    const rect = scroller.getBoundingClientRect()
-    scroller.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 140, clientY: rect.top + 70 }))
-    return true
-  })()`)
-  await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
-  await screenshot('06b-editor-menu.png')
-  console.log('[smoke] menu dbg:', JSON.stringify(await evaluate('window.__menuDbg')), 'focus log:', JSON.stringify(await evaluate('window.__focusLog')))
-  let menuHasFocus = true
-  await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
-    menuHasFocus = false
-    deferred.push(error.message)
-    console.log('[smoke] focus log:', JSON.stringify(await evaluate('window.__focusLog')))
-    console.log('[smoke] menu dbg (late):', JSON.stringify(await evaluate('window.__menuDbg')))
-    console.log(
-      '[smoke] focus is on:',
-      await evaluate(`(() => {
-        const describe = (el) => (el ? el.tagName + '.' + el.className : 'nothing')
-        const menu = document.querySelector('[role=menu]')
-        const before = describe(document.activeElement)
-        menu?.focus({ preventScroll: true })
-        return JSON.stringify({
-          before,
-          afterManualFocus: describe(document.activeElement),
-          visibility: menu && getComputedStyle(menu).visibility,
-          box: menu && JSON.stringify(menu.getBoundingClientRect()),
-          hasFocus: document.hasFocus(),
-          visible: document.visibilityState,
-        })
-      })()`),
-    )
-  })
-  if (menuHasFocus) await pressKey('Escape')
-  else await evaluate("document.querySelector('[role=menu]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
-  await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed')
+  // Right-click opens the editor's own menu, and the menu takes keyboard focus. That must hold when
+  // the system reduces motion too (the runner's Windows does): a transition, however short, keeps an
+  // element that was just shown at visibility hidden for a frame, and a hidden element cannot be focused.
+  for (const reduce of [false, true]) {
+    const how = reduce ? ' with reduced motion' : ''
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduce ? 'reduce' : 'no-preference' }] })
+    await evaluate(`(() => {
+      const scroller = document.querySelector('.enc-scroller')
+      const rect = scroller.getBoundingClientRect()
+      scroller.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 140, clientY: rect.top + 70 }))
+      return true
+    })()`)
+    await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu' + how)
+    if (!reduce) await screenshot('06b-editor-menu.png')
+    await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu' + how)
+    await pressKey('Escape')
+    await waitFor("!document.querySelector('[role=menu]')", 4000, 'editor context menu closed' + how)
+    await waitFor("document.activeElement?.classList.contains('enc-input')", 4000, 'focus back in the editor after Escape' + how)
+  }
+  await send('Emulation.setEmulatedMedia', { features: [] })
 
   // A change on disk (here a write through the app's API, as the agent's are) reaches the open document and keeps the cursor.
   const readme = await evaluate("window.eNCode.workspace.read('README.md').then((file) => file.content)")
@@ -1511,9 +1468,8 @@ try {
   await runFontChecks()
   await runAppearanceChecks()
 
-  if (deferred.length) console.error('[smoke] failures that did not stop the run:\n' + deferred.join('\n'))
-  if (errors.length || deferred.length) {
-    if (errors.length) console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
+  if (errors.length) {
+    console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
     process.exitCode = 1
   } else {
     console.log('[smoke] PASS — no renderer exceptions')

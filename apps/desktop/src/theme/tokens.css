@@ -222,13 +222,19 @@
   --border-strong: #a3abb9;
 }
 
-/* Reduce motion: System follows Windows, On always, Off never. */
+/*
+ * Reduce motion: System follows Windows, On always, Off never. Animations shrink to one frame
+ * (animationend still fires). Transitions are removed, not shortened: a transition of 0.01ms
+ * still keeps an element that was just shown at `visibility: hidden` until the next frame, and
+ * a hidden element cannot take focus, so a menu opened by a user who reduces motion would not
+ * answer the keyboard.
+ */
 :root[data-motion='reduce'] *,
 :root[data-motion='reduce'] *::before,
 :root[data-motion='reduce'] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition: none !important;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) *,
@@ -236,6 +242,6 @@
   :root:not([data-motion='full']) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
   }
 }

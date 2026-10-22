@@ -152,7 +152,19 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   return (
     <>
       <div className="code-editor" ref={hostRef} hidden={path === null} />
-      {menu && <ContextMenu x={menu.x} y={menu.y} entries={entries()} label="Editor" onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          entries={entries()}
+          label="Editor"
+          onClose={(refocus) => {
+            setMenu(null)
+            // Escape or a choice hands focus back; a click elsewhere has put it where the user wanted.
+            if (refocus) viewRef.current?.focus()
+          }}
+        />
+      )}
     </>
   )
 }
