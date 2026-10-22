@@ -22,6 +22,21 @@ export default function Toasts() {
       key={toast.id}
       kind={toast.kind}
       onDismiss={dismiss}
+      action={
+        toast.action && (
+          <button
+            type="button"
+            className="toast-action"
+            onClick={() => {
+              const run = toast.action?.run
+              dismiss()
+              run?.()
+            }}
+          >
+            {toast.action.label}
+          </button>
+        )
+      }
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
     >

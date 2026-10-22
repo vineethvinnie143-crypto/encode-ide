@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
+import { alertGate, toastOf } from './components/models/alerts'
+import ConnectModelDialog from './components/models/ConnectModelDialog'
 import BottomPanel from './components/panels/BottomPanel'
 import SidePanel from './components/panels/SidePanel'
 import PluginsModal from './components/PluginsModal'
@@ -115,9 +117,18 @@ export default function App() {
       refresh()
     })
 
+    // Problems with a connection (a refused key, a payment) are told at once, wherever the person is.
+    const shown = alertGate()
+    const offAlert = api.models.onAlert((alert) => {
+      if (!shown(alert)) return
+      const { kind, text, tab } = toastOf(alert)
+      useUi.getState().notify(kind, text, tab ? { label: 'Open Settings', run: () => useUi.getState().openSettings(tab) } : undefined)
+    })
+
     return () => {
       offAgent()
       offFiles()
+      offAlert()
       refresh.cancel()
     }
   }, [])
@@ -165,6 +176,7 @@ export default function App() {
       {settingsOpen && <SettingsModal />}
       {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
+      <ConnectModelDialog />
       <PromptDialog />
       <ShortcutsDialog />
       <AboutDialog />

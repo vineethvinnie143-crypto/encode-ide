@@ -28,6 +28,7 @@
     "@encode/permissions": "workspace:*",
     "@encode/protocol": "workspace:*",
     "@encode/providers": "workspace:*",
+    "@encode/router": "workspace:*",
     "@encode/testkit": "workspace:*",
     "@encode/text": "workspace:*",
     "@encode/tools": "workspace:*",

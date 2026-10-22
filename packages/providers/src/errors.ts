@@ -174,6 +174,8 @@ const WINDOW_PATTERNS = [
   /context (?:length|window) (?:of|is) ([\d,]+)/i,
 ]
 const USED_PATTERNS = [
+  // "you requested 9000 tokens (7568 in the messages, 1432 in the completion)": the prompt is the first part, not the sum.
+  /\(([\d,]+) in the (?:messages|prompt|input)/i,
   /(?:you requested(?: about)?|resulted in) ([\d,]+) tokens/i,
   /prompt is too long: ([\d,]+) tokens/i,
   /input token count \(([\d,]+)\)/i,

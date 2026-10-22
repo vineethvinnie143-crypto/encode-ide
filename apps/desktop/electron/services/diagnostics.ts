@@ -1,5 +1,6 @@
 import type { AboutInfo, Settings } from '../../shared/types'
 import { buildLine } from '../../shared/about'
+import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
 import { redact, type RedactContext } from './redact'
 
 export interface DisplayInfo {
@@ -96,6 +97,12 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     const key = profile.kind === 'demo' ? 'needs no key' : profile.hasApiKey ? 'key stored' : 'NO KEY'
     out.push(`  ${active} ${profile.name} [${profile.kind}]${server}, model ${profile.model || 'not chosen'}, ${key}`)
   }
+  const free = freeProfile(settings)
+  const roles = MODEL_ROLES.map((role): [string, string[]] => [role, role === 'main' ? mainRefs(settings) : (settings.roles[role] ?? [])]).filter(([, refs]) => refs.length)
+  out.push(
+    `  Only free models: ${settings.freeOnly ? 'on' : 'off'}; the free models come from ${free ? free.name : 'no connection'}`,
+    ...(roles.length ? roles.map(([role, refs]) => `  ${role}: ${refs.map((ref) => labelOfRef(settings, ref)).join(', then ')}`) : ['  No model chosen for any role']),
+  )
 
   section('Agent', [
     ['Process', agentHost ? `${agentHost.running ? 'running' : 'not running'}, ${agentHost.failures} stops in a row, ${agentHost.working} sessions working` : 'unknown'],

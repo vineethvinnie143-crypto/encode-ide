@@ -37,6 +37,10 @@ const settings: Settings = {
   lastWorkspace: 'C:\\Users\\ana\\private-project',
   agentMode: 'code',
   appearance: { ...DEFAULT_APPEARANCE },
+  roles: { reviewer: ['paid:big-model'] },
+  freeOnly: false,
+  freeProfileId: null,
+  setupDone: true,
   keyStorage: { mode: 'keychain' },
 }
 
@@ -78,6 +82,14 @@ describe('diagnostics report', () => {
     assert.match(text, /^ {4}Demo \(offline\) \[demo\], model eNCode-demo, needs no key$/m)
     assert.match(text, /^ {2}\* OpenRouter \[openrouter\] https:\/\/openrouter\.ai\/api\/v1, model qwen\/qwen3-coder:free, key stored$/m)
     assert.match(text, /^ {4}Paid key \[custom\] https:\/\/api\.example\.com\/v1, model not chosen, NO KEY$/m)
+  })
+
+  it('says whether only free models are allowed, where they come from, and which models each role tries', () => {
+    const text = diagnosticsReport(input())
+    assert.match(text, /^ {2}Only free models: off; the free models come from OpenRouter$/m)
+    assert.match(text, /^ {2}main: OpenRouter: qwen\/qwen3-coder:free$/m)
+    assert.match(text, /^ {2}reviewer: Paid key: big-model$/m)
+    assert.ok(!/^ {2}explore:/m.test(text), 'a role that follows another is not listed')
   })
 
   it('leaves out the folders the settings remember, and the home folder is a tilde wherever it shows up', () => {

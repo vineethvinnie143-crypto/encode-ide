@@ -72,25 +72,36 @@ pnpm start
 `pnpm dev` runs the renderer with hot reload and restarts Electron when the main process
 changes.
 
-Open a folder and start a session. The **Demo (offline)** profile needs no key: its plan is
-scripted, but its tools act on the real workspace, so you can try approvals, diffs and the
-shell straight away.
+Open a folder and start a session. On a first start a **Connect a model** window asks how eNCode
+should reach a model: free models on a free OpenRouter key, a key or a local server of your own, or the
+**Demo (offline)** agent, which needs no key: its plan is scripted, but its tools act on the real
+workspace, so you can try approvals, diffs and the shell straight away.
 
 ## Models
 
-Open the profile menu at the bottom of the left rail and choose **Settings… → Models → Add
-provider**, then pick a preset or *Custom*:
+The model button in the message box lists what is in use, the free models and each connection's
+models, and opens the Connect window again. Every model call goes through the router
+(`@encode/router`), which ranks models, fails over, learns what a provider refuses and keeps
+a billed model from ever being tried after a free one or on another key
+([ADR 0052](docs/adr/0052-every-model-call-goes-through-the-router-keys-are-asked-for-by-origin.md)):
+
+- **Settings → Roles** sets *Only use free models*, which model does which job (writing,
+  exploring, planning, reviewing, summarizing, small tasks) with a fallback order, and shows how
+  each connection is doing.
+- **Settings → Models** edits the connections. Presets for the Connect window:
 
 | Preset | Base URL | Example model |
 | --- | --- | --- |
 | OpenRouter | `https://openrouter.ai/api/v1` | pick from the catalog (`:free` models cost nothing) |
+| Anthropic | `https://api.anthropic.com` | pick from the list |
 | DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | Ollama | `http://localhost:11434/v1` | `llama3.2` |
 | LM Studio | `http://localhost:1234/v1` | your loaded model |
 
-An endpoint must implement `POST {baseUrl}/chat/completions` with OpenAI tool calling.
-Streaming is preferred, and servers that answer with a single JSON body work too.
+An address is `https://`, or `http://` for a server on this computer. An endpoint implements
+`POST {baseUrl}/chat/completions` with OpenAI tool calling, or Anthropic's Messages API. Streaming is
+preferred, and servers that answer with a single JSON body work too.
 
 API keys are sealed by the operating system's keychain (DPAPI on Windows) and never written in
 any other form. Where no keychain is usable, Settings says so and keeps the key for the
@@ -242,12 +253,13 @@ covers:
 - the shell, running `node` and `npm`;
 - a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs, and what the
   model is sent: Claude Code's tool names, and the project's instructions as a reminder;
-- the key path;
+- the key path, and the first start: the Connect window, a model of one's own checked with a real
+  tool call, the model menu and the Roles tab;
 - the session logs on disk (readable only by the user, no key in them) and the import of an
   earlier build's sessions;
 - sessions, subagents and Stop;
 - `WebFetch` approvals;
-- compaction;
+- compaction, with a model whose window is only a little larger than eNCode's own instructions and tools;
 - the About box (version and commit) and the diagnostics report, which must hold no key.
 
 Screenshots and the Electron log land in `apps/desktop/screenshots`. Set

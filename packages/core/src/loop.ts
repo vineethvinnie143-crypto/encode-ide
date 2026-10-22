@@ -80,8 +80,9 @@ import type { ConversationEntry } from './ui'
 
 /** What a call may ask of the model for its answer. */
 const MAX_OUTPUT_TOKENS = 32_000
-/** Room left for the answer when judging whether the prompt fits. */
+/** Room left for the answer when judging whether the prompt fits, and the most of a window it may take. */
 const OUTPUT_RESERVE = 16_000
+const OUTPUT_RESERVE_SHARE = 0.25
 const MAX_PARALLEL_READS = 8
 const MAX_PARALLEL_SUBAGENTS = 4
 const MAX_LENGTH_RETRIES = 3
@@ -381,7 +382,11 @@ export class AgentLoop {
       }
       if (outcome.kind === 'compact') {
         if (overflows++ >= MAX_OVERFLOW_RETRIES) {
-          return { kind: 'end', end: { kind: 'failed', message: "The conversation does not fit the model's context window, even after compacting it." } }
+          // The instructions and tools are sent with every request and cannot be compacted: on a small window they may be most of it.
+          const fixed = Math.ceil(this.fixed * this.meter.scale)
+          const share = fixed > outcome.window / 2 ? ` eNCode's instructions and tools alone take about ${fixed.toLocaleString('en-US')} tokens.` : ''
+          const message = `The conversation does not fit the model's context window (${outcome.window.toLocaleString('en-US')} tokens), even after compacting it.${share} Choose a model with a larger window.`
+          return { kind: 'end', end: { kind: 'failed', message } }
         }
         if (outcome.used) this.meter.calibrate(sent, this.fixed, outcome.used)
         await this.fit(turn, { force: true, window: outcome.window })
@@ -448,7 +453,9 @@ export class AgentLoop {
     const { o } = this
     const budget = await o.client.budget(o.role, this.query())
     const window = options.window ?? budget.contextWindow
-    let limit = Math.min(Math.floor(window * COMPACT_AT), window - Math.min(budget.maxOutputTokens, OUTPUT_RESERVE))
+    // On a small window the answer's share is capped, or the limit would sit below the instructions and tools alone.
+    const reserve = Math.min(budget.maxOutputTokens, OUTPUT_RESERVE, Math.floor(window * OUTPUT_RESERVE_SHARE))
+    let limit = Math.min(Math.floor(window * COMPACT_AT), window - reserve)
     const cap = o.settings().contextCap
     if (cap) limit = Math.min(limit, cap)
     limit = Math.max(limit, 2_000)

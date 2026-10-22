@@ -302,6 +302,28 @@ describe('ModelRouter: context and capabilities', () => {
     assert.equal(world.calls.length, 0)
   })
 
+  it('asks core to compact when the server counts more than the estimate and the prompt cannot fit', async () => {
+    // The estimate said 1,500 tokens, so each model looked able to take the call; each says 20,000 is all it has and 25,000 were sent.
+    const overflow = faults.contextOverflow(20_000, 25_000)
+    const world = freeWorld({ behavior: { [A]: overflow, [B]: overflow, [C]: overflow } })
+    const { outcome } = await world.complete({ requirements: { promptTokens: 1_500, maxOutputTokens: 4_096, tools: false, images: false } })
+    assert.deepEqual(outcome, { kind: 'compact', window: 20_000, used: 25_000 })
+    assert.deepEqual(world.calls.map((call) => call.model), [A, B, C], 'each model is asked once, then none is asked again')
+    // The windows are kept: once the conversation is compacted, the best model answers again.
+    world.behavior[A] = faults.reply('after compaction')
+    const next = await world.complete({ requirements: { promptTokens: 2_000, maxOutputTokens: 1_024, tools: false, images: false } })
+    assert.equal(next.text, 'after compaction')
+    assert.equal(world.router.registry.get('openrouter', A).contextWindow, 20_000)
+  })
+
+  it('shrinks the output budget when only the budget made the call overflow', async () => {
+    // 28,000 of the 32,768 tokens are prompt: the prompt fits, so the retry asks for what is left rather than asking core to compact.
+    const world = freeWorld({ behavior: { [A]: [faults.contextOverflow(32_768, 28_000), faults.reply('fits now')] } })
+    const { text } = await world.complete({ requirements: { promptTokens: 1_500, maxOutputTokens: 4_096, tools: false, images: false } })
+    assert.equal(text, 'fits now')
+    assert.deepEqual(world.callsTo(A).map((call) => call.target.maxOutputTokens), [4_096, 32_768 - 30_800])
+  })
+
   it('learns that a model cannot call tools and leaves it out of tool calls', async () => {
     const world = freeWorld({ behavior: { [A]: faults.noTools(), [B]: faults.toolCall('Read', { path: 'a.ts' }) } })
     const requirements = { promptTokens: 1_000, maxOutputTokens: 4_096, tools: true, images: false }

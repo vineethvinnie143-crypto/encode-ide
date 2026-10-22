@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ComponentProps } from 'react'
 import type { AgentMode, BackgroundJob } from '@shared/types'
 import { api } from '../api'
 import { commandRegistry, sessionActions } from '../commands/app'
+import { errorText } from '../ipc-error'
 import { activeKind } from '../panels/model'
 import { useChat } from '../stores/chat'
 import { useGit } from '../stores/git'
@@ -113,7 +114,7 @@ export default function SessionHeader() {
           void api.agent
             .compact(session.id)
             .then((result) => useUi.getState().notify('success', result.removed ? `Compacted ${result.removed} messages` : 'Nothing to compact yet'))
-            .catch((error: Error) => useUi.getState().notify('error', error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')))
+            .catch((error: Error) => useUi.getState().notify('error', errorText(error)))
         },
       },
       { id: 'fork', label: 'Fork session', onSelect: () => void sessionActions.fork(session) },

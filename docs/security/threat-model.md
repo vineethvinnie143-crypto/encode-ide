@@ -1,9 +1,9 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0, and updated on 2026-10-22 when the desktop app moved
-onto the agent host (T23 to T25, R11) and when the Browser tab began lifting framing rules
-(T29, R13). It covers the desktop app as built from this
-repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
+onto the agent host (T23 to T25, R11), when the Browser tab began lifting framing rules
+(T29, R13) and when every model call moved onto the router (T35 to T38, R16). It covers the
+desktop app as built from this repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
 permission rules, trust, hooks, checkpoints and MCP client (M3) have their own sections at the
 end. The CLI and the router get theirs when they land.
 
@@ -113,6 +113,10 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none (0050). | Mitigated |
 | T33 | Two chats drive the mouse at once and act on each other's screens | One chat at a time sends input; another is told the desktop is busy, and the hold ends after 30 seconds without input, on stop or on close (0050). | Mitigated |
 | T34 | A log or a diagnostics report that a tester sends to someone else carries a key, a conversation or the user's name | Every log line is scrubbed before it is kept: keys and tokens by shape, the stored keys by value, e-mail addresses and user names in paths. A report holds no file contents, conversations or remembered folders, is scrubbed again with the keys read fresh, is written only where the user says and is never sent by eNCode (0051). | Partial (R15) |
+| T35 | A key reaches a place the person did not choose: the agent host's configuration, a log, or another server than the one it belongs to | The host's configuration carries a revision number for each key and never a key. When the router needs one it asks the main process, naming the origin it is about to call, and the main process answers only for the origin of that profile's address. An address is `https://`, or `http://` for a server on this computer, with no user name, password, query or fragment: the dialog says so, the model list request (which carries the key) refuses anything else before it is made, and the router drops the connection with the same words. A changed address drops the stored key (0052). | Partial (R16) |
+| T36 | A model call is billed that the person did not choose: a paid model behind a free one, a second key's account, a free model that turns out to charge | Free only is on until the person chooses a model that costs money, and choosing one asks first. In that mode the router refuses every model that is not free. It never falls from a free model to a paid one, or from one key's account to another's, and a model that was billed although it was listed free counts as paid from then on, with a notice (0023, 0024, 0052). | Partial (R16) |
+| T37 | A refused key, a spent balance or a paused connection goes unnoticed, or the same notice floods the person | The router's alerts reach the interface as one notice each, the same one at most once a minute, with a button to the Settings tab that helps. Settings → Roles lists every connection's state and what is paused until when (0052). | Mitigated |
+| T38 | The router's saved state exposes a prompt or a key | `eNCode-models.json` holds health, cooldowns, free-request tallies and learned prices. It is written atomically with owner-only permissions every 30 seconds and at shutdown, and holds no prompt, reply or key (0052). | Mitigated |
 
 ## Residual risks
 
@@ -203,6 +207,13 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   get through; and a log line can name a file or folder when something went wrong with it. The report says so and is
   plain text, so the tester reads it before sending it.
   - Owner: whoever adds a log line, who logs no content; the patterns grow with the services eNCode talks to.
+- **R16. Free models and the key in the host.** A free model's provider may keep and learn from what is sent to it, and OpenRouter
+  routes a free request to whichever provider has room, so eNCode cannot tell which one. The dialog and Settings → Roles say so, and
+  "Only use free models" does not mean private. The key is also in the host's memory for the length of one request: a compromised
+  host can ask for any key, but only for the origin its profile points at, and cannot read the key store. What a provider lists
+  as free is its own word, which the router distrusts only after a bill proves it wrong.
+  - Owner: the gateway (0020), which will serve the free models from a key of ours, and a per-model "may train on prompts" flag
+    from OpenRouter's catalog if it ever offers one.
 
 ## Verification
 
@@ -219,6 +230,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - what the model is sent (the project's instructions arrive as a reminder, never in the
     system prompt) and the session logs on disk (owner-only, no key in them);
   - the About box and a diagnostics report, which must hold no key that was just stored.
+  - the first start (the Connect dialog, a model of one's own checked with a real tool call through the router, the model
+    menu and the Roles tab), and a provider call whose key was asked for by origin (0052).
 - The same run packages the app, then starts the unpacked program, the portable program and the
   installed program (installing and uninstalling it silently) and checks that the bundled
   interface loads, the build names its commit, and the agent process answers (0051).

@@ -9,31 +9,19 @@ import {
   Trash2,
   X,
 } from '../ui/icons'
+import { addressProblem, cleanRoles, mainPatch, mainRefs, modelRef } from '@shared/models'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'
+import { useModels } from '../stores/models'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
 import { applyAppearance } from '../theme/appearance'
 import AppearanceSettings from './AppearanceSettings'
-
-interface Preset {
-  label: string
-  name: string
-  kind: ProfileKind
-  baseUrl: string
-  model: string
-}
-
-const PRESETS: Preset[] = [
-  { label: 'DeepSeek', name: 'DeepSeek', kind: 'custom', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
-  { label: 'OpenRouter', name: 'OpenRouter', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: '' },
-  { label: 'Ollama', name: 'Ollama', kind: 'custom', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
-  { label: 'LM Studio', name: 'LM Studio', kind: 'custom', baseUrl: 'http://localhost:1234/v1', model: '' },
-  { label: 'OpenAI', name: 'OpenAI', kind: 'custom', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { label: 'Custom', name: 'Custom', kind: 'custom', baseUrl: '', model: '' },
-]
+import { uniqueName } from './models/connect'
+import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
+import RolesSettings from './models/RolesSettings'
 
 export default function SettingsModal() {
   const settings = useSettings((state) => state.settings)
@@ -100,26 +88,26 @@ export default function SettingsModal() {
   }
 
   const updateProfile = (id: string, patch: Partial<ModelProfile>) => {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            profiles: current.profiles.map((profile) => (profile.id === id ? { ...profile, ...patch } : profile)),
-          }
-        : current,
-    )
+    setDraft((current) => {
+      if (!current) return current
+      const before = current.profiles.find((profile) => profile.id === id)
+      const profiles = current.profiles.map((profile) => (profile.id === id ? { ...profile, ...patch } : profile))
+      let next: Settings = { ...current, profiles }
+      // The model typed into the connection that answers goes on answering: a main list that held only its old model follows the new one.
+      const main = mainRefs(current)
+      const changed = patch.model !== undefined && before && patch.model.trim() !== before.model.trim()
+      if (changed && id === current.activeProfileId && main.length === 1 && main[0] === modelRef(id, before.model.trim()) && patch.model!.trim()) {
+        next = { ...next, ...mainPatch(next, [modelRef(id, patch.model!.trim())]) }
+      }
+      return next
+    })
   }
 
   const addProfile = (preset: Preset) => {
     if (!draft) return
-    let name = preset.name
-    let counter = 2
-    while (draft.profiles.some((profile) => profile.name === name)) {
-      name = `${preset.name} ${counter++}`
-    }
     const profile: ModelProfile = {
       id: crypto.randomUUID(),
-      name,
+      name: uniqueName(draft.profiles, preset.name),
       kind: preset.kind,
       baseUrl: preset.baseUrl,
       model: preset.model,
@@ -142,7 +130,8 @@ export default function SettingsModal() {
     const profiles = draft.profiles.filter((profile) => profile.id !== id)
     if (!profiles.length) return
     const activeProfileId = draft.activeProfileId === id ? profiles[0].id : draft.activeProfileId
-    setDraft({ ...draft, profiles, activeProfileId })
+    useModels.getState().forget(id)
+    setDraft({ ...draft, profiles, activeProfileId, roles: cleanRoles(draft.roles, profiles), freeProfileId: draft.freeProfileId === id ? null : draft.freeProfileId })
     if (selectedId === id) setSelectedId(profiles[0].id)
     setKeyInput('')
     setModels([])
@@ -219,6 +208,13 @@ export default function SettingsModal() {
 
   const close = () => setSettingsOpen(false)
 
+  /** The dialog changes the connections under this one: what was edited here is saved first, so the draft is never older than the settings. */
+  const connect = async () => {
+    if (!(await persist())) return
+    setSettingsOpen(false)
+    useUi.getState().setConnectOpen(true)
+  }
+
   return (
     <div className="modal-backdrop" onMouseDown={close}>
       <div className="settings-modal" onMouseDown={(event) => event.stopPropagation()}>
@@ -227,6 +223,9 @@ export default function SettingsModal() {
           <div className="settings-tabs">
             <button className={tab === 'models' ? 'is-on' : ''} onClick={() => setTab('models')}>
               Models
+            </button>
+            <button className={tab === 'roles' ? 'is-on' : ''} onClick={() => setTab('roles')}>
+              Roles
             </button>
             <button className={tab === 'agent' ? 'is-on' : ''} onClick={() => setTab('agent')}>
               Agent
@@ -343,7 +342,14 @@ export default function SettingsModal() {
                             placeholder="https://api.deepseek.com"
                             onChange={(event) => updateProfile(selected.id, { baseUrl: event.target.value })}
                           />
-                          <div className="form-help">Chat endpoint is <code>{selected.baseUrl.replace(/\/+$/, '')}/chat/completions</code></div>
+                          {selected.kind === 'custom' && selected.baseUrl.trim() !== '' && addressProblem(selected.baseUrl) && <div className="form-help is-warn">{addressProblem(selected.baseUrl)}</div>}
+                          <div className="form-help">
+                            Chat endpoint is{' '}
+                            <code>
+                              {selected.baseUrl.replace(/\/+$/, '').replace(/\/v1$/, isAnthropicUrl(selected.baseUrl) ? '' : '/v1')}
+                              {isAnthropicUrl(selected.baseUrl) ? '/v1/messages' : '/chat/completions'}
+                            </code>
+                          </div>
                         </div>
 
                         <div className="form-row">
@@ -447,7 +453,7 @@ export default function SettingsModal() {
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() => setDraft({ ...draft, activeProfileId: selected.id })}
+                          onClick={() => setDraft({ ...draft, ...(selected.model.trim() ? mainPatch(draft, [modelRef(selected.id, selected.model.trim())]) : { activeProfileId: selected.id }) })}
                         >
                           <Check size={13} /> Use this profile
                         </button>
@@ -457,6 +463,8 @@ export default function SettingsModal() {
                 )}
               </section>
             </div>
+          ) : tab === 'roles' ? (
+            <RolesSettings draft={draft} onChange={(patch) => setDraft((current) => (current ? { ...current, ...patch } : current))} onConnect={() => void connect()} />
           ) : tab === 'agent' ? (
             <div className="settings-agent">
               <div className="section-title">Approvals</div>

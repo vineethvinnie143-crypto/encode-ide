@@ -214,6 +214,7 @@ export const Shield = icon('Shield', <path d={shield} />)
 export const ShieldAlert = icon('ShieldAlert', <><path d={`${shield} M12 8.5v4`} />{dot(12, 15.5, 1)}</>)
 export const ShieldCheck = icon('ShieldCheck', <path d={`${shield} M9 12l2.2 2.2L15.5 10`} />)
 export const Lock = icon('Lock', <path d="M6.5 11h11v9h-11z M9 11V8.5a3 3 0 0 1 6 0V11" />)
+export const Key = icon('Key', <><circle cx="8.5" cy="14.5" r="3.5" /><path d="M11 12 19.5 3.5 M16 7l2.5 2.5 M13.8 9.2l1.7 1.7" /></>)
 export const Eye = icon('Eye', <><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></>)
 export const EyeOff = icon(
   'EyeOff',

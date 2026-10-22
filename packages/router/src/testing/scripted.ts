@@ -168,8 +168,9 @@ export const faults = {
   payment(): Script {
     return [fail('payment', 'HTTP 402: Insufficient credits', { status: 402, scope: 'account' })]
   },
-  contextOverflow(window?: number): Script {
-    return [fail('context-overflow', `HTTP 400: maximum context length exceeded`, { status: 400, ...(window ? { window } : {}) })]
+  /** The prompt is too long for the model; the server may say what its window is and how many tokens it counted. */
+  contextOverflow(window?: number, used?: number): Script {
+    return [fail('context-overflow', `HTTP 400: maximum context length exceeded`, { status: 400, ...(window ? { window } : {}), ...(used ? { used } : {}) })]
   },
   notFound(): Script {
     return [fail('not-found', 'HTTP 404: No endpoints found for this model.', { status: 404 })]

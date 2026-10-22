@@ -206,3 +206,99 @@ describe('SettingsService defaults and secrets', () => {
     assert.deepEqual(settings.secrets(), ['key-for-b-0002'])
   })
 })
+
+describe('SettingsService models', () => {
+  const profiles = (): Settings['profiles'] => [
+    { id: 'demo', name: 'Demo', kind: 'demo', baseUrl: '', model: 'eNCode-demo' },
+    { id: 'or', name: 'OpenRouter', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: '' },
+    { id: 'oa', name: 'OpenAI', kind: 'custom', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  ]
+
+  it('starts a new install with only free models allowed, the first-run dialog unanswered and no role chosen', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(settings.freeOnly, true, 'nothing is billed until the person says so')
+    assert.equal(settings.setupDone, false)
+    assert.deepEqual(settings.roles, {})
+    assert.equal(settings.freeProfileId, null)
+  })
+
+  it('keeps allowing what already worked: a file from before roles that uses a real model has set up and may pay', () => {
+    fs.writeFileSync(file(), JSON.stringify({ profiles: [{ id: 'x', name: 'X', kind: 'custom', baseUrl: 'https://a.example/v1', model: 'm', apiKeyEnc: legacy('key-0001-abcd') }], activeProfileId: 'x' }))
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(settings.freeOnly, false)
+    assert.equal(settings.setupDone, true)
+
+    fs.writeFileSync(file(), JSON.stringify({ profiles: [{ id: 'x', name: 'X', kind: 'custom', baseUrl: 'http://localhost:11434/v1', model: 'm' }], activeProfileId: 'x' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().setupDone, true, 'a model on this machine needs no key')
+
+    fs.writeFileSync(file(), JSON.stringify({ profiles: [{ id: 'x', name: 'X', kind: 'custom', baseUrl: 'https://a.example/v1', model: 'm' }], activeProfileId: 'x' }))
+    const keyless = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(keyless.freeOnly, true)
+    assert.equal(keyless.setupDone, false)
+  })
+
+  it('saves the roles, the free-only switch, the free connection and the answered dialog, and reads them back after a restart', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ profiles: profiles() })
+    const saved = settings.save({ roles: { main: ['oa:gpt-4o', '@free'], reviewer: ['or:qwen/qwen3-coder:free'] }, freeOnly: false, freeProfileId: 'or', setupDone: true })
+    assert.deepEqual(saved.roles, { main: ['oa:gpt-4o', '@free'], reviewer: ['or:qwen/qwen3-coder:free'] })
+    assert.equal(saved.freeOnly, false)
+    assert.equal(saved.freeProfileId, 'or')
+    assert.equal(saved.setupDone, true)
+    const again = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.deepEqual(again.roles, saved.roles)
+    assert.equal(again.freeOnly, false)
+    assert.equal(again.freeProfileId, 'or')
+  })
+
+  it('leaves them alone when a patch does not name them', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ profiles: profiles(), roles: { main: ['oa:gpt-4o'] }, freeOnly: false, setupDone: true })
+    const saved = settings.save({ maxSteps: 12 })
+    assert.deepEqual(saved.roles, { main: ['oa:gpt-4o'] })
+    assert.equal(saved.freeOnly, false)
+    assert.equal(saved.setupDone, true)
+  })
+
+  it('drops what names a profile that went away, an unknown role, or something that is not a reference', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ profiles: profiles() })
+    const bad = { main: ['gone:x', 'oa:gpt-4o', 5], dreamer: ['oa:gpt-4o'], utility: 'oa:gpt-4o' }
+    assert.deepEqual(settings.save({ roles: bad as unknown as Settings['roles'] }).roles, { main: ['oa:gpt-4o'] })
+    settings.save({ roles: { main: ['oa:gpt-4o'], reviewer: ['oa:o3', 'or:a:free'] } })
+    assert.deepEqual(settings.save({ profiles: profiles().filter((profile) => profile.id !== 'oa') }).roles, { reviewer: ['or:a:free'] })
+  })
+
+  it('takes a free connection only if it is an OpenRouter profile that exists', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ profiles: profiles() })
+    assert.equal(settings.save({ freeProfileId: 'oa' }).freeProfileId, null, 'OpenAI cannot serve the free models')
+    assert.equal(settings.save({ freeProfileId: 'gone' }).freeProfileId, null)
+    assert.equal(settings.save({ freeProfileId: 'or' }).freeProfileId, 'or')
+    assert.equal(settings.save({ freeProfileId: null }).freeProfileId, null)
+    settings.save({ freeProfileId: 'or' })
+    assert.equal(settings.save({ profiles: profiles().filter((profile) => profile.id !== 'or') }).freeProfileId, null)
+  })
+
+  it('ignores a free-only switch that is not true or false, from the renderer or from the file', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.save({ freeOnly: 'no' as unknown as boolean }).freeOnly, true)
+    fs.writeFileSync(file(), JSON.stringify({ freeOnly: 'false' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().freeOnly, true, 'a switch that guards against spending stays on')
+  })
+
+  it('numbers a profile\'s key anew each time it changes, so the agent host can tell without seeing it', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ profiles: profiles() })
+    const start = settings.keyRevision('oa')
+    settings.setProfileKey('oa', 'key-for-oa-0001')
+    const first = settings.keyRevision('oa')
+    settings.setProfileKey('oa', 'key-for-oa-0002')
+    const second = settings.keyRevision('oa')
+    assert.ok(first > start && second > first)
+    assert.equal(settings.keyRevision('or'), 0, 'another profile\'s key did not change')
+    // Pointing the profile at another server drops its key, which is a change too.
+    settings.save({ profiles: profiles().map((profile) => (profile.id === 'oa' ? { ...profile, baseUrl: 'https://elsewhere.example/v1' } : profile)) })
+    assert.ok(settings.keyRevision('oa') > second)
+  })
+})

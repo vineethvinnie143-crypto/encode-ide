@@ -1,7 +1,7 @@
 import { create } from '../store'
 
 export type SidebarView = 'explorer' | 'search' | 'git'
-export type SettingsTab = 'models' | 'agent' | 'appearance'
+export type SettingsTab = 'models' | 'roles' | 'agent' | 'appearance'
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'
 
@@ -23,10 +23,17 @@ export interface ConfirmRequest {
   resolve: (confirmed: boolean) => void
 }
 
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
 export interface Toast {
   id: number
   kind: 'info' | 'success' | 'error'
   text: string
+  /** A button on the notice, such as "Open Settings". */
+  action?: ToastAction
 }
 
 interface UiStore {
@@ -38,6 +45,8 @@ interface UiStore {
   collapsedProjects: string[]
   settingsOpen: boolean
   settingsTab: SettingsTab
+  /** The "Connect a model" dialog, opened from the model menu; a first start opens it by itself. */
+  connectOpen: boolean
   pluginsOpen: boolean
   automationOpen: boolean
   quickOpenOpen: boolean
@@ -53,6 +62,7 @@ interface UiStore {
   toggleProject(key: string): void
   setSettingsOpen(open: boolean): void
   openSettings(tab: SettingsTab): void
+  setConnectOpen(open: boolean): void
   setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean): void
@@ -62,7 +72,7 @@ interface UiStore {
   resolvePrompt(value: string | null): void
   askConfirm(options: { title: string; body: string; confirmLabel?: string; danger?: boolean }): Promise<boolean>
   resolveConfirm(confirmed: boolean): void
-  notify(kind: Toast['kind'], text: string): void
+  notify(kind: Toast['kind'], text: string, action?: ToastAction): void
   dismissToast(): void
 }
 
@@ -107,6 +117,7 @@ export const useUi = create<UiStore>((set, get) => ({
   sidebarMode: 'projects',
   settingsOpen: false,
   settingsTab: 'models',
+  connectOpen: false,
   pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
@@ -129,6 +140,7 @@ export const useUi = create<UiStore>((set, get) => ({
   },
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   openSettings: (tab) => set({ settingsTab: tab, settingsOpen: true }),
+  setConnectOpen: (open) => set({ connectOpen: open }),
   setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
@@ -161,7 +173,7 @@ export const useUi = create<UiStore>((set, get) => ({
   },
 
   // Toasts.tsx closes it after 5 s, pausing while the pointer is on it.
-  notify: (kind, text) => set({ toast: { id: Date.now() + Math.random(), kind, text } }),
+  notify: (kind, text, action) => set({ toast: { id: Date.now() + Math.random(), kind, text, ...(action ? { action } : {}) } }),
 
   dismissToast: () => set({ toast: null }),
 }))

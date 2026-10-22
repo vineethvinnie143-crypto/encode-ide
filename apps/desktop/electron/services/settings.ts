@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
+import { cleanRoles, isLocalUrl } from '../../shared/models'
 import type { AgentMode, ApprovalPolicy, ModelProfile, ProfileKind, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
@@ -35,6 +36,10 @@ function defaults(): StoredSettings {
     lastWorkspace: null,
     agentMode: 'code',
     appearance: { ...DEFAULT_APPEARANCE },
+    roles: {},
+    freeOnly: true,
+    freeProfileId: null,
+    setupDone: false,
   }
 }
 
@@ -73,10 +78,17 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
   return Math.min(max, Math.max(min, Math.round(n)))
 }
 
+/** The profile that may serve the free models: an OpenRouter one that exists. */
+function freeProfileOf(value: unknown, profiles: StoredProfile[]): string | null {
+  return typeof value === 'string' && profiles.some((profile) => profile.id === value && profile.kind === 'openrouter') ? value : null
+}
+
 export class SettingsService {
   private readonly file: string
   private readonly vault: KeyVault
   private data: StoredSettings
+  /** Changes whenever a profile's key does, so the agent host can tell a new key from the old one without seeing either. */
+  private readonly revisions = new Map<string, number>()
 
   /** `cipher` is Electron's safeStorage; tests pass a fake. */
   constructor(dir: string, cipher: Cipher, platform: NodeJS.Platform = process.platform) {
@@ -132,6 +144,8 @@ export class SettingsService {
     if (!profiles.length) profiles.push({ ...DEMO_PROFILE })
 
     const active = profiles.find((p) => p.id === input.activeProfileId) ?? profiles[0]
+    // A file from before the model router: whoever already ran a real model keeps being allowed to, and has set up.
+    const usesRealModel = profiles.some((p) => p.kind !== 'demo' && (Boolean(p.apiKeyEnc) || isLocalUrl(p.baseUrl)))
     return {
       profiles,
       activeProfileId: active.id,
@@ -144,6 +158,10 @@ export class SettingsService {
       lastWorkspace: typeof input.lastWorkspace === 'string' ? input.lastWorkspace : null,
       agentMode: input.agentMode === 'ask' || input.agentMode === 'plan' ? input.agentMode : 'code',
       appearance: normalizeAppearance(input.appearance),
+      roles: cleanRoles(input.roles, profiles),
+      freeOnly: typeof input.freeOnly === 'boolean' ? input.freeOnly : !usesRealModel,
+      freeProfileId: freeProfileOf(input.freeProfileId, profiles),
+      setupDone: typeof input.setupDone === 'boolean' ? input.setupDone : usesRealModel,
     }
   }
 
@@ -171,6 +189,10 @@ export class SettingsService {
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
       appearance: { ...this.data.appearance },
+      roles: structuredClone(this.data.roles),
+      freeOnly: this.data.freeOnly,
+      freeProfileId: this.data.freeProfileId,
+      setupDone: this.data.setupDone,
       keyStorage: this.vault.storage,
     }
   }
@@ -192,7 +214,10 @@ export class SettingsService {
           const baseUrl = str(p.baseUrl)
           // A key stays with the server it was entered for: pointing its profile elsewhere drops it.
           const sameServer = prev !== undefined && serverOf(prev.baseUrl) === serverOf(baseUrl)
-          if (prev && !sameServer) this.vault.forget(prev.id)
+          if (prev && !sameServer) {
+            this.vault.forget(prev.id)
+            this.revise(prev.id)
+          }
           return {
             id: p.id,
             name: str(p.name, 'Model'),
@@ -205,7 +230,11 @@ export class SettingsService {
         })
       if (!next.profiles.length) next.profiles = [{ ...DEMO_PROFILE }]
       const kept = new Set(next.profiles.map((p) => p.id))
-      for (const id of existing.keys()) if (!kept.has(id)) this.vault.forget(id)
+      for (const id of existing.keys()) {
+        if (kept.has(id)) continue
+        this.vault.forget(id)
+        this.revise(id)
+      }
     }
 
     if (typeof patch.activeProfileId === 'string' && next.profiles.some((p) => p.id === patch.activeProfileId)) {
@@ -228,6 +257,12 @@ export class SettingsService {
     // A partial appearance changes only the fields it names.
     if (patch.appearance !== undefined) next.appearance = normalizeAppearance(patch.appearance, next.appearance)
 
+    // Models for the roles; a profile that went away takes the entries that named it.
+    next.roles = cleanRoles(patch.roles !== undefined ? patch.roles : next.roles, next.profiles)
+    if (typeof patch.freeOnly === 'boolean') next.freeOnly = patch.freeOnly
+    next.freeProfileId = freeProfileOf(patch.freeProfileId !== undefined ? patch.freeProfileId : next.freeProfileId, next.profiles)
+    if (typeof patch.setupDone === 'boolean') next.setupDone = patch.setupDone
+
     this.data = next
     this.persist()
     return this.get()
@@ -240,9 +275,19 @@ export class SettingsService {
     const profile = this.data.profiles.find((p) => p.id === profileId)
     if (profile) {
       profile.apiKeyEnc = this.vault.put(profile.id, trimmed)
+      this.revise(profile.id)
       this.persist()
     }
     return this.get()
+  }
+
+  private revise(profileId: string): void {
+    this.revisions.set(profileId, (this.revisions.get(profileId) ?? 0) + 1)
+  }
+
+  /** A number that is different after every change of the profile's key. */
+  keyRevision(profileId: string): number {
+    return this.revisions.get(profileId) ?? 0
   }
 
   /** Every stored key, so that a log or a report can be scrubbed of exactly these values. */

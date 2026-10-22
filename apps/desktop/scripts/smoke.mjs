@@ -6,7 +6,8 @@
  *   1. start Electron:  .\node_modules\electron\dist\electron.exe . --remote-debugging-port=9222
  *   2. run:             node scripts/smoke.mjs <workspace-to-open>
  *
- * ENCODE_DEBUG_PORT and ENCODE_FAKE_PROVIDER_PORT override the ports (9222, 8787).
+ * ENCODE_DEBUG_PORT and ENCODE_FAKE_PROVIDER_PORT override the ports (9222, 8787). ENCODE_SMOKE_VERBOSE=1 lets the
+ * fake provider print what it is asked.
  *
  * Exercises the in-house editor (what it draws, typing, save and undo round-trip, find,
  * quick open), the offline demo agent, then a real streaming provider via
@@ -101,6 +102,16 @@ async function typeInto(selector, value) {
   })()`)
 }
 
+async function selectOption(selector, value) {
+  return evaluate(`(() => {
+    const select = document.querySelector(${JSON.stringify(selector)})
+    if (!select) return false
+    select.value = ${JSON.stringify(value)}
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  })()`)
+}
+
 /** The lines the editor has drawn, top to bottom. They are pooled, so DOM order is not line order. */
 const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
@@ -183,7 +194,8 @@ async function ensureFakeProvider() {
   }
   provider = spawn(process.execPath, [path.join(root, 'scripts', 'fake-provider.mjs')], {
     env: { ...process.env, FAKE_PROVIDER_PORT: String(providerPort) },
-    stdio: 'ignore',
+    // ENCODE_SMOKE_VERBOSE=1 shows what the fake provider was asked, which is what a failing phase needs.
+    stdio: process.env.ENCODE_SMOKE_VERBOSE ? 'inherit' : 'ignore',
     windowsHide: true,
   })
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -294,6 +306,120 @@ async function checkSessionFiles(secret) {
   if (process.platform !== 'win32' && (await fs.stat(dir)).mode & 0o077) throw new Error('The sessions folder can be read by other users')
   if (!ran) throw new Error('The command the agent ran is not in any session log')
   console.log('[smoke] session logs:', JSON.stringify({ logs: logs.length }))
+}
+
+/**
+ * A new install: "Connect a model" shows by itself and is not dismissed by a stray click. The free models need the
+ * internet, so only their form is looked at; a key of one's own is connected to the local provider, the way a person
+ * would connect any server, and the model menu and the Roles settings are walked through.
+ */
+async function runFirstStartChecks() {
+  console.log('[smoke] --- first start ---')
+  await ensureFakeProvider()
+  await waitFor("!!document.querySelector('.connect-dialog .connect-option')", 15000, 'the connect dialog on a first start')
+  const first = await evaluate('window.eNCode.settings.get()')
+  if (first.setupDone !== false) throw new Error(`a new install should not be set up yet: ${JSON.stringify({ setupDone: first.setupDone })}`)
+  const choices = await evaluate("[...document.querySelectorAll('.connect-option')].map((node) => node.dataset.choice)")
+  if (choices.join() !== 'free,own,demo') throw new Error(`the connect dialog offers ${choices.join()}`)
+  await screenshot('01-launch.png')
+
+  // A click beside the dialog does not dismiss it.
+  await evaluate("document.querySelector('.ui-backdrop').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))")
+  await sleep(150)
+  if (!(await evaluate("!!document.querySelector('.connect-dialog')"))) throw new Error('a click beside the first-start dialog closed it')
+
+  // The free models: the form, a warning for a key of the wrong kind, and back out with Escape.
+  if (!(await click('.connect-option[data-choice="free"]'))) throw new Error('no free-models choice')
+  await waitFor("!!document.querySelector('.connect-dialog .key-field input')", 4000, 'the key field')
+  await typeInto('.connect-dialog .key-field input', 'sk-proj-not-an-openrouter-key')
+  await waitFor("/start with sk-or-/.test(document.querySelector('.connect-dialog')?.textContent ?? '')", 4000, 'the warning for a key of the wrong kind')
+  if (!(await evaluate("document.querySelector('.connect-dialog a[href=\"https://openrouter.ai/keys\"]') !== null"))) throw new Error('the free-models form does not say where to get a key')
+  if (await evaluate("document.querySelector('.ui-dialog-foot .btn.primary').disabled")) throw new Error('Connect should be possible once a key is typed')
+  await pressKey('Escape')
+  await waitFor("!!document.querySelector('.connect-option[data-choice=\"demo\"]')", 4000, 'Escape goes back to the choices')
+  await screenshot('01-connect.png')
+
+  // A key of one's own, for a server that is not in the list: the local provider.
+  if (!(await click('.connect-option[data-choice="own"]'))) throw new Error('no own-key choice')
+  await waitFor("!!document.querySelector('#connect-provider')", 4000, 'the provider list')
+  if (!(await selectOption('#connect-provider', 'custom'))) throw new Error('no provider list')
+  await waitFor("!!document.querySelector('#connect-url')", 4000, 'the address field of a custom provider')
+  if (!(await evaluate("document.querySelector('.ui-dialog-foot .btn.primary').disabled"))) throw new Error('Continue should wait for an address and a key')
+  await typeInto('#connect-url', `http://127.0.0.1:${providerPort}/v1`)
+  await typeInto('.connect-dialog .key-field input', 'smoke-first-start-key')
+  await sleep(150)
+  await screenshot('01-connect-key.png')
+  if (!(await click('.ui-dialog-foot .btn.primary'))) throw new Error('no Continue button')
+  await waitFor("!!document.querySelector('.connect-models .connect-model')", 20000, 'the model list of the provider')
+  const listed = await evaluate("[...document.querySelectorAll('.connect-model')].map((node) => node.textContent)")
+  if (listed.length !== 1 || !listed[0].includes('Mock model') || !listed[0].includes('mock-model')) throw new Error(`the provider lists ${JSON.stringify(listed)}`)
+  if (!listed[0].includes('Free')) throw new Error('a model on this computer should be marked free')
+  if (!(await evaluate("document.querySelector('.ui-dialog-foot .btn.primary').disabled"))) throw new Error('Use this model should wait for a choice')
+  if (!(await click('.connect-model', 'Mock model'))) throw new Error('no model to choose')
+  await screenshot('01-connect-models.png')
+  if (!(await click('.ui-dialog-foot .btn.primary'))) throw new Error('no Use this model button')
+  // The model is asked for a tool call, the way the agent will use it.
+  await waitFor("!document.querySelector('.connect-dialog')", 60000, 'the connect dialog closing after the model answered')
+
+  const set = await evaluate('window.eNCode.settings.get()')
+  const connection = set.profiles.find((profile) => profile.baseUrl.includes(`:${providerPort}`))
+  if (!connection) throw new Error('the connection was not stored')
+  if (!set.setupDone) throw new Error('the setup was not finished')
+  if (connection.model !== 'mock-model' || !connection.hasApiKey) throw new Error(`the connection is ${JSON.stringify(connection)}`)
+  if (JSON.stringify(set.roles.main) !== JSON.stringify([`${connection.id}:mock-model`]) || set.activeProfileId !== connection.id) {
+    throw new Error(`the main model is ${JSON.stringify(set.roles)} on ${set.activeProfileId}`)
+  }
+  if (set.freeOnly !== true) throw new Error('a model on this computer should leave "only free models" on')
+  const authorization = (await (await fetch(`http://127.0.0.1:${providerPort}/__last-authorization`)).json()).authorization
+  if (authorization !== 'Bearer smoke-first-start-key') throw new Error(`the provider received ${authorization}`)
+  const chip = await evaluate("document.querySelector('.model-chip')?.textContent ?? ''")
+  if (!chip.includes('mock-model')) throw new Error(`the model chip reads "${chip}"`)
+  console.log('[smoke] connected:', JSON.stringify({ id: connection.id, main: set.roles.main }))
+
+  // The model menu: what is in use, search, the offline demo, and the way back to the connect dialog and the Roles.
+  if (!(await click('.model-chip'))) throw new Error('no model chip')
+  await waitFor("!!document.querySelector('.model-picker .model-picker-item')", 8000, 'the model menu')
+  const groups = await evaluate("[...document.querySelectorAll('.model-picker-heading')].map((node) => node.textContent.trim())")
+  if (groups[0] !== 'In use') throw new Error(`the model menu starts with ${JSON.stringify(groups)}`)
+  const inUse = await evaluate("document.querySelector('.model-picker-item.is-selected')?.dataset.ref")
+  if (inUse !== `${connection.id}:mock-model`) throw new Error(`the model in use is ${inUse}`)
+  await typeInto('.model-picker-search input', 'no such model anywhere')
+  await waitFor("/No model matches/.test(document.querySelector('.model-picker-empty')?.textContent ?? '')", 4000, 'an empty search')
+  await typeInto('.model-picker-search input', 'mock')
+  await waitFor("document.querySelectorAll('.model-picker-item').length === 1", 4000, 'a search that finds only the model')
+  await typeInto('.model-picker-search input', '')
+  await screenshot('01-model-menu.png')
+  if (!(await click('.model-picker-item[data-ref="demo"]'))) throw new Error('no offline demo in the model menu')
+  await waitFor("document.querySelector('.model-chip')?.textContent.includes('Demo')", 8000, 'the demo chosen')
+  const demoSettings = await evaluate('window.eNCode.settings.get()')
+  if (demoSettings.roles.main !== undefined || demoSettings.profiles.find((profile) => profile.id === demoSettings.activeProfileId)?.kind !== 'demo') {
+    throw new Error(`the demo was not chosen: ${JSON.stringify({ roles: demoSettings.roles, active: demoSettings.activeProfileId })}`)
+  }
+
+  await click('.model-chip')
+  await waitFor("!!document.querySelector('.model-picker-footer')", 8000, 'the model menu')
+  if (!(await click('.model-picker-link', 'Connect a model'))) throw new Error('no way to connect another model')
+  await waitFor("!!document.querySelector('.connect-dialog .connect-option')", 4000, 'the connect dialog from the model menu')
+  if (!(await click('.ui-dialog-foot .btn', 'Cancel'))) throw new Error('no Cancel in the connect dialog')
+  await waitFor("!document.querySelector('.connect-dialog')", 4000, 'Cancel closing the dialog')
+
+  await click('.model-chip')
+  await waitFor("!!document.querySelector('.model-picker-footer')", 8000, 'the model menu')
+  if (!(await click('.model-picker-link', 'Roles'))) throw new Error('no way to the Roles settings')
+  await waitFor("!!document.querySelector('.settings-modal .settings-roles')", 8000, 'the Roles settings')
+  const roles = await evaluate("[...document.querySelectorAll('.role-row')].map((node) => node.dataset.role)")
+  if (roles.join() !== 'main,explore,planner,reviewer,summarizer,utility') throw new Error(`the Roles settings list ${roles.join()}`)
+  await waitFor("document.querySelectorAll('[data-section=\"status\"] .status-row').length >= 1", 30000, 'the connections report')
+  const report = await evaluate("document.querySelector('[data-section=\"status\"]').textContent")
+  if (!report.includes('Custom')) throw new Error(`the connections report reads "${report}"`)
+  if ((await evaluate("document.querySelector('#free-only').getAttribute('aria-checked')")) !== 'true') throw new Error('"Only use free models" should be on')
+  await screenshot('01-roles.png')
+  if (!(await click('.settings-footer .btn', 'Cancel'))) throw new Error('no Cancel in settings')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+
+  // Back to a plain install for the checks that follow.
+  const keep = demoSettings.profiles.filter((profile) => profile.id !== connection.id)
+  await evaluate(`window.eNCode.settings.save({ profiles: ${JSON.stringify(keep)}, roles: {}, activeProfileId: ${JSON.stringify(demoSettings.activeProfileId)} })`)
 }
 
 async function runProviderPhase() {
@@ -1275,7 +1401,7 @@ try {
     'app shell',
   )
   console.log('[smoke] app shell rendered')
-  await screenshot('01-launch.png')
+  await runFirstStartChecks()
 
   const opened = await evaluate(`window.eNCode.workspace.openPath(${JSON.stringify(demoPath)})`)
   console.log('[smoke] workspace opened:', opened?.name)

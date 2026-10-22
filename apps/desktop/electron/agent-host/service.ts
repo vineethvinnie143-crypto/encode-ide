@@ -9,7 +9,8 @@
  */
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
-import type { DesktopHostApi, HostConfig, HostInit, MainApi } from './api'
+import type { ModelAlert, ModelStatus } from '../../shared/types'
+import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 
 export interface HostProcess {
   port: Port
@@ -27,6 +28,8 @@ export interface AgentHostServiceOptions {
   apiKey(profileId: string, baseUrl: string): string | Promise<string>
   onEvent(event: AgentEvent): void
   onJobs(jobs: BackgroundJob[]): void
+  /** The model router has something the person should hear: a key was refused, a quota is spent, a model is closed to the account. */
+  onAlert?(alert: ModelAlert): void
   log?(message: string): void
   /** The pause before the first restart, ms; it doubles with every failure. Default 400. */
   restartDelayMs?: number
@@ -99,6 +102,21 @@ export class AgentHostService {
     }
   }
 
+  /** How the model connections are doing. */
+  async modelStatus(): Promise<ModelStatus> {
+    return (await this.ready()).request('modelStatus', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** A small tool call to one model, the way the agent will make it. */
+  async modelCheck(profileId: string, model: string): Promise<ModelCheckResult> {
+    return (await this.ready()).request('modelCheck', { profileId, model }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
+  }
+
+  /** Lifts what a refused key or a payment problem set, and reads the model lists again. */
+  async modelRecheck(): Promise<void> {
+    await (await this.ready()).request('modelRecheck', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
   private ready(): Promise<Peer<MainApi, DesktopHostApi>> {
     if (this.disposed) return Promise.reject(new Error('eNCode is closing.'))
     if (this.starting) return this.starting
@@ -132,6 +150,7 @@ export class AgentHostService {
       this.o.onEvent(event)
     })
     peer.on('jobs', (jobs) => this.o.onJobs(jobs))
+    peer.on('alert', (alert) => this.o.onAlert?.(alert))
     peer.on('warn', (message) => this.log(message))
     child.onExit(() => this.exited(child, peer))
 
@@ -214,4 +233,11 @@ export class AgentHostService {
   }
 }
 
-const NO_CONFIG: HostConfig = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8, profile: null }
+const NO_CONFIG: HostConfig = {
+  policy: 'workspace-write',
+  maxSteps: 30,
+  maxGoalRounds: 8,
+  model: 'none',
+  router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
+  providers: {},
+}

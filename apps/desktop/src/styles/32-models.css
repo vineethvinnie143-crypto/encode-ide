@@ -1,0 +1,638 @@
+/* ============================================================
+   Models: connecting one, choosing one, giving each job its own
+   ============================================================ */
+
+/* ---- Connect a model ------------------------------------------------ */
+
+.connect-dialog .ui-dialog-body {
+  padding-top: 12px;
+}
+
+.connect-options {
+  display: grid;
+  gap: 8px;
+}
+
+.connect-option {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface-2);
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.connect-option:hover {
+  background: var(--surface-1);
+  border-color: var(--border-strong);
+}
+.connect-option:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.connect-option-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-8);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.connect-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.connect-option-title {
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: 20px;
+}
+.connect-option-body {
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 19px;
+}
+.connect-option-go {
+  color: var(--text-3);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.connect-option:hover .connect-option-go {
+  color: var(--text-2);
+  transform: translateX(2px);
+}
+
+.connect-form {
+  display: grid;
+  gap: 14px;
+}
+.connect-field {
+  display: grid;
+  gap: 6px;
+}
+.connect-field .text-input,
+.key-field .text-input {
+  height: 36px;
+  font-size: var(--fs-13);
+}
+.connect-form .ui-select {
+  display: flex;
+  width: 100%;
+}
+.connect-form .ui-select select {
+  width: 100%;
+  height: 36px;
+}
+.connect-link,
+.connect-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.connect-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.connect-link a:hover {
+  text-decoration: underline;
+}
+.connect-note.is-warn {
+  color: var(--warning);
+}
+
+.connect-problem {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: var(--fs-13);
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.connect-problem > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger);
+}
+.connect-way {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.connect-way:hover {
+  text-decoration: underline;
+}
+
+.connect-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-3);
+}
+.connect-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.connect-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.connect-models {
+  max-height: 264px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.connect-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 5px 10px;
+  border-radius: var(--r-8);
+  text-align: left;
+}
+.connect-model:hover {
+  background: var(--hover);
+}
+.connect-model.is-picked {
+  background: var(--selected);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.connect-model.is-dim {
+  opacity: 0.6;
+}
+.connect-model-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.connect-model-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+.connect-model-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 16px;
+}
+.connect-models-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+.connect-models-note.is-warn {
+  color: var(--warning);
+}
+
+/* ---- A field for a key ---------------------------------------------- */
+
+.key-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+.key-field-optional {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.key-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.key-field-row .text-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.key-field-note {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.key-field-note.is-warn {
+  color: var(--warning);
+}
+
+/* ---- The model menu -------------------------------------------------- */
+
+.model-picker {
+  position: fixed;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 16px);
+  max-height: min(72vh, 540px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-14);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  animation: ui-pop-down var(--dur-3) var(--ease-out);
+}
+.model-picker[data-side='top'] {
+  animation-name: ui-pop-up;
+}
+
+.model-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-3);
+}
+.model-picker-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+}
+.model-picker-search input::placeholder {
+  color: var(--text-3);
+}
+
+.model-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+.model-picker-group + .model-picker-group {
+  margin-top: 4px;
+}
+.model-picker-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px 4px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.model-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 5px 10px;
+  border-radius: var(--r-8);
+  color: var(--text-1);
+  text-align: left;
+}
+.model-picker-item.is-active {
+  background: var(--hover);
+}
+.model-picker-item.is-disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+.model-picker-check {
+  width: 16px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.model-picker-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.model-picker-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+.model-picker-item.is-selected .model-picker-title {
+  font-weight: 600;
+}
+.model-picker-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 16px;
+}
+.model-picker-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 10px 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.model-picker-note.is-warn {
+  color: var(--warning);
+}
+.model-picker-note > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.model-picker-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+.model-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.model-picker-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-8);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+}
+.model-picker-link:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.model-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.model-price,
+.model-context {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+.model-price {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Settings: roles --------------------------------------------------- */
+
+.settings-roles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow: auto;
+  padding: 20px 24px 28px;
+}
+.roles-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.roles-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.roles-section-head h3 {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+.roles-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.roles-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.roles-row-text {
+  min-width: 0;
+}
+.roles-row-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.roles-row-hint {
+  max-width: 520px;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+.role-row {
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.role-name {
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.role-hint {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.role-follows {
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.role-models {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.role-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+}
+.role-model.is-skipped .role-model-name {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--warning) 60%, transparent);
+}
+.role-order {
+  width: 14px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.role-model-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+}
+.role-model-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.role-order-note {
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+/* ---- Settings: how the connections are doing ----------------------------- */
+
+.status-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+}
+.status-dot {
+  align-self: center;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+.status-row.is-ok .status-dot {
+  background: var(--success);
+}
+.status-row.is-warn .status-dot {
+  background: var(--warning);
+}
+.status-row.is-bad .status-dot {
+  background: var(--danger);
+}
+.status-name {
+  min-width: 110px;
+  font-weight: 600;
+}
+.status-text {
+  min-width: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.status-row.is-warn > svg {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.status-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+
+/* A button on a notice */
+.toast-action {
+  flex-shrink: 0;
+  align-self: center;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-6);
+  color: var(--accent);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.toast-action:hover {
+  background: var(--hover);
+}
+
+/* The search fields have their own way to clear: the native cross is hidden. */
+.connect-search-input::-webkit-search-cancel-button,
+.model-picker-search input::-webkit-search-cancel-button {
+  display: none;
+}

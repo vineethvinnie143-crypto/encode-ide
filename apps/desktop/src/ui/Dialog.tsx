@@ -6,6 +6,10 @@ import { X } from './icons'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+/** The same selector limited to the body: a bare "a, b" after one parent would only scope its first part. */
+const FOCUSABLE_IN_BODY = FOCUSABLE.split(', ')
+  .map((part) => `.ui-dialog-body ${part}`)
+  .join(', ')
 
 /**
  * A modal dialog: focus moves in when it opens, stays inside while it is
@@ -20,6 +24,7 @@ export function Dialog({
   footer,
   width = 520,
   className,
+  backdropCloses = true,
   children,
 }: {
   open: boolean
@@ -30,6 +35,8 @@ export function Dialog({
   footer?: ReactNode
   width?: number
   className?: string
+  /** False for a dialog a stray click should not dismiss, such as the first-start setup; Escape and the close button still do. */
+  backdropCloses?: boolean
   children?: ReactNode
 }) {
   const titleId = useId()
@@ -42,7 +49,7 @@ export function Dialog({
     const returnTo = document.activeElement as HTMLElement | null
     const node = panel.current
     // An element marked data-autofocus wins, then the first field or button in the body.
-    const first = node?.querySelector<HTMLElement>('[data-autofocus]') ?? node?.querySelector<HTMLElement>(`.ui-dialog-body ${FOCUSABLE}`) ?? node
+    const first = node?.querySelector<HTMLElement>('[data-autofocus]') ?? node?.querySelector<HTMLElement>(FOCUSABLE_IN_BODY) ?? node
     first?.focus({ preventScroll: true })
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -75,7 +82,7 @@ export function Dialog({
   }
 
   return createPortal(
-    <div className="ui-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="ui-backdrop" onMouseDown={(event) => backdropCloses && event.target === event.currentTarget && onClose()}>
       <div
         ref={panel}
         role="dialog"

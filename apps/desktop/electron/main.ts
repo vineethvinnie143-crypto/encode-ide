@@ -110,6 +110,7 @@ if (!gotLock) {
         home,
         workspace: workspace.current?.root ?? null,
         legacySessionsFile: path.join(userData, 'eNCode-sessions.json'),
+        routerStateFile: path.join(userData, 'eNCode-models.json'),
       }),
       // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {
@@ -119,8 +120,9 @@ if (!gotLock) {
       },
       onEvent: (event) => send('agent:event', event),
       onJobs: (jobs) => send('jobs:changed', jobs),
+      onAlert: (alert) => send('models:alert', alert),
     })
-    const configureAgent = () => agentHost.configure(hostConfigOf(settings.get(), (profile) => models.contextWindow(profile)))
+    const configureAgent = () => agentHost.configure(hostConfigOf(settings.get(), (profileId) => settings.keyRevision(profileId)))
     configureAgent()
 
     const schedules = new ScheduleService(async (schedule) => {

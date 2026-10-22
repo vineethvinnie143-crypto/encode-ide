@@ -18,10 +18,29 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 1. Windows says **"Windows protected your PC"** because the build is not signed. Choose **More info**, then **Run
    anyway**. This is expected for every tester build.
 2. Open **Help → About eNCode** and check that the commit matches what you were told you are testing.
-3. Without a key the **Demo (offline)** model runs a scripted plan against a folder you open, so approvals, diffs and
-   the shell can be tried at once.
-4. For a real model: profile menu at the bottom of the left rail → **Settings… → Models → Add provider → OpenRouter**,
-   paste your key and pick a model. Keys are sealed by Windows (DPAPI) and go only to the server they were entered for.
+3. A **Connect a model** window opens on the first start. Choose how eNCode reaches a model:
+   - **Free models** needs a free OpenRouter key (create one at openrouter.ai/keys, no payment needed). eNCode picks a
+     free model that works and moves to the next when one is busy or refused.
+   - **My own API key** takes a key from OpenRouter, Anthropic, OpenAI, DeepSeek or any compatible provider, or a model
+     running on your computer (Ollama, LM Studio). The key is checked before anything else, and a model of your own is
+     asked for a real tool call, because a model that cannot call tools cannot drive the agent.
+   - **Offline demo** runs a scripted plan against a folder you open, so approvals, diffs and the shell can be tried
+     with no key at all. **Skip for now** does the same.
+4. Keys are sealed by Windows (DPAPI) and go only to the server they were entered for. A key that is refused is
+   explained in words, with a way to try again.
+
+## Models
+
+- The **model button** in the message box lists what is in use, the free models and each connection's models. Type to
+  narrow the list; **Connect a model…** and **Roles** are at the bottom.
+- **Settings → Roles** sets **Only use free models** (on until you choose a model that costs money, which asks first),
+  which model does which job (writing, exploring, planning, reviewing, summarizing, small tasks) with a fallback order,
+  and how each connection is doing: whether its key works, how many models, how many free requests are left today, and
+  what is paused until when. **Check again** lifts a pause after you changed a key or added credit.
+- Free models can be slower and busier than paid ones, and their providers may keep and learn from what you send. For
+  private code, use a key of your own.
+- A paid key is never used for a call you did not choose: with **Only use free models** on, billed models are skipped,
+  and a failed call is never retried on a second key or on a billed model after a free one.
 
 ## Stay safe
 
@@ -74,3 +93,5 @@ Updating means installing the next build over the last one: everything above sta
 - Not signed, so SmartScreen warns on first start, and some antivirus programs look closely at a new program.
 - No automatic updates: a new build is a new download.
 - A network that needs a proxy does not work yet for model requests.
+- The free models run on an OpenRouter key of your own; eNCode has no free service of its own yet.
+- A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
