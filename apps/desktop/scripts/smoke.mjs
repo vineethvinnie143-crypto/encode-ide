@@ -2038,6 +2038,105 @@ async function runSessionViewChecks() {
   console.log('[smoke] session view checks passed')
 }
 
+const FIND_STATE = `(() => {
+  const marks = CSS.highlights.get('enc-find')
+  const current = CSS.highlights.get('enc-find-current')
+  return {
+    bar: Boolean(document.querySelector('.find-bar')),
+    count: document.querySelector('.find-bar-count')?.textContent ?? null,
+    marks: marks?.size ?? 0,
+    current: current ? [...current].map((range) => range.toString()).join('|') : '',
+    logOpen: document.querySelector('.worklog-head')?.getAttribute('aria-expanded'),
+    focus: document.activeElement?.className ?? '',
+  }
+})()`
+
+/**
+ * Ctrl+F in the session after the demo run: words that are only in the folded work log (the note the demo wrote, in
+ * the Write step's diff) open it and are marked and counted; the note's path, named five times (twice in the Write step,
+ * in the Read step, the reply and the change card's folded list of files), steps round with Enter and back with
+ * Shift+Enter; words that are nowhere fold the log back; Esc closes the bar with the log left open
+ * around the match it closed on and the focus back in the message box; Ctrl+F again keeps the words; and words
+ * selected in the thread start a search.
+ */
+async function runFindChecks() {
+  console.log('[smoke] --- find in the session ---')
+  const countIs = (text) => `document.querySelector('.find-bar-count')?.textContent === ${JSON.stringify(text)}`
+  if ((await evaluate("document.querySelector('.worklog-head')?.getAttribute('aria-expanded')")) === 'true') await click('.worklog-head')
+  await waitFor("document.querySelectorAll('.worklog-body').length === 0", 4000, 'the work log folds')
+  await evaluate("document.querySelector('.composer-input')?.focus()")
+  await pressKey('f', { ctrl: true })
+  await waitFor("document.activeElement?.classList.contains('find-bar-input') === true", 4000, 'Ctrl+F opens the find bar with the cursor in it')
+  await typeInto('.find-bar-input', 'Written by  the OFFLINE demo')
+  await waitFor(countIs('1 of 1'), 4000, 'the words written in the folded work log')
+  let state = await evaluate(FIND_STATE)
+  console.log('[smoke] find:', JSON.stringify(state))
+  if (state.logOpen !== 'true' || state.marks !== 1 || state.current !== 'written by the offline demo') {
+    throw new Error('find did not open the work log and mark the words written in it')
+  }
+  await screenshot('ui-dark-find.png')
+
+  await typeInto('.find-bar-input', 'DEMO-NOTE.md')
+  await waitFor("/^[1-5] of 5$/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the note named five times')
+  if ((await evaluate(FIND_STATE)).current.toLowerCase() !== 'demo-note.md') throw new Error('the match in view is not marked')
+  const first = await evaluate("document.querySelector('.find-bar-count').textContent")
+  await pressKey('Enter')
+  await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Enter moves to the next match')
+  for (let press = 0; press < 4; press++) await pressKey('Enter')
+  await waitFor(countIs(first), 4000, 'five presses of Enter go round to the same match')
+  await pressKey('Enter', { shift: true })
+  await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Shift+Enter goes back')
+
+  await typeInto('.find-bar-input', 'no such words anywhere')
+  await waitFor(countIs('No results'), 4000, 'No results')
+  state = await evaluate(FIND_STATE)
+  if (state.marks !== 0) throw new Error('marks stayed for words that are not there')
+  if (state.logOpen !== 'false') throw new Error('the work log find opened did not fold back when its words went')
+  await typeInto('.find-bar-input', 'written by the offline demo')
+  await waitFor(countIs('1 of 1'), 4000, 'found again')
+
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Esc closes the find bar')
+  state = await evaluate(FIND_STATE)
+  if (state.marks !== 0 || state.current) throw new Error('the marks stayed after the bar closed')
+  if (state.logOpen !== 'true') throw new Error('the work log folded away from the match the bar closed on')
+  if (!state.focus.includes('composer-input')) throw new Error(`the focus went to "${state.focus}", not back to the message box`)
+
+  await pressKey('f', { ctrl: true })
+  await waitFor(
+    "(() => { const input = document.querySelector('.find-bar-input'); return input?.value === 'written by the offline demo' && document.activeElement === input && input.selectionStart === 0 && input.selectionEnd === input.value.length })()",
+    4000,
+    'Ctrl+F opens on the last words, selected',
+  )
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Esc closes it again')
+
+  // Words selected in the reply start a search for them.
+  const selected = await evaluate(`(() => {
+    const reply = [...document.querySelectorAll('.msg-assistant')].at(-1)
+    const walker = document.createTreeWalker(reply, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.data.indexOf('approval flow')
+      if (at < 0) continue
+      const range = document.createRange()
+      range.setStart(node, at)
+      range.setEnd(node, at + 'approval flow'.length)
+      getSelection().removeAllRanges()
+      getSelection().addRange(range)
+      return true
+    }
+    return false
+  })()`)
+  if (!selected) throw new Error('the demo reply has no "approval flow" to select')
+  await pressKey('f', { ctrl: true })
+  await waitFor("document.querySelector('.find-bar-input')?.value === 'approval flow'", 4000, 'Ctrl+F looks for the selected words')
+  await waitFor("/ of [1-9]/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the selected words are found')
+  await click('.find-bar [aria-label="Close"]')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Close closes the find bar')
+  await evaluate('getSelection().removeAllRanges()')
+  console.log('[smoke] find in the session: ok')
+}
+
 /**
  * The side panel and the bottom panel: tabs and the New tab page, a Browser tab that remembers its
  * page, the three layouts, resizing, and the shortcuts that drive them.
@@ -2889,6 +2988,7 @@ try {
   )
   await screenshot('08-agent.png')
   await runSessionViewChecks()
+  await runFindChecks()
   await runComposerChecks()
   await runPaletteChecks()
 

@@ -23,6 +23,12 @@ export interface AppActions {
 
   edit(command: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'): void
   searchInFiles(): void
+  /** Find in the open session: the thread is on screen, not under a full-width panel. */
+  canFind(): boolean
+  /** The find bar is open. */
+  isFinding(): boolean
+  find(): void
+  findStep(direction: 1 | -1): void
 
   toggleSidebar(): void
   toggleSidePanel(): void
@@ -112,6 +118,17 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'edit.copy', title: 'Copy', hint: 'Ctrl+C', run: () => a.edit('copy'), ...edit },
     { id: 'edit.paste', title: 'Paste', hint: 'Ctrl+V', run: () => a.edit('paste'), ...edit },
     { id: 'edit.selectAll', title: 'Select all', hint: 'Ctrl+A', run: () => a.edit('selectAll'), ...edit },
+    {
+      id: 'edit.find',
+      title: 'Find in session',
+      group: 'Edit',
+      keys: ['Ctrl+F'],
+      keywords: 'search words text conversation messages thread',
+      enabled: () => a.canFind(),
+      run: () => a.find(),
+    },
+    { id: 'edit.findNext', title: 'Find next', group: 'Edit', keys: ['F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(1) },
+    { id: 'edit.findPrevious', title: 'Find previous', group: 'Edit', keys: ['Shift+F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(-1) },
     {
       id: 'edit.searchInFiles',
       title: 'Search in files',

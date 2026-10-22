@@ -6,6 +6,7 @@
 import type { SessionSummary } from '@shared/types'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
+import { useFind } from '../stores/find'
 import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
@@ -88,6 +89,16 @@ export const sessionActions = {
   },
 }
 
+/** Words selected in the thread, which Ctrl+F looks for: one line, and not a whole page. */
+function threadSelection(): string | undefined {
+  const selection = window.getSelection()
+  const text = selection?.toString().trim() ?? ''
+  if (!text || text.length > 200 || /[\r\n]/.test(text)) return undefined
+  const node = selection?.anchorNode
+  const element = node instanceof Element ? node : node?.parentElement
+  return element?.closest('.thread') ? text : undefined
+}
+
 function withActive(run: (session: SessionSummary) => void | Promise<void>): () => void {
   return () => {
     const session = activeSession()
@@ -120,6 +131,10 @@ function createAppActions(): AppActions {
       }
     },
     searchInFiles: () => panels().open('files', { view: 'search' }),
+    canFind: () => panels().side.layout !== 'full',
+    isFinding: () => useFind.getState().open,
+    find: () => useFind.getState().show(threadSelection()),
+    findStep: (direction) => useFind.getState().move(direction),
 
     toggleSidebar: () => ui().toggleSidebar(),
     toggleSidePanel: () => panels().toggleHidden(),

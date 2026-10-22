@@ -96,6 +96,18 @@ describe('the command map', () => {
     assert.equal(registry.forEvent({ key: 'k', code: 'KeyK', ctrlKey: true, altKey: false, shiftKey: false, metaKey: false }, true)?.id, 'app.palette')
   })
 
+  it('finds in the session on Ctrl+F from the message box, and steps with F3 only while the find bar is open', () => {
+    const key = (key: string, code: string, shiftKey = false, ctrlKey = false) => ({ key, code, ctrlKey, altKey: false, shiftKey, metaKey: false })
+    const open = registryWith({ canFind: () => true, isFinding: () => true })
+    assert.equal(open.forEvent(key('f', 'KeyF', false, true), true)?.id, 'edit.find')
+    assert.equal(open.forEvent(key('F3', 'F3'), true)?.id, 'edit.findNext')
+    assert.equal(open.forEvent(key('F3', 'F3', true), false)?.id, 'edit.findPrevious')
+    const closed = registryWith({ canFind: () => true, isFinding: () => false })
+    assert.equal(closed.forEvent(key('F3', 'F3'), false), undefined, 'F3 is left to the editor')
+    const covered = registryWith({ canFind: () => false })
+    assert.equal(covered.forEvent(key('f', 'KeyF', false, true), false), undefined, 'a full-width panel covers the thread')
+  })
+
   it('puts the side panel on browser-style tab shortcuts, and the first nine tabs on Ctrl+1 to Ctrl+9', () => {
     const keys = (id: string) => registry.get(id)?.keys?.[0]
     assert.equal(keys('panel.newTab'), 'Ctrl+T')

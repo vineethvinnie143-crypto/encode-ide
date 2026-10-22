@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, CornerDownRight, GitFork, Info, Pencil, Undo2 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
@@ -7,6 +7,8 @@ import { useChat } from '../../stores/chat'
 import { useReview } from '../../stores/review'
 import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
+import { useFoldFind, useRevealRef } from '../../find/hooks'
+import { foldText } from '../../find/text'
 import { Button, IconButton } from '../../ui/Button'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
@@ -56,7 +58,7 @@ function UserMessage({ entry }: { entry: ConversationEntry }) {
       <div className="bubble-row">
         <div className="chat-user-bubble">{entry.text}</div>
       </div>
-      <div className="msg-actions is-right">
+      <div className="msg-actions is-right" data-find-skip>
         <span className="msg-time">{timeOf(entry.createdAt)}</span>
         <CopyButton text={entry.text ?? ''} label="Copy message" />
         <RewindButton entry={entry} />
@@ -72,7 +74,7 @@ function SteerMessage({ entry }: { entry: ConversationEntry }) {
       <div className="bubble-row">
         <div className="chat-user-bubble">{entry.text}</div>
       </div>
-      <div className="msg-actions is-right">
+      <div className="msg-actions is-right" data-find-skip>
         <span className="msg-steer-tag" title="You sent this while eNCode worked; it read it after the step it was on">
           <CornerDownRight size={12} />
           Steered
@@ -133,11 +135,16 @@ function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
   const totals = useMemo(() => editTotals(turn.log), [turn.log])
   const files = useMemo(() => editedFiles(turn.log), [turn.log])
   const running = useChat((state) => state.running)
-  const [open, setOpen] = useState(false)
+  const [own, setOpen] = useState(false)
+  const toggle = useRef<HTMLButtonElement>(null)
+  const reveal = useCallback(() => setOpen(true), [])
+  const cardRef = useRevealRef(toggle, reveal)
+  const { found, dismiss } = useFoldFind(useCallback((needle: string) => files.some((file) => foldText(file.path).text.includes(needle)), [files]))
+  const open = own || found
   if (!totals.files) return null
   const user = turn.user
   return (
-    <div className="result-card">
+    <div ref={cardRef} className="result-card">
       <div className="result-head">
         <span className="result-icon">
           <Pencil size={16} />
@@ -171,12 +178,22 @@ function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
           >
             Review changes
           </Button>
-          <IconButton label={open ? 'Hide files' : 'Show files'} size="sm" onClick={() => setOpen((value) => !value)}>
+          <IconButton
+            ref={toggle}
+            label={open ? 'Hide files' : 'Show files'}
+            size="sm"
+            onClick={() => {
+              if (found) {
+                dismiss()
+                setOpen(false)
+              } else setOpen((value) => !value)
+            }}
+          >
             <ChevronDown size={14} className={cx('result-chevron', open && 'is-open')} />
           </IconButton>
         </span>
       </div>
-      <Collapse open={open}>
+      <Collapse open={open} instant={found}>
         <div className="result-files">
           {files.map((file) => (
             <div className="result-file" key={file.path}>
@@ -215,7 +232,7 @@ function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
       <ResultCard turn={turn} latest={latest} />
 
       {!turn.active && lastAnswer && (
-        <div className="msg-actions">
+        <div className="msg-actions" data-find-skip>
           <CopyButton text={answerText} label="Copy reply" />
           <IconButton
             label="Fork session"

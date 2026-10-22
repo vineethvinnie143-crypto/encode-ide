@@ -15,7 +15,20 @@ export const MENUS: readonly MenuSpec[] = [
   { label: 'File', items: ['file.newSession', 'file.openFolder', 'file.quickOpen', 'file.save', '-', 'app.settings', '-', 'app.quit'] },
   {
     label: 'Edit',
-    items: ['edit.undo', 'edit.redo', '-', 'edit.cut', 'edit.copy', 'edit.paste', 'edit.selectAll', '-', 'edit.searchInFiles'],
+    items: [
+      'edit.undo',
+      'edit.redo',
+      '-',
+      'edit.cut',
+      'edit.copy',
+      'edit.paste',
+      'edit.selectAll',
+      '-',
+      'edit.find',
+      'edit.findNext',
+      'edit.findPrevious',
+      'edit.searchInFiles',
+    ],
   },
   {
     label: 'View',

@@ -1,13 +1,32 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ConversationEntry } from '@shared/types'
 import { AlertTriangle, ChevronRight, Info } from '../../ui/icons'
+import { useFoldFind, useRevealRef } from '../../find/hooks'
+import { foldText, markdownHaystack } from '../../find/text'
 import { useNow } from '../../hooks/useNow'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
-import StepRow, { GroupRow } from './StepRow'
-import { formatClock, formatDuration, logItems, stepsOf, summarizeSteps, type Turn } from './turns'
+import StepRow, { GroupRow, stepsHold } from './StepRow'
+import { formatClock, formatDuration, logItems, stepsOf, summarizeSteps, type LogItem, type Turn } from './turns'
 
 type WorkLogProps = Pick<Turn, 'log' | 'active' | 'startedAt' | 'endedAt'>
+
+const texts = new WeakMap<ConversationEntry, string>()
+
+/** True when anything in a log holds the words find looks for: its notes, its steps' rows, or what they show opened. */
+export function logHolds(items: readonly LogItem[], needle: string): boolean {
+  return items.some((item) => {
+    if (item.type === 'group') return foldText(summarizeSteps(item.entries)).text.includes(needle) || stepsHold(item.entries, needle)
+    if (item.type === 'step') return stepsHold([item.entry], needle)
+    let text = texts.get(item.entry)
+    if (text === undefined) {
+      text = markdownHaystack(item.entry.text ?? '')
+      texts.set(item.entry, text)
+    }
+    return text.includes(needle)
+  })
+}
 
 /**
  * What the agent did in a turn. While it works the log is open and a clock runs;
@@ -16,8 +35,16 @@ type WorkLogProps = Pick<Turn, 'log' | 'active' | 'startedAt' | 'endedAt'>
 function WorkLog({ log, active, startedAt, endedAt }: WorkLogProps) {
   const now = useNow(active)
   const items = useMemo(() => logItems(log), [log])
-  const [open, setOpen] = useState(active)
+  const [own, setOpen] = useState(active)
   const touched = useRef(false)
+  const head = useRef<HTMLButtonElement>(null)
+  const reveal = useCallback(() => {
+    touched.current = true
+    setOpen(true)
+  }, [])
+  const logRef = useRevealRef(head, reveal)
+  const { found, dismiss } = useFoldFind(useCallback((needle: string) => logHolds(items, needle), [items]))
+  const open = own || found
 
   // The log folds when the turn ends, unless you opened or closed it yourself.
   useEffect(() => {
@@ -29,15 +56,20 @@ function WorkLog({ log, active, startedAt, endedAt }: WorkLogProps) {
   const label = active ? `Working for ${formatClock(now - startedAt)}` : `Worked for ${formatDuration(endedAt - startedAt)}`
 
   return (
-    <div className={cx('worklog', active && 'is-live')}>
+    <div ref={logRef} className={cx('worklog', active && 'is-live')}>
       <button
+        ref={head}
         type="button"
         className="worklog-head"
         aria-expanded={open}
         title={summarizeSteps(stepsOf({ log }))}
         onClick={() => {
           touched.current = true
-          setOpen((value) => !value)
+          // Find holds the log open: closing it by hand keeps it closed for this search.
+          if (found) {
+            dismiss()
+            setOpen(false)
+          } else setOpen((value) => !value)
         }}
       >
         <span className={cx('worklog-label', active && 'shimmer')}>{label}</span>
@@ -45,7 +77,7 @@ function WorkLog({ log, active, startedAt, endedAt }: WorkLogProps) {
         {log.length > 0 && <ChevronRight size={14} className={cx('worklog-chevron', open && 'is-open')} />}
       </button>
 
-      <Collapse open={open && items.length > 0}>
+      <Collapse open={open && items.length > 0} instant={found}>
         <div className="worklog-body">
           {items.map((item) => {
             switch (item.type) {
