@@ -1,9 +1,23 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
-import type { Accent, Appearance, Contrast, Density, Motion, ThemeMode } from '@shared/appearance'
+import { useMemo, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  CODE_SIZES,
+  FONT_ENCODE,
+  FONT_SYSTEM,
+  UI_SIZES,
+  type Accent,
+  type Appearance,
+  type Contrast,
+  type Density,
+  type Motion,
+  type ThemeMode,
+} from '@shared/appearance'
+import { useInstalledFonts } from '../hooks/useInstalledFonts'
+import { Button } from '../ui/Button'
 import { cx } from '../ui/cx'
 import { Monitor, Moon, Sun } from '../ui/icons'
 import { keyToMove, moveIndex } from '../ui/nav'
 import { Segmented, type SegmentedOption } from '../ui/Segmented'
+import { Select, type SelectOption } from '../ui/Select'
 
 const MODES: SegmentedOption<ThemeMode>[] = [
   { value: 'system', label: 'System', icon: <Monitor size={14} /> },
@@ -33,6 +47,14 @@ const MOTIONS: SegmentedOption<Motion>[] = [
   { value: 'reduce', label: 'On' },
   { value: 'full', label: 'Off' },
 ]
+
+const sizeOptions = (sizes: readonly number[]): SelectOption<string>[] => sizes.map((size) => ({ value: String(size), label: `${size} px` }))
+
+/** The built-in choices, then every installed font; a font that is chosen but not in the list stays selectable. */
+function fontOptions(builtIn: SelectOption<string>[], installed: readonly string[], chosen: string): SelectOption<string>[] {
+  const named = installed.includes(chosen) || chosen === FONT_SYSTEM || chosen === FONT_ENCODE ? installed : [chosen, ...installed]
+  return [...builtIn, ...named.map((family) => ({ value: family, label: family }))]
+}
 
 function Row({ label, help, children }: { label: string; help: string; children: ReactNode }) {
   return (
@@ -89,6 +111,31 @@ export default function AppearanceSettings({
   onChange: (appearance: Appearance) => void
 }) {
   const set = <K extends keyof Appearance>(key: K, next: Appearance[K]) => onChange({ ...value, [key]: next })
+  const installed = useInstalledFonts()
+  const uiFonts = useMemo(
+    () =>
+      fontOptions(
+        [
+          { value: FONT_SYSTEM, label: 'System' },
+          { value: FONT_ENCODE, label: 'eNCode (Inter)' },
+        ],
+        installed.fonts,
+        value.uiFont,
+      ),
+    [installed.fonts, value.uiFont],
+  )
+  const codeFonts = useMemo(
+    () =>
+      fontOptions(
+        [
+          { value: FONT_SYSTEM, label: 'System (Consolas)' },
+          { value: FONT_ENCODE, label: 'eNCode (JetBrains Mono)' },
+        ],
+        installed.fonts,
+        value.codeFont,
+      ),
+    [installed.fonts, value.codeFont],
+  )
   return (
     <div className="settings-appearance">
       <div className="section-title">Theme</div>
@@ -107,6 +154,39 @@ export default function AppearanceSettings({
             onChange={(contrast) => set('contrast', contrast)}
           />
         </Row>
+      </div>
+
+      <div className="section-title">Fonts</div>
+      <div className="settings-card">
+        <Row label="Interface font" help="System is Windows' own font, the same as Codex. eNCode is Inter.">
+          <Select label="Interface font" value={value.uiFont} options={uiFonts} onChange={(font) => set('uiFont', font)} />
+        </Row>
+        <Row label="Interface size" help="The size of text in the thread, the sidebar and menus; smaller text follows it. Codex uses 14.">
+          <Select
+            label="Interface size"
+            value={String(value.uiSize)}
+            options={sizeOptions(UI_SIZES)}
+            onChange={(size) => set('uiSize', Number(size))}
+          />
+        </Row>
+        <Row label="Code font" help="System is Consolas, the same as Codex. eNCode is JetBrains Mono.">
+          <Select label="Code font" value={value.codeFont} options={codeFonts} onChange={(font) => set('codeFont', font)} />
+        </Row>
+        <Row label="Code size" help="Code in replies, diffs and tool output. Codex uses 12.">
+          <Select
+            label="Code size"
+            value={String(value.codeSize)}
+            options={sizeOptions(CODE_SIZES)}
+            onChange={(size) => set('codeSize', Number(size))}
+          />
+        </Row>
+        {installed.failed && (
+          <Row label="Installed fonts" help="Windows did not list them yet. Try again to choose any font on this PC.">
+            <Button size="sm" onClick={installed.retry}>
+              List installed fonts
+            </Button>
+          </Row>
+        )}
       </div>
 
       <div className="section-title">Layout and motion</div>

@@ -67,7 +67,7 @@
   background: var(--surface-1);
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--code-size);
   line-height: 19px;
   white-space: pre-wrap;
   word-break: break-word;

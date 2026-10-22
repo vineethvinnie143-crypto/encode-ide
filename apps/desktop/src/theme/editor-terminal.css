@@ -11,7 +11,7 @@
   --enc-editor-bg: var(--canvas);
   --enc-editor-fg: var(--text-1);
   --enc-editor-font-family: var(--font-mono);
-  --enc-editor-font-size: 13px;
+  --enc-editor-font-size: calc(var(--code-size) + 1px);
   --enc-editor-line-height: 20px;
   --enc-editor-gutter-bg: var(--canvas);
   --enc-editor-gutter-fg: var(--text-disabled);
@@ -77,7 +77,7 @@
   --enc-term-cursor-text: var(--canvas);
   --enc-term-selection-bg: color-mix(in srgb, var(--accent) 30%, transparent);
   --enc-term-font-family: var(--font-mono);
-  --enc-term-font-size: 12px;
+  --enc-term-font-size: var(--code-size);
   --enc-term-line-height: 19px;
 
   /* ANSI: black, red, green, yellow, blue, magenta, cyan, white, then the bright eight */

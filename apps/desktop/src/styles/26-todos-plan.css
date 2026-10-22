@@ -11,7 +11,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.7px;
   color: var(--text-3);
@@ -29,7 +29,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   color: var(--text-2);
 }
 .todo-item svg {
@@ -62,13 +62,13 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   font-weight: 600;
   color: var(--accent);
 }
 .plan-body {
   margin: 0;
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   line-height: 1.6;
   color: var(--text-1);
   white-space: pre-wrap;
@@ -88,7 +88,7 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-2);
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
 }
 .plugin-name {
   font-weight: 600;
@@ -97,14 +97,14 @@
 }
 .plugin-meta {
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .plugin-badge {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--text-3);
@@ -123,12 +123,12 @@
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   color: var(--text-2);
 }
 .job-status {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(var(--code-size) - 2px);
   text-transform: uppercase;
   color: var(--text-3);
   flex-shrink: 0;

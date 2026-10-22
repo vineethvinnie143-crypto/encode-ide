@@ -1,9 +1,10 @@
 /**
  * Applies an Appearance to the page as data attributes on <html>, which
- * tokens.css turns into colours, row heights and motion. With mode System
- * it follows Windows switching between light and dark.
+ * tokens.css turns into colours, row heights and motion, and as the CSS
+ * variables for fonts and sizes. With mode System it follows Windows
+ * switching between light and dark.
  */
-import { appearanceFromParams, resolveTheme, type Appearance } from '@shared/appearance'
+import { appearanceFromParams, fontVariables, resolveTheme, type Appearance } from '@shared/appearance'
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)')
 let current: Appearance | null = null
@@ -16,6 +17,7 @@ export function applyAppearance(appearance: Appearance): void {
   root.dataset.contrast = appearance.contrast
   root.dataset.density = appearance.density
   root.dataset.motion = appearance.motion
+  for (const [name, value] of Object.entries(fontVariables(appearance))) root.style.setProperty(name, value)
 }
 
 darkScheme.addEventListener('change', () => {

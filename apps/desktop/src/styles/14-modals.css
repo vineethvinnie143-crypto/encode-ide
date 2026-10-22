@@ -24,7 +24,7 @@
 }
 
 .prompt-title {
-  font-size: 13px;
+  font-size: calc(13px + var(--ui-small));
   font-weight: 600;
   margin-bottom: 12px;
 }
@@ -62,7 +62,7 @@
   background: none;
   border: none;
   outline: none;
-  font-size: 14px;
+  font-size: calc(14px + var(--ui-delta));
 }
 
 .quickopen-list {
@@ -92,13 +92,13 @@
 
 .qo-name {
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--ui-small));
   white-space: nowrap;
 }
 
 .qo-dir {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: calc(var(--code-size) - 1px);
   font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -110,7 +110,7 @@
   padding: 16px;
   text-align: center;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
 }
 
 .quickopen-footer {
@@ -119,14 +119,14 @@
   padding: 7px 12px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-3);
-  font-size: 10.5px;
+  font-size: calc(10.5px + var(--ui-small));
 }
 .quickopen-footer kbd {
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
-  font-size: 9.5px;
+  font-size: calc(9.5px + var(--ui-small));
 }
 .quickopen-footer span {
   display: flex;
@@ -156,7 +156,7 @@
 }
 
 .settings-title {
-  font-size: 15px;
+  font-size: calc(15px + var(--ui-delta));
   font-weight: 650;
   letter-spacing: -0.1px;
 }
@@ -172,7 +172,7 @@
 .settings-tabs button {
   padding: 5px 14px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   color: var(--text-3);
   font-weight: 600;
   transition: background 0.12s, color 0.12s;
@@ -214,7 +214,7 @@
 }
 
 .profile-list-label {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-3);
@@ -249,7 +249,7 @@
 }
 
 .profile-item-name {
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -257,7 +257,7 @@
 }
 
 .profile-item-model {
-  font-size: 11px;
+  font-size: calc(var(--code-size) - 1px);
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -277,7 +277,7 @@
 }
 
 .profile-add-label {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-3);
@@ -295,7 +295,7 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   color: var(--text-2);
   background: var(--surface-2);
   transition: border-color 0.12s, color 0.12s, background 0.12s;
@@ -321,7 +321,7 @@
   gap: 6px;
 }
 .form-row > label {
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   color: var(--text-2);
   font-weight: 500;
 }
@@ -335,7 +335,7 @@
 }
 
 .form-help {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--text-3);
   line-height: 1.45;
   word-break: break-all;
@@ -346,7 +346,7 @@
 }
 .form-help code {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(var(--code-size) - 1.5px);
   color: var(--text-2);
 }
 
@@ -391,7 +391,7 @@ select.text-input:focus {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   color: var(--text-2);
   cursor: pointer;
 }
@@ -402,7 +402,7 @@ select.text-input:focus {
 }
 .checkbox-row.sub {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
 }
 
 .form-actions {
@@ -417,7 +417,7 @@ select.text-input:focus {
   align-items: center;
   gap: 5px;
   color: var(--accent);
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 999px;
@@ -427,7 +427,7 @@ select.text-input:focus {
 
 .ok-text {
   color: var(--accent);
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   background: color-mix(in srgb, var(--accent) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 6px;
@@ -436,7 +436,7 @@ select.text-input:focus {
 
 .error-text {
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px + var(--ui-small));
   background: color-mix(in srgb, var(--danger) 7%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   border-radius: 6px;
@@ -444,7 +444,7 @@ select.text-input:focus {
 }
 
 .info-note {
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--ui-small));
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -557,7 +557,7 @@ select.text-input:focus {
 }
 
 .section-title {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-3);
@@ -574,7 +574,7 @@ select.text-input:focus {
 }
 
 .settings-hint {
-  font-size: 11px;
+  font-size: calc(11px + var(--ui-small));
   color: var(--text-3);
 }
 
