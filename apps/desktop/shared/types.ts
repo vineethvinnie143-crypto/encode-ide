@@ -154,8 +154,13 @@ export interface SearchResult {
 }
 
 export interface GitChange {
+  /** Relative to the repository, with `/`. */
   path: string
   status: string
+  /** The index holds a change to it. */
+  staged: boolean
+  /** The working tree holds a change to it that is not staged, or it is new to git. */
+  unstaged: boolean
 }
 
 export interface GitStatus {
@@ -165,6 +170,129 @@ export interface GitStatus {
   behind?: number
   changes: GitChange[]
 }
+
+// ---------------------------------------------------------------------------
+// The Review tab (the same shapes as @encode/git's, which the main process fills)
+
+/** Unstaged: the working tree against the index. Staged: the index against HEAD. Branch: against the base. Commit: one commit. */
+export type ReviewScope = { kind: 'unstaged' } | { kind: 'staged' } | { kind: 'branch'; base?: string } | { kind: 'commit'; commit: string }
+
+export interface ReviewOptions {
+  /** Unchanged lines around each change; Infinity shows whole files. */
+  context: number
+  ignoreWhitespace: boolean
+}
+
+export interface ReviewLine {
+  kind: 'add' | 'del' | 'ctx'
+  text: string
+  old?: number
+  new?: number
+  noEol?: true
+  words?: Array<[number, number]>
+}
+
+export interface ReviewHunk {
+  id: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: ReviewLine[]
+  added: number
+  removed: number
+}
+
+export type ReviewFileChange = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'typechange' | 'untracked' | 'conflicted'
+
+export interface ReviewFile {
+  path: string
+  oldPath?: string
+  change: ReviewFileChange
+  kind: 'text' | 'binary' | 'large' | 'submodule' | 'symlink' | 'folder'
+  oldMode?: string
+  newMode?: string
+  added: number
+  removed: number
+  hunks: ReviewHunk[]
+  approximate?: boolean
+  hunkActions: boolean
+  hunkActionsOff?: string
+  note?: string
+  size?: { old?: number; new?: number }
+  fingerprint: string
+}
+
+export interface ReviewCommit {
+  oid: string
+  short: string
+  subject: string
+  author: string
+  /** Seconds since 1970. */
+  time: number
+}
+
+export interface ReviewRepo {
+  /** The repository's top folder. */
+  root: string
+  /** Where the open folder sits in the repository: `/`-separated and ending in `/`, or empty at the top. */
+  folder: string
+  branch: string | null
+  head: string | null
+  upstream?: string
+  ahead?: number
+  behind?: number
+}
+
+export interface ReviewSnapshot {
+  scope: ReviewScope
+  repo: ReviewRepo
+  files: ReviewFile[]
+  added: number
+  removed: number
+  counts: { unstaged: number; staged: number }
+  base?: { ref: string; oid: string | null }
+  commit?: ReviewCommit
+  skipped: number
+  readOnly: boolean
+  options: ReviewOptions
+}
+
+export type ReviewAction =
+  | { type: 'stage-hunk' | 'unstage-hunk' | 'revert-hunk'; path: string; hunk: string; fingerprint: string }
+  | { type: 'stage-file' | 'unstage-file' | 'revert-file'; path: string; fingerprint?: string }
+  | { type: 'stage-all' | 'unstage-all' | 'revert-all' }
+
+/** A review, or why there is none: no folder, not a repository, no git. */
+export type ReviewLoad = { ok: true; snapshot: ReviewSnapshot; undo: string | null } | { ok: false; message: string }
+
+/**
+ * What an action did and the scope as it stands afterwards. `stale`: the file changed since it was shown, so nothing
+ * was done and the review is read again.
+ */
+export type ReviewActOutcome =
+  | { ok: true; message: string; undoable: boolean; load: ReviewLoad }
+  | { ok: false; message: string; stale: boolean; load: ReviewLoad }
+
+export interface ReviewBranches {
+  current: string | null
+  /** The base the Branch view uses unless another is chosen. */
+  base: string | null
+  refs: string[]
+}
+
+export interface ReviewCommitRequest {
+  message: string
+  /** Stage every change first. */
+  all: boolean
+  amend: boolean
+  /** Push after committing. */
+  push: boolean
+}
+
+export type ReviewCommitOutcome =
+  | { ok: true; commit: ReviewCommit; pushed?: string; pushError?: string }
+  | { ok: false; message: string }
 
 export interface ModelInfo {
   id: string
@@ -714,6 +842,18 @@ export interface EncodeApi {
   }
   git: {
     status(): Promise<GitStatus>
+  }
+  /** The Review tab: the open folder's repository by scope, and what can be done to it. */
+  review: {
+    load(scope: ReviewScope, options: ReviewOptions): Promise<ReviewLoad>
+    act(scope: ReviewScope, action: ReviewAction, options: ReviewOptions): Promise<ReviewActOutcome>
+    /** Takes back the latest revert, then answers with the scope as it stands. */
+    undo(scope: ReviewScope, options: ReviewOptions): Promise<ReviewActOutcome>
+    commits(): Promise<ReviewCommit[]>
+    branches(): Promise<ReviewBranches>
+    commit(request: ReviewCommitRequest): Promise<ReviewCommitOutcome>
+    /** A commit message for what is staged (with `all`, every change), drafted by the model of the Small tasks role. */
+    draft(options?: { all?: boolean }): Promise<{ ok: true; message: string } | { ok: false; message: string }>
   }
   shell: {
     create(opts: ShellCreateOptions): Promise<ShellInfo>

@@ -24,6 +24,8 @@ export interface MenuAction {
   shortcut?: string
   /** A second line under the label, such as what a policy allows. */
   description?: string
+  /** Quiet text at the end of the row, such as a count. */
+  trailing?: string
   /** Set (true or false) for an item that shows a check mark. */
   checked?: boolean
   disabled?: boolean
@@ -215,6 +217,7 @@ export function MenuPanel({
               <span className="ui-menu-label">{action.label}</span>
               {action.description && <span className="ui-menu-description">{action.description}</span>}
             </span>
+            {action.trailing && <span className="ui-menu-trailing">{action.trailing}</span>}
             {action.shortcut && <Kbd keys={action.shortcut} plain className="ui-menu-shortcut" />}
           </button>
         )

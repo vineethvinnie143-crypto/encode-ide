@@ -4,6 +4,7 @@ import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Columns2, Maximize2, PanelRightClose } from '../../ui/icons'
 import BrowserPanel from '../BrowserPanel'
+import ReviewPane from '../review/ReviewPane'
 import TerminalPanel from '../Terminal/TerminalPanel'
 import TrajectoryView from '../TrajectoryView'
 import { EditorPane, FilesPane, JobsPane, NewTabPane } from './Panes'
@@ -20,6 +21,8 @@ export function PaneFor({ tab }: { tab: PanelTab }) {
       return <FilesPane />
     case 'editor':
       return <EditorPane />
+    case 'review':
+      return <ReviewPane />
     case 'terminal':
       return <TerminalPanel />
     case 'trajectory':

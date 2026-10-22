@@ -442,6 +442,13 @@
 .ui-menu-shortcut {
   margin-left: 16px;
 }
+.ui-menu-trailing {
+  flex-shrink: 0;
+  margin-left: 12px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Dialog */
 .ui-backdrop {

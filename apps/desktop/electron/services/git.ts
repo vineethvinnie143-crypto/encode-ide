@@ -85,7 +85,13 @@ export class GitService {
       if (file.includes(' -> ')) file = file.split(' -> ').pop() as string
       file = file.replace(/^"|"$/g, '').replace(/\\/g, '/')
       const statusChar = xy.trim()[0] ?? 'M'
-      changes.push({ path: file, status: STATUS_LABEL[statusChar] ?? 'modified' })
+      const untracked = xy === '??'
+      changes.push({
+        path: file,
+        status: STATUS_LABEL[statusChar] ?? 'modified',
+        staged: !untracked && xy[0] !== ' ' && xy[0] !== '!',
+        unstaged: untracked || (xy[1] !== ' ' && xy[1] !== '!'),
+      })
     }
 
     return { isRepo: true, branch, ahead, behind, changes }

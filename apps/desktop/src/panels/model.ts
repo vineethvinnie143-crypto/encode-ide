@@ -4,7 +4,7 @@
  * stores/panels.ts keeps the state and saves it.
  */
 
-export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'terminal' | 'trajectory' | 'jobs'
+export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'review' | 'terminal' | 'trajectory' | 'jobs'
 export type PanelLayout = 'split' | 'full' | 'hidden'
 
 export interface PanelTab {
@@ -25,17 +25,18 @@ export interface PanelsState {
   bottom: Strip & { open: boolean }
 }
 
-export const SIDE_KINDS: readonly PanelTabKind[] = ['new', 'browser', 'files', 'editor', 'terminal', 'trajectory']
+export const SIDE_KINDS: readonly PanelTabKind[] = ['new', 'browser', 'files', 'editor', 'review', 'terminal', 'trajectory']
 export const BOTTOM_KINDS: readonly PanelTabKind[] = ['terminal', 'jobs']
 
 /** Kinds that exist once: opening one again shows the one that is open. */
-const SINGLE: readonly PanelTabKind[] = ['files', 'editor', 'trajectory', 'jobs']
+const SINGLE: readonly PanelTabKind[] = ['files', 'editor', 'review', 'trajectory', 'jobs']
 
 const TITLES: Record<PanelTabKind, string> = {
   new: 'New tab',
   browser: 'Browser',
   files: 'Files',
   editor: 'Editor',
+  review: 'Review',
   terminal: 'Terminal',
   trajectory: 'Trajectory',
   jobs: 'Jobs',

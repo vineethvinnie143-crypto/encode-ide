@@ -39,9 +39,7 @@ export default function IconRail() {
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const sidebarMode = useUi((state) => state.sidebarMode)
-  const sourceControlShown = useUi((state) => state.sidebarView === 'git')
-  const filesShown = usePanels((state) => state.side.layout !== 'hidden' && activeKind(state.side) === 'files')
-  const reviewOpen = filesShown && sourceControlShown
+  const reviewOpen = usePanels((state) => state.side.layout !== 'hidden' && activeKind(state.side) === 'review')
   const sessions = useSessions((state) => state.sessions)
   const statuses = useStatus((state) => state.statusById)
   const [user, setUser] = useState('developer')
@@ -92,11 +90,7 @@ export default function IconRail() {
       <RailButton label="Automations" active={automationOpen} onClick={() => ui().setAutomationOpen(true)}>
         <Clock size={20} />
       </RailButton>
-      <RailButton
-        label="Review"
-        active={reviewOpen}
-        onClick={() => usePanels.getState().open('files', { view: 'git' })}
-      >
+      <RailButton label="Review" shortcut={shortcut('view.review')} active={reviewOpen} onClick={() => usePanels.getState().open('review')}>
         <GitPullRequest size={20} />
       </RailButton>
       <RailButton label="Plugins and skills" active={pluginsOpen} onClick={() => ui().setPluginsOpen(true)}>

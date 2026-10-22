@@ -46,14 +46,15 @@ interface ChatStore {
   setDraft(text: string): void
   init(): Promise<void>
   load(sessionId: string): Promise<void>
-  send(text: string, attachments?: { path: string; content: string }[]): void
+  /** Starts a turn. `keepDraft`: the message comes from elsewhere (the Review tab), so what the composer holds stays. */
+  send(text: string, attachments?: { path: string; content: string }[], options?: { keepDraft?: boolean }): void
   stop(): Promise<void>
   clear(): Promise<void>
   /** Answers one approval (the first, unless an id is given); the card leaves the list at once. */
   answerApproval(answer: boolean | ApprovalAnswer, id?: string): Promise<void>
   answer(text: string): Promise<void>
   /** Holds a message until the agent is done. */
-  enqueue(text: string): void
+  enqueue(text: string, options?: { keepDraft?: boolean }): void
   removeQueued(id: string): void
   moveQueued(id: string, direction: -1 | 1): void
   /** Takes a queued message back into the composer to edit it. */
@@ -159,10 +160,10 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
   },
 
-  send: (text, attachments) => {
+  send: (text, attachments, options) => {
     const trimmed = text.trim()
     if (!trimmed || get().running) return
-    set({ running: true, status: 'thinking', approvals: [], ask: null, draft: '', streamStartedAt: 0, streamChars: 0 })
+    set({ running: true, status: 'thinking', approvals: [], ask: null, streamStartedAt: 0, streamChars: 0, ...(options?.keepDraft ? {} : { draft: '' }) })
     const sessionId = getActiveSessionId()
     void api.agent
       .start(sessionId, {
@@ -219,10 +220,10 @@ export const useChat = create<ChatStore>((set, get) => ({
     }
   },
 
-  enqueue: (text) => {
+  enqueue: (text, options) => {
     const sessionId = getActiveSessionId()
     const queue = enqueue(get().queues[sessionId] ?? [], text, crypto.randomUUID())
-    set({ queues: { ...get().queues, [sessionId]: queue }, draft: '' })
+    set({ queues: { ...get().queues, [sessionId]: queue }, ...(options?.keepDraft ? {} : { draft: '' }) })
   },
 
   removeQueued: (id) => {

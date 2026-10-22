@@ -27,6 +27,7 @@ export const MENUS: readonly MenuSpec[] = [
       '-',
       'view.chat',
       'view.files',
+      'view.review',
       'view.terminal',
       '-',
       'panel.newTab',

@@ -26,6 +26,9 @@ importers:
       '@encode/editor-view':
         specifier: workspace:*
         version: link:../../packages/editor-view
+      '@encode/git':
+        specifier: workspace:*
+        version: link:../../packages/git
       '@encode/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -243,6 +246,25 @@ importers:
 
   packages/gateway-protocol:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/git:
+    dependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../diff
+      '@encode/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

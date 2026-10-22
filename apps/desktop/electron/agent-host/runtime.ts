@@ -32,6 +32,7 @@ import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, sea
 import type { ModelAlert, ModelStatus } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
+import { draftCommitMessage } from './commit-message'
 
 export interface HostRuntimeOptions {
   /** Lets a test replace pieces of the host (the shell, the web, the model). */
@@ -71,6 +72,9 @@ const STATUS_WAIT_MS = 15_000
 /** The test search of the Settings screen: one plain query, and no longer than a person will wait. */
 const SEARCH_CHECK_QUERY = 'web search test'
 const SEARCH_CHECK_TIMEOUT_MS = 20_000
+
+/** A drafted commit message is waited for in a dialog: a person will wait this long, not more. */
+const DRAFT_TIMEOUT_MS = 90_000
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -411,6 +415,18 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   peer.handle('sandboxAct', async ({ root, action }) => {
     if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
     return workspaces.sandboxAct(root, action)
+  })
+
+  peer.handle('draftCommit', async (input) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), DRAFT_TIMEOUT_MS)
+    try {
+      return { message: await draftCommitMessage(client, input, controller.signal) }
+    } catch (error) {
+      throw new RpcError('failed', controller.signal.aborted ? `No model wrote a message within ${DRAFT_TIMEOUT_MS / 1000} seconds. Write it yourself, or try again.` : describe(error))
+    } finally {
+      clearTimeout(timer)
+    }
   })
 
   peer.handle('shutdown', async () => {

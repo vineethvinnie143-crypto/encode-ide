@@ -1,0 +1,23 @@
+{
+  "name": "@encode/git",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's git: a repository's changes by scope as reviewable hunks, staging, unstaging and reverting one hunk the way git add does it, commit and push.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/diff": "workspace:*",
+    "@encode/permissions": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

@@ -12,6 +12,7 @@ import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
 import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
+import type { CommitDraftInput } from './commit-message'
 
 export interface HostProcess {
   port: Port
@@ -164,6 +165,11 @@ export class AgentHostService {
   /** Changes a switch of the sandbox or checks the machine again; the sandbox as it stands afterwards comes back. */
   async sandboxAct(root: string, action: SandboxAction): Promise<SandboxOutcome> {
     return (await this.ready()).request('sandboxAct', { root, action }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
+  }
+
+  /** A commit message for the changes given, from the model of the Small tasks role. */
+  async draftCommit(input: CommitDraftInput): Promise<string> {
+    return (await (await this.ready()).request('draftCommit', input, { timeoutMs: 2 * 60_000 })).message
   }
 
   private ready(): Promise<Peer<MainApi, DesktopHostApi>> {

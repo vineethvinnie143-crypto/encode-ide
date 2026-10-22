@@ -200,6 +200,15 @@ use of each program asks. While it works, a banner at the bottom of the screen s
 What is most useful to hear: any click that landed in the wrong place, any step where it said it had done something
 that had not happened, and anything that kept the banner up when nothing was running.
 
+## The Review tab
+
+`Ctrl+Shift+G` opens **Review** on the open folder's git changes. After the agent changes something, press **Review
+changes** under its reply: stage the parts you keep (a single hunk or a whole file), revert the rest, comment on lines
+and **Send** the comments back to the agent, then **Commit…** and read the drafted message before you commit.
+
+What is most useful to hear: any hunk that was staged or reverted differently from how it looked, any file that shows
+every line changed when only a few did (line endings), and anything slow in a large change.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
