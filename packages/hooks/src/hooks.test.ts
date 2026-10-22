@@ -291,6 +291,15 @@ describe('process runner', () => {
     assert.ok(Date.now() - started < 15_000)
   })
 
+  it('starts nothing for a turn that is already stopped', async () => {
+    const turn = new AbortController()
+    turn.abort()
+    const result = await run('console.log("ran")', { ...options, signal: turn.signal })
+    assert.equal(result.exitCode, null)
+    assert.equal(result.stdout, '')
+    assert.match(result.error ?? '', /stopped/)
+  })
+
   it('reports a shell that cannot start', async () => {
     const missing = createProcessRunner({ file: '/no/such/shell', args: (command) => ['-c', command] })
     const result = await missing('true', options)
