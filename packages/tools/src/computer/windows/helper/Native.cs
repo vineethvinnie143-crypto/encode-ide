@@ -162,6 +162,8 @@ namespace Encode.Desktop
         public const int VK_SHIFT = 0x10;
         public const int VK_CONTROL = 0x11;
         public const int VK_MENU = 0x12;
+        public const uint SRCCOPY = 0x00CC0020;
+        public const uint CAPTUREBLT = 0x40000000;
     }
 
     /// <summary>The Win32 calls the helper makes, and nothing else. Each is used in one place and named for what it does there.</summary>
@@ -210,6 +212,10 @@ namespace Encode.Desktop
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
+        [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hwnd);
+        [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+
+        [DllImport("gdi32.dll", SetLastError = true)] public static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, uint operation);
 
         [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
         [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);

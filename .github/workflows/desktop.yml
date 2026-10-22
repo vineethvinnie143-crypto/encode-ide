@@ -46,7 +46,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Computer tool and desktop helper tests
+        env:
+          ENCODE_TEST_DIGEST: ${{ runner.temp }}/digest.txt
         run: node scripts/test.mjs packages/tools/src/computer
+
+      - name: What failed
+        if: always()
+        run: if (Test-Path "$env:RUNNER_TEMP/digest.txt") { Get-Content "$env:RUNNER_TEMP/digest.txt" }
 
       - name: Keep what the helper saw
         if: always()

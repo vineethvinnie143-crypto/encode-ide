@@ -24,9 +24,27 @@ namespace Encode.Desktop
             Bitmap bitmap = new Bitmap(box.W, box.H, PixelFormat.Format24bppRgb);
             try
             {
-                using (Graphics graphics = Graphics.FromImage(bitmap))
+                // Graphics.CopyFromScreen rejects the two flags together, and layered windows are left out without CAPTUREBLT.
+                IntPtr screen = Native.GetDC(IntPtr.Zero);
+                if (screen == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                try
                 {
-                    graphics.CopyFromScreen(box.X, box.Y, 0, 0, new Size(box.W, box.H), CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                    using (Graphics graphics = Graphics.FromImage(bitmap))
+                    {
+                        IntPtr target = graphics.GetHdc();
+                        try
+                        {
+                            if (!Native.BitBlt(target, 0, 0, box.W, box.H, screen, box.X, box.Y, Const.SRCCOPY | Const.CAPTUREBLT)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                        }
+                        finally
+                        {
+                            graphics.ReleaseHdc(target);
+                        }
+                    }
+                }
+                finally
+                {
+                    Native.ReleaseDC(IntPtr.Zero, screen);
                 }
                 return bitmap;
             }
