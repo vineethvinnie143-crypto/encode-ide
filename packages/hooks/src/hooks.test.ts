@@ -55,6 +55,31 @@ describe('hook configuration', () => {
     assert.match(problems.join('\n'), /other hook types are not supported/)
     assert.match(problems.join('\n'), /Unknown is not an event/)
   })
+
+  it('says which problems may have cost a guard: under PreToolUse, a misspelling of it, or a value that cannot be read at all', () => {
+    const pre = parseHooksConfig({ PreToolUse: [{ matcher: '(', hooks: [{ type: 'command', command: 'x' }] }, { hooks: [{ type: 'command', command: '' }] }] }, 'project')
+    assert.equal(pre.unsafe.length, 2)
+    assert.deepEqual(pre.unsafe, pre.problems)
+
+    for (const config of [{ PreToolUse: 'nope' }, { PreToolUse: [5] }, { PreToolUse: [{ matcher: 5, hooks: [] }] }, { PreToolUse: [{ hooks: 'x' }] }, { PretoolUse: [] }, 'x', []]) {
+      assert.notEqual(parseHooksConfig(config, 'user').unsafe.length, 0, JSON.stringify(config))
+    }
+    // A typo in a hook that only formats, tests or adds context costs a convenience, not a protection.
+    const rest = parseHooksConfig({ PostToolUse: [{ hooks: [{ type: 'command', command: '' }] }], Stop: 'nope', Typo: [] }, 'user')
+    assert.equal(rest.problems.length, 3)
+    assert.deepEqual(rest.unsafe, [])
+    assert.deepEqual(parseHooksConfig(undefined, 'user').unsafe, [])
+  })
+
+  it('prefixes the unsafe problems of every source like the others', () => {
+    const loaded = loadHookGroups([
+      { scope: 'user', config: { PreToolUse: 'nope' } },
+      { scope: 'project', config: { Stop: [{ hooks: [{ type: 'command', command: 'npm test' }] }] } },
+    ])
+    assert.equal(loaded.groups.length, 1)
+    assert.deepEqual(loaded.unsafe, ['user settings: hooks.PreToolUse must be a list'])
+    assert.deepEqual(loaded.problems, loaded.unsafe)
+  })
 })
 
 describe('command hooks', () => {
@@ -89,6 +114,35 @@ describe('command hooks', () => {
     )
     await hooks.preToolUse(TOOL)
     assert.deepEqual(calls.map((call) => call.command), ['all'])
+  })
+
+  it('starts nothing for a stopped turn, and the call a guard was asked about is refused', async () => {
+    const { hooks, calls, notices } = hooksFor(
+      { PreToolUse: [{ hooks: [{ type: 'command', command: 'guard' }] }], Stop: [{ hooks: [{ type: 'command', command: 'tests' }] }] },
+      {},
+    )
+    const stopped = new AbortController()
+    stopped.abort()
+    assert.deepEqual(await hooks.preToolUse({ ...TOOL, signal: stopped.signal }), { decision: 'deny', reason: 'The turn was stopped.' })
+    assert.deepEqual(await hooks.beforeStop({ ...BASE, signal: stopped.signal, lastMessage: 'Done.', continued: false }), {})
+    assert.deepEqual(calls, [])
+    assert.deepEqual(notices, [])
+  })
+
+  it('hands the turn to the command, and a command that was stopped with it is neither an answer nor a notice', async () => {
+    const turn = new AbortController()
+    const seen: Array<AbortSignal | undefined> = []
+    const { groups } = loadHookGroups([{ scope: 'user', config: { PreToolUse: [{ hooks: [{ type: 'command', command: 'slow' }] }], Stop: [{ hooks: [{ type: 'command', command: 'slow' }] }] } }])
+    const notices: string[] = []
+    const runner: HookRunner = async (_command, options) => {
+      seen.push(options.signal)
+      turn.abort()
+      return { exitCode: null, stdout: '', stderr: '', timedOut: false }
+    }
+    const hooks = createCommandHooks(groups, { env: {}, runner, notice: (text) => notices.push(text) })
+    assert.deepEqual(await hooks.preToolUse({ ...TOOL, signal: turn.signal }), { decision: 'deny', reason: 'The turn was stopped.' })
+    assert.equal(seen[0], turn.signal)
+    assert.deepEqual(notices, [])
   })
 
   it('denies a call on exit 2, with stderr as the reason', async () => {
@@ -225,6 +279,25 @@ describe('process runner', () => {
       }
     }
     assert.equal(alive, false, 'the process the hook started is still running')
+  })
+
+  it('stops a command when its turn is stopped, long before its own timeout', async () => {
+    const turn = new AbortController()
+    setTimeout(() => turn.abort(), 300)
+    const started = Date.now()
+    const result = await run('setTimeout(()=>{},60000)', { ...options, timeoutMs: 120_000, signal: turn.signal })
+    assert.equal(result.exitCode, null)
+    assert.equal(result.timedOut, false)
+    assert.ok(Date.now() - started < 15_000)
+  })
+
+  it('starts nothing for a turn that is already stopped', async () => {
+    const turn = new AbortController()
+    turn.abort()
+    const result = await run('console.log("ran")', { ...options, signal: turn.signal })
+    assert.equal(result.exitCode, null)
+    assert.equal(result.stdout, '')
+    assert.match(result.error ?? '', /stopped/)
   })
 
   it('reports a shell that cannot start', async () => {

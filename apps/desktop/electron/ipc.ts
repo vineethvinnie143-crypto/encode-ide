@@ -3,6 +3,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { isRpcError } from '@encode/protocol'
+import { rewindRequestOf } from './agent-host/rewind-request'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
 import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
@@ -258,6 +259,16 @@ export function registerIpc(deps: IpcDeps): void {
   handle('agent:set-plan', (sessionId: string, plan: PlanRequest | null) => host.setPlan(String(sessionId), plan ?? null))
 
   handle('agent:compact', (sessionId: string) => host.compact(String(sessionId)))
+  // Rewinding: the host works the plan out again from the record and the disk, so the renderer only names the request and echoes the fingerprint.
+  handle('agent:checkpoints', (sessionId: string) => host.checkpoints(String(sessionId)).catch((error) => Promise.reject(hostFailure(error))))
+  handle('agent:rewind-plan', (sessionId: string, turn: string) => host.rewindPlan(String(sessionId), String(turn)).catch((error) => Promise.reject(hostFailure(error))))
+  handle('agent:redo-plan', (sessionId: string) => host.redoPlan(String(sessionId)).catch((error) => Promise.reject(hostFailure(error))))
+  handle('agent:rewind-apply', (sessionId: string, request: unknown) =>
+    host.rewindApply(String(sessionId), rewindRequestOf(request)).catch((error) => Promise.reject(hostFailure(error))),
+  )
+  handle('agent:rewind-conversation', (sessionId: string, entryId: string) =>
+    host.rewind(String(sessionId), String(entryId)).catch((error) => Promise.reject(hostFailure(error))),
+  )
   // The host writes the transcript; the save dialog and the file are the main process's.
   handle('agent:export', async (sessionId: string, targetPath?: string) =>
     exportSessionZip(await host.exportData(String(sessionId)), targetPath ? String(targetPath) : undefined),

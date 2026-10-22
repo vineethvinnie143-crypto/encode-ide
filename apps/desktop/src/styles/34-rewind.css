@@ -1,0 +1,196 @@
+/* ============================================================
+   Rewind: put the files, and the conversation, back to before
+   one of your requests
+   ============================================================ */
+
+.rewind-dialog .ui-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rewind-request {
+  margin: 0;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.rewind-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rewind-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.rewind-problem svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--warning);
+}
+
+.rewind-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rewind-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.rewind-choice:hover {
+  border-color: var(--border-strong);
+}
+.rewind-choice.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.rewind-choice input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.rewind-choice-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rewind-choice-title {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 20px;
+}
+.rewind-choice-help {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+.rewind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rewind-summary {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.rewind-refreshed {
+  color: var(--warning);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.rewind-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+}
+.rewind-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rewind-file:last-child {
+  border-bottom: 0;
+}
+.rewind-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+}
+.rewind-file.is-skip .rewind-file-path,
+.rewind-file.is-unchanged .rewind-file-path {
+  color: var(--text-3);
+}
+.rewind-file-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.rewind-file.is-delete .rewind-file-action {
+  color: var(--danger);
+}
+.rewind-file-flag {
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--warning);
+  font-size: var(--fs-11);
+  line-height: 18px;
+}
+.rewind-overwrite {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+  cursor: pointer;
+}
+.rewind-overwrite input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.rewind-overwrite-note {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.rewind-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+.rewind-dialog .ui-dialog-foot {
+  align-items: center;
+}
+.rewind-working {
+  margin-right: auto;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.rewind-undo-link {
+  margin-right: auto;
+}

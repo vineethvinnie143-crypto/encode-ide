@@ -69,6 +69,7 @@ export default function PermissionsPane() {
       {report.waiting.length > 0 && <Waiting report={report} />}
       <Rules report={report} />
       <AddRule report={report} />
+      <Hooks report={report} />
       <Extras report={report} />
     </div>
   )
@@ -316,6 +317,34 @@ function AddRule({ report }: { report: PermissionsReport }) {
           ))}
         </div>
       </div>
+    </section>
+  )
+}
+
+function Hooks({ report }: { report: PermissionsReport }) {
+  return (
+    <section aria-label="Hooks">
+      <div className="section-title">Hooks</div>
+      {report.hooks.length === 0 ? (
+        <div className="info-note">
+          No hooks. A hook is a command that runs at a point in the agent’s work, such as before a tool call or when it stops. Add them under <code>hooks</code> in a settings file.
+        </div>
+      ) : (
+        <div className="perm-hooks">
+          {report.hooks.map((hook, index) => (
+            <div key={`${index}-${hook.event}-${hook.command}`} className="perm-hook">
+              <div className="perm-hook-top">
+                <span className="perm-hook-event">{hook.event}</span>
+                {hook.matcher && <Chip mono>{hook.matcher}</Chip>}
+                <Chip>{SCOPE_NAMES[hook.scope]}</Chip>
+                <span className="perm-hook-time">up to {hook.timeout} s</span>
+              </div>
+              <pre className="perm-hook-command">{hook.command}</pre>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="perm-add-help">Hooks run commands with your rights, in the same environment as the agent’s own commands. A project’s hooks wait until you trust the folder and approve its settings.</div>
     </section>
   )
 }

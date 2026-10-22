@@ -59,8 +59,11 @@ export interface CheckpointOptions {
   fs: CheckpointFs
   /** This workspace's store (see `checkpointDir`): `blobs/` and `sessions/` live under it. */
   dir: string
-  /** The workspace root, then any other folders the agent may write in; a rewind restores files only inside these. */
-  roots: string[]
+  /**
+   * The workspace root, then any other folders the agent may write in; a rewind restores files only inside these. A
+   * function is asked each time, for a list that can change while the session runs (the settings' extra folders).
+   */
+  roots: readonly string[] | (() => readonly string[])
   /** Names the session's manifest; letters, digits, dot, dash and underscore only. */
   sessionId: string
   platform?: NodeJS.Platform
@@ -118,6 +121,8 @@ export class CheckpointService {
   private queue: Promise<unknown> = Promise.resolve()
   private loading: Promise<Manifest> | undefined
   private resolvedRoots: Promise<string[]> | undefined
+  /** The list `resolvedRoots` was made from. */
+  private resolvedFor = ''
   /** The manifest ended in a torn line; the next line must start on a new one. */
   private needsNewline = false
   /** Files each tool call is about to write, until its `postToolUse` hook records what they hold. */
@@ -125,7 +130,7 @@ export class CheckpointService {
 
   constructor(private readonly options: CheckpointOptions) {
     if (!SESSION_ID.test(options.sessionId)) throw new TypeError(`Checkpoints: not a usable session id: ${JSON.stringify(options.sessionId)}`)
-    if (!options.roots.length) throw new TypeError('Checkpoints: at least one root folder is needed.')
+    if (!this.wantedRoots().length) throw new TypeError('Checkpoints: at least one root folder is needed.')
     const windows = (options.platform ?? process.platform) === 'win32'
     this.fs = options.fs
     this.api = windows ? path.win32 : path.posix
@@ -363,11 +368,21 @@ export class CheckpointService {
     manifest.add(entry)
   }
 
+  private wantedRoots(): readonly string[] {
+    const { roots } = this.options
+    return typeof roots === 'function' ? roots() : roots
+  }
+
+  /** The folders a rewind may write in, with their links resolved; resolved again only when the list changes. */
   private roots(): Promise<string[]> {
-    if (!this.resolvedRoots) {
-      this.resolvedRoots = Promise.all(this.options.roots.map((root) => this.fs.realpath(root)))
-      this.resolvedRoots.catch(() => {
-        this.resolvedRoots = undefined
+    const wanted = this.wantedRoots()
+    const key = wanted.join('\u0000')
+    if (!this.resolvedRoots || this.resolvedFor !== key) {
+      const resolving = Promise.all(wanted.map((root) => this.fs.realpath(root)))
+      this.resolvedRoots = resolving
+      this.resolvedFor = key
+      resolving.catch(() => {
+        if (this.resolvedRoots === resolving) this.resolvedRoots = undefined
       })
     }
     return this.resolvedRoots

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
+import RewindDialog from './components/Chat/RewindDialog'
 import { alertGate, toastOf } from './components/models/alerts'
 import ConnectModelDialog from './components/models/ConnectModelDialog'
 import BottomPanel from './components/panels/BottomPanel'
@@ -177,6 +178,7 @@ export default function App() {
       {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
       <ConnectModelDialog />
+      <RewindDialog />
       <PromptDialog />
       <ShortcutsDialog />
       <AboutDialog />

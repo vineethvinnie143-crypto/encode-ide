@@ -16,7 +16,11 @@ import type {
   AgentStatus,
   ApprovalAnswer,
   BackgroundJob,
+  CheckpointInfo,
   PlanRequest,
+  RewindOutcome,
+  RewindPlan,
+  RewindRequest,
   SessionGoal,
   SessionPatch,
   SessionSummary,
@@ -44,6 +48,10 @@ export type HostRequests = {
   setPlan: { params: { sessionId: string; plan: PlanRequest | null }; result: void }
   compact: { params: { sessionId: string; instructions?: string }; result: { removed: number } }
   rewind: { params: { sessionId: string; entryId: string }; result: { text: string } }
+  checkpoints: { params: { sessionId: string }; result: CheckpointInfo }
+  rewindPlan: { params: { sessionId: string; turn: string }; result: RewindPlan }
+  redoPlan: { params: { sessionId: string }; result: RewindPlan | null }
+  rewindApply: { params: { sessionId: string; request: RewindRequest }; result: RewindOutcome }
   exportData: { params: { sessionId: string }; result: { title: string; transcript: string; json: string } }
   approve: { params: { requestId: string; answer: Exclude<ApprovalAnswer, boolean> }; result: boolean }
   answer: { params: { requestId: string; text: string }; result: boolean }
@@ -142,6 +150,18 @@ const ANSWER: JsonSchema = {
   properties: { approved: { type: 'boolean' }, note: text(4_000), remember: { enum: ['session', 'always'] }, scope: { enum: ['user', 'project', 'local'] } },
 }
 
+const REWIND_REQUEST: JsonSchema = {
+  type: 'object',
+  required: ['kind', 'turn', 'fingerprint'],
+  properties: {
+    kind: { enum: ['rewind', 'redo'] },
+    turn: id,
+    fingerprint: text(200, 1),
+    force: { type: 'boolean' },
+    conversation: { type: 'boolean' },
+  },
+}
+
 /** Request parameters per method; methods without an entry take none. */
 export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   create: { type: ['object', 'null'], properties: { projectRoot: nullable(text(4_096)), title: text(400) } },
@@ -161,6 +181,10 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   setPlan: object({ ...sessionId, plan: nullable(PLAN) }, ['sessionId', 'plan']),
   compact: object({ ...sessionId, instructions: text(8_000) }, ['sessionId']),
   rewind: object({ ...sessionId, entryId: id }, ['sessionId', 'entryId']),
+  checkpoints: object(sessionId, ['sessionId']),
+  rewindPlan: object({ ...sessionId, turn: id }, ['sessionId', 'turn']),
+  redoPlan: object(sessionId, ['sessionId']),
+  rewindApply: object({ ...sessionId, request: REWIND_REQUEST }, ['sessionId', 'request']),
   exportData: object(sessionId, ['sessionId']),
   approve: object({ requestId: id, answer: ANSWER }, ['requestId', 'answer']),
   answer: object({ requestId: id, text: text(100_000) }, ['requestId', 'text']),
@@ -199,6 +223,10 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('setPlan', ({ sessionId, plan }) => host.setPlan(sessionId, plan))
   on('compact', ({ sessionId, instructions }) => host.compact(sessionId, instructions))
   on('rewind', ({ sessionId, entryId }) => host.rewind(sessionId, entryId))
+  on('checkpoints', ({ sessionId }) => host.checkpointInfo(sessionId))
+  on('rewindPlan', ({ sessionId, turn }) => host.rewindPlan(sessionId, turn))
+  on('redoPlan', ({ sessionId }) => host.redoPlan(sessionId))
+  on('rewindApply', ({ sessionId, request }) => host.rewindApply(sessionId, request))
   on('exportData', ({ sessionId }) => host.exportData(sessionId))
   on('approve', ({ requestId, answer }) => host.approve(requestId, answer))
   on('answer', ({ requestId, text: answer }) => host.answer(requestId, answer))
@@ -236,6 +264,10 @@ export interface HostClient {
   setPlan(sessionId: string, plan: PlanRequest | null): Promise<void>
   compact(sessionId: string, instructions?: string): Promise<{ removed: number }>
   rewind(sessionId: string, entryId: string): Promise<{ text: string }>
+  checkpoints(sessionId: string): Promise<CheckpointInfo>
+  rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
+  redoPlan(sessionId: string): Promise<RewindPlan | null>
+  rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome>
   exportData(sessionId: string): Promise<{ title: string; transcript: string; json: string }>
   approve(requestId: string, answer: ApprovalAnswer): Promise<boolean>
   answer(requestId: string, text: string): Promise<boolean>
@@ -268,6 +300,10 @@ export function createHostClient(caller: HostCaller): HostClient {
     setPlan: (sessionId, plan) => caller.request('setPlan', { sessionId, plan }),
     compact: (sessionId, instructions) => caller.request('compact', { sessionId, ...(instructions ? { instructions } : {}) }),
     rewind: (sessionId, entryId) => caller.request('rewind', { sessionId, entryId }),
+    checkpoints: (sessionId) => caller.request('checkpoints', { sessionId }),
+    rewindPlan: (sessionId, turn) => caller.request('rewindPlan', { sessionId, turn }),
+    redoPlan: (sessionId) => caller.request('redoPlan', { sessionId }),
+    rewindApply: (sessionId, request) => caller.request('rewindApply', { sessionId, request }),
     exportData: (sessionId) => caller.request('exportData', { sessionId }),
     approve: (requestId, answer) => caller.request('approve', { requestId, answer: typeof answer === 'boolean' ? { approved: answer } : answer }),
     answer: (requestId, answer) => caller.request('answer', { requestId, text: answer }),

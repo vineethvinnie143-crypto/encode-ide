@@ -5,7 +5,7 @@ import { after, describe, it } from 'node:test'
 import { parseRule, RuleSet } from '@encode/permissions'
 import type { SessionScope } from './host'
 import type { Script } from './scripted'
-import type { RememberResult } from './session'
+import type { RememberResult, SessionCheckpoints } from './session'
 import { closeHarnesses, hostHarness } from './testing'
 
 after(closeHarnesses)
@@ -245,5 +245,140 @@ describe('a session scope', () => {
     const session = await h.host.create()
     await h.host.start(session.id, { text: 'hello', mode: 'code' })
     assert.deepEqual(order, ['scope', 'host'])
+  })
+})
+
+/** A record of file changes that keeps what it is asked to apply, and answers as told. */
+function fakeCheckpoints(patch: Partial<SessionCheckpoints> = {}) {
+  const applied: Array<Parameters<SessionCheckpoints['apply']>[0]> = []
+  const checkpoints: SessionCheckpoints = {
+    info: async () => ({ available: true, turns: [], canUndo: false }),
+    plan: async (turn) => ({ kind: 'rewind', turn, known: true, files: [], fingerprint: 'fp' }),
+    planRedo: async () => null,
+    apply: async (request) => {
+      applied.push(request)
+      return { ok: true, restored: 1, deleted: 0, skipped: [], failed: [] }
+    },
+    ...patch,
+  }
+  return { checkpoints, applied }
+}
+
+describe('a session scope with checkpoints', () => {
+  it('answers what was changed, what a rewind would do, and what undoing one would do', async () => {
+    const { checkpoints } = fakeCheckpoints({
+      info: async () => ({ available: true, turns: [{ turn: 'm1', at: 5, files: 2, outside: 0 }], canUndo: true }),
+      planRedo: async () => ({ kind: 'redo', turn: 'm1', known: true, files: [{ path: 'a.ts', action: 'restore', conflict: false }], fingerprint: 'again' }),
+    })
+    const h = await hostHarness({ script: [{ text: 'ok' }], host: { scope: () => ({ checkpoints }) } })
+    const session = await h.host.create()
+    assert.deepEqual(await h.host.checkpointInfo(session.id), { available: true, turns: [{ turn: 'm1', at: 5, files: 2, outside: 0 }], canUndo: true })
+    assert.equal((await h.host.rewindPlan(session.id, 'm1')).fingerprint, 'fp')
+    assert.equal((await h.host.redoPlan(session.id))?.fingerprint, 'again')
+  })
+
+  it('says so when nothing is recorded, and when the record cannot be read', async () => {
+    const plain = await hostHarness({ script: [{ text: 'ok' }], host: { scope: () => ({}) } })
+    const a = await plain.host.create()
+    const info = await plain.host.checkpointInfo(a.id)
+    assert.equal(info.available, false)
+    assert.match(info.problem ?? '', /Nothing is recorded/)
+    await assert.rejects(() => plain.host.rewindPlan(a.id, 'm1'), /Nothing is recorded/)
+    assert.deepEqual(await plain.host.rewindApply(a.id, { kind: 'rewind', turn: 'm1', fingerprint: 'fp' }), { ok: false, reason: 'unavailable', message: 'Nothing is recorded for this session.' })
+
+    const broken = fakeCheckpoints({ info: async () => Promise.reject(new Error('the history is larger than 64 MB')) })
+    const b = await hostHarness({ script: [{ text: 'ok' }], host: { scope: () => ({ checkpoints: broken.checkpoints }) } })
+    const session = await b.host.create()
+    assert.deepEqual(await b.host.checkpointInfo(session.id), { available: false, problem: 'the history is larger than 64 MB', turns: [], canUndo: false })
+  })
+
+  it('puts the files back, then goes back in the conversation and hands back the request', async () => {
+    const { checkpoints, applied } = fakeCheckpoints()
+    const h = await hostHarness({ script: [{ text: 'first answer' }, { text: 'second answer' }], host: { scope: () => ({ checkpoints }) } })
+    const session = await h.host.create()
+    await h.host.start(session.id, { text: 'one', mode: 'code' })
+    await h.host.start(session.id, { text: 'two', mode: 'code' })
+    const second = (await h.host.history(session.id)).entries.filter((entry) => entry.kind === 'user')[1]
+
+    const outcome = await h.host.rewindApply(session.id, { kind: 'rewind', turn: second.id, fingerprint: 'fp', force: true, conversation: true })
+    assert.deepEqual(outcome, { ok: true, restored: 1, deleted: 0, skipped: [], failed: [], text: 'two' })
+    assert.deepEqual(applied, [{ kind: 'rewind', turn: second.id, fingerprint: 'fp', force: true }])
+    const entries = (await h.host.history(session.id)).entries
+    assert.deepEqual(entries.filter((entry) => entry.kind === 'user').map((entry) => entry.text), ['one'])
+    assert.equal(entries.some((entry) => entry.text === 'second answer'), false)
+  })
+
+  it('keeps the conversation as it is when only the files were asked for, or a file could not be put back', async () => {
+    const failing = fakeCheckpoints({ apply: async () => ({ ok: true, restored: 0, deleted: 0, skipped: [], failed: [{ path: 'a.ts', error: 'EPERM' }] }) })
+    const h = await hostHarness({ script: [{ text: 'answer' }], host: { scope: () => ({ checkpoints: failing.checkpoints }) } })
+    const session = await h.host.create()
+    await h.host.start(session.id, { text: 'one', mode: 'code' })
+    const turn = (await h.host.history(session.id)).entries.find((entry) => entry.kind === 'user')!.id
+    const outcome = await h.host.rewindApply(session.id, { kind: 'rewind', turn, fingerprint: 'fp', conversation: true })
+    assert.equal(outcome.ok && outcome.text, undefined, 'no request comes back while a file is still wrong')
+    assert.equal((await h.host.history(session.id)).entries.filter((entry) => entry.kind === 'user').length, 1)
+
+    const files = fakeCheckpoints()
+    const g = await hostHarness({ script: [{ text: 'answer' }], host: { scope: () => ({ checkpoints: files.checkpoints }) } })
+    const other = await g.host.create()
+    await g.host.start(other.id, { text: 'one', mode: 'code' })
+    const id = (await g.host.history(other.id)).entries.find((entry) => entry.kind === 'user')!.id
+    await g.host.rewindApply(other.id, { kind: 'rewind', turn: id, fingerprint: 'fp' })
+    assert.equal((await g.host.history(other.id)).entries.filter((entry) => entry.kind === 'user').length, 1)
+  })
+
+  it('refuses while the agent is working, and for a request that is not in the conversation, touching no file', async () => {
+    const { checkpoints, applied } = fakeCheckpoints()
+    const h = await hostHarness({
+      scriptFor: () => callOnce(() => ({ name: 'Bash', input: { command: 'npm run build', description: 'build' } })),
+      host: { scope: () => ({ checkpoints }) },
+    })
+    const session = await h.host.create()
+    const running = h.host.start(session.id, { text: 'build', mode: 'code' })
+    const request = (await until(() => h.of('approval-request', session.id)[0])).request
+    const busy = await h.host.rewindApply(session.id, { kind: 'rewind', turn: 'anything', fingerprint: 'fp' })
+    assert.deepEqual(busy, { ok: false, reason: 'busy', message: 'eNCode is working on this session. Stop it first.' })
+    h.host.approve(request.id, false)
+    await running
+
+    const missing = await h.host.rewindApply(session.id, { kind: 'rewind', turn: 'not-a-request', fingerprint: 'fp', conversation: true })
+    assert.deepEqual(missing, { ok: false, reason: 'unavailable', message: 'That request is not in this session.' })
+    assert.deepEqual(applied, [])
+  })
+
+  it('does not let a second turn start while files are being put back', async () => {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const slow = fakeCheckpoints({ apply: async () => (await gate, { ok: true, restored: 1, deleted: 0, skipped: [], failed: [] }) })
+    const h = await hostHarness({ script: [{ text: 'answer' }], host: { scope: () => ({ checkpoints: slow.checkpoints }) } })
+    const session = await h.host.create()
+    await h.host.start(session.id, { text: 'one', mode: 'code' })
+    const turn = (await h.host.history(session.id)).entries.find((entry) => entry.kind === 'user')!.id
+    const rewinding = h.host.rewindApply(session.id, { kind: 'rewind', turn, fingerprint: 'fp' })
+    await assert.rejects(() => h.host.start(session.id, { text: 'two', mode: 'code' }), /already working/)
+    release()
+    assert.equal((await rewinding).ok, true)
+  })
+
+  it('lets the scope put a line in the conversation', async () => {
+    let notice: (text: string) => void = () => undefined
+    const h = await hostHarness({ script: [{ text: 'ok' }], host: { scope: (request) => ((notice = request.notice), {}) } })
+    const session = await h.host.create()
+    await h.host.start(session.id, { text: 'hello', mode: 'code' })
+    notice('The hook "format" could not run.')
+    const told = await until(() => h.of('entry', session.id).find((event) => event.entry.kind === 'notice' && /could not run/.test(event.entry.text ?? '')))
+    assert.equal(told.entry.text, 'The hook "format" could not run.')
+  })
+
+  it('hands the hooks the turn to stop with', async () => {
+    const seen: Array<AbortSignal | undefined> = []
+    const h = await hostHarness({
+      script: [{ text: 'ok' }],
+      host: { scope: () => ({ hooks: { userPromptSubmit: async (event) => void seen.push(event.signal) } }) },
+    })
+    const session = await h.host.create()
+    await h.host.start(session.id, { text: 'hello', mode: 'code' })
+    assert.equal(seen.length, 1)
+    assert.ok(seen[0] instanceof AbortSignal)
   })
 })

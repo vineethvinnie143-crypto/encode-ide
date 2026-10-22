@@ -375,12 +375,18 @@ importers:
 
   packages/workspace:
     dependencies:
+      '@encode/checkpoints':
+        specifier: workspace:*
+        version: link:../checkpoints
       '@encode/config':
         specifier: workspace:*
         version: link:../config
       '@encode/core':
         specifier: workspace:*
         version: link:../core
+      '@encode/hooks':
+        specifier: workspace:*
+        version: link:../hooks
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions

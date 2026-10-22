@@ -66,8 +66,12 @@ import {
   type ApprovalRequest,
   type AskRequest,
   type BackgroundJob,
+  type CheckpointInfo,
   type ConversationEntry,
   type PlanRequest,
+  type RewindOutcome,
+  type RewindPlan,
+  type RewindRequest,
   type RuleScope,
   type SessionGoal,
   type SessionSummary,
@@ -97,6 +101,8 @@ export interface SessionEnv {
   refresh?: () => Promise<void>
   /** Saves the rules "Always allow" offered, in the settings file `scope` names. */
   remember?(rules: string[], scope: RuleScope): Promise<RememberResult>
+  /** What the agent's file tools changed, kept so that it can be put back; absent where nothing is recorded. */
+  checkpoints?: SessionCheckpoints
   /** Called once when the session closes, for what the environment holds on its behalf. */
   release?(): Promise<void>
   web: WebAccess
@@ -137,6 +143,19 @@ export type RememberResult =
   /** `where` names the file for people ("your user settings", ".encode/settings.local.json"); `approved` is false when the rule waits for the user to review the folder's settings. */
   | { ok: true; where: string; approved: boolean; changed: boolean }
   | { ok: false; reason: string }
+
+/**
+ * The record of what a session's file tools changed, and the means to put it back (see @encode/checkpoints). The
+ * session adds what only it knows: that nothing is running while files change, and the conversation going back too.
+ */
+export interface SessionCheckpoints {
+  info(): Promise<CheckpointInfo>
+  plan(turn: string): Promise<RewindPlan>
+  /** Null when there is no rewind to undo. */
+  planRedo(): Promise<RewindPlan | null>
+  /** Carries out a plan the caller made; refuses one the files or the history have moved past. */
+  apply(request: Pick<RewindRequest, 'kind' | 'turn' | 'fingerprint' | 'force'>): Promise<RewindOutcome>
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -462,6 +481,11 @@ export class AgentSession {
     this.persist({ type: 'entry', entry: structuredClone(entry) })
   }
 
+  /** A line in the conversation from outside the session: a hook that failed, a store that could not be read. */
+  tell(text: string): void {
+    this.notice(text)
+  }
+
   /** Shows a note in the transcript and stores it. */
   private notice(text: string, kind: 'notice' | 'error' = 'notice'): void {
     this.settleEntry(this.addEntry({ kind, text }))
@@ -750,7 +774,7 @@ export class AgentSession {
   // ------------------------------------------------------------ a turn
 
   /** The reminders and the user's text, as the message the model reads. */
-  private async promptBlocks(input: AgentStartInput, text: string, mode: AgentMode, turnId: string): Promise<{ blocks: UserBlock[] } | { blocked: string }> {
+  private async promptBlocks(input: AgentStartInput, text: string, mode: AgentMode, turnId: string, signal: AbortSignal): Promise<{ blocks: UserBlock[] } | { blocked: string }> {
     const { env } = this
     const first = this.messages.length === 0
     const blocks: UserBlock[] = []
@@ -774,7 +798,7 @@ export class AgentSession {
       this.turn.memory = fingerprint
     }
 
-    const hookEvent = { sessionId: this.id, agentId: 'main', root: env.root, mode }
+    const hookEvent = { sessionId: this.id, agentId: 'main', root: env.root, mode, signal }
     if (!this.started) {
       this.started = true
       try {
@@ -838,7 +862,7 @@ export class AgentSession {
     const turnId = newRecordId()
     try {
       this.setStatus('thinking')
-      const prompt = await this.promptBlocks(input, text, mode, turnId)
+      const prompt = await this.promptBlocks(input, text, mode, turnId, signal)
       if ('blocked' in prompt) {
         this.notice(`A hook refused this request: ${prompt.blocked}`)
         this.setStatus('idle')
@@ -985,6 +1009,22 @@ export class AgentSession {
   /** Goes back to just before a request of the user's, which is returned to be edited and sent again. */
   async rewind(entryId: string): Promise<{ text: string }> {
     this.assertIdle()
+    return this.holding(() => this.cutBefore(entryId))
+  }
+
+  /** Runs `work` with the session counted as working, so that no turn, compaction or second rewind starts in the middle of it. */
+  private async holding<T>(work: () => Promise<T>): Promise<T> {
+    const hold = new AbortController()
+    this.controller = hold
+    try {
+      return await work()
+    } finally {
+      if (this.controller === hold) this.controller = undefined
+    }
+  }
+
+  /** The cut itself; the caller holds the session. */
+  private async cutBefore(entryId: string): Promise<{ text: string }> {
     const entry = this.entries.find((candidate) => candidate.id === entryId && candidate.kind === 'user')
     if (!entry) throw new Error('That request is not in this session.')
     await this.flush()
@@ -993,6 +1033,54 @@ export class AgentSession {
     this.forgetRuntimeState()
     this.setStatus('idle')
     return { text: entry.text ?? '' }
+  }
+
+  // ------------------------------------------------------------ checkpoints
+
+  /** The requests after which files changed, for the rewind picker. */
+  async checkpointInfo(): Promise<CheckpointInfo> {
+    if (!this.env.checkpoints) return { available: false, problem: 'Nothing is recorded for this session: no folder is open.', turns: [], canUndo: false }
+    try {
+      return await this.env.checkpoints.info()
+    } catch (error) {
+      return { available: false, problem: errorMessage(error), turns: [], canUndo: false }
+    }
+  }
+
+  /** What putting the files back to just before a request would do. Nothing changes. */
+  async rewindPlan(turn: string): Promise<RewindPlan> {
+    if (!this.env.checkpoints) throw new Error('Nothing is recorded for this session.')
+    return this.env.checkpoints.plan(turn)
+  }
+
+  /** What undoing the latest rewind would do, or null. */
+  async redoPlan(): Promise<RewindPlan | null> {
+    return (await this.env.checkpoints?.planRedo()) ?? null
+  }
+
+  /**
+   * Puts files back as a plan said (and, for a rewind with `conversation`, goes back in the conversation to just
+   * before the request, which is returned as text). Only while nothing runs: a file the agent is writing must not be
+   * written under it. The conversation goes back only when every file was dealt with.
+   */
+  async rewindApply(request: RewindRequest): Promise<RewindOutcome> {
+    const { checkpoints } = this.env
+    if (!checkpoints) return { ok: false, reason: 'unavailable', message: 'Nothing is recorded for this session.' }
+    if (this.controller) return { ok: false, reason: 'busy', message: 'eNCode is working on this session. Stop it first.' }
+    if (request.conversation && request.kind === 'rewind' && !this.entries.some((entry) => entry.id === request.turn && entry.kind === 'user')) {
+      return { ok: false, reason: 'unavailable', message: 'That request is not in this session.' }
+    }
+    try {
+      return await this.holding(async () => {
+        await this.flush()
+        const outcome = await checkpoints.apply({ kind: request.kind, turn: request.turn, fingerprint: request.fingerprint, ...(request.force ? { force: true } : {}) })
+        if (!outcome.ok || request.kind !== 'rewind' || !request.conversation || outcome.failed.length) return outcome
+        const { text } = await this.cutBefore(request.turn)
+        return { ...outcome, text }
+      })
+    } catch (error) {
+      return { ok: false, reason: 'failed', message: errorMessage(error) }
+    }
   }
 
   // ------------------------------------------------------------ jobs, export, closing

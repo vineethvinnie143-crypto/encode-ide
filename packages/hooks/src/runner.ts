@@ -78,6 +78,10 @@ export function killTree(child: ChildProcess, platform: NodeJS.Platform = proces
 export function createProcessRunner(shell: HookShell, platform: NodeJS.Platform = process.platform): HookRunner {
   return (command, options) =>
     new Promise<HookRun>((resolve) => {
+      if (options.signal?.aborted) {
+        resolve({ exitCode: null, stdout: '', stderr: '', timedOut: false, error: 'The turn was stopped.' })
+        return
+      }
       let child: ChildProcess
       try {
         child = spawn(shell.file, shell.args(command), {
@@ -97,6 +101,8 @@ export function createProcessRunner(shell: HookShell, platform: NodeJS.Platform 
       child.stderr?.on('data', (chunk: Buffer) => stderr.add(chunk))
 
       let timedOut = false
+      let interrupted = false
+      let exited = false
       let settled = false
       let exitCode: number | null = null
       const stop = () => killTree(child, platform)
@@ -104,20 +110,26 @@ export function createProcessRunner(shell: HookShell, platform: NodeJS.Platform 
         timedOut = true
         stop()
       }, options.timeoutMs)
-      options.signal?.addEventListener('abort', stop, { once: true })
+      // The turn ended while the command ran. Told apart here and not by the exit code: Windows gives a killed process the code taskkill chose.
+      const interrupt = () => {
+        interrupted = !exited
+        stop()
+      }
+      options.signal?.addEventListener('abort', interrupt, { once: true })
 
       const finish = (error?: string) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        options.signal?.removeEventListener('abort', stop)
+        options.signal?.removeEventListener('abort', interrupt)
         child.stdout?.destroy()
         child.stderr?.destroy()
-        resolve({ exitCode: timedOut ? null : exitCode, stdout: stdout.text(), stderr: stderr.text(), timedOut, ...(error ? { error } : {}) })
+        resolve({ exitCode: timedOut || interrupted ? null : exitCode, stdout: stdout.text(), stderr: stderr.text(), timedOut, ...(error ? { error } : {}) })
       }
       child.on('error', (error) => finish(error.message))
       child.on('close', () => finish())
       child.on('exit', (code) => {
+        exited = true
         exitCode = code
         // Normally 'close' follows at once; a background child that kept the pipes open must not hold the hook.
         setTimeout(() => finish(), DRAIN_MS)

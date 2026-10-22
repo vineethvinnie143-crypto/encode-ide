@@ -1,8 +1,11 @@
 import { memo, useMemo, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Copy, GitFork, Info, Pencil } from '../../ui/icons'
+import { AlertTriangle, Check, ChevronDown, Copy, GitFork, Info, Pencil, Undo2 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
+import { getActiveSessionId } from '../../stores/active'
+import { useChat } from '../../stores/chat'
 import { usePanels } from '../../stores/panels'
+import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
 import { Button, IconButton } from '../../ui/Button'
 import { Collapse } from '../../ui/Collapse'
@@ -32,6 +35,21 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
+/** Opens the Rewind dialog for this request: the files the agent changed after it, and the conversation, can go back to before it. */
+function RewindButton({ entry }: { entry: ConversationEntry }) {
+  const working = useChat((state) => state.running)
+  return (
+    <IconButton
+      label={working ? 'Stop the agent to rewind' : 'Rewind to before this request'}
+      size="sm"
+      disabled={working}
+      onClick={() => void useRewind.getState().show(getActiveSessionId(), entry.id, entry.text ?? '')}
+    >
+      <Undo2 size={14} />
+    </IconButton>
+  )
+}
+
 function UserMessage({ entry }: { entry: ConversationEntry }) {
   return (
     <div className="turn-user">
@@ -41,6 +59,7 @@ function UserMessage({ entry }: { entry: ConversationEntry }) {
       <div className="msg-actions is-right">
         <span className="msg-time">{timeOf(entry.createdAt)}</span>
         <CopyButton text={entry.text ?? ''} label="Copy message" />
+        <RewindButton entry={entry} />
       </div>
     </div>
   )

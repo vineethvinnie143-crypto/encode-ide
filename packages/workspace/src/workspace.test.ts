@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import type { HookRun, HookRunner } from '@encode/hooks'
 import type { RuleQuery } from '@encode/permissions'
 import { tempWorkspace } from '@encode/tools/testing'
 import { actOn } from './actions'
@@ -315,7 +316,7 @@ describe('the workspaces of a program', () => {
     const root = await fs.realpath(await tempWorkspace())
     const home = await fs.realpath(await tempWorkspace())
     const workspaces = new Workspaces({ home })
-    const scope = await workspaces.scope({ sessionId: 's1', root })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
     assert.equal(scope.rules!.evaluate({ type: 'read', paths: [path.join(root, '.env')] }), null)
     await fs.mkdir(path.join(home, '.encode'), { recursive: true })
     await fs.writeFile(path.join(home, '.encode', 'settings.json'), json({ permissions: { deny: ['Read(./.env)'] } }))
@@ -327,7 +328,7 @@ describe('the workspaces of a program', () => {
     const root = await fs.realpath(await tempWorkspace({ '.encode/settings.local.json': json({ env: { PROJECT_MODE: 'dev' } }) }))
     const home = await fs.realpath(await tempWorkspace())
     const workspaces = new Workspaces({ home })
-    const scope = await workspaces.scope({ sessionId: 's1', root })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
     assert.deepEqual(scope.shell!(), { extraEnv: {} })
     await trustFolder(workspaces.config(root))
     await scope.refresh!()
@@ -338,7 +339,7 @@ describe('the workspaces of a program', () => {
     const root = await fs.realpath(await tempWorkspace())
     const home = await fs.realpath(await tempWorkspace())
     const workspaces = new Workspaces({ home })
-    const scope = await workspaces.scope({ sessionId: 's1', root })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
     await trustFolder(workspaces.config(root))
     const saved = await scope.remember!(['Bash(npm test:*)'], 'local')
     assert.equal(saved.ok && saved.approved, true)
@@ -356,7 +357,7 @@ describe('the workspaces of a program', () => {
       home,
       fs: { ...nodeWorkspaceFs, read: async (file) => (failing && file.endsWith('settings.json') ? Promise.reject(new Error('disk gone')) : nodeWorkspaceFs.read(file)) },
     })
-    const scope = await workspaces.scope({ sessionId: 's1', root })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
     const query: RuleQuery = { type: 'read', paths: [path.join(root, 'README.md')] }
     assert.equal(scope.rules!.evaluate(query), null)
     failing = true
@@ -369,5 +370,215 @@ describe('the workspaces of a program', () => {
     assert.equal(scope.rules!.evaluate(query), null)
     assert.equal(scope.rules!.evaluate({ type: 'read', paths: [path.join(root, '.env')] })?.decision, 'deny')
     assert.equal((await reportOn(workspaces.config(root))).broken, null)
+  })
+})
+
+/** A runner that answers every hook command the same way, and keeps what each was given. */
+function hookRunner(answer: Partial<HookRun> = {}) {
+  const calls: Array<{ command: string; env: Record<string, string>; stdin: Record<string, any> }> = []
+  const runner: HookRunner = async (command, options) => {
+    calls.push({ command, env: options.env, stdin: JSON.parse(options.stdin) })
+    return { exitCode: 0, stdout: '', stderr: '', timedOut: false, ...answer }
+  }
+  return { runner, calls }
+}
+
+const GUARD = { hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard' }] }] } }
+
+describe('hooks in a scope', () => {
+  const event = (root: string) => ({ sessionId: 's1', agentId: 'main', root, mode: 'code' as const })
+  const call = (root: string) => ({ ...event(root), tool: 'Bash', toolUseId: 'u1', input: { command: 'ls' } })
+
+  it('wait for the folder to be trusted, then guard its calls', async () => {
+    const root = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json(GUARD) }))
+    const home = await fs.realpath(await tempWorkspace())
+    const { runner, calls } = hookRunner({ exitCode: 2, stderr: 'not in this folder' })
+    const workspaces = new Workspaces({ home, hookRunner: runner })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
+    assert.deepEqual(await scope.hooks!.preToolUse!(call(root)), {})
+    assert.equal(calls.length, 0, 'a folder\'s own hooks run commands, which only a trusted folder may')
+    assert.deepEqual((await reportOn(workspaces.config(root))).hooks, [])
+
+    await trustFolder(workspaces.config(root))
+    await scope.refresh!()
+    assert.deepEqual(await scope.hooks!.preToolUse!(call(root)), { decision: 'deny', reason: 'not in this folder' })
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].stdin.cwd, root)
+    assert.equal(calls[0].stdin.tool_name, 'Bash')
+    const listed = (await reportOn(workspaces.config(root))).hooks
+    assert.deepEqual(listed, [{ event: 'PreToolUse', matcher: 'Bash', command: 'guard', timeout: 60, scope: 'project' }])
+  })
+
+  it('read the settings again before a prompt, so a hook the person just added counts at once', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace())
+    const { runner, calls } = hookRunner({ stdout: 'The branch is main.' })
+    const workspaces = new Workspaces({ home, hookRunner: runner })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
+    const prompt = { ...event(root), messageId: 'm1', prompt: 'hello' }
+    assert.deepEqual(await scope.hooks!.userPromptSubmit!(prompt), {})
+    await fs.mkdir(path.join(home, '.encode'), { recursive: true })
+    await fs.writeFile(path.join(home, '.encode', 'settings.json'), json({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'context' }] }] } }))
+    assert.deepEqual(await scope.hooks!.userPromptSubmit!(prompt), { context: 'The branch is main.' })
+    assert.deepEqual(calls.map((item) => item.command), ['context'])
+  })
+
+  it('run with the agent\'s environment: secrets left out, the settings\' variables added', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ ...GUARD, env: { SLACK_TOKEN: 'wanted' } }) }))
+    const { runner, calls } = hookRunner()
+    const workspaces = new Workspaces({ home, hookRunner: runner, env: { PATH: '/bin', OPENROUTER_API_KEY: 'sk-secret', GITHUB_TOKEN: 'ghp_x', EDITOR: 'vi' } })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
+    await scope.hooks!.preToolUse!(call(root))
+    const { env } = calls[0]
+    assert.equal(env.PATH, '/bin')
+    assert.equal(env.EDITOR, 'vi')
+    assert.equal(env.SLACK_TOKEN, 'wanted')
+    assert.equal(env.OPENROUTER_API_KEY, undefined)
+    assert.equal(env.GITHUB_TOKEN, undefined)
+    assert.equal(env.CLAUDE_PROJECT_DIR, root)
+  })
+
+  it('run nothing while the settings cannot be trusted, and a guard that cannot be read stops the folder', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ hooks: { PreToolUse: 'oops' } }) }))
+    const { runner, calls } = hookRunner()
+    const workspaces = new Workspaces({ home, hookRunner: runner })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
+    assert.deepEqual(await scope.hooks!.preToolUse!(call(root)), {})
+    assert.equal(calls.length, 0)
+    const verdict = scope.rules!.evaluate({ type: 'read', paths: [path.join(root, 'a.txt')] })
+    assert.equal(verdict?.decision, 'deny')
+    assert.match(verdict?.reason ?? '', /hooks\.PreToolUse must be a list/)
+  })
+
+  it('tell the conversation about a hook that failed', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: 'format' }] }] } }) }))
+    const { runner } = hookRunner({ exitCode: 1, stderr: 'prettier is not installed' })
+    const notes: string[] = []
+    const workspaces = new Workspaces({ home, hookRunner: runner })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: (text) => notes.push(text) })
+    await scope.hooks!.postToolUse!({ ...call(root), ok: true, output: 'done' })
+    assert.equal(notes.length, 1)
+    assert.match(notes[0], /PostToolUse hook "format" failed \(exit 1\): prettier is not installed/)
+  })
+})
+
+describe('checkpoints in a scope', () => {
+  const base = (root: string) => ({ sessionId: 's1', agentId: 'main', root, mode: 'code' as const })
+
+  async function open(extra: Record<string, string> = {}) {
+    const root = await fs.realpath(await tempWorkspace({ 'a.txt': 'before', ...extra }))
+    const home = await fs.realpath(await tempWorkspace())
+    const store = await fs.realpath(await tempWorkspace())
+    const warnings: string[] = []
+    const notes: string[] = []
+    const workspaces = new Workspaces({ home, checkpoints: { dir: store }, warn: (message) => warnings.push(message) })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: (text) => notes.push(text) })
+    /** What the file tools do: tell the seam, write, and let the post hook record what is there. */
+    const edit = async (turn: string, tool: string, file: string, text: string) => {
+      const previous = await fs.readFile(file).catch(() => null)
+      await scope.beforeWrite!(file, previous, { turnId: turn, toolUseId: tool })
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      await fs.writeFile(file, text)
+      await scope.hooks!.postToolUse!({ ...base(root), tool: 'Edit', toolUseId: tool, input: {}, ok: true, output: '' })
+    }
+    const begin = (turn: string) => scope.hooks!.userPromptSubmit!({ ...base(root), messageId: turn, prompt: 'go' })
+    return { root, home, store, workspaces, scope, edit, begin, warnings, notes }
+  }
+
+  it('keep what a turn changed and put it back, with paths relative to the folder', async () => {
+    const t = await open()
+    await t.begin('m1')
+    await t.edit('m1', 'u1', path.join(t.root, 'a.txt'), 'after')
+    await t.edit('m1', 'u2', path.join(t.root, 'src', 'new.ts'), 'created')
+
+    const info = await t.scope.checkpoints!.info()
+    assert.deepEqual(info, { available: true, turns: [{ turn: 'm1', at: info.turns[0].at, files: 2, outside: 0 }], canUndo: false })
+    const plan = await t.scope.checkpoints!.plan('m1')
+    assert.deepEqual(plan.files.map((file) => [file.path, file.action, file.conflict]), [['a.txt', 'restore', false], ['src/new.ts', 'delete', false]])
+
+    const outcome = await t.scope.checkpoints!.apply({ kind: 'rewind', turn: 'm1', fingerprint: plan.fingerprint })
+    assert.deepEqual(outcome, { ok: true, restored: 1, deleted: 1, skipped: [], failed: [] })
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'before')
+    assert.equal(await exists(path.join(t.root, 'src', 'new.ts')), false)
+
+    // The rewind can be undone.
+    assert.equal((await t.scope.checkpoints!.info()).canUndo, true)
+    const redo = await t.scope.checkpoints!.planRedo()
+    assert.deepEqual(redo?.files.map((file) => [file.path, file.action]), [['a.txt', 'restore'], ['src/new.ts', 'restore']])
+  })
+
+  it('refuse a plan the files have moved past, and leave a file the person changed alone unless told', async () => {
+    const t = await open()
+    await t.begin('m1')
+    await t.edit('m1', 'u1', path.join(t.root, 'a.txt'), 'agent')
+    const plan = await t.scope.checkpoints!.plan('m1')
+    await fs.writeFile(path.join(t.root, 'a.txt'), 'the person edited this')
+    const stale = await t.scope.checkpoints!.apply({ kind: 'rewind', turn: 'm1', fingerprint: plan.fingerprint })
+    assert.equal(stale.ok, false)
+    assert.equal(!stale.ok && stale.reason, 'stale')
+
+    const fresh = await t.scope.checkpoints!.plan('m1')
+    assert.deepEqual(fresh.files.map((file) => [file.action, file.conflict]), [['restore', true]])
+    const kept = await t.scope.checkpoints!.apply({ kind: 'rewind', turn: 'm1', fingerprint: fresh.fingerprint })
+    assert.deepEqual(kept.ok && kept.skipped, [{ path: 'a.txt', reason: 'changed since the agent last wrote it' }])
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'the person edited this')
+    const forced = await t.scope.checkpoints!.apply({ kind: 'rewind', turn: 'm1', fingerprint: fresh.fingerprint, force: true })
+    assert.equal(forced.ok && forced.restored, 1)
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'before')
+  })
+
+  it('refuse the write when the earlier version cannot be kept', async () => {
+    const t = await open()
+    await t.begin('m1')
+    await fs.rm(t.store, { recursive: true, force: true })
+    await fs.writeFile(t.store, 'a file where the store should be')
+    await assert.rejects(
+      () => t.scope.beforeWrite!(path.join(t.root, 'a.txt'), Buffer.from('before'), { turnId: 'm1', toolUseId: 'u1' }),
+      /could not keep the earlier version of a\.txt so that it can be put back .*so the file was not changed/,
+    )
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'before')
+  })
+
+  it('hear of a record that cannot be updated once, and still run the prompt hooks after it', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'screen' }] }] } }) }))
+    const store = path.join(await fs.realpath(await tempWorkspace()), 'store')
+    await fs.writeFile(store, 'a file where the store should be')
+    const { runner, calls } = hookRunner({ exitCode: 2, stderr: 'no secrets in prompts' })
+    const notes: string[] = []
+    const workspaces = new Workspaces({ home, checkpoints: { dir: store }, hookRunner: runner })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: (text) => notes.push(text) })
+    const prompt = (messageId: string) => scope.hooks!.userPromptSubmit!({ ...base(root), messageId, prompt: 'go' })
+    // The guard still sees the prompt, and still refuses it, although the record failed before it.
+    assert.deepEqual(await prompt('m1'), { block: 'no secrets in prompts' })
+    assert.deepEqual(await prompt('m2'), { block: 'no secrets in prompts' })
+    assert.equal(calls.length, 2)
+    assert.equal(notes.length, 1)
+    assert.match(notes[0], /could not update the record of what the agent changes/)
+    assert.deepEqual(await scope.checkpoints!.info().then((info) => info.available), true)
+  })
+
+  it('count the extra folders the settings name as part of the folder once they apply', async () => {
+    const shared = await fs.realpath(await tempWorkspace({ 'lib.ts': 'shared' }))
+    const t = await open({ '.encode/settings.local.json': json({ permissions: { additionalDirectories: [shared] } }) })
+    await trustFolder(t.workspaces.config(t.root))
+    await t.scope.refresh!()
+    await t.begin('m1')
+    await t.edit('m1', 'u1', path.join(shared, 'lib.ts'), 'changed')
+    const info = await t.scope.checkpoints!.info()
+    assert.deepEqual(info.turns.map((turn) => [turn.files, turn.outside]), [[1, 0]])
+    const plan = await t.scope.checkpoints!.plan('m1')
+    assert.deepEqual(plan.files.map((file) => file.path), [path.join(shared, 'lib.ts')], 'a file outside the folder is shown in full')
+  })
+
+  it('offer nothing where no store was given', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace())
+    const scope = await new Workspaces({ home }).scope({ sessionId: 's1', root, notice: () => undefined })
+    assert.equal(scope.checkpoints, undefined)
+    assert.equal(scope.beforeWrite, undefined)
   })
 })

@@ -47,6 +47,12 @@ primary platform; the code stays cross-platform.
   and shows whether the folder is trusted. A folder you open is not trusted: its own settings can take
   permissions away but cannot give any until you trust the folder and approve what they say, and a banner tells
   you when a pull changed them. If a settings file cannot be read, nothing runs in that folder until it is fixed.
+- **Hooks, and a way back.** Commands you set under `hooks` in a settings file (Claude Code's format) run before and
+  after tool calls, when you send a message, and when the agent stops; a `PreToolUse` hook that exits with 2 refuses
+  the call. A project's hooks wait until you trust the folder. Every file the agent's tools change is kept first, so
+  the **Rewind** button on any of your requests can put the files back to before it, and the conversation with them if
+  you like; a file you edited since is left alone unless you say otherwise, and **Undo** brings the changes back.
+  Changes made by commands (installs, builds, git) are not recorded.
 - **Its own look.** Dark or light (or follow Windows), four accents, high contrast,
   compact density and reduced motion, under **Settings → Appearance**. Text is in Windows' own
   fonts at Codex's sizes (Segoe UI 14 px, Consolas 12 px); choose eNCode's Inter and
@@ -220,14 +226,14 @@ apps/desktop/                 the Electron app (@encode/desktop)
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
-packages/checkpoints/         what the file tools changed, saved before each change, and put back on request
+packages/checkpoints/         what the file tools changed, saved before each change, and put back on request (the Rewind dialog's engine)
 packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
 packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
-packages/hooks/               user hooks in Claude Code's format
+packages/hooks/               user hooks in Claude Code's format, run in the agent's shell and environment
 packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
@@ -236,7 +242,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web, and the Computer tool with its Windows helper
-packages/workspace/           a folder's permissions as one snapshot: settings, trust, rules, and what the Permissions screen may do
+packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, and the record behind Rewind
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
@@ -274,6 +280,9 @@ covers:
 - permissions: "Always allow" saving a rule and trusting the folder, the same command then running unasked while a
   different one asks, settings that arrive from a pull waiting behind a banner, the Permissions screen, a rule added
   and removed by hand, and trust taken back;
+- hooks and rewind: a folder's hooks staying quiet until it is trusted, then logging each prompt and change of a file
+  while a guard refuses a command before it asks; the Rewind dialog putting the agent's changes back (files only), Undo,
+  a file edited since being left alone, and going back in the conversation too;
 - compaction, with a model whose window is only a little larger than eNCode's own instructions and tools;
 - the About box (version and commit) and the diagnostics report, which must hold no key.
 

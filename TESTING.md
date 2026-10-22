@@ -69,6 +69,27 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 What is most useful to hear: anything that asked when a rule said it would not, anything that did not ask when it
 should have, and any message you could not understand.
 
+## Hooks and rewind
+
+- Ask the agent to change a file and add another. Under each of your requests, **Rewind** (the arrow next to Copy)
+  opens a dialog that lists every file the agent changed since: what will be put back and what will be deleted. Choose
+  **Code only** and press **Put the files back**; the files should be exactly as they were. Press **Undo** in the notice
+  that appears and they should come back.
+- Edit one of those files yourself after the agent did, then rewind: it should be marked **Changed since** and left
+  alone unless you tick the box to overwrite it. The agent's other files still go back.
+- **Code and conversation** also goes back in the conversation: your request returns to the message box so you can
+  change it and send it again.
+- Changes made by commands the agent ran (installs, builds, git) are not recorded, and the dialog says so. Open a
+  copy of a project you care about.
+- Hooks: add this to `.encode/settings.local.json` in a project (only you have that file):
+  `{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "echo \"no commands here\" 1>&2; exit 2" } ] } ] } }`
+  Trust the folder under **Settings → Permissions**, then ask for a command: it should be refused with that text and
+  never ask. Take the trust back and it should ask again. A typo in the hooks of a settings file should stop work in
+  that folder and say where, rather than quietly drop the guard.
+
+What is most useful to hear: any change the rewind did not put back, any file it overwrote that you did not tell it
+to, and any hook that ran when the folder was not trusted.
+
 ## Computer use
 
 **Settings → Agent → Let the agent use this computer** is off until you turn it on. With it on, ask the agent to do

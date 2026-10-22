@@ -31,7 +31,7 @@ import { createDefaultAssessor, refuseEverything, type RuleJudge } from './appro
 import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
-import { AgentSession, type RememberResult, type SessionEnv } from './session'
+import { AgentSession, type RememberResult, type SessionCheckpoints, type SessionEnv } from './session'
 import type { SessionLog } from './session-records'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
@@ -44,7 +44,11 @@ import type {
   AgentStatus,
   ApprovalAnswer,
   BackgroundJob,
+  CheckpointInfo,
   PlanRequest,
+  RewindOutcome,
+  RewindPlan,
+  RewindRequest,
   RuleScope,
   SessionGoal,
   SessionSummary,
@@ -67,6 +71,8 @@ export interface SessionScope {
   refresh?: () => Promise<void>
   remember?(rules: string[], scope: RuleScope): Promise<RememberResult>
   beforeWrite?: ToolContext['beforeWrite']
+  /** What the session's file tools changed, and the means to put it back. */
+  checkpoints?: SessionCheckpoints
   /** Options for this session's shells, asked for each time one is made, merged over the host's. */
   shell?: () => Omit<AgentShellOptions, 'root'>
   /** The session closed: let go of what was held for it. */
@@ -89,8 +95,11 @@ export interface HostOptions {
   platform?: NodeJS.Platform
   hooks?: AgentHooks
   assessor?: ShellCommandAssessor
-  /** Settings, trust, rules, hooks and checkpoints of the folder a session works in. Asked once for each session that has a folder. */
-  scope?(request: { sessionId: string; root: string }): SessionScope | Promise<SessionScope>
+  /**
+   * Settings, trust, rules, hooks and checkpoints of the folder a session works in. Asked once for each session that has a
+   * folder. `notice` puts a line in the session's conversation (a hook that failed, a store that could not be read).
+   */
+  scope?(request: { sessionId: string; root: string; notice(text: string): void }): SessionScope | Promise<SessionScope>
   web?: WebAccess
   /** Options for the agent's shells: sandboxing, variables to keep. */
   shell?: Omit<AgentShellOptions, 'root'>
@@ -201,6 +210,7 @@ export class AgentHost {
       ...(scope?.refresh ? { refresh: scope.refresh } : {}),
       ...(scope?.remember ? { remember: scope.remember } : {}),
       ...(scope?.release ? { release: scope.release } : {}),
+      ...(scope?.checkpoints ? { checkpoints: scope.checkpoints } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
       skills: createSkills(() => this.skillSources(root)),
@@ -228,7 +238,7 @@ export class AgentHost {
     let scope: SessionScope | undefined
     if (root && this.o.scope) {
       try {
-        scope = await this.o.scope({ sessionId: log.id, root })
+        scope = await this.o.scope({ sessionId: log.id, root, notice: (text) => this.loaded.get(log.id)?.tell(text) })
       } catch (error) {
         // Without its rules a session must not run with the permissive defaults: it opens, and every tool call fails.
         this.o.warn?.(`Could not load the settings of ${root}: ${error instanceof Error ? error.message : String(error)}`)
@@ -435,6 +445,26 @@ export class AgentHost {
   /** Goes back to before one of the user's requests; resolves to its text. */
   async rewind(sessionId: string, entryId: string): Promise<{ text: string }> {
     return (await this.open(sessionId)).rewind(entryId)
+  }
+
+  /** The requests after which files changed, and whether a rewind can be undone. */
+  async checkpointInfo(sessionId: string): Promise<CheckpointInfo> {
+    return (await this.open(sessionId)).checkpointInfo()
+  }
+
+  /** What putting the files back to before one of the user's requests would do; nothing changes. */
+  async rewindPlan(sessionId: string, turn: string): Promise<RewindPlan> {
+    return (await this.open(sessionId)).rewindPlan(turn)
+  }
+
+  /** What undoing the latest rewind would do, or null. */
+  async redoPlan(sessionId: string): Promise<RewindPlan | null> {
+    return (await this.open(sessionId)).redoPlan()
+  }
+
+  /** Puts files back as a plan said, and the conversation with them if asked. */
+  async rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome> {
+    return (await this.open(sessionId)).rewindApply(request)
   }
 
   /** The conversation as Markdown and JSON, for the caller to save. */

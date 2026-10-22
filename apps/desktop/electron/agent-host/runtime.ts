@@ -9,6 +9,7 @@
  * the key was entered for.
  */
 import fs from 'node:fs'
+import path from 'node:path'
 import { AgentHost, NO_MODEL_MESSAGE, createDemoClient, serveHost, type AgentSettings, type HostOptions } from '@encode/core'
 import { Peer, RpcError, type Port } from '@encode/protocol'
 import {
@@ -245,7 +246,13 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       stateTimer.unref?.()
     }
     // The settings, trust and permission rules of each folder a session works in; the Permissions screen reads the same pictures.
-    workspaces = new Workspaces({ home: init.home, warn: (message) => peer.notify('warn', message) })
+    workspaces = new Workspaces({
+      home: init.home,
+      warn: (message) => peer.notify('warn', message),
+      ...(init.checkpointsDir ? { checkpoints: { dir: init.checkpointsDir } } : {}),
+      // Hooks are told where the conversation is written, as Claude Code's are.
+      transcriptPath: (sessionId) => path.join(init.dir, `${sessionId}.jsonl`),
+    })
     const created = new AgentHost({
       dir: init.dir,
       home: init.home,

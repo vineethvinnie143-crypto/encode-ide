@@ -158,6 +158,74 @@ export interface BackgroundJob {
   output: string
 }
 
+// ------------------------------------------------------------ checkpoints and rewind
+
+/** A request of the user's after which the agent's file tools changed files, for the rewind picker. */
+export interface RewindTurn {
+  /** The request's id: the id of its entry in the conversation. */
+  turn: string
+  at: number
+  /** Files in the workspace the agent's tools changed in this turn. */
+  files: number
+  /** Files changed elsewhere, which a rewind does not restore. */
+  outside: number
+}
+
+export interface CheckpointInfo {
+  /** False where nothing is recorded: no folder is open, or the store could not be opened (`problem` says why). */
+  available: boolean
+  problem?: string
+  /** Oldest first. */
+  turns: RewindTurn[]
+  /** The latest rewind can still be undone. */
+  canUndo: boolean
+}
+
+export type RewindAction = 'restore' | 'delete' | 'unchanged' | 'skip'
+
+export interface RewindFile {
+  /** Relative to the workspace root where the file is inside it. */
+  path: string
+  action: RewindAction
+  /** Why the file is skipped. */
+  reason?: string
+  /** Not what the agent last left there: putting it back would overwrite someone else's change. */
+  conflict: boolean
+}
+
+/** What a rewind (or the undoing of one) would do, shown before it is done. */
+export interface RewindPlan {
+  kind: 'rewind' | 'redo'
+  turn: string
+  /** False when nothing was recorded for the turn. */
+  known: boolean
+  files: RewindFile[]
+  /** Names the state of the disk and the history the plan was made from; applying a plan whose fingerprint no longer matches is refused. */
+  fingerprint: string
+}
+
+export interface RewindRequest {
+  kind: 'rewind' | 'redo'
+  turn: string
+  fingerprint: string
+  /** Also put back files that changed since the agent last wrote them. */
+  force?: boolean
+  /** Also go back in the conversation to just before the request (for a rewind; the request comes back as text). */
+  conversation?: boolean
+}
+
+export type RewindOutcome =
+  | {
+      ok: true
+      restored: number
+      deleted: number
+      skipped: Array<{ path: string; reason: string }>
+      failed: Array<{ path: string; error: string }>
+      /** The request, to be edited and sent again, when the conversation went back too. */
+      text?: string
+    }
+  | { ok: false; reason: 'stale' | 'unavailable' | 'busy' | 'failed'; message: string }
+
 export type AgentEventBody =
   | { type: 'status'; status: AgentStatus }
   | { type: 'entry'; entry: ConversationEntry }

@@ -422,6 +422,33 @@ describe('what a rewind will not touch', () => {
     assert.equal(t.mem.text('/home/u/.bashrc'), 'changed')
   })
 
+  it('follows a list of folders that changes while the session runs', async () => {
+    const t = setup()
+    const roots = [t.root]
+    const service = new CheckpointService({ fs: t.mem, dir: t.store, roots: () => roots, sessionId: 'moving', platform: 'linux', now: () => 5 })
+    const edit = async (turn: string, tool: string, text: string) => {
+      await service.beforeWrite('/shared/lib.ts', t.mem.get('/shared/lib.ts') ?? null, { turnId: turn, toolUseId: tool })
+      t.mem.put('/shared/lib.ts', text)
+      await service.afterTool(tool)
+    }
+    t.mem.put('/shared/lib.ts', 'original')
+    await service.beginTurn('t1')
+    await edit('t1', 'u1', 'one')
+    assert.deepEqual((await service.turns())[0].outside, ['/shared/lib.ts'], 'a folder that is not on the list is noted, not kept')
+
+    roots.push('/shared')
+    await service.beginTurn('t2')
+    await edit('t2', 'u2', 'two')
+    assert.deepEqual((await service.turns())[1].files, ['/shared/lib.ts'])
+    const result = done(await service.apply(await service.planRewind('t2')))
+    assert.deepEqual(result.restored, ['/shared/lib.ts'])
+    assert.equal(t.mem.text('/shared/lib.ts'), 'one')
+
+    roots.pop()
+    const after = await service.planRewind('t2')
+    assert.deepEqual(after.files.map((file) => [file.action, file.reason]), [['skip', 'outside the workspace']], 'a folder taken off the list is not written to')
+  })
+
   it('cannot keep or restore a file larger than the limit', async () => {
     const t = setup({ maxFileBytes: 10 })
     t.mem.put(t.file('big.ts'), 'x'.repeat(40))

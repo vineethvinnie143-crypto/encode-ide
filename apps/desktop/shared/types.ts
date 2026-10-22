@@ -231,6 +231,17 @@ export interface PermissionRuleView {
   active: boolean
 }
 
+/** One hook command that runs, as the Permissions screen lists it. */
+export interface PermissionHookView {
+  event: string
+  /** The tool names it is for, as a regular expression; empty for everything. */
+  matcher: string
+  command: string
+  /** Seconds it may run. */
+  timeout: number
+  scope: 'user' | 'project' | 'local' | 'cli'
+}
+
 /** A folder's settings, trust and rules as the Permissions screen shows them. */
 export interface PermissionsReport {
   root: string
@@ -250,6 +261,8 @@ export interface PermissionsReport {
   additionalDirectories: string[]
   /** Names only. */
   envNames: string[]
+  /** The hooks that run: the person's own, and the folder's once it is trusted and its settings approved. */
+  hooks: PermissionHookView[]
   /** The mode settings ask sessions to start in, if any. */
   defaultMode?: string
   files: Record<'user' | 'project' | 'local', string>
@@ -265,6 +278,72 @@ export type PermissionsAction =
 
 /** The folder as it is after an action, with what happened in words. */
 export type PermissionsOutcome = { ok: true; report: PermissionsReport; note?: string } | { ok: false; reason: string; report: PermissionsReport }
+
+/** A request of the person's after which the agent's file tools changed files, for the rewind menu. */
+export interface RewindTurn {
+  /** The request's id: the id of its entry in the conversation. */
+  turn: string
+  at: number
+  /** Files in the folder the agent's tools changed in this request. */
+  files: number
+  /** Files changed elsewhere, which a rewind does not restore. */
+  outside: number
+}
+
+export interface CheckpointInfo {
+  /** False where nothing is recorded: no folder is open, or the record could not be opened (`problem` says why). */
+  available: boolean
+  problem?: string
+  /** Oldest first. */
+  turns: RewindTurn[]
+  /** The latest rewind can still be undone. */
+  canUndo: boolean
+}
+
+export type RewindAction = 'restore' | 'delete' | 'unchanged' | 'skip'
+
+export interface RewindFile {
+  /** Relative to the folder where the file is inside it. */
+  path: string
+  action: RewindAction
+  /** Why the file is skipped. */
+  reason?: string
+  /** Not what the agent last left there: putting it back would overwrite someone else's change. */
+  conflict: boolean
+}
+
+/** What a rewind (or the undoing of one) would do, shown before it is done. */
+export interface RewindPlan {
+  kind: 'rewind' | 'redo'
+  turn: string
+  /** False when nothing was recorded for the request. */
+  known: boolean
+  files: RewindFile[]
+  /** Names what the plan was made from; a plan the files have moved past is refused. */
+  fingerprint: string
+}
+
+export interface RewindRequest {
+  kind: 'rewind' | 'redo'
+  turn: string
+  fingerprint: string
+  /** Also put back files that changed since the agent last wrote them. */
+  force?: boolean
+  /** Also go back in the conversation to just before the request (the request comes back as text). */
+  conversation?: boolean
+}
+
+export type RewindOutcome =
+  | {
+      ok: true
+      restored: number
+      deleted: number
+      skipped: Array<{ path: string; reason: string }>
+      failed: Array<{ path: string; error: string }>
+      /** The request, to be edited and sent again, when the conversation went back too. */
+      text?: string
+    }
+  | { ok: false; reason: 'stale' | 'unavailable' | 'busy' | 'failed'; message: string }
 
 export interface ToolCall {
   id: string
@@ -533,6 +612,16 @@ export interface EncodeApi {
     export(sessionId: string, targetPath?: string): Promise<string | null>
     plan(sessionId: string): Promise<PlanRequest | null>
     setPlan(sessionId: string, plan: PlanRequest | null): Promise<void>
+    /** The requests after which files changed, and whether the latest rewind can be undone. */
+    checkpoints(sessionId: string): Promise<CheckpointInfo>
+    /** What putting the files back to just before a request would do; nothing changes. */
+    rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
+    /** What undoing the latest rewind would do, or null. */
+    redoPlan(sessionId: string): Promise<RewindPlan | null>
+    /** Puts files back as a plan said, and the conversation with them if asked. Only while the agent is idle. */
+    rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome>
+    /** Goes back in the conversation to just before a request, which comes back as text to edit; the files stay as they are. */
+    rewindConversation(sessionId: string, entryId: string): Promise<{ text: string }>
     approve(requestId: string, answer: boolean | ApprovalAnswer): Promise<void>
     answer(requestId: string, answer: string): Promise<void>
     onEvent(cb: (e: AgentEvent) => void): () => void

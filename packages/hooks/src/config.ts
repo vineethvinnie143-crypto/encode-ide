@@ -68,62 +68,82 @@ export function compileMatcher(source: string): HookMatcher | string {
   }
 }
 
+export interface ParsedHooks {
+  groups: HookGroup[]
+  problems: string[]
+  /**
+   * The problems after which a PreToolUse hook, the one kind that can stop a call, may be missing: the whole value
+   * cannot be read, or an entry under PreToolUse (or a misspelling of it) is skipped. Everything else a typo costs is
+   * a convenience, listed in `problems` only.
+   */
+  unsafe: string[]
+}
+
 /** Reads one settings file's `hooks` value. */
-export function parseHooksConfig(raw: unknown, origin: string): { groups: HookGroup[]; problems: string[] } {
+export function parseHooksConfig(raw: unknown, origin: string): ParsedHooks {
   const groups: HookGroup[] = []
   const problems: string[] = []
-  if (raw === undefined) return { groups, problems }
-  if (!isObject(raw)) return { groups, problems: ['hooks must be an object of event names'] }
+  const unsafe: string[] = []
+  const report = (text: string, guard: boolean) => {
+    problems.push(text)
+    if (guard) unsafe.push(text)
+  }
+  if (raw === undefined) return { groups, problems, unsafe }
+  if (!isObject(raw)) {
+    report('hooks must be an object of event names', true)
+    return { groups, problems, unsafe }
+  }
   for (const [event, entries] of Object.entries(raw)) {
     if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
-      problems.push(`hooks.${event} is not an event eNCode runs hooks for (${HOOK_EVENTS.join(', ')})`)
+      report(`hooks.${event} is not an event eNCode runs hooks for (${HOOK_EVENTS.join(', ')})`, event.toLowerCase() === 'pretooluse')
       continue
     }
     const name = event as HookEventName
+    const guard = name === 'PreToolUse'
     if (!Array.isArray(entries)) {
-      problems.push(`hooks.${event} must be a list`)
+      report(`hooks.${event} must be a list`, guard)
       continue
     }
     for (const [index, entry] of entries.entries()) {
       const where = `hooks.${event}[${index}]`
       if (!isObject(entry)) {
-        problems.push(`${where} must be an object with a hooks list`)
+        report(`${where} must be an object with a hooks list`, guard)
         continue
       }
       let matcher: HookMatcher = { source: '', test: () => true }
       if (entry.matcher !== undefined) {
         if (typeof entry.matcher !== 'string') {
-          problems.push(`${where}.matcher must be a string`)
+          report(`${where}.matcher must be a string`, guard)
           continue
         }
         if (MATCHED_EVENTS.has(name)) {
           const compiled = compileMatcher(entry.matcher)
           if (typeof compiled === 'string') {
-            problems.push(`${where}: ${compiled}`)
+            report(`${where}: ${compiled}`, guard)
             continue
           }
           matcher = compiled
         }
       }
       if (!Array.isArray(entry.hooks)) {
-        problems.push(`${where}.hooks must be a list`)
+        report(`${where}.hooks must be a list`, guard)
         continue
       }
       const hooks: CommandHook[] = []
       for (const [position, hook] of entry.hooks.entries()) {
         const at = `${where}.hooks[${position}]`
         if (!isObject(hook) || hook.type !== 'command') {
-          problems.push(`${at} must be {"type": "command", "command": "..."}; other hook types are not supported`)
+          report(`${at} must be {"type": "command", "command": "..."}; other hook types are not supported`, guard)
           continue
         }
         if (typeof hook.command !== 'string' || !hook.command.trim()) {
-          problems.push(`${at}.command must be a non-empty string`)
+          report(`${at}.command must be a non-empty string`, guard)
           continue
         }
         let timeout = DEFAULT_TIMEOUT_SECONDS
         if (hook.timeout !== undefined) {
           if (typeof hook.timeout !== 'number' || !Number.isFinite(hook.timeout) || hook.timeout <= 0) {
-            problems.push(`${at}.timeout must be a positive number of seconds`)
+            report(`${at}.timeout must be a positive number of seconds`, guard)
             continue
           }
           timeout = Math.min(hook.timeout, MAX_TIMEOUT_SECONDS)
@@ -133,5 +153,5 @@ export function parseHooksConfig(raw: unknown, origin: string): { groups: HookGr
       if (hooks.length) groups.push({ event: name, matcher, hooks, origin })
     }
   }
-  return { groups, problems }
+  return { groups, problems, unsafe }
 }
