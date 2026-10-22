@@ -11,7 +11,7 @@ import {
   type SettingsScope,
 } from '@encode/config'
 import type { RuleBehavior } from '@encode/permissions'
-import type { WorkspaceConfig } from './config'
+import type { ConfigSnapshot, WorkspaceConfig } from './config'
 import { keepLocalSettingsOutOfGit } from './remember'
 
 /** One rule as the Settings screen lists it. */
@@ -21,6 +21,17 @@ export interface RuleView {
   scope: SettingsScope
   /** False for a rule of the folder's that waits for the user to trust the folder and approve its settings. */
   active: boolean
+}
+
+/** One hook command that applies, as the Settings screen lists it. */
+export interface HookView {
+  event: string
+  /** The tool names it is for, as a regular expression; empty for everything. */
+  matcher: string
+  command: string
+  /** Seconds it may run. */
+  timeout: number
+  scope: SettingsScope
 }
 
 /** A folder's permissions as the Settings screen shows them. */
@@ -42,12 +53,33 @@ export interface WorkspaceReport {
   additionalDirectories: string[]
   /** Names only. */
   envNames: string[]
+  /** The hooks that run: the person's own, and the folder's once it is trusted and its settings approved. */
+  hooks: HookView[]
   /** The mode settings ask sessions to start in, if any. */
   defaultMode?: string
   files: Record<'user' | 'project' | 'local', string>
 }
 
 const MAX_WAITING_CHARS = 6_000
+const MAX_HOOKS_SHOWN = 100
+const MAX_COMMAND_CHARS = 600
+
+function hooksOf(snapshot: ConfigSnapshot): HookView[] {
+  const views: HookView[] = []
+  for (const group of snapshot.hooks) {
+    for (const hook of group.hooks) {
+      views.push({
+        event: group.event,
+        matcher: group.matcher.source,
+        command: hook.command.length > MAX_COMMAND_CHARS ? `${hook.command.slice(0, MAX_COMMAND_CHARS)}…` : hook.command,
+        timeout: hook.timeout,
+        scope: group.origin as SettingsScope,
+      })
+      if (views.length >= MAX_HOOKS_SHOWN) return views
+    }
+  }
+  return views
+}
 
 /** The folder's picture, read over first. */
 export async function reportOn(config: WorkspaceConfig, platform: NodeJS.Platform = process.platform): Promise<WorkspaceReport> {
@@ -85,6 +117,7 @@ export async function reportOn(config: WorkspaceConfig, platform: NodeJS.Platfor
     rules,
     additionalDirectories: snapshot.extraRoots,
     envNames: Object.keys(effective.env).sort(),
+    hooks: hooksOf(snapshot),
     ...(effective.defaultMode ? { defaultMode: effective.defaultMode } : {}),
     files: settingsFiles(config.home, config.root, platform === 'win32' ? path.win32 : path.posix),
   }

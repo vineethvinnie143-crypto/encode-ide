@@ -604,6 +604,7 @@ async function runProviderPhase() {
   await runSubagentChecks()
   await runWebChecks()
   await runPermissionChecks()
+  await runRewindChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -771,6 +772,150 @@ async function runPermissionChecks() {
   await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   console.log('[smoke] permissions: ok')
+}
+
+/**
+ * Hooks and rewind. The folder's hooks wait for trust; once it is trusted they log what the agent does and a guard refuses
+ * a command before it can ask. The Rewind dialog then puts one request's changes back (files only), brings them back
+ * with Undo, leaves alone a file the person changed since, and last goes back in the conversation too.
+ */
+async function runRewindChecks() {
+  console.log('[smoke] --- hooks and rewind ---')
+  const utilsFile = path.join(demoPath, 'src', 'utils.ts')
+  const createdFile = path.join(demoPath, 'rewind-new.txt')
+  const noteFile = path.join(demoPath, 'untrusted-note.txt')
+  const logFile = path.join(demoPath, 'hook-log.txt')
+  const original = await fs.readFile(utilsFile, 'utf8')
+  // A Windows PowerShell would write UTF-16: take the zero bytes out so the lines can be compared.
+  const read = async (file) => {
+    const text = await fs.readFile(file, 'utf8').catch(() => null)
+    return text === null ? null : text.split(String.fromCharCode(0)).join('')
+  }
+  const logged = async () => ((await read(logFile)) ?? '').split(/\r?\n/).filter(Boolean)
+  const expectFile = async (file, expected, what) => {
+    const text = await read(file)
+    if (text !== expected) throw new Error(`${what}: expected ${JSON.stringify(expected)}, found ${JSON.stringify(text)}`)
+  }
+  const openRewind = async (index) => {
+    if (!(await evaluate(`(() => {
+      const button = [...document.querySelectorAll('.turn-user')][${index}]?.querySelector('button[aria-label="Rewind to before this request"]')
+      if (!button) return false
+      button.click()
+      return true
+    })()`))) throw new Error(`The request ${index + 1} has no Rewind button`)
+    await waitFor("!!document.querySelector('.rewind-dialog') && !document.querySelector('.rewind-loading')", 10000, 'the Rewind dialog has its plan')
+  }
+  const rows = () => evaluate(`[...document.querySelectorAll('.rewind-file')].map((row) => [
+    row.querySelector('.rewind-file-path').textContent,
+    row.querySelector('.rewind-file-action').lastChild.textContent,
+    row.classList.contains('is-conflict'),
+  ]).sort((a, b) => a[0].localeCompare(b[0]))`)
+  const choose = (value) => evaluate(`(() => { const input = document.querySelector('input[name="rewind-choice"][value="${value}"]'); input?.click(); return Boolean(input) })()`)
+  const applyDialog = async () => {
+    if (!(await click('.rewind-dialog .ui-dialog-foot .btn.primary'))) throw new Error('The Rewind dialog has no primary button')
+    await waitFor("!document.querySelector('.rewind-dialog')", 10000, 'the Rewind dialog closes')
+  }
+  const toastIs = (text) => waitFor(`[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === ${JSON.stringify(text)})`, 8000, `the notice "${text}"`)
+
+  await evaluate('window.eNCode.agent.reset()')
+  await fs.mkdir(path.join(demoPath, '.encode'), { recursive: true })
+  await fs.writeFile(
+    path.join(demoPath, '.encode', 'settings.json'),
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo "blocked by the guard hook" 1>&2; exit 2' }] }],
+        UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo prompt >> hook-log.txt' }] }],
+        PostToolUse: [{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'echo changed >> hook-log.txt' }] }],
+      },
+    }),
+  )
+
+  // Not trusted yet: the folder's hooks are only read, so the request runs without the log or the guard.
+  const before = await evaluate('window.eNCode.permissions.report()')
+  if (before.trusted || before.hooks.length) throw new Error(`Hooks of an untrusted folder should not apply: ${JSON.stringify(before.hooks)}`)
+  if (!before.waiting.some((item) => item.text.includes('PreToolUse'))) throw new Error('The hooks that wait should be readable before they are approved')
+  await sendPrompt('[scenario:hooks-untrusted] Write a note.')
+  const first = await driveAgent('18-hooks-untrusted')
+  if (first.length) throw new Error(`Writing a file should not ask: ${JSON.stringify(first)}`)
+  await expectFile(noteFile, 'written before the folder was trusted\n', 'the first request wrote its note')
+  if ((await read(logFile)) !== null) throw new Error('A hook of an untrusted folder ran')
+
+  const trust = await evaluate("window.eNCode.permissions.act({ type: 'trust' })")
+  if (!trust.ok || trust.report.hooks.length !== 3) throw new Error(`Trusting the folder should bring its three hooks in force: ${JSON.stringify(trust)}`)
+  // The banner that said the settings wait reads the folder again when the window is back in front.
+  await evaluate("window.dispatchEvent(new Event('focus'))")
+  await waitFor("!document.querySelector('.trust-banner')", 8000, 'the banner goes once the folder is trusted')
+
+  // Trusted: the prompt and each change of a file are logged, and the guard refuses the command without asking.
+  await sendPrompt('[scenario:hooks-check] Change add, add a file and run a command.')
+  const second = await driveAgent('18-hooks-check')
+  if (second.length) throw new Error(`The guard should refuse the command before it asks: ${JSON.stringify(second)}`)
+  const log = await logged()
+  console.log('[smoke] hook log:', JSON.stringify(log))
+  if (JSON.stringify(log) !== JSON.stringify(['prompt', 'changed', 'changed'])) throw new Error(`The hooks logged ${JSON.stringify(log)}`)
+  const guarded = (await toolOutputs()).filter((entry) => entry.name === 'Bash')
+  if (guarded.length !== 1 || guarded[0].state !== 'rejected' || !guarded[0].output.includes('blocked by the guard hook')) {
+    throw new Error(`The command should have been refused with the guard's words: ${JSON.stringify(guarded)}`)
+  }
+  const changedUtils = await read(utilsFile)
+  if (!changedUtils.includes('return b + a')) throw new Error('The agent did not change src/utils.ts')
+  await expectFile(createdFile, 'created by the hooks check\n', 'the agent created a file')
+
+  // The dialog lists what this request changed, and nothing of the first request.
+  await openRewind(1)
+  const plan = await rows()
+  console.log('[smoke] rewind plan:', JSON.stringify(plan))
+  if (JSON.stringify(plan) !== JSON.stringify([['rewind-new.txt', 'Delete', false], ['src/utils.ts', 'Put back', false]])) throw new Error(`The plan lists ${JSON.stringify(plan)}`)
+  await screenshot('18-rewind-dialog.png')
+  if (!(await choose('code'))) throw new Error('The dialog offers no "Code only"')
+  await applyDialog()
+  await toastIs('Put back 1 file and deleted 1 file.')
+  await expectFile(utilsFile, original, 'src/utils.ts is as it was')
+  if ((await read(createdFile)) !== null) throw new Error('The file the agent created should be gone')
+  await expectFile(noteFile, 'written before the folder was trusted\n', 'the first request is left as it was')
+  if ((await evaluate("document.querySelectorAll('.turn-user').length")) !== 2) throw new Error('A rewind of the files alone should keep the conversation')
+
+  // Undo brings both back.
+  if (!(await click('.toast-action', 'Undo'))) throw new Error('The notice offers no Undo')
+  await waitFor("!!document.querySelector('.rewind-dialog') && !document.querySelector('.rewind-loading') && document.querySelectorAll('.rewind-file').length === 2", 10000, 'the dialog for undoing')
+  await applyDialog()
+  await toastIs('Brought back 2 files.')
+  if (!(await read(utilsFile)).includes('return b + a')) throw new Error('Undo did not bring back the change to src/utils.ts')
+  await expectFile(createdFile, 'created by the hooks check\n', 'Undo brought back the file')
+
+  // A file the person changed since is left alone unless they say otherwise; the rest still goes back.
+  await fs.writeFile(utilsFile, `${changedUtils}// my own edit\n`)
+  await openRewind(1)
+  await choose('code')
+  const clash = await rows()
+  console.log('[smoke] rewind plan after an edit:', JSON.stringify(clash))
+  if (JSON.stringify(clash) !== JSON.stringify([['rewind-new.txt', 'Delete', false], ['src/utils.ts', 'Put back', true]])) throw new Error(`The plan lists ${JSON.stringify(clash)}`)
+  if ((await evaluate("document.querySelector('.rewind-overwrite input')?.checked")) !== false) throw new Error('Overwriting a file the person changed must start unticked')
+  await screenshot('18-rewind-conflict.png')
+  await applyDialog()
+  await waitFor("[...document.querySelectorAll('.toast-text')].some((node) => node.textContent.startsWith('Deleted 1 file. 1 file left alone (src/utils.ts: '))", 8000, 'the notice about the file left alone')
+  if (!(await read(utilsFile)).includes('// my own edit')) throw new Error('The person’s own edit was overwritten')
+  if ((await read(createdFile)) !== null) throw new Error('The file the agent created should be gone')
+
+  // Both: the files go back, overwriting the edit when told to, and so does the conversation, with the request to edit.
+  await openRewind(1)
+  if (!(await evaluate("document.querySelector('input[name=\"rewind-choice\"][value=\"both\"]')?.checked"))) throw new Error('"Code and conversation" should be the first choice')
+  await evaluate("document.querySelector('.rewind-overwrite input')?.click()")
+  await applyDialog()
+  await toastIs('Put back 1 file. Went back in the conversation.')
+  await expectFile(utilsFile, original, 'src/utils.ts is as it was, with the edit overwritten')
+  await waitFor("document.querySelectorAll('.turn-user').length === 1", 8000, 'the conversation goes back to the first request')
+  const draft = await evaluate("document.querySelector('.composer-input')?.value ?? ''")
+  if (!draft.includes('[scenario:hooks-check]')) throw new Error(`The request should be back in the composer, not ${JSON.stringify(draft)}`)
+  await expectFile(noteFile, 'written before the folder was trusted\n', 'the first request is still as it was')
+  const kept = await evaluate('window.eNCode.agent.history().then((history) => history.entries.filter((entry) => entry.kind === "user").map((entry) => entry.text))')
+  if (kept.length !== 1 || !kept[0].includes('[scenario:hooks-untrusted]')) throw new Error(`The conversation should hold the first request only: ${JSON.stringify(kept)}`)
+
+  await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  await typeInto('.composer-input', '')
+  for (const file of [noteFile, logFile, createdFile]) await fs.rm(file, { force: true })
+  await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
+  console.log('[smoke] hooks and rewind: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

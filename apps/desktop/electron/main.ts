@@ -131,6 +131,7 @@ if (!gotLock) {
         workspace: workspace.current?.root ?? null,
         legacySessionsFile: path.join(userData, 'eNCode-sessions.json'),
         routerStateFile: path.join(userData, 'eNCode-models.json'),
+        checkpointsDir: path.join(userData, 'checkpoints'),
       }),
       // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {

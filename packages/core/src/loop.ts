@@ -262,7 +262,7 @@ export class AgentLoop {
   }
 
   private event(turn: Turn): HookEvent {
-    return { ...this.base, mode: turn.mode }
+    return { ...this.base, mode: turn.mode, signal: turn.signal }
   }
 
   private checkAbort(signal: AbortSignal): void {

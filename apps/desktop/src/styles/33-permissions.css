@@ -366,3 +366,44 @@
   font-size: var(--fs-12);
   line-height: 18px;
 }
+
+/* Hooks: the commands that run at points in the agent's work */
+.perm-hooks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.perm-hook {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+}
+.perm-hook-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.perm-hook-event {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.perm-hook-command {
+  margin: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.perm-hook-time {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}

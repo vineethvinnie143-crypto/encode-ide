@@ -27,6 +27,8 @@ export interface HookEvent {
   agentId: string
   root: string
   mode: string
+  /** Aborts when the turn is stopped; a command still running is stopped with it. */
+  signal?: AbortSignal
 }
 
 export interface SessionStartEvent extends HookEvent {
@@ -179,6 +181,9 @@ export function createCommandHooks(groups: readonly HookGroup[], host: HookHost)
       for (const hook of group.hooks) commands.set(hook.command, Math.max(commands.get(hook.command) ?? 0, hook.timeout))
     }
     if (!commands.size) return []
+    // A stopped turn starts nothing, and the call a guard was asked about is not made.
+    const stopped = (command: string): Answer => (event === 'PreToolUse' ? { command, decision: 'deny', reason: 'The turn was stopped.' } : { command })
+    if (base.signal?.aborted) return [...commands.keys()].map(stopped)
     const input = JSON.stringify({
       session_id: base.sessionId,
       transcript_path: host.transcriptPath?.(base.sessionId) ?? null,
@@ -192,10 +197,12 @@ export function createCommandHooks(groups: readonly HookGroup[], host: HookHost)
       [...commands].map(async ([command, timeout]) => {
         let result: HookRun
         try {
-          result = await host.runner(command, { stdin: input, env, cwd: base.root, timeoutMs: timeout * 1000 })
+          result = await host.runner(command, { stdin: input, env, cwd: base.root, timeoutMs: timeout * 1000, ...(base.signal ? { signal: base.signal } : {}) })
         } catch (error) {
           result = { exitCode: null, stdout: '', stderr: '', timedOut: false, error: error instanceof Error ? error.message : String(error) }
         }
+        // What a command that was stopped with its turn left behind is not an answer, nor worth a notice.
+        if (base.signal?.aborted) return stopped(command)
         return interpret(event, command, result, notice)
       }),
     )

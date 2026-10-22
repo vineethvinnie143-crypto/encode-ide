@@ -11,6 +11,7 @@ import {
   type SettingsSource,
 } from '@encode/config'
 import { refuseEverything, type RuleJudge } from '@encode/core'
+import { loadHookGroups, type HookGroup } from '@encode/hooks'
 import { createShellAssessor, parseRule, RuleSet, type DiskProbe, type PermissionRule } from '@encode/permissions'
 import { realPathOf, type ShellCommandAssessor } from '@encode/tools'
 import type { WorkspaceFs } from './fs'
@@ -49,7 +50,9 @@ export interface ConfigSnapshot {
   rules: RuleSet
   /** The folders the user counts as part of the workspace, as real paths. */
   extraRoots: string[]
-  /** What was wrong with the settings and the rules, in words. */
+  /** The hooks that apply: the user's own, and the folder's once it is trusted and its settings approved. Empty while the settings are broken. */
+  hooks: HookGroup[]
+  /** What was wrong with the settings, the rules and the hooks, in words. */
   problems: string[]
   /**
    * Why nothing may run under these settings, or null. A deny or ask rule or a whole file could not be read, so
@@ -205,7 +208,9 @@ export class WorkspaceConfig {
     const folder = await this.trust.state(this.root, digest)
     const effective = resolveSettings(sources, { folderApproved: folder.configApproved })
     const { rules, problems, unsafe } = buildRuleSet(effective.rules, { root: this.root, home: this.home, windows })
-    const broken = effective.unsafe.length || unsafe.length ? brokenSettingsMessage([...effective.unsafe, ...unsafe]) : null
+    // A PreToolUse hook that cannot be read may have been a guard: like a deny rule that cannot be read, it stops everything.
+    const hooks = loadHookGroups(effective.hooks)
+    const broken = effective.unsafe.length || unsafe.length || hooks.unsafe.length ? brokenSettingsMessage([...effective.unsafe, ...unsafe, ...hooks.unsafe]) : null
     const refusal = broken ? refuseEverything(broken) : null
     const api = windows ? path.win32 : path.posix
     const extraRoots: string[] = []
@@ -220,7 +225,8 @@ export class WorkspaceConfig {
       folder,
       rules,
       extraRoots,
-      problems: [...effective.problems, ...problems],
+      hooks: broken ? [] : hooks.groups,
+      problems: [...effective.problems, ...problems, ...hooks.problems],
       broken,
       judge: refusal?.rules ?? rules,
       assessor: refusal?.assessor ?? createShellAssessor({ rules, trusted: folder.trusted, probe: this.probe, platform: windows ? 'win32' : 'posix' }),

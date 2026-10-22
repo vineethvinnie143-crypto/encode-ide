@@ -39,6 +39,8 @@ export interface HostInit {
   legacySessionsFile?: string
   /** Where the router keeps what it has learned (model lists, health, free-tier counts) between runs. */
   routerStateFile?: string
+  /** Where what the agent's file tools change is kept so that a rewind can put it back; without it nothing is kept. */
+  checkpointsDir?: string
 }
 
 /** The result of a test call to one model. */

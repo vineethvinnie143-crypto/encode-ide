@@ -21,6 +21,8 @@ export interface HookEvent {
   /** The workspace root. */
   root: string
   mode: AgentMode
+  /** Aborts when the turn is stopped: a hook still running is stopped with it. */
+  signal?: AbortSignal
 }
 
 export interface SessionStartEvent extends HookEvent {

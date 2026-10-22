@@ -15,6 +15,7 @@ const report = (patch: Partial<PermissionsReport> = {}): PermissionsReport => ({
   rules: [],
   additionalDirectories: [],
   envNames: [],
+  hooks: [],
   files: { user: '/home/u/.encode/settings.json', project: '/code/app/.encode/settings.json', local: '/code/app/.encode/settings.local.json' },
   ...patch,
 })

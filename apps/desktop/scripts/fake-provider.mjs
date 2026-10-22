@@ -87,6 +87,20 @@ const SCENARIOS = {
     { text: 'Now another command.', call: { name: 'Bash', args: { command: 'echo another-command-ok', description: 'Echo another word' } } },
     { text: 'Always allow check finished.' },
   ],
+  // The folder's hooks wait for trust, so nothing guards or logs this request; its file is what a later rewind leaves alone.
+  'hooks-untrusted': [
+    { text: 'Writing a note.', call: { name: 'Write', args: { file_path: 'untrusted-note.txt', content: 'written before the folder was trusted\n' } } },
+    { text: 'Note written.' },
+  ],
+  // With the folder trusted its hooks apply: the log hook runs after each change of a file, and the guard refuses the
+  // command before it can ask. The two files are what the rewind of this request puts back.
+  'hooks-check': [
+    { text: 'Reading the helpers.', call: { name: 'Read', args: { file_path: 'src/utils.ts' } } },
+    { text: 'Changing add.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + b', new_string: 'return b + a' } } },
+    { text: 'Adding a file.', call: { name: 'Write', args: { file_path: 'rewind-new.txt', content: 'created by the hooks check\n' } } },
+    { text: 'Running a command.', call: { name: 'Bash', args: { command: 'echo guarded-command-ran', description: 'Echo a word' } } },
+    { text: 'Hooks check finished.' },
+  ],
   // The Computer tool lists the windows (nothing to approve), then a command waits for the person: the banner that says the
   // agent uses the computer reads "waiting" meanwhile, and its Stop button or Ctrl+Alt+Esc ends the turn (Windows only).
   'computer-check': [

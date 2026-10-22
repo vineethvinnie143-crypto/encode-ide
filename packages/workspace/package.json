@@ -12,8 +12,10 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@encode/checkpoints": "workspace:*",
     "@encode/config": "workspace:*",
     "@encode/core": "workspace:*",
+    "@encode/hooks": "workspace:*",
     "@encode/permissions": "workspace:*",
     "@encode/tools": "workspace:*"
   },

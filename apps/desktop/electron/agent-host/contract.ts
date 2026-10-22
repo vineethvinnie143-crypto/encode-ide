@@ -25,6 +25,10 @@ export type HostToRenderer = [
   Expect<Same<Core.PlanRequest, Ui.PlanRequest>>,
   Expect<Same<Workspace.WorkspaceReport, Ui.PermissionsReport>>,
   Expect<Same<Workspace.PermissionsOutcome, Ui.PermissionsOutcome>>,
+  Expect<Same<Workspace.HookView, Ui.PermissionHookView>>,
+  Expect<Same<Core.CheckpointInfo, Ui.CheckpointInfo>>,
+  Expect<Same<Core.RewindPlan, Ui.RewindPlan>>,
+  Expect<Same<Core.RewindOutcome, Ui.RewindOutcome>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -35,4 +39,5 @@ export type RendererToHost = [
   Expect<Same<Core.ApprovalPolicy, Ui.ApprovalPolicy>>,
   Expect<Same<Core.AgentMode, Ui.AgentMode>>,
   Expect<Same<Workspace.PermissionsAction, Ui.PermissionsAction>>,
+  Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
 ]
