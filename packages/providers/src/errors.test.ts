@@ -101,6 +101,14 @@ describe('classifyHttpFailure: a preset whose server tool the API does not take'
     assert.doesNotMatch(error.message, /user_0000/, 'nothing but the tool and the API is taken from the body')
   })
 
+  it('says which APIs do take the tool, so a client can ask one of them instead', () => {
+    assert.deepEqual(classifyHttpFailure(400, undefined, body).apis, ['responses', 'anthropic-messages'])
+    const one = classifyHttpFailure(400, undefined, "{\"error\":{\"message\":\"Tool 'openrouter:shell' is not available for the 'chat-completions' API. It is only supported for: responses.\"}}")
+    assert.deepEqual(one.apis, ['responses'])
+    const unsaid = classifyHttpFailure(400, undefined, "{\"error\":{\"message\":\"Tool 'openrouter:shell' is not available for the 'chat-completions' API\"}}")
+    assert.equal(unsaid.apis, undefined, 'a refusal that names no API says nothing about which would work')
+  })
+
   it('is not mistaken for a model that cannot call tools, which would be learned and stay learned', () => {
     // The body talks about a tool that is "not available", as the tools-unsupported pattern does.
     assert.notEqual(classifyHttpFailure(400, undefined, body).kind, 'unsupported')

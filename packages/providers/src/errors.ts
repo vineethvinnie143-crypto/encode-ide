@@ -46,6 +46,8 @@ export interface TransportErrorDetails {
   scope?: 'model' | 'account'
   /** The provider's own error code (OpenRouter's error_type, the gateway's code), for special cases and logs. */
   code?: string
+  /** For a server tool the API refused: the APIs that do take it, as the provider names them (`responses`, `anthropic-messages`). */
+  apis?: readonly string[]
   cause?: unknown
 }
 
@@ -58,6 +60,7 @@ export class TransportError extends Error {
   readonly feature?: 'stream' | 'tools' | 'images'
   readonly scope?: 'model' | 'account'
   readonly code?: string
+  readonly apis?: readonly string[]
 
   constructor(kind: TransportErrorKind, message: string, details: TransportErrorDetails = {}) {
     super(message, details.cause === undefined ? undefined : { cause: details.cause })
@@ -70,6 +73,7 @@ export class TransportError extends Error {
     this.feature = details.feature
     this.scope = details.scope
     this.code = details.code
+    this.apis = details.apis
   }
 }
 
@@ -212,6 +216,8 @@ const QUOTA = /free-models-per-day|daily (?:limit|quota)|quota (?:exceeded|exhau
  * the model are fine; the preset's tool list is not, and only its owner can change that.
  */
 const SERVER_TOOL_REFUSED = /\bTool '(openrouter:[a-z0-9_.-]{1,40})' is not available for the '([a-z-]{1,30})' API/i
+/** "It is only supported for: responses, anthropic-messages." */
+const SERVER_TOOL_APIS = /\bonly supported for:\s*([a-z-]{1,30}(?:\s*,\s*[a-z-]{1,30}){0,5})/i
 /** The `code` of the error that says so (the status is 400, which alone says nothing). */
 export const SERVER_TOOL_REFUSED_CODE = 'server_tool_unsupported'
 
@@ -343,10 +349,11 @@ export function classifyHttpFailure(status: number, headers: HeaderSource | unde
   const serverTool = status === 400 ? SERVER_TOOL_REFUSED.exec(detail.message) : null
   if (serverTool) {
     const [, tool, api] = serverTool
+    const apis = SERVER_TOOL_APIS.exec(detail.message)?.[1].split(',').map((name) => name.trim().toLowerCase()).filter(Boolean)
     return new TransportError(
       'invalid-request',
       `HTTP 400: OpenRouter added its ${tool} tool to this request, usually from a preset, and that tool does not work on the ${api} API that eNCode uses. Remove it from the preset on openrouter.ai (Settings, Presets), or use the model without the preset.`,
-      { status, code: SERVER_TOOL_REFUSED_CODE },
+      { status, code: SERVER_TOOL_REFUSED_CODE, ...(apis?.length ? { apis } : {}) },
     )
   }
   const message = `HTTP ${status}${detail.message ? `: ${errorSnippet(detail.message)}` : ''}`

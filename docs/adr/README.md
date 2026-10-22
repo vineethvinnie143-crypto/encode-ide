@@ -32,6 +32,7 @@ say so.
 | [0032](0032-claude-code-tool-contracts-and-reminders.md) | Claude Code's tool contracts, and reminders instead of a changing prompt | Accepted |
 | [0033](0033-the-editor-is-our-own-engine.md) | The editor is our own engine: text model, core and view | Accepted |
 | [0034](0034-documents-live-outside-the-ui-store.md) | Open documents live outside the UI store, and "unsaved" is derived from the text | Accepted |
+| [0035](0035-openrouter-presets-with-server-tools-go-through-the-messages-api.md) | A preset whose server tool chat-completions refuses is asked on the Messages API | Accepted |
 | [0040](0040-permission-rules-are-judged-over-parsed-commands.md) | Permission rules are judged over parsed commands | Accepted |
 | [0041](0041-folder-settings-grant-only-when-approved.md) | A folder's settings grant only what the user approved | Accepted |
 | [0042](0042-hooks-in-claude-codes-format-fail-closed.md) | Hooks in Claude Code's format, and a broken guard denies | Accepted |
