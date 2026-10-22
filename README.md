@@ -190,7 +190,8 @@ runs the repository's hooks, as git does.
 conversation changed with the agent's file tools, from the agent's own record, so it works in a folder without git
 too. A chip beside it picks an earlier request. Revert a hunk, a file or everything the request did; each revert can be
 undone. A file a later request changed again, or whose earlier version eNCode could not keep, is marked **Read only**
-with the reason. **Undo** on the latest change card opens the Rewind dialog on putting that request's files back
+with the reason. **Undo** on the latest change card opens the Rewind dialog on putting that request's files back. A
+card's view lasts until you close the tab; the tab opens again on the scope you picked from the menu
 ([ADR 0065](docs/adr/0065-the-turn-view-reads-the-agents-record-and-writes-back-only-over-what-the-person-saw.md)).
 
 ## Shortcuts

@@ -81,7 +81,7 @@ function ScopeMenu({ snapshot }: { snapshot: ReviewSnapshot | null }) {
         label: 'Last turn',
         description: 'What the agent changed for your latest request, with or without git',
         checked: kind === 'turn',
-        onSelect: () => (kind === 'turn' ? review.setTurn(null) : review.setKind('turn')),
+        onSelect: pick('turn'),
       },
     ]
   }

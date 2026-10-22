@@ -28,7 +28,9 @@ taking it back one change at a time. The forces:
   open conversation changed with its file tools; a chip beside it picks any earlier request that changed files. The
   change card under a request opens the view on that request ("Review changes"), and the latest card also offers
   Undo, which opens the Rewind dialog on putting that request's files back with the conversation kept. The view works
-  with or without git; a folder without git offers it from the Review tab's empty state.
+  with or without git; a folder without git offers it from the Review tab's empty state. What a card (or a step) shows
+  lasts while the Review tab is open: the scope the person picks from the menu is the one the tab opens on next time
+  and the one kept between runs, so a card never changes where `Ctrl+Shift+G` lands.
 - **The record says what changed; the disk says where it stands.** For each file the request wrote, the "before" is
   the copy kept at its first write in that request. The "after" is the disk as it is now, or, when a later request
   wrote the file again, the copy that later request kept before its own first write (the file as this request left

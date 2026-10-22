@@ -24,7 +24,13 @@ export interface ReviewView {
 }
 
 interface ReviewStore {
+  /** The scope shown now. */
   kind: ScopeKind
+  /**
+   * The scope the person picked from the menu, which the tab opens on and which is kept between runs. A file or a
+   * request shown from elsewhere (a step, a change card) changes `kind` only until the last Review tab closes.
+   */
+  chosen: ScopeKind
   /** The base of the Branch view; null: the one eNCode picks (the remote's default branch). */
   base: string | null
   /** The commit of the Commit view; null: the latest. */
@@ -84,6 +90,8 @@ interface ReviewStore {
   showTurn(turn: string, target?: string): void
   /** The file asked for is in view. */
   revealed(): void
+  /** The last Review tab closed: the next one opens on the scope the person chose, and the Turn view on the latest request. */
+  settle(): void
   /** Forgets everything about the folder that was open: another one is. Called when the open folder changes. */
   reset(): void
 }
@@ -155,8 +163,8 @@ function wantedIn(load: ReviewLoad, mine: number): string | null {
 export const useReview = create<ReviewStore>((set, get) => {
   const saved = loadSaved()
   const persist = () => {
-    const { kind, base, options, view } = get()
-    save({ kind, base, options, view })
+    const { chosen, base, options, view } = get()
+    save({ kind: chosen, base, options, view })
   }
   /** A new scope or option: what was shown no longer applies. */
   const reload = () => {
@@ -179,6 +187,7 @@ export const useReview = create<ReviewStore>((set, get) => {
 
   return {
     kind: saved.kind,
+    chosen: saved.kind,
     base: saved.base,
     commit: null,
     turn: null,
@@ -222,9 +231,16 @@ export const useReview = create<ReviewStore>((set, get) => {
     },
 
     setKind: (kind) => {
-      if (kind === get().kind) return
+      const { kind: current, turn, chosen } = get()
       // Chosen from the menu, the Turn view starts on the latest request.
-      set({ kind, ...(kind === 'turn' ? { turn: null } : {}) })
+      if (kind === current && !(kind === 'turn' && turn !== null)) {
+        if (kind !== chosen) {
+          set({ chosen: kind })
+          persist()
+        }
+        return
+      }
+      set({ kind, chosen: kind, ...(kind === 'turn' ? { turn: null } : {}) })
       reload()
     },
     setBase: (base) => {
@@ -402,8 +418,10 @@ export const useReview = create<ReviewStore>((set, get) => {
       const next = kind ?? (current === 'unstaged' || current === 'branch' ? current : 'unstaged')
       wanted = { target, from, after: generation }
       usePanels.getState().open('review')
-      if (next !== current) get().setKind(next)
-      else void get().refresh()
+      if (next !== current) {
+        set({ kind: next })
+        reload()
+      } else void get().refresh()
     },
     showTurn: (turn, target) => {
       wanted = target ? { target, from: 'folder', after: generation } : null
@@ -416,6 +434,13 @@ export const useReview = create<ReviewStore>((set, get) => {
       reload()
     },
     revealed: () => set({ revealPath: null }),
+    settle: () => {
+      const { kind, chosen, turn } = get()
+      if (kind === chosen && turn === null) return
+      generation++
+      wanted = null
+      set({ kind: chosen, turn: null, load: null, loading: false, editing: null, revealPath: null })
+    },
 
     reset: () => {
       generation++
@@ -432,6 +457,19 @@ useWorkspace.subscribe(() => {
   if (next === folder) return
   folder = next
   useReview.getState().reset()
+})
+
+// A file or a request shown from elsewhere lasts while the tab is open; closed, the tab opens on the person's scope again.
+const reviewTabOpen = (): boolean => {
+  const { side, bottom } = usePanels.getState()
+  return side.tabs.some((tab) => tab.kind === 'review') || bottom.tabs.some((tab) => tab.kind === 'review')
+}
+let tabOpen = reviewTabOpen()
+usePanels.subscribe(() => {
+  const next = reviewTabOpen()
+  if (next === tabOpen) return
+  tabOpen = next
+  if (!next) useReview.getState().settle()
 })
 
 // The Turn view belongs to the open conversation: another one shows its own latest request (the tab reads it again).

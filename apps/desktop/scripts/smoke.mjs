@@ -1167,6 +1167,11 @@ async function runTurnReviewChecks({ utilsFile, createdFile, original, changedUt
   // Leave the side panel as it was found.
   await key({ key: 'w', code: 'KeyW', ctrlKey: true })
   await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+  // The card showed one request; opened again by the person, the tab is back on the scope they chose.
+  await key({ key: 'G', code: 'KeyG', ctrlKey: true, shiftKey: true })
+  await waitFor("document.querySelector('.review-pane .rv-scope')?.textContent === 'Unstaged'", 6000, 'the Review tab opens on Unstaged again')
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed again')
   console.log('[smoke] review of a turn: reverted a change and a created file from the Review tab, and undid both')
 }
 
