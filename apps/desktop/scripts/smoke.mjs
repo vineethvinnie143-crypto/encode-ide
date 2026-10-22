@@ -53,15 +53,21 @@ async function evaluateInFrame(url, expression, timeoutMs = 10000) {
   throw new Error(`The Browser tab did not show ${url}. Frames: ${seen.join(', ') || 'none'}`)
 }
 
-/** Evaluates in a DevTools target of its own, over a socket of its own. */
-async function evaluateOn(webSocketDebuggerUrl, expression) {
+/**
+ * Evaluates in a DevTools target of its own, over a socket of its own. A target that goes away before it answers,
+ * or never answers, is an error rather than a hang.
+ */
+async function evaluateOn(webSocketDebuggerUrl, expression, timeoutMs = 30000) {
   const socket = new WebSocket(webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true })
     socket.addEventListener('error', reject, { once: true })
   })
+  let timer
   try {
     return await new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`The target did not answer within ${timeoutMs} ms`)), timeoutMs)
+      socket.addEventListener('close', () => reject(new Error('The target closed before it answered')), { once: true })
       socket.addEventListener('message', (event) => {
         const message = JSON.parse(event.data)
         if (message.id !== 1) return
@@ -71,6 +77,7 @@ async function evaluateOn(webSocketDebuggerUrl, expression) {
       socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, userGesture: true } }))
     })
   } finally {
+    clearTimeout(timer)
     socket.close()
   }
 }
@@ -728,7 +735,8 @@ async function runComputerChecks() {
   if ((await bannerTargets()).length) throw new Error('A banner is up with nothing using the computer')
 
   for (const [label, stop] of [
-    ['the banner button', () => evaluateInBanner("document.getElementById('stop').click()")],
+    // The banner closes with the turn, so the click is made after the answer has gone out; a page that is gone cannot answer.
+    ['the banner button', () => evaluateInBanner("setTimeout(() => document.getElementById('stop').click(), 50), true")],
     ['Ctrl+Alt+Esc', async () => pressStopShortcut()],
   ]) {
     await sendPrompt('[scenario:computer-check] Look at the desktop, then run a command.')
