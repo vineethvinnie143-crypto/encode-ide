@@ -18,6 +18,7 @@ import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
 import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
+import type { SearchProviderId } from '../shared/search'
 import type {
   AgentStartInput,
   ApprovalAnswer,
@@ -194,6 +195,9 @@ export function registerIpc(deps: IpcDeps): void {
     configureAgent()
     return saved
   })
+  // A search key reaches the host only when a search is made: the host asks for it then, so nothing is told here.
+  handle('settings:set-search-key', (provider: string, key: string) => settings.setSearchKey(provider as SearchProviderId, String(key ?? '')))
+  handle('search:test', () => agent.searchCheck().catch((error) => Promise.reject(hostFailure(error))))
 
   handle('models:openrouter', (freeOnly?: boolean) => models.openRouter(Boolean(freeOnly)))
   handle('models:provider', (profileId: string) => models.provider(String(profileId)))

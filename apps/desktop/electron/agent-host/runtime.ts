@@ -25,7 +25,9 @@ import {
   type ModelRole,
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
+import { SearchError, createSearchProvider, createWebAccess, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Workspaces } from '@encode/workspace'
+import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
 import type { ModelAlert, ModelStatus } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
@@ -43,6 +45,8 @@ export interface HostRuntimeOptions {
   fetch?: (input: string, init: RequestInit) => Promise<Response>
   /** How often what the router has learned is written, if it changed, ms. Default 30 000. */
   stateIntervalMs?: number
+  /** The web search providers; a test points them at a server of its own. */
+  search?: { fetch?: ProviderOptions['fetch']; endpoints?: Partial<Record<SearchProviderId, string>> }
 }
 
 export interface HostRuntime {
@@ -62,6 +66,10 @@ const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, ma
 
 /** How long the status page waits for the model lists before it shows what it has. */
 const STATUS_WAIT_MS = 15_000
+
+/** The test search of the Settings screen: one plain query, and no longer than a person will wait. */
+const SEARCH_CHECK_QUERY = 'web search test'
+const SEARCH_CHECK_TIMEOUT_MS = 20_000
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -107,6 +115,34 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       if (!entry || entry.keyRevision === null) return undefined
       return (await requestKey(entry.profile, origin)) || undefined
     },
+  }
+
+  /** A search provider's key, asked for at every search: it is held here only while the search is being made. */
+  const searchKeyOf =
+    (provider: KeyedSearchProviderId): SearchKeySource =>
+    async () => {
+      try {
+        return (await peer.request('searchKey', { provider }, { timeoutMs: options.keyTimeoutMs ?? 10_000 })) || ''
+      } catch (error) {
+        log(`could not get the search key for ${provider}: ${describe(error)}`)
+        return ''
+      }
+    }
+
+  /** Who answers a search is read from the settings at every search, so a change in Settings applies at once. */
+  const searchProviders = new Map<SearchProviderId, SearchProvider>()
+  const searchProvider = (): SearchProvider => {
+    const id = isSearchProviderId(config?.searchProvider) ? config.searchProvider : DEFAULT_SEARCH_PROVIDER
+    let provider = searchProviders.get(id)
+    if (!provider) {
+      const endpoint = options.search?.endpoints?.[id]
+      provider = createSearchProvider(id, isKeyedSearchProvider(id) ? searchKeyOf(id) : () => '', {
+        ...(options.search?.fetch ? { fetch: options.search.fetch } : {}),
+        ...(endpoint ? { endpoint } : {}),
+      })
+      searchProviders.set(id, provider)
+    }
+    return provider
   }
 
   const alertOf = (alert: RouterAlert): ModelAlert => ({
@@ -270,6 +306,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       onJobs: (jobs) => peer.notify('jobs', jobs),
       warn: (message) => peer.notify('warn', message),
       scope: workspaces.scope,
+      web: createWebAccess({ searchProvider }),
       ...options.hostOptions,
     })
     if (init.legacySessionsFile) {
@@ -309,6 +346,27 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     if (!router) return
     for (const provider of Object.keys(config?.providers ?? {})) router.keysChanged(provider)
     await router.refresh({ force: true }).catch(() => undefined)
+  })
+
+  peer.handle('searchCheck', async (): Promise<SearchCheckResult> => {
+    const provider = searchProvider()
+    const name = searchProviderInfo(provider.id).name
+    const started = Date.now()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), SEARCH_CHECK_TIMEOUT_MS)
+    try {
+      const hits = await provider.search({ query: SEARCH_CHECK_QUERY, limit: 3, signal: controller.signal })
+      const ms = Date.now() - started
+      if (hits.length) return { ok: true, message: `${name} answered with ${hits.length} ${hits.length === 1 ? 'result' : 'results'}.`, ms }
+      return { ok: false, message: `${name} answered, but found nothing for the test search. If this keeps happening, choose another search provider.`, ms }
+    } catch (error) {
+      if (controller.signal.aborted) return { ok: false, message: `${name} did not answer within ${SEARCH_CHECK_TIMEOUT_MS / 1000} seconds.` }
+      // The person is in Settings already: "add one in Settings" would send them where they are.
+      if (error instanceof SearchError && error.kind === 'key' && /^There is no API key/.test(error.message)) return { ok: false, message: `There is no API key for ${name}. Paste one above, then press Test search.` }
+      return { ok: false, message: describe(error) }
+    } finally {
+      clearTimeout(timer)
+    }
   })
 
   peer.handle('permissionsReport', async ({ root }) => {

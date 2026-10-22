@@ -16,6 +16,7 @@ const config: HostConfig = {
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},
+  searchProvider: 'duckduckgo',
 }
 
 async function until<T>(read: () => T | undefined | false, ms = 3_000): Promise<T> {
@@ -34,6 +35,7 @@ interface Fixture {
   /** Every process started, newest last. */
   processes: { runtime: HostRuntime; kill(): void; killed: boolean; exit(): void }[]
   keysAsked: string[]
+  searchKeysAsked: string[]
   dir: string
   workspace: string
 }
@@ -50,6 +52,7 @@ async function fixture(options: { script?: Parameters<typeof createScriptedClien
   const events: AgentEvent[] = []
   const processes: Fixture['processes'] = []
   const keysAsked: string[] = []
+  const searchKeysAsked: string[] = []
   const client = createScriptedClient(options.script ?? [{ text: 'ok' }], { delayMs: 15 })
   const service = new AgentHostService({
     spawn(): HostProcess {
@@ -80,6 +83,10 @@ async function fixture(options: { script?: Parameters<typeof createScriptedClien
       keysAsked.push(`${profileId} ${baseUrl}`)
       return baseUrl.startsWith('http://127.0.0.1') ? `key-for-${profileId}` : ''
     },
+    searchKey: (provider) => {
+      searchKeysAsked.push(provider)
+      return provider === 'brave' ? 'brave-key' : ''
+    },
     onEvent: (event) => events.push(event),
     onJobs: () => undefined,
     log: () => undefined,
@@ -88,7 +95,7 @@ async function fixture(options: { script?: Parameters<typeof createScriptedClien
     ...(options.maxFailures ? { maxFailures: options.maxFailures } : {}),
   })
   services.push(service)
-  return { service, events, processes, keysAsked, dir, workspace }
+  return { service, events, processes, keysAsked, searchKeysAsked, dir, workspace }
 }
 
 describe('the agent host service', () => {
@@ -161,6 +168,21 @@ describe('the agent host service', () => {
     await assert.rejects((peer as unknown as { request(method: string, params: unknown): Promise<unknown> }).request('key', { profileId: 'p1', baseUrl: 'x', extra: 1 }), { code: 'invalid-params' })
     assert.equal(f.keysAsked.length, 2)
     await assert.rejects((peer as unknown as { request(method: string): Promise<unknown> }).request('cancelEverything'), { code: 'unknown-method' })
+  })
+
+  it('answers the host\'s request for a search key only for a provider that has one, and only as agreed', async () => {
+    const f = await fixture()
+    await f.service.start()
+    const peer = f.processes[0].runtime.peer
+    assert.equal(await peer.request('searchKey', { provider: 'brave' }), 'brave-key')
+    assert.equal(await peer.request('searchKey', { provider: 'exa' }), '')
+    const raw = peer as unknown as { request(method: string, params: unknown): Promise<unknown> }
+    // DuckDuckGo has no key, a profile id is not a provider, and nothing else rides along: none of these reaches the vault.
+    await assert.rejects(raw.request('searchKey', { provider: 'duckduckgo' }), { code: 'invalid-params' })
+    await assert.rejects(raw.request('searchKey', { provider: 'search:brave' }), { code: 'invalid-params' })
+    await assert.rejects(raw.request('searchKey', { provider: 'brave', baseUrl: 'https://elsewhere.example' }), { code: 'invalid-params' })
+    await assert.rejects(raw.request('searchKey', {}), { code: 'invalid-params' })
+    assert.deepEqual(f.searchKeysAsked, ['brave', 'exa'])
   })
 
   it('shuts the host down in order', async () => {

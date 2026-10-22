@@ -5,6 +5,7 @@
  */
 
 import type { Appearance } from './appearance'
+import type { SearchCheckResult, SearchProviderId } from './search'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
 export type AgentStatus =
@@ -69,6 +70,10 @@ export interface Settings {
   freeProfileId: string | null
   /** The first-run dialog has been answered: a model connected, the demo chosen, or "not now". */
   setupDone: boolean
+  /** Who answers the agent's web searches; see shared/search.ts. Default DuckDuckGo, which needs no key. */
+  searchProvider: SearchProviderId
+  /** Read only: the search providers that have an API key stored. A key is set with settings.setSearchKey and never comes back. */
+  searchKeys: SearchProviderId[]
   /** Read only; reported by the main process and ignored on save. */
   keyStorage: KeyStorage
   /** Read only: this computer has a way for the agent to see and operate other applications (Windows). */
@@ -629,6 +634,12 @@ export interface EncodeApi {
     get(): Promise<Settings>
     save(patch: Partial<Settings>): Promise<Settings>
     setProfileKey(id: string, key: string): Promise<Settings>
+    /** Stores, replaces or (with an empty key) removes the API key of a search provider that needs one. */
+    setSearchKey(provider: SearchProviderId, key: string): Promise<Settings>
+  }
+  search: {
+    /** One search through the provider in use, the way the agent makes it: the answer says whether it works. */
+    test(): Promise<SearchCheckResult>
   }
   models: {
     openRouter(freeOnly?: boolean): Promise<ModelInfo[]>

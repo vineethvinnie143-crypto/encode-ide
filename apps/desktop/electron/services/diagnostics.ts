@@ -1,6 +1,7 @@
 import type { AboutInfo, Settings } from '../../shared/types'
 import { buildLine } from '../../shared/about'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
+import { searchProviderInfo } from '../../shared/search'
 import { redact, type RedactContext } from './redact'
 
 export interface DisplayInfo {
@@ -82,10 +83,12 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
   ])
 
   const keys = settings.keyStorage.mode === 'keychain' ? 'sealed by the operating system' : `kept in memory only (${settings.keyStorage.reason})`
+  const search = searchProviderInfo(settings.searchProvider)
   section('Settings', [
     ['What the agent may do', settings.policy],
     ['Agent mode', settings.agentMode],
     ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
+    ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],
     ['API keys', keys],
     ['Folders', `${settings.recentWorkspaces.length} remembered, ${input.workspaceOpen ? 'one open' : 'none open'}`],

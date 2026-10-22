@@ -10,8 +10,10 @@ import {
   X,
 } from '../ui/icons'
 import { addressProblem, cleanRoles, mainPatch, mainRefs, modelRef } from '@shared/models'
+import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult } from '@shared/search'
 import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
+import { errorText } from '../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'
 import { useModels } from '../stores/models'
 import { useSettings } from '../stores/settings'
@@ -25,12 +27,14 @@ import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
 import RolesSettings from './models/RolesSettings'
 import McpPane from './mcp/McpPane'
 import PermissionsPane from './permissions/PermissionsPane'
+import { SearchSettings } from './search/SearchSettings'
 
 export default function SettingsModal() {
   const settings = useSettings((state) => state.settings)
   const keyStorage = settings?.keyStorage
   const save = useSettings((state) => state.save)
   const setProfileKey = useSettings((state) => state.setProfileKey)
+  const setSearchKey = useSettings((state) => state.setSearchKey)
   const setSettingsOpen = useUi((state) => state.setSettingsOpen)
   const notify = useUi((state) => state.notify)
 
@@ -44,6 +48,9 @@ export default function SettingsModal() {
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [searchKeyInput, setSearchKeyInput] = useState('')
+  const [searchTest, setSearchTest] = useState<SearchCheckResult | null>(null)
+  const [searchTesting, setSearchTesting] = useState(false)
 
   useEffect(() => {
     if (!settings || draft) return
@@ -163,7 +170,41 @@ export default function SettingsModal() {
       if (!(await setProfileKey(selected.id, keyInput.trim()))) return false
       setKeyInput('')
     }
+    // A search key typed for the provider chosen; the field starts empty again whenever the provider changes.
+    if (searchKeyInput.trim() && isKeyedSearchProvider(draft.searchProvider)) {
+      if (!(await setSearchKey(draft.searchProvider, searchKeyInput.trim()))) return false
+      setSearchKeyInput('')
+    }
     return true
+  }
+
+  const chooseSearchProvider = (searchProvider: Settings['searchProvider']) => {
+    setDraft((current) => (current ? { ...current, searchProvider } : current))
+    setSearchKeyInput('')
+    setSearchTest(null)
+  }
+
+  const removeSearchKey = async () => {
+    if (!draft) return
+    const provider = draft.searchProvider
+    if (!(await setSearchKey(provider, ''))) return
+    setSearchKeyInput('')
+    setSearchTest(null)
+    notify('success', `Removed the ${searchProviderInfo(provider).name} key.`)
+  }
+
+  /** The agent's own way of searching, through the provider and key as they are now: what was typed is saved first. */
+  const testSearch = async () => {
+    setSearchTest(null)
+    setSearchTesting(true)
+    try {
+      if (!(await persist())) return
+      setSearchTest(await api.search.test())
+    } catch (error) {
+      setSearchTest({ ok: false, message: errorText(error) })
+    } finally {
+      setSearchTesting(false)
+    }
   }
 
   const fetchModels = async () => {
@@ -521,6 +562,19 @@ export default function SettingsModal() {
                   </div>
                 </>
               ) : null}
+
+              <SearchSettings
+                provider={draft.searchProvider}
+                storedKeys={settings?.searchKeys ?? []}
+                keyStorage={keyStorage}
+                keyInput={searchKeyInput}
+                onProvider={chooseSearchProvider}
+                onKeyInput={setSearchKeyInput}
+                onRemoveKey={() => void removeSearchKey()}
+                onTest={() => void testSearch()}
+                testing={searchTesting}
+                result={searchTest}
+              />
 
               <div className="section-title">Limits</div>
               <div className="form-row inline">

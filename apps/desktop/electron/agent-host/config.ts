@@ -1,4 +1,5 @@
 import { modelMode } from '../../shared/models'
+import { DEFAULT_SEARCH_PROVIDER, isSearchProviderId } from '../../shared/search'
 import type { Settings } from '../../shared/types'
 import type { HostConfig } from './api'
 import { isCallable, providerIds, routerSettingsOf } from './router-settings'
@@ -23,5 +24,6 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     model: modelMode(settings),
     router: routerSettingsOf(settings),
     providers,
+    searchProvider: isSearchProviderId(settings.searchProvider) ? settings.searchProvider : DEFAULT_SEARCH_PROVIDER,
   }
 }

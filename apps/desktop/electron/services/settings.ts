@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
 import { cleanRoles, isLocalUrl } from '../../shared/models'
+import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
 import type { AgentMode, ApprovalPolicy, ModelProfile, ProfileKind, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
@@ -12,9 +13,14 @@ interface StoredProfile extends Omit<ModelProfile, 'hasApiKey'> {
   apiKeyEnc?: string
 }
 
-interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'computerSupported'> {
+interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'computerSupported' | 'searchKeys'> {
   profiles: StoredProfile[]
+  /** The keys of the search providers that need one, sealed like a profile's. */
+  searchKeysEnc: Partial<Record<KeyedSearchProviderId, string>>
 }
+
+/** The name a search key has in the vault; a profile's id is a UUID, so the two cannot meet. */
+const searchVaultId = (provider: KeyedSearchProviderId): string => `search:${provider}`
 
 const DEMO_PROFILE: StoredProfile = {
   id: 'demo',
@@ -41,6 +47,8 @@ function defaults(): StoredSettings {
     freeOnly: true,
     freeProfileId: null,
     setupDone: false,
+    searchProvider: DEFAULT_SEARCH_PROVIDER,
+    searchKeysEnc: {},
   }
 }
 
@@ -79,6 +87,17 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
   return Math.min(max, Math.max(min, Math.round(n)))
 }
 
+/** The sealed search keys of a settings file: only the providers that exist and only text. */
+function storedSearchKeys(value: unknown): StoredSettings['searchKeysEnc'] {
+  const keys: StoredSettings['searchKeysEnc'] = {}
+  if (typeof value !== 'object' || value === null) return keys
+  for (const provider of KEYED_SEARCH_PROVIDER_IDS) {
+    const stored = (value as Record<string, unknown>)[provider]
+    if (typeof stored === 'string') keys[provider] = stored
+  }
+  return keys
+}
+
 /** The profile that may serve the free models: an OpenRouter one that exists. */
 function freeProfileOf(value: unknown, profiles: StoredProfile[]): string | null {
   return typeof value === 'string' && profiles.some((profile) => profile.id === value && profile.kind === 'openrouter') ? value : null
@@ -110,6 +129,15 @@ export class SettingsService {
       const next = this.vault.load(profile.id, profile.apiKeyEnc)
       if (next !== profile.apiKeyEnc) {
         profile.apiKeyEnc = next
+        changed = true
+      }
+    }
+    for (const provider of KEYED_SEARCH_PROVIDER_IDS) {
+      const stored = this.data.searchKeysEnc[provider]
+      const next = this.vault.load(searchVaultId(provider), stored)
+      if (next !== stored) {
+        if (next === undefined) delete this.data.searchKeysEnc[provider]
+        else this.data.searchKeysEnc[provider] = next
         changed = true
       }
     }
@@ -166,6 +194,8 @@ export class SettingsService {
       freeOnly: typeof input.freeOnly === 'boolean' ? input.freeOnly : !usesRealModel,
       freeProfileId: freeProfileOf(input.freeProfileId, profiles),
       setupDone: typeof input.setupDone === 'boolean' ? input.setupDone : usesRealModel,
+      searchProvider: isSearchProviderId(input.searchProvider) ? input.searchProvider : base.searchProvider,
+      searchKeysEnc: storedSearchKeys(input.searchKeysEnc),
     }
   }
 
@@ -198,6 +228,8 @@ export class SettingsService {
       freeOnly: this.data.freeOnly,
       freeProfileId: this.data.freeProfileId,
       setupDone: this.data.setupDone,
+      searchProvider: this.data.searchProvider,
+      searchKeys: KEYED_SEARCH_PROVIDER_IDS.filter((provider) => this.vault.has(searchVaultId(provider), this.data.searchKeysEnc[provider])),
       keyStorage: this.vault.storage,
       computerSupported: this.platform === 'win32',
     }
@@ -269,6 +301,7 @@ export class SettingsService {
     if (typeof patch.freeOnly === 'boolean') next.freeOnly = patch.freeOnly
     next.freeProfileId = freeProfileOf(patch.freeProfileId !== undefined ? patch.freeProfileId : next.freeProfileId, next.profiles)
     if (typeof patch.setupDone === 'boolean') next.setupDone = patch.setupDone
+    if (isSearchProviderId(patch.searchProvider)) next.searchProvider = patch.searchProvider
 
     this.data = next
     this.persist()
@@ -288,6 +321,23 @@ export class SettingsService {
     return this.get()
   }
 
+  /** Stores, replaces or (with an empty key) removes the key of a search provider that needs one. */
+  setSearchKey(provider: SearchProviderId, key: string): Settings {
+    if (!isKeyedSearchProvider(provider)) throw new Error('This search provider does not use a key.')
+    const trimmed = key.trim()
+    checkKey(trimmed)
+    const sealed = this.vault.put(searchVaultId(provider), trimmed)
+    if (sealed === undefined) delete this.data.searchKeysEnc[provider]
+    else this.data.searchKeysEnc[provider] = sealed
+    this.persist()
+    return this.get()
+  }
+
+  /** The key of a search provider, or '' when it has none or it cannot be read. Main process only. */
+  searchKeyFor(provider: SearchProviderId): string {
+    return isKeyedSearchProvider(provider) ? this.vault.get(searchVaultId(provider), this.data.searchKeysEnc[provider]) : ''
+  }
+
   private revise(profileId: string): void {
     this.revisions.set(profileId, (this.revisions.get(profileId) ?? 0) + 1)
   }
@@ -299,7 +349,10 @@ export class SettingsService {
 
   /** Every stored key, so that a log or a report can be scrubbed of exactly these values. */
   secrets(): string[] {
-    return this.data.profiles.map((profile) => this.vault.get(profile.id, profile.apiKeyEnc)).filter(Boolean)
+    return [
+      ...this.data.profiles.map((profile) => this.vault.get(profile.id, profile.apiKeyEnc)),
+      ...KEYED_SEARCH_PROVIDER_IDS.map((provider) => this.vault.get(searchVaultId(provider), this.data.searchKeysEnc[provider])),
+    ].filter(Boolean)
   }
 
   keyFor(profileId: string): string {

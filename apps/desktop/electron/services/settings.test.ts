@@ -207,6 +207,110 @@ describe('SettingsService defaults and secrets', () => {
   })
 })
 
+describe('SettingsService web search', () => {
+  it('starts on DuckDuckGo, which needs no key, with no key stored', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(settings.searchProvider, 'duckduckgo')
+    assert.deepEqual(settings.searchKeys, [])
+  })
+
+  it('saves the provider, keeps it when a patch does not name it, and takes only a provider that exists', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.save({ searchProvider: 'tavily' }).searchProvider, 'tavily')
+    assert.equal(settings.save({ maxSteps: 12 }).searchProvider, 'tavily')
+    assert.equal(settings.save({ searchProvider: 'bing' as never }).searchProvider, 'tavily')
+    assert.equal(settings.save({ searchProvider: 7 as never }).searchProvider, 'tavily')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'tavily', 'and still after a restart')
+    fs.writeFileSync(file(), JSON.stringify({ searchProvider: 'evil' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'duckduckgo', 'a file that names no provider we know falls back')
+  })
+
+  it('seals a key, shows only that there is one, and hands it over to the main process alone', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    const after = settings.setSearchKey('brave', '  BSA-secret-value  ')
+    assert.deepEqual(after.searchKeys, ['brave'])
+    assert.doesNotMatch(JSON.stringify(after), /BSA-secret-value|enc:|searchKeysEnc/)
+    assert.equal(settings.searchKeyFor('brave'), 'BSA-secret-value')
+    assert.equal(settings.searchKeyFor('exa'), '')
+    assert.doesNotMatch(onDisk(), /BSA-secret-value/)
+    assert.match(onDisk(), /"searchKeysEnc": \{\s+"brave": "enc:/)
+    const restarted = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(restarted.searchKeyFor('brave'), 'BSA-secret-value')
+    assert.deepEqual(restarted.get().searchKeys, ['brave'])
+  })
+
+  it('keeps a key per provider, replaces one, and removes one with an empty key', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.setSearchKey('brave', 'brave-key-0001')
+    settings.setSearchKey('exa', 'exa-key-0001')
+    assert.deepEqual(settings.get().searchKeys.sort(), ['brave', 'exa'])
+    settings.setSearchKey('brave', 'brave-key-0002')
+    assert.equal(settings.searchKeyFor('brave'), 'brave-key-0002')
+    assert.equal(settings.searchKeyFor('exa'), 'exa-key-0001')
+    assert.deepEqual(settings.setSearchKey('brave', '').searchKeys, ['exa'])
+    assert.equal(settings.searchKeyFor('brave'), '')
+    assert.doesNotMatch(onDisk(), /brave-key/)
+  })
+
+  it('has no key for DuckDuckGo, or for a name that is not a provider, and says so', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.throws(() => settings.setSearchKey('duckduckgo', 'k-0001'), /does not use a key/)
+    assert.throws(() => settings.setSearchKey('search:brave' as never, 'k-0001'), /does not use a key/)
+    assert.throws(() => settings.setSearchKey('__proto__' as never, 'k-0001'), /does not use a key/)
+    assert.equal(settings.searchKeyFor('duckduckgo'), '')
+    assert.equal(settings.searchKeyFor('constructor' as never), '')
+    assert.deepEqual(settings.get().searchKeys, [])
+  })
+
+  it('refuses keys that cannot travel in an HTTP header, as it does for a model', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    for (const bad of ['two words', 'k\r\nX-Injected: 1', 'ключ', 'k'.repeat(4097)]) {
+      assert.throws(() => settings.setSearchKey('tavily', bad), /API key/, JSON.stringify(bad.slice(0, 20)))
+    }
+    assert.equal(settings.searchKeyFor('tavily'), '')
+  })
+
+  it('holds a key in memory only, and never on disk, where no keychain would take it', () => {
+    const cipher = new FakeCipher()
+    cipher.available = false
+    const settings = new SettingsService(dir, cipher, 'win32')
+    assert.deepEqual(settings.setSearchKey('exa', 'exa-session-key').searchKeys, ['exa'])
+    assert.equal(settings.searchKeyFor('exa'), 'exa-session-key')
+    assert.doesNotMatch(onDisk(), /exa-session-key|"exa":/)
+    const restarted = new SettingsService(dir, cipher, 'win32')
+    assert.deepEqual(restarted.get().searchKeys, [])
+    assert.equal(restarted.searchKeyFor('exa'), '')
+  })
+
+  it('shows a key sealed by another keychain as missing', () => {
+    new SettingsService(dir, new FakeCipher(0x33), 'win32').setSearchKey('brave', 'sealed-elsewhere')
+    const here = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(here.get().searchKeys, [])
+    assert.equal(here.searchKeyFor('brave'), '')
+  })
+
+  it('lists the keys among the secrets a log or a report is scrubbed of', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.setSearchKey('brave', 'brave-key-0001')
+    settings.setSearchKey('tavily', 'tavily-key-0001')
+    assert.deepEqual(settings.secrets().sort(), ['brave-key-0001', 'tavily-key-0001'])
+    settings.setSearchKey('brave', '')
+    assert.deepEqual(settings.secrets(), ['tavily-key-0001'])
+  })
+
+  it('reads a settings file from before search providers, and one that keeps strange things where keys go', () => {
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'read-only' }))
+    const old = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(old.searchProvider, 'duckduckgo')
+    assert.deepEqual(old.searchKeys, [])
+    fs.writeFileSync(file(), JSON.stringify({ searchKeysEnc: { brave: 5, exa: null, duckduckgo: 'enc:xx', evil: 'enc:yy' } }))
+    const odd = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(odd.get().searchKeys, [])
+    odd.save({ maxSteps: 12 })
+    assert.doesNotMatch(onDisk(), /"duckduckgo": "enc|evil/, 'what was not a key of a provider that exists is not written back')
+  })
+})
+
 describe('SettingsService models', () => {
   const profiles = (): Settings['profiles'] => [
     { id: 'demo', name: 'Demo', kind: 'demo', baseUrl: '', model: 'eNCode-demo' },

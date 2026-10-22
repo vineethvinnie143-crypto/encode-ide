@@ -2,11 +2,14 @@
  * The agent's way onto the web: fetches through safeFetch (public addresses
  * only, checked after DNS; redirects to another host handed back), pages
  * converted to readable text and cached for a quarter of an hour, and a web
- * search that needs no account.
+ * search through the provider the person chose (DuckDuckGo needs no account).
  */
-import type { FetchedPage, SearchHit, WebAccess } from '../types'
-import { decodeEntities, htmlToText, pageTitle } from './html'
+import type { FetchedPage, WebAccess } from '../types'
+import { htmlToText, pageTitle } from './html'
 import { safeFetch, type FetchOptions } from './safe-fetch'
+import { duckDuckGoProvider, type SearchProvider } from './search'
+
+export { parseSearchResults } from './search'
 
 export type WebErrorKind = 'refused' | 'redirect' | 'binary' | 'failed'
 
@@ -25,14 +28,18 @@ export class WebError extends Error {
 export interface WebAccessOptions {
   /** Network settings for safeFetch; tests widen the address check. */
   fetch?: Omit<FetchOptions, 'signal'>
-  /** The search page. Default: DuckDuckGo's HTML endpoint. */
+  /** The search page of the default provider. Default: DuckDuckGo's HTML endpoint. */
   searchUrl?: string
+  /** Who answers a search, asked on every search so that a change in Settings applies at once. Default DuckDuckGo. */
+  searchProvider?: () => SearchProvider
   /** How long a fetched page is reused. Default 15 minutes. */
   cacheMs?: number
   now?: () => number
 }
 
 const CACHE_LIMIT = 50
+/** Results a search hands the model. Few, because each one costs tokens in every later request of the turn. */
+export const SEARCH_RESULTS = 8
 const IP_HOST = /^(\d{1,3}\.){3}\d{1,3}$|^\[[0-9a-f:]+\]$/i
 
 /** http becomes https, except for addresses that are only ever plain http. */
@@ -48,48 +55,6 @@ export function upgradeUrl(raw: string): string {
   } catch {
     return url
   }
-}
-
-/** The real address behind a DuckDuckGo result link. */
-function resultUrl(href: string): string {
-  const decoded = decodeEntities(href)
-  const match = /[?&]uddg=([^&]+)/.exec(decoded)
-  if (match) {
-    try {
-      return decodeURIComponent(match[1])
-    } catch {
-      return decoded
-    }
-  }
-  return decoded.startsWith('//') ? `https:${decoded}` : decoded
-}
-
-function hostMatches(url: string, domains: readonly string[]): boolean {
-  let host: string
-  try {
-    host = new URL(url).hostname.toLowerCase()
-  } catch {
-    return false
-  }
-  return domains.some((domain) => {
-    const d = domain.toLowerCase().replace(/^\*?\./, '')
-    return host === d || host.endsWith(`.${d}`)
-  })
-}
-
-export function parseSearchResults(html: string): SearchHit[] {
-  const hits: SearchHit[] = []
-  const blocks = html.split(/<div[^>]+class="[^"]*\bresult\b[^"]*"/i).slice(1)
-  for (const block of blocks) {
-    const link = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block)
-    if (!link) continue
-    const snippet = /<(?:a|div|td)[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|td)>/i.exec(block)
-    const title = htmlToText(link[2]).replace(/\s+/g, ' ').trim()
-    const url = resultUrl(link[1])
-    if (!title || !/^https?:\/\//i.test(url) || /duckduckgo\.com\/y\.js/.test(url)) continue
-    hits.push({ title, url, snippet: snippet ? htmlToText(snippet[1]).replace(/\s+/g, ' ').trim() : '' })
-  }
-  return hits
 }
 
 export function createWebAccess(options: WebAccessOptions = {}): WebAccess {
@@ -125,17 +90,19 @@ export function createWebAccess(options: WebAccessOptions = {}): WebAccess {
     return page
   }
 
+  const fallback = duckDuckGoProvider({ ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.searchUrl ? { endpoint: options.searchUrl } : {}) })
+  const provider = () => options.searchProvider?.() ?? fallback
+
   return {
     fetch: fetchPage,
-    async search(query, searchOptions) {
-      const endpoint = options.searchUrl ?? 'https://html.duckduckgo.com/html/'
-      const outcome = await safeFetch(`${endpoint}?q=${encodeURIComponent(query)}`, { ...options.fetch, signal: searchOptions.signal })
-      if (outcome.kind !== 'response') throw new WebError('failed', `The search service could not be reached (${outcome.kind === 'refused' ? outcome.reason : outcome.kind}).`)
-      if (outcome.status !== 200) throw new WebError('failed', `The search service answered HTTP ${outcome.status}.`)
-      let hits = parseSearchResults(outcome.text)
-      if (searchOptions.allowedDomains?.length) hits = hits.filter((hit) => hostMatches(hit.url, searchOptions.allowedDomains!))
-      if (searchOptions.blockedDomains?.length) hits = hits.filter((hit) => !hostMatches(hit.url, searchOptions.blockedDomains!))
-      return hits.slice(0, 10)
-    },
+    search: (query, searchOptions) =>
+      provider().search({
+        query,
+        ...(searchOptions.allowedDomains ? { allowedDomains: searchOptions.allowedDomains } : {}),
+        ...(searchOptions.blockedDomains ? { blockedDomains: searchOptions.blockedDomains } : {}),
+        limit: SEARCH_RESULTS,
+        signal: searchOptions.signal,
+      }),
+    searchTarget: () => provider().endpoint,
   }
 }

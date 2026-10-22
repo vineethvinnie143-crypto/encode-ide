@@ -76,7 +76,7 @@ wiring pull request does, by using them:
 | Piece | Notes |
 | --- | --- |
 | OS sandbox: Seatbelt on macOS, bubblewrap on Linux, an allowlist proxy, and the Windows evaluation | A package of its own, with a `SpawnWrapper` for the core's shell. Until it lands, R1 stays open and prompts are the control on every platform. |
-| Search providers (Brave, Tavily, Exa) | Implements the core's `WebAccess.search`. |
+| Search providers (Brave, Tavily, Exa) | Done (0058): `@encode/tools` serves them behind `WebAccess.search`, the app chooses one in Settings → Agent and keeps its key sealed; the host asks for the key at each search. |
 | Subagent definitions (`.encode/agents/*.md`) and the reviewer gate | Map onto the core's `Subagents` and hook points. |
 
 ## Known limits carried into the wiring
