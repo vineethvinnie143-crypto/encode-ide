@@ -77,7 +77,7 @@ describe('an MCP tool as the agent sees it', () => {
     assert.deepEqual(built.definition.inputSchema, { type: 'object', properties: { title: { type: 'string' } } })
     assert.equal(built.readOnly, false)
     assert.deepEqual(built.modes, ['code'])
-    assert.deepEqual(built.access({}, context()), { type: 'external', server: 'github' })
+    assert.deepEqual(built.access({}, context()), { type: 'external', server: 'github', tool: 'create_issue' })
     assert.deepEqual(built.mcp, { server: 'github', tool: 'create_issue', ruleTool: 'create_issue', hints: {} })
     assert.equal(build({ content: [], isError: false }, { description: '' }).definition.description, 'The create_issue tool of the MCP server github.')
   })

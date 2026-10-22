@@ -44,7 +44,7 @@ export interface ExternalTool {
   readonly readOnly: false
   readonly modes: readonly ['code']
   readonly mcp?: McpToolIdentity
-  access(input: Record<string, unknown>, context: ExternalToolContext): { type: 'external'; server: string }
+  access(input: Record<string, unknown>, context: ExternalToolContext): { type: 'external'; server: string; tool?: string }
   describe(input: Record<string, unknown>, context: ExternalToolContext): { title: string; detail?: string }
   run(input: Record<string, unknown>, context: ExternalToolContext): Promise<ExternalOutcome>
 }
@@ -160,7 +160,8 @@ export function mcpTool(options: McpToolOptions): ExternalTool {
     readOnly: false,
     modes: ['code'],
     mcp: { server, tool: tool.name, ruleTool, hints: tool.hints },
-    access: () => ({ type: 'external', server }),
+    // The tool's name as rules spell it, so that a rule (and "Always allow") can name this tool and not the whole server.
+    access: () => ({ type: 'external', server, tool: ruleTool }),
     describe(input) {
       const claims = tool.hints.readOnly ? 'The server says this tool only reads.' : tool.hints.destructive ? 'The server says this tool can destroy data.' : ''
       return { title: `${tool.title ?? tool.name} (${server})`, detail: `${claims ? `${claims}\n` : ''}${pretty(input, 1500)}` }
