@@ -15,6 +15,7 @@ import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type
 import type { ModelRequest, ReasoningEffort, ToolResultContent } from './messages'
 import { anthropicTraits, type AnthropicTraits } from './models'
 import { readSse } from './sse'
+import { acceptingToolNames } from './tool-names'
 
 export interface AnthropicOptions {
   fetch?: FetchLike
@@ -398,5 +399,5 @@ export function createAnthropicAdapter(options: AnthropicOptions = {}): Provider
     yield* streamedReplyEvents(response, signal, where)
   }
 
-  return { type: 'anthropic', stream }
+  return acceptingToolNames({ type: 'anthropic', stream })
 }

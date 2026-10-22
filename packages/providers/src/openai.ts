@@ -13,6 +13,7 @@ import { classifyStreamError, isTransportError, TransportError } from './errors'
 import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type FetchLike } from './http'
 import type { AssistantMessage, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
 import { readSse } from './sse'
+import { acceptingToolNames } from './tool-names'
 
 export interface OpenAICompatibleOptions {
   fetch?: FetchLike
@@ -466,9 +467,9 @@ function createChatAdapter(type: 'openai-compatible' | 'openrouter', options: Op
 }
 
 export function createOpenAICompatibleAdapter(options: OpenAICompatibleOptions = {}): ProviderAdapter {
-  return createChatAdapter('openai-compatible', options)
+  return acceptingToolNames(createChatAdapter('openai-compatible', options))
 }
 
 export function createOpenRouterAdapter(options: OpenAICompatibleOptions = {}): ProviderAdapter {
-  return createChatAdapter('openrouter', options)
+  return acceptingToolNames(createChatAdapter('openrouter', options))
 }
