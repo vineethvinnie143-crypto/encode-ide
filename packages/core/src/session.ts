@@ -22,6 +22,7 @@ import {
   type UserMessage,
 } from '@encode/providers'
 import {
+  addToolSearch,
   createFileStateTracker,
   createJobManager,
   createToolRegistry,
@@ -666,6 +667,8 @@ export class AgentSession {
         this.env.warn?.(`The tool ${tool.definition.name} was left out: ${errorMessage(error)}`)
       }
     }
+    // With many outside tools only their names are sent, and ToolSearch loads the ones the model asks for.
+    addToolSearch(registry)
     return registry
   }
 

@@ -223,3 +223,4 @@ Updating means installing the next build over the last one: everything above sta
 - A network that needs a proxy does not work yet for model requests.
 - The free models run on an OpenRouter key of your own; eNCode has no free service of its own yet.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
+- An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").

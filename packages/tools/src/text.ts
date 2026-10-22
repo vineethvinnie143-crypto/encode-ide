@@ -161,6 +161,26 @@ export function truncateMiddle(text: string, maxLength: number): string {
   return text.slice(0, head) + marker(cutText.length, lines) + (tail ? text.slice(text.length - tail) : '')
 }
 
+/**
+ * Replaces a run of identical lines by its first line and a count. Build and test logs repeat themselves (the same
+ * warning for each of a hundred files), and the model reads the line once as well as it reads it a hundred times.
+ */
+export function collapseRepeats(text: string, minRun = 4): string {
+  if (!text.includes('\n')) return text
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; ) {
+    let end = i + 1
+    while (end < lines.length && lines[end] === lines[i]) end++
+    out.push(lines[i])
+    // A blank line says nothing worth a note, and a short line costs less than the note.
+    if (end - i >= minRun && lines[i].trim().length >= 8) out.push(`… (the line above is repeated ${end - i - 1} more times)`)
+    else for (let j = i + 1; j < end; j++) out.push(lines[j])
+    i = end
+  }
+  return out.length === lines.length && out.every((line, index) => line === lines[index]) ? text : out.join('\n')
+}
+
 /** Removes terminal escape sequences: colours, cursor moves and window titles. */
 export function stripAnsi(text: string): string {
   return text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[@-Z\\-_]/g, '')

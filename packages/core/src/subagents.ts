@@ -28,6 +28,7 @@ import path from 'node:path'
 import { userText, type ModelClient, type ModelRole, type SystemPart, type Usage } from '@encode/providers'
 import {
   createFileStateTracker,
+  withoutSeen,
   BUILTIN_SUBAGENT_TYPES,
   type AgentShell,
   type FileStateTracker,
@@ -269,7 +270,8 @@ class SubagentSurface implements Surface {
 /** A copy of what the main agent has read, so a subagent can edit those files without reading them again. */
 export function cloneTracker(source: FileStateTracker): FileStateTracker {
   const copy = createFileStateTracker()
-  for (const [file, state] of source.entries()) copy.set(file, { ...state })
+  // What the parent's Read showed is in the parent's conversation, not the subagent's.
+  for (const [file, state] of source.entries()) copy.set(file, withoutSeen(state))
   return copy
 }
 

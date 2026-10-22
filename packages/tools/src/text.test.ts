@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { decodeText, encodeText, looksLikeText, UnencodableTextError } from './text'
+import { collapseRepeats, decodeText, encodeText, looksLikeText, UnencodableTextError } from './text'
 
 const char = (code: number) => String.fromCodePoint(code)
 
@@ -46,5 +46,31 @@ describe('encodeText', () => {
     assert.throws(() => encodeText(`a${cjk}`, 'windows-1252'), (error) => error instanceof UnencodableTextError && error.character === cjk && error.encoding === 'windows-1252')
     assert.throws(() => encodeText(char(0x1f600), 'windows-1252'), (error) => error instanceof UnencodableTextError && error.character === char(0x1f600))
     assert.deepEqual(encodeText(cjk, 'utf8'), Buffer.from(cjk))
+  })
+})
+
+describe('collapseRepeats', () => {
+  it('replaces a run of identical lines by the line and a count, and leaves the rest as it was', () => {
+    const warning = 'warning: unused variable `index` in the loop'
+    const text = ['start', ...Array(120).fill(warning), 'done'].join('\n')
+    assert.equal(collapseRepeats(text), `start\n${warning}\n… (the line above is repeated 119 more times)\ndone`)
+    const other = ['a long line, once', 'a long line, once', 'a long line, once', 'a different long line'].join('\n')
+    assert.equal(collapseRepeats(other), other, 'three in a row is not a run')
+  })
+
+  it('does not touch short lines, blank lines or text without a run', () => {
+    const dots = Array(50).fill('.').join('\n')
+    assert.equal(collapseRepeats(dots), dots)
+    const blanks = ['a', '', '', '', '', '', '', 'b'].join('\n')
+    assert.equal(collapseRepeats(blanks), blanks)
+    const plain = 'one line only'
+    assert.equal(collapseRepeats(plain), plain)
+    const varied = Array.from({ length: 30 }, (_, index) => `line number ${index} of the output`).join('\n')
+    assert.equal(collapseRepeats(varied), varied)
+  })
+
+  it('collapses each run on its own and keeps a count for every one', () => {
+    const text = [...Array(5).fill('first repeated line'), 'between', ...Array(7).fill('second repeated line')].join('\n')
+    assert.equal(collapseRepeats(text), 'first repeated line\n… (the line above is repeated 4 more times)\nbetween\nsecond repeated line\n… (the line above is repeated 6 more times)')
   })
 })

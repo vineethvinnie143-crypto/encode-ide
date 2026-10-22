@@ -1,5 +1,6 @@
 export * from './types'
 export * from './registry'
+export * from './tool-search'
 export * from './text'
 export * from './diff'
 export * from './paths'

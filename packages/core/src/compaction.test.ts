@@ -41,6 +41,24 @@ describe('repairPairing', () => {
     assert.deepEqual(repaired, messages)
   })
 
+  it('returns the very messages of a paired conversation, so that nothing is mistaken for a repair', () => {
+    const messages: Message[] = [
+      userText('go'),
+      ...step('a'),
+      assistant(call('b'), call('c')),
+      { role: 'user', content: [result('b', 'B'), result('c', 'C'), textBlock('and a note after the results')] },
+      assistant('done'),
+    ]
+    assert.ok(isPaired(messages))
+    const repaired = repairPairing(messages)
+    assert.ok(repaired.every((message, index) => message === messages[index]), 'every message is the original object')
+    // Results in another order than the calls are put right, which is a change.
+    const shuffled: Message[] = [userText('go'), assistant(call('b'), call('c')), results(result('c', 'C'), result('b', 'B'))]
+    const fixed = repairPairing(shuffled)
+    assert.notEqual(fixed[2], shuffled[2])
+    assert.deepEqual((fixed[2] as UserMessage).content.map((block) => (block as ToolResultBlock).toolUseId), ['b', 'c'])
+  })
+
   it('answers a call that has no result, and drops results nobody asked for', () => {
     const messages: Message[] = [
       userText('go'),

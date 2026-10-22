@@ -98,6 +98,11 @@ export interface Tool<Input extends Record<string, unknown> = Record<string, unk
   readonly readOnly: boolean
   /** Modes that offer the tool. Default: every mode when read-only, `code` otherwise. */
   readonly modes?: readonly AgentMode[]
+  /**
+   * For tools there can be many of (those of MCP servers): once their definitions together are long, only their names
+   * are listed, and a definition is sent when the model asks for it with ToolSearch (tool-search.ts).
+   */
+  readonly defer?: boolean
   /** Rules the schema cannot express, checked after it passes. Returns what is wrong. */
   check?(input: Input): string | undefined
   /** What the call would touch, with paths resolved against the context. */
@@ -119,6 +124,12 @@ export interface FileState {
   /** True when it saw only a range of lines. */
   partial: boolean
   readAt: number
+  /**
+   * The lines Read put in the conversation last, while that output is still in it. Only Read sets it; a write, a
+   * rewind and every rewrite of the history (a shortened output, a summary) clear it, because from then on the
+   * conversation no longer holds those lines as they are.
+   */
+  seen?: { from: number; to: number; chars: number }
 }
 
 export interface FileStateTracker {
@@ -127,6 +138,8 @@ export interface FileStateTracker {
   delete(path: string): void
   /** Every path and state, for a subagent that inherits what its parent read. */
   entries(): [string, FileState][]
+  /** The conversation was rewritten and no longer holds what Read showed: the next Read shows the lines again. */
+  forgetSeen(): void
 }
 
 /** Who is writing, for checkpoints keyed by turn. */

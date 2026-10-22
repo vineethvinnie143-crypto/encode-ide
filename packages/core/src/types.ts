@@ -20,7 +20,7 @@ export interface AgentSettings {
   completionTool?: boolean
   /** Offer the Computer tool (mouse, keyboard and screen), where the host has a desktop to give. Applies from the next turn. */
   computer?: boolean
-  /** Compact before the prompt passes this many tokens, whatever the window. */
+  /** Compact before the prompt passes this many tokens, whatever the window. 200,000 when absent. */
   contextCap?: number
 }
 

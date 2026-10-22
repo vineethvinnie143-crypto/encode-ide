@@ -37,6 +37,7 @@ import {
 import { screenCommand, type Screened } from '@encode/permissions'
 import {
   isInsideReal,
+  loadedTools,
   truncateMiddle,
   type AgentShell,
   type DesktopServices,
@@ -60,6 +61,7 @@ import {
   CHARS_PER_TOKEN,
   clamp,
   COMPACT_AT,
+  DEFAULT_CONTEXT_CAP,
   ContextMeter,
   digest,
   dropThinkingFrom,
@@ -353,7 +355,7 @@ export class AgentLoop {
     let overflows = 0
     let empties = 0
     for (;;) {
-      const tools = o.registry.allDefinitions(o.tools)
+      const tools = o.registry.visibleDefinitions(o.tools, loadedTools(o.conversation.messages(), o.registry))
       await this.noteContext(tools, turn)
       await this.fit(turn)
       const settings = o.settings()
@@ -481,13 +483,13 @@ export class AgentLoop {
   private async fit(turn: Turn, options: FitOptions = {}): Promise<number> {
     const { o } = this
     const budget = await o.client.budget(o.role, this.query())
-    const window = options.window ?? budget.contextWindow
+    // A prompt is paid for in full on every step, and a model does not read 800,000 tokens as well as 150,000: past the
+    // person's cap (200,000 unless they set another) the window counts as that big.
+    const cap = o.settings().contextCap ?? DEFAULT_CONTEXT_CAP
+    const window = Math.min(options.window ?? budget.contextWindow, Math.ceil(cap / COMPACT_AT))
     // On a small window the answer's share is capped, or the limit would sit below the instructions and tools alone.
     const reserve = Math.min(budget.maxOutputTokens, OUTPUT_RESERVE, Math.floor(window * OUTPUT_RESERVE_SHARE))
-    let limit = Math.min(Math.floor(window * COMPACT_AT), window - reserve)
-    const cap = o.settings().contextCap
-    if (cap) limit = Math.min(limit, cap)
-    limit = Math.max(limit, 2_000)
+    const limit = Math.max(Math.min(Math.floor(window * COMPACT_AT), window - reserve, cap), 2_000)
 
     const original = o.conversation.messages()
     let messages = repairPairing(original)
@@ -534,7 +536,11 @@ export class AgentLoop {
         }
       }
     }
-    if (rewritten) await o.conversation.replace(messages, { trigger, summary, removed, turnId: turn.turnId })
+    if (rewritten) {
+      await o.conversation.replace(messages, { trigger, summary, removed, turnId: turn.turnId })
+      // Read answers "unchanged" by pointing at its earlier output, which may now be shortened or gone.
+      o.services.files.forgetSeen()
+    }
     return removed
   }
 

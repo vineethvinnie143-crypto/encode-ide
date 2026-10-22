@@ -91,11 +91,21 @@ so a reopened session shows its cards again.
 
 ## Compaction
 
-At 85% of the model's context window the conversation is shortened, from cheap to costly: old tool
+At 85% of the model's context window (counted as at most 200,000 tokens unless the `contextCap` setting says
+otherwise) the conversation is shortened, from cheap to costly: old tool
 outputs and call arguments are elided, then older units are summarized by the model, in units
 that never split a tool call from its result ([ADR 0009](../../docs/adr/0009-compaction-keeps-every-tool-call-answered.md)).
 What the user sees is kept whole. A request that still does not fit the window comes back from
 the client as `compact` and is tried again after compacting.
+
+## What a request costs
+
+Every step sends the instructions, the tool definitions and the whole conversation again, so the parts that are
+in every request are budgeted (`budget.test.ts`; `ENCODE_TOKEN_REPORT=1 node scripts/test.mjs budget` prints the
+sizes). Tools of MCP servers are deferred once their definitions are long: the request lists their names in
+`ToolSearch` and sends a definition after the model asked for it. A Read of lines that are still in the
+conversation, from a file that has not changed, is answered with a note that points back
+([ADR 0062](../../docs/adr/0062-every-step-pays-for-the-whole-request-so-its-parts-have-a-budget-and-the-large-ones-wait-until-asked-for.md)).
 
 ## Sessions on disk
 
