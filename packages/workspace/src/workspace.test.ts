@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import type { HookRun, HookRunner } from '@encode/hooks'
 import type { RuleQuery } from '@encode/permissions'
+import { Sandbox, type EnginePolicy, type SandboxEngine } from '@encode/sandbox'
 import { tempWorkspace } from '@encode/tools/testing'
 import { actOn } from './actions'
 import { WorkspaceConfig } from './config'
@@ -333,6 +334,43 @@ describe('the workspaces of a program', () => {
     await trustFolder(workspaces.config(root))
     await scope.refresh!()
     assert.deepEqual(scope.shell!(), { extraEnv: { PROJECT_MODE: 'dev' } })
+  })
+
+  it('give the shells of a folder the sandbox: the folder and its extra folders to write, and only the tightening its own settings ask for', async () => {
+    const root = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ sandbox: { network: 'block', denyWrite: ['secrets'], allowWrite: ['/'], allowUnsandboxed: true } }) }))
+    const home = await fs.realpath(await tempWorkspace({ '.encode/settings.json': json({ permissions: { additionalDirectories: [] } }) }))
+    const dir = await fs.realpath(await tempWorkspace())
+    const policies: EnginePolicy[] = []
+    const engine: SandboxEngine = {
+      name: 'bubblewrap',
+      limits: { reads: true, network: true, protectedPaths: 'exact' },
+      probe: async () => ({ ok: true }),
+      prepare: async () => undefined,
+      wrap: (spec, policy) => {
+        policies.push(policy)
+        return { ...spec, file: '/usr/bin/fake-sandbox', args: [spec.file, ...spec.args] }
+      },
+    }
+    const sandbox = new Sandbox({ home, dir, engine, env: {} })
+    const workspaces = new Workspaces({ home, sandbox })
+    const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
+    // The probe has settled by the time the session has its scope, so the first request already says what Bash runs in.
+    assert.equal(sandbox.status().state, 'active')
+    const shell = scope.shell!()
+    assert.deepEqual(shell.sandbox!(), { active: true, allowUnsandboxed: true })
+    const wrapped = await shell.wrapSpawn!({ file: '/bin/bash', args: ['x.sh'], env: { PATH: '/usr/bin' }, cwd: root })
+    assert.equal(wrapped.file, '/usr/bin/fake-sandbox')
+    assert.ok(policies[0].writable.includes(root))
+    assert.ok(!policies[0].writable.includes('/'), 'a folder cannot add where commands may write')
+    assert.equal(policies[0].network, false, 'a folder can block the network')
+    assert.ok(policies[0].protected.includes(path.join(root, 'secrets')), 'a folder can protect more')
+    assert.equal(await shell.scratchRoot!(), policies[0].temp)
+
+    // The person turns it off in their own settings: the next command is not rewritten.
+    await fs.writeFile(path.join(home, '.encode', 'settings.json'), json({ sandbox: { enabled: false } }))
+    await scope.refresh!()
+    assert.equal(shell.sandbox!().active, false)
+    assert.equal((await shell.wrapSpawn!({ file: '/bin/bash', args: ['x.sh'], env: {}, cwd: root })).file, '/bin/bash')
   })
 
   it('let Always allow save through the scope, and the next call see it', async () => {

@@ -38,6 +38,9 @@ importers:
       '@encode/router':
         specifier: workspace:*
         version: link:../../packages/router
+      '@encode/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@encode/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
@@ -405,6 +408,9 @@ importers:
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions
+      '@encode/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       '@encode/tools':
         specifier: workspace:*
         version: link:../tools

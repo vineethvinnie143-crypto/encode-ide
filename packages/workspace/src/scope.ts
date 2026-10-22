@@ -3,6 +3,7 @@ import { checkpointDir, CheckpointService, nodeCheckpointFs, pruneStore, type Ch
 import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
+import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
 import { realPathOf } from '@encode/tools'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
 import { WorkspaceConfig } from './config'
@@ -13,8 +14,12 @@ import { actOnMcp, type McpAction, type McpOutcome } from './mcp-actions'
 import { rememberRules } from './remember'
 import { reportOn, type WorkspaceReport } from './report'
 import { recordingHooks, sessionCheckpoints } from './rewind'
+import { actOnSandbox, type SandboxAction, type SandboxOutcome } from './sandbox-actions'
+import { sandboxReport, type SandboxReport } from './sandbox-report'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/** How long opening a session waits for the sandbox to find out whether this machine has one (the first run on Windows builds its helper). */
+const SANDBOX_WAIT_MS = 15_000
 
 export interface CheckpointStoreOptions {
   /** The store's base folder; a folder for each workspace is made under it. */
@@ -46,6 +51,8 @@ export interface WorkspacesOptions {
   onMcpChange?(root: string): void
   /** For tests: how MCP servers are reached, and how long things are waited for. */
   mcp?: Pick<McpHubOptions, 'manager' | 'startWaitMs' | 'idleMs'>
+  /** The operating-system sandbox for the agent's commands; one for the whole program. Without it commands run as the user does. */
+  sandbox?: Sandbox
 }
 
 /**
@@ -131,6 +138,23 @@ export class Workspaces {
     return actOnMcp(config, this.hub(config), action, { fs: this.fs, platform: this.platform })
   }
 
+  /** The sandbox around the agent's commands as it stands in a folder, for the Sandbox screen. The folder may be given as any path to it. */
+  async sandboxReport(root: string): Promise<SandboxReport> {
+    const config = this.config(await realPathOf(root))
+    return sandboxReport(this.options.sandbox, await config.refresh(), this.home, this.platform)
+  }
+
+  /** Does what the Sandbox screen asked, and returns how the sandbox stands afterwards. */
+  async sandboxAct(root: string, action: SandboxAction): Promise<SandboxOutcome> {
+    const config = this.config(await realPathOf(root))
+    return actOnSandbox(config, this.options.sandbox, action, { fs: this.fs, platform: this.platform })
+  }
+
+  /** Calls back when the sandbox's state changes (it was checked, or a folder is being prepared). Returns the way to stop. */
+  onSandboxChange(listener: () => void): () => void {
+    return this.options.sandbox?.onChange(listener) ?? (() => undefined)
+  }
+
   /** Stops every folder's MCP servers. Quick enough for a program that is closing. */
   async close(): Promise<void> {
     const hubs = [...this.hubs.values()]
@@ -197,6 +221,7 @@ export class Workspaces {
     const release = hub.acquire()
     try {
       hub.sync(await config.refresh())
+      await this.sandboxChecked()
       return this.scopeOf(request, config, hub, release)
     } catch (error) {
       release()
@@ -204,9 +229,32 @@ export class Workspaces {
     }
   }
 
+  /** A session's tools are built once the sandbox has said whether it works here, so that Bash is told what its commands run in. Never fails a session. */
+  private async sandboxChecked(): Promise<void> {
+    const sandbox = this.options.sandbox
+    if (!sandbox) return
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        sandbox.start().catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, SANDBOX_WAIT_MS)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   private scopeOf(request: { sessionId: string; root: string; notice(text: string): void }, config: WorkspaceConfig, hub: McpHub, release: () => void): SessionScope {
     const recording = this.recorder(request, config)
     const { env, hookRunner, transcriptPath } = this.options
+    // The folder and the extra folders its settings name are where commands may write; its settings may tighten the rest.
+    const sandbox = this.options.sandbox?.session({
+      roots: () => [request.root, ...config.current().extraRoots],
+      settings: () => resolveSandboxSettings(config.current().effective.sandbox),
+    })
+    sandbox?.warm()
     return {
       // What keeps the record comes first: a hook that stops a result must not leave the record out of date.
       hooks: combineHooks(
@@ -232,7 +280,19 @@ export class Workspaces {
         }
       },
       remember: rememberRules(config, this.fs, this.platform),
-      shell: () => ({ extraEnv: config.current().effective.env }),
+      shell: () => ({
+        extraEnv: config.current().effective.env,
+        ...(sandbox
+          ? {
+              wrapSpawn: sandbox.wrapSpawn,
+              scratchRoot: sandbox.scratchRoot,
+              sandbox: () => {
+                const { active, allowUnsandboxed } = sandbox.state()
+                return { active, allowUnsandboxed }
+              },
+            }
+          : {}),
+      }),
       external: hub,
       release: async () => release(),
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
