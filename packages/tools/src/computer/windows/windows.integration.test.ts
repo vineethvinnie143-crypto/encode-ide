@@ -662,14 +662,22 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     const long = 'abcdefghijklmnopqrstuvwxyz'.repeat(1_600)
     const controller = new AbortController()
     const started = Date.now()
-    const typing = desktop.act(actOf(window, [{ kind: 'type', text: long }], { pace: 'smooth' }), controller.signal)
-    const outcome = typing.then(
-      () => 'finished',
-      (error: unknown) => (error === controller.signal.reason ? 'stopped' : `failed: ${String(error)}`),
+    let ended = 'running'
+    const typing = desktop.act(actOf(window, [{ kind: 'type', text: long }], { pace: 'smooth' }), controller.signal).then(
+      () => {
+        ended = 'finished'
+      },
+      (error: unknown) => {
+        ended = error === controller.signal.reason ? 'stopped' : `failed: ${String(error)}`
+      },
     )
-    await eventually(async () => (await a.state()).notes.length > 200, 'the typing to start')
+    await eventually(async () => {
+      assert.ok(!ended.startsWith('failed') && ended !== 'finished', `the typing ended before it was stopped: ${ended}`)
+      return (await a.state()).notes.length > 200
+    }, 'the typing to start')
     controller.abort(new Error('stop'))
-    assert.equal(await outcome, 'stopped')
+    await typing
+    assert.equal(ended, 'stopped')
     assert.ok(Date.now() - started < 20_000, 'it did not wait for all the text')
     // What was already sent may still be on its way into the field; the length must settle and stay.
     let settled = -1

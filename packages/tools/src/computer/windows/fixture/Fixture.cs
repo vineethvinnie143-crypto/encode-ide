@@ -113,12 +113,12 @@ namespace Encode.Fixture
         private readonly Label status = new Label();
         private readonly Canvas canvas;
         private readonly List<string> events = new List<string>();
-        private readonly Timer later = new Timer();
         private readonly Timer commands = new Timer();
         private int activated;
         private int counter;
         private bool dialogOpen;
         private string lastPolled = "";
+        private int soonPending;
 
         public FixtureForm(string statePath, int left, int top, string title)
         {
@@ -211,12 +211,6 @@ namespace Encode.Fixture
             Resize += delegate { Write(); };
             KeyDown += OnFixtureKey;
 
-            later.Interval = 40;
-            later.Tick += delegate
-            {
-                later.Stop();
-                Write();
-            };
             commands.Interval = 100;
             commands.Tick += delegate
             {
@@ -238,10 +232,27 @@ namespace Encode.Fixture
             Write();
         }
 
-        /// <summary>Typing writes a change per character; one record per moment is enough.</summary>
+        /// <summary>
+        /// Typing writes a change per character; one record per moment is enough. The moment is counted off the interface
+        /// thread, because a timer on it never fires while keys keep arriving, and the record would not move until the end of
+        /// a long text.
+        /// </summary>
         private void Soon()
         {
-            if (!later.Enabled) later.Start();
+            if (System.Threading.Interlocked.Exchange(ref soonPending, 1) == 1) return;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                System.Threading.Thread.Sleep(40);
+                System.Threading.Interlocked.Exchange(ref soonPending, 0);
+                try
+                {
+                    if (IsHandleCreated) BeginInvoke(new MethodInvoker(Write));
+                }
+                catch (InvalidOperationException)
+                {
+                    // The window is closing.
+                }
+            });
         }
 
         private void RunCommand()
