@@ -1,16 +1,18 @@
 /**
- * eNCode's own icon set (ADR 0013): line icons drawn on a 24 px grid with a
- * 1.75 px stroke and round ends, coloured by `currentColor`. They replace
- * lucide-react and keep its prop shape (`size`, `className`, `fill`,
- * `strokeWidth`), so call sites only change their import.
+ * eNCode's own icon set (ADR 0013): line icons drawn on a 24 px grid with
+ * round ends, coloured by `currentColor`. The line is sized so that it is
+ * about 1.5 px on screen whatever size the icon is drawn at (see `weight`).
+ * They replace lucide-react and keep its prop shape (`size`, `className`,
+ * `fill`, `strokeWidth`), so call sites only change their import.
  */
 import type { ReactNode, SVGProps } from 'react'
+import { weight } from './icon-weight'
 
 export type IconProps = Omit<SVGProps<SVGSVGElement>, 'ref'> & { size?: number | string }
 export type Icon = ((props: IconProps) => ReactNode) & { displayName?: string }
 
 function icon(name: string, children: ReactNode): Icon {
-  const Component: Icon = ({ size = 16, strokeWidth = 1.75, fill = 'none', className, ...rest }: IconProps) => (
+  const Component: Icon = ({ size = 16, strokeWidth, fill = 'none', className, ...rest }: IconProps) => (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       width={size}
@@ -18,7 +20,7 @@ function icon(name: string, children: ReactNode): Icon {
       viewBox="0 0 24 24"
       fill={fill}
       stroke="currentColor"
-      strokeWidth={strokeWidth}
+      strokeWidth={strokeWidth ?? weight(size)}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -34,7 +36,7 @@ function icon(name: string, children: ReactNode): Icon {
 }
 
 /** A filled dot that stays filled whatever `fill` the icon is given. */
-const dot = (cx: number, cy: number, r = 1.15) => <circle cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />
+const dot = (cx: number, cy: number, r = 1.3) => <circle cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />
 const ring = (r = 8.5) => <circle cx="12" cy="12" r={r} />
 const page = <path d="M7 3.5h6.5L18 8v12.5H7z M13.5 3.5V8H18" />
 const shield = 'M12 3.5 19 6v5.5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6z'
@@ -69,7 +71,7 @@ export const CircleDot = icon('CircleDot', <>{ring()}{dot(12, 12, 2.5)}</>)
 export const AlertTriangle = icon('AlertTriangle', <><path d="M12 4 2.8 19.5h18.4z M12 10v4.5" />{dot(12, 17, 1)}</>)
 export const Info = icon('Info', <><>{ring()}</><path d="M12 11v5" />{dot(12, 8, 1)}</>)
 export const Loader2 = icon('Loader2', <path d="M20.5 12a8.5 8.5 0 1 1-6-8.13" />)
-export const MoreHorizontal = icon('MoreHorizontal', <>{dot(6, 12, 1.4)}{dot(12, 12, 1.4)}{dot(18, 12, 1.4)}</>)
+export const MoreHorizontal = icon('MoreHorizontal', <>{dot(5.5, 12, 1.8)}{dot(12, 12, 1.8)}{dot(18.5, 12, 1.8)}</>)
 export const Star = icon('Star', <path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.6L12 17l-5.1 2.6 1-5.6-4.1-4 5.7-.8z" />)
 export const Target = icon('Target', <>{ring()}{ring(5)}{dot(12, 12, 1.5)}</>)
 export const Gauge = icon('Gauge', <><path d="M4.5 17a8 8 0 1 1 15 0 M12 13l3.5-4" />{dot(12, 13, 1.3)}</>)
@@ -205,7 +207,8 @@ export const Palette = icon(
 )
 
 // Settings and safety
-export const Settings = icon('Settings', <path d="M4 7h9 M17 7h3 M4 17h3 M11 17h9 M15 5v4 M9 15v4" />)
+/** Eight teeth around a hub: Settings. The outline is generated from its radii, not traced from another set. */
+export const Gear = icon('Gear', <><path d="M10.4 4.78 L10.66 2.49 L13.34 2.49 L13.6 4.78A7.4 7.4 0 0 1 15.98 5.76 L17.78 4.33 L19.67 6.22 L18.24 8.02A7.4 7.4 0 0 1 19.22 10.4 L21.51 10.66 L21.51 13.34 L19.22 13.6A7.4 7.4 0 0 1 18.24 15.98 L19.67 17.78 L17.78 19.67 L15.98 18.24A7.4 7.4 0 0 1 13.6 19.22 L13.34 21.51 L10.66 21.51 L10.4 19.22A7.4 7.4 0 0 1 8.02 18.24 L6.22 19.67 L4.33 17.78 L5.76 15.98A7.4 7.4 0 0 1 4.78 13.6 L2.49 13.34 L2.49 10.66 L4.78 10.4A7.4 7.4 0 0 1 5.76 8.02 L4.33 6.22 L6.22 4.33 L8.02 5.76A7.4 7.4 0 0 1 10.4 4.78Z" /><circle cx="12" cy="12" r="2.9" /></>)
 export const Settings2 = icon('Settings2', <><path d="M4 8h5 M13 8h7 M4 16h9 M17 16h3" /><circle cx="11" cy="8" r="2" /><circle cx="15" cy="16" r="2" /></>)
 export const Shield = icon('Shield', <path d={shield} />)
 export const ShieldAlert = icon('ShieldAlert', <><path d={`${shield} M12 8.5v4`} />{dot(12, 15.5, 1)}</>)
@@ -222,7 +225,14 @@ export const Sparkles = icon(
   'Sparkles',
   <path d="M12 3.5l1.9 5.2 5.1 1.8-5.1 1.8L12 17.5l-1.9-5.2L5 10.5l5.1-1.8z M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />,
 )
-export const Bot = icon('Bot', <><rect x="5" y="8" width="14" height="11" rx="3" /><path d="M12 4.5V8 M9.5 16h5" />{dot(9.5, 12.5, 1.2)}{dot(14.5, 12.5, 1.2)}{dot(12, 4, 1.1)}</>)
+export const Bot = icon(
+  'Bot',
+  <>
+    <rect x="5" y="9" width="14" height="10.5" rx="3.2" />
+    <path d="M12 9V6.4 M9.3 13v1.7 M14.7 13v1.7 M2.8 13v2.7 M21.2 13v2.7" />
+    <circle cx="12" cy="4.9" r="1.4" />
+  </>,
+)
 export const Puzzle = icon('Puzzle', <path d="M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M16.5 13.5v6 M13.5 16.5h6" />)
 export const Layers = icon('Layers', <path d="M12 3.5 3.5 8 12 12.5 20.5 8z M3.5 12 12 16.5 20.5 12 M3.5 16 12 20.5 20.5 16" />)
 export const Bolt = icon('Bolt', <path d="M13 3 5 13h6l-1 8 8-10h-6z" />)

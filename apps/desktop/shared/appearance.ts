@@ -64,6 +64,15 @@ export const WINDOW_BACKGROUND: Record<ResolvedTheme, string> = {
   light: '#edeff3',
 }
 
+/** The glyphs of the native window buttons (Windows draws them over the title bar), chosen to stand out from `WINDOW_BACKGROUND`. */
+export const CAPTION_SYMBOL: Record<ResolvedTheme, string> = {
+  dark: '#d3d8e2',
+  light: '#3a4152',
+}
+
+/** The title bar's height in px, which is also the height of the native window buttons. `.titlebar` in 01-titlebar.css says the same. */
+export const TITLE_BAR_HEIGHT = 44
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
 }

@@ -704,8 +704,10 @@ export class AgentSession {
     try {
       return await run
     } finally {
+      // Free before the end of the turn is saved: a client that hears the turn is over may send the next request at once.
       this.controller = undefined
       this.clearPending()
+      await this.flush().catch(() => undefined)
     }
   }
 
@@ -744,8 +746,6 @@ export class AgentSession {
       const message = errorMessage(error)
       this.fail(message)
       return { kind: 'failed', message }
-    } finally {
-      await this.flush().catch(() => undefined)
     }
   }
 

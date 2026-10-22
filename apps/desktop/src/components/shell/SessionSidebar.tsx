@@ -83,7 +83,7 @@ function SessionRow({ session, active, status, nested, renaming, onOpen, onConte
     }
   }
   return (
-    <div className={cx('sb-row', nested && 'sb-sub', active && 'is-active')} onContextMenu={(event) => onContext(event, session)}>
+    <div className={cx('sb-row', 'sb-session', nested && 'sb-sub', active && 'is-active')} onContextMenu={(event) => onContext(event, session)}>
       {renaming ? (
         <>
           <StatusSlot status={status} />
@@ -305,7 +305,7 @@ export default function SessionSidebar() {
             <button type="button" className="sb-row sb-new" onClick={() => commandRegistry.run('file.newSession')}>
               <PenSquare size={16} className="ic" />
               <span className="title">New session</span>
-              <Kbd keys={commandRegistry.shortcut('file.newSession') ?? ''} />
+              <Kbd keys={commandRegistry.shortcut('file.newSession') ?? ''} plain />
             </button>
 
             {model.pinned.length > 0 && (
@@ -394,7 +394,7 @@ export default function SessionSidebar() {
               <span>Archived</span>
             </div>
             {archived.map((session) => (
-              <div key={session.id} className="sb-row">
+              <div key={session.id} className="sb-row sb-session">
                 <span className="slot" aria-hidden="true" />
                 <span className="title" title={session.title}>
                   {session.title}

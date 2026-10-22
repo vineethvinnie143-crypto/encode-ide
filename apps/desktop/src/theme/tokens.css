@@ -18,6 +18,8 @@
   --surface-3: #1f2430; /* menus, dialogs, keys */
   --hover: rgb(255 255 255 / 0.05);
   --pressed: rgb(255 255 255 / 0.08);
+  /* The row or place you are in: a neutral fill a step above hover, so the accent stays for actions. */
+  --row-selected: rgb(255 255 255 / 0.075);
 
   /* Lines */
   --border-subtle: #1e222c;
@@ -134,6 +136,7 @@
   --surface-3: #ffffff;
   --hover: rgb(15 23 42 / 0.05);
   --pressed: rgb(15 23 42 / 0.08);
+  --row-selected: rgb(15 23 42 / 0.075);
 
   --border-subtle: #eceef2;
   --border: #e0e3e9;

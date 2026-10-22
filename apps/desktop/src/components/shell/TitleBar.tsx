@@ -91,6 +91,13 @@ function MenuBar() {
   )
 }
 
+/**
+ * Windows draws the window buttons itself, over the right end of the title bar (see window.ts, which says so
+ * in the page's address). Their corner is then not ours: the bar leaves it free (01-titlebar.css) and draws
+ * no buttons of its own, not even in full screen, where the system hides its own.
+ */
+const NATIVE_CAPTIONS = new URLSearchParams(window.location.search).get('captions') === 'native'
+
 function CaptionButtons() {
   const [maximized, setMaximized] = useState(false)
   useEffect(() => api.window.onStateChange((state) => setMaximized(state.maximized)), [])
@@ -122,7 +129,7 @@ export default function TitleBar() {
   const shortcut = (id: string) => commandRegistry.shortcut(id)
 
   return (
-    <header className="titlebar">
+    <header className={cx('titlebar', NATIVE_CAPTIONS && 'has-native-captions')}>
       <LogoMark size={22} className="titlebar-logo" />
       <IconButton label="Back" shortcut={shortcut('session.back')} size="md" disabled={!back} onClick={() => commandRegistry.run('session.back')}>
         <ArrowLeft size={16} />
@@ -142,7 +149,7 @@ export default function TitleBar() {
       <span className="tb-sep" />
       <MenuBar />
       <div className="tb-drag" />
-      <CaptionButtons />
+      {!NATIVE_CAPTIONS && <CaptionButtons />}
     </header>
   )
 }

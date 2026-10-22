@@ -49,6 +49,27 @@ describe('a session', () => {
     await running
   })
 
+  it('takes the next request as soon as a turn has reported its end, while that end is still being saved', async () => {
+    const h = await sessionHarness({ script: [{ text: 'first' }, { text: 'second' }] })
+    const flush = h.session.flush.bind(h.session)
+    // A slow disk: the client has been told the turn is over and the session is still writing it down.
+    h.session.flush = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      await flush()
+    }
+    let second: ReturnType<typeof h.session.start> | undefined
+    const emit = h.env.emit
+    h.env.emit = (event) => {
+      emit(event)
+      // A queued message goes out the moment the client hears "done", on a later tick as across a port.
+      if (event.type === 'done' && !second) setImmediate(() => (second = h.session.start({ text: 'two', mode: 'code' })))
+    }
+    await h.session.start({ text: 'one', mode: 'code' })
+    assert.ok(second)
+    assert.deepEqual(await second, { kind: 'done', reply: 'second' })
+    assert.deepEqual(shown(h), [['user', 'one'], ['assistant', 'first'], ['user', 'two'], ['assistant', 'second']])
+  })
+
   it('stops on request, finishing what was streaming', async () => {
     const h = await sessionHarness({ client: { delayMs: 15 }, script: [{ text: 'one two three four five six seven eight nine ten eleven twelve' }] })
     const running = h.session.start({ text: 'talk', mode: 'code' })

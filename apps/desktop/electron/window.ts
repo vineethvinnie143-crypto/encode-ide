@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { appearanceParams, type Appearance } from '../shared/appearance'
-import { windowBackground } from './appearance'
+import { NATIVE_CAPTIONS, captionOverlay, windowBackground } from './appearance'
 import { allowFraming } from './framing'
 
 /** The Vite dev server, honoured only by an unpackaged build. */
@@ -25,10 +25,14 @@ export function isRendererUrl(url: string): boolean {
   return url.startsWith('app://renderer/')
 }
 
-/** The renderer's address. It carries the appearance, so the first frame is drawn in the right theme. */
+/**
+ * The renderer's address. It carries the appearance, so the first frame is drawn in the right theme, and
+ * says whether the system draws the window buttons, so the title bar is laid out right from the first frame.
+ */
 function rendererUrl(appearance: Appearance): string {
   const url = new URL(devServer ?? 'app://renderer/index.html')
   for (const [name, value] of Object.entries(appearanceParams(appearance))) url.searchParams.set(name, value)
+  if (NATIVE_CAPTIONS) url.searchParams.set('captions', 'native')
   return url.toString()
 }
 
@@ -71,7 +75,9 @@ export function createMainWindow(appearance: Appearance): BrowserWindow {
     show: false,
     title: 'eNCode',
     backgroundColor: windowBackground(),
-    frame: false,
+    // On Windows the system draws the window buttons over our title bar: the right glyphs, hover and press
+    // states, and the snap layouts of Windows 11. Elsewhere the title bar draws its own (TitleBar.tsx).
+    ...(NATIVE_CAPTIONS ? { titleBarStyle: 'hidden' as const, titleBarOverlay: captionOverlay() } : { frame: false }),
     icon: path.join(app.getAppPath(), 'build', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {

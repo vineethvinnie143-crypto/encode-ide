@@ -16,6 +16,11 @@
   user-select: none;
 }
 
+/* With the system's own window buttons, the bar stops where they start. */
+.titlebar.has-native-captions {
+  padding-right: calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%));
+}
+
 .titlebar button,
 .titlebar .menubar {
   -webkit-app-region: no-drag;
@@ -58,7 +63,7 @@
   align-self: stretch;
 }
 
-/* Windows caption buttons: 46 x 44, with the system's red on Close */
+/* The window buttons where the system does not draw them: 46 x 44, with Windows' red on Close */
 .caption {
   display: flex;
   align-self: stretch;

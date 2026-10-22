@@ -53,8 +53,8 @@
   border-radius: var(--r-8);
 }
 .icon-btn.is-on {
-  background: var(--selected);
-  color: var(--accent);
+  background: var(--row-selected);
+  color: var(--text-1);
 }
 
 /* Tooltip */
@@ -81,28 +81,44 @@
   animation: ui-fade var(--dur-2) var(--ease-out);
 }
 
-/* Keys */
+/* Keys: flat chips, so a shortcut reads as a hint and not as a row of buttons. */
 .ui-kbd-group {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .ui-kbd {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: var(--r-4);
-  background: var(--surface-2);
+  border-radius: 5px;
+  background: var(--pressed);
   color: var(--text-2);
   font-family: var(--font-ui);
   font-size: var(--fs-11);
   font-weight: 500;
   line-height: 1;
+}
+
+/* Plain: quiet text with plus signs, as in Ctrl+Shift+P, for menus and lists. */
+.ui-kbd-group.is-plain {
+  gap: 0;
+}
+.ui-kbd-group.is-plain .ui-kbd {
+  display: inline;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-weight: 400;
+}
+.ui-kbd-group.is-plain .ui-kbd + .ui-kbd::before {
+  content: '+';
 }
 
 /* Pills and chips */

@@ -26,26 +26,26 @@
   box-shadow: -1px -1px 0 var(--border-subtle);
 }
 
-/* Icon rail (52 px): 36 px buttons on a 44 px pitch */
+/* Icon rail (52 px): 38 px buttons with 20 px icons. The place you are in is a quiet filled square; no bars, no borders. */
 .icon-rail {
   width: 52px;
   flex: none;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0 14px;
+  gap: 4px;
+  padding: 6px 0 12px;
   background: var(--chrome);
 }
 
 .rail-btn {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--r-10);
   display: grid;
   place-items: center;
-  color: var(--text-3);
+  color: var(--text-2);
   transition:
     background var(--dur-1) var(--ease-out),
     color var(--dur-1) var(--ease-out);
@@ -54,28 +54,20 @@
   background: var(--hover);
   color: var(--text-1);
 }
-.rail-btn.is-active {
-  background: var(--surface-2);
-  color: var(--text-1);
-  box-shadow: inset 0 0 0 1px var(--border);
+.rail-btn:active {
+  background: var(--pressed);
 }
-.rail-btn.is-active::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
+.rail-btn.is-active {
+  background: var(--row-selected);
+  color: var(--text-1);
 }
 
 .rail-badge {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 7px;
-  height: 7px;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--chrome);
@@ -85,9 +77,11 @@
   flex: 1;
 }
 
+/* The letter has its own layer so it is drawn in greys, not in ClearType's coloured fringes. */
 .avatar {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -95,8 +89,11 @@
   color: var(--text-1);
   font-size: var(--fs-12);
   font-weight: 600;
-  box-shadow: 0 0 0 1px var(--border);
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px var(--border);
+  will-change: transform;
+  transition: box-shadow var(--dur-1) var(--ease-out);
 }
 .avatar:hover {
-  box-shadow: 0 0 0 1px var(--border-strong);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
