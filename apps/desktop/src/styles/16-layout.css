@@ -100,15 +100,3 @@
 .avatar:hover {
   box-shadow: 0 0 0 1px var(--border-strong);
 }
-
-/* Below 1100 px the side panel floats over the thread instead of pushing it. */
-@media (max-width: 1099px) {
-  .right-wrap {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    box-shadow: var(--shadow-pop);
-  }
-}

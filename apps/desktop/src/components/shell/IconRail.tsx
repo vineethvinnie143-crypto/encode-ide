@@ -1,6 +1,8 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { api } from '../../api'
 import { commandRegistry } from '../../commands/app'
+import { activeKind } from '../../panels/model'
+import { usePanels } from '../../stores/panels'
 import { useSessions } from '../../stores/sessions'
 import { attentionCount } from '../../stores/sidebar-model'
 import { useStatus } from '../../stores/status'
@@ -37,7 +39,9 @@ export default function IconRail() {
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const sidebarMode = useUi((state) => state.sidebarMode)
-  const reviewOpen = useUi((state) => state.rightVisible && state.rightPanel === 'workspace' && state.workspaceTab === 'files' && state.sidebarView === 'git')
+  const sourceControlShown = useUi((state) => state.sidebarView === 'git')
+  const filesShown = usePanels((state) => state.side.layout !== 'hidden' && activeKind(state.side) === 'files')
+  const reviewOpen = filesShown && sourceControlShown
   const sessions = useSessions((state) => state.sessions)
   const statuses = useStatus((state) => state.statusById)
   const [user, setUser] = useState('developer')
@@ -76,7 +80,8 @@ export default function IconRail() {
         badge={waiting > 0}
         onClick={() => {
           ui().setSidebarMode('projects')
-          ui().setMainView('chat')
+          // A full-width side panel covers the thread; Home is the thread.
+          if (usePanels.getState().side.layout === 'full') usePanels.getState().setLayout('split')
           ui().setSettingsOpen(false)
           ui().setPluginsOpen(false)
           ui().setAutomationOpen(false)
@@ -90,10 +95,7 @@ export default function IconRail() {
       <RailButton
         label="Review"
         active={reviewOpen}
-        onClick={() => {
-          ui().setSidebarView('git')
-          ui().setWorkspaceTab('files')
-        }}
+        onClick={() => usePanels.getState().open('files', { view: 'git' })}
       >
         <GitPullRequest size={18} />
       </RailButton>

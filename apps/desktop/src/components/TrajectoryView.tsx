@@ -1,71 +1,9 @@
 import { useState } from 'react'
-import { ChevronRight, Columns2, LayoutGrid, PanelRightClose, Plus, X } from '../ui/icons'
+import { ChevronRight, Columns2 } from '../ui/icons'
 import { useChat } from '../stores/chat'
-import { useUi } from '../stores/ui'
-import BrowserPanel from './BrowserPanel'
-import WorkspacePanel from './WorkspacePanel'
 
-export default function RightPanel() {
-  const rightPanel = useUi((state) => state.rightPanel)
-  const setRightPanel = useUi((state) => state.setRightPanel)
-  const setRightVisible = useUi((state) => state.setRightVisible)
-
-  const other = rightPanel === 'browse' ? 'workspace' : 'browse'
-
-  return (
-    <aside className="right-panel">
-      <div className="right-tabs">
-        <button className={`right-tab ${rightPanel === 'browse' ? 'is-active' : ''}`} onClick={() => setRightPanel('browse')}>
-          Browse
-          <span
-            className="right-tab-close"
-            title="Close"
-            onClick={(event) => {
-              event.stopPropagation()
-              setRightVisible(false)
-            }}
-          >
-            <X size={10} />
-          </span>
-        </button>
-        {rightPanel === 'workspace' && (
-          <button className="right-tab is-active" onClick={() => setRightPanel('workspace')}>
-            Workspace
-            <span
-              className="right-tab-close"
-              title="Close"
-              onClick={(event) => {
-                event.stopPropagation()
-                setRightPanel('browse')
-              }}
-            >
-              <X size={10} />
-            </span>
-          </button>
-        )}
-        <button className="right-tab-add" title="New tab" onClick={() => setRightPanel('workspace')}>
-          <Plus size={13} />
-        </button>
-        <span className="right-tab-spacer" />
-        <button className="icon-btn" title="Swap panel" onClick={() => setRightPanel(other)}>
-          <LayoutGrid size={14} />
-        </button>
-        <button className="icon-btn" title="Collapse panel" onClick={() => setRightVisible(false)}>
-          <PanelRightClose size={14} />
-        </button>
-      </div>
-
-      <div className={`right-pane ${rightPanel === 'browse' ? 'is-active' : ''}`}>
-        <BrowserPanel />
-      </div>
-      <div className={`right-pane ${rightPanel === 'workspace' ? 'is-active' : ''}`}>
-        <WorkspacePanel />
-      </div>
-    </aside>
-  )
-}
-
-export function TrajectoryView() {
+/** Every step of the session, in order, each opening to its input and output. */
+export default function TrajectoryView() {
   const entries = useChat((state) => state.entries)
   const [open, setOpen] = useState<Record<string, boolean>>({})
 

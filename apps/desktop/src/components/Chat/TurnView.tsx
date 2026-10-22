@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Copy, GitFork, Info, Pencil } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
+import { usePanels } from '../../stores/panels'
 import { useSessions } from '../../stores/sessions'
-import { useUi } from '../../stores/ui'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
@@ -67,10 +67,7 @@ function ResultCard({ turn }: { turn: Turn }) {
         <span className="result-actions">
           <Button
             size="sm"
-            onClick={() => {
-              useUi.getState().setSidebarView('git')
-              useUi.getState().setWorkspaceTab('files')
-            }}
+            onClick={() => usePanels.getState().open('files', { view: 'git' })}
           >
             Review changes
           </Button>
