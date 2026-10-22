@@ -123,7 +123,10 @@ before it runs.
 
 The side panel holds tabs: **Files** (the explorer, search and source control), **Editor**,
 **Browser**, **Terminal** and **Trajectory**. `Ctrl+T` opens a New tab page to choose from, and a
-Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was.
+Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was. The tab
+shows a page in a frame and lifts the framing rules (`X-Frame-Options`, `frame-ancestors`) from
+what that frame loads, so sites that forbid framing do not leave it blank. That is a stopgap until
+the browser gets a view of its own.
 `Ctrl+Alt+F` makes the panel full width, `Ctrl+Shift+B` cycles split, full and hidden, and
 `Ctrl+Alt+B` hides it. A hidden panel stays alive: a browser keeps its page and a terminal its
 shell.

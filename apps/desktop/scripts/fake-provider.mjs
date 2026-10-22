@@ -210,6 +210,19 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, stats)
       return
     }
+    // A page that forbids being framed, twice over, for the Browser tab. Its CSP also blocks scripts: the
+    // tab may drop frame-ancestors, and nothing else, from the policy.
+    if (request.url === '/__frame/denied') {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'x-frame-options': 'DENY',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+      })
+      response.end(
+        '<!doctype html><title>Framed page</title><body style="margin:0;padding:24px;background:#0b3d5c;color:#fff;font:28px sans-serif">Framed page<script>document.title = "Script ran"</script></body>',
+      )
+      return
+    }
     if (request.url?.endsWith('/models')) {
       sendJson(response, 200, { data: [{ id: 'mock-model', name: 'Mock model' }] })
       return

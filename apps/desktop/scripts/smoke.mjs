@@ -115,6 +115,42 @@ async function waitFor(expression, timeoutMs = 15000, label = expression) {
   throw new Error(`Timed out waiting for: ${label}`)
 }
 
+/**
+ * Evaluates in the frame, a DevTools target of its own, that has loaded `url`. A frame the page refused to
+ * show is an error page, so it has no target at that address.
+ */
+async function evaluateInFrame(url, expression, timeoutMs = 10000) {
+  const started = Date.now()
+  let seen = []
+  while (Date.now() - started < timeoutMs) {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+    seen = targets.filter((target) => target.type === 'iframe').map((target) => target.url)
+    const frame = targets.find((target) => target.type === 'iframe' && target.url === url && target.webSocketDebuggerUrl)
+    if (frame) {
+      const socket = new WebSocket(frame.webSocketDebuggerUrl)
+      await new Promise((resolve, reject) => {
+        socket.addEventListener('open', resolve, { once: true })
+        socket.addEventListener('error', reject, { once: true })
+      })
+      try {
+        return await new Promise((resolve, reject) => {
+          socket.addEventListener('message', (event) => {
+            const message = JSON.parse(event.data)
+            if (message.id !== 1) return
+            if (message.error) reject(new Error(message.error.message))
+            else resolve(message.result?.result?.value)
+          })
+          socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }))
+        })
+      } finally {
+        socket.close()
+      }
+    }
+    await sleep(250)
+  }
+  throw new Error(`The Browser tab did not show ${url}. Frames: ${seen.join(', ') || 'none'}`)
+}
+
 async function screenshot(name) {
   const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   await fs.writeFile(path.join(shotsDir, name), Buffer.from(data, 'base64'))
@@ -874,6 +910,17 @@ async function runPanelChecks() {
   if (!(await click('.newtab-card', 'Browser'))) throw new Error('the New tab page has no Browser')
   await waitFor("!document.querySelector('.newtab') && !!document.querySelector('.browser-address input')", 4000, 'the page became a Browser tab')
   if ((await titles()).length !== start.length + 1) throw new Error('choosing Browser added a tab instead of using the New tab page')
+
+  // A page that forbids being framed (X-Frame-Options and frame-ancestors) opens in the panel instead of leaving it blank
+  // white, and its script-blocking policy is still in force.
+  const deniedUrl = `http://127.0.0.1:${providerPort}/__frame/denied`
+  await typeInto('.browser-address input', deniedUrl)
+  await evaluate("document.querySelector('.browser-address input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  const framed = await evaluateInFrame(deniedUrl, 'document.title')
+  if (framed !== 'Framed page') {
+    throw new Error(framed === 'Script ran' ? 'The Browser tab dropped more than frame-ancestors from the page policy: its script ran' : `The framed page is titled ${JSON.stringify(framed)}`)
+  }
+  console.log('[smoke] a page that forbids framing is shown in the Browser tab, with the rest of its policy')
 
   // An address that needs no network: nothing listens on port 8, so the frame shows its error page.
   await typeInto('.browser-address input', 'http://127.0.0.1:8/')
