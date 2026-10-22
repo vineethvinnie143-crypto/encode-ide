@@ -17,7 +17,7 @@
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { execSync, spawn } from 'node:child_process'
+import { execFileSync, execSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { connect, sleep } from './cdp.mjs'
 
@@ -47,29 +47,39 @@ async function evaluateInFrame(url, expression, timeoutMs = 10000) {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
     seen = targets.filter((target) => target.type === 'iframe').map((target) => target.url)
     const frame = targets.find((target) => target.type === 'iframe' && target.url === url && target.webSocketDebuggerUrl)
-    if (frame) {
-      const socket = new WebSocket(frame.webSocketDebuggerUrl)
-      await new Promise((resolve, reject) => {
-        socket.addEventListener('open', resolve, { once: true })
-        socket.addEventListener('error', reject, { once: true })
-      })
-      try {
-        return await new Promise((resolve, reject) => {
-          socket.addEventListener('message', (event) => {
-            const message = JSON.parse(event.data)
-            if (message.id !== 1) return
-            if (message.error) reject(new Error(message.error.message))
-            else resolve(message.result?.result?.value)
-          })
-          socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }))
-        })
-      } finally {
-        socket.close()
-      }
-    }
+    if (frame) return evaluateOn(frame.webSocketDebuggerUrl, expression)
     await sleep(250)
   }
   throw new Error(`The Browser tab did not show ${url}. Frames: ${seen.join(', ') || 'none'}`)
+}
+
+/**
+ * Evaluates in a DevTools target of its own, over a socket of its own. A target that goes away before it answers,
+ * or never answers, is an error rather than a hang.
+ */
+async function evaluateOn(webSocketDebuggerUrl, expression, timeoutMs = 30000) {
+  const socket = new WebSocket(webSocketDebuggerUrl)
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true })
+    socket.addEventListener('error', reject, { once: true })
+  })
+  let timer
+  try {
+    return await new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`The target did not answer within ${timeoutMs} ms`)), timeoutMs)
+      socket.addEventListener('close', () => reject(new Error('The target closed before it answered')), { once: true })
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data)
+        if (message.id !== 1) return
+        if (message.error) reject(new Error(message.error.message))
+        else resolve(message.result?.result?.value)
+      })
+      socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, userGesture: true } }))
+    })
+  } finally {
+    clearTimeout(timer)
+    socket.close()
+  }
 }
 
 async function screenshot(name) {
@@ -593,6 +603,7 @@ async function runProviderPhase() {
 
   await runSubagentChecks()
   await runWebChecks()
+  await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
 }
@@ -669,6 +680,97 @@ async function runWebChecks() {
   if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
     throw new Error('WebFetch reached a private address')
   }
+}
+
+/** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */
+async function bannerTargets() {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  return targets.filter((target) => target.type === 'page' && target.url.startsWith('data:text/html') && target.webSocketDebuggerUrl)
+}
+
+async function evaluateInBanner(expression, timeoutMs = 15000) {
+  const started = Date.now()
+  for (;;) {
+    const [banner] = await bannerTargets()
+    if (banner) return evaluateOn(banner.webSocketDebuggerUrl, expression)
+    if (Date.now() - started > timeoutMs) throw new Error('The computer banner did not appear')
+    await sleep(250)
+  }
+}
+
+/** Waits until no banner page is left; if one stays, says what the page is showing and what else is listed. */
+async function waitForBannerToGo(label, timeoutMs = 15000) {
+  const started = Date.now()
+  while ((await bannerTargets()).length) {
+    if (Date.now() - started > timeoutMs) {
+      const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+      const shown = await evaluateInBanner(BANNER_STATE, 3000).catch((error) => `unreadable: ${error.message}`)
+      throw new Error(`The banner is still up ${timeoutMs} ms after the turn ended (${label}): ${JSON.stringify({ shown, targets: targets.map((t) => ({ type: t.type, title: t.title, url: t.url.slice(0, 40) })) })}`)
+    }
+    await sleep(250)
+  }
+}
+
+const BANNER_STATE = `({ mode: document.body.dataset.mode, text: document.getElementById('text').textContent, hint: document.getElementById('hint').textContent, stop: Boolean(document.getElementById('stop')) })`
+
+/** Presses Ctrl+Alt+Esc the way a keyboard does, from outside the app. */
+function pressStopShortcut() {
+  const script = [
+    `Add-Type -Namespace Smoke -Name Keys -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);'`,
+    ...[[0x11, 0], [0x12, 0], [0x1b, 0], [0x1b, 2], [0x12, 2], [0x11, 2]].map(([key, flags]) => `[Smoke.Keys]::keybd_event(${key}, 0, ${flags}, [UIntPtr]::Zero)`),
+  ].join('; ')
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { stdio: 'inherit', timeout: 60000 })
+}
+
+/** A turn that uses the computer waits for the person at a command; the person stops it from the banner, then from the keyboard. */
+async function runComputerChecks() {
+  if (process.platform !== 'win32') {
+    console.log('[smoke] --- computer use: skipped (Windows only) ---')
+    return
+  }
+  console.log('[smoke] --- computer use ---')
+  await evaluate('window.eNCode.agent.reset()')
+
+  // Off until the person turns it on, with the switch in Settings > Agent.
+  const initial = await evaluate('window.eNCode.settings.get()')
+  if (initial.computerSupported !== true) throw new Error('Windows should offer computer use')
+  if (initial.computer !== false) throw new Error('Computer use must be off until the person turns it on')
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await waitFor("!!document.querySelector('#computer-use')", 4000, 'the computer switch')
+  await screenshot('computer-settings.png')
+  await click('#computer-use')
+  if ((await evaluate("document.querySelector('#computer-use').getAttribute('aria-checked')")) !== 'true') throw new Error('The computer switch did not turn on')
+  await click('.settings-footer .btn.primary')
+  await waitFor('window.eNCode.settings.get().then((value) => value.computer === true)', 8000, 'the computer setting is saved')
+  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  if ((await bannerTargets()).length) throw new Error('A banner is up with nothing using the computer')
+
+  for (const [label, stop] of [
+    // The banner closes with the turn, so the click is made after the answer has gone out; a page that is gone cannot answer.
+    ['the banner button', () => evaluateInBanner("setTimeout(() => document.getElementById('stop').click(), 50), true")],
+    ['Ctrl+Alt+Esc', async () => pressStopShortcut()],
+  ]) {
+    await sendPrompt('[scenario:computer-check] Look at the desktop, then run a command.')
+    // The first use builds the helper that drives windows, which takes a while.
+    await waitFor("!!document.querySelector('.approval-card')", 180000, `the command waits for you (${label})`)
+    const banner = await evaluateInBanner(BANNER_STATE)
+    console.log(`[smoke] banner (${label}):`, JSON.stringify(banner))
+    if (banner.mode !== 'waiting' || banner.text !== 'eNCode is waiting for you' || !banner.stop) throw new Error(`The banner says ${JSON.stringify(banner)} while the agent waits for the person`)
+    if (banner.hint !== 'Ctrl+Alt+Esc') throw new Error(`The banner shows no stop key: ${JSON.stringify(banner.hint)}`)
+    const rows = await evaluate("[...document.querySelectorAll('.tool-row')].map((row) => row.textContent)")
+    if (!rows.some((text) => text.startsWith('Looked at the windows'))) throw new Error(`The work log does not say what the agent looked at: ${JSON.stringify(rows)}`)
+    await screenshot('computer-banner.png')
+    await stop()
+    await waitFor("!document.querySelector('.approval-card')", 15000, `the card goes with the turn (${label})`)
+    await waitFor("['idle', 'done'].includes(document.querySelector('.chat-panel')?.dataset.status)", 15000, `the turn ends (${label})`)
+    await waitForBannerToGo(label)
+    console.log(`[smoke] stopped from ${label}`)
+  }
+
+  // Turned off again, so nothing later depends on it.
+  await evaluate("window.eNCode.settings.save({ computer: false })")
 }
 
 /** The tool entries of the active session, with their outputs. */

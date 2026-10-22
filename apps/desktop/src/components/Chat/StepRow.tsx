@@ -7,6 +7,7 @@ import {
   ListTree,
   Loader2,
   MessageCircleQuestion,
+  Monitor,
   Network,
   Pencil,
   Search,
@@ -16,6 +17,7 @@ import {
 import type { ConversationEntry } from '@shared/types'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
+import { TAKEN_OVER, computerStep } from './computer-step'
 import DiffView from './DiffView'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
@@ -33,6 +35,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   WebSearch: { label: 'Searched the web', icon: Globe },
   Task: { label: 'Subagent', icon: Network },
   AskUserQuestion: { label: 'Asked', icon: MessageCircleQuestion },
+  Computer: { label: 'Used the computer', icon: Monitor },
   TodoWrite: { label: 'Updated tasks', icon: ListTree },
   ExitPlanMode: { label: 'Proposed a plan', icon: ListTree },
   Skill: { label: 'Skill', icon: FileText },
@@ -67,6 +70,7 @@ const KIND_ICON: Record<StepKind, typeof FileText> = {
   web: Globe,
   subagent: Network,
   ask: MessageCircleQuestion,
+  computer: Monitor,
   other: FileText,
 }
 
@@ -153,10 +157,14 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
 
   const meta = TOOL_META[tool.name] ?? { label: tool.name.replace(/_/g, ' '), icon: FileText }
   const Icon = meta.icon
-  const detail = detailOf(entry)
   const state = tool.state ?? 'done'
   const isShell = stepKind(tool.name) === 'shell'
-  const hasBody = Boolean(tool.output || tool.diff?.length || !QUIET_TOOLS.has(tool.name))
+  const isComputer = tool.name === 'Computer'
+  // A desktop step says what it did in words; opened, it shows only why it failed.
+  const computer = isComputer ? computerStep(tool.input ?? {}, tool.output, tool.state) : null
+  const label = computer?.label ?? meta.label
+  const detail = computer ? computer.detail : detailOf(entry)
+  const hasBody = isComputer ? state === 'error' && Boolean(tool.output) && tool.output !== TAKEN_OVER : Boolean(tool.output || tool.diff?.length || !QUIET_TOOLS.has(tool.name))
   const additions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'add').length, 0) ?? 0
   const deletions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'del').length, 0) ?? 0
   const content = tool.input.content
@@ -171,7 +179,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
     <div className={cx('tool-row', `tool-${state}`, nested && 'is-nested')}>
       <button type="button" className="tool-row-toggle" aria-expanded={hasBody ? expanded : undefined} onClick={() => setExpanded((value) => !value)}>
         <Icon size={14} className="tool-row-icon" />
-        <span className="tool-row-label">{meta.label}</span>
+        <span className="tool-row-label">{label}</span>
         {detail && <span className="tool-row-detail">{detail}</span>}
         {sizeLabel && <span className="tool-row-size">{sizeLabel}</span>}
         {(additions > 0 || deletions > 0) && (

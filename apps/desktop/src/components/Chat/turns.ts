@@ -5,7 +5,7 @@
  */
 import type { ConversationEntry } from '@shared/types'
 
-export type StepKind = 'read' | 'search' | 'edit' | 'shell' | 'web' | 'subagent' | 'ask' | 'other'
+export type StepKind = 'read' | 'search' | 'edit' | 'shell' | 'web' | 'subagent' | 'ask' | 'computer' | 'other'
 
 // The agent's tools follow Claude Code's names (Read, Bash, ...). The lower-case names are those of
 // earlier builds, which sessions imported from them still carry.
@@ -23,6 +23,7 @@ const KINDS: Record<string, StepKind> = {
   WebSearch: 'web',
   Task: 'subagent',
   AskUserQuestion: 'ask',
+  Computer: 'computer',
   read: 'read',
   read_file: 'read',
   glob: 'search',
@@ -170,6 +171,9 @@ export function summarizeSteps(steps: readonly ConversationEntry[]): string {
         break
       case 'ask':
         parts.push(`asked ${plural(count, 'question')}`)
+        break
+      case 'computer':
+        parts.push(`used the computer ${plural(count, 'time')}`)
         break
       default:
         parts.push(`used ${plural(count, 'other tool')}`)

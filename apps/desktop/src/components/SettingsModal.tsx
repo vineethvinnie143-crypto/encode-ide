@@ -18,6 +18,7 @@ import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
 import { applyAppearance } from '../theme/appearance'
+import { Toggle } from '../ui/Toggle'
 import AppearanceSettings from './AppearanceSettings'
 import { uniqueName } from './models/connect'
 import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
@@ -489,6 +490,29 @@ export default function SettingsModal() {
                 {ALWAYS_ASKS_NOTE} Ask and Plan modes never edit files or run commands. When eNCode asks, it shows you
                 exactly what will change or run.
               </div>
+
+              {settings?.computerSupported ? (
+                <>
+                  <div className="section-title">Computer</div>
+                  <div className="settings-card">
+                    <div className="settings-row">
+                      <div className="settings-row-text">
+                        <label className="settings-row-label" htmlFor="computer-use">
+                          Let the agent use this computer
+                        </label>
+                        <div className="settings-row-help">
+                          It can look at an application and use the mouse and keyboard in it, one application at a time, and only after you
+                          allow that application. A banner shows while it works. Stop it with the banner&apos;s Stop button, with Ctrl+Alt+Esc,
+                          or by using the mouse or keyboard yourself. eNCode&apos;s own windows and password fields are never shown to it.
+                        </div>
+                      </div>
+                      <div className="settings-row-control">
+                        <Toggle id="computer-use" checked={draft.computer} onChange={(computer) => setDraft({ ...draft, computer })} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
 
               <div className="section-title">Limits</div>
               <div className="form-row inline">

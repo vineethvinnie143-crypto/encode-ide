@@ -12,7 +12,7 @@ interface StoredProfile extends Omit<ModelProfile, 'hasApiKey'> {
   apiKeyEnc?: string
 }
 
-interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage'> {
+interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'computerSupported'> {
   profiles: StoredProfile[]
 }
 
@@ -32,6 +32,7 @@ function defaults(): StoredSettings {
     policy: 'workspace-write',
     maxSteps: 30,
     maxGoalRounds: 8,
+    computer: false,
     recentWorkspaces: [],
     lastWorkspace: null,
     agentMode: 'code',
@@ -89,9 +90,11 @@ export class SettingsService {
   private data: StoredSettings
   /** Changes whenever a profile's key does, so the agent host can tell a new key from the old one without seeing either. */
   private readonly revisions = new Map<string, number>()
+  private readonly platform: NodeJS.Platform
 
   /** `cipher` is Electron's safeStorage; tests pass a fake. */
   constructor(dir: string, cipher: Cipher, platform: NodeJS.Platform = process.platform) {
+    this.platform = platform
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     this.file = path.join(dir, 'eNCode-settings.json')
     this.vault = new KeyVault(cipher, platform)
@@ -152,6 +155,7 @@ export class SettingsService {
       policy: normalizePolicy(input.policy, base.policy),
       maxSteps: clamp(input.maxSteps, 1, 100, base.maxSteps),
       maxGoalRounds: clamp(input.maxGoalRounds, 1, 100, base.maxGoalRounds),
+      computer: typeof input.computer === 'boolean' ? input.computer : base.computer,
       recentWorkspaces: Array.isArray(input.recentWorkspaces)
         ? input.recentWorkspaces.filter((r): r is string => typeof r === 'string').slice(0, 12)
         : [],
@@ -185,6 +189,7 @@ export class SettingsService {
       policy: this.data.policy,
       maxSteps: this.data.maxSteps,
       maxGoalRounds: this.data.maxGoalRounds,
+      computer: this.data.computer,
       recentWorkspaces: [...this.data.recentWorkspaces],
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
@@ -194,6 +199,7 @@ export class SettingsService {
       freeProfileId: this.data.freeProfileId,
       setupDone: this.data.setupDone,
       keyStorage: this.vault.storage,
+      computerSupported: this.platform === 'win32',
     }
   }
 
@@ -246,6 +252,7 @@ export class SettingsService {
     if (patch.policy !== undefined) next.policy = normalizePolicy(patch.policy, next.policy)
     if (patch.maxSteps !== undefined) next.maxSteps = clamp(patch.maxSteps, 1, 100, 30)
     if (patch.maxGoalRounds !== undefined) next.maxGoalRounds = clamp(patch.maxGoalRounds, 1, 100, 8)
+    if (typeof patch.computer === 'boolean') next.computer = patch.computer
     if (Array.isArray(patch.recentWorkspaces)) {
       next.recentWorkspaces = patch.recentWorkspaces.filter((r): r is string => typeof r === 'string').slice(0, 12)
     }

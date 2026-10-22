@@ -51,6 +51,22 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
   pages the agent fetches. There is no telemetry and no update check.
 
+## Computer use
+
+**Settings → Agent → Let the agent use this computer** is off until you turn it on. With it on, ask the agent to do
+something in a program that has no command line (change a setting, fill in a form, use a program's menus). The first
+use of each program asks. While it works, a banner at the bottom of the screen says so:
+
+- **Stop** on the banner, or **Ctrl+Alt+Esc** from any window, ends the turn. Using the mouse or keyboard yourself stops
+  it too, and the agent waits for you to say whether to go on.
+- It never uses terminals, password managers, programs running as administrator or eNCode itself, and never types into a
+  password field. The model gets a picture of the program's window only (if it can read images), the newest one only, and no picture is saved in the conversation.
+- The first use builds a small helper program from source that ships with eNCode; it takes a few seconds. If an
+  antivirus program blocks it, the message names the file to allow.
+
+What is most useful to hear: any click that landed in the wrong place, any step where it said it had done something
+that had not happened, and anything that kept the banner up when nothing was running.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,

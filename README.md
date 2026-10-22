@@ -29,6 +29,11 @@ primary platform; the code stays cross-platform.
 
   It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
   the window, and every session is an append-only log that survives a crash and can be forked.
+- **Computer use (Windows).** Off until you turn it on under **Settings → Agent**. The agent can then look at an
+  application, read its controls and use the mouse and keyboard in it, one application at a time, only after you allow
+  that application. A banner shows while it works, and its **Stop** button or **Ctrl+Alt+Esc** ends it from any
+  window, as does using the mouse or keyboard yourself. Terminals, password managers, eNCode itself and programs
+  running as administrator are never used, and screenshots are never saved.
 - **Review before it acts.** Four approval policies decide what runs unasked:
   - Read Only: edits and commands are refused.
   - Workspace Write: every command asks.

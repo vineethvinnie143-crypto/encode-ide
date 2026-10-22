@@ -237,6 +237,7 @@ const NO_CONFIG: HostConfig = {
   policy: 'workspace-write',
   maxSteps: 30,
   maxGoalRounds: 8,
+  computer: false,
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

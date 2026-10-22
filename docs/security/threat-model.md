@@ -118,6 +118,8 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T37 | A refused key, a spent balance or a paused connection goes unnoticed, or the same notice floods the person | The router's alerts reach the interface as one notice each, the same one at most once a minute, with a button to the Settings tab that helps. Settings → Roles lists every connection's state and what is paused until when (0052). | Mitigated |
 | T38 | The router's saved state exposes a prompt or a key | `eNCode-models.json` holds health, cooldowns, free-request tallies and learned prices. It is written atomically with owner-only permissions every 30 seconds and at shutdown, and holds no prompt, reply or key (0052). | Mitigated |
 | T39 | The desktop helper is replaced or altered, or reads what the user types | The helper is built on the machine from sources that are in the repository and embedded in the app, into a folder named by their hash; the hash of the built file is recorded beside it and checked before every start, so a changed or half-written copy is built again, never run. It starts with a short list of environment variables and no network code, and its input hooks read only the "injected" flag of an event (never a key, a position or text) and exist only while an action runs (0053). | Partial (R17) |
+| T40 | The agent works on the person's computer and they cannot tell, or cannot make it stop | Computer use is off until the person turns it on in Settings. While a session uses it, a banner is in front of everything, without taking the keyboard, with a Stop button and Ctrl+Alt+Esc, a combination registered only for that time and one the Computer tool refuses to press. Stop cancels every session that uses the computer, the way the chat's Stop does; the person's own mouse or keyboard stops the agent too (0053, 0054). | Partial (R18) |
+| T41 | The banner is read, clicked or spoofed by the agent, or its page is used to reach the app | The banner is left out of screenshots and, as a window of eNCode, is never used by the Computer tool. Its page runs one script allowed by hash under `default-src 'none'`, in a sandboxed process with a session of its own that grants no permission and cancels every request, and cannot navigate or open windows. The main process answers only the banner's own top frame on its four channels, and the renderer's channels refuse it (0054). | Mitigated |
 
 ## Residual risks
 
@@ -203,7 +205,7 @@ Each item names what remains, why it is acceptable for now, and who closes it.
     caught. The backend marks windows by what they are (console windows, elevated processes), which
     narrows this, and the owner of the list is the Windows backend's record.
   - Owner: the Windows backend (0053 masks other programs' windows and password fields in
-    screenshots) and the stop key with the "agent is controlling" indicator that follow it.
+    screenshots), and the banner and stop key (0054) that tell the person and let them end it.
 - **R15. A report is scrubbed by shape.** A key of a kind nobody has seen, that eNCode does not hold, can
   get through; and a log line can name a file or folder when something went wrong with it. The report says so and is
   plain text, so the tester reads it before sending it.
@@ -222,6 +224,12 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   runs, the helper's input hooks are the only code in eNCode that sees every keystroke and mouse event of the machine; they read
   one flag of each and nothing else, and a reviewer should check that it stays so.
   - Owner: the Windows backend (0053), and whoever changes `helper/Input.cs`.
+- **R18. The banner can be covered, and the key can be taken.** A window that is always on top, or a full-screen program that has
+  the display to itself, can hide the banner; the banner is on the screen eNCode is on, not on every screen; and another
+  program may hold Ctrl+Alt+Esc, in which case the banner shows no key and only the button stops the agent. Stopping ends a turn,
+  it does not undo what the agent already did. None of this lets the agent act without the person having turned the feature
+  on and allowed each application, and the person's own input stops it from inside the helper.
+  - Owner: the banner window (`electron/computer-overlay.ts`, 0054).
 
 ## Verification
 

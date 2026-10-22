@@ -35,7 +35,7 @@ function fail(message) {
   process.exit(1)
 }
 
-for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/renderer/index.html']) {
+for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/electron/overlay-preload.cjs', 'dist/renderer/index.html']) {
   if (!fs.existsSync(path.join(root, built))) fail(`${built} is missing. Run pnpm build first.`)
 }
 
@@ -162,7 +162,8 @@ const smoke = spawnSync(process.execPath, [path.resolve(root, 'scripts', script)
 cleanUp()
 
 if (smoke.error || smoke.status !== 0) {
-  const tail = fs.readFileSync(path.join(shotsDir, 'electron.log'), 'utf8').split('\n').slice(-40).join('\n')
+  // The log is long where the desktop bus is missing (Linux CI); what it says about that is not what failed.
+  const tail = fs.readFileSync(path.join(shotsDir, 'electron.log'), 'utf8').split('\n').filter((line) => !/dbus|^gio:/.test(line)).slice(-60).join('\n')
   console.error(`[e2e] electron.log, last lines:\n${tail}`)
   fail(`FAILED: ${smoke.error ? smoke.error.message : `exit code ${smoke.status}`}. Screenshots and electron.log are in ${shotsDir}`)
 }

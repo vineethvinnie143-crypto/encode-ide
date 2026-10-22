@@ -6,8 +6,11 @@ import { spawnAgentHost } from './agent-host/electron'
 import { AgentHostService } from './agent-host/service'
 import { applyNativeAppearance, followSystemTheme } from './appearance'
 import { aboutInfo, currentEnvironment } from './build-info'
+import { Banner, electronShortcuts } from './computer-overlay'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
+import { ComputerControl } from './services/computer-control'
+import { ComputerWatch } from './services/computer-watch'
 import { diagnosticsReport } from './services/diagnostics'
 import { GitService } from './services/git'
 import { LogService } from './services/logs'
@@ -102,6 +105,23 @@ if (!gotLock) {
       if (target && !target.isDestroyed()) target.webContents.send(channel, payload)
     }
 
+    // While the agent uses the computer the person sees a banner with a Stop button, and Ctrl+Alt+Esc stops it from any window.
+    const banner = new Banner({
+      // On the screen the pointer is on: that is where the person is looking, and where the agent works.
+      display: () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
+      onStop: () => computerControl.stop(),
+      log: (message) => console.warn(`[computer] ${message}`),
+    })
+    const computerControl = new ComputerControl({
+      overlay: banner,
+      shortcuts: electronShortcuts,
+      cancel: (sessionId) => agentHost.client.cancel(sessionId),
+      log: (message) => console.warn(`[computer] ${message}`),
+    })
+    const computerWatch = new ComputerWatch((activity) => computerControl.setActivity(activity))
+    // Only while the setting offers the tool: a model that invents a Computer call without it has touched nothing.
+    let computerOn = false
+
     // The agent runs in a utility process; this side hands it the settings it needs and the keys it asks for.
     const agentHost = new AgentHostService({
       spawn: () => spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => console.error(`[agent-host] ${line}`)),
@@ -118,11 +138,19 @@ if (!gotLock) {
         const server = serverOf(baseUrl)
         return profile && server && serverOf(profile.baseUrl) === server ? settings.keyFor(profileId) : ''
       },
-      onEvent: (event) => send('agent:event', event),
+      onEvent: (event) => {
+        send('agent:event', event)
+        if (computerOn) computerWatch.see(event)
+      },
       onJobs: (jobs) => send('jobs:changed', jobs),
       onAlert: (alert) => send('models:alert', alert),
     })
-    const configureAgent = () => agentHost.configure(hostConfigOf(settings.get(), (profileId) => settings.keyRevision(profileId)))
+    const configureAgent = () => {
+      const current = settings.get()
+      computerOn = current.computer && current.computerSupported
+      if (!computerOn) computerWatch.reset()
+      agentHost.configure(hostConfigOf(current, (profileId) => settings.keyRevision(profileId)))
+    }
     configureAgent()
 
     const schedules = new ScheduleService(async (schedule) => {
@@ -151,6 +179,8 @@ if (!gotLock) {
     win.on('closed', () => {
       shell.disposeAll()
       schedules.dispose()
+      // The banner is a window too; left up, it would keep eNCode from quitting.
+      computerControl.dispose()
       mainWindow = null
     })
 
@@ -198,6 +228,7 @@ if (!gotLock) {
       configureAgent,
       logs,
       diagnostics,
+      onSessionRemoved: (sessionId) => computerWatch.forget(sessionId),
     })
 
     // Close the sessions and their commands before the process goes: the host is asked, then ended.
@@ -206,6 +237,8 @@ if (!gotLock) {
       if (closing) return
       closing = true
       event.preventDefault()
+      computerControl.dispose()
+      banner.dispose()
       void agentHost.dispose().finally(() => {
         logs.flush()
         app.quit()

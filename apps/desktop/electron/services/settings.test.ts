@@ -287,6 +287,20 @@ describe('SettingsService models', () => {
     assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().freeOnly, true, 'a switch that guards against spending stays on')
   })
 
+  it('keeps the agent off the rest of the computer until the person turns that on, and only takes true or false', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.get().computer, false, 'off on a new install')
+    assert.equal(settings.get().computerSupported, true, 'where Windows can be driven')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'linux').get().computerSupported, false)
+    assert.equal(settings.save({ computer: true }).computer, true)
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().computer, true, 'and still on after a restart')
+    assert.equal(settings.save({ policy: 'read-only' }).computer, true, 'a patch that does not name it leaves it')
+    assert.equal(settings.save({ computer: 'yes' as unknown as boolean }).computer, true, 'something that is not true or false is ignored')
+    assert.equal(settings.save({ computer: false }).computer, false)
+    fs.writeFileSync(file(), JSON.stringify({ computer: 'true' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().computer, false, 'a file that says something else leaves it off')
+  })
+
   it('numbers a profile\'s key anew each time it changes, so the agent host can tell without seeing it', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
     settings.save({ profiles: profiles() })

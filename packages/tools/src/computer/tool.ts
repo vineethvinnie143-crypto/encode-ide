@@ -304,6 +304,13 @@ function fail(content: string): ToolOutcome {
   return { ok: false, content }
 }
 
+/** What the work log says when the person took the mouse or keyboard: the window shows it as such (Chat/computer-step.ts). */
+export const TAKEN_OVER_DISPLAY = 'you took over'
+
+function takenOver(content: string): ToolOutcome {
+  return { ok: false, content, display: { output: TAKEN_OVER_DISPLAY } }
+}
+
 const HINTS: Partial<Record<DesktopError['code'], string>> = {
   'window-gone': ' Call windows to see what is open.',
   covered: ' Take a screenshot to see what is in the way, or use focus to bring the window to the front.',
@@ -318,7 +325,7 @@ const HINTS: Partial<Record<DesktopError['code'], string>> = {
 function failureOf(error: DesktopError, desktop: DesktopHandle, turnId: string): ToolOutcome {
   if (error.code === 'interrupted') {
     desktop.state.takenOverIn = turnId
-    return fail(`${error.message} I stopped. Wait for the user to say whether to go on.`)
+    return takenOver(`${error.message} I stopped. Wait for the user to say whether to go on.`)
   }
   if (error.code === 'unavailable') return fail(`Desktop control is not available: ${error.message}`)
   return fail(`${error.message}${HINTS[error.code] ?? ''}`)
@@ -490,7 +497,7 @@ async function sendInput(inputs: ComputerInput, window: WindowInfo, desktop: Des
   const described = describeAct(result, before, () => subject)
   const image = result.look && described.changed ? result.look.capture : undefined
   const verb = result.performed[0]?.kind ?? step.kind
-  return ok(described.text, `${verb} ${subject}`.slice(0, 100), image)
+  return ok(described.text, `${verb} ${subject} in ${labelFor(window.app, window.label)}`.slice(0, 140), image)
 }
 
 // ---------------------------------------------------------------- the tool
@@ -558,7 +565,7 @@ export const computerTool: Tool<ComputerInput> = {
         default:
       }
       if (isInput(inputs.action) && desktop.state.takenOverIn === ctx.turnId) {
-        return fail('The user took over the mouse or keyboard earlier in this turn. Do not send more input until they tell you to go on.')
+        return takenOver('The user took over the mouse or keyboard earlier in this turn. Do not send more input until they tell you to go on.')
       }
       await desktop.backend.ready(ctx.signal)
       const window = await usableWindow(desktop, inputs.window, ctx.signal)

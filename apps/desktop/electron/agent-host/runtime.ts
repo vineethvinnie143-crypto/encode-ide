@@ -53,6 +53,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   policy: config.policy,
   maxSteps: config.maxSteps,
   maxGoalRounds: config.maxGoalRounds,
+  computer: config.computer,
 })
 
 const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, maxOutputTokens: 8_192 }
