@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { appearanceParams, type Appearance } from '../shared/appearance'
 import { windowBackground } from './appearance'
+import { allowFraming } from './framing'
 
 /** The Vite dev server, honoured only by an unpackaged build. */
 const devServer = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL
@@ -44,6 +45,22 @@ function restrictPermissions(win: BrowserWindow): void {
   session.setPermissionCheckHandler((_contents, permission, _origin, details) => allowed(permission, details.requestingUrl, details.isMainFrame))
 }
 
+/**
+ * A Browser tab shows its page in a frame of this window, and a site that forbids being framed
+ * (X-Frame-Options, frame-ancestors) would leave it blank white. The responses of those frames, and
+ * only of those, lose the two rules; every other header stays (see `allowFraming`).
+ */
+function allowBrowserFrames(win: BrowserWindow): void {
+  const contentsId = win.webContents.id
+  win.webContents.session.webRequest.onHeadersReceived({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
+    if (details.resourceType !== 'subFrame' || details.webContentsId !== contentsId || !details.responseHeaders) {
+      callback({})
+      return
+    }
+    callback({ responseHeaders: allowFraming(details.responseHeaders) })
+  })
+}
+
 /** Call after applyNativeAppearance, so the window starts in the colour of the chosen theme. */
 export function createMainWindow(appearance: Appearance): BrowserWindow {
   const win = new BrowserWindow({
@@ -68,6 +85,7 @@ export function createMainWindow(appearance: Appearance): BrowserWindow {
   })
 
   restrictPermissions(win)
+  allowBrowserFrames(win)
 
   win.once('ready-to-show', () => {
     win.show()
