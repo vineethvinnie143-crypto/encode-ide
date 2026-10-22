@@ -60,8 +60,12 @@ export async function launch({ width = 1200, height = 800 } = {}) {
     ],
     { stdio: 'ignore' },
   )
+  let exited = null
+  child.once('exit', (code, signal) => (exited = signal ?? code))
+  // A cold start on a busy CI runner can take well over ten seconds; a browser that quit is reported at once.
+  const deadline = Date.now() + 30_000
   let target
-  for (let attempt = 0; attempt < 100 && !target; attempt++) {
+  while (!target && exited === null && Date.now() < deadline) {
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
       target = list.find((entry) => entry.type === 'page')
@@ -72,7 +76,7 @@ export async function launch({ width = 1200, height = 800 } = {}) {
   }
   if (!target) {
     child.kill()
-    throw new Error(`Could not reach ${executable} on port ${port}`)
+    throw new Error(exited === null ? `Could not reach ${executable} on port ${port} within 30 s` : `${executable} quit before it could be reached (${exited})`)
   }
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {
