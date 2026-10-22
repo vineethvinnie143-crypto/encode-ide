@@ -31,6 +31,13 @@ export function headline(report: SandboxReport): Headline {
   if (report.state === 'off') {
     return { tone: 'warning', title: 'The sandbox is off', detail: 'Commands run with everything you can do on this computer. Turn it on below.' }
   }
+  // The sandbox itself works; the shell the agent uses is one it cannot confine.
+  if (report.shell?.unsupported) {
+    const offer = report.engine === 'restricted-token' ? ' Turn on “Run commands in PowerShell” below to confine them.' : ''
+    return report.settings.required
+      ? { tone: 'danger', title: `${report.shell.name} cannot run in the sandbox, so no command runs`, detail: `${report.shell.unsupported} The settings require the sandbox.${offer}` }
+      : { tone: 'warning', title: `${report.shell.name} cannot run in the sandbox`, detail: `${report.shell.unsupported} Commands run with everything you can do on this computer.${offer}` }
+  }
   const reason = report.reason ?? 'It did not pass its test.'
   return report.settings.required
     ? { tone: 'danger', title: 'The sandbox cannot start, so no command runs', detail: `${reason} The settings require it. Fix that, or stop requiring it below.` }
@@ -49,7 +56,7 @@ export function limitLines(report: SandboxReport): string[] {
   return lines
 }
 
-export type SwitchKey = 'enabled' | 'required' | 'allowUnsandboxed' | 'network' | 'caches'
+export type SwitchKey = 'enabled' | 'required' | 'allowUnsandboxed' | 'network' | 'caches' | 'powershell'
 
 export interface SwitchRow {
   key: SwitchKey
@@ -71,6 +78,16 @@ export function switchRows(report: SandboxReport): SwitchRow[] {
       help: 'Applies to every command the agent runs, whatever the approval policy. Turning it off is your choice alone: a project’s settings cannot do it.',
       checked: settings.enabled,
     },
+    ...(windows
+      ? [
+          {
+            key: 'powershell' as const,
+            label: 'Run commands in PowerShell',
+            help: 'Git Bash cannot be confined by the Windows sandbox; PowerShell can. With this on, the agent’s commands run in PowerShell in the conversations you start from now on, so the sandbox applies to them.',
+            checked: settings.powershell,
+          },
+        ]
+      : []),
     {
       key: 'required',
       label: 'Refuse to run commands without it',

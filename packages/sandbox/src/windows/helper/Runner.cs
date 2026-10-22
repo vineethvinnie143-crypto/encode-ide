@@ -18,6 +18,8 @@ namespace Encode.Sandbox
         public string JobUi = "all";
         /// <summary>"none": nothing leaves the job; "ok": a program started with CREATE_BREAKAWAY_FROM_JOB may; "silent": every child leaves it.</summary>
         public string JobBreakaway = "none";
+        /// <summary>inherit: the helper's own window station and desktop; own: a desktop of its own in the same window station; own-station: a window station and a desktop of its own.</summary>
+        public string Desktop = "inherit";
         /// <summary>hidden: a console nobody sees; detached: none; inherit: the helper's own.</summary>
         public string Console = "hidden";
         public string Cwd;
@@ -138,15 +140,14 @@ namespace Encode.Sandbox
             IntPtr restricted = Tokens.Restrict(own, restricting, options.WriteRestricted, options.Lua);
             try
             {
-                if (restricting.Count > 0)
-                {
-                    List<SecurityIdentifier> allowed = new List<SecurityIdentifier>();
-                    allowed.Add(Sids.TokenUserSid(own));
-                    allowed.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
-                    allowed.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
-                    foreach (SecurityIdentifier sid in restricting) if (!allowed.Contains(sid)) allowed.Add(sid);
-                    Tokens.SetDefaultDacl(restricted, allowed);
-                }
+                // What the program makes (pipes, events, sections) must be open to it. An administrator's token names the
+                // Administrators group there, which is deny-only in this one, so the person's own SID is named too.
+                List<SecurityIdentifier> allowed = new List<SecurityIdentifier>();
+                allowed.Add(Sids.TokenUserSid(own));
+                allowed.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
+                allowed.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+                foreach (SecurityIdentifier sid in restricting) if (!allowed.Contains(sid)) allowed.Add(sid);
+                Tokens.SetDefaultDacl(restricted, allowed);
                 if (options.Integrity == "low") Tokens.SetIntegrity(restricted, 0x1000);
                 else if (options.Integrity.Length > 0) throw new SandboxException("Unknown integrity level: " + options.Integrity);
                 return restricted;
@@ -165,6 +166,8 @@ namespace Encode.Sandbox
             IntPtr job = IntPtr.Zero;
             IntPtr attributes = IntPtr.Zero;
             IntPtr handleList = IntPtr.Zero;
+            IntPtr desktopName = IntPtr.Zero;
+            PrivateDesktop desktop = null;
             PROCESS_INFORMATION process = new PROCESS_INFORMATION();
             bool started = false;
             try
@@ -207,6 +210,12 @@ namespace Encode.Sandbox
                     if (!Native.UpdateProcThreadAttribute(attributes, 0, Native.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handleList, new IntPtr(IntPtr.Size * inherited.Count), IntPtr.Zero, IntPtr.Zero)) throw SandboxException.Last("UpdateProcThreadAttribute");
                 }
                 startup.lpAttributeList = attributes;
+                if (options.Desktop != "inherit")
+                {
+                    desktop = PrivateDesktop.Create(options.Desktop == "own-station", Sids.TokenUserSid(own));
+                    desktopName = Marshal.StringToHGlobalUni(desktop.Name);
+                    startup.StartupInfo.lpDesktop = desktopName;
+                }
 
                 uint flags = Native.CREATE_SUSPENDED | Native.CREATE_UNICODE_ENVIRONMENT | Native.EXTENDED_STARTUPINFO_PRESENT;
                 if (options.Console == "hidden") flags |= Native.CREATE_NO_WINDOW;
@@ -241,6 +250,8 @@ namespace Encode.Sandbox
                     Marshal.FreeHGlobal(attributes);
                 }
                 if (handleList != IntPtr.Zero) Marshal.FreeHGlobal(handleList);
+                if (desktopName != IntPtr.Zero) Marshal.FreeHGlobal(desktopName);
+                if (desktop != null) desktop.Dispose();
                 if (process.hThread != IntPtr.Zero) Native.CloseHandle(process.hThread);
                 if (process.hProcess != IntPtr.Zero) Native.CloseHandle(process.hProcess);
                 if (token != IntPtr.Zero) Native.CloseHandle(token);

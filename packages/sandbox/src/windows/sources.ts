@@ -5,6 +5,7 @@
  * repository.
  */
 import acls from './helper/Acls.cs'
+import desktops from './helper/Desktops.cs'
 import json from './helper/Json.cs'
 import labels from './helper/Labels.cs'
 import native from './helper/Native.cs'
@@ -22,6 +23,7 @@ export interface SourceFile {
 
 export const HELPER_FILES: readonly SourceFile[] = [
   { name: 'Acls.cs', text: acls },
+  { name: 'Desktops.cs', text: desktops },
   { name: 'Json.cs', text: json },
   { name: 'Labels.cs', text: labels },
   { name: 'Native.cs', text: native },

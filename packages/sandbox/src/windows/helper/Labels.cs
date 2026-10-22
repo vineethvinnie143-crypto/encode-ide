@@ -25,10 +25,11 @@ namespace Encode.Sandbox
         }
 
         /// <summary>
-        /// Gives the path the level (empty: takes its label away). A folder passes it to what is in it. `detach` makes
-        /// the path ignore its parent's label.
+        /// Gives the path the level (empty: takes its label away). A folder passes it to what is in it. A label the
+        /// path carries itself is kept when its parent's label is passed down, which is how a path inside a labeled
+        /// folder keeps another one.
         /// </summary>
-        public static void Apply(string path, string level, bool detach)
+        public static void Apply(string path, string level)
         {
             IntPtr descriptor = IntPtr.Zero;
             IntPtr sacl = IntPtr.Zero;
@@ -37,15 +38,14 @@ namespace Encode.Sandbox
                 if (level.Length > 0)
                 {
                     string inherit = Directory.Exists(path) ? "OICI" : "";
-                    string text = "S:" + (detach ? "P" : "") + "(ML;" + inherit + ";NW;;;" + Alias(level) + ")";
+                    string text = "S:(ML;" + inherit + ";NW;;;" + Alias(level) + ")";
                     uint size;
                     if (!Native.ConvertStringSecurityDescriptorToSecurityDescriptor(text, Native.SDDL_REVISION_1, out descriptor, out size)) throw SandboxException.Last("ConvertStringSecurityDescriptorToSecurityDescriptor");
                     bool present;
                     bool defaulted;
                     if (!Native.GetSecurityDescriptorSacl(descriptor, out present, out sacl, out defaulted) || !present) throw new SandboxException("The label has no access control list.");
                 }
-                uint information = Native.LABEL_SECURITY_INFORMATION | (detach ? Native.PROTECTED_SACL_SECURITY_INFORMATION : Native.UNPROTECTED_SACL_SECURITY_INFORMATION);
-                uint error = Native.SetNamedSecurityInfo(path, Native.SE_FILE_OBJECT, information, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, sacl);
+                uint error = Native.SetNamedSecurityInfo(path, Native.SE_FILE_OBJECT, Native.LABEL_SECURITY_INFORMATION, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, sacl);
                 if (error != 0) throw new SandboxException("SetNamedSecurityInfo(" + path + ")", (int)error);
             }
             finally

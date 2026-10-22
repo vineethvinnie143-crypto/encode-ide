@@ -15,7 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { ensureHelper, type HelperBuild } from './build'
-import { grantFolder, labelFolder, probeHelper, readLabels, runArguments, unlabelFolder, type RunFlags } from './client'
+import { desktopInfo, grantFolder, labelFolder, probeHelper, readLabels, runArguments, unlabelFolder, type RunFlags } from './client'
 
 const explore = process.platform === 'win32' && process.env.ENCODE_SANDBOX_EXPLORE === '1'
 
@@ -38,19 +38,20 @@ interface Variant {
   withBash?: boolean
 }
 
-const CHILDREN = ['ps echo', 'cmd > NUL', 'node write in root', 'node starts cmd and node', 'node starts node only']
+const START = ['bash echo', 'ps echo', 'ps5 echo', 'cmd > NUL', 'node write in root']
+const CHILDREN = ['node starts cmd and node', 'node starts node only']
 
 const VARIANTS: Variant[] = [
   { name: 'none', mode: 'direct' },
   { name: 'S+E+L', mode: 'sid', extra: ['everyone', 'logon'] },
-  { name: 'S+E+L nojob', mode: 'sid', extra: ['everyone', 'logon'], flags: { job: false }, only: CHILDREN },
-  { name: 'S+E+L ui-none', mode: 'sid', extra: ['everyone', 'logon'], flags: { jobUi: 'none' }, only: CHILDREN },
   { name: 'Low (no bash open)', mode: 'low', programs: ['bash'] },
   { name: 'Low', mode: 'low', withBash: true },
-  { name: 'Low nojob', mode: 'low', flags: { job: false }, only: CHILDREN },
-  { name: 'Low ui-none', mode: 'low', flags: { jobUi: 'none' }, only: CHILDREN },
-  { name: 'Low breakaway', mode: 'low', flags: { jobBreakaway: 'ok' }, only: CHILDREN },
+  { name: 'Low detached', mode: 'low', flags: { console: 'detached' }, only: [...START, ...CHILDREN] },
+  { name: 'Low desktop', mode: 'low', flags: { desktop: 'own' }, only: [...START, ...CHILDREN] },
+  { name: 'Low station', mode: 'low', flags: { desktop: 'own-station' }, withBash: true },
+  { name: 'Low station nojob', mode: 'low', flags: { desktop: 'own-station', job: false }, only: [...START, ...CHILDREN] },
   { name: 'Low junction', mode: 'low', junction: true, withBash: true, programs: ['bash'] },
+  { name: 'Low station junction', mode: 'low', flags: { desktop: 'own-station' }, junction: true, withBash: true, programs: ['bash'] },
 ]
 
 const WHERE = ['temp', 'profile', 'public', 'cdrive', 'wintemp', 'programdata'] as const
@@ -353,6 +354,46 @@ function buildProbes(): Probe[] {
       contains: /grandchild-ok/,
     },
     {
+      name: 'ps named pipe server',
+      expect: 'info',
+      show: true,
+      program: 'ps',
+      args: () => ps("$p = New-Object System.IO.Pipes.NamedPipeServerStream('encode-probe-' + $PID); $p.Dispose(); Write-Output 'pipe-ok'"),
+      contains: /pipe-ok/,
+    },
+    {
+      name: 'node named pipe server',
+      expect: 'info',
+      show: true,
+      program: 'node',
+      args: () => ['-e', `const s=require('net').createServer();s.on('error',(e)=>{console.log('pipe '+e.code);process.exit(2)});s.listen(${JSON.stringify('\\\\.\\pipe\\encode-probe-')}+process.pid,()=>{console.log('pipe-ok');process.exit(0)})`],
+      contains: /pipe-ok/,
+    },
+    {
+      name: 'node spawnSync with stdio ignore',
+      expect: 'info',
+      show: true,
+      program: 'node',
+      args: () => ['-e', "const r=require('child_process').spawnSync(process.execPath,['-e','0'],{stdio:'ignore'});console.log(r.error?'spawn '+r.error.code:'spawn-ok status='+r.status)"],
+      contains: /spawn-ok/,
+    },
+    {
+      name: 'node spawnSync with stdio inherit',
+      expect: 'info',
+      show: true,
+      program: 'node',
+      args: () => ['-e', "const r=require('child_process').spawnSync(process.execPath,['-e','0'],{stdio:'inherit'});console.log(r.error?'spawn '+r.error.code:'spawn-ok status='+r.status)"],
+      contains: /spawn-ok/,
+    },
+    {
+      name: 'node spawn with pipes',
+      expect: 'info',
+      show: true,
+      program: 'node',
+      args: () => ['-e', "const c=require('child_process').spawn(process.execPath,['-e','console.log(1)']);c.on('error',(e)=>console.log('spawn '+e.code));c.stdout.on('data',(d)=>console.log('spawn-ok '+String(d).trim()))"],
+      contains: /spawn-ok/,
+    },
+    {
       name: 'node loopback socket',
       expect: 'allow',
       program: 'node',
@@ -546,7 +587,14 @@ describe('what keeps the programs of an agent working and its writes inside the 
     const startup = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
     fs.mkdirSync(startup, { recursive: true })
 
-    for (const flags of [{ restrict: [sid, 'everyone', 'logon'] }, { restrict: [], integrity: 'low' as const }, { restrict: [sid, 'logon'], lua: false }]) {
+    say(`window station and desktop of the helper: ${JSON.stringify(await desktopInfo(build.exe).catch(failure))}`)
+    for (const flags of [
+      { restrict: [sid, 'everyone', 'logon'] },
+      { restrict: [], integrity: 'low' as const },
+      { restrict: [], integrity: 'low' as const, desktop: 'own' as const },
+      { restrict: [], integrity: 'low' as const, desktop: 'own-station' as const },
+      { restrict: [], integrity: 'low' as const, console: 'detached' as const },
+    ]) {
       say(`probe ${JSON.stringify(flags)}: ${JSON.stringify(await probeHelper(build.exe, flags).catch(failure))}`)
     }
 

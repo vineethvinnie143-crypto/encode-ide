@@ -7,7 +7,7 @@ const report = (patch: Partial<SandboxReport> = {}): SandboxReport => ({
   state: 'active',
   engine: 'bubblewrap',
   limits: { reads: true, network: true, protectedPaths: 'exact' },
-  settings: { enabled: true, required: false, allowUnsandboxed: true, caches: true, network: 'allow', allowWrite: [], denyWrite: [], denyRead: [], allowRead: [] },
+  settings: { enabled: true, required: false, allowUnsandboxed: true, caches: true, powershell: false, network: 'allow', allowWrite: [], denyWrite: [], denyRead: [], allowRead: [] },
   tightened: [],
   problems: [],
   file: '/home/u/.encode/settings.json',
@@ -28,6 +28,19 @@ describe('what the screen says first', () => {
     const none = headline(report({ state: 'unavailable', reason: 'bubblewrap is not installed.' }))
     assert.equal(none.tone, 'warning')
     assert.match(none.detail, /bubblewrap is not installed\. Commands run with everything you can do/)
+  })
+
+  it('says which shell it cannot confine, and offers PowerShell only where that helps', () => {
+    const git = { name: 'Git Bash', unsupported: 'Git Bash cannot run inside the Windows sandbox, because its runtime needs access that the sandbox withholds. PowerShell can.' }
+    const windows = headline(report({ state: 'unavailable', engine: 'restricted-token', reason: git.unsupported, shell: git }))
+    assert.equal(windows.tone, 'warning')
+    assert.equal(windows.title, 'Git Bash cannot run in the sandbox')
+    assert.match(windows.detail, /Commands run with everything you can do on this computer\. Turn on “Run commands in PowerShell”/)
+    const elsewhere = headline(report({ state: 'unavailable', reason: 'odd', shell: { name: 'bash', unsupported: 'bash cannot be confined here.' } }))
+    assert.doesNotMatch(elsewhere.detail, /PowerShell/)
+    const required = headline(report({ state: 'unavailable', engine: 'restricted-token', reason: git.unsupported, shell: git, settings: { ...report().settings, required: true } }))
+    assert.equal(required.tone, 'danger')
+    assert.match(required.title, /Git Bash cannot run in the sandbox, so no command runs/)
   })
 
   it('is an alarm, not a note, when the settings require a sandbox that cannot start', () => {
@@ -59,6 +72,14 @@ describe('the switches', () => {
       ['network', true],
       ['caches', true],
     ])
+  })
+
+  it('offer the PowerShell switch on Windows only', () => {
+    const on = switchRows(report({ engine: 'restricted-token', limits: { reads: false, network: false, protectedPaths: 'best-effort' }, settings: { ...report().settings, powershell: true } }))
+    assert.deepEqual(on.map((row) => row.key), ['enabled', 'powershell', 'required', 'allowUnsandboxed', 'network', 'caches'])
+    assert.equal(on.find((row) => row.key === 'powershell')!.checked, true)
+    assert.equal(switchRows(report()).some((row) => row.key === 'powershell'), false)
+    assert.deepEqual(actionFor('powershell', true), { type: 'set', key: 'powershell', value: true })
   })
 
   it('cannot block the network where the system cannot, and says so', () => {

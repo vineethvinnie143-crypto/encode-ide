@@ -57,6 +57,14 @@ namespace Encode.Sandbox
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct SECURITY_ATTRIBUTES
+    {
+        public int nLength;
+        public IntPtr lpSecurityDescriptor;
+        public int bInheritHandle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct IO_COUNTERS
     {
         public ulong ReadOperationCount;
@@ -123,6 +131,10 @@ namespace Encode.Sandbox
         public const uint PROTECTED_SACL_SECURITY_INFORMATION = 0x40000000;
         public const uint UNPROTECTED_SACL_SECURITY_INFORMATION = 0x10000000;
         public const uint SDDL_REVISION_1 = 1;
+        public const uint OWNER_SECURITY_INFORMATION = 0x00000001;
+        public const uint DACL_SECURITY_INFORMATION = 0x00000004;
+        public const uint GENERIC_ALL = 0x10000000;
+        public const int UOI_NAME = 2;
 
         public const uint CREATE_SUSPENDED = 0x00000004;
         public const uint DETACHED_PROCESS = 0x00000008;
@@ -230,6 +242,39 @@ namespace Encode.Sandbox
 
         [DllImport("kernel32.dll")]
         public static extern IntPtr LocalFree(IntPtr memory);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern IntPtr CreateWindowStation(string name, uint flags, uint access, IntPtr attributes);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern IntPtr CreateDesktop(string name, string device, IntPtr devmode, uint flags, uint access, IntPtr attributes);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool CloseDesktop(IntPtr desktop);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool CloseWindowStation(IntPtr station);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr GetProcessWindowStation();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SetProcessWindowStation(IntPtr station);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr GetThreadDesktop(uint thread);
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool GetUserObjectInformation(IntPtr handle, int index, IntPtr info, uint length, out uint needed);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool GetUserObjectSecurity(IntPtr handle, ref uint information, IntPtr descriptor, uint length, out uint needed);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SetUserObjectSecurity(IntPtr handle, ref uint information, IntPtr descriptor);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern bool CreateProcessAsUser(

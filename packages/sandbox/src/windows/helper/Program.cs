@@ -15,6 +15,7 @@ namespace Encode.Sandbox
     ///   label --path P [--protect X]...   labels P (and everything in it) low, so that low-integrity programs may write it
     ///   unlabel --path P [--protect X]... takes the labels away
     ///   labels --path P...                the labels the paths carry
+    ///   desktop-info                      the window station and desktop this process is on, and who may use them
     ///   probe [options]                   whether a program can be started this way here
     ///
     /// Answers other than a program's own output are one line of JSON on standard output. A failure is a line on
@@ -74,6 +75,7 @@ namespace Encode.Sandbox
                     case "--integrity": parsed.Run.Integrity = Value(args, ref i); break;
                     case "--job-ui": parsed.Run.JobUi = Value(args, ref i); break;
                     case "--job-breakaway": parsed.Run.JobBreakaway = Value(args, ref i); break;
+                    case "--desktop": parsed.Run.Desktop = Value(args, ref i); break;
                     case "--full-restriction": parsed.Run.WriteRestricted = false; break;
                     case "--sid": parsed.Sid = Value(args, ref i); break;
                     case "--path": parsed.Paths.Add(Value(args, ref i)); break;
@@ -102,7 +104,7 @@ namespace Encode.Sandbox
         {
             try
             {
-                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, label, unlabel, labels, probe or version.");
+                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, label, unlabel, labels, desktop-info, probe or version.");
                 switch (args[0])
                 {
                     case "version":
@@ -160,6 +162,9 @@ namespace Encode.Sandbox
                         Say(new JsonObject().Bool("ok", true).List("present", present).ToString());
                         return 0;
                     }
+                    case "desktop-info":
+                        Say(PrivateDesktop.Describe());
+                        return 0;
                     case "label":
                     {
                         Parsed parsed = Parse(args, 1);
@@ -170,11 +175,11 @@ namespace Encode.Sandbox
                         {
                             if (parsed.IfMissing && Labels.IsLow(path)) continue;
                             if (!System.IO.Directory.Exists(path)) throw new SandboxException("Not a folder: " + path);
-                            Labels.Apply(path, "low", false);
+                            Labels.Apply(path, "low");
                             done.Add(path);
                         }
                         // What the command must not change inside is labeled medium again, and no longer takes the folder's label.
-                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "medium", true);
+                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "medium");
                         Say(new JsonObject().Bool("ok", true).List("labeled", done).Number("ms", (long)(DateTime.UtcNow - begun).TotalMilliseconds).ToString());
                         return 0;
                     }
@@ -183,8 +188,8 @@ namespace Encode.Sandbox
                         Parsed parsed = Parse(args, 1);
                         if (parsed.Paths.Count == 0) throw new SandboxException("--path is required.");
                         DateTime begun = DateTime.UtcNow;
-                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "", false);
-                        foreach (string path in parsed.Paths) if (System.IO.Directory.Exists(path)) Labels.Apply(path, "", false);
+                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "");
+                        foreach (string path in parsed.Paths) if (System.IO.Directory.Exists(path)) Labels.Apply(path, "");
                         Say(new JsonObject().Bool("ok", true).Number("ms", (long)(DateTime.UtcNow - begun).TotalMilliseconds).ToString());
                         return 0;
                     }

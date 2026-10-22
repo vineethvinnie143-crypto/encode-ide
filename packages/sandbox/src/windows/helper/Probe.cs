@@ -41,6 +41,7 @@ namespace Encode.Sandbox
             test.Integrity = options.Integrity;
             test.JobUi = options.JobUi;
             test.JobBreakaway = options.JobBreakaway;
+            test.Desktop = options.Desktop;
             test.Console = options.Console;
             test.Program = Path.Combine(Environment.SystemDirectory, "cmd.exe");
             test.Args.Add("/d");

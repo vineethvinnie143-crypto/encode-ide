@@ -17,6 +17,8 @@ export interface RunFlags {
   jobUi?: 'all' | 'none'
   /** Whether programs the command starts may leave the job (default none). */
   jobBreakaway?: 'none' | 'ok' | 'silent'
+  /** Where the program starts: the helper's own desktop (default), a desktop of its own, or a window station and desktop of its own. */
+  desktop?: 'inherit' | 'own' | 'own-station'
   /** hidden: a console nobody sees (default); detached: none; inherit: the helper's own. */
   console?: 'hidden' | 'detached' | 'inherit'
   /** Turn administrator groups into deny-only (default true). */
@@ -37,6 +39,7 @@ function flagArguments(flags: RunFlags): string[] {
   if (flags.job === false) out.push('--no-job')
   if (flags.jobUi && flags.jobUi !== 'all') out.push('--job-ui', flags.jobUi)
   if (flags.jobBreakaway && flags.jobBreakaway !== 'none') out.push('--job-breakaway', flags.jobBreakaway)
+  if (flags.desktop && flags.desktop !== 'inherit') out.push('--desktop', flags.desktop)
   if (flags.fullRestriction) out.push('--full-restriction')
   return out
 }
@@ -133,4 +136,9 @@ export async function readLabels(exe: string, paths: readonly string[], timeoutM
   const args = ['labels']
   for (const item of paths) args.push('--path', item)
   return (await helperJson<{ labels: string[] }>(exe, args, timeoutMs)).labels
+}
+
+/** The window station and desktop the helper is on, and who may use them, as the helper sees them. */
+export function desktopInfo(exe: string, timeoutMs = 20_000): Promise<Record<string, string>> {
+  return helperJson<Record<string, string>>(exe, ['desktop-info'], timeoutMs)
 }

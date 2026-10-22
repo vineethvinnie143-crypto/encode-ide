@@ -360,12 +360,15 @@ export interface SandboxReport {
   reason?: string
   /** What this system's sandbox can hold back. */
   limits?: { reads: boolean; network: boolean; protectedPaths: 'exact' | 'best-effort' }
+  /** The shell commands run in on this computer, and why the sandbox cannot confine it when it cannot. */
+  shell?: { name: string; unsupported?: string }
   /** What applies in this folder: your own settings, tightened by the folder's. */
   settings: {
     enabled: boolean
     required: boolean
     allowUnsandboxed: boolean
     caches: boolean
+    powershell: boolean
     network: 'allow' | 'block'
     allowWrite: string[]
     denyWrite: string[]
@@ -384,7 +387,7 @@ export interface SandboxReport {
 
 /** What the Sandbox screen can do: change a switch in your own settings, or check the machine again. */
 export type SandboxAction =
-  | { type: 'set'; key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches'; value: boolean }
+  | { type: 'set'; key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'powershell'; value: boolean }
   | { type: 'set'; key: 'network'; value: 'allow' | 'block' }
   | { type: 'recheck' }
 
