@@ -6,7 +6,9 @@
  * Within that one model it is patient: transient failures (a dropped
  * connection, a 5xx, a short rate limit) are retried before the first byte
  * and after a dead stream, with backoff, and an empty reply gets a second
- * chance. Everything it cannot fix ends as a `compact` or `paused` outcome.
+ * chance. A rate limit or an overloaded provider gets longer, because waiting
+ * is what clears it; a quota, a bad key or a model that is gone does not wait.
+ * Everything it cannot fix ends as a `compact` or `paused` outcome.
  */
 import { createAssembler, type AssembledReply } from './assembler'
 import { createAnthropicAdapter } from './anthropic'
@@ -73,6 +75,8 @@ export interface DirectClientOptions {
   adapters?: Partial<Record<ProviderType, ProviderAdapter>>
   /** Attempts per call, the first included. Default 3. */
   attempts?: number
+  /** Attempts for a rate limit or an overloaded provider, which clear by waiting. Default 6: about half a minute of growing pauses. */
+  patientAttempts?: number
   /** Silence after which an attempt is abandoned, in ms. Default 120 s. */
   idleTimeoutMs?: number
   /** The longest rate-limit wait sat out; a longer one pauses instead. Default 60 s. */
@@ -154,6 +158,7 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
     ...options.adapters,
   }
   const attempts = Math.max(1, options.attempts ?? 3)
+  const patientAttempts = Math.max(attempts, options.patientAttempts ?? 6)
   const idleTimeoutMs = options.idleTimeoutMs ?? 120_000
   const maxWaitMs = options.maxWaitMs ?? 60_000
   const now = options.now ?? Date.now
@@ -230,7 +235,8 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
       })
       if (!RETRYABLE.has(error.kind)) return describe(PAUSE_FOR[error.kind] ?? 'unavailable', error.retryAt)
       const wait = error.retryAt !== undefined ? Math.max(0, error.retryAt - now()) : Math.min(maxWaitMs, 1000 * 2 ** (attempt - 1))
-      if (attempt >= attempts || wait > maxWaitMs) return describe(PAUSE_FOR[error.kind] ?? 'unavailable', error.retryAt)
+      const limit = error.kind === 'rate-limit' || error.kind === 'overloaded' ? patientAttempts : attempts
+      if (attempt >= limit || wait > maxWaitMs) return describe(PAUSE_FOR[error.kind] ?? 'unavailable', error.retryAt)
       if (wait > 0) {
         emit({ type: 'wait', until: now() + wait, reason: error.message })
         await sleep(wait, signal)
