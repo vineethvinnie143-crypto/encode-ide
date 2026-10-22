@@ -223,6 +223,9 @@ describe('comments for the agent', () => {
     assert.equal(scopePhrase({ kind: 'staged' }, shot), 'the staged changes')
     assert.equal(scopePhrase({ kind: 'branch' }, { ...shot, scope: { kind: 'branch' }, base: { ref: 'origin/main', oid: null } }), 'the changes on branch main against origin/main')
     assert.equal(scopePhrase({ kind: 'commit', commit: 'abcdef1234' }, null), 'commit abcdef1')
+    assert.equal(scopePhrase({ kind: 'turn', session: 's' }, null), 'the changes you made in your last turn')
+    assert.equal(scopePhrase({ kind: 'turn', session: 's', turn: 'u' }, null, '  Fix the\n  parser  '), 'the changes you made for my request "Fix the parser"')
+    assert.equal(scopePhrase({ kind: 'turn', session: 's' }, null, 'x'.repeat(100)), `the changes you made for my request "${'x'.repeat(80)}…"`)
   })
 })
 
@@ -236,6 +239,9 @@ describe('paths between the repository and the open folder', () => {
     assert.equal(inFolder('apps/web/src/a.ts', 'apps/web/'), 'src/a.ts')
     assert.equal(inFolder('apps/webby/a.ts', 'apps/web/'), null)
     assert.equal(inFolder('README.md', 'apps/web/'), null)
+    // The Turn view names a file outside the workspace by its whole path: no folder name reaches it.
+    assert.equal(inFolder('/etc/hosts', ''), null)
+    assert.equal(inFolder('C:\\Users\\me\\.npmrc', ''), null)
   })
 
   it('name a file the agent named, absolute or from the open folder, the way the repository does', () => {
@@ -259,5 +265,7 @@ describe('paths between the repository and the open folder', () => {
     assert.equal(forAgent('README.md', inner), '/home/me/repo/README.md')
     assert.equal(forAgent('docs/x.md', windows), 'C:\\dev\\Repo\\docs\\x.md')
     assert.equal(forAgent('src/a.ts', top), 'src/a.ts')
+    assert.equal(forAgent('/etc/hosts', top), '/etc/hosts', 'a whole path stays as it is')
+    assert.equal(forAgent('C:\\Users\\me\\.npmrc', windows), 'C:\\Users\\me\\.npmrc')
   })
 })

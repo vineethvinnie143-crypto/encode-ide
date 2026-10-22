@@ -9,6 +9,8 @@ const ACTIONS = new Set(['stage-hunk', 'unstage-hunk', 'revert-hunk', 'stage-fil
 const HUNK_ID = /^[0-9a-f]{16}$/
 const FINGERPRINT = /^[0-9a-f]{40}$/
 const COMMIT = /^[0-9a-f]{4,64}$/i
+/** A session's or a request's id as eNCode makes them. */
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
 /** A branch's short name as git allows one (no space, ~ ^ : ? * [ \\, "..", "//" or "@{"), and never one that reads as an option. */
 const REF = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[^\s~^:?*[\\\p{Cc}]{1,200}$/u
 
@@ -31,6 +33,12 @@ export function reviewScopeOf(value: unknown): ReviewScope {
     case 'commit':
       if (typeof given.commit !== 'string' || !COMMIT.test(given.commit)) throw new TypeError('Not a commit.')
       return { kind: 'commit', commit: given.commit.toLowerCase() }
+    case 'turn': {
+      if (typeof given.session !== 'string' || !ID.test(given.session)) throw new TypeError('Not a session.')
+      if (given.turn === undefined || given.turn === null) return { kind: 'turn', session: given.session }
+      if (typeof given.turn !== 'string' || !ID.test(given.turn)) throw new TypeError('Not a request.')
+      return { kind: 'turn', session: given.session, turn: given.turn }
+    }
     default:
       throw new TypeError('Not a review scope.')
   }

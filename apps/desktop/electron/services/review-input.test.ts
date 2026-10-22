@@ -20,6 +20,17 @@ describe('what the Review tab may ask for', () => {
     for (const scope of [null, 'unstaged', [], { kind: 'everything' }]) assert.throws(() => reviewScopeOf(scope), TypeError)
   })
 
+  it('takes the Turn view of a session, at its latest request or one named by id', () => {
+    const session = '8a6b2c1e-1f0d-4e57-9a51-3c2b1d0e9f87'
+    assert.deepEqual(reviewScopeOf({ kind: 'turn', session, extra: 1 }), { kind: 'turn', session })
+    assert.deepEqual(reviewScopeOf({ kind: 'turn', session, turn: null }), { kind: 'turn', session })
+    assert.deepEqual(reviewScopeOf({ kind: 'turn', session, turn: 'u-1' }), { kind: 'turn', session, turn: 'u-1' })
+    for (const bad of ['', '../x', '-rf', 'a b', 'x'.repeat(201), 5]) {
+      assert.throws(() => reviewScopeOf({ kind: 'turn', session: bad }), /Not a session/, String(bad))
+      assert.throws(() => reviewScopeOf({ kind: 'turn', session, turn: bad }), /Not a request/, String(bad))
+    }
+  })
+
   it('keeps options in range and falls back to three lines of context', () => {
     assert.deepEqual(reviewOptionsOf(undefined), { context: 3, ignoreWhitespace: false })
     assert.deepEqual(reviewOptionsOf({ context: 10, ignoreWhitespace: true }), { context: 10, ignoreWhitespace: true })

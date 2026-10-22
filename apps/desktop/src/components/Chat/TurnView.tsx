@@ -65,12 +65,18 @@ function UserMessage({ entry }: { entry: ConversationEntry }) {
   )
 }
 
-/** "Edited 2 files +12 −3" with a button to review them. */
-function ResultCard({ turn }: { turn: Turn }) {
+/**
+ * "Edited 2 files +12 −3" with a button to review them: the Review tab's Turn view, which shows what this request
+ * changed (and lets each change be reverted), with or without git. The latest one also offers Undo, which opens the
+ * Rewind dialog on putting this request's files back, keeping the conversation.
+ */
+function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
   const totals = useMemo(() => editTotals(turn.log), [turn.log])
   const files = useMemo(() => editedFiles(turn.log), [turn.log])
+  const running = useChat((state) => state.running)
   const [open, setOpen] = useState(false)
   if (!totals.files) return null
+  const user = turn.user
   return (
     <div className="result-card">
       <div className="result-head">
@@ -85,7 +91,25 @@ function ResultCard({ turn }: { turn: Turn }) {
           <span className="del-stat">−{totals.deletions}</span>
         </span>
         <span className="result-actions">
-          <Button size="sm" onClick={() => useReview.getState().showFile(files[0].path, 'folder')}>
+          {latest && user && !turn.active && (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Undo2 size={14} />}
+              disabled={running}
+              title={running ? 'Stop the agent to undo' : 'Put back the files this request changed'}
+              onClick={() => void useRewind.getState().show(getActiveSessionId(), user.id, user.text ?? '', 'code')}
+            >
+              Undo
+            </Button>
+          )}
+          <Button
+            size="sm"
+            onClick={() => {
+              if (user) useReview.getState().showTurn(user.id, files[0]?.path)
+              else if (files[0]) useReview.getState().showFile(files[0].path, 'folder')
+            }}
+          >
             Review changes
           </Button>
           <IconButton label={open ? 'Hide files' : 'Show files'} size="sm" onClick={() => setOpen((value) => !value)}>
@@ -112,8 +136,11 @@ function ResultCard({ turn }: { turn: Turn }) {
   )
 }
 
-/** One turn: your message, the work log, the reply, what it changed, and (on hover) copy, fork, time and model. */
-function TurnView({ turn }: { turn: Turn }) {
+/**
+ * One turn: your message, the work log, the reply, what it changed, and (on hover) copy, fork, time and model.
+ * `latest` marks the last turn that edited files, whose change card offers Undo.
+ */
+function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
   const replyEntries = turn.reply.filter((entry) => entry.kind !== 'assistant' || entry.text?.trim() || entry.streaming)
   const answer = turn.reply.filter((entry) => entry.kind === 'assistant' && entry.text?.trim())
   const lastAnswer = answer[answer.length - 1]
@@ -149,7 +176,7 @@ function TurnView({ turn }: { turn: Turn }) {
         )
       })}
 
-      <ResultCard turn={turn} />
+      <ResultCard turn={turn} latest={latest} />
 
       {!turn.active && lastAnswer && (
         <div className="msg-actions">

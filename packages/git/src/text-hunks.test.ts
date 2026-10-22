@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { check, gen } from '@encode/testkit'
 import { applyHunk, diffContents, hunkHeader, reverseHunk } from './hunks'
 import { parseRaw } from './raw'
+import { compareBytes } from './review'
 import { parseStatus } from './status'
 import { decode, encode, splitLines, type TextContent } from './text'
 
@@ -191,5 +192,28 @@ describe('hunks', () => {
     const [hunk] = diffContents(text('a\nb\n'), text('a\nc\n')).hunks
     assert.equal(applyHunk(text('a\nz\n'), hunk), null)
     assert.equal(reverseHunk(text('a\nb\n'), hunk), null)
+  })
+})
+
+describe('comparing versions git does not hold', () => {
+  const options = { context: 3, ignoreWhitespace: false }
+  it('draws the change, and offers its hunks only when it may be written back', () => {
+    const shown = compareBytes({ path: 'a.ts', change: 'modified', old: Buffer.from('a\nb\n'), new: Buffer.from('a\nc\n'), editable: true }, options)
+    assert.deepEqual([shown.kind, shown.added, shown.removed, shown.hunkActions, shown.hunks.length], ['text', 1, 1, true, 1])
+    assert.match(shown.fingerprint, /^[0-9a-f]{40}$/)
+    const fixed = compareBytes({ path: 'a.ts', change: 'modified', old: Buffer.from('a\nb\n'), new: Buffer.from('a\nc\n'), editable: false }, options)
+    assert.deepEqual([fixed.hunkActions, fixed.hunkActionsOff], [false, undefined])
+    assert.equal(fixed.fingerprint, shown.fingerprint, 'the same versions are the same picture')
+  })
+
+  it('names new and removed files, binary content, and a change only the endings make', () => {
+    const added = compareBytes({ path: 'n.ts', change: 'added', old: null, new: Buffer.from('x\n'), editable: true }, options)
+    assert.deepEqual([added.change, added.added, added.removed], ['added', 1, 0])
+    const removed = compareBytes({ path: 'n.ts', change: 'deleted', old: Buffer.from('x\ny\n'), new: null, editable: true }, options)
+    assert.deepEqual([removed.added, removed.removed], [0, 2])
+    const binary = compareBytes({ path: 'logo.png', change: 'modified', old: Buffer.from([0x89, 0, 1]), new: Buffer.from([0x89, 0, 2]), editable: true }, options)
+    assert.deepEqual([binary.kind, binary.hunkActions], ['binary', false])
+    const endings = compareBytes({ path: 'e.ts', change: 'modified', old: Buffer.from('a\nb\n'), new: Buffer.from('a\r\nb\r\n'), editable: true }, options)
+    assert.deepEqual([endings.hunks.length, endings.note], [0, 'Only the line endings changed (LF to CRLF).'])
   })
 })

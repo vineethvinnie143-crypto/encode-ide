@@ -8,7 +8,7 @@ import { parseManifest } from './manifest'
 import { memoryFs } from './memory-fs'
 import { CheckpointService } from './service'
 import { checkpointDir, pruneStore } from './store'
-import type { ApplyOutcome, ApplyResult } from './types'
+import type { ApplyOutcome, ApplyResult, TurnVersion } from './types'
 
 function setup(options: { windows?: boolean; maxFileBytes?: number } = {}) {
   const windows = options.windows === true
@@ -535,6 +535,169 @@ describe('the history file', () => {
     await t.write('t1', 'a.ts', 'x')
     await t.write('t1', 'b.ts', 'y')
     assert.equal(t.mem.files().filter((file) => file.includes('blobs')).length, 1)
+  })
+})
+
+/** A version's text, or what stands in for it. */
+function shown(version: TurnVersion): string {
+  if (version.state === 'missing') return '(none)'
+  if (version.state === 'unread') return `(${version.why})`
+  return version.bytes.toString('utf8')
+}
+
+describe('reviewing one turn', () => {
+  it('shows each file as the turn found it and as it is now', async () => {
+    const t = setup()
+    t.mem.put(t.file('a.ts'), 'original')
+    await t.service.beginTurn('t1')
+    await t.write('t1', 'a.ts', 'one')
+    await t.write('t1', 'a.ts', 'two')
+    await t.write('t1', 'new/b.ts', 'made')
+    const changes = await t.service.turnChanges('t1')
+    assert.equal(changes.known, true)
+    assert.equal(typeof changes.at, 'number')
+    assert.deepEqual(
+      changes.files.map((file) => [file.path, shown(file.before), shown(file.after), file.afterFrom, file.changedSince, file.fixed]),
+      [
+        [t.file('a.ts'), 'original', 'two', 'now', false, undefined],
+        [t.file('new/b.ts'), '(none)', 'made', 'now', false, undefined],
+      ],
+    )
+    const [a] = changes.files
+    assert.equal(a.before.state === 'bytes' && a.before.hash, sha256(Buffer.from('original')))
+  })
+
+  it('takes what the next turn found as what an earlier turn left, and keeps that turn read-only', async () => {
+    const t = setup()
+    t.mem.put(t.file('a.ts'), 'zero')
+    await t.service.beginTurn('t1')
+    await t.write('t1', 'a.ts', 'one')
+    await t.write('t1', 'only-one.ts', 'first')
+    await t.service.beginTurn('t2')
+    await t.write('t2', 'a.ts', 'two')
+    const first = await t.service.turnChanges('t1')
+    assert.deepEqual(
+      first.files.map((file) => [shown(file.before), shown(file.after), file.afterFrom, file.fixed ?? '']),
+      [
+        ['zero', 'one', 'later', 'changed again by a later request'],
+        ['(none)', 'first', 'now', ''],
+      ],
+    )
+    const second = await t.service.turnChanges('t2')
+    assert.deepEqual(second.files.map((file) => [shown(file.before), shown(file.after), file.afterFrom]), [['one', 'two', 'now']])
+  })
+
+  it('says when something other than the agent changed a file after the turn', async () => {
+    const t = setup()
+    t.mem.put(t.file('a.ts'), 'zero')
+    t.mem.put(t.file('b.ts'), 'zero')
+    await t.service.beginTurn('t1')
+    await t.write('t1', 'a.ts', 'agent')
+    await t.write('t1', 'b.ts', 'agent')
+    t.mem.put(t.file('a.ts'), 'agent, then mine')
+    t.mem.put(t.file('b.ts'), 'agent, then mine')
+    await t.service.beginTurn('t2')
+    await t.write('t2', 'b.ts', 'again')
+    const changes = await t.service.turnChanges('t1')
+    assert.deepEqual(
+      changes.files.map((file) => [shown(file.after), file.afterFrom, file.changedSince]),
+      [
+        ['agent, then mine', 'now', true],
+        ['agent, then mine', 'later', true],
+      ],
+    )
+  })
+
+  it('reads within its limits, and says why a version was not read', async () => {
+    const t = setup({ maxFileBytes: 64 })
+    t.mem.put(t.file('big.ts'), 'b'.repeat(100))
+    t.mem.put(t.file('mid.ts'), 'm'.repeat(30))
+    t.mem.put(t.file('small.ts'), 's')
+    await t.service.beginTurn('t1')
+    for (const name of ['big.ts', 'mid.ts', 'small.ts']) await t.write('t1', name, `${name} after`)
+    const changes = await t.service.turnChanges('t1', { maxFileBytes: 40, maxTotalBytes: 45 })
+    assert.deepEqual(
+      changes.files.map((file) => [shown(file.before), shown(file.after)]),
+      [
+        // Too large to keep when the agent replaced it; the file now is small.
+        ['(unkept)', 'big.ts after'],
+        // Past the budget a version is not read, though a smaller one after it still fits.
+        ['m'.repeat(30), '(budget)'],
+        ['s', '(budget)'],
+      ],
+    )
+    // A version not shown still has its hash where the store could keep it, so it can be put back whole.
+    assert.deepEqual(
+      changes.files.map((file) => file.after.state === 'unread' && file.after.hash),
+      [false, sha256(Buffer.from('mid.ts after')), sha256(Buffer.from('small.ts after'))],
+    )
+    t.mem.put(t.file('mid.ts'), 'x'.repeat(65))
+    const huge = (await t.service.turnChanges('t1', { maxFileBytes: 40 })).files[1].after
+    assert.deepEqual(huge, { state: 'unread', hash: null, size: 65, why: 'large' }, 'past what the store keeps, it is not read at all')
+    assert.deepEqual(await t.service.turnChanges('nope'), { turn: 'nope', known: false, files: [] })
+  })
+
+  it('lists files outside the workspace without reading them', async () => {
+    const t = setup()
+    t.mem.put('/home/u/.bashrc', 'secret')
+    await t.service.beginTurn('t1')
+    await t.service.beforeWrite('/home/u/.bashrc', Buffer.from('secret'), { turnId: 't1', toolUseId: 'u1' })
+    t.mem.put('/home/u/.bashrc', 'changed')
+    await t.service.afterTool('u1')
+    const [file] = (await t.service.turnChanges('t1')).files
+    assert.deepEqual([file.path, shown(file.before), shown(file.after), file.fixed], ['/home/u/.bashrc', '(outside)', '(outside)', 'outside the workspace'])
+  })
+})
+
+describe('writing a file from a review', () => {
+  it('writes a file the agent changed only while it holds what was shown, keeping what it held', async () => {
+    const t = setup()
+    t.mem.put(t.file('a.ts'), 'zero')
+    await t.service.beginTurn('t1')
+    await t.write('t1', 'a.ts', 'one')
+    const stale = await t.service.write(t.file('a.ts'), sha256(Buffer.from('zero')), { bytes: Buffer.from('x') })
+    assert.deepEqual(stale.ok === false && stale.reason, 'stale')
+    assert.equal(t.mem.text(t.file('a.ts')), 'one')
+
+    const outcome = await t.service.write(t.file('a.ts'), sha256(Buffer.from('one')), { bytes: Buffer.from('half way') })
+    assert.deepEqual(outcome, { ok: true, previous: sha256(Buffer.from('one')), written: sha256(Buffer.from('half way')) })
+    assert.equal(t.mem.text(t.file('a.ts')), 'half way')
+    assert.ok(t.mem.get(blobFile(t.store, sha256(Buffer.from('one')), t.api)), 'what it held is kept')
+    // The review's write is what eNCode last left: rewinding finds no one else's edit to protect.
+    const { plan } = await t.rewind('t1')
+    assert.deepEqual(plan.files.map((file) => [file.action, file.conflict]), [['restore', false]])
+    assert.equal(t.mem.text(t.file('a.ts')), 'zero')
+  })
+
+  it('puts a kept copy back, and deletes a file the agent made with the folders it made', async () => {
+    const t = setup()
+    await t.service.beginTurn('t1')
+    await t.write('t1', 'new/dir/made.ts', 'made')
+    const made = sha256(Buffer.from('made'))
+    const removed = await t.service.write(t.file('new/dir/made.ts'), made, null)
+    assert.deepEqual(removed, { ok: true, previous: made, written: null })
+    assert.equal(await t.mem.exists(t.file('new')), false)
+    const back = await t.service.write(t.file('new/dir/made.ts'), null, { kept: made })
+    assert.deepEqual(back, { ok: true, previous: null, written: made })
+    assert.equal(t.mem.text(t.file('new/dir/made.ts')), 'made')
+    const missing = await t.service.write(t.file('new/dir/made.ts'), made, { kept: sha256(Buffer.from('never kept')) })
+    assert.equal(missing.ok === false && missing.reason, 'refused')
+  })
+
+  it('refuses files the agent did not change, and files outside the workspace or in .git', async () => {
+    const t = setup()
+    t.mem.put(t.file('mine.ts'), 'mine')
+    t.mem.put('/home/u/.bashrc', 'secret')
+    await t.service.beginTurn('t1')
+    await t.service.beforeWrite('/home/u/.bashrc', Buffer.from('secret'), { turnId: 't1', toolUseId: 'u1' })
+    await t.service.afterTool('u1')
+    const sum = (text: string) => sha256(Buffer.from(text))
+    for (const [file, text] of [[t.file('mine.ts'), 'mine'], ['/home/u/.bashrc', 'secret'], [t.file('.git/config'), ''], ['relative.ts', '']]) {
+      const outcome = await t.service.write(file, sum(text), { bytes: Buffer.from('x') })
+      assert.equal(outcome.ok === false && outcome.reason, 'refused', file)
+    }
+    assert.equal(t.mem.text(t.file('mine.ts')), 'mine')
+    assert.equal(t.mem.text('/home/u/.bashrc'), 'secret')
   })
 })
 

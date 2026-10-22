@@ -41,6 +41,14 @@ export default function ChatPanel() {
   // A turn that did not change stays the same object, so a streaming answer redraws only its own turn.
   const shown = useRef<Turn[]>([])
   const turns = useMemo(() => (shown.current = reuseTurns(shown.current, buildTurns(entries, running))), [entries, running])
+  // The last request that edited files: its change card offers Undo.
+  const latestEdit = useMemo(() => {
+    for (let index = turns.length - 1; index >= 0; index--) {
+      const turn = turns[index]
+      if (turn.user && turn.log.some((entry) => entry.tool?.diff?.length)) return turn.id
+    }
+    return null
+  }, [turns])
 
   const scrollToEnd = (smooth = false) => {
     const list = listRef.current
@@ -109,7 +117,7 @@ export default function ChatPanel() {
             )}
 
             {turns.map((turn) => (
-              <TurnView key={turn.id} turn={turn} />
+              <TurnView key={turn.id} turn={turn} latest={turn.id === latestEdit} />
             ))}
           </div>
         </div>

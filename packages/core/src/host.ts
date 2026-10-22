@@ -54,6 +54,9 @@ import type {
   SessionGoal,
   SessionSummary,
   TodoItem,
+  TurnChangeSet,
+  TurnFileWrite,
+  TurnWriteOutcome,
 } from './ui'
 
 /**
@@ -469,6 +472,16 @@ export class AgentHost {
   /** Puts files back as a plan said, and the conversation with them if asked. */
   async rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome> {
     return (await this.open(sessionId)).rewindApply(request)
+  }
+
+  /** What one request's file tools changed (the latest such request when none is named), for the Review tab. */
+  async turnChanges(sessionId: string, turn?: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<TurnChangeSet> {
+    return (await this.open(sessionId)).turnChanges(turn, limits)
+  }
+
+  /** Writes a file the agent changed, for the person, while it holds what they saw. */
+  async turnWrite(sessionId: string, write: TurnFileWrite): Promise<TurnWriteOutcome> {
+    return (await this.open(sessionId)).turnWrite(write)
   }
 
   /** The conversation as Markdown and JSON, for the caller to save. */

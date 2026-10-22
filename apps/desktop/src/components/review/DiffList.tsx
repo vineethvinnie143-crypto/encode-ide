@@ -39,7 +39,8 @@ const CODE_PAD = 16
 const SIGN_WIDTH = 18
 const NO_COMMENTS: readonly ReviewComment[] = []
 
-type Scope = 'unstaged' | 'staged' | null
+/** What the person can do in the view shown: stage and revert, unstage, revert an agent's turn, or nothing. */
+type Scope = 'unstaged' | 'staged' | 'turn' | null
 
 interface Metrics {
   charWidth: number
@@ -208,6 +209,20 @@ function FileHead({ file, folder, folded, scope, busy, pinned }: { file: ReviewF
             <Minus size={14} />
           </IconButton>
         )}
+        {scope === 'turn' &&
+          (file.fixed ? (
+            <span className="rv-fixed" title={file.fixed}>
+              Read only
+            </span>
+          ) : (
+            <IconButton
+              label={file.change === 'added' ? 'Delete this file' : 'Revert this file'}
+              disabled={locked}
+              onClick={() => void act({ type: 'revert-file', path: file.path, ...(fingerprint ? { fingerprint } : {}) })}
+            >
+              {file.change === 'added' ? <Trash2 size={14} /> : <Undo2 size={14} />}
+            </IconButton>
+          ))}
       </span>
     </div>
   )
@@ -238,9 +253,15 @@ function HunkHead({ file, hunk, scope, busy }: { file: ReviewFile; hunk: ReviewH
               Unstage
             </button>
           )}
+          {scope === 'turn' && (
+            <button type="button" className="rv-chip" disabled={locked} onClick={() => action('revert-hunk')}>
+              Revert
+            </button>
+          )}
         </span>
       ) : (
         scope !== null &&
+        !file.fixed &&
         file.hunkActionsOff && (
           <span className="rv-hunk-off" title={file.hunkActionsOff}>
             Whole file only
@@ -348,7 +369,8 @@ export default function DiffList({ snapshot }: { snapshot: ReviewSnapshot }) {
   const editing = useReview((state) => state.editing)
   const busy = useReview((state) => state.busy)
   const revealPath = useReview((state) => state.revealPath)
-  const scope: Scope = snapshot.readOnly ? null : snapshot.scope.kind === 'unstaged' ? 'unstaged' : snapshot.scope.kind === 'staged' ? 'staged' : null
+  const kind = snapshot.scope.kind
+  const scope: Scope = snapshot.readOnly ? null : kind === 'unstaged' || kind === 'staged' || kind === 'turn' ? kind : null
 
   const scroller = useRef<HTMLDivElement>(null)
   const probe = useRef<HTMLSpanElement>(null)

@@ -2,7 +2,7 @@ import { create } from '../store'
 import type { RewindOutcome, RewindPlan } from '@shared/types'
 import { api } from '../api'
 import { mergeDraft } from '../components/Chat/queue'
-import { defaultChoice, outcomeNote, requestFor, type RewindChoice } from '../panels/rewind'
+import { choicesFor, defaultChoice, outcomeNote, requestFor, type RewindChoice } from '../panels/rewind'
 import { useChat } from './chat'
 import { useSessions } from './sessions'
 import { useUi } from './ui'
@@ -14,6 +14,8 @@ export interface RewindTarget {
   turn: string
   /** What the person wrote, to show which request this is. */
   text: string
+  /** The choice to start on, where the plan offers it (Undo on a change card starts on the files alone). */
+  choice?: RewindChoice
 }
 
 export type RewindMode = 'rewind' | 'undo'
@@ -34,7 +36,7 @@ interface RewindStore {
   /** Also put back files that changed since the agent last wrote them. */
   overwrite: boolean
   busy: boolean
-  show(sessionId: string, turn: string, text: string): Promise<void>
+  show(sessionId: string, turn: string, text: string, choice?: RewindChoice): Promise<void>
   /** Opens the dialog on the undoing of the latest rewind. */
   showUndo(sessionId: string): Promise<void>
   close(): void
@@ -58,12 +60,13 @@ export const useRewind = create<RewindStore>((set, get) => {
     // The dialog may have moved on, or closed, while the answers were on their way.
     const now = get().target
     if (!now || now.sessionId !== target.sessionId || now.turn !== target.turn) return
+    const wanted = target.choice && choicesFor(plan.value).includes(target.choice) ? target.choice : defaultChoice(plan.value)
     set({
       plan: plan.value,
       redo,
       problem: plan.problem,
       loading: false,
-      choice: get().mode === 'rewind' ? defaultChoice(plan.value) : 'code',
+      choice: get().mode === 'rewind' ? wanted : 'code',
       overwrite: false,
     })
   }
@@ -95,8 +98,8 @@ export const useRewind = create<RewindStore>((set, get) => {
     overwrite: false,
     busy: false,
 
-    show: async (sessionId, turn, text) => {
-      const target = { sessionId, turn, text }
+    show: async (sessionId, turn, text, choice) => {
+      const target: RewindTarget = { sessionId, turn, text, ...(choice ? { choice } : {}) }
       set({ target, mode: 'rewind', loading: true, plan: null, redo: null, problem: null, refreshed: false, choice: 'conversation', overwrite: false, busy: false })
       await load(target)
     },

@@ -202,12 +202,18 @@ that had not happened, and anything that kept the banner up when nothing was run
 
 ## The Review tab
 
-`Ctrl+Shift+G` opens **Review** on the open folder's git changes. After the agent changes something, press **Review
-changes** under its reply: stage the parts you keep (a single hunk or a whole file), revert the rest, comment on lines
-and **Send** the comments back to the agent, then **Commit…** and read the drafted message before you commit.
+`Ctrl+Shift+G` opens **Review** on the open folder's git changes. After the agent changes something, stage the parts
+you keep (a single hunk or a whole file), revert the rest, comment on lines and **Send** the comments back to the agent,
+then **Commit…** and read the drafted message before you commit.
+
+**Review changes** opens the **Last turn** view: only what that request changed, in any folder, git or not. Revert one
+hunk, then press **Undo** on the notice; delete a file the agent created, and bring it back the same way. Edit a file
+yourself after the agent did and try to revert it from a view you opened before your edit: it should refuse and show
+the file as it is now. **Undo** on the latest change card opens the Rewind dialog on that request's files.
 
 What is most useful to hear: any hunk that was staged or reverted differently from how it looked, any file that shows
-every line changed when only a few did (line endings), and anything slow in a large change.
+every line changed when only a few did (line endings), a Last turn view that shows something the request did not do
+(or misses something it did with its file tools), and anything slow in a large change.
 
 ## What to try
 

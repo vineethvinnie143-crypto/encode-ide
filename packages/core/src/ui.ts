@@ -244,6 +244,57 @@ export type RewindOutcome =
     }
   | { ok: false; reason: 'stale' | 'unavailable' | 'busy' | 'failed'; message: string }
 
+// ------------------------------------------------------------ one request's changes, for the Review tab
+
+/** One version of a file as a review reads it. Known only by its hash (`unread`) when it was too large, not kept or lost. */
+export type ChangeVersion =
+  | { state: 'missing' }
+  | { state: 'bytes'; hash: string; bytes: Uint8Array }
+  | { state: 'unread'; hash: string | null; size: number; why: 'large' | 'budget' | 'unkept' | 'lost' | 'outside' }
+
+/** One file a request's file tools changed: as the request found it, and as it left it. */
+export interface TurnFileChange {
+  /** Relative to the workspace root with `/`, or absolute where the file lies outside it. */
+  path: string
+  /** Absolute, as the tools wrote it: what a write names. */
+  file: string
+  before: ChangeVersion
+  /** The copy a later request kept just before it changed the file again (`later`), or the file now (`now`). */
+  after: ChangeVersion
+  afterFrom: 'later' | 'now'
+  /** Something other than the agent changed the file after the request's last write; `after` holds that too. */
+  changedSince: boolean
+  /** Why the file cannot be written from the review. */
+  fixed?: string
+}
+
+export interface TurnChangeSet {
+  /** The request shown: the one asked for, or the latest that changed files; null when there is none. */
+  turn: string | null
+  /** When the request began. */
+  at?: number
+  /** The workspace root the paths are relative to. */
+  root: string
+  files: TurnFileChange[]
+  /** A turn is running in the session, so nothing can be written until it ends. */
+  busy: boolean
+  /** Why nothing can be shown, in words. */
+  problem?: string
+}
+
+/** What the review writes in a file: these bytes, a copy the record keeps (by hash), or nothing (the file goes). */
+export interface TurnFileWrite {
+  /** As `TurnFileChange.file`. */
+  file: string
+  /** What the file must hold now (its SHA-256); null: there must be no file. */
+  expected: string | null
+  next: { bytes: ArrayBuffer } | { kept: string } | null
+}
+
+export type TurnWriteOutcome =
+  | { ok: true; previous: string | null; written: string | null }
+  | { ok: false; reason: 'stale' | 'refused' | 'busy' | 'unavailable'; message: string }
+
 export type AgentEventBody =
   | { type: 'status'; status: AgentStatus }
   | { type: 'entry'; entry: ConversationEntry }

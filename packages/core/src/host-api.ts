@@ -25,6 +25,9 @@ import type {
   SessionPatch,
   SessionSummary,
   TodoItem,
+  TurnChangeSet,
+  TurnFileWrite,
+  TurnWriteOutcome,
 } from './ui'
 
 export type HostRequests = {
@@ -52,6 +55,8 @@ export type HostRequests = {
   rewindPlan: { params: { sessionId: string; turn: string }; result: RewindPlan }
   redoPlan: { params: { sessionId: string }; result: RewindPlan | null }
   rewindApply: { params: { sessionId: string; request: RewindRequest }; result: RewindOutcome }
+  turnChanges: { params: { sessionId: string; turn?: string; limits?: { maxFileBytes?: number; maxTotalBytes?: number } }; result: TurnChangeSet }
+  turnWrite: { params: { sessionId: string; write: TurnFileWrite }; result: TurnWriteOutcome }
   exportData: { params: { sessionId: string }; result: { title: string; transcript: string; json: string } }
   approve: { params: { requestId: string; answer: Exclude<ApprovalAnswer, boolean> }; result: boolean }
   answer: { params: { requestId: string; text: string }; result: boolean }
@@ -162,6 +167,30 @@ const REWIND_REQUEST: JsonSchema = {
   },
 }
 
+const HASH: JsonSchema = { type: 'string', pattern: '^[0-9a-f]{64}$' }
+
+const LIMITS: JsonSchema = {
+  type: 'object',
+  properties: { maxFileBytes: { type: 'integer', minimum: 0, maximum: 64 * 1024 * 1024 }, maxTotalBytes: { type: 'integer', minimum: 0, maximum: 512 * 1024 * 1024 } },
+}
+
+/** The bytes travel as an ArrayBuffer, which the checker passes over without looking at each byte. */
+const FILE_WRITE: JsonSchema = {
+  type: 'object',
+  required: ['file', 'expected', 'next'],
+  properties: {
+    file: text(4_096, 1),
+    expected: nullable(HASH),
+    next: {
+      anyOf: [
+        { type: 'object', required: ['bytes'], properties: { bytes: { type: 'object' } } },
+        { type: 'object', required: ['kept'], properties: { kept: HASH } },
+        { type: 'null' },
+      ],
+    },
+  },
+}
+
 /** Request parameters per method; methods without an entry take none. */
 export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   create: { type: ['object', 'null'], properties: { projectRoot: nullable(text(4_096)), title: text(400) } },
@@ -185,6 +214,8 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   rewindPlan: object({ ...sessionId, turn: id }, ['sessionId', 'turn']),
   redoPlan: object(sessionId, ['sessionId']),
   rewindApply: object({ ...sessionId, request: REWIND_REQUEST }, ['sessionId', 'request']),
+  turnChanges: object({ ...sessionId, turn: id, limits: LIMITS }, ['sessionId']),
+  turnWrite: object({ ...sessionId, write: FILE_WRITE }, ['sessionId', 'write']),
   exportData: object(sessionId, ['sessionId']),
   approve: object({ requestId: id, answer: ANSWER }, ['requestId', 'answer']),
   answer: object({ requestId: id, text: text(100_000) }, ['requestId', 'text']),
@@ -227,6 +258,13 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('rewindPlan', ({ sessionId, turn }) => host.rewindPlan(sessionId, turn))
   on('redoPlan', ({ sessionId }) => host.redoPlan(sessionId))
   on('rewindApply', ({ sessionId, request }) => host.rewindApply(sessionId, request))
+  on('turnChanges', ({ sessionId, turn, limits }) => host.turnChanges(sessionId, turn, limits))
+  on('turnWrite', ({ sessionId, write }) => {
+    const { next } = write
+    // The checker saw an object; only an ArrayBuffer is bytes.
+    if (next && 'bytes' in next && !(next.bytes instanceof ArrayBuffer)) throw new TypeError('write.next.bytes must be an ArrayBuffer')
+    return host.turnWrite(sessionId, write)
+  })
   on('exportData', ({ sessionId }) => host.exportData(sessionId))
   on('approve', ({ requestId, answer }) => host.approve(requestId, answer))
   on('answer', ({ requestId, text: answer }) => host.answer(requestId, answer))
@@ -268,6 +306,8 @@ export interface HostClient {
   rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
   redoPlan(sessionId: string): Promise<RewindPlan | null>
   rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome>
+  turnChanges(sessionId: string, turn?: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<TurnChangeSet>
+  turnWrite(sessionId: string, write: TurnFileWrite): Promise<TurnWriteOutcome>
   exportData(sessionId: string): Promise<{ title: string; transcript: string; json: string }>
   approve(requestId: string, answer: ApprovalAnswer): Promise<boolean>
   answer(requestId: string, text: string): Promise<boolean>
@@ -304,6 +344,8 @@ export function createHostClient(caller: HostCaller): HostClient {
     rewindPlan: (sessionId, turn) => caller.request('rewindPlan', { sessionId, turn }),
     redoPlan: (sessionId) => caller.request('redoPlan', { sessionId }),
     rewindApply: (sessionId, request) => caller.request('rewindApply', { sessionId, request }),
+    turnChanges: (sessionId, turn, limits) => caller.request('turnChanges', { sessionId, ...(turn ? { turn } : {}), ...(limits ? { limits } : {}) }),
+    turnWrite: (sessionId, write) => caller.request('turnWrite', { sessionId, write }),
     exportData: (sessionId) => caller.request('exportData', { sessionId }),
     approve: (requestId, answer) => caller.request('approve', { requestId, answer: typeof answer === 'boolean' ? { approved: answer } : answer }),
     answer: (requestId, answer) => caller.request('answer', { requestId, text: answer }),

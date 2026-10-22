@@ -1033,13 +1033,23 @@ async function runRewindChecks() {
   if (!changedUtils.includes('return b + a')) throw new Error('The agent did not change src/utils.ts')
   await expectFile(createdFile, 'created by the hooks check\n', 'the agent created a file')
 
-  // The dialog lists what this request changed, and nothing of the first request.
-  await openRewind(1)
+  await runTurnReviewChecks({ utilsFile, createdFile, original, changedUtils, read, expectFile, toastIs })
+
+  // Undo on the latest change card opens the dialog on the files alone. It lists what this request changed, and nothing
+  // of the first request, whose card offers no Undo.
+  const undoButtons = await evaluate(`[...document.querySelectorAll('.turn .result-card')].map((card) => [...card.querySelectorAll('button')].some((node) => node.textContent === 'Undo'))`)
+  if (JSON.stringify(undoButtons) !== JSON.stringify([false, true])) throw new Error(`Only the latest change card should offer Undo: ${JSON.stringify(undoButtons)}`)
+  if (!(await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.turn .result-card button')].find((node) => node.textContent === 'Undo')
+    button?.click()
+    return Boolean(button)
+  })()`))) throw new Error('The latest change card has no Undo')
+  await waitFor("!!document.querySelector('.rewind-dialog') && !document.querySelector('.rewind-loading')", 10000, 'the Rewind dialog has its plan')
   const plan = await rows()
   console.log('[smoke] rewind plan:', JSON.stringify(plan))
   if (JSON.stringify(plan) !== JSON.stringify([['rewind-new.txt', 'Delete', false], ['src/utils.ts', 'Put back', false]])) throw new Error(`The plan lists ${JSON.stringify(plan)}`)
+  if (!(await evaluate("document.querySelector('input[name=\"rewind-choice\"][value=\"code\"]')?.checked"))) throw new Error('Undo should start on "Code only"')
   await screenshot('18-rewind-dialog.png')
-  if (!(await choose('code'))) throw new Error('The dialog offers no "Code only"')
   await applyDialog()
   await toastIs('Put back 1 file and deleted 1 file.')
   await expectFile(utilsFile, original, 'src/utils.ts is as it was')
@@ -1088,6 +1098,76 @@ async function runRewindChecks() {
   for (const file of [noteFile, logFile, createdFile]) await fs.rm(file, { force: true })
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   console.log('[smoke] hooks and rewind: ok')
+}
+
+/**
+ * The Review tab's Turn view, in a folder without git: the change card's "Review changes" opens what the request
+ * changed. One change is reverted on its own and the file the request created is deleted; the notices' Undo brings each
+ * back, so the files end as the agent left them and the rewind that follows finds nothing of the person's in its way.
+ */
+async function runTurnReviewChecks({ utilsFile, createdFile, original, changedUtils, read, expectFile, toastIs }) {
+  console.log('[smoke] --- review of a turn ---')
+  const heads = "document.querySelectorAll('.review-pane .rv-file-head:not(.is-pinned)').length"
+  const opened = await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.turn')].at(-1)?.querySelector('.result-card')
+    const button = card ? [...card.querySelectorAll('button')].find((node) => node.textContent === 'Review changes') : null
+    button?.click()
+    return Boolean(button)
+  })()`)
+  if (!opened) throw new Error('The change card has no "Review changes"')
+  await waitFor("document.querySelector('.side-panel .panel-tab.is-active .panel-tab-title')?.textContent === 'Review'", 6000, 'the Review tab opens')
+  await waitFor(`${heads} === 2`, 15000, 'the two files the request changed')
+  const listed = await evaluate(`({
+    scope: document.querySelector('.review-pane .rv-scope')?.textContent ?? '',
+    request: document.querySelector('.review-pane .rv-turn-chip .rv-chip-text')?.textContent ?? '',
+    files: [...document.querySelectorAll('.review-pane .rv-file-head:not(.is-pinned) .rv-path')].map((node) => node.textContent),
+    hunks: document.querySelectorAll('.review-pane .rv-hunk-head').length,
+    added: [...document.querySelectorAll('.review-pane .rv-line.is-add')].map((node) => node.textContent),
+  })`)
+  console.log('[smoke] turn review shows:', JSON.stringify(listed))
+  if (listed.scope !== 'Agent turn' || !listed.request.startsWith('[scenario:hooks-check]')) throw new Error(`The Turn view is not on the request: ${JSON.stringify(listed)}`)
+  if (JSON.stringify(listed.files) !== JSON.stringify(['rewind-new.txt', 'src/utils.ts']) || listed.hunks !== 2) throw new Error(`The Turn view lists ${JSON.stringify(listed)}`)
+  if (!listed.added.some((text) => text.includes('return b + a')) || !listed.added.some((text) => text.includes('created by the hooks check'))) throw new Error('The added lines are not shown')
+  await sleep(300)
+  await screenshot('18-turn-review.png')
+
+  // The change to src/utils.ts, reverted on its own, then brought back.
+  const reverted = await evaluate(`(() => {
+    let inFile = false
+    for (const row of document.querySelectorAll('.review-pane .rv-canvas > .rv-row')) {
+      const head = row.querySelector('.rv-file-head')
+      if (head) inFile = head.querySelector('.rv-path')?.textContent === 'src/utils.ts'
+      const chip = inFile ? [...row.querySelectorAll('.rv-hunk-head .rv-chip')].find((node) => node.textContent === 'Revert') : null
+      if (chip) {
+        chip.click()
+        return true
+      }
+    }
+    return false
+  })()`)
+  if (!reverted) throw new Error('The change in src/utils.ts has no Revert')
+  await toastIs('Reverted a change in utils.ts')
+  await expectFile(utilsFile, original, 'the one change is reverted')
+  await waitFor(`${heads} === 1`, 10000, 'only the created file is left to review')
+  if (!(await click('.toast-action', 'Undo'))) throw new Error('The notice offers no Undo')
+  await toastIs('Undid: reverted a change in utils.ts')
+  await expectFile(utilsFile, changedUtils, 'Undo brings the change back')
+  await waitFor(`${heads} === 2`, 10000, 'the change is back in the review')
+
+  // The created file, deleted from the review, then brought back.
+  if (!(await click('.review-pane .rv-file-head:not(.is-pinned) button[aria-label="Delete this file"]'))) throw new Error('The created file has no "Delete this file"')
+  await toastIs('Deleted rewind-new.txt')
+  if ((await read(createdFile)) !== null) throw new Error('The created file should be gone')
+  await waitFor(`${heads} === 1`, 10000, 'only src/utils.ts is left to review')
+  if (!(await click('.toast-action', 'Undo'))) throw new Error('The notice offers no Undo')
+  await toastIs('Undid: deleted rewind-new.txt')
+  await expectFile(createdFile, 'created by the hooks check\n', 'Undo brings the created file back')
+  await waitFor(`${heads} === 2`, 10000, 'both files are back in the review')
+
+  // Leave the side panel as it was found.
+  await key({ key: 'w', code: 'KeyW', ctrlKey: true })
+  await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+  console.log('[smoke] review of a turn: reverted a change and a created file from the Review tab, and undid both')
 }
 
 /**

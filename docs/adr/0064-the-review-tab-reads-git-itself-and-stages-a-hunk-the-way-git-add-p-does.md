@@ -77,5 +77,5 @@ list of changed files and the editor. The forces:
   can be skipped by typing.
 - Hooks still run on commit, as the person expects. On Windows the sandbox holds them best effort (0063), so a command
   run outside the sandbox could plant one; that is the sandbox's residual risk, not a new one.
-- Still open: a "Last turn" scope built from the agent's checkpoints, so a folder without git can be reviewed too, and
-  undo for one turn from the change card (UI-4b); review of a pull request from the forge; staging single lines.
+- Still open: review of a pull request from the forge; staging single lines. The "Last turn" scope built from the
+  agent's checkpoints, and Undo on the change card, are 0065.

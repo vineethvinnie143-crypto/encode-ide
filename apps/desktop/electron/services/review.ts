@@ -16,6 +16,7 @@ import type {
   ReviewScope,
 } from '../../shared/types'
 import type { CommitDraftInput } from '../agent-host/commit-message'
+import { TurnReview, type TurnSource } from './turn-review'
 
 export interface ReviewServiceOptions {
   /** The folder open now, or null. */
@@ -27,10 +28,13 @@ export interface ReviewServiceOptions {
   trash?: RepositoryOptions['trash']
   /** Asks the Tools role's model for a commit message. */
   draft?: (input: CommitDraftInput) => Promise<string>
+  /** The agent's record of what each request changed, for the Turn view; without it that view has nothing to show. */
+  turns?: TurnSource
   platform?: NodeJS.Platform
 }
 
 const NO_GIT = 'git was not found. Install Git from git-scm.com, then restart eNCode.'
+const NO_TURNS = 'The agent’s record of its changes is not available here.'
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -38,8 +42,11 @@ function describe(error: unknown): string {
 
 export class ReviewService {
   private opened: { folder: string; repository: Promise<Repository | { reason: string }> } | null = null
+  private readonly turns: TurnReview | null
 
-  constructor(private readonly options: ReviewServiceOptions) {}
+  constructor(private readonly options: ReviewServiceOptions) {
+    this.turns = options.turns ? new TurnReview(options.turns) : null
+  }
 
   /** The repository of the open folder, opened once per folder. */
   private repository(): Promise<Repository | { reason: string }> {
@@ -60,6 +67,7 @@ export class ReviewService {
   }
 
   async load(scope: ReviewScope, options: ReviewOptions): Promise<ReviewLoad> {
+    if (scope.kind === 'turn') return this.turns ? this.turns.load(scope, options) : { ok: false, message: NO_TURNS }
     const repository = await this.repository()
     if (!(repository instanceof Repository)) return { ok: false, message: repository.reason }
     try {
@@ -71,6 +79,7 @@ export class ReviewService {
   }
 
   async act(scope: ReviewScope, action: ReviewAction, options: ReviewOptions): Promise<ReviewActOutcome> {
+    if (scope.kind === 'turn') return this.turns ? this.turns.act(scope, action, options) : { ok: false, message: NO_TURNS, stale: false, load: { ok: false, message: NO_TURNS } }
     const repository = await this.repository()
     if (!(repository instanceof Repository)) return { ok: false, message: repository.reason, stale: false, load: { ok: false, message: repository.reason } }
     try {
@@ -85,6 +94,7 @@ export class ReviewService {
   }
 
   async undo(scope: ReviewScope, options: ReviewOptions): Promise<ReviewActOutcome> {
+    if (scope.kind === 'turn') return this.turns ? this.turns.undo(scope, options) : { ok: false, message: NO_TURNS, stale: false, load: { ok: false, message: NO_TURNS } }
     const repository = await this.repository()
     if (!(repository instanceof Repository)) return { ok: false, message: repository.reason, stale: false, load: { ok: false, message: repository.reason } }
     try {

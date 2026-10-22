@@ -117,6 +117,10 @@ export function memoryFs(options: { windows?: boolean } = {}): MemoryFs {
       const key = fold(target)
       return files.has(key) || folders.has(key) || links.has(key)
     },
+    async size(file) {
+      check('size', file)
+      return files.get(fold(file))?.bytes.length ?? null
+    },
     async realpath(target) {
       const key = fold(target)
       for (const [from, to] of links) {

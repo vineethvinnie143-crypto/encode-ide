@@ -548,6 +548,31 @@ describe('checkpoints in a scope', () => {
     assert.deepEqual(redo?.files.map((file) => [file.path, file.action]), [['a.txt', 'restore'], ['src/new.ts', 'restore']])
   })
 
+  it('show what one turn changed, with paths relative to the folder, and write a file back for the person', async () => {
+    const t = await open()
+    await t.begin('m1')
+    await t.edit('m1', 'u1', path.join(t.root, 'a.txt'), 'after')
+    await t.edit('m1', 'u2', path.join(t.root, 'src', 'new.ts'), 'created')
+    const text = (version: { state: string; bytes?: Uint8Array }) => (version.state === 'bytes' ? Buffer.from(version.bytes!).toString('utf8') : version.state)
+    const changes = await t.scope.checkpoints!.changes!('m1')
+    assert.deepEqual(
+      changes.files.map((file) => [file.path, file.file, text(file.before), text(file.after), file.afterFrom]),
+      [
+        ['a.txt', path.join(t.root, 'a.txt'), 'before', 'after', 'now'],
+        ['src/new.ts', path.join(t.root, 'src', 'new.ts'), 'missing', 'created', 'now'],
+      ],
+    )
+    const after = changes.files[0].after
+    const expected = after.state === 'bytes' ? after.hash : null
+    const bytes = new TextEncoder().encode('before, again').buffer as ArrayBuffer
+    const outcome = await t.scope.checkpoints!.write!({ file: path.join(t.root, 'a.txt'), expected, next: { bytes } })
+    assert.deepEqual(outcome.ok && outcome.previous, expected)
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'before, again')
+    const back = await t.scope.checkpoints!.write!({ file: path.join(t.root, 'a.txt'), expected: outcome.ok ? outcome.written : null, next: { kept: expected! } })
+    assert.equal(back.ok, true)
+    assert.equal(await fs.readFile(path.join(t.root, 'a.txt'), 'utf8'), 'after')
+  })
+
   it('refuse a plan the files have moved past, and leave a file the person changed alone unless told', async () => {
     const t = await open()
     await t.begin('m1')

@@ -10,10 +10,18 @@ import type {
   Entry,
   Hash,
   PlannedFile,
+  ReadLimits,
+  Replacement,
   RewindFile,
   RewindPlan,
+  SnapEntry,
+  TurnChanges,
   TurnCheckpoint,
+  TurnFile,
+  TurnVersion,
+  UnreadWhy,
   WriteInfo,
+  WriteOutcome,
 } from './types'
 
 /**
@@ -54,6 +62,9 @@ import type {
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const MAX_ID = 256
+/** What a review reads by default: a version up to 2 MB, 48 MB in all. */
+const REVIEW_FILE_BYTES = 2 * 1024 * 1024
+const REVIEW_TOTAL_BYTES = 48 * 1024 * 1024
 
 export interface CheckpointOptions {
   fs: CheckpointFs
@@ -96,6 +107,19 @@ interface Computed {
 }
 
 type Placement = { ok: true; real: string; relative: string } | { ok: false; reason: string }
+
+/** One file of a turn under review: the turn's first copy of it, and the next turn's, with what eNCode had left before that. */
+interface Track {
+  first: SnapEntry
+  later?: SnapEntry
+  leftBefore?: Hash | null
+}
+
+/** What a review may still read: per version, and in all. */
+interface Budget {
+  file: number
+  left: number
+}
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -327,6 +351,89 @@ export class CheckpointService {
   }
 
   // -------------------------------------------------------------------------
+  // Reviewing one turn
+
+  /**
+   * What one turn's tools changed, file by file: the version the turn found, and the one it left. The version it left
+   * is the copy a later turn kept just before it changed the file again, or else the file as it is now; `changedSince`
+   * says when something other than the agent changed the file after the turn's last write. Nothing is written.
+   */
+  turnChanges(turn: string, limits: ReadLimits = {}): Promise<TurnChanges> {
+    assertId('turn id', turn)
+    return this.serial(async () => {
+      const manifest = await this.manifest()
+      const marker = manifest.markerIndex(turn)
+      if (marker === undefined) return { turn, known: false, files: [] }
+      const tracks = new Map<string, Track>()
+      /** What eNCode last left in each file, as the history goes on. */
+      const left = new Map<string, Hash | null>()
+      for (let index = marker + 1; index < manifest.entries.length; index++) {
+        const entry = manifest.entries[index]
+        if (entry.t === 'wrote') {
+          left.set(this.keyOf(entry.path), entry.hash)
+          continue
+        }
+        if (entry.t !== 'snap') continue
+        const key = this.keyOf(entry.path)
+        const track = tracks.get(key)
+        if (entry.turn === turn) {
+          if (!track) tracks.set(key, { first: entry })
+        } else if (track && !track.later) {
+          track.later = entry
+          if (left.has(key)) track.leftBefore = left.get(key)
+        }
+      }
+      const budget: Budget = { file: limits.maxFileBytes ?? REVIEW_FILE_BYTES, left: limits.maxTotalBytes ?? REVIEW_TOTAL_BYTES }
+      const files: TurnFile[] = []
+      for (const track of [...tracks.values()].sort((a, b) => byPath(a.first, b.first))) files.push(await this.turnFile(manifest, track, budget))
+      return { turn, known: true, at: manifest.entries[marker].at, files }
+    })
+  }
+
+  /**
+   * Writes a file the agent changed, for the person: a change of the agent's they took back in a review, or put back
+   * again. Only a file the history tracks, only inside the workspace and never in .git or .encode, and only while it
+   * holds `expected` (null: there is no file). What it held is kept in the store first. The write is recorded as what
+   * eNCode last left there, so that a later rewind does not take the person's choice for someone else's edit.
+   */
+  write(file: string, expected: Hash | null, next: Replacement): Promise<WriteOutcome> {
+    return this.serial(async () => {
+      const name = this.api.basename(file)
+      const refuse = (message: string): WriteOutcome => ({ ok: false, reason: 'refused', message })
+      const manifest = await this.manifest()
+      if (!this.api.isAbsolute(file) || !manifest.tracked(file)) return refuse(`eNCode only writes files the agent changed, and ${name} is not one of them.`)
+      const placement = await this.contain(file)
+      if (!placement.ok) return refuse(`${name} is ${placement.reason}.`)
+      const bytes = await this.fs.read(file)
+      const current = bytes ? sha256(bytes) : null
+      if (current !== expected) return { ok: false, reason: 'stale', message: `${name} changed since you looked at it.` }
+      let replacement: Buffer | null = null
+      if (next && 'bytes' in next) replacement = next.bytes
+      else if (next) {
+        try {
+          replacement = await getBlob(this.fs, this.options.dir, next.kept, this.api)
+        } catch (error) {
+          return refuse(`The copy of ${name} to put back is not there any more (${error instanceof BlobError ? error.message : describe(error)}).`)
+        }
+      }
+      const written = replacement ? sha256(replacement) : null
+      if (written === current) return { ok: true, previous: current, written }
+      if (bytes) {
+        if (bytes.length > this.maxFileBytes) return refuse(`${name} is too large to keep a copy of before it is replaced.`)
+        await putBlob(this.fs, this.options.dir, bytes, current!, this.api)
+      }
+      if (replacement) await this.fs.overwrite(file, replacement)
+      else {
+        await this.fs.remove(file)
+        const madeDir = this.madeDirOf(manifest, file)
+        if (madeDir) await this.removeMadeDirs(file, madeDir)
+      }
+      await this.record(manifest, { t: 'wrote', tool: `review-${randomUUID()}`, path: file, hash: written, at: this.now() })
+      return { ok: true, previous: current, written }
+    })
+  }
+
+  // -------------------------------------------------------------------------
   // Internals
 
   /** Runs one operation at a time, so lines reach the manifest in the order things happened. */
@@ -485,6 +592,83 @@ export class CheckpointService {
       }
     }
     return { ...base, action: target.hash === null ? 'delete' : 'restore', conflict: !target.accept.has(current) }
+  }
+
+  /** One file of a turn as a review shows it. */
+  private async turnFile(manifest: Manifest, track: Track, budget: Budget): Promise<TurnFile> {
+    const { first, later } = track
+    const outside: TurnVersion = { state: 'unread', hash: null, size: 0, why: 'outside' }
+    if (first.outside) return { path: first.path, before: this.unread(first, 'outside'), after: outside, afterFrom: 'now', changedSince: false, fixed: 'outside the workspace' }
+    const placement = await this.contain(first.path)
+    const before = await this.keptVersion(first, budget)
+    if (later) {
+      return {
+        path: first.path,
+        before,
+        after: await this.keptVersion(later, budget),
+        afterFrom: 'later',
+        changedSince: track.leftBefore !== undefined && later.hash !== track.leftBefore,
+        fixed: placement.ok ? 'changed again by a later request' : placement.reason,
+      }
+    }
+    if (!placement.ok) return { path: first.path, before, after: outside, afterFrom: 'now', changedSince: false, fixed: placement.reason }
+    const after = await this.diskVersion(first.path, budget)
+    const expected = manifest.expectation(first.path)
+    const now = after.state === 'missing' ? null : after.hash
+    // Only a write the history saw finish says what the file should hold; a version not read cannot be compared.
+    const changedSince = expected?.confirmed === true && (after.state === 'missing' || after.hash !== null) && now !== expected.hash
+    return { path: first.path, before, after, afterFrom: 'now', changedSince }
+  }
+
+  private unread(snap: SnapEntry, why: UnreadWhy): TurnVersion {
+    return { state: 'unread', hash: snap.hash, size: snap.size, why }
+  }
+
+  /** The version a turn's copy holds, read from the store within the budget. */
+  private async keptVersion(snap: SnapEntry, budget: Budget): Promise<TurnVersion> {
+    if (snap.hash === null) return { state: 'missing' }
+    if (snap.outside) return this.unread(snap, 'outside')
+    if (!snap.stored) return this.unread(snap, 'unkept')
+    if (snap.size > budget.file) return this.unread(snap, 'large')
+    if (snap.size > budget.left) return this.unread(snap, 'budget')
+    try {
+      const bytes = await getBlob(this.fs, this.options.dir, snap.hash, this.api)
+      budget.left -= bytes.length
+      return { state: 'bytes', hash: snap.hash, bytes }
+    } catch {
+      return this.unread(snap, 'lost')
+    }
+  }
+
+  /**
+   * The file as it is now, read within the budget. A file too large to show is still read for its hash, up to the
+   * size the store keeps a copy of, so a review can put it back whole; its bytes are not held.
+   */
+  private async diskVersion(file: string, budget: Budget): Promise<TurnVersion> {
+    try {
+      const size = this.fs.size ? await this.fs.size(file) : undefined
+      if (size === null) return { state: 'missing' }
+      if (size !== undefined && size > this.maxFileBytes) return { state: 'unread', hash: null, size, why: 'large' }
+      const bytes = await this.fs.read(file)
+      if (!bytes) return { state: 'missing' }
+      const hash = sha256(bytes)
+      if (bytes.length > budget.file) return { state: 'unread', hash, size: bytes.length, why: 'large' }
+      if (bytes.length > budget.left) return { state: 'unread', hash, size: bytes.length, why: 'budget' }
+      budget.left -= bytes.length
+      return { state: 'bytes', hash, bytes }
+    } catch {
+      return { state: 'unread', hash: null, size: 0, why: 'lost' }
+    }
+  }
+
+  /** The folder the agent's latest creation of the file made for it, if any. */
+  private madeDirOf(manifest: Manifest, file: string): string | undefined {
+    const key = this.keyOf(file)
+    for (let index = manifest.entries.length - 1; index >= 0; index--) {
+      const entry = manifest.entries[index]
+      if (entry.t === 'snap' && entry.hash === null && this.keyOf(entry.path) === key) return entry.madeDir
+    }
+    return undefined
   }
 
   private makePlan(kind: RewindPlan['kind'], turn: string, known: boolean, files: PlannedFile[]): RewindPlan {

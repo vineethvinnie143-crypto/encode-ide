@@ -12,7 +12,7 @@ import { Toggle } from '../../ui/Toggle'
  * edits it; nothing is committed until they press Commit. Pushing goes to the branch's upstream, or sets one.
  */
 export default function CommitDialog({ open, onClose, snapshot }: { open: boolean; onClose: () => void; snapshot: ReviewSnapshot }) {
-  const { staged, unstaged } = snapshot.counts
+  const { staged, unstaged } = snapshot.counts ?? { staged: 0, unstaged: 0 }
   const branch = snapshot.repo.branch
   const [message, setMessage] = useState('')
   const [all, setAll] = useState(false)
