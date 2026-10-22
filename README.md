@@ -23,7 +23,13 @@ primary platform; the code stays cross-platform.
   and `$` a skill. A file you mention comes with your message, as the Read tool would show it, and counts as read,
   so the agent can edit it at once; only files it may read without asking come this way (inside the folder, or
   allowed by a rule), and the rest are named for the agent to read through its tools. A skill you call with `$`
-  brings its instructions. `Esc` twice stops the agent.
+  brings its instructions. `Ctrl+F` finds words anywhere in the session, folded steps and long outputs included.
+  `Esc` twice stops the agent. Any shortcut can be changed: open the list with `Ctrl+/`, click one and press the new
+  keys.
+- **Steer it while it works.** A message sent while the agent works reaches it before its next step, with the results
+  of the step it came in during (`Ctrl+Enter`, or **Steer now** on a waiting message); `Enter` queues it for after the
+  turn. **Settings → Agent** swaps the two. A steering message goes through your hooks and brings what it mentions,
+  like any request.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
   - files: `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
@@ -112,6 +118,9 @@ a billed model from ever being tried after a free one or on another key
 - **Settings → Roles** sets *Only use free models*, which model does which job (writing,
   exploring, planning, reviewing, summarizing, small tasks) with a fallback order, and shows how
   each connection is doing.
+- **Effort** sets how hard a role's models think, from Low to Max: the chip under the message box, `Ctrl+Shift+M` and
+  `/effort` set it for the main role, and **Settings → Roles** for each role. A model without a reasoning setting
+  ignores it, and a role left alone is left to its model.
 - **Settings → Models** edits the connections. Presets for the Connect window:
 
 | Preset | Base URL | Example model |
@@ -187,6 +196,10 @@ coloured as in the editor, the words that changed are marked, and the layout is 
 - **Commit…** drafts a message from the staged changes with the Small tasks model; edit it, then **Commit** or
   **Commit and push**. Nothing is committed until you press one.
 - `F7` and `Shift+F7` move between changes. Lockfiles and other generated files start folded.
+- **Ask the Reviewer** (the tab's button, `/review` or the palette) sends the change to the model of the Review role,
+  in one request with no tools, and its findings land on their lines as comments with a priority (P0 to P3), beside
+  yours, to send to the agent or delete. The change is read as data, never as instructions; lock and minified files are
+  left out.
 
 The tab runs git itself, with the settings that stop a repository's config from starting programs when it is read
 ([ADR 0064](docs/adr/0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md)). Committing
@@ -202,7 +215,12 @@ card's view lasts until you close the tab; the tab opens again on the scope you 
 
 ## Shortcuts
 
-`Ctrl+/` lists every shortcut and the menus show them next to each command. The main ones:
+`Ctrl+/` lists every shortcut and the menus show them next to each command. Click a shortcut in that list and press
+the new keys to change it; **+** adds another, **Reset** puts one back and **Reset all** every one (with Undo). A key
+another command has asks before it moves, and keys that typing, every text field or Windows need (a plain letter,
+`Ctrl+C`, `Alt+F4`, the computer tool's `Ctrl+Alt+Esc`) cannot be used. Your shortcuts are kept with your settings
+([ADR 0067](docs/adr/0067-steering-goes-through-what-a-request-goes-through-the-reviewer-reads-the-change-as-data-and-a-shortcut-leaves-typing-alone.md)).
+The main ones as shipped:
 
 | Action | Shortcut |
 | --- | --- |
@@ -210,7 +228,9 @@ card's view lasts until you close the tab; the tab opens again on the scope you 
 | New session | `Ctrl+N` |
 | Open a folder | `Ctrl+O` |
 | Go to file | `Ctrl+P` |
-| Choose the model | `Alt+M` |
+| Choose the model, the effort | `Alt+M`, `Ctrl+Shift+M` |
+| Steer the agent now, queue a message (while it works) | `Ctrl+Enter`, `Enter` (swapped in Settings → Agent) |
+| Find in the session, next and previous match | `Ctrl+F`, then `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) |
 | Plan mode on or off | `Shift+Tab` (in the message box) |
 | Stop the agent | `Esc` twice (in the message box or on the conversation) |
 | Save the active file | `Ctrl+S` |

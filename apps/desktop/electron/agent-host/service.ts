@@ -12,6 +12,7 @@ import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
 import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
+import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
 
 export interface HostProcess {
@@ -170,6 +171,11 @@ export class AgentHostService {
   /** A commit message for the changes given, from the model of the Small tasks role. */
   async draftCommit(input: CommitDraftInput): Promise<string> {
     return (await (await this.ready()).request('draftCommit', input, { timeoutMs: 2 * 60_000 })).message
+  }
+
+  /** What the model of the Review role finds wrong with a change. */
+  async codeReview(input: CodeReviewInput): Promise<CodeReviewResult> {
+    return (await this.ready()).request('codeReview', input, { timeoutMs: 6 * 60_000 })
   }
 
   private ready(): Promise<Peer<MainApi, DesktopHostApi>> {

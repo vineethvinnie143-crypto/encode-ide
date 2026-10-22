@@ -25,6 +25,7 @@ export function Dialog({
   width = 520,
   className,
   backdropCloses = true,
+  escapeCloses = true,
   children,
 }: {
   open: boolean
@@ -37,12 +38,16 @@ export function Dialog({
   className?: string
   /** False for a dialog a stray click should not dismiss, such as the first-start setup; Escape and the close button still do. */
   backdropCloses?: boolean
+  /** False while the dialog needs Escape itself, such as to stop listening for a new shortcut. */
+  escapeCloses?: boolean
   children?: ReactNode
 }) {
   const titleId = useId()
   const panel = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  const escapeClosesRef = useRef(escapeCloses)
+  escapeClosesRef.current = escapeCloses
 
   useEffect(() => {
     if (!open) return
@@ -52,7 +57,7 @@ export function Dialog({
     const first = node?.querySelector<HTMLElement>('[data-autofocus]') ?? node?.querySelector<HTMLElement>(FOCUSABLE_IN_BODY) ?? node
     first?.focus({ preventScroll: true })
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && escapeClosesRef.current) {
         event.stopPropagation()
         onCloseRef.current()
       }

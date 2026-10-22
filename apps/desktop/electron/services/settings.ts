@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
-import { cleanRoles, isLocalUrl } from '../../shared/models'
+import { cleanKeybindings } from '../../shared/keybindings'
+import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
-import type { AgentMode, ApprovalPolicy, ModelProfile, ProfileKind, Settings } from '../../shared/types'
+import type { AgentMode, ApprovalPolicy, FollowUp, ModelProfile, ProfileKind, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -42,8 +43,11 @@ function defaults(): StoredSettings {
     recentWorkspaces: [],
     lastWorkspace: null,
     agentMode: 'code',
+    followUp: 'queue',
     appearance: { ...DEFAULT_APPEARANCE },
     roles: {},
+    efforts: {},
+    keybindings: {},
     freeOnly: true,
     freeProfileId: null,
     setupDone: false,
@@ -57,6 +61,8 @@ const POLICIES: ApprovalPolicy[] = ['read-only', 'workspace-write', 'full-access
 function normalizePolicy(value: unknown, fallback: ApprovalPolicy): ApprovalPolicy {
   return POLICIES.includes(value as ApprovalPolicy) ? (value as ApprovalPolicy) : fallback
 }
+
+const isFollowUp = (value: unknown): value is FollowUp => value === 'queue' || value === 'steer'
 
 function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
@@ -189,8 +195,11 @@ export class SettingsService {
         : [],
       lastWorkspace: typeof input.lastWorkspace === 'string' ? input.lastWorkspace : null,
       agentMode: input.agentMode === 'ask' || input.agentMode === 'plan' ? input.agentMode : 'code',
+      followUp: isFollowUp(input.followUp) ? input.followUp : base.followUp,
       appearance: normalizeAppearance(input.appearance),
       roles: cleanRoles(input.roles, profiles),
+      efforts: cleanEfforts(input.efforts),
+      keybindings: cleanKeybindings(input.keybindings),
       freeOnly: typeof input.freeOnly === 'boolean' ? input.freeOnly : !usesRealModel,
       freeProfileId: freeProfileOf(input.freeProfileId, profiles),
       setupDone: typeof input.setupDone === 'boolean' ? input.setupDone : usesRealModel,
@@ -223,8 +232,11 @@ export class SettingsService {
       recentWorkspaces: [...this.data.recentWorkspaces],
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
+      followUp: this.data.followUp,
       appearance: { ...this.data.appearance },
       roles: structuredClone(this.data.roles),
+      efforts: { ...this.data.efforts },
+      keybindings: structuredClone(this.data.keybindings),
       freeOnly: this.data.freeOnly,
       freeProfileId: this.data.freeProfileId,
       setupDone: this.data.setupDone,
@@ -293,11 +305,14 @@ export class SettingsService {
     if (patch.agentMode === 'ask' || patch.agentMode === 'plan' || patch.agentMode === 'code') {
       next.agentMode = patch.agentMode
     }
+    if (isFollowUp(patch.followUp)) next.followUp = patch.followUp
     // A partial appearance changes only the fields it names.
     if (patch.appearance !== undefined) next.appearance = normalizeAppearance(patch.appearance, next.appearance)
 
     // Models for the roles; a profile that went away takes the entries that named it.
     next.roles = cleanRoles(patch.roles !== undefined ? patch.roles : next.roles, next.profiles)
+    if (patch.efforts !== undefined) next.efforts = cleanEfforts(patch.efforts)
+    if (patch.keybindings !== undefined) next.keybindings = cleanKeybindings(patch.keybindings)
     if (typeof patch.freeOnly === 'boolean') next.freeOnly = patch.freeOnly
     next.freeProfileId = freeProfileOf(patch.freeProfileId !== undefined ? patch.freeProfileId : next.freeProfileId, next.profiles)
     if (typeof patch.setupDone === 'boolean') next.setupDone = patch.setupDone

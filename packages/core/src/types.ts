@@ -3,7 +3,7 @@
  * it reports and asks (a surface), and how a turn ends. A session wires them
  * to the UI and the log; a subagent wires them to its parent.
  */
-import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage } from '@encode/providers'
+import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, UserBlock } from '@encode/providers'
 import type { AgentMode, DiffHunk, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry } from './ui'
@@ -109,6 +109,19 @@ export interface Turn {
   turnId: string
   mode: AgentMode
   signal: AbortSignal
+}
+
+/**
+ * Messages the user sent to steer the running turn. The loop takes them in between two steps, with the results
+ * of the step that ran (or after a reply that would have ended the turn), so they belong to the turn they steer.
+ */
+export interface Steers {
+  /** A message is waiting. */
+  waiting(): boolean
+  /** The waiting messages as the model reads them, shown in the transcript as they are taken; empty when none is left to read. Never rejects. */
+  take(signal: AbortSignal): Promise<UserBlock[]>
+  /** The turn is ending: it takes no more, and a message sent from now on waits for the next turn. */
+  close(): void
 }
 
 export type TurnEnd =

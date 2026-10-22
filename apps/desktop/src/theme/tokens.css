@@ -62,6 +62,11 @@
   --shadow-composer: 0 10px 30px rgb(0 0 0 / 0.35);
   --backdrop: rgb(4 6 10 / 0.6);
 
+  /* Find in a session: every match tinted, the one in view solid with dark text */
+  --find-match: rgb(245 181 74 / 0.26);
+  --find-current: #f5b54a;
+  --find-current-text: #15110a;
+
   /* Accent: Signal blue */
   --accent: #6b98ff; /* links, focus, active marks */
   --accent-fill: #3d6bea; /* primary buttons and Send, white text */
@@ -170,6 +175,10 @@
   --shadow-pop: 0 16px 40px rgb(15 23 42 / 0.14), 0 0 0 1px rgb(15 23 42 / 0.08);
   --shadow-composer: 0 8px 24px rgb(15 23 42 / 0.08);
   --backdrop: rgb(15 23 42 / 0.32);
+
+  --find-match: rgb(245 166 35 / 0.32);
+  --find-current: #f5a623;
+  --find-current-text: #1a1206;
 
   --accent: #2f5fe0;
   --accent-fill: #2f5fe0;

@@ -6,7 +6,7 @@
  *
  * Pure functions over Settings, with no runtime dependency, so both tsconfig projects can use them.
  */
-import type { ModelProfile, ModelRole, Settings } from './types'
+import type { ModelProfile, ModelRole, ReasoningEffort, Settings } from './types'
 
 export const MODEL_ROLES: readonly ModelRole[] = ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility']
 
@@ -18,6 +18,36 @@ export const ROLE_INFO: Readonly<Record<ModelRole, { label: string; hint: string
   reviewer: { label: 'Review', hint: 'Checks finished work, and judges low-risk commands under Auto review.', follows: 'main' },
   summarizer: { label: 'Compaction', hint: 'Summarizes old turns to make room.', follows: 'utility' },
   utility: { label: 'Small tasks', hint: 'Names sessions, summarizes pages and drafts commit messages.', follows: 'main' },
+}
+
+/** The efforts a role can be set to, least first. */
+export const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+export const EFFORT_INFO: Readonly<Record<ReasoningEffort, { label: string; hint: string }>> = {
+  low: { label: 'Low', hint: 'Answers fastest and spends the fewest tokens.' },
+  medium: { label: 'Medium', hint: 'A balance of speed and care.' },
+  high: { label: 'High', hint: 'Thinks longer on hard problems.' },
+  xhigh: { label: 'Extra high', hint: 'More than High where the model has it, else High.' },
+  max: { label: 'Max', hint: 'As long as the model will think. Slowest, and the most tokens.' },
+}
+
+export const isEffort = (value: unknown): value is ReasoningEffort => typeof value === 'string' && (EFFORTS as readonly string[]).includes(value)
+
+/** Efforts as the settings keep them: known roles and levels only. A role left out is left to its model. */
+export function cleanEfforts(input: unknown): Partial<Record<ModelRole, ReasoningEffort>> {
+  const out: Partial<Record<ModelRole, ReasoningEffort>> = {}
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return out
+  for (const role of MODEL_ROLES) {
+    const effort = (input as Record<string, unknown>)[role]
+    if (isEffort(effort)) out[role] = effort
+  }
+  return out
+}
+
+/** `efforts` with the role set to `effort`; null leaves the role to its model. */
+export function withEffort(efforts: Partial<Record<ModelRole, ReasoningEffort>>, role: ModelRole, effort: ReasoningEffort | null): Partial<Record<ModelRole, ReasoningEffort>> {
+  const { [role]: _replaced, ...others } = efforts
+  return effort ? { ...others, [role]: effort } : others
 }
 
 /** The free models of the connection that serves them; the router spells it the same way. */

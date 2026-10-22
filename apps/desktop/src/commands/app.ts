@@ -3,9 +3,10 @@
  * registers them; the title bar menus, the keymap and the shortcut list all
  * read `commandRegistry`.
  */
-import type { SessionSummary } from '@shared/types'
+import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
 import { useEditor } from '../stores/editor'
+import { useFind } from '../stores/find'
 import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
@@ -88,6 +89,16 @@ export const sessionActions = {
   },
 }
 
+/** Words selected in the thread, which Ctrl+F looks for: one line, and not a whole page. */
+function threadSelection(): string | undefined {
+  const selection = window.getSelection()
+  const text = selection?.toString().trim() ?? ''
+  if (!text || text.length > 200 || /[\r\n]/.test(text)) return undefined
+  const node = selection?.anchorNode
+  const element = node instanceof Element ? node : node?.parentElement
+  return element?.closest('.thread') ? text : undefined
+}
+
 function withActive(run: (session: SessionSummary) => void | Promise<void>): () => void {
   return () => {
     const session = activeSession()
@@ -120,6 +131,10 @@ function createAppActions(): AppActions {
       }
     },
     searchInFiles: () => panels().open('files', { view: 'search' }),
+    canFind: () => panels().side.layout !== 'full',
+    isFinding: () => useFind.getState().open,
+    find: () => useFind.getState().show(threadSelection()),
+    findStep: (direction) => useFind.getState().move(direction),
 
     toggleSidebar: () => ui().toggleSidebar(),
     toggleSidePanel: () => panels().toggleHidden(),
@@ -172,8 +187,10 @@ function createAppActions(): AppActions {
     compact: () => void agentActions.compact(),
     stop: agentActions.stop,
     chooseModel: () => agentActions.openMenu('model'),
+    chooseEffort: () => agentActions.chooseEffort(),
     choosePermissions: () => agentActions.openMenu('policy'),
     reviewLastTurn: agentActions.reviewLastTurn,
+    askReviewer: () => void agentActions.askReviewer(),
     canUndo: agentActions.canUndo,
     undoLastTurn: agentActions.undo,
     canRewind: agentActions.canRewind,
@@ -207,3 +224,12 @@ function createAppActions(): AppActions {
 
 export const commandRegistry = new CommandRegistry()
 commandRegistry.register(...buildCommands(createAppActions()))
+
+// The person's own shortcuts apply as soon as the settings load, and whenever they change.
+let appliedKeybindings: Settings['keybindings'] | undefined
+useSettings.subscribe(() => {
+  const keybindings = useSettings.getState().settings?.keybindings
+  if (!keybindings || keybindings === appliedKeybindings) return
+  appliedKeybindings = keybindings
+  commandRegistry.setOverrides(keybindings)
+})

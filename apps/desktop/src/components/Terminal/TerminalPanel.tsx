@@ -254,22 +254,24 @@ export default function TerminalPanel() {
   )
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
+    // With Ctrl or Alt these are the app's shortcuts (Ctrl+Tab goes to the last session), not the prompt's.
+    const plain = !event.ctrlKey && !event.altKey && !event.metaKey
+    if (event.key === 'Enter' && plain) {
       event.preventDefault()
       submit()
       return
     }
-    if (event.key === 'Tab') {
+    if (event.key === 'Tab' && plain && !event.shiftKey) {
       event.preventDefault()
       void complete()
       return
     }
-    if (event.key === 'ArrowUp') {
+    if (event.key === 'ArrowUp' && plain) {
       event.preventDefault()
       navigateHistory(-1)
       return
     }
-    if (event.key === 'ArrowDown') {
+    if (event.key === 'ArrowDown' && plain) {
       event.preventDefault()
       navigateHistory(1)
       return

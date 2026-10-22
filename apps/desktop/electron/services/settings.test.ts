@@ -180,6 +180,16 @@ describe('SettingsService defaults and secrets', () => {
     assert.deepEqual(settings.recentWorkspaces, [])
     assert.equal(settings.lastWorkspace, null)
     assert.equal(settings.agentMode, 'code')
+    assert.equal(settings.followUp, 'queue', 'a message sent while the agent works waits, unless the person steers with it')
+  })
+
+  it('keeps what Enter does while the agent works, and nothing but its two values', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.save({ followUp: 'steer' }).followUp, 'steer')
+    assert.equal(settings.save({ followUp: 'now' as unknown as Settings['followUp'] }).followUp, 'steer')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().followUp, 'steer')
+    fs.writeFileSync(file(), JSON.stringify({ followUp: 42 }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().followUp, 'queue')
   })
 
   it('falls back to those defaults when the file is damaged', () => {
@@ -382,6 +392,50 @@ describe('SettingsService models', () => {
     assert.equal(settings.save({ freeProfileId: null }).freeProfileId, null)
     settings.save({ freeProfileId: 'or' })
     assert.equal(settings.save({ profiles: profiles().filter((profile) => profile.id !== 'or') }).freeProfileId, null)
+  })
+
+  it('leaves every role\'s effort to its model until the person picks one, and keeps a pick across restarts', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.get().efforts, {})
+    assert.deepEqual(settings.save({ efforts: { main: 'max', explore: 'low' } }).efforts, { main: 'max', explore: 'low' })
+    assert.deepEqual(settings.save({ maxSteps: 12 }).efforts, { main: 'max', explore: 'low' }, 'a patch that does not name them leaves them')
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, { main: 'max', explore: 'low' })
+    assert.deepEqual(settings.save({ efforts: {} }).efforts, {})
+  })
+
+  it('takes only known roles at known levels, from the renderer or from the file', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    const bad = { main: 'ultra', reviewer: 'high', dreamer: 'max', utility: 2 }
+    assert.deepEqual(settings.save({ efforts: bad as unknown as Settings['efforts'] }).efforts, { reviewer: 'high' })
+    assert.deepEqual(settings.save({ efforts: 'max' as unknown as Settings['efforts'] }).efforts, {})
+    fs.writeFileSync(file(), JSON.stringify({ efforts: { main: 'low', planner: ['max'] } }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, { main: 'low' })
+    fs.writeFileSync(file(), JSON.stringify({ efforts: ['low'] }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().efforts, {})
+  })
+
+  it('hands the renderer a copy of the efforts', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ efforts: { main: 'high' } })
+    const copy = settings.get()
+    copy.efforts.main = 'max'
+    assert.deepEqual(settings.get().efforts, { main: 'high' })
+  })
+
+  it('keeps the shortcuts the person chose across restarts, and only well-formed ones', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.deepEqual(settings.get().keybindings, {}, 'a new install has the shortcuts eNCode ships with')
+    const chosen = { 'view.bottomPanel': ['Ctrl+Shift+J'], 'edit.find': [] }
+    assert.deepEqual(settings.save({ keybindings: chosen }).keybindings, chosen)
+    assert.deepEqual(settings.save({ maxSteps: 12 }).keybindings, chosen, 'a patch that does not name them leaves them')
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().keybindings, chosen)
+    const bad = { __proto__: ['Ctrl+J'], 'view.sidebar': 'Ctrl+B', 'edit.find': ['Ctrl+F', 3] }
+    assert.deepEqual(settings.save({ keybindings: bad as unknown as Settings['keybindings'] }).keybindings, { 'edit.find': ['Ctrl+F'] })
+    fs.writeFileSync(file(), JSON.stringify({ keybindings: ['Ctrl+J'] }))
+    assert.deepEqual(new SettingsService(dir, new FakeCipher(), 'win32').get().keybindings, {})
+    const copy = settings.get()
+    copy.keybindings['edit.find'].push('F9')
+    assert.deepEqual(settings.get().keybindings, { 'edit.find': ['Ctrl+F'] }, 'the renderer gets a copy')
   })
 
   it('ignores a free-only switch that is not true or false, from the renderer or from the file', () => {

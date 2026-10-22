@@ -29,9 +29,10 @@ import { SearchError, createSearchProvider, createWebAccess, type KeySource as S
 import { Sandbox } from '@encode/sandbox'
 import { Workspaces } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
-import type { ModelAlert, ModelStatus } from '../../shared/types'
+import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
+import { reviewChanges } from './code-review'
 import { draftCommitMessage } from './commit-message'
 
 export interface HostRuntimeOptions {
@@ -75,6 +76,8 @@ const SEARCH_CHECK_TIMEOUT_MS = 20_000
 
 /** A drafted commit message is waited for in a dialog: a person will wait this long, not more. */
 const DRAFT_TIMEOUT_MS = 90_000
+/** A review reads a large change and thinks it over: it gets longer than a commit message. */
+const REVIEW_TIMEOUT_MS = 5 * 60_000
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -238,7 +241,10 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     budget: (role: ModelRole, query?: BudgetQuery): Promise<ModelBudget> => pick().budget(role, query),
     async complete(request: CompletionRequest): Promise<CompletionOutcome> {
       const onEvent = request.onEvent
-      const outcome = await pick().complete(onEvent ? { ...request, onEvent: (event) => onEvent(humanizeEvent(event)) } : request)
+      // The effort the person chose for the role wins over the one the caller asked for; the adapter drops it for a model without a dial.
+      const effort = (config?.efforts as Record<string, ReasoningEffort | undefined> | undefined)?.[request.role]
+      const asked = effort ? { ...request, payload: { ...request.payload, reasoning: effort } } : request
+      const outcome = await pick().complete(onEvent ? { ...asked, onEvent: (event) => onEvent(humanizeEvent(event)) } : asked)
       return outcome.kind === 'paused' ? { ...outcome, message: humanize(outcome.message) } : outcome
     },
   }
@@ -424,6 +430,18 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       return { message: await draftCommitMessage(client, input, controller.signal) }
     } catch (error) {
       throw new RpcError('failed', controller.signal.aborted ? `No model wrote a message within ${DRAFT_TIMEOUT_MS / 1000} seconds. Write it yourself, or try again.` : describe(error))
+    } finally {
+      clearTimeout(timer)
+    }
+  })
+
+  peer.handle('codeReview', async (input) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REVIEW_TIMEOUT_MS)
+    try {
+      return await reviewChanges(client, input, controller.signal)
+    } catch (error) {
+      throw new RpcError('failed', controller.signal.aborted ? `The Reviewer did not answer within ${REVIEW_TIMEOUT_MS / 60_000} minutes. Ask again, or about a smaller part of the change.` : describe(error))
     } finally {
       clearTimeout(timer)
     }

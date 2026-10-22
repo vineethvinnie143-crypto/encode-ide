@@ -66,7 +66,8 @@ describe('slash commands', () => {
   it('puts the command a query starts first', () => {
     assert.equal(slashOptions('comp', [])[0]?.name, 'compact')
     assert.equal(slashOptions('perm', [])[0]?.name, 'policy')
-    assert.equal(slashOptions('re', [])[0]?.name, 'rewind', 'ties keep the list order')
+    assert.equal(slashOptions('re', [])[0]?.name, 'review', 'ties keep the list order')
+    assert.equal(slashOptions('rew', [])[0]?.name, 'rewind')
     assert.deepEqual(slashOptions('zzzz', []), [])
   })
 })

@@ -385,6 +385,11 @@ export class AgentHost {
     this.loaded.get(sessionId)?.cancel()
   }
 
+  /** A message for the turn running in a session, taken in between two of its steps; null when none takes it now. */
+  steer(sessionId: string, text: string, id?: string): { id: string } | null {
+    return this.loaded.get(sessionId)?.steer(text, id) ?? null
+  }
+
   /** Starts a session's conversation over; without an id, every session's. */
   async reset(sessionId?: string): Promise<void> {
     if (sessionId) {

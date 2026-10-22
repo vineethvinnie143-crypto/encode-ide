@@ -1,8 +1,16 @@
 import type { DiffHunk } from '@shared/types'
 
+/** A step's diff shows this many lines at most. */
+export const MAX_DIFF_LINES = 260
+
+/** The lines a step's diff shows, in order. */
+export function shownDiffLines(diff: readonly DiffHunk[]): string[] {
+  return diff.flatMap((hunk) => hunk.lines.map((line) => line.text)).slice(0, MAX_DIFF_LINES)
+}
+
 export default function DiffView({ diff }: { diff: DiffHunk[] }) {
   if (!diff.length) return null
-  const maxLines = 260
+  const maxLines = MAX_DIFF_LINES
   let rendered = 0
 
   return (

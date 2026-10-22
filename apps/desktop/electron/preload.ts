@@ -100,6 +100,7 @@ const api: EncodeApi = {
     branches: () => invoke('review:branches'),
     commit: (request: ReviewCommitRequest) => invoke('review:commit', request),
     draft: (options?: { all?: boolean }) => invoke('review:draft', options),
+    ask: (scope: ReviewScope, options: ReviewOptions) => invoke('review:ask', scope, options),
   },
   shell: {
     create: (options: ShellCreateOptions) => invoke('shell:create', options),
@@ -152,6 +153,7 @@ const api: EncodeApi = {
     history: (sessionId?: string) => invoke('agent:history', sessionId),
     start: (sessionId: string, input: AgentStartInput) => invoke('agent:start', sessionId, input),
     cancel: (sessionId: string) => invoke('agent:cancel', sessionId),
+    steer: (sessionId: string, text: string, id: string) => invoke('agent:steer', sessionId, text, id),
     reset: (sessionId?: string) => invoke('agent:reset', sessionId),
     remove: (sessionId: string) => invoke('agent:remove', sessionId),
     fork: (sessionId: string) => invoke('agent:fork', sessionId),

@@ -4,10 +4,17 @@
  * can be consumed from both tsconfig projects.
  */
 
+import type { Keybindings } from './keybindings'
 import type { Appearance } from './appearance'
 import type { SearchCheckResult, SearchProviderId } from './search'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
+
+/**
+ * What Enter does with a message while the agent works: `queue` holds it until the request is done, `steer` hands it
+ * to the running request, which reads it after the step it is on. Ctrl+Enter does the other one.
+ */
+export type FollowUp = 'queue' | 'steer'
 export type AgentStatus =
   | 'idle'
   | 'thinking'
@@ -21,6 +28,9 @@ export type ProfileKind = 'custom' | 'openrouter' | 'demo'
 
 /** The jobs a model can be given; the names core and the model router use. */
 export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility'
+
+/** How hard a model thinks before it answers. The providers map it to their own dial; a model without one ignores it. */
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export interface ModelProfile {
   id: string
@@ -56,6 +66,8 @@ export interface Settings {
   recentWorkspaces: string[]
   lastWorkspace: string | null
   agentMode: AgentMode
+  /** What Enter does with a message while the agent works; see FollowUp. Default `queue`. */
+  followUp: FollowUp
   /** Theme, accent, contrast, density and motion; see shared/appearance.ts. */
   appearance: Appearance
   /**
@@ -64,6 +76,10 @@ export interface Settings {
    * (see shared/models.ts), and main without one uses the active profile's model.
    */
   roles: Partial<Record<ModelRole, string[]>>
+  /** How hard each role's models think; a role left out leaves it to the model. See shared/models.ts EFFORTS. */
+  efforts: Partial<Record<ModelRole, ReasoningEffort>>
+  /** The shortcuts the person chose, by command id; see shared/keybindings.ts. */
+  keybindings: Keybindings
   /** Never send a request to a model that costs money, whatever the roles list. */
   freeOnly: boolean
   /** The OpenRouter profile whose key serves "@free"; null picks the first one that has a key. */
@@ -312,6 +328,25 @@ export interface ReviewCommitRequest {
 export type ReviewCommitOutcome =
   | { ok: true; commit: ReviewCommit; pushed?: string; pushError?: string }
   | { ok: false; message: string }
+
+/** How much a Reviewer's finding matters: P0 stops everything (broken build, lost data, a hole), P3 is minor. */
+export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+/** A problem the Reviewer found, tied to one line of the change as the review names its file. */
+export interface ReviewFinding {
+  path: string
+  side: 'old' | 'new'
+  line: number
+  priority: FindingPriority
+  title: string
+  body: string
+}
+
+/**
+ * What the Reviewer said about a review's changes: a short verdict and its findings. `files`: how many files it read;
+ * `left`: how many changed files were left out to keep the request small.
+ */
+export type ReviewAskOutcome = { ok: true; summary: string; findings: ReviewFinding[]; files: number; left: number } | { ok: false; message: string }
 
 export interface ModelInfo {
   id: string
@@ -628,7 +663,8 @@ export interface DiffHunk {
   lines: DiffLine[]
 }
 
-export type EntryKind = 'user' | 'assistant' | 'tool' | 'notice' | 'error'
+/** `steer`: a message the person sent while the agent worked, which the running request took in between two steps. */
+export type EntryKind = 'user' | 'steer' | 'assistant' | 'tool' | 'notice' | 'error'
 
 export interface ConversationEntry {
   id: string
@@ -873,6 +909,8 @@ export interface EncodeApi {
     commit(request: ReviewCommitRequest): Promise<ReviewCommitOutcome>
     /** A commit message for what is staged (with `all`, every change), drafted by the model of the Small tasks role. */
     draft(options?: { all?: boolean }): Promise<{ ok: true; message: string } | { ok: false; message: string }>
+    /** The Reviewer's findings on the scope's changes, from the model of the Review role. */
+    ask(scope: ReviewScope, options: ReviewOptions): Promise<ReviewAskOutcome>
   }
   shell: {
     create(opts: ShellCreateOptions): Promise<ShellInfo>
@@ -894,6 +932,12 @@ export interface EncodeApi {
     history(sessionId?: string): Promise<AgentHistory>
     start(sessionId: string, input: AgentStartInput): Promise<void>
     cancel(sessionId: string): Promise<void>
+    /**
+     * Hands a message to the running request, which reads it after its current step and shows it as an entry with the
+     * id given (a fresh `crypto.randomUUID()`). Null when nothing is running that can take it: the turn is ending, or a
+     * tool stopped it; then it is the next request's.
+     */
+    steer(sessionId: string, text: string, id: string): Promise<{ id: string } | null>
     reset(sessionId?: string): Promise<void>
     remove(sessionId: string): Promise<void>
     fork(sessionId: string): Promise<SessionSummary>

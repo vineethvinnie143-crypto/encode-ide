@@ -44,7 +44,9 @@ export function commentsMessage(comments: readonly ReviewComment[], phrase: stri
     const where = comment.side === 'old' ? `${file}, line ${comment.line} before the change` : `${file}:${comment.line}`
     const excerpt = comment.excerpt.trim()
     const quoted = excerpt ? `\n> ${excerpt.length > EXCERPT_CHARS ? `${excerpt.slice(0, EXCERPT_CHARS)}…` : excerpt}` : ''
-    return `${index + 1}. ${where}${quoted}\n${comment.text.trim()}`
+    // A finding of the Reviewer says so, with how much it matters: the agent weighs it as a second opinion.
+    const from = comment.by === 'reviewer' ? ` (the Reviewer, ${comment.priority ?? 'P2'}: ${comment.title ?? 'a finding'})` : ''
+    return `${index + 1}. ${where}${from}${quoted}\n${comment.text.trim()}`
   })
   const lead = comments.length === 1 ? `A review comment on ${phrase}. Address it:` : `Review comments on ${phrase}. Address each one:`
   return `${lead}\n\n${items.join('\n\n')}`

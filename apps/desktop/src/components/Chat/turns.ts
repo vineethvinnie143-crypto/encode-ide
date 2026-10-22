@@ -1,7 +1,8 @@
 /**
  * How a conversation is laid out as turns: your message, a work log of what
- * the agent did (folded once it is done), and its reply. Pure, so the rules
- * are unit tested.
+ * the agent did (folded once it is done), and its reply. A message you sent
+ * while the agent worked starts a new part of the turn, with its own work log
+ * and reply. Pure, so the rules are unit tested.
  */
 import type { ConversationEntry } from '@shared/types'
 
@@ -60,22 +61,67 @@ export function toolPath(input: Record<string, unknown>): string | undefined {
   return value === undefined || value === null ? undefined : String(value)
 }
 
+/** A stretch of a turn: what the agent did and wrote after your request, or after a message you sent while it worked. */
+export interface TurnPart {
+  /** The id of the message that started it, the turn's for the first part: stable while the part grows. */
+  id: string
+  /** The message you sent while the agent worked that starts this part; null for the first part. */
+  steer: ConversationEntry | null
+  /** Everything up to and including the part's last tool call: commentary, steps and notices between them. */
+  log: ConversationEntry[]
+  /** What the agent wrote after that call. */
+  reply: ConversationEntry[]
+  startedAt: number
+  endedAt: number
+  /** The part the agent is working on right now. */
+  active: boolean
+}
+
 export interface Turn {
   /** The id of the first entry: stable while the turn grows. */
   id: string
   /** Your message; null for entries that came before any (a notice at the start of a session). */
   user: ConversationEntry | null
-  /** Everything up to and including the last tool call: commentary, steps and notices between them. */
+  /** Everything before the answer: the steps of every part, and the messages you sent while the agent worked. */
   log: ConversationEntry[]
-  /** What the agent wrote after its last tool call: the answer. */
+  /** What the agent wrote after its last tool call and your last message: the answer. */
   reply: ConversationEntry[]
+  /** The turn as it is shown: split at each message you sent while the agent worked, so one part when there was none. */
+  parts: TurnPart[]
   startedAt: number
   endedAt: number
   /** The turn the agent is working on right now. */
   active: boolean
 }
 
-/** Splits a conversation into turns at each of your messages. */
+/** The parts of a turn's entries after your request: a message sent while the agent worked starts the next one. */
+function partsOf(id: string, startedAt: number, body: readonly ConversationEntry[], active: boolean): TurnPart[] {
+  const chunks: { steer: ConversationEntry | null; entries: ConversationEntry[] }[] = [{ steer: null, entries: [] }]
+  for (const entry of body) {
+    if (entry.kind === 'steer') chunks.push({ steer: entry, entries: [] })
+    else chunks[chunks.length - 1].entries.push(entry)
+  }
+  return chunks.map(({ steer, entries }, index) => {
+    let lastTool = -1
+    entries.forEach((entry, position) => {
+      if (entry.kind === 'tool') lastTool = position
+    })
+    const start = steer?.createdAt ?? startedAt
+    // A part ended when the next message was taken: that is right after its last step.
+    const end = chunks[index + 1]?.steer?.createdAt ?? entries[entries.length - 1]?.createdAt ?? start
+    return {
+      id: steer?.id ?? id,
+      steer,
+      log: entries.slice(0, lastTool + 1),
+      reply: entries.slice(lastTool + 1),
+      startedAt: start,
+      endedAt: end,
+      active: active && index === chunks.length - 1,
+    }
+  })
+}
+
+/** Splits a conversation into turns at each of your requests, and each turn into parts at the messages sent while the agent worked. */
 export function buildTurns(entries: readonly ConversationEntry[], running: boolean): Turn[] {
   const groups: ConversationEntry[][] = []
   for (const entry of entries) {
@@ -85,18 +131,18 @@ export function buildTurns(entries: readonly ConversationEntry[], running: boole
   return groups.map((group, index) => {
     const user = group[0].kind === 'user' ? group[0] : null
     const body = user ? group.slice(1) : group
-    let lastTool = -1
-    body.forEach((entry, position) => {
-      if (entry.kind === 'tool') lastTool = position
-    })
+    const active = running && index === groups.length - 1
+    const parts = partsOf(group[0].id, group[0].createdAt, body, active)
+    const reply = parts[parts.length - 1].reply
     return {
       id: group[0].id,
       user,
-      log: body.slice(0, lastTool + 1),
-      reply: body.slice(lastTool + 1),
+      log: body.slice(0, body.length - reply.length),
+      reply,
+      parts,
       startedAt: group[0].createdAt,
       endedAt: group[group.length - 1].createdAt,
-      active: running && index === groups.length - 1,
+      active,
     }
   })
 }
@@ -118,10 +164,21 @@ export function latestRequest<T extends Pick<Turn, 'user'>>(turns: readonly T[])
 
 const sameEntries = (a: readonly ConversationEntry[], b: readonly ConversationEntry[]) => a.length === b.length && a.every((entry, index) => entry === b[index])
 
+/** `next` as the part it was before when nothing in it changed, or with the work log or the reply that did not. */
+function reusePart(old: TurnPart | undefined, next: TurnPart): TurnPart {
+  if (!old) return next
+  const log = sameEntries(old.log, next.log) ? old.log : next.log
+  const reply = sameEntries(old.reply, next.reply) ? old.reply : next.reply
+  if (log === old.log && reply === old.reply && old.steer === next.steer && old.active === next.active && old.startedAt === next.startedAt && old.endedAt === next.endedAt) {
+    return old
+  }
+  return { ...next, log, reply }
+}
+
 /**
  * `next` with every turn that did not change replaced by the object it was before, and, in a turn that did, the
- * work log or the reply that did not. While an answer streams only its own turn changes, and the page can then
- * skip all the others (and the finished steps of this one) by comparing the objects. Entries are compared by
+ * parts, work logs and replies that did not. While an answer streams only its own part changes, and the page can
+ * then skip all the others (and the finished steps of this one) by comparing the objects. Entries are compared by
  * identity: the stores replace an entry whenever it changes.
  */
 export function reuseTurns(previous: readonly Turn[], next: Turn[]): Turn[] {
@@ -132,9 +189,13 @@ export function reuseTurns(previous: readonly Turn[], next: Turn[]): Turn[] {
     if (!old) return turn
     const log = sameEntries(old.log, turn.log) ? old.log : turn.log
     const reply = sameEntries(old.reply, turn.reply) ? old.reply : turn.reply
+    const oldParts = new Map(old.parts.map((part) => [part.id, part]))
+    const reused = turn.parts.map((part) => reusePart(oldParts.get(part.id), part))
+    const parts = reused.length === old.parts.length && reused.every((part, index) => part === old.parts[index]) ? old.parts : reused
     if (
       log === old.log &&
       reply === old.reply &&
+      parts === old.parts &&
       old.user === turn.user &&
       old.active === turn.active &&
       old.startedAt === turn.startedAt &&
@@ -142,7 +203,7 @@ export function reuseTurns(previous: readonly Turn[], next: Turn[]): Turn[] {
     ) {
       return old
     }
-    return { ...turn, log, reply }
+    return { ...turn, log, reply, parts }
   })
 }
 

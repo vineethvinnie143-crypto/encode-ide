@@ -23,14 +23,16 @@ const MOVE_MS = 240
  * Content that opens and closes by growing and shrinking instead of appearing and vanishing, as a folded
  * work log, a step's output or a list of files does. Closed it holds nothing in the page, so a log of a
  * thousand steps costs nothing while it is folded; open at the start it is simply there, with no motion.
+ * `instant` jumps instead of moving, in the same frame: find opens the folds that hold a match that way,
+ * so the match is on the page to count and scroll to at once.
  */
-export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+export function Collapse({ open, instant = false, children }: { open: boolean; instant?: boolean; children: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState<Phase>(open ? 'open' : 'closed')
 
   useLayoutEffect(() => {
-    setPhase((current) => phaseFor(current, open))
-  }, [open])
+    setPhase((current) => (instant ? (open ? 'open' : 'closed') : phaseFor(current, open)))
+  }, [open, instant])
 
   useLayoutEffect(() => {
     if (phase !== 'start') return
@@ -45,9 +47,11 @@ export function Collapse({ open, children }: { open: boolean; children: ReactNod
     return () => window.clearTimeout(timer)
   }, [phase])
 
-  if (phase === 'closed') return null
+  // An instant fold shows what `open` says in this very render, not a frame later.
+  const shown = instant ? (open ? 'open' : 'closed') : phase
+  if (shown === 'closed') return null
   return (
-    <div ref={root} className={cx('collapse', (phase === 'opening' || phase === 'open') && 'is-open', phase === 'open' && 'is-settled')}>
+    <div ref={root} className={cx('collapse', (shown === 'opening' || shown === 'open') && 'is-open', shown === 'open' && 'is-settled')}>
       <div className="collapse-inner">{children}</div>
     </div>
   )

@@ -7,6 +7,7 @@ import { reducedMotion, scrollBehavior } from '../../ui/motion'
 import TrustBanner from '../permissions/TrustBanner'
 import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
+import FindBar from './FindBar'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
@@ -115,6 +116,8 @@ export default function ChatPanel() {
             ))}
           </div>
         </div>
+
+        <FindBar thread={threadRef} scroller={listRef} />
 
         {turns.length >= 3 && (
           <div className="turn-ticks" role="navigation" aria-label="Turns">

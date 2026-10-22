@@ -88,6 +88,23 @@ describe('the host over a port', () => {
     assert.equal((await client.history(session.id)).entries.at(-1)?.text, 'Stopped.')
   })
 
+  it('steers a running turn, and says so when nothing runs to take the message', async () => {
+    const long = Array.from({ length: 30 }, (_, index) => `word${index}`).join(' ')
+    const { client, events } = await connect({ client: { delayMs: 20 }, script: [{ text: long }, { text: 'Steered.' }] })
+    const session = await client.create()
+    assert.equal(await client.steer(session.id, 'nobody is working'), null)
+    const running = client.start(session.id, { text: 'talk', mode: 'code' })
+    await until(() => events.some((event) => event.type === 'delta'))
+    const chosen = crypto.randomUUID()
+    assert.deepEqual(await client.steer(session.id, 'shorter, please', chosen), { id: chosen })
+    await running
+    const entries = (await client.history(session.id)).entries
+    assert.deepEqual(entries.map((entry) => entry.kind), ['user', 'assistant', 'steer', 'assistant'])
+    assert.equal(entries[2].id, chosen)
+    assert.equal(entries.at(-1)?.text, 'Steered.')
+    assert.equal(await client.steer('missing', 'hello'), null)
+  })
+
   it('keeps goals, todos, plans, titles and exports', async () => {
     const { client } = await connect({ script: [{ text: 'ok' }] })
     const session = await client.create({ title: 'Wire' })
@@ -120,6 +137,9 @@ describe('the host over a port', () => {
     await refused('approve', { requestId: 'r', answer: { approved: true, remember: 'forever' } })
     await refused('setGoal', { sessionId: 's', goal: { text: 'x', status: 'done', rounds: 0, createdAt: 1, updatedAt: 1 } })
     await refused('setTodos', { sessionId: 's', todos: [{ id: 't', text: 'x', status: 'later' }] })
+    await refused('steer', { sessionId: 's', text: '' })
+    await refused('steer', { sessionId: 's' })
+    await refused('steer', { sessionId: 's', text: 'x', id: 'turn-1' })
     await refused('setWorkspace', { root: '' })
     await refused('killJob', {})
     await refused('turnChanges', { sessionId: 's', limits: { maxFileBytes: -1 } })

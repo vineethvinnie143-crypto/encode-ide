@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { mainLabel } from '@shared/models'
+import { EFFORT_INFO, mainLabel } from '@shared/models'
 import { POLICY_LABELS } from '../../policies'
 import { useChat } from '../../stores/chat'
 import { useGit } from '../../stores/git'
@@ -61,6 +61,7 @@ export function StatusDialog() {
   if (settings) {
     facts.push(
       { label: 'Model', value: mainLabel(settings) },
+      { label: 'Effort', value: settings.efforts.main ? EFFORT_INFO[settings.efforts.main].label : 'Model default' },
       { label: 'Mode', value: settings.agentMode === 'plan' ? 'Plan first, then build' : 'Code' },
       { label: 'Permissions', value: POLICY_LABELS[settings.policy ?? 'workspace-write'], ...(settings.policy === 'full-access' ? { tone: 'warning' as const } : {}) },
     )

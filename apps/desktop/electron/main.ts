@@ -234,6 +234,7 @@ if (!gotLock) {
       },
       trash: (file) => osShell.trashItem(file),
       draft: (input) => agentHost.draftCommit(input),
+      reviewCode: (input) => agentHost.codeReview(input),
       // The Turn view reads the agent's record of a request's changes, and writes through it.
       turns: {
         changes: (sessionId, turn) => agentHost.client.turnChanges(sessionId, turn),

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
+import { messageText } from '@encode/providers'
 import { createDemoClient, DEMO_NOTE } from './demo'
 import { closeHarnesses, sessionHarness } from './testing'
 
@@ -50,6 +51,21 @@ describe('the offline demo', () => {
       signal: new AbortController().signal,
     })
     assert.equal(outcome.kind, 'done')
+  })
+
+  it('answers Ask the Reviewer in the form it is read in, saying it reads no code', async () => {
+    const client = createDemoClient({ delayMs: 0 })
+    const outcome = await client.complete({
+      role: 'reviewer',
+      tool: 'CodeReview',
+      payload: { system: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'Review the staged changes.' }] }], tools: [], maxOutputTokens: 100 },
+      requirements: { promptTokens: 10, maxOutputTokens: 100, tools: false, images: false },
+      signal: new AbortController().signal,
+    })
+    assert.equal(outcome.kind, 'done')
+    const reply = JSON.parse(outcome.kind === 'done' ? messageText(outcome.message) : '{}') as { summary: string; findings: unknown[] }
+    assert.deepEqual(reply.findings, [])
+    assert.match(reply.summary, /offline demo does not read code/)
   })
 
   it('gives a session no name of its own, so the first words of the request stay its title', async () => {

@@ -1,4 +1,4 @@
-import { modelMode } from '../../shared/models'
+import { cleanEfforts, modelMode } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, isSearchProviderId } from '../../shared/search'
 import type { Settings } from '../../shared/types'
 import type { HostConfig } from './api'
@@ -23,6 +23,7 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     computer: settings.computer && settings.computerSupported,
     model: modelMode(settings),
     router: routerSettingsOf(settings),
+    efforts: cleanEfforts(settings.efforts),
     providers,
     searchProvider: isSearchProviderId(settings.searchProvider) ? settings.searchProvider : DEFAULT_SEARCH_PROVIDER,
   }

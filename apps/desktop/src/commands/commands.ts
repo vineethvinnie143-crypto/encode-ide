@@ -23,6 +23,12 @@ export interface AppActions {
 
   edit(command: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'): void
   searchInFiles(): void
+  /** Find in the open session: the thread is on screen, not under a full-width panel. */
+  canFind(): boolean
+  /** The find bar is open. */
+  isFinding(): boolean
+  find(): void
+  findStep(direction: 1 | -1): void
 
   toggleSidebar(): void
   toggleSidePanel(): void
@@ -63,8 +69,10 @@ export interface AppActions {
   compact(): void
   stop(): void
   chooseModel(): void
+  chooseEffort(): void
   choosePermissions(): void
   reviewLastTurn(): void
+  askReviewer(): void
   canUndo(): boolean
   undoLastTurn(): void
   canRewind(): boolean
@@ -110,6 +118,17 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'edit.copy', title: 'Copy', hint: 'Ctrl+C', run: () => a.edit('copy'), ...edit },
     { id: 'edit.paste', title: 'Paste', hint: 'Ctrl+V', run: () => a.edit('paste'), ...edit },
     { id: 'edit.selectAll', title: 'Select all', hint: 'Ctrl+A', run: () => a.edit('selectAll'), ...edit },
+    {
+      id: 'edit.find',
+      title: 'Find in session',
+      group: 'Edit',
+      keys: ['Ctrl+F'],
+      keywords: 'search words text conversation messages thread',
+      enabled: () => a.canFind(),
+      run: () => a.find(),
+    },
+    { id: 'edit.findNext', title: 'Find next', group: 'Edit', keys: ['F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(1) },
+    { id: 'edit.findPrevious', title: 'Find previous', group: 'Edit', keys: ['Shift+F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(-1) },
     {
       id: 'edit.searchInFiles',
       title: 'Search in files',
@@ -182,6 +201,7 @@ export function buildCommands(a: AppActions): Command[] {
     },
     { id: 'agent.goal', title: 'Set a goal…', keywords: 'objective long task', run: () => a.setGoal(), ...session },
     { id: 'agent.model', title: 'Choose model…', group: 'Session', keys: ['Alt+M'], keywords: 'models provider builder', run: () => a.chooseModel() },
+    { id: 'agent.effort', title: 'Choose effort…', group: 'Session', keys: ['Ctrl+Shift+M'], keywords: 'reasoning thinking effort low medium high max', run: () => a.chooseEffort() },
     { id: 'agent.permissions', title: 'Choose permissions…', group: 'Session', keywords: 'approval policy access ask', run: () => a.choosePermissions() },
     { id: 'agent.compact', title: 'Compact the conversation', keywords: 'context summary free up', run: () => a.compact(), ...session },
     { id: 'agent.stop', title: 'Stop the agent', group: 'Session', keywords: 'cancel interrupt', enabled: () => a.isRunning() === true, run: () => a.stop() },
@@ -192,6 +212,14 @@ export function buildCommands(a: AppActions): Command[] {
       keywords: 'changes diff agent request',
       enabled: () => a.hasWorkspace(),
       run: () => a.reviewLastTurn(),
+    },
+    {
+      id: 'agent.askReviewer',
+      title: 'Ask the Reviewer',
+      group: 'Session',
+      keywords: 'review code bugs check findings second opinion changes diff',
+      enabled: () => a.hasWorkspace(),
+      run: () => a.askReviewer(),
     },
     { id: 'agent.undo', title: 'Undo the last turn…', group: 'Session', keywords: 'revert changes files', enabled: () => a.canUndo() === true, run: () => a.undoLastTurn() },
     { id: 'agent.rewind', title: 'Rewind…', group: 'Session', keywords: 'go back earlier message restore', enabled: () => a.canRewind() === true, run: () => a.rewind() },

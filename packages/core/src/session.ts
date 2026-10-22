@@ -50,7 +50,7 @@ import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, systemParts } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { pruneScreens, withoutScreens } from './screens'
 import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
@@ -58,7 +58,7 @@ import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
 import { builtinDefinitions, createSubagents, loadAgentDefinitions, type AgentSource } from './subagents'
 import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
-import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Surface, type TurnEnd } from './types'
+import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
 import {
   previewOf,
   type AgentEvent,
@@ -87,6 +87,9 @@ import {
 } from './ui'
 
 const MAX_ATTACHMENT_CHARS = 20_000
+/** Messages waiting to steer one turn; more than this and the person is better served by the queue. */
+const MAX_STEERS = 20
+const STEER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const JOB_PREVIEW_CHARS = 4_000
 const NAMING_TIMEOUT_MS = 20_000
 const CANCELLED = '(cancelled)'
@@ -255,6 +258,10 @@ export class AgentSession {
   private turn: TurnState = {}
   private started = false
   private controller: AbortController | undefined
+  /** Messages sent to steer the turn that runs, oldest first, until the loop takes them in between two steps. */
+  private steers: { id: string; text: string }[] = []
+  /** A turn runs and still takes them: from its request until the loop decides that it ends. */
+  private steerable = false
   private current: Promise<unknown> = Promise.resolve()
   private chain: Promise<unknown> = Promise.resolve()
   private gateTail: Promise<unknown> = Promise.resolve()
@@ -821,6 +828,7 @@ export class AgentSession {
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
       preface: this.preface,
+      steers: this.steering,
     })
   }
 
@@ -900,8 +908,20 @@ export class AgentSession {
       this.notice(`The userPromptSubmit hook failed: ${errorMessage(error)}`)
     }
 
-    // What the message points at with @ and $ comes with it, as Read and the Skill tool would bring it.
-    const mentioned = await mentionBlocks(text, {
+    for (const block of await this.mentions(text)) blocks.push(textBlock(block))
+
+    const attached = (input.attachments ?? [])
+      .filter((file) => file.content)
+      .map((file) => `--- ${file.path} ---\n${file.content.slice(0, MAX_ATTACHMENT_CHARS)}`)
+      .join('\n\n')
+    blocks.push(textBlock(attached ? `${text}\n\n<attached_files>\n${attached}\n</attached_files>` : text))
+    return { blocks }
+  }
+
+  /** What a message points at with @ and $, as Read and the Skill tool would bring it. Never rejects. */
+  private async mentions(text: string): Promise<string[]> {
+    const { env } = this
+    return mentionBlocks(text, {
       root: env.root,
       home: env.home,
       platform: env.platform,
@@ -915,14 +935,56 @@ export class AgentSession {
       this.notice(`What the message mentions could not be attached: ${errorMessage(error)}`)
       return []
     })
-    for (const block of mentioned) blocks.push(textBlock(block))
+  }
 
-    const attached = (input.attachments ?? [])
-      .filter((file) => file.content)
-      .map((file) => `--- ${file.path} ---\n${file.content.slice(0, MAX_ATTACHMENT_CHARS)}`)
-      .join('\n\n')
-    blocks.push(textBlock(attached ? `${text}\n\n<attached_files>\n${attached}\n</attached_files>` : text))
-    return { blocks }
+  /**
+   * A message for the turn that runs, which takes it in between two of its steps. Null when no turn runs or the
+   * turn is past taking one: the caller sends it as the next request instead. `id` names the entry the message
+   * gets when it is taken; it must be a UUID no entry of the session has.
+   */
+  steer(text: string, id?: string): { id: string } | null {
+    const trimmed = text.trim()
+    if (!trimmed) throw new Error('Type a message first.')
+    if (id !== undefined && (!STEER_ID.test(id) || this.entries.some((entry) => entry.id === id) || this.steers.some((steer) => steer.id === id))) {
+      throw new Error('That message id cannot be used.')
+    }
+    if (this.disposed || !this.steerable || this.steers.length >= MAX_STEERS) return null
+    const chosen = id ?? randomUUID()
+    this.steers.push({ id: chosen, text: trimmed })
+    return { id: chosen }
+  }
+
+  private readonly steering: Steers = {
+    waiting: () => this.steerable && this.steers.length > 0,
+    take: (signal) => this.takeSteers(signal),
+    close: () => {
+      this.steerable = false
+    },
+  }
+
+  /**
+   * The waiting messages as the model reads them: each is shown in the transcript where it is taken (its entry has
+   * the id `steer` gave), goes through the userPromptSubmit hook as a request does, and brings what it mentions.
+   */
+  private async takeSteers(signal: AbortSignal): Promise<UserBlock[]> {
+    const taken = this.steers.splice(0)
+    const blocks: UserBlock[] = []
+    for (const { id, text } of taken) {
+      this.settleEntry(this.addEntry({ id, kind: 'steer', text }))
+      try {
+        const submitted = await this.env.hooks.userPromptSubmit?.({ sessionId: this.id, agentId: 'main', root: this.env.root, mode: this.turn.mode ?? 'code', signal, messageId: id, prompt: text })
+        if (submitted?.block) {
+          this.notice(`A hook refused this message: ${submitted.block}`)
+          continue
+        }
+        if (submitted?.context) blocks.push(textBlock(reminder(submitted.context)))
+      } catch (error) {
+        this.notice(`The userPromptSubmit hook failed: ${errorMessage(error)}`)
+      }
+      for (const block of await this.mentions(text)) blocks.push(textBlock(block))
+      blocks.push(textBlock(text))
+    }
+    return blocks.length ? [textBlock(STEER_NOTE), ...blocks] : []
   }
 
   /** Runs one turn on the user's request. Resolves when the turn ends; rejects only when the request cannot start. */
@@ -941,6 +1003,9 @@ export class AgentSession {
     } finally {
       // Free before the end of the turn is saved: a client that hears the turn is over may send the next request at once.
       this.controller = undefined
+      // What no step took stays with the client, which sends it as the next request: it never saw an entry for it.
+      this.steerable = false
+      this.steers = []
       this.clearPending()
       await this.flush().catch(() => undefined)
     }
@@ -972,7 +1037,10 @@ export class AgentSession {
         await this.rename(this.provisionalTitle)
       }
 
-      const end = await this.getLoop().run({ turnId, mode, signal })
+      const loop = this.getLoop()
+      // From here a message sent while the turn runs steers it; the loop closes that again where the turn ends.
+      this.steerable = true
+      const end = await loop.run({ turnId, mode, signal })
       this.finishStreaming()
       this.conclude(end)
       if (end.kind === 'done' || end.kind === 'stopped') this.naming = this.nameSession(text).catch(() => undefined)
@@ -1243,6 +1311,7 @@ export class AgentSession {
       '',
       ...this.entries.map((entry) => {
         if (entry.kind === 'tool') return `## ${entry.tool?.name ?? 'tool'} ${subjectOf(entry)}\n\n\`\`\`\n${entry.tool?.output ?? ''}\n\`\`\`\n`
+        if (entry.kind === 'steer') return `## user (while the agent worked)\n\n${entry.text ?? ''}\n`
         return `## ${entry.kind}\n\n${entry.text ?? ''}\n`
       }),
     ].join('\n')

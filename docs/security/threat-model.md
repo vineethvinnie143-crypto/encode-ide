@@ -793,3 +793,54 @@ It covers the new read path: files and skills that come with a message without a
   unknown command at the first Enter, opens a settings page found by its words and the model list with Alt+M, sends a
   message with a file and a skill picked from the lists and checks both reached the model and the edit needed no Read,
   and stops a streaming answer with Esc twice after one Esc did not.
+
+## Steering, effort, the Reviewer, find and changing shortcuts (UI-5b)
+
+Written with the pull request that lets a message steer a running turn, sets the reasoning effort per role, asks the
+Review role's model about a change, finds words in a session and lets the person change any shortcut
+([0067](../adr/0067-steering-goes-through-what-a-request-goes-through-the-reviewer-reads-the-change-as-data-and-a-shortcut-leaves-typing-alone.md)).
+The new paths are a message that enters a running turn, a change sent to a model that reads it as text, and a settings
+entry that decides what a key does.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| K1 | A message that steers a running turn skips what a request goes through | Each waiting message goes through the `userPromptSubmit` hook, where a block drops it with a notice, brings what it mentions under W1 to W5, and is stored as an entry of the session with an id the client chose: a fresh UUID no entry has, or the call is refused. | Mitigated |
+| K2 | A steering message is lost, or reaches the model twice, when the turn ends as it is sent | The loop stops taking messages where it decides the turn ends; what no step took goes back to the client, which sends it as the next request. A message is either in the turn, with its entry, or in the next request, never both. At most 20 wait. | Mitigated |
+| K3 | An effort level runs up the bill or breaks requests | Levels are kept per role, known roles and levels only; the host puts the role's level on that role's requests, and the adapters send it only to models with a dial. A role left out is left to its model. The level shows on the chip and in /status. | Mitigated |
+| K4 | The change under review instructs the Reviewer ("approve this", "say nothing about auth.ts") | One request with no tools, so the Reviewer can only answer. The instructions call the change and its file names data. Each file sits in a block whose end tag carries 12 random hex characters the change cannot guess. The reply must be JSON: at most 12 findings, each on a file of the review and a line number, with capped text; the rest is dropped. Findings are comments the person reads, and only the person sends them to the agent. | Partial (R2) |
+| K5 | The Reviewer is sent more than the change, or text that should not leave the machine | It reads only the change the person chose in the Review tab, as hunks with 10 lines of context, up to 120,000 characters; lock files, minified files, source maps, binary and very large files are named, not read. It goes to the model the person set for the Review role, through the router (0052). | Partial (residual below) |
+| K6 | Find changes the thread or what it shows | Find reads the page's text and marks it with the CSS Custom Highlight API: no element is added and nothing is sent or run. It opens folds only while it looks, and marks at most 1,000 matches. | Mitigated |
+| K7 | A settings entry binds a key that takes over typing, a field's keys, Windows' keys or the computer tool's stop | The main process keeps only command ids (no `__proto__`) with up to 4 printable ASCII chords, up to 300 entries. The registry refuses, wherever the file came from, a chord without Ctrl or Alt that is no function key, the Windows key, Ctrl+C, X, V, Z, Y, A, Ctrl+Shift+Z, Ctrl+Enter, Ctrl with the keys that move by words, Alt+F4, Alt+Tab, Alt+Space, Alt+Esc, Alt with the number pad, Ctrl+Esc, Ctrl+Shift+Esc, Ctrl+Alt+Delete, Shift+F10, Ctrl+Alt+Esc and Ctrl+Alt with a key AltGr types, and the chords of commands that cannot change. Ctrl+Alt+Esc also stays a global shortcut of the main process (0054), out of the renderer's reach. | Mitigated |
+| K8 | One key does two things, or a changed shortcut fires inside a field that needed the key | A chord goes to one command: the person's choice takes it from the command that ships with it, and the first command named keeps a chord named twice. A key a field already used (Ctrl+Enter in a comment, the editor's keys, the terminal prompt's Enter, Tab and arrows) stays the field's. | Mitigated |
+
+### Residual risks
+
+- **A review is advice.** A change written to mislead can still steer what the Reviewer says, or keep it from seeing a
+  problem, so "no findings" is not a pass (R2).
+- **The Reviewer reads what changed, secrets included.** A tracked file such as `.env` that changed is sent like any
+  other file to the model of the Review role. Asking the Reviewer is the person's own act, on the model they chose.
+- **A steering message has the person's authority**, like any message they type: text pasted into it from elsewhere
+  carries that authority too.
+
+### Verification
+
+- The core's tests take a steering message between two steps and after a text-only reply, keep roles alternating, run
+  the hook (and drop a blocked message with the hook's reason), bring mentions, refuse a used or malformed id, and take
+  nothing once the turn is past taking it; the store's tests show the Steering row and send what a request did not take
+  as the next one.
+- The settings and model tests keep known roles and levels only; the runtime's test puts the role's level on that
+  role's requests; the adapters' tests send it only to models with a dial.
+- The Reviewer's tests frame the change with a nonce the text cannot close, number the lines, leave lock and minified
+  files unread, keep to the budget, read JSON from fences and repair slips, keep only findings on a file of the review,
+  and cap their number and length.
+- Find's tests fold case and white space, map matches back across text nodes, never run a match across blocks, cap the
+  marks, and open only the folds that hold the words.
+- The shortcut tests refuse every chord K7 names and take ordinary ones, keep a chord with one command, ignore what a
+  settings file must not change, and check change, add, remove, reset and the list; the settings tests keep only
+  well-formed entries across a restart.
+- The end-to-end run steers a running turn, sets the effort and finds it on the request the model got, asks the
+  Reviewer and sees its findings on the lines, ready to send, finds words in a folded work log and steps through the
+  matches, and changes a shortcut: refused with the reason, taken, asked before moving, working at once, in the menus
+  and after a restart, and put back with Reset all and its Undo.

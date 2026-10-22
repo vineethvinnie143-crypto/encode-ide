@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO, freeProfile, isFreeRef, labelOfRef, mainPatch, mainRefs } from '@shared/models'
-import type { ModelRole, ModelStatus, Settings } from '@shared/types'
+import { EFFORTS, EFFORT_INFO, FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO, freeProfile, isFreeRef, labelOfRef, mainPatch, mainRefs, withEffort } from '@shared/models'
+import type { ModelRole, ModelStatus, ReasoningEffort, Settings } from '@shared/types'
 import { useModels } from '../../stores/models'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { AlertTriangle, ArrowDown, ArrowUp, Plus, RefreshCw, X } from '../../ui/icons'
 import type { Rect } from '../../ui/place'
 import { Chip } from '../../ui/Pill'
-import { Select } from '../../ui/Select'
+import { Select, type SelectOption } from '../../ui/Select'
 import { Spinner } from '../../ui/Spinner'
 import { Toggle } from '../../ui/Toggle'
 import { ModelPicker } from './ModelPicker'
 
-type Draft = Pick<Settings, 'profiles' | 'roles' | 'activeProfileId' | 'freeOnly' | 'freeProfileId'>
+type Draft = Pick<Settings, 'profiles' | 'roles' | 'activeProfileId' | 'freeOnly' | 'freeProfileId' | 'efforts'>
+
+type EffortChoice = ReasoningEffort | 'default'
+
+const EFFORT_CHOICES: readonly SelectOption<EffortChoice>[] = [
+  { value: 'default', label: 'Default effort' },
+  ...EFFORTS.map((effort) => ({ value: effort, label: `${EFFORT_INFO[effort].label} effort` })),
+]
 
 /** The refs a role lists in the draft; Main falls back to the active connection's model, as the router does. */
 function refsOf(draft: Draft, role: ModelRole): string[] {
@@ -85,7 +92,16 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
           <div className="role-name">{info.label}</div>
           <div className="role-hint">{info.hint}</div>
         </div>
-        <AddModel draft={draft} role={role} onPick={(ref) => !refs.includes(ref) && set([...refs, ref])} />
+        <div className="role-tools">
+          <Select<EffortChoice>
+            className="role-effort"
+            label={`How hard ${info.label} thinks`}
+            value={draft.efforts[role] ?? 'default'}
+            options={EFFORT_CHOICES}
+            onChange={(choice) => onChange({ efforts: withEffort(draft.efforts, role, choice === 'default' ? null : choice) })}
+          />
+          <AddModel draft={draft} role={role} onPick={(ref) => !refs.includes(ref) && set([...refs, ref])} />
+        </div>
       </div>
       {refs.length === 0 ? (
         <div className="role-follows">{info.follows ? `Uses ${ROLE_INFO[info.follows].label.toLowerCase()}.` : 'No model chosen.'}</div>
@@ -248,7 +264,10 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
         <header className="roles-section-head">
           <h3>Which model does what</h3>
         </header>
-        <p className="roles-note">Each job takes a list. The first model that works answers; a role with no list uses the one named under its name.</p>
+        <p className="roles-note">
+          Each job takes a list. The first model that works answers; a role with no list uses the one named under its name. Effort is how hard a role’s models think, where a model has
+          that dial; each role has its own, and Default leaves it to the model.
+        </p>
         {MODEL_ROLES.map((role) => (
           <RoleRow key={role} draft={draft} role={role} onChange={onChange} />
         ))}

@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, Paperclip, Pencil, Plus, Shield, Square, Target, Trash2, X } from '../../ui/icons'
+import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, Loader2, Paperclip, Pencil, Plus, Shield, Square, Target, Trash2, X } from '../../ui/icons'
 import { api } from '../../api'
 import { agentActions } from '../../commands/agent'
 import { commandRegistry } from '../../commands/app'
@@ -14,6 +14,7 @@ import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Menu, type MenuEntry } from '../../ui/Menu'
 import { Pill } from '../../ui/Pill'
+import EffortButton from '../models/EffortButton'
 import ModelButton from '../models/ModelButton'
 import { ComposerPicker } from './ComposerPicker'
 import { fileMention, fileOptions, findSlash, indexFiles, parseSlash, replaceTrigger, skillOptions, slashOptions, triggerAt, type FileIndex, type PickerOption, type SkillLike } from './picker'
@@ -111,6 +112,8 @@ export default function Composer() {
   const answer = useChat((state) => state.answer)
   const entries = useChat((state) => state.entries)
   const enqueue = useChat((state) => state.enqueue)
+  const steer = useChat((state) => state.steer)
+  const sendQueued = useChat((state) => state.sendQueued)
   const removeQueued = useChat((state) => state.removeQueued)
   const moveQueued = useChat((state) => state.moveQueued)
   const editQueued = useChat((state) => state.editQueued)
@@ -118,6 +121,7 @@ export default function Composer() {
   const usageTotals = useChat((state) => state.usageTotals)
   const activeId = useSessions((state) => state.activeId)
   const queue = useChat((state) => state.queues[activeId])
+  const steering = useChat((state) => state.steering[activeId])
   const activePath = useEditor((state) => state.activePath)
   const tabs = useEditor((state) => state.tabs)
   const settings = useSettings((state) => state.settings)
@@ -200,6 +204,7 @@ export default function Composer() {
 
   const policy = settings?.policy ?? 'workspace-write'
   const mode = settings?.agentMode ?? 'code'
+  const followUp = settings?.followUp ?? 'queue'
   const stats = useMemo(() => conversationStats(entries, usageTotals), [entries, usageTotals])
 
   /** Replaces the draft and puts the caret at `at`. */
@@ -278,7 +283,8 @@ export default function Composer() {
     write(`${before}${lead}${sign}${draft.slice(at)}`, at + lead.length + 1)
   }
 
-  const submit = () => {
+  /** Sends the draft. While the agent works, Enter does what the follow-up setting says and `other` (Ctrl+Enter) the other one. */
+  const submit = (other = false) => {
     const text = draft.trim()
     if (!text) return
     if (ask) {
@@ -310,9 +316,10 @@ export default function Composer() {
       notify('info', 'Open a folder first so the agent has a project to work on.')
       return
     }
-    // While the agent works, a message waits in the queue and goes out when it is done.
+    // While the agent works, a message either waits in the queue for it to be done, or goes to it now, read after its step.
     if (running) {
-      enqueue(message)
+      if ((followUp === 'steer') !== other) steer(message)
+      else enqueue(message)
       return
     }
     send(message, attachments)
@@ -330,7 +337,7 @@ export default function Composer() {
     { kind: 'separator', id: 'sep-session' },
     { id: 'compact', label: 'Compact the conversation', onSelect: () => void agentActions.compact() },
     { id: 'export', label: 'Export session…', onSelect: () => void commandRegistry.run('session.export') },
-    { id: 'commands', label: 'Command palette…', shortcut: commandRegistry.shortcut('app.palette') ?? 'Ctrl+K', onSelect: () => useUi.getState().setPaletteOpen(true) },
+    { id: 'commands', label: 'Command palette…', shortcut: commandRegistry.shortcut('app.palette'), onSelect: () => useUi.getState().setPaletteOpen(true) },
   ]
 
   const policyEntries = (): MenuEntry[] => [
@@ -349,26 +356,49 @@ export default function Composer() {
     : ask
       ? "Answer the agent's question…"
       : running
-        ? 'Queue a message for when eNCode is done…'
+        ? followUp === 'steer'
+          ? 'Steer the agent now. Ctrl+Enter queues it for later'
+          : 'Queue a follow-up. Ctrl+Enter steers the agent now'
         : 'Message or run a task. / commands, @ files, $ skills'
 
-  const lastPrompt = [...entries].reverse().find((entry) => entry.kind === 'user')?.text
+  const lastPrompt = [...entries].reverse().find((entry) => entry.kind === 'user' || entry.kind === 'steer')?.text
   const tone = policy === 'full-access' ? 'warning' : policy === 'auto-review' ? 'accent' : 'neutral'
 
   return (
     <div className="composer-dock">
-      {queue && queue.length > 0 && (
-        <div className="queue-strip" aria-label="Queued messages">
-          <div className="queue-head">
-            Queued · {queue.length}
-            <span className="queue-note">sent one by one when eNCode is done</span>
-          </div>
-          {queue.map((item, index) => (
+      {((queue && queue.length > 0) || (steering && steering.length > 0)) && (
+        <div className="queue-strip" aria-label="Messages waiting">
+          {steering && steering.length > 0 && (
+            <>
+              <div className="queue-head">
+                Steering · {steering.length}
+                <span className="queue-note">read by the agent after the step it is on</span>
+              </div>
+              {steering.map((item) => (
+                <div className="queue-row is-steering" key={item.id}>
+                  <Loader2 size={13} className="spin queue-spinner" />
+                  <span className="queue-text" title={item.text}>
+                    {item.text}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+          {queue && queue.length > 0 && (
+            <div className="queue-head">
+              Queued · {queue.length}
+              <span className="queue-note">sent one by one when eNCode is done</span>
+            </div>
+          )}
+          {queue?.map((item, index) => (
             <div className="queue-row" key={item.id}>
               <span className="queue-text" title={item.text}>
                 {item.text}
               </span>
               <span className="queue-actions">
+                <IconButton label={running ? 'Steer now: the agent reads it after its step' : 'Send now'} size="sm" onClick={() => sendQueued(item.id)}>
+                  {running ? <CornerDownRight size={14} /> : <ArrowUp size={14} />}
+                </IconButton>
                 <IconButton label="Move up" size="sm" disabled={index === 0} onClick={() => moveQueued(item.id, -1)}>
                   <ArrowUp size={14} />
                 </IconButton>
@@ -451,7 +481,7 @@ export default function Composer() {
             }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
-              submit()
+              submit(event.ctrlKey || event.metaKey)
             } else if (event.key === 'Tab' && event.shiftKey) {
               event.preventDefault()
               agentActions.togglePlan()
@@ -491,13 +521,27 @@ export default function Composer() {
           <span className="composer-spacer" />
 
           <ModelButton />
+          <EffortButton />
 
           {running && !ask ? (
-            <button type="button" className="composer-send is-stop" onClick={() => void stop()} title="Stop (Esc twice)" aria-label="Stop">
-              <Square size={13} fill="currentColor" />
-            </button>
+            <>
+              {draft.trim() && (
+                <button
+                  type="button"
+                  className="composer-send is-follow-up"
+                  onClick={() => submit()}
+                  title={followUp === 'steer' ? 'Steer now (Enter) · Queue (Ctrl+Enter)' : 'Queue (Enter) · Steer now (Ctrl+Enter)'}
+                  aria-label={followUp === 'steer' ? 'Steer now' : 'Queue'}
+                >
+                  {followUp === 'steer' ? <CornerDownRight size={16} /> : <ArrowUp size={16} />}
+                </button>
+              )}
+              <button type="button" className="composer-send is-stop" onClick={() => void stop()} title="Stop (Esc twice)" aria-label="Stop">
+                <Square size={13} fill="currentColor" />
+              </button>
+            </>
           ) : (
-            <button type="button" className="composer-send" onClick={submit} disabled={!draft.trim() || (!workspace && !parseSlash(draft))} title="Send (Enter)" aria-label="Send">
+            <button type="button" className="composer-send" onClick={() => submit()} disabled={!draft.trim() || (!workspace && !parseSlash(draft))} title="Send (Enter)" aria-label="Send">
               <ArrowUp size={16} />
             </button>
           )}

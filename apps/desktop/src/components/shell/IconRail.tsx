@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { api } from '../../api'
 import { commandRegistry } from '../../commands/app'
+import { useShortcuts } from '../../commands/useShortcuts'
 import { activeKind } from '../../panels/model'
 import { usePanels } from '../../stores/panels'
 import { useSessions } from '../../stores/sessions'
@@ -34,6 +35,7 @@ function RailButton({
 
 /** The 52 px strip of places: Home, Automations, Review, Plugins and skills, Models and roles, More, then Settings and you. */
 export default function IconRail() {
+  useShortcuts()
   const settingsOpen = useUi((state) => state.settingsOpen)
   const settingsTab = useUi((state) => state.settingsTab)
   const pluginsOpen = useUi((state) => state.pluginsOpen)

@@ -233,6 +233,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle('review:branches', () => review.branches())
   handle('review:commit', (request: unknown) => review.commit(commitRequestOf(request)))
   handle('review:draft', (options?: { all?: unknown }) => review.draft(options?.all === true))
+  handle('review:ask', (scope: unknown, options: unknown) => review.askReviewer(reviewScopeOf(scope), reviewOptionsOf(options)))
 
   handle('shell:create', (options: ShellCreateOptions) =>
     shell.create(options, (id) => ({
@@ -262,6 +263,8 @@ export function registerIpc(deps: IpcDeps): void {
     }
   })
   handle('agent:cancel', (sessionId: string) => host.cancel(String(sessionId)))
+  // The host checks the text and the id against its schema; null means no step can take the message now, and the renderer sends it as a request instead.
+  handle('agent:steer', (sessionId: string, text: string, id: string) => host.steer(String(sessionId), String(text ?? ''), String(id ?? '')))
   handle('agent:reset', (sessionId?: string) => host.reset(sessionId ? String(sessionId) : undefined))
   handle('agent:remove', async (sessionId: string) => {
     await host.remove(String(sessionId))

@@ -38,8 +38,11 @@ const settings: Settings = {
   recentWorkspaces: ['C:\\Users\\ana\\private-project', 'D:\\clients\\secret'],
   lastWorkspace: 'C:\\Users\\ana\\private-project',
   agentMode: 'code',
+  followUp: 'queue',
   appearance: { ...DEFAULT_APPEARANCE },
   roles: { reviewer: ['paid:big-model'] },
+  efforts: {},
+  keybindings: { 'edit.find': ['Ctrl+Alt+F'], 'view.bottomPanel': [] },
   freeOnly: false,
   freeProfileId: null,
   setupDone: true,
@@ -76,6 +79,7 @@ describe('diagnostics report', () => {
     assert.match(text, /Displays +2560x1440 at 125% \(main\)\n +1920x1080 at 100%/)
     assert.match(text, /Variables set +ENCODE_DEVTOOLS/)
     assert.match(text, /What the agent may do +workspace-write/)
+    assert.match(text, /Shortcuts +edit\.find Ctrl\+Alt\+F, view\.bottomPanel none/)
     assert.match(text, /API keys +sealed by the operating system/)
     assert.match(text, /Process +running, 0 stops in a row, 1 sessions working/)
     assert.match(text, /Sessions +12 \(3 archived\)/)

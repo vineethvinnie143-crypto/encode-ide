@@ -1,3 +1,5 @@
+import { commandRegistry } from '../../commands/app'
+import { useShortcuts } from '../../commands/useShortcuts'
 import { usePanels } from '../../stores/panels'
 import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
@@ -17,6 +19,7 @@ export default function BottomPanel({
   height: number
   onResizeStart: (event: React.PointerEvent) => void
 }) {
+  useShortcuts()
   const tabs = usePanels((state) => state.bottom.tabs)
   const activeId = usePanels((state) => state.bottom.activeId)
 
@@ -31,7 +34,7 @@ export default function BottomPanel({
         onSelect={(id) => usePanels.getState().activateBottom(id)}
         onClose={(id) => usePanels.getState().closeBottom(id)}
       >
-        <IconButton label="Hide bottom panel" shortcut="Ctrl+J" size="md" onClick={() => usePanels.getState().toggleBottom()}>
+        <IconButton label="Hide bottom panel" shortcut={commandRegistry.shortcut('view.bottomPanel')} size="md" onClick={() => usePanels.getState().toggleBottom()}>
           <X size={14} />
         </IconButton>
       </TabStrip>

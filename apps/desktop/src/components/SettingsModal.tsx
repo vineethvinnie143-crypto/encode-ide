@@ -11,7 +11,7 @@ import {
 } from '../ui/icons'
 import { addressProblem, cleanRoles, mainPatch, mainRefs, modelRef } from '@shared/models'
 import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult } from '@shared/search'
-import type { ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
+import type { FollowUp, ModelInfo, ModelProfile, ProfileKind, Settings } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../policies'
@@ -20,6 +20,7 @@ import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import type { SettingsTab } from '../stores/ui'
 import { applyAppearance } from '../theme/appearance'
+import { Segmented } from '../ui/Segmented'
 import { Toggle } from '../ui/Toggle'
 import AppearanceSettings from './AppearanceSettings'
 import { uniqueName } from './models/connect'
@@ -29,6 +30,11 @@ import McpPane from './mcp/McpPane'
 import SandboxPane from './sandbox/SandboxPane'
 import PermissionsPane from './permissions/PermissionsPane'
 import { SearchSettings } from './search/SearchSettings'
+
+const FOLLOW_UPS = [
+  { value: 'queue', label: 'Queue' },
+  { value: 'steer', label: 'Steer' },
+] as const satisfies readonly { value: FollowUp; label: string }[]
 
 export default function SettingsModal() {
   const settings = useSettings((state) => state.settings)
@@ -542,6 +548,22 @@ export default function SettingsModal() {
               <div className="info-note">
                 {ALWAYS_ASKS_NOTE} Ask and Plan modes never edit files or run commands. When eNCode asks, it shows you
                 exactly what will change or run.
+              </div>
+
+              <div className="section-title">Messages while eNCode works</div>
+              <div className="settings-card">
+                <div className="settings-row">
+                  <div className="settings-row-text">
+                    <div className="settings-row-label">What Enter does</div>
+                    <div className="settings-row-help">
+                      Queue holds a message until the agent is done, then sends it. Steer hands it to the agent now: it reads it after the step it
+                      is on and carries on with it in mind. Ctrl+Enter always does the other one.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Segmented label="What Enter does while the agent works" value={draft.followUp} options={FOLLOW_UPS} onChange={(followUp) => setDraft({ ...draft, followUp })} />
+                  </div>
+                </div>
               </div>
 
               {settings?.computerSupported ? (

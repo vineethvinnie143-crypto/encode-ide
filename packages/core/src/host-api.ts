@@ -39,6 +39,8 @@ export type HostRequests = {
   /** Resolves when the turn ends. */
   start: { params: { sessionId: string; input: AgentStartInput }; result: void }
   cancel: { params: { sessionId: string }; result: void }
+  /** A message for the running turn; null when no turn takes one now (send it as the next request). */
+  steer: { params: { sessionId: string; text: string; id?: string }; result: { id: string } | null }
   reset: { params: { sessionId?: string } | undefined; result: void }
   remove: { params: { sessionId: string }; result: void }
   fork: { params: { sessionId: string }; result: SessionSummary }
@@ -169,6 +171,9 @@ const REWIND_REQUEST: JsonSchema = {
 
 const HASH: JsonSchema = { type: 'string', pattern: '^[0-9a-f]{64}$' }
 
+/** An id the caller chose for a message, as `crypto.randomUUID()` makes them. */
+const UUID: JsonSchema = { type: 'string', pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' }
+
 const LIMITS: JsonSchema = {
   type: 'object',
   properties: { maxFileBytes: { type: 'integer', minimum: 0, maximum: 64 * 1024 * 1024 }, maxTotalBytes: { type: 'integer', minimum: 0, maximum: 512 * 1024 * 1024 } },
@@ -198,6 +203,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   history: { type: ['object', 'null'], properties: optionalSessionId },
   start: object({ ...sessionId, input: START_INPUT }, ['sessionId', 'input']),
   cancel: object(sessionId, ['sessionId']),
+  steer: object({ ...sessionId, text: text(400_000, 1), id: UUID }, ['sessionId', 'text']),
   reset: { type: ['object', 'null'], properties: optionalSessionId },
   remove: object(sessionId, ['sessionId']),
   fork: object(sessionId, ['sessionId']),
@@ -242,6 +248,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('history', (params) => host.history(params?.sessionId || undefined))
   on('start', ({ sessionId, input }) => host.start(sessionId, input))
   on('cancel', ({ sessionId }) => host.cancel(sessionId))
+  on('steer', ({ sessionId, text: message, id: chosen }) => host.steer(sessionId, message, chosen))
   on('reset', (params) => host.reset(params?.sessionId || undefined))
   on('remove', ({ sessionId }) => host.remove(sessionId))
   on('fork', ({ sessionId }) => host.fork(sessionId))
@@ -290,6 +297,8 @@ export interface HostClient {
   history(sessionId?: string): Promise<AgentHistory>
   start(sessionId: string, input: AgentStartInput): Promise<void>
   cancel(sessionId: string): Promise<void>
+  /** `id`, when given, names the message's entry: a caller can then match the entry even when it comes before the answer. */
+  steer(sessionId: string, text: string, id?: string): Promise<{ id: string } | null>
   reset(sessionId?: string): Promise<void>
   remove(sessionId: string): Promise<void>
   fork(sessionId: string): Promise<SessionSummary>
@@ -328,6 +337,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     history: (sessionId) => caller.request('history', sessionId ? { sessionId } : undefined),
     start: (sessionId, input) => caller.request('start', { sessionId, input }),
     cancel: (sessionId) => caller.request('cancel', { sessionId }),
+    steer: (sessionId, text, id) => caller.request('steer', id === undefined ? { sessionId, text } : { sessionId, text, id }),
     reset: (sessionId) => caller.request('reset', sessionId ? { sessionId } : undefined),
     remove: (sessionId) => caller.request('remove', { sessionId }),
     fork: (sessionId) => caller.request('fork', { sessionId }),

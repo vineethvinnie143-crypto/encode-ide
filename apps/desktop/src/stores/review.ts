@@ -3,6 +3,7 @@ import type { ReviewAction, ReviewBranches, ReviewCommit, ReviewCommitOutcome, R
 import { api } from '../api'
 import { commentsMessage, scopePhrase } from '../review/comments'
 import { forAgent, inRepository } from '../review/paths'
+import { findingComments } from '../review/reviewer'
 import { toggledForAll, type Anchor, type DiffLayout, type ReviewComment } from '../review/rows'
 import { getActiveSessionId } from './active'
 import { useChat } from './chat'
@@ -13,6 +14,14 @@ import { useUi } from './ui'
 import { useWorkspace } from './workspace'
 
 export type ScopeKind = ReviewScope['kind']
+
+/** What the Reviewer said about a view: its verdict in a sentence or two, how many findings, what it could not read. */
+export interface ReviewerVerdict {
+  summary: string
+  findings: number
+  files: number
+  left: number
+}
 
 /** How the lines are drawn; none of it changes what git is asked. */
 export interface ReviewView {
@@ -55,6 +64,10 @@ interface ReviewStore {
   commits: ReviewCommit[] | null
   /** A file of the review to bring into view, by its path in the repository. */
   revealPath: string | null
+  /** The view whose changes the Reviewer is reading, by key. */
+  asking: string | null
+  /** What the Reviewer said about each view it read, by key, until the person closes it. */
+  verdicts: Readonly<Record<string, ReviewerVerdict>>
 
   /** The scope the person chose, as the main process is asked for it; null while the Commit view has no commit yet. */
   scope(): ReviewScope | null
@@ -78,6 +91,13 @@ interface ReviewStore {
   removeComment(id: string): void
   /** Hands this view's comments to the agent: sent now, or queued behind the turn that is running. */
   sendComments(): void
+  /**
+   * Asks the Reviewer about this view's changes (with `kind`, about that view's, opening the tab on it). Its findings
+   * replace the ones it left here before, as comments the person can edit, delete or send to the agent.
+   */
+  askReviewer(kind?: ScopeKind): Promise<void>
+  /** Closes what the Reviewer said about this view; its comments stay. */
+  dismissVerdict(): void
   loadBranches(): Promise<void>
   loadCommits(): Promise<void>
   commitChanges(request: ReviewCommitRequest): Promise<ReviewCommitOutcome>
@@ -145,6 +165,8 @@ const describe = (error: unknown) => (error instanceof Error ? error.message : S
 let generation = 0
 let reading: Promise<void> | null = null
 let again = false
+/** Counts the folders opened: a Reviewer's answer about the folder before is dropped. */
+let folderEpoch = 0
 /** A file `showFile` asked for, answered by the first read that started after the asking. */
 let wanted: { target: string; from: 'repository' | 'folder'; after: number } | null = null
 
@@ -206,6 +228,8 @@ export const useReview = create<ReviewStore>((set, get) => {
     branches: null,
     commits: null,
     revealPath: null,
+    asking: null,
+    verdicts: {},
 
     scope: () => {
       const { kind, base, commit, commits, turn } = get()
@@ -379,6 +403,40 @@ export const useReview = create<ReviewStore>((set, get) => {
       useUi.getState().notify('success', chat.running ? `Queued ${list.length === 1 ? 'the comment' : `${list.length} comments`} for when the agent is done.` : `Sent ${list.length === 1 ? 'the comment' : `${list.length} comments`} to the agent.`)
     },
 
+    askReviewer: async (kind) => {
+      if (!useWorkspace.getState().workspace) return useUi.getState().notify('info', 'Open a folder to review its changes.')
+      if (get().asking) return useUi.getState().notify('info', 'The Reviewer is still reading the last change it was asked about.')
+      usePanels.getState().open('review')
+      if (kind && kind !== get().kind) get().setKind(kind)
+      if (!get().load?.ok) await get().refresh()
+      const scope = acting()
+      if (!scope) return useUi.getState().notify('info', get().kind === 'turn' ? 'Open a conversation to review what its requests changed.' : 'There is nothing here for the Reviewer to read.')
+      // The findings belong to the view that was asked about, whatever the person looks at by the time they come.
+      const key = get().viewKey()
+      const epoch = folderEpoch
+      set({ asking: key })
+      try {
+        const outcome = await api.review.ask(scope, get().options)
+        if (epoch !== folderEpoch) return
+        if (!outcome.ok) return useUi.getState().notify('error', outcome.message)
+        const load = get().load
+        const shown = get().viewKey() === key && load?.ok ? load.snapshot : null
+        const own = (get().comments[key] ?? []).filter((comment) => comment.by !== 'reviewer')
+        set({
+          comments: { ...get().comments, [key]: [...own, ...findingComments(outcome.findings, shown)] },
+          verdicts: { ...get().verdicts, [key]: { summary: outcome.summary, findings: outcome.findings.length, files: outcome.files, left: outcome.left } },
+        })
+      } catch (error) {
+        if (epoch === folderEpoch) useUi.getState().notify('error', describe(error))
+      } finally {
+        if (epoch === folderEpoch) set({ asking: null })
+      }
+    },
+    dismissVerdict: () => {
+      const { [get().viewKey()]: _closed, ...others } = get().verdicts
+      set({ verdicts: others })
+    },
+
     loadBranches: async () => {
       try {
         set({ branches: await api.review.branches() })
@@ -447,8 +505,9 @@ export const useReview = create<ReviewStore>((set, get) => {
 
     reset: () => {
       generation++
+      folderEpoch++
       wanted = null
-      set({ load: null, error: null, busy: null, toggled: new Set(), comments: {}, editing: null, branches: null, commits: null, commit: null, turn: null, revealPath: null })
+      set({ load: null, error: null, busy: null, toggled: new Set(), comments: {}, editing: null, branches: null, commits: null, commit: null, turn: null, revealPath: null, asking: null, verdicts: {} })
     },
   }
 })

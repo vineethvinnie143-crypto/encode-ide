@@ -88,11 +88,13 @@
 }
 
 .policy-chip,
-.model-chip {
+.model-chip,
+.effort-chip {
   height: 28px;
   font-size: var(--fs-12);
 }
-.policy-chip {
+.policy-chip,
+.effort-chip {
   flex-shrink: 0;
 }
 /* A narrow thread (a wide side panel beside it) shortens the model name instead of pushing Send out. */
@@ -198,4 +200,15 @@
 .queue-actions {
   display: flex;
   flex-shrink: 0;
+}
+/* Handed to the running request, waiting for the step it is on to end */
+.queue-row.is-steering {
+  min-height: 28px;
+}
+.queue-row.is-steering .queue-text {
+  color: var(--text-2);
+}
+.queue-spinner {
+  flex-shrink: 0;
+  color: var(--accent);
 }

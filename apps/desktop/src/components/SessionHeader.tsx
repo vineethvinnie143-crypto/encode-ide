@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ComponentProps } from 'react'
 import type { AgentMode, BackgroundJob } from '@shared/types'
 import { api } from '../api'
 import { commandRegistry, sessionActions } from '../commands/app'
+import { useShortcuts } from '../commands/useShortcuts'
 import { errorText } from '../ipc-error'
 import { activeKind } from '../panels/model'
 import { useChat } from '../stores/chat'
@@ -43,6 +44,7 @@ function ChipButton({ className, children, ...rest }: ComponentProps<'button'>) 
 
 /** 52 px: the session's title, where it runs and what it is doing, and its menus. */
 export default function SessionHeader() {
+  useShortcuts()
   const sessions = useSessions((state) => state.sessions)
   const activeId = useSessions((state) => state.activeId)
   const entries = useChat((state) => state.entries)

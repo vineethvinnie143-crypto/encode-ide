@@ -8,6 +8,9 @@
  *
  * Conversations follow a script. A `[scenario:<name>]` marker in the latest
  * user message picks it; the step is the number of tool results since then.
+ * A message the person sent while the agent worked (eNCode marks it) belongs
+ * to the request it came in during, so it neither picks a script nor resets
+ * the count.
  * Like OpenAI, it refuses a transcript whose tool calls and results do not
  * pair up, and a request without tools is answered as a summary request,
  * unless it asks for the name of a session.
@@ -133,6 +136,12 @@ const SCENARIOS = {
   ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
+  // The command asks first, and the person sends messages while its card waits. The request takes them with the
+  // command's result, and the next answer repeats the last one, so the smoke can tell the model read it.
+  'steer-check': [
+    { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo steer-check-ok', description: 'Echo a word' } } },
+    { text: 'Steer check finished.', answersSteer: true },
+  ],
   // The message mentions src/utils.ts with @, so the file comes with it and counts as read: an Edit works without a Read first.
   'mention-check': [
     { text: 'Swapping the operands.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + b', new_string: 'return b + a' } } },
@@ -212,7 +221,9 @@ let lastAuthorization = null
 let lastRequest = null
 /** The latest request of the Reviewer: what it was given, so the smoke can check it sees little and has no tools. */
 let lastReviewer = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0 }
+/** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
+let lastCodeReview = null
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0 }
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -267,9 +278,20 @@ function chunk(delta, finish = null) {
   })}\n\n`
 }
 
+/** What eNCode puts before a message the person sent while the agent worked. */
+const STEERED = 'sent the message below while you were working'
+const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
+
+/** The latest request of the person's: a message sent while the agent worked is part of the request before it. */
 function lastUserIndex(messages) {
-  for (let index = messages.length - 1; index >= 0; index--) if (messages[index].role === 'user') return index
+  for (let index = messages.length - 1; index >= 0; index--) if (messages[index].role === 'user' && !isSteer(messages[index])) return index
   return -1
+}
+
+/** The last thing the person said while the agent worked: the last paragraph of the latest such message. */
+function lastSteer(messages) {
+  const message = messages.findLast(isSteer)
+  return message ? textOf(message.content).split('\n\n').at(-1).trim() : ''
 }
 
 function scenarioOf(messages) {
@@ -340,6 +362,26 @@ function reviewerAnswer(user) {
   return JSON.stringify({ verdict: 'ask', risk: 'medium', reason: 'It writes a file you did not mention.' })
 }
 
+/** Ask the Reviewer: one call with the change, each line numbered as in its file, and no tools. */
+const CODE_REVIEWER = 'You are the Reviewer. A developer asks you to review a code change'
+const isCodeReview = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(CODE_REVIEWER))
+
+/** A finding on the first added line of the first file the change shows, the way a model answers. */
+function codeReviewAnswer(user) {
+  const file = /<file path=("(?:[^"\\]|\\.)*")[^>]*>\n([\s\S]*?)\n<\/file>/.exec(user)
+  const added = file ? /^\+(\d+) \| (.*)$/m.exec(file[2]) : null
+  if (!file || !added) return JSON.stringify({ summary: 'There are no changed lines to judge.', findings: [] })
+  const path = JSON.parse(file[1])
+  return `Here is my review.\n\`\`\`json\n${JSON.stringify({
+    summary: 'The change adds a counter; one line of it can divide by zero.',
+    findings: [
+      { file: path, line: Number(added[1]), priority: 'P1', title: 'Divides by zero when the list is empty', body: `Line ${added[1]} divides by the length of a list that can be empty. Return early when it is.` },
+      { file: `b/${path}`, line: Number(added[1]), priority: 'P3', title: 'The counter is never reset', body: 'Reset it where the list is cleared.' },
+      { file: 'not/in/the/change.ts', line: 3, priority: 'P0', title: 'A file the change does not touch', body: 'eNCode drops a finding on a file it did not send.' },
+    ],
+  })}\n\`\`\``
+}
+
 /** The small call that names a session once its first turn is over. */
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
@@ -360,6 +402,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-reviewer') {
       sendJson(response, 200, lastReviewer)
+      return
+    }
+    if (request.url === '/__last-code-review') {
+      sendJson(response, 200, lastCodeReview)
       return
     }
     if (request.url === '/__stats') {
@@ -409,6 +455,14 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
+    if (isCodeReview(messages)) {
+      stats.codeReviews += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastCodeReview = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, codeReviewAnswer(user))
+      return
+    }
+
     if (isReviewer(messages)) {
       stats.reviewerRequests += 1
       const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
@@ -425,7 +479,7 @@ const server = http.createServer(async (request, response) => {
 
     // The connection check asks for one call to a tool named echo, the way a person's first message would ask for work.
     const check = body.tools.some((tool) => (tool.function?.name ?? tool.name) === 'echo')
-    if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages }
+    if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages, model: body.model ?? null, effort: body.reasoning_effort ?? null }
     const step = check ? { text: '', call: { name: 'echo', args: { text: 'eNCode' } } } : stepOf(messages)
     const used = tokensOf(raw)
     const window = !check && step.overflowUntilCompacted ? overflowWindow(body, messages) : Infinity
@@ -444,7 +498,8 @@ const server = http.createServer(async (request, response) => {
     }
     console.log(`[fake-provider] ${body.model ?? '?'} scenario=${check ? 'check' : scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
     if (!step.call) {
-      await sendText(response, body, step.text, step.streamDelayMs)
+      const told = step.answersSteer ? lastSteer(messages) : ''
+      await sendText(response, body, told ? `Steered by: ${told} ${step.text}` : step.text, step.streamDelayMs)
       return
     }
     const callId = `call_${requestCount}_${step.call.name}`

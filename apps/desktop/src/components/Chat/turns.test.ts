@@ -83,6 +83,63 @@ describe('turns', () => {
   })
 })
 
+describe('messages sent while the agent worked', () => {
+  it('start a new part of the same turn, each with its own steps and reply', () => {
+    const user = entry('user', { text: 'tidy a.ts' })
+    const read = tool('Read', { file_path: 'a.ts' })
+    const steer = entry('steer', { text: 'use tabs' })
+    const edit = tool('Edit', { file_path: 'a.ts' }, { diff: [hunk(2, 1)] })
+    const answer = entry('assistant', { text: 'Done, with tabs.' })
+    const [turn, ...rest] = buildTurns([user, read, steer, edit, answer], false)
+    assert.equal(rest.length, 0, 'a steered message is not a new request')
+    assert.deepEqual(
+      turn.parts.map((part) => [part.id, part.steer?.id ?? null, part.log.map((item) => item.id), part.reply.map((item) => item.id)]),
+      [
+        [user.id, null, [read.id], []],
+        [steer.id, steer.id, [edit.id], [answer.id]],
+      ],
+    )
+    // The turn as a whole: everything before the last answer, which is the answer, and every change in it.
+    assert.deepEqual(turn.log.map((item) => item.id), [read.id, steer.id, edit.id])
+    assert.deepEqual(turn.reply, [answer])
+    assert.deepEqual(editTotals(turn.log), { files: 1, additions: 2, deletions: 1 })
+  })
+
+  it('ends a part where the next message was taken, and keeps a reply that came before it', () => {
+    const user = entry('user', { text: 'explain' })
+    const first = entry('assistant', { text: 'A long answer.' })
+    const steer = entry('steer', { text: 'shorter' })
+    const second = entry('assistant', { text: 'Short.', streaming: true })
+    const [turn] = buildTurns([user, first, steer, second], true)
+    const [one, two] = turn.parts
+    assert.deepEqual(one.reply, [first])
+    assert.deepEqual([one.startedAt, one.endedAt], [user.createdAt, steer.createdAt])
+    assert.deepEqual([two.startedAt, two.endedAt], [steer.createdAt, second.createdAt])
+    assert.deepEqual([one.active, two.active], [false, true], 'only the part being worked on is live')
+    assert.deepEqual(turn.reply, [second])
+    assert.deepEqual(turn.log, [first, steer])
+  })
+
+  it('show a message just taken as a live part with nothing in it yet', () => {
+    const user = entry('user')
+    const read = tool('Read', { file_path: 'a.ts' })
+    const steer = entry('steer', { text: 'also b.ts' })
+    const [turn] = buildTurns([user, read, steer], true)
+    const last = turn.parts[1]
+    assert.deepEqual([last.log, last.reply, last.active, last.startedAt, last.endedAt], [[], [], true, steer.createdAt, steer.createdAt])
+    assert.deepEqual(turn.reply, [])
+  })
+
+  it('keep a single part, the turn itself, when there were none', () => {
+    const user = entry('user')
+    const read = tool('Read', { file_path: 'a.ts' })
+    const answer = entry('assistant', { text: 'ok' })
+    const [turn] = buildTurns([user, read, answer], false)
+    assert.equal(turn.parts.length, 1)
+    assert.deepEqual([turn.parts[0].id, turn.parts[0].log, turn.parts[0].reply], [turn.id, turn.log, turn.reply])
+  })
+})
+
 describe('reusing turns', () => {
   const conversation = () => {
     const user1 = entry('user', { text: 'first' })
@@ -126,6 +183,21 @@ describe('reusing turns', () => {
     assert.equal(grown.length, 3)
     assert.equal(grown[0], first[0])
     assert.equal(grown[2].user?.text, 'third')
+  })
+
+  it('keeps the finished parts of a steered turn while its last part streams', () => {
+    const user = entry('user', { text: 'go' })
+    const read = tool('Read', { file_path: 'a.ts' })
+    const steer = entry('steer', { text: 'and b.ts' })
+    const answer = entry('assistant', { text: 'Rea', streaming: true })
+    const first = buildTurns([user, read, steer, answer], true)
+    const grown = [user, read, steer, { ...answer, text: 'Read both.' }]
+    const second = reuseTurns(first, buildTurns(grown, true))
+    assert.notEqual(second[0], first[0])
+    assert.equal(second[0].parts[0], first[0].parts[0], 'the part before the message is the same object')
+    assert.notEqual(second[0].parts[1], first[0].parts[1])
+    assert.equal(second[0].parts[1].log, first[0].parts[1].log)
+    assert.equal(reuseTurns(second, buildTurns([...grown], true))[0], second[0], 'nothing changed, so the turn is the same object')
   })
 
   it('has nothing to reuse the first time', () => {

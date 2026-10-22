@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,10 +17,12 @@ import {
   XCircle,
 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
+import { useFoldFind, useRevealRef } from '../../find/hooks'
+import { foldText } from '../../find/text'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import { TAKEN_OVER, computerStep } from './computer-step'
-import DiffView from './DiffView'
+import DiffView, { shownDiffLines } from './DiffView'
 import { reviewLine } from './review-text'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
@@ -176,11 +178,71 @@ function StepNotes({ tool }: { tool: NonNullable<ConversationEntry['tool']> }) {
   )
 }
 
+type Tool = NonNullable<ConversationEntry['tool']>
+
+/** What a step's row and its opened body show, worked out once for the row and for find. */
+function stepParts(entry: ConversationEntry, tool: Tool) {
+  const meta = TOOL_META[tool.name] ?? { label: tool.name.replace(/_/g, ' '), icon: FileText }
+  const state = tool.state ?? 'done'
+  const isComputer = tool.name === 'Computer'
+  // A desktop step says what it did in words; opened, it shows only why it failed.
+  const computer = isComputer ? computerStep(tool.input ?? {}, tool.output, tool.state) : null
+  // A declined step's output is the Reviewer's reason, which the notes already give.
+  const output = tool.review?.verdict === 'declined' ? '' : tool.output
+  const content = tool.input.content
+  return {
+    icon: meta.icon,
+    label: computer?.label ?? meta.label,
+    detail: computer ? computer.detail : detailOf(entry),
+    state,
+    isShell: stepKind(tool.name) === 'shell',
+    hasBody: isComputer
+      ? state === 'error' && Boolean(tool.output) && tool.output !== TAKEN_OVER
+      : Boolean(tool.output || tool.diff?.length || tool.review || tool.warnings?.length || !QUIET_TOOLS.has(tool.name)),
+    output,
+    // With nothing else to show, the body shows what the step was given.
+    showsInput: !tool.diff?.length && !output && !tool.review && Object.keys(tool.input ?? {}).length > 0,
+    sizeLabel:
+      typeof content === 'string' && content.length > 0 ? (content.length >= 1024 ? `${Math.round(content.length / 1024)}KB` : `${content.length}B`) : '',
+  }
+}
+
+/** What a step's row says, and what its opened body says, as find reads them. */
+export function stepText(entry: ConversationEntry): { head: string; body: string } {
+  const tool = entry.tool
+  if (!tool) return { head: '', body: '' }
+  const parts = stepParts(entry, tool)
+  const head = `${parts.label} ${parts.detail} ${parts.sizeLabel}`
+  if (!parts.hasBody) return { head, body: '' }
+  const notes = [tool.review ? reviewLine(tool.review) : '', tool.warnings?.length ? `Invisible or look-alike characters\n${tool.warnings.join('\n')}` : '']
+  const body = parts.isShell
+    ? [parts.detail, STATE_LABEL[parts.state] ?? parts.state, ...notes, parts.output ?? '']
+    : [...notes, ...shownDiffLines(tool.diff ?? []), parts.output ?? '', parts.showsInput ? JSON.stringify(tool.input, null, 2) : '']
+  return { head, body: body.join('\n') }
+}
+
+const folded = new WeakMap<ConversationEntry, { head: string; body: string }>()
+
+/** stepText as find compares it, worked out once for each version of a step. */
+export function foldedStep(entry: ConversationEntry): { head: string; body: string } {
+  let text = folded.get(entry)
+  if (!text) {
+    const raw = stepText(entry)
+    text = { head: foldText(raw.head).text, body: foldText(raw.body).text }
+    folded.set(entry, text)
+  }
+  return text
+}
+
 /** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
 function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
   const tool = entry.tool
   // A step the Reviewer declined opens by itself: the person was not asked, so the reason is the first thing they want.
   const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting' || tool?.review?.verdict === 'declined')
+  const head = useRef<HTMLButtonElement>(null)
+  const reveal = useCallback(() => setExpanded(true), [])
+  const rowRef = useRevealRef(head, reveal)
+  const { found, dismiss } = useFoldFind(useCallback((needle: string) => foldedStep(entry).body.includes(needle), [entry]))
 
   useEffect(() => {
     if (tool?.diff?.length) setExpanded(true)
@@ -193,35 +255,28 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
 
   if (!tool) return null
 
-  const meta = TOOL_META[tool.name] ?? { label: tool.name.replace(/_/g, ' '), icon: FileText }
-  const Icon = meta.icon
-  const state = tool.state ?? 'done'
-  const isShell = stepKind(tool.name) === 'shell'
-  const isComputer = tool.name === 'Computer'
-  // A desktop step says what it did in words; opened, it shows only why it failed.
-  const computer = isComputer ? computerStep(tool.input ?? {}, tool.output, tool.state) : null
-  const label = computer?.label ?? meta.label
-  const detail = computer ? computer.detail : detailOf(entry)
-  const hasBody = isComputer
-    ? state === 'error' && Boolean(tool.output) && tool.output !== TAKEN_OVER
-    : Boolean(tool.output || tool.diff?.length || tool.review || tool.warnings?.length || !QUIET_TOOLS.has(tool.name))
-  // A declined step's output is the Reviewer's reason, which the notes already give.
-  const output = tool.review?.verdict === 'declined' ? '' : tool.output
+  const { icon: Icon, label, detail, state, isShell, hasBody, output, showsInput, sizeLabel } = stepParts(entry, tool)
   const approved = tool.review?.by === 'reviewer' && tool.review.verdict === 'approved'
   const warned = Boolean(tool.warnings?.length)
   const additions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'add').length, 0) ?? 0
   const deletions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'del').length, 0) ?? 0
-  const content = tool.input.content
-  const sizeLabel =
-    typeof content === 'string' && content.length > 0
-      ? content.length >= 1024
-        ? `${Math.round(content.length / 1024)}KB`
-        : `${content.length}B`
-      : ''
+  const open = expanded || found
 
   return (
-    <div className={cx('tool-row', `tool-${state}`, nested && 'is-nested')}>
-      <button type="button" className="tool-row-toggle" aria-expanded={hasBody ? expanded : undefined} onClick={() => setExpanded((value) => !value)}>
+    <div ref={rowRef} className={cx('tool-row', `tool-${state}`, nested && 'is-nested')}>
+      <button
+        ref={head}
+        type="button"
+        className="tool-row-toggle"
+        aria-expanded={hasBody ? open : undefined}
+        onClick={() => {
+          // Find holds the step open: closing it by hand keeps it closed for this search.
+          if (found) {
+            dismiss()
+            setExpanded(false)
+          } else setExpanded((value) => !value)
+        }}
+      >
         <Icon size={14} className="tool-row-icon" />
         <span className="tool-row-label">{label}</span>
         {detail && <span className="tool-row-detail">{detail}</span>}
@@ -252,7 +307,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
         {(state === 'rejected' || state === 'error') && <XCircle size={13} className="tool-row-state is-bad" />}
       </button>
 
-      <Collapse open={expanded && hasBody}>
+      <Collapse open={open && hasBody} instant={found}>
         <div className={cx('tool-row-body', isShell && 'is-card')}>
           {isShell ? (
             <>
@@ -269,9 +324,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
               <StepNotes tool={tool} />
               {tool.diff && tool.diff.length > 0 && <DiffView diff={tool.diff} />}
               {output && <pre className="tool-row-output">{output}</pre>}
-              {!tool.diff?.length && !output && !tool.review && Object.keys(tool.input ?? {}).length > 0 && (
-                <pre className="tool-row-output">{JSON.stringify(tool.input, null, 2)}</pre>
-              )}
+              {showsInput && <pre className="tool-row-output">{JSON.stringify(tool.input, null, 2)}</pre>}
             </>
           )}
         </div>
@@ -280,19 +333,43 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
   )
 }
 
+/** True when the rows of these steps, or what they show opened, hold the words find looks for. */
+export function stepsHold(entries: readonly ConversationEntry[], needle: string): boolean {
+  return entries.some((entry) => {
+    const text = foldedStep(entry)
+    return text.head.includes(needle) || text.body.includes(needle)
+  })
+}
+
 /** Several small steps of one kind as a single line ("Read 4 files") that opens into its rows. */
 function GroupRowView({ kind, entries }: { kind: StepKind; entries: ConversationEntry[] }) {
-  const [open, setOpen] = useState(false)
+  const [own, setOpen] = useState(false)
+  const head = useRef<HTMLButtonElement>(null)
+  const reveal = useCallback(() => setOpen(true), [])
+  const groupRef = useRevealRef(head, reveal)
+  const { found, dismiss } = useFoldFind(useCallback((needle: string) => stepsHold(entries, needle), [entries]))
+  const open = own || found
   const Icon = KIND_ICON[kind]
   const running = entries.some((entry) => entry.tool?.state === 'running' || entry.tool?.state === 'reviewing')
   return (
-    <div className="tool-row tool-group">
-      <button type="button" className="tool-row-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+    <div ref={groupRef} className="tool-row tool-group">
+      <button
+        ref={head}
+        type="button"
+        className="tool-row-toggle"
+        aria-expanded={open}
+        onClick={() => {
+          if (found) {
+            dismiss()
+            setOpen(false)
+          } else setOpen((value) => !value)
+        }}
+      >
         <Icon size={14} className="tool-row-icon" />
         <span className="tool-row-label">{summarizeSteps(entries)}</span>
         {running ? <Loader2 size={13} className="spin tool-row-state" /> : <ChevronRight size={13} className={cx('tool-row-state', 'group-chevron', open && 'is-open')} />}
       </button>
-      <Collapse open={open}>
+      <Collapse open={open} instant={found}>
         <div className="group-rows">
           {entries.map((entry) => (
             <StepRow key={entry.id} entry={entry} nested />

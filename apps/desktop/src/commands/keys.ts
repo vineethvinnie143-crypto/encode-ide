@@ -107,3 +107,87 @@ export function matchesChord(event: KeyEventLike, chord: Chord): boolean {
 export function worksWhileTyping(chord: Chord): boolean {
   return chord.ctrl || chord.alt || chord.meta || /^f\d{1,2}$/.test(chord.key)
 }
+
+/** One name for a chord however it was written ("ctrl+shift+p" and "Ctrl+Shift+P" alike), to compare chords by. */
+export function chordId(chord: Chord): string {
+  return `${chord.ctrl ? 'Ctrl+' : ''}${chord.alt ? 'Alt+' : ''}${chord.shift ? 'Shift+' : ''}${chord.meta ? 'Meta+' : ''}${chord.key}`
+}
+
+/** The same for chord text; text that is not a chord stands for itself. */
+export function chordKey(text: string): string {
+  const chord = parseChord(text)
+  return chord ? chordId(chord) : text
+}
+
+/** True when two lists name the same chords in the same order. */
+export function sameChords(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((text, index) => chordKey(text) === chordKey(b[index]))
+}
+
+const SHOWN: Record<string, string> = {
+  escape: 'Esc',
+  arrowup: 'Up',
+  arrowdown: 'Down',
+  arrowleft: 'Left',
+  arrowright: 'Right',
+  pageup: 'PageUp',
+  pagedown: 'PageDown',
+  '+': 'Plus',
+}
+
+/** A chord written the way eNCode shows shortcuts: "Ctrl+Shift+K", "Alt+Up", "Shift+F3", "Ctrl+Plus". */
+export function formatChord(chord: Chord): string {
+  const { key } = chord
+  const name = SHOWN[key] ?? (key.length === 1 ? key.toUpperCase() : /^num\d$/.test(key) ? `Num${key.slice(3)}` : key.charAt(0).toUpperCase() + key.slice(1))
+  return `${chord.ctrl ? 'Ctrl+' : ''}${chord.alt ? 'Alt+' : ''}${chord.shift ? 'Shift+' : ''}${chord.meta ? 'Meta+' : ''}${name}`
+}
+
+const MODIFIER_KEYS = new Set(['control', 'shift', 'alt', 'meta', 'altgraph', 'os', 'capslock', 'numlock', 'scrolllock', 'fn', 'dead', 'unidentified', 'process'])
+
+/** The chord a key press makes, or null while only modifiers are down (or for a key that names nothing). */
+export function chordOfEvent(event: KeyEventLike): Chord | null {
+  const key = eventKey(event)
+  if (!key || MODIFIER_KEYS.has(key)) return null
+  return { ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey, key }
+}
+
+/** Chords that stay Windows', every text field's, or the computer tool's, and what each does there. */
+const RESERVED: Record<string, string> = {
+  'Alt+f4': 'Alt+F4 closes the window.',
+  'Ctrl+Alt+delete': 'Windows keeps Ctrl+Alt+Delete.',
+  'Ctrl+Shift+escape': 'Windows keeps Ctrl+Shift+Esc for the Task Manager.',
+  'Ctrl+Alt+escape': 'Ctrl+Alt+Esc stops the agent using the computer, from anywhere.',
+  'Ctrl+escape': 'Windows keeps Ctrl+Esc for the Start menu.',
+  'Shift+f10': 'Shift+F10 opens the menu for what has the focus.',
+  'Ctrl+c': 'Ctrl+C copies, in every field.',
+  'Ctrl+x': 'Ctrl+X cuts, in every field.',
+  'Ctrl+v': 'Ctrl+V pastes, in every field.',
+  'Ctrl+z': 'Ctrl+Z undoes, in every field.',
+  'Ctrl+y': 'Ctrl+Y redoes, in every field.',
+  'Ctrl+Shift+z': 'Ctrl+Shift+Z redoes, in every field.',
+  'Ctrl+a': 'Ctrl+A selects all, in every field.',
+  'Ctrl+enter': 'Ctrl+Enter sends from the message box, a comment and a commit message.',
+}
+
+/** Keys that, with Ctrl and maybe Shift, move or delete by words in every text field. */
+const TEXT_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end', 'pageup', 'pagedown', 'backspace', 'delete', 'insert'])
+/** Named keys a shortcut can use besides those: the rest (media keys, Print Screen) are the system's. */
+const NAMED_KEYS = new Set([...TEXT_KEYS, 'escape', 'enter', 'tab', 'space'])
+
+/** Why a chord cannot be a shortcut, or null when it can. */
+export function chordProblem(chord: Chord): string | null {
+  const { key } = chord
+  if (chord.meta) return 'Shortcuts with the Windows key belong to Windows.'
+  if (chord.ctrl && chord.alt && [...key].length === 1 && !/^[a-z0-9]$/.test(key)) return `Ctrl+Alt with ${key} types characters on many keyboards. Use a letter or a digit.`
+  const functionKey = /^f([1-9]|1\d|2[0-4])$/.test(key)
+  // Settings keep chords as ASCII text (see shared/keybindings), so other keys are refused here rather than lost there.
+  if (!functionKey && !NAMED_KEYS.has(key) && !/^num\d$/.test(key) && !/^[\x21-\x7e]$/.test(key)) {
+    return 'That key cannot be part of a shortcut. Try a letter, a digit or a function key.'
+  }
+  if (!chord.ctrl && !chord.alt && !functionKey) return 'Add Ctrl or Alt, or use a function key, so typing stays typing.'
+  const reserved = RESERVED[chordId(chord)]
+  if (reserved) return reserved
+  if (chord.ctrl && !chord.alt && TEXT_KEYS.has(key)) return `${formatChord(chord)} moves or deletes by words, in every field.`
+  if (chord.alt && !chord.ctrl && /^(num\d|tab|space|escape)$/.test(key)) return `Windows keeps ${formatChord(chord)}.`
+  return null
+}

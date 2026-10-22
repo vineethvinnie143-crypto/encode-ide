@@ -151,6 +151,25 @@
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
 }
+/* A message sent while the agent worked says so at all times; its time and Copy wait for hover like the others. */
+.turn-user.is-steer .msg-actions {
+  opacity: 1;
+}
+.turn-user.is-steer .msg-actions > :not(.msg-steer-tag) {
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.turn:hover .turn-user.is-steer .msg-actions > *,
+.turn-user.is-steer .msg-actions:focus-within > * {
+  opacity: 1;
+}
+.msg-steer-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  color: var(--text-3);
+}
 .msg-model {
   height: 20px;
   padding: 0 7px;
@@ -410,4 +429,76 @@
 }
 .latest-btn:hover {
   background: var(--surface-2);
+}
+
+/* Find in the session (Ctrl+F): a bar over the top right of the thread, and the marks it leaves in the text */
+.find-bar {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 6;
+  width: min(392px, calc(100% - 40px));
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  animation: find-bar-in var(--dur-3) var(--ease-out);
+}
+.find-bar:focus-within {
+  border-color: var(--focus);
+}
+.find-bar-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.find-bar-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 6px;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.find-bar-input::placeholder {
+  color: var(--text-3);
+}
+.find-bar-count {
+  flex-shrink: 0;
+  padding: 0 4px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.find-bar[data-state='none'] .find-bar-count {
+  color: var(--danger);
+}
+.find-bar-rule {
+  flex-shrink: 0;
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+@keyframes find-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+::highlight(enc-find) {
+  background-color: var(--find-match);
+}
+::highlight(enc-find-current) {
+  background-color: var(--find-current);
+  color: var(--find-current-text);
 }

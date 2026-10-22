@@ -130,11 +130,11 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
 const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13 }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
-async function pressKey(key, { ctrl = false, shift = false } = {}) {
+async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
   const common = {
     key,
     code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
-    modifiers: (ctrl ? 2 : 0) | (shift ? 8 : 0),
+    modifiers: (alt ? 1 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0),
     windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
   }
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
@@ -607,6 +607,8 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runStopChecks()
+  await runSteerChecks()
+  await runEffortChecks()
   await runSubagentChecks()
   await runWebChecks()
   await runSearchChecks()
@@ -1532,6 +1534,162 @@ async function runStopChecks() {
   console.log('[smoke] Esc twice: ok')
 }
 
+/**
+ * Messages sent while the agent works. By default Enter queues and Ctrl+Enter steers: the Steering row shows until the
+ * request takes the message with the command's result, the model reads it, and the thread shows it between the two
+ * parts of the turn. With Steer chosen in Settings the keys swap, and a queued message can be steered with its button.
+ */
+async function runSteerChecks() {
+  console.log('[smoke] --- steering a running request ---')
+  const steeringRows = "document.querySelectorAll('.queue-row.is-steering').length"
+  const queuedRows = "document.querySelectorAll('.queue-row:not(.is-steering)').length"
+  const typeAndPress = async (text, init) => {
+    await typeInto('.composer-input', text)
+    await sleep(250)
+    await composerKey({ key: 'Enter', ...init })
+  }
+
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:steer-check] Run the check.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the command asks first')
+  const placeholder = await evaluate("document.querySelector('.composer-input').placeholder")
+  if (!placeholder.includes('Ctrl+Enter steers')) throw new Error(`the message box does not say how to steer: ${placeholder}`)
+  await typeAndPress('Also say tabs, please.', { ctrlKey: true })
+  await waitFor(`${steeringRows} === 1 && ${queuedRows} === 0`, 4000, 'Ctrl+Enter hands the message to the running request')
+  if ((await composerValue()) !== '') throw new Error('steering did not clear the message box')
+  await screenshot('ui-dark-steering.png')
+  await click('.approval-card .btn.primary')
+  await driveAgent('16-steer')
+  await waitFor("!document.querySelector('.queue-strip')", 4000, 'the Steering row goes once the request took the message')
+  await waitFor("document.body.textContent.includes('Steered by: Also say tabs, please. Steer check finished.')", 8000, 'the model read the message')
+
+  const kinds = await evaluate('window.eNCode.agent.history().then((history) => history.entries.map((entry) => entry.kind).join(" "))')
+  if (kinds !== 'user assistant tool steer assistant') throw new Error(`the steered turn holds ${kinds}`)
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const roles = sent.messages.filter((message) => message.role !== 'system').map((message) => message.role).join(' ')
+  if (roles !== 'user assistant tool user') throw new Error(`the provider was sent ${roles}`)
+  // One request: the message is a part of the turn, not a turn of its own, and sits between its two parts.
+  const thread = await evaluate(`(() => {
+    const turns = document.querySelectorAll('.thread > .turn')
+    const turn = turns[turns.length - 1]
+    const steer = turn?.querySelector('.turn-user.is-steer')
+    return {
+      turns: turns.length,
+      steer: steer?.querySelector('.chat-user-bubble')?.textContent ?? '',
+      tag: steer?.querySelector('.msg-steer-tag')?.textContent ?? '',
+      logBefore: Boolean(steer?.previousElementSibling?.classList.contains('worklog')),
+      answerAfter: steer?.nextElementSibling?.textContent ?? '',
+    }
+  })()`)
+  if (thread.steer !== 'Also say tabs, please.' || thread.tag !== 'Steered' || !thread.logBefore || !thread.answerAfter.includes('Steered by:')) {
+    throw new Error(`the thread shows the steered message as ${JSON.stringify(thread)}`)
+  }
+  await screenshot('ui-dark-steered-turn.png')
+
+  // Steer as the default: Enter steers and Ctrl+Enter queues; a queued message is steered with its button.
+  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
+  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await waitFor("!!document.querySelector('[aria-label=\"What Enter does while the agent works\"]')", 4000, 'the follow-up choice')
+  await click('[aria-label="What Enter does while the agent works"] .ui-segment', 'Steer')
+  await click('.settings-footer .btn.primary', 'Save')
+  await waitFor("window.eNCode.settings.get().then((settings) => settings.followUp === 'steer')", 4000, 'Steer is saved')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
+
+  await sendPrompt('[scenario:steer-check] Run it again.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the command asks again')
+  if (!(await evaluate("document.querySelector('.composer-input').placeholder")).includes('Ctrl+Enter queues')) throw new Error('the message box does not say Ctrl+Enter queues')
+  await typeAndPress('First note.', {})
+  await waitFor(`${steeringRows} === 1`, 4000, 'Enter steers when Steer is chosen')
+  await typeAndPress('Second note.', { ctrlKey: true })
+  await waitFor(`${queuedRows} === 1`, 4000, 'Ctrl+Enter queues when Steer is chosen')
+  await click('.queue-row:not(.is-steering) [aria-label^="Steer now"]')
+  await waitFor(`${steeringRows} === 2 && ${queuedRows} === 0`, 4000, 'Steer now hands the queued message over')
+  await click('.approval-card .btn.primary')
+  await driveAgent('16-steer-default')
+  await waitFor("document.body.textContent.includes('Steered by: Second note. Steer check finished.')", 8000, 'the model read both, in order')
+  const steered = await evaluate("[...document.querySelectorAll('.thread > .turn:last-child .turn-user.is-steer .chat-user-bubble')].map((node) => node.textContent).join(' | ')")
+  if (steered !== 'First note. | Second note.') throw new Error(`the thread shows the steered messages as ${steered}`)
+  if (await evaluate("!!document.querySelector('.queue-strip')")) throw new Error('a message was left waiting')
+
+  await evaluate("window.eNCode.settings.save({ followUp: 'queue' })")
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the steering checks')
+  console.log('[smoke] steering: ok')
+}
+
+/**
+ * Effort: the chip under the message box sets how hard the main model thinks, Ctrl+Shift+M and /effort reach the same
+ * choice, each role has its own under Settings, Roles, and the level goes out with the request to a model that has a
+ * thinking dial.
+ */
+async function runEffortChecks() {
+  console.log('[smoke] --- effort ---')
+  const efforts = async () => JSON.stringify(await evaluate('window.eNCode.settings.get().then((settings) => settings.efforts)'))
+  const chip = "(document.querySelector('.effort-chip')?.textContent ?? '')"
+  const pick = (label) =>
+    evaluate(`(() => {
+      const item = [...document.querySelectorAll('.ui-menu [role^="menuitem"]')].find((node) => node.querySelector('.ui-menu-label')?.textContent === ${JSON.stringify(label)})
+      item?.click()
+      return Boolean(item)
+    })()`)
+
+  await evaluate('window.eNCode.agent.reset()')
+  await waitFor(`${chip} === 'Effort'`, 8000, 'the effort chip, with the effort left to the model')
+  await click('.effort-chip')
+  await waitFor(menuOpen('Effort'), 4000, 'the effort menu')
+  const levels = await evaluate("[...document.querySelectorAll('.ui-menu [role=menuitemcheckbox] .ui-menu-label')].map((node) => node.textContent).join()")
+  if (levels !== 'Model default,Low,Medium,High,Extra high,Max') throw new Error(`the effort menu lists ${levels}`)
+  await sleep(250)
+  await screenshot('ui-dark-effort-menu.png')
+  if (!(await pick('High'))) throw new Error('no High in the effort menu')
+  await waitFor(`${chip} === 'High'`, 4000, 'the chip names the level chosen')
+  if ((await efforts()) !== '{"main":"high"}') throw new Error(`the efforts are ${await efforts()}`)
+
+  // Ctrl+Shift+M from the message box opens the same menu, with the level in use checked.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true })
+  await waitFor(menuOpen('Effort'), 4000, 'Ctrl+Shift+M opens the effort menu')
+  const checked = await evaluate("document.querySelector('.ui-menu [aria-checked=true] .ui-menu-label')?.textContent ?? ''")
+  if (checked !== 'High') throw new Error(`the effort menu checks ${checked}`)
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the effort menu')
+
+  // /effort with a level sets it and says so, and empties the box.
+  await typeInto('.composer-input', '/effort low')
+  await sleep(250)
+  await composerKey({ key: 'Enter' })
+  await waitFor(`${chip} === 'Low' && document.querySelector('.composer-input').value === ''`, 4000, '/effort low sets Low')
+  await waitFor("[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'The model thinks at Low effort.')", 4000, '/effort says what it set')
+
+  // Each role has its own effort, saved with the other settings.
+  await click('.effort-chip')
+  await waitFor(menuOpen('Effort'), 4000, 'the effort menu again')
+  if (!(await pick('Effort for each role…'))) throw new Error('no way from the effort menu to the roles')
+  await waitFor("!!document.querySelector('.settings-modal .settings-roles .role-effort')", 8000, 'the Roles settings with an effort for each role')
+  const shown = await evaluate("[...document.querySelectorAll('.role-row')].map((row) => row.dataset.role + '=' + row.querySelector('.role-effort select').value).join()")
+  if (shown !== 'main=low,explore=default,planner=default,reviewer=default,summarizer=default,utility=default') throw new Error(`the roles show ${shown}`)
+  await selectOption('.role-row[data-role="explore"] .role-effort select', 'max')
+  await sleep(250)
+  await screenshot('ui-dark-role-efforts.png')
+  await click('.settings-footer .btn.primary', 'Save')
+  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
+  if ((await efforts()) !== '{"main":"low","explore":"max"}') throw new Error(`the efforts are ${await efforts()} after Save`)
+
+  // A model with a thinking dial is sent the main role's level, not Explore's.
+  const before = await evaluate('window.eNCode.settings.get().then((settings) => settings.roles)')
+  await evaluate("window.eNCode.settings.save({ roles: { main: ['local-mock:gpt-5-mock'] } })")
+  await sendPrompt('[scenario:follow-up] Think it over.')
+  await driveAgent('16-effort')
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  if (sent.model !== 'gpt-5-mock' || sent.effort !== 'low') throw new Error(`the model was sent ${JSON.stringify({ model: sent.model, effort: sent.effort })}`)
+
+  await evaluate(`window.eNCode.settings.save({ roles: ${JSON.stringify(before)}, efforts: {} })`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the effort checks')
+  console.log('[smoke] effort: ok')
+}
+
 async function runSubagentChecks() {
   console.log('[smoke] --- subagents ---')
 
@@ -1880,6 +2038,105 @@ async function runSessionViewChecks() {
   console.log('[smoke] session view checks passed')
 }
 
+const FIND_STATE = `(() => {
+  const marks = CSS.highlights.get('enc-find')
+  const current = CSS.highlights.get('enc-find-current')
+  return {
+    bar: Boolean(document.querySelector('.find-bar')),
+    count: document.querySelector('.find-bar-count')?.textContent ?? null,
+    marks: marks?.size ?? 0,
+    current: current ? [...current].map((range) => range.toString()).join('|') : '',
+    logOpen: document.querySelector('.worklog-head')?.getAttribute('aria-expanded'),
+    focus: document.activeElement?.className ?? '',
+  }
+})()`
+
+/**
+ * Ctrl+F in the session after the demo run: words that are only in the folded work log (the note the demo wrote, in
+ * the Write step's diff) open it and are marked and counted; the note's path, named five times (twice in the Write step,
+ * in the Read step, the reply and the change card's folded list of files), steps round with Enter and back with
+ * Shift+Enter; words that are nowhere fold the log back; Esc closes the bar with the log left open
+ * around the match it closed on and the focus back in the message box; Ctrl+F again keeps the words; and words
+ * selected in the thread start a search.
+ */
+async function runFindChecks() {
+  console.log('[smoke] --- find in the session ---')
+  const countIs = (text) => `document.querySelector('.find-bar-count')?.textContent === ${JSON.stringify(text)}`
+  if ((await evaluate("document.querySelector('.worklog-head')?.getAttribute('aria-expanded')")) === 'true') await click('.worklog-head')
+  await waitFor("document.querySelectorAll('.worklog-body').length === 0", 4000, 'the work log folds')
+  await evaluate("document.querySelector('.composer-input')?.focus()")
+  await pressKey('f', { ctrl: true })
+  await waitFor("document.activeElement?.classList.contains('find-bar-input') === true", 4000, 'Ctrl+F opens the find bar with the cursor in it')
+  await typeInto('.find-bar-input', 'Written by  the OFFLINE demo')
+  await waitFor(countIs('1 of 1'), 4000, 'the words written in the folded work log')
+  let state = await evaluate(FIND_STATE)
+  console.log('[smoke] find:', JSON.stringify(state))
+  if (state.logOpen !== 'true' || state.marks !== 1 || state.current !== 'written by the offline demo') {
+    throw new Error('find did not open the work log and mark the words written in it')
+  }
+  await screenshot('ui-dark-find.png')
+
+  await typeInto('.find-bar-input', 'DEMO-NOTE.md')
+  await waitFor("/^[1-5] of 5$/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the note named five times')
+  if ((await evaluate(FIND_STATE)).current.toLowerCase() !== 'demo-note.md') throw new Error('the match in view is not marked')
+  const first = await evaluate("document.querySelector('.find-bar-count').textContent")
+  await pressKey('Enter')
+  await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Enter moves to the next match')
+  for (let press = 0; press < 4; press++) await pressKey('Enter')
+  await waitFor(countIs(first), 4000, 'five presses of Enter go round to the same match')
+  await pressKey('Enter', { shift: true })
+  await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Shift+Enter goes back')
+
+  await typeInto('.find-bar-input', 'no such words anywhere')
+  await waitFor(countIs('No results'), 4000, 'No results')
+  state = await evaluate(FIND_STATE)
+  if (state.marks !== 0) throw new Error('marks stayed for words that are not there')
+  if (state.logOpen !== 'false') throw new Error('the work log find opened did not fold back when its words went')
+  await typeInto('.find-bar-input', 'written by the offline demo')
+  await waitFor(countIs('1 of 1'), 4000, 'found again')
+
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Esc closes the find bar')
+  state = await evaluate(FIND_STATE)
+  if (state.marks !== 0 || state.current) throw new Error('the marks stayed after the bar closed')
+  if (state.logOpen !== 'true') throw new Error('the work log folded away from the match the bar closed on')
+  if (!state.focus.includes('composer-input')) throw new Error(`the focus went to "${state.focus}", not back to the message box`)
+
+  await pressKey('f', { ctrl: true })
+  await waitFor(
+    "(() => { const input = document.querySelector('.find-bar-input'); return input?.value === 'written by the offline demo' && document.activeElement === input && input.selectionStart === 0 && input.selectionEnd === input.value.length })()",
+    4000,
+    'Ctrl+F opens on the last words, selected',
+  )
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Esc closes it again')
+
+  // Words selected in the reply start a search for them.
+  const selected = await evaluate(`(() => {
+    const reply = [...document.querySelectorAll('.msg-assistant')].at(-1)
+    const walker = document.createTreeWalker(reply, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.data.indexOf('approval flow')
+      if (at < 0) continue
+      const range = document.createRange()
+      range.setStart(node, at)
+      range.setEnd(node, at + 'approval flow'.length)
+      getSelection().removeAllRanges()
+      getSelection().addRange(range)
+      return true
+    }
+    return false
+  })()`)
+  if (!selected) throw new Error('the demo reply has no "approval flow" to select')
+  await pressKey('f', { ctrl: true })
+  await waitFor("document.querySelector('.find-bar-input')?.value === 'approval flow'", 4000, 'Ctrl+F looks for the selected words')
+  await waitFor("/ of [1-9]/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the selected words are found')
+  await click('.find-bar [aria-label="Close"]')
+  await waitFor("!document.querySelector('.find-bar')", 4000, 'Close closes the find bar')
+  await evaluate('getSelection().removeAllRanges()')
+  console.log('[smoke] find in the session: ok')
+}
+
 /**
  * The side panel and the bottom panel: tabs and the New tab page, a Browser tab that remembers its
  * page, the three layouts, resizing, and the shortcuts that drive them.
@@ -2122,10 +2379,176 @@ async function runReviewChecks() {
   await until(async () => (await fs.readFile(sample, 'utf8')).includes('second change'), 10000, 'Ctrl+Z brings the reverted change back')
   await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 1", 10000, 'the change shows again')
   console.log('[smoke] review: staged a hunk, committed it, reverted a file and undid that')
+  await runReviewerChecks()
 
   // Leave the side panel as it was found.
   await key({ key: 'w', code: 'KeyW', ctrlKey: true })
   await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+}
+
+/**
+ * Ask the Reviewer, with the unstaged change of the review checks in view: the offline demo says it reads no code;
+ * a real model is sent the change with numbered lines and no tools, and its findings become comments on those lines,
+ * marked with their priority, while a finding on a file the change does not touch is dropped.
+ */
+async function runReviewerChecks() {
+  console.log('[smoke] --- the Reviewer ---')
+  const findings = "[...document.querySelectorAll('.review-pane .rv-comment.is-reviewer')]"
+  const verdict = "(document.querySelector('.review-pane .rv-verdict')?.textContent ?? '')"
+
+  await click('.review-pane .rv-ask')
+  await waitFor(`!!document.querySelector('.review-pane .rv-verdict.is-clean') && ${verdict}.includes('offline demo does not read code')`, 15000, 'the demo says it reads no code')
+  if (await evaluate(`${findings}.length`)) throw new Error('the demo left findings')
+
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'local-mock' })")
+  await typeInto('.composer-input', '/review unstaged')
+  await sleep(250)
+  await composerKey({ key: 'Enter' })
+  await waitFor(`${findings}.length === 2 && ${verdict}.includes('The Reviewer left 2 comments.')`, 30000, '/review leaves the findings as comments')
+  const shown = await evaluate(`${findings}.map((node) => ({
+    priority: node.dataset.priority,
+    head: node.querySelector('.rv-comment-where')?.textContent ?? '',
+    title: node.querySelector('.rv-finding-title')?.textContent ?? '',
+  }))`)
+  if (JSON.stringify(shown.map((item) => item.priority)) !== '["P1","P3"]') throw new Error(`the findings are ${JSON.stringify(shown)}`)
+  if (shown[0].head !== 'Reviewer · Line 35' || shown[0].title !== 'Divides by zero when the list is empty') throw new Error(`the first finding reads ${JSON.stringify(shown[0])}`)
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-code-review`)).json()
+  if (sent.tools.length) throw new Error(`the Reviewer was offered tools: ${JSON.stringify(sent.tools)}`)
+  if (!sent.user.includes('<file path="src/review-me.ts" change="modified">') || !sent.user.includes('+35 | export const value35 = 3500 // second change')) {
+    throw new Error(`the Reviewer was not sent the numbered change: ${sent.user.slice(0, 400)}`)
+  }
+  if (!(await evaluate("document.querySelector('.review-pane .rv-foot')?.textContent ?? ''")).includes('Send 2 comments')) throw new Error('the findings cannot be sent to the agent')
+  await sleep(300)
+  await screenshot('ui-dark-reviewer.png')
+
+  await evaluate(`${findings}[1].querySelector('[aria-label="Delete comment"]').click()`)
+  await waitFor(`${findings}.length === 1`, 4000, 'a finding can be deleted')
+  await click('.review-pane .rv-verdict [aria-label="Close"]')
+  await waitFor("!document.querySelector('.review-pane .rv-verdict')", 4000, 'the verdict closes, and its comments stay')
+  if ((await evaluate(`${findings}.length`)) !== 1) throw new Error('closing the verdict took the comments')
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'demo' })")
+  console.log('[smoke] the Reviewer: ok')
+}
+
+/**
+ * Changing shortcuts in Help > Keyboard shortcuts: a chord that cannot be one is refused with the reason, a free one
+ * works at once, in the menus and after a restart, one another command has asks first, Esc stops listening without
+ * closing the list, and Reset all puts every shortcut back, with an Undo that can be pressed over the dialog.
+ */
+async function runShortcutChecks() {
+  console.log('[smoke] --- changing shortcuts ---')
+  const row = (id) => `.shortcuts-row[data-shortcut="${id}"]`
+  const keysOf = (id) =>
+    evaluate(`[...document.querySelectorAll('${row(id)} .shortcuts-keys .ui-kbd-group')].map((group) => group.getAttribute('aria-label')).join(' or ')`)
+  const saved = () => evaluate('window.eNCode.settings.get().then((settings) => JSON.stringify(settings.keybindings))')
+  const bottomShown = "(!!document.querySelector('.bottom-panel') && !document.querySelector('.bottom-panel').classList.contains('is-closed'))"
+  const sidebarShown = "!!document.querySelector('.session-sidebar')"
+  const onTop = (selector) =>
+    evaluate(`(() => {
+      const node = document.querySelector(${JSON.stringify(selector)})
+      if (!node) return false
+      const box = node.getBoundingClientRect()
+      return node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2))
+    })()`)
+  const openList = async () => {
+    await key({ key: '/', code: 'Slash', ctrlKey: true })
+    await waitFor("!!document.querySelector('.shortcuts-dialog .shortcuts-row')", 4000, 'Ctrl+/ opens the shortcuts')
+  }
+  const listen = async (id) => {
+    await click(`${row(id)} .shortcuts-keys`)
+    await waitFor(`document.activeElement?.matches('${row(id)} .shortcuts-recorder') === true`, 4000, `the ${id} row listens for a new shortcut`)
+  }
+
+  await openList()
+  await typeInto('.shortcuts-filter', 'bottom panel')
+  await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'the list finds the row by name')
+  await typeInto('.shortcuts-filter', 'ctrl j')
+  await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'and by its keys')
+  await listen('view.bottomPanel')
+  await pressKey('c', { ctrl: true })
+  await waitFor("/copies/.test(document.querySelector('.shortcuts-note.is-refused')?.textContent ?? '')", 4000, 'Ctrl+C is refused, and the row says why')
+  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('a refused chord closed the list')
+  await pressKey('j', { ctrl: true, shift: true })
+  await waitFor(`!document.querySelector('.shortcuts-recorder') && !!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Ctrl+Shift+J is taken')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl Shift J') throw new Error(`the bottom panel shows ${await keysOf('view.bottomPanel')}`)
+  await waitFor(`document.activeElement?.matches('${row('view.bottomPanel')} .shortcuts-keys') === true`, 4000, 'the focus is back on the row')
+  if ((await saved()) !== '{"view.bottomPanel":["Ctrl+Shift+J"]}') throw new Error(`the settings keep ${await saved()}`)
+
+  // A chord that another command has asks before it moves.
+  await typeInto('.shortcuts-filter', '')
+  await waitFor("document.querySelectorAll('.shortcuts-row').length > 30", 4000, 'every row again')
+  await listen('view.bottomPanel')
+  await pressKey('b', { ctrl: true })
+  await waitFor("/Toggle sidebar/.test(document.querySelector('.shortcuts-take')?.textContent ?? '')", 4000, 'Ctrl+B asks first: the sidebar has it')
+  await waitFor("document.activeElement?.matches('.shortcuts-take .btn.primary') === true", 4000, 'Use it here has the focus')
+  await sleep(300)
+  await screenshot('ui-dark-shortcuts-take.png')
+  await click('.shortcuts-take .btn.primary')
+  await waitFor(`!document.querySelector('.shortcuts-take')`, 4000, 'Use it here')
+  await waitFor(`${JSON.stringify('Ctrl B')} === [...document.querySelectorAll('${row('view.bottomPanel')} .shortcuts-keys .ui-kbd-group')].map((group) => group.getAttribute('aria-label')).join(' or ')`, 4000, 'the bottom panel has Ctrl+B')
+  if ((await keysOf('view.sidebar')) !== 'Ctrl Shift S') throw new Error(`the sidebar shows ${await keysOf('view.sidebar')}, not just Ctrl+Shift+S`)
+  if (!(await evaluate(`!!document.querySelector('${row('view.sidebar')} .shortcuts-changed')`))) throw new Error('the sidebar does not show that it changed')
+
+  // Esc stops listening and leaves the list open; a second Esc closes it.
+  await listen('view.sidebar')
+  await pressKey('Escape')
+  await waitFor(`!document.querySelector('.shortcuts-recorder') && document.activeElement?.matches('${row('view.sidebar')} .shortcuts-keys') === true`, 4000, 'Esc stops listening')
+  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('Esc while listening closed the list')
+  await sleep(300)
+  await screenshot('ui-dark-shortcuts-changed.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'a second Esc closes the list')
+
+  // The new shortcut works, the old one is gone, and the sidebar keeps the one it has left.
+  let shown = await evaluate(bottomShown)
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+B toggles the bottom panel now')
+  if (!(await evaluate(sidebarShown))) throw new Error('Ctrl+B still hid the sidebar')
+  await key({ key: 'j', ctrlKey: true })
+  await sleep(300)
+  if ((await evaluate(bottomShown)) !== !shown) throw new Error('Ctrl+J still toggles the bottom panel')
+  await key({ key: 'S', ctrlKey: true, shiftKey: true })
+  await waitFor(`!${sidebarShown}`, 4000, 'Ctrl+Shift+S still hides the sidebar')
+  await key({ key: 'S', ctrlKey: true, shiftKey: true })
+  await waitFor(sidebarShown, 4000, 'and shows it')
+
+  // After a restart: the menus show it, and it works.
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with changed shortcuts')
+  const menuKeys = "(() => { const item = [...document.querySelectorAll('.ui-menu .ui-menu-item')].find((node) => node.textContent.includes('Toggle bottom panel')); return item?.querySelector('.ui-menu-shortcut')?.getAttribute('aria-label') ?? '' })()"
+  await waitFor("!!document.querySelector('.tb-menu')", 8000, 'the menus')
+  await click('.tb-menu', 'View')
+  await waitFor(`${menuKeys} === 'Ctrl B'`, 8000, 'the View menu shows Ctrl+B for the bottom panel after a restart')
+  await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
+  await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the menu')
+  shown = await evaluate(bottomShown)
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+B works after a restart')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${shown}`, 4000, 'and toggles back')
+
+  // Reset all, with an Undo pressed over the dialog, then reset again for the checks that follow.
+  await openList()
+  await click('.shortcuts-bar .btn', 'Reset all')
+  await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all clears every change')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl J' || (await keysOf('view.sidebar')) !== 'Ctrl B or Ctrl Shift S') throw new Error('Reset all did not bring the shipped shortcuts back')
+  await waitFor("!!document.querySelector('.toast .toast-action')", 4000, 'Reset all offers Undo')
+  if (!(await onTop('.toast .toast-action'))) throw new Error('the Undo of Reset all is under the dialog')
+  await click('.toast .toast-action')
+  await waitFor(`!!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Undo brings the changes back')
+  if ((await keysOf('view.bottomPanel')) !== 'Ctrl B') throw new Error('Undo did not bring Ctrl+B back')
+  await click('.shortcuts-bar .btn', 'Reset all')
+  await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all again')
+  if ((await saved()) !== '{}') throw new Error(`the settings still keep ${await saved()}`)
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Esc closes the list')
+  await evaluate("document.querySelector('.toast-close')?.click()")
+  shown = await evaluate(bottomShown)
+  await key({ key: 'j', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${!shown}`, 4000, 'Ctrl+J toggles the bottom panel again')
+  await key({ key: 'j', ctrlKey: true })
+  await waitFor(`${bottomShown} === ${shown}`, 4000, 'and back')
+  console.log('[smoke] changing shortcuts: ok')
 }
 
 /**
@@ -2686,6 +3109,7 @@ try {
   )
   await screenshot('08-agent.png')
   await runSessionViewChecks()
+  await runFindChecks()
   await runComposerChecks()
   await runPaletteChecks()
 
@@ -2749,6 +3173,7 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runShortcutChecks()
   await runAboutChecks()
   await runPanelChecks()
   await runReviewChecks()

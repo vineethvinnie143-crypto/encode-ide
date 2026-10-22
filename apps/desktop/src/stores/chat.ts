@@ -14,6 +14,8 @@ import { enqueue, dequeue, moveQueued, removeQueued, takeQueued, mergeDraft, typ
 import { getActiveSessionId } from './active'
 import { appendTexts, createDeltaBuffer } from './deltas'
 import { useSettings } from './settings'
+import { isBusy } from './sidebar-model'
+import { useStatus } from './status'
 import { useUi } from './ui'
 
 export interface AskState {
@@ -40,6 +42,8 @@ interface ChatStore {
   draft: string
   /** Messages sent while the agent worked, by session, waiting to go out one by one. */
   queues: Record<string, Queued[]>
+  /** Messages handed to a session's running request that no step has taken yet, by session. */
+  steering: Record<string, Queued[]>
   tokensPerSecond: number
   streamStartedAt: number
   streamChars: number
@@ -55,6 +59,15 @@ interface ChatStore {
   answer(text: string): Promise<void>
   /** Holds a message until the agent is done. */
   enqueue(text: string, options?: { keepDraft?: boolean }): void
+  /**
+   * Hands a message to the running request, which reads it after the step it is on. A message no step takes (the
+   * request was ending, or a tool ended it) goes to the front of the queue, so it is the next request.
+   */
+  steer(text: string, options?: { keepDraft?: boolean }): void
+  /** Takes a queued message out of the queue: the running request reads it after its step, or, with none running, it is sent. */
+  sendQueued(id: string): void
+  /** Follows a session's messages handed to its request: one taken leaves the list; what an ended request left goes back to the queue. */
+  followSteers(event: AgentEvent): void
   removeQueued(id: string): void
   moveQueued(id: string, direction: -1 | 1): void
   /** Takes a queued message back into the composer to edit it. */
@@ -70,6 +83,15 @@ function upsertEntry(entries: ConversationEntry[], entry: ConversationEntry): Co
   const next = entries.slice()
   next[index] = entry
   return next
+}
+
+/** What a session's request was handed and did not take goes to the front of its queue, in the order it was sent. */
+function giveBack(sessionId: string): void {
+  useChat.setState((state) => {
+    const left = state.steering[sessionId]
+    if (!left?.length) return {}
+    return { steering: { ...state.steering, [sessionId]: [] }, queues: { ...state.queues, [sessionId]: [...left, ...(state.queues[sessionId] ?? [])] } }
+  })
 }
 
 /** The tokens of a conversation that has used none: a new, loaded or reset one counts from here. */
@@ -98,6 +120,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   loadedFor: '',
   draft: '',
   queues: {},
+  steering: {},
   tokensPerSecond: 0,
   streamStartedAt: 0,
   streamChars: 0,
@@ -227,6 +250,48 @@ export const useChat = create<ChatStore>((set, get) => ({
     const sessionId = getActiveSessionId()
     const queue = enqueue(get().queues[sessionId] ?? [], text, crypto.randomUUID())
     set({ queues: { ...get().queues, [sessionId]: queue }, ...(options?.keepDraft ? {} : { draft: '' }) })
+  },
+
+  steer: (text, options) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const sessionId = getActiveSessionId()
+    // The id is ours, so the entry the request shows for the message is known even if it comes before the answer.
+    const id = crypto.randomUUID()
+    set((state) => ({
+      steering: { ...state.steering, [sessionId]: [...(state.steering[sessionId] ?? []), { id, text: trimmed }] },
+      ...(options?.keepDraft ? {} : { draft: '' }),
+    }))
+    // Not taken: a request that still runs gives it back when it ends; one that is over gives it back now.
+    const refused = () => {
+      if (!isBusy(useStatus.getState().statusById[sessionId])) giveBack(sessionId)
+    }
+    void api.agent.steer(sessionId, trimmed, id).then((taken) => {
+      if (!taken) refused()
+    }, refused)
+  },
+
+  sendQueued: (id) => {
+    const sessionId = getActiveSessionId()
+    const { taken, rest } = takeQueued(get().queues[sessionId] ?? [], id)
+    if (!taken) return
+    set({ queues: { ...get().queues, [sessionId]: rest } })
+    if (get().running) get().steer(taken.text, { keepDraft: true })
+    else get().send(taken.text, undefined, { keepDraft: true })
+  },
+
+  followSteers: (event) => {
+    const sessionId = event.sessionId
+    if (!sessionId) return
+    if (event.type === 'entry') {
+      const list = get().steering[sessionId]
+      if (event.entry.kind === 'steer' && list?.some((item) => item.id === event.entry.id)) {
+        set((state) => ({ steering: { ...state.steering, [sessionId]: removeQueued(state.steering[sessionId] ?? [], event.entry.id) } }))
+      }
+      return
+    }
+    const ended = event.type === 'done' || event.type === 'error' || event.type === 'session-reset' || (event.type === 'status' && !isBusy(event.status))
+    if (ended) giveBack(sessionId)
   },
 
   removeQueued: (id) => {

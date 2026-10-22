@@ -2,14 +2,45 @@
  * What each slash command does when it runs from the message box. The list, the names and the parsing are in
  * picker.ts; each command reuses the action the menus and the palette run.
  */
+import { EFFORT_INFO, isEffort } from '@shared/models'
+import type { ReasoningEffort } from '@shared/types'
 import { agentActions } from '../../commands/agent'
 import { commandRegistry } from '../../commands/app'
+import type { ScopeKind } from '../../stores/review'
 import { useSessions } from '../../stores/sessions'
+import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import type { SlashCommand } from './picker'
 
 const ui = () => useUi.getState()
 const run = (id: string) => void commandRegistry.run(id)
+
+/** The effort `/effort` names: a level, as written or by its label ("extra high"); null for the model's default; undefined for words it does not know. */
+export function effortOf(words: string): ReasoningEffort | null | undefined {
+  const wanted = words.trim().toLowerCase().replace(/[\s_-]+/g, ' ')
+  if (['default', 'auto', 'model default', 'reset'].includes(wanted)) return null
+  if (wanted === 'extra high' || wanted === 'x high') return 'xhigh'
+  return isEffort(wanted) ? wanted : undefined
+}
+
+/** The view `/review` names: as the Review tab's menu does, or in the words people use for it. */
+export function reviewKindOf(words: string): ScopeKind | undefined {
+  const wanted = words.trim().toLowerCase().replace(/\s+/g, ' ')
+  const kinds: Record<string, ScopeKind> = {
+    unstaged: 'unstaged',
+    changes: 'unstaged',
+    'working tree': 'unstaged',
+    staged: 'staged',
+    index: 'staged',
+    branch: 'branch',
+    commit: 'commit',
+    'last commit': 'commit',
+    turn: 'turn',
+    'last turn': 'turn',
+    agent: 'turn',
+  }
+  return kinds[wanted]
+}
 
 export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Promise<void>>> = {
   plan: async (args) => {
@@ -20,10 +51,23 @@ export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Pro
   goal: (args) => (args.toLowerCase() === 'clear' ? agentActions.clearGoal() : agentActions.setGoal(args || undefined)),
   compact: () => agentActions.compact(),
   model: () => agentActions.openMenu('model'),
+  effort: async (args) => {
+    if (!args) return agentActions.chooseEffort()
+    const effort = effortOf(args)
+    if (effort === undefined) return ui().notify('info', `/effort takes low, medium, high, xhigh, max or default, not “${args}”.`)
+    await useSettings.getState().setEffort('main', effort)
+    ui().notify('success', effort ? `The model thinks at ${EFFORT_INFO[effort].label} effort.` : 'The model decides how hard to think.')
+  },
   policy: () => agentActions.openMenu('policy'),
   status: () => ui().setStatusOpen(true),
   diff: () => {
     if (!commandRegistry.run('view.review')) ui().notify('info', 'Open a folder to review its changes.')
+  },
+  review: (args) => {
+    if (!args) return agentActions.askReviewer()
+    const kind = reviewKindOf(args)
+    if (!kind) return ui().notify('info', `/review takes unstaged, staged, branch, commit or turn, not “${args}”.`)
+    return agentActions.askReviewer(kind)
   },
   undo: () => {
     if (agentActions.canUndo()) agentActions.undo()
