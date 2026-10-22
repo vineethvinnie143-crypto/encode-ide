@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { tempWorkspace } from '@encode/tools/testing'
+import { linkOrSkip, tempWorkspace } from '@encode/tools/testing'
 import { loadMemory, memoryFingerprint, renderMemory, MAX_FILE_CHARS } from './memory'
 
 const names = (files: { path: string }[], root: string) => files.map((file) => path.relative(root, file.path).split(path.sep).join('/'))
@@ -73,5 +73,38 @@ describe('project memory', () => {
     assert.match(renderMemory(after, true)!, /changed since you last read them/)
     assert.match(renderMemory(after)!, /Instructions for this project follow/)
     assert.equal(renderMemory([]), undefined)
+  })
+})
+
+describe('instruction files that are links', () => {
+  it('skips a project file that points outside its folder, and reads the next candidate instead', async (t) => {
+    const outside = await tempWorkspace({ 'secret.md': 'my private key' })
+    const root = await tempWorkspace({ 'AGENTS.md': 'agents' })
+    if (!linkOrSkip(t, path.join(outside, 'secret.md'), path.join(root, 'ENCODE.md'))) return
+    if (!linkOrSkip(t, path.join(outside, 'secret.md'), path.join(root, 'ENCODE.local.md'))) return
+    const files = await loadMemory({ root, home: await tempWorkspace() })
+    assert.deepEqual(files.map((file) => file.content), ['agents'])
+    assert.ok(files.every((file) => !file.content.includes('private key')))
+  })
+
+  it('reads a project file that points at another file inside the folder', async (t) => {
+    const root = await tempWorkspace({ 'docs/rules.md': 'house rules' })
+    if (!linkOrSkip(t, path.join(root, 'docs', 'rules.md'), path.join(root, 'ENCODE.md'))) return
+    assert.deepEqual((await loadMemory({ root, home: await tempWorkspace() })).map((file) => file.content), ['house rules'])
+  })
+
+  it('skips .encode/ENCODE.md when .encode is a link leading out', async (t) => {
+    const outside = await tempWorkspace({ 'ENCODE.md': 'not from this project' })
+    const root = await tempWorkspace({ 'CLAUDE.md': 'claude' })
+    if (!linkOrSkip(t, outside, path.join(root, '.encode'), 'junction')) return
+    assert.deepEqual((await loadMemory({ root, home: await tempWorkspace() })).map((file) => file.content), ['claude'])
+  })
+
+  it('lets the user\'s own file be a link, as a dotfiles folder makes it', async (t) => {
+    const dotfiles = await tempWorkspace({ 'encode.md': 'mine' })
+    const home = await tempWorkspace({ '.encode/placeholder.txt': 'x' })
+    if (!linkOrSkip(t, path.join(dotfiles, 'encode.md'), path.join(home, '.encode', 'ENCODE.md'))) return
+    const files = await loadMemory({ root: await tempWorkspace(), home })
+    assert.deepEqual(files.map((file) => [file.scope, file.content]), [['user', 'mine']])
   })
 })

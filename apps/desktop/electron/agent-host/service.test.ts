@@ -125,7 +125,8 @@ describe('the agent host service', () => {
     const [session] = await f.service.client.sessions()
     const running = f.service.client.start(session.id, { text: 'talk', mode: 'code' })
     running.catch(() => undefined)
-    await until(() => f.events.some((event) => event.type === 'status' && event.status === 'thinking'))
+    // The model is answering, so the user's message is on disk: the restart can bring it back.
+    await until(() => f.events.some((event) => event.type === 'delta'))
     f.processes[0].kill()
     await assert.rejects(running, { code: 'closed' })
 

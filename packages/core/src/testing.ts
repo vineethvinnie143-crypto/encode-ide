@@ -26,6 +26,7 @@ import {
 } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { createDefaultAssessor } from './approval'
+import type { AutoReviewer } from './reviewer'
 import { createSkills } from './skills'
 import { AgentHost, type HostOptions } from './host'
 import { AgentSession, type SessionEnv } from './session'
@@ -125,6 +126,17 @@ export function stubShell(root: string): AgentShell {
   }
 }
 
+/** A shell that records the lines it is asked to run and answers each with `output`. */
+export function recordingShell(root: string, ran: string[], output = 'ok'): AgentShell {
+  return {
+    ...stubShell(root),
+    run: async (command) => {
+      ran.push(command)
+      return { output, exitCode: 0, timedOut: false, interrupted: false, cwd: root }
+    },
+  }
+}
+
 export const stubJobs: JobManager = {
   start: async () => {
     throw new Error('This test has no background jobs.')
@@ -176,6 +188,9 @@ export interface HarnessOptions {
   tools?: readonly string[]
   maxSteps?: number
   preface?: () => string[]
+  /** Answers the commands the assessor cannot prove read-only, under Auto review. */
+  reviewer?: AutoReviewer
+  requests?: () => readonly string[]
 }
 
 export async function loopHarness(options: HarnessOptions): Promise<Harness> {
@@ -206,6 +221,8 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     ...(options.tools ? { tools: options.tools } : {}),
     ...(options.maxSteps ? { maxSteps: options.maxSteps } : {}),
     ...(options.preface ? { preface: options.preface } : {}),
+    ...(options.reviewer ? { reviewer: options.reviewer } : {}),
+    ...(options.requests ? { requests: options.requests } : {}),
     services: {
       root,
       home: os.homedir(),
@@ -310,8 +327,9 @@ export async function sessionHarness(options: SessionHarnessOptions = {}): Promi
     createShell: () => (options.createShell ?? stubManagedShell)(root),
     skills: createSkills(() => []),
     emit: (event) => events.push(event),
-    // The scripted model answers every request, so a naming call would only change what the tests count.
+    // The scripted model answers every request, so a naming call or a review would only change what the tests count.
     nameSessions: false,
+    autoReview: false,
     ...options.env,
   }
   const log = await store.create({ root })

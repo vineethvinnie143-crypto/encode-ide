@@ -2,6 +2,7 @@
  * A ToolContext for tests: a real directory, a real file-state tracker, and
  * services that fail loudly when a test did not expect them to be used.
  */
+import { symlinkSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -69,6 +70,20 @@ export async function tempWorkspace(files: Record<string, string | Buffer> = {})
     await fs.writeFile(file, content)
   }
   return root
+}
+
+/**
+ * Makes a symbolic link (a junction for a folder on Windows). A system that will not, Windows without the
+ * privilege, skips the test instead: the result says whether the test should go on.
+ */
+export function linkOrSkip(t: { skip(message?: string): void }, target: string, at: string, type: 'file' | 'dir' | 'junction' = 'file'): boolean {
+  try {
+    symlinkSync(target, at, type)
+    return true
+  } catch {
+    t.skip('this system will not create the link')
+    return false
+  }
 }
 
 export function textOf(content: string | readonly { type: string; text?: string }[]): string {

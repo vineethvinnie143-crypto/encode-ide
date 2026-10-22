@@ -136,7 +136,7 @@ describe('commands', () => {
     const proven = await context('auto-review')
     assert.equal((await decideApproval(command('ls', proven.root), proven)).kind, 'allow')
     const unproven = await context('auto-review', { assessor: asking })
-    assert.deepEqual(await decideApproval(command('rm -rf x', unproven.root), unproven), { kind: 'ask', reason: 'Not proven read-only: it writes.', grantable: true })
+    assert.deepEqual(await decideApproval(command('rm -rf x', unproven.root), unproven), { kind: 'ask', reason: 'Not proven read-only: it writes.', grantable: true, reviewable: true })
   })
 
   it('run only proven read-only commands under Read Only', async () => {
@@ -384,6 +384,39 @@ describe("the user's rules", () => {
     }
     const full = await context('full-access', { assessor: byRule })
     assert.equal((await decideApproval(command('git push', full.root), full)).kind, 'allow')
+  })
+})
+
+describe('which questions the Reviewer may answer', () => {
+  const reviewable = (decision: Awaited<ReturnType<typeof decideApproval>>): boolean => decision.kind === 'ask' && decision.reviewable === true
+
+  it('is only a command the assessor could not prove read-only, under Auto review', async () => {
+    const auto = await context('auto-review', { assessor: asking })
+    assert.equal(reviewable(await decideApproval(command('npm test', auto.root), auto)), true)
+    for (const policy of ['workspace-write', 'read-only'] as const) {
+      const ctx = await context(policy, { assessor: asking })
+      assert.equal(reviewable(await decideApproval(command('npm test', ctx.root), ctx)), false, policy)
+    }
+  })
+
+  it('is never a question about a rule, the outside of the workspace, a protected folder, a site, an outside tool or an application', async () => {
+    const byRule: ShellCommandAssessor = async () => ({ decision: 'ask', reason: 'Asks by user rule Bash(git push:*)', source: 'rule' })
+    const ruled = await context('auto-review', { assessor: byRule })
+    const ctx = await context('auto-review')
+    const cases: Array<[string, ToolAccess, ApprovalContext]> = [
+      ['a command asked by a rule', command('git push', ruled.root), ruled],
+      ['a read outside the workspace', read(path.join(os.homedir(), 'notes.txt')), ctx],
+      ['a write outside the workspace', write(path.join(os.tmpdir(), 'elsewhere.txt')), ctx],
+      ['a write into a protected folder', write(path.join(ctx.root, '.git', 'config')), ctx],
+      ['a first visit to a site', { type: 'web', url: 'https://example.com/docs' }, ctx],
+      ['an outside tool', { type: 'external', server: 'github' }, ctx],
+      ['an application', { type: 'desktop', app: 'notepad.exe', label: 'Notepad', title: 'Notepad window' }, ctx],
+    ]
+    for (const [name, access, where] of cases) {
+      const decision = await decideApproval(access, where)
+      assert.equal(decision.kind, 'ask', name)
+      assert.equal(reviewable(decision), false, name)
+    }
   })
 })
 

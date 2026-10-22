@@ -1,4 +1,5 @@
 export * from './assessor'
+export * from './auto-review'
 export * from './bash-grammar'
 export * from './bash-policy'
 export * from './command-policy'

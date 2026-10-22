@@ -9,7 +9,7 @@
  * (environment, project memory, mode, goal, date) goes to the model as
  * reminders in the user's message, never in the system prompt.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   messageText,
   textBlock,
@@ -41,14 +41,15 @@ import {
   type ToolRegistry,
   type WebAccess,
 } from '@encode/tools'
-import { estimateTokens } from './compaction'
+import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
 import type { RuleJudge } from './approval'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
-import { dateReminder, environmentReminder, goalReminder, modeReminder, reminder, systemParts } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, systemParts } from './prompt'
+import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { pruneScreens, withoutScreens } from './screens'
 import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
 import { DEFAULT_TITLE, newRecordId } from './session-store'
@@ -139,6 +140,8 @@ export interface SessionEnv {
   warn?(message: string): void
   /** Name a session with one small call to the utility model once its first turn is over. Default true. */
   nameSessions?: boolean
+  /** Whether Auto review has a Reviewer to ask; without one, it asks the person as Workspace Write does. Default true. */
+  autoReview?: boolean
 }
 
 /** What saving an "Always allow" rule came to. */
@@ -168,7 +171,7 @@ function errorMessage(error: unknown): string {
 function settled(entry: ConversationEntry): ConversationEntry {
   const copy = structuredClone(entry)
   if (copy.streaming) copy.streaming = false
-  if (copy.tool && (copy.tool.state === 'running' || copy.tool.state === 'waiting')) {
+  if (copy.tool && (copy.tool.state === 'running' || copy.tool.state === 'waiting' || copy.tool.state === 'reviewing')) {
     copy.tool = { ...copy.tool, state: 'rejected', ok: false, output: copy.tool.output || 'Interrupted.' }
   }
   return copy
@@ -249,6 +252,8 @@ export class AgentSession {
   private readonly questions = new Map<string, { request: AskRequest; finish: (answer: string) => void }>()
   /** What the user approved for the rest of the session; never stored. */
   private readonly grants = new Set<string>()
+  /** Under Auto review, the model that answers the low-risk questions. One per session, so its run of declines carries over from turn to turn. */
+  private readonly reviewer: AutoReviewer | undefined
   private disposed = false
   private disposing: Promise<void> | undefined
 
@@ -267,6 +272,7 @@ export class AgentSession {
     }
     this.shell = shell
     this.jobsManager = createJobManager(shell, { onChange: () => env.jobsChanged?.(this.id) })
+    this.reviewer = env.autoReview === false ? undefined : createAutoReviewer({ client: env.client, sticky: this.id, onUsage: (usage) => this.surface.usage(usage) })
     this.load()
   }
 
@@ -523,6 +529,7 @@ export class AgentSession {
     },
     fileChanged: (path) => this.send({ type: 'file-changed', path }),
     approve: (prompt, signal) => this.requestApproval(prompt, signal),
+    granted: (grant) => this.grants.has(grant),
     ask: (entryId, question, signal) => this.gate(() => this.requestAnswer(entryId, question, signal)),
     proposePlan: async (_entryId, plan, signal) => {
       if (this.env.reviewPlan) return this.env.reviewPlan(plan, signal)
@@ -547,6 +554,8 @@ export class AgentSession {
       ...(prompt.reason ? { reason: prompt.reason } : {}),
       input: prompt.input,
       ...(prompt.preview ? { preview: prompt.preview } : {}),
+      ...(prompt.review ? { review: prompt.review } : {}),
+      ...(prompt.warnings?.length ? { warnings: prompt.warnings } : {}),
       grantable: Boolean(prompt.grant),
       ...(prompt.always && this.env.remember ? { always: { label: prompt.always.label, rules: [...prompt.always.rules] } } : {}),
     }
@@ -702,7 +711,9 @@ export class AgentSession {
   /** What decides the tool list: a change takes effect with the next turn. */
   private toolsKey(): string {
     const settings = this.env.settings()
-    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? ''])
+    // The subagent definitions are part of it: the Task tool lists them, so a changed agent file takes effect with the next turn.
+    const agents = createHash('sha256').update(JSON.stringify(this.definitions())).digest('hex')
+    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? '', agents])
   }
 
   private getLoop(): AgentLoop {
@@ -765,6 +776,7 @@ export class AgentSession {
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
       ...(env.refresh ? { refresh: env.refresh } : {}),
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
+      ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
     })
     return new AgentLoop({
       agentId: 'main',
@@ -784,8 +796,21 @@ export class AgentSession {
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
       ...(env.refresh ? { refresh: env.refresh } : {}),
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
+      ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
       preface: this.preface,
     })
+  }
+
+  /** What the user last asked, in their own words: what the Reviewer measures a command against. */
+  private readonly recentRequests = (): string[] => {
+    const requests: string[] = []
+    for (let index = this.messages.length - 1; index >= 0 && requests.length < 3; index--) {
+      const message = this.messages[index]
+      if (message.role !== 'user') continue
+      const text = requestText(message)
+      if (text && text !== CONTINUE_AFTER_LENGTH) requests.unshift(text)
+    }
+    return requests
   }
 
   // ------------------------------------------------------------ a turn

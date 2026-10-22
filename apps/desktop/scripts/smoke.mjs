@@ -149,8 +149,9 @@ async function focusEditor() {
 
 /**
  * Waits for the agent to finish, approving every approval card on the way.
- * Returns the approval cards it saw ({ title, reason, detail }).
- * options.keyboard approves with Enter; options.whileWaiting runs once, while the first card shows.
+ * Returns the approval cards it saw ({ title, reason, review, detail }).
+ * options.keyboard approves with Enter; options.whileWaiting runs once, while the first card shows;
+ * options.deny(card) answers a card with Deny instead.
  */
 async function driveAgent(label, timeoutMs = 120000, options = {}) {
   const approvals = []
@@ -171,6 +172,7 @@ async function driveAgent(label, timeoutMs = 120000, options = {}) {
       return {
         title: card.querySelector('.approval-head')?.textContent ?? '',
         reason: card.querySelector('.approval-reason')?.textContent ?? '',
+        review: card.querySelector('.approval-review')?.textContent ?? '',
         detail: card.querySelector('.approval-detail')?.textContent ?? '',
       }
     })()`)
@@ -179,7 +181,9 @@ async function driveAgent(label, timeoutMs = 120000, options = {}) {
       await sleep(250)
       await screenshot(`${label}-approval-${approvals.length}.png`)
       if (options.whileWaiting && approvals.length === 1) await options.whileWaiting()
-      if (options.keyboard) {
+      if (options.deny?.(card)) {
+        await click('.approval-card .btn', 'Deny')
+      } else if (options.keyboard) {
         // Enter approves while nothing is being typed.
         await evaluate("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
       } else {
@@ -605,6 +609,7 @@ async function runProviderPhase() {
   await runWebChecks()
   await runSearchChecks()
   await runPermissionChecks()
+  await runAutoReviewChecks()
   await runRewindChecks()
   await runMcpChecks()
   await runComputerChecks()
@@ -857,6 +862,88 @@ async function runPermissionChecks() {
   await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   console.log('[smoke] permissions: ok')
+}
+
+/**
+ * Auto review. A command the assessor cannot prove read-only goes to the Reviewer, a second model call that sees the
+ * request and the command and nothing else: it approves the first, declines the second, and passes the third to the
+ * person. The fixed checks keep a force-push for the person without asking the Reviewer. The steps say who looked.
+ */
+async function runAutoReviewChecks() {
+  console.log('[smoke] --- auto review ---')
+  const notes = ['review-approved.txt', 'review-declined.txt', 'review-asked.txt']
+  const exists = (name) => fs.access(path.join(demoPath, name)).then(() => true, () => false)
+  const clean = () => Promise.all(notes.map((name) => fs.rm(path.join(demoPath, name), { force: true })))
+  await clean()
+  await evaluate('window.eNCode.agent.reset()')
+  await evaluate("window.eNCode.settings.save({ policy: 'auto-review' })")
+  const before = await providerStats()
+  try {
+    await sendPrompt('[scenario:auto-review] Write three notes, then publish.')
+    const cards = await driveAgent('18-auto-review', 120000, { deny: (card) => card.detail.includes('git push') })
+    console.log('[smoke] auto review cards:', JSON.stringify(cards))
+    // Two questions reach the person: the Reviewer's doubt about the third note, and the fixed checks' stop on the force-push.
+    if (cards.length !== 2) throw new Error(`Expected 2 approval cards, saw ${cards.length}: ${JSON.stringify(cards)}`)
+    if (!cards[0].detail.includes('review-asked.txt') || !/^The Reviewer leaves this to you: It writes a file you did not mention\.$/.test(cards[0].review)) {
+      throw new Error(`The Reviewer's question reads ${JSON.stringify(cards[0])}`)
+    }
+    if (!cards[1].detail.includes('git push --force') || !/^Auto review leaves this to you: /.test(cards[1].review)) {
+      throw new Error(`The fixed checks' question reads ${JSON.stringify(cards[1])}`)
+    }
+
+    // The files say what ran: the approved note and the one the person approved, not the declined one.
+    if (!(await exists('review-approved.txt')) || !(await exists('review-asked.txt'))) throw new Error('The approved commands did not run')
+    if (await exists('review-declined.txt')) throw new Error('The command the Reviewer declined ran')
+
+    const steps = await evaluate(`window.eNCode.agent.history().then((history) =>
+      history.entries.filter((entry) => entry.kind === 'tool').map((entry) => ({
+        state: entry.tool.state,
+        review: entry.tool.review ?? null,
+        output: entry.tool.output ?? '',
+      })))`)
+    console.log('[smoke] auto review steps:', JSON.stringify(steps.map((step) => [step.state, step.review?.by, step.review?.verdict])))
+    const outline = steps.map((step) => `${step.state}:${step.review?.by}:${step.review?.verdict}`)
+    const expected = ['done:reviewer:approved', 'rejected:reviewer:declined', 'done:reviewer:asked', 'rejected:floor:asked']
+    if (JSON.stringify(outline) !== JSON.stringify(expected)) throw new Error(`The steps went ${JSON.stringify(outline)}, not ${JSON.stringify(expected)}`)
+    if (steps[0].review.risk !== 'low' || !steps[1].output.startsWith('Declined by the Reviewer: Nothing you asked for needs this file.')) {
+      throw new Error(`The Reviewer's verdicts read ${JSON.stringify(steps.slice(0, 2))}`)
+    }
+
+    // The Reviewer was asked three times, never about the force-push, and saw the request and one action, with no tools.
+    const after = await providerStats()
+    if (after.reviewerRequests - before.reviewerRequests !== 3) throw new Error(`The Reviewer was asked ${after.reviewerRequests - before.reviewerRequests} times, not 3`)
+    const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-reviewer`)).json()
+    if (seen.tools.length || seen.messages !== 2) throw new Error(`The Reviewer was given ${JSON.stringify({ tools: seen.tools.length, messages: seen.messages })}`)
+    if (!seen.system.startsWith('You are the Reviewer for a coding agent.') || !seen.user.includes('[scenario:auto-review] Write three notes, then publish.')) {
+      throw new Error(`The Reviewer's request reads ${JSON.stringify(seen)}`)
+    }
+    if (seen.user.includes('Contents of') || seen.user.includes('<environment>')) throw new Error('The Reviewer was given more than the request and the action')
+
+    // The work log shows who looked: a mark on the approved step, the reason under the declined one.
+    await openWorkLogs()
+    await evaluate(`(() => {
+      document.querySelectorAll('.tool-row:not(.tool-group)').forEach((row) => {
+        if (!row.querySelector('.tool-row-body')) row.querySelector('.tool-row-toggle')?.click()
+      })
+      return true
+    })()`)
+    await sleep(400)
+    const log = await evaluate(`(() => ({
+      approvedMarks: document.querySelectorAll('.tool-row-mark.is-ok').length,
+      notes: [...document.querySelectorAll('.step-note')].map((note) => note.textContent),
+    }))()`)
+    console.log('[smoke] auto review notes:', JSON.stringify(log))
+    if (log.approvedMarks !== 1) throw new Error(`The approved step should carry one mark, not ${log.approvedMarks}`)
+    for (const text of ['Approved by the Reviewer (low risk): It writes a note in the project, as you asked.', 'Declined by the Reviewer (medium risk): Nothing you asked for needs this file.']) {
+      if (!log.notes.includes(text)) throw new Error(`The work log does not say "${text}": ${JSON.stringify(log.notes)}`)
+    }
+    await screenshot('18-auto-review.png')
+  } finally {
+    await evaluate("window.eNCode.settings.save({ policy: 'workspace-write' })")
+    await evaluate('window.eNCode.agent.reset()')
+    await clean()
+  }
+  console.log('[smoke] auto review: ok')
 }
 
 /**

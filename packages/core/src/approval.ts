@@ -39,8 +39,11 @@ export type ApprovalDecision =
    * `grantable`: the user may approve this and its like for the rest of the session. Protected folders never are.
    * `byRule`: a rule of the user's says to ask, so no rule of theirs could stop the question (an allow rule loses
    * to it) and approving covers this call only.
+   * `reviewable`: under Auto review the Reviewer may answer it, after the safety floor has passed it. Only a command
+   * the assessor could not prove read-only is; every other question (outside the workspace, protected folders, sites,
+   * outside tools, applications, a user's own rule) is the person's alone.
    */
-  | { kind: 'ask'; reason: string; grantable: boolean; byRule?: true }
+  | { kind: 'ask'; reason: string; grantable: boolean; byRule?: true; reviewable?: true }
   | { kind: 'deny'; reason: string }
 
 /** What decisions ask of the user's permission rules; a `RuleSet` is one. */
@@ -84,6 +87,7 @@ export interface ApprovalContext {
 const ALLOW: ApprovalDecision = { kind: 'allow' }
 const ask = (reason: string, grantable = true): ApprovalDecision => ({ kind: 'ask', reason, grantable })
 const askByRule = (reason: string): ApprovalDecision => ({ kind: 'ask', reason, grantable: false, byRule: true })
+const askReviewable = (reason: string): ApprovalDecision => ({ kind: 'ask', reason, grantable: true, reviewable: true })
 const deny = (reason: string): ApprovalDecision => ({ kind: 'deny', reason })
 
 function shown(file: string, root: string): string {
@@ -184,7 +188,10 @@ async function decideAccess(access: ToolAccess, context: ApprovalContext): Promi
           ? ALLOW
           : deny(`The approval policy is Read Only, which runs only commands proven read-only. ${verdict.reason} Ask the user to switch to Workspace Write if the command is needed.`)
       }
-      if (verdict.decision === 'ask') return byRule ? askByRule(verdict.reason) : ask(verdict.reason)
+      if (verdict.decision === 'ask') {
+        if (byRule) return askByRule(verdict.reason)
+        return policy === 'auto-review' ? askReviewable(verdict.reason) : ask(verdict.reason)
+      }
       if (byRule) return ALLOW
       return policy === 'workspace-write' ? ask('Workspace Write asks before every command.') : ALLOW
     }

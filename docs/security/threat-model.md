@@ -79,7 +79,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| T1 | Prompt injection makes the agent run a harmful command | Four approval policies, and Auto review allows only proven read-only lines whose real paths stay inside and whose programs live outside the workspace (0004). Subagents inherit the policy (0006). | Partial (R1, R2) |
+| T1 | Prompt injection makes the agent run a harmful command | Four approval policies. Auto review runs a proven read-only line whose real paths stay inside and whose programs live outside the workspace (0004), and puts any other command through fixed checks and then a Reviewer model before the person is asked; a model's yes never widens what the checks allow (0059). Subagents inherit the policy (0006). | Partial (R1, R2, RP9) |
 | T2 | Data leaves in a URL after an injection | First fetch per site asks in every mode and policy but Full access (0007) | Mitigated |
 | T3 | SSRF to localhost, the LAN or cloud metadata | Public addresses only, checked at connect time against every resolved address. Same-host redirects, size and time caps (0007). | Mitigated |
 | T4 | A repository's git config starts a program (fsmonitor, bare repo discovery) | `core.fsmonitor=false` and `safe.bareRepository=explicit` on every git eNCode runs (0004) | Partial (R3, R4) |
@@ -96,7 +96,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T15 | A broken transcript makes providers refuse every request | Pairing invariant, repair on load, every call answered (0009) | Mitigated |
 | T16 | A too-long prompt is sent repeatedly or the session dies | Compaction before each request, and a single compact-and-resend on overflow (0009) | Mitigated |
 | T17 | A subagent does what its parent may not | Same mode, policy, approvals and cancellation as the parent (0006) | Mitigated |
-| T18 | Source that reads differently from how it runs (bidi controls, zero-width characters) | `scripts/check-sources.mjs` in CI, and the command policy asks for lines containing them (0004, 0012) | Mitigated |
+| T18 | Source that reads differently from how it runs (bidi controls, zero-width characters) | `scripts/check-sources.mjs` in CI, and the command policy asks for lines containing them (0004, 0012). What a file write or a command adds is scanned too, and the findings are shown on the card, in the step and to the model (0060). | Mitigated |
 | T19 | A compromised dependency, action or Electron download | Frozen lockfile, one-day minimum release age, skipped install scripts, actions pinned by hash, read-only CI token, checksum-verified Electron download | Partial (R9) |
 | T20 | Abuse of the free tier's shared key | The key never ships in the client. Gateway quotas, a `:free`-only cost firewall and a kill switch (0020). Threats G1 to G15 below. | Partial (GR1) |
 | T21 | A tampered build or update | Code signing and signed updates | Planned, M6 |
@@ -131,8 +131,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
 - **R1. Full access means full access.** Under that policy nothing asks. It is an explicit
   user choice, labeled in the composer.
   - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux. It is
-    the next M3 pull request, after the one that holds the rules, trust, hooks, checkpoints and
-    MCP client.
+    the next M3 pull request, after the one that holds the rules, trust, hooks, checkpoints,
+    MCP client, web search providers and the Reviewer.
   - Windows has no equivalent yet. Approvals are the only control there, and the plan's risk
     table says so.
 - **R2. Prompt injection inside allowed actions.** Injected text can still steer which
@@ -141,8 +141,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - Compaction summaries are produced from transcripts that may contain injected text, and
     the summary sits in a user message (0009). The summarizer is told the transcript is
     data, and approvals still gate every action.
-  - Owner: M3. Workspace trust is built ([0041](../adr/0041-folder-settings-grant-only-when-approved.md));
-    the reviewer gate follows in the next M3 pull request.
+  - Owner: M3. Workspace trust is built ([0041](../adr/0041-folder-settings-grant-only-when-approved.md))
+    and so is the reviewer gate ([0059](../adr/0059-auto-review-asks-a-model-about-low-risk-commands-behind-checks-the-model-cannot-overrule.md)).
 - **R3. Git in a folder whose `.git/config` someone else wrote.** Under Auto review,
   "read-only" git commands such as `git diff`, `git log -p` and `git show` can still start
   programs configured in that file: `diff.external`, textconv drivers, clean filters, a
@@ -494,8 +494,9 @@ Written with the pull request that added `@encode/config`, `@encode/hooks`,
 are libraries with their own tests. The permission rules, workspace trust, "Always allow" and
 the Permissions screen are wired into the app (0055, P11 to P13), and so are hooks, checkpoints
 and rewind (0056, P14 to P17) and the MCP client with its screen (0057, P18 to P22). The OS
-sandbox, search providers, subagent definitions and the reviewer gate are later M3 pull requests
-and get their rows when they land.
+sandbox is a later M3 pull request and gets its rows when it lands. Web search providers have their
+rows in the main table (T42 to T44, 0058). The Reviewer, the scan for hidden characters and subagent
+definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 
 ### Threats and controls
 
@@ -523,6 +524,12 @@ and get their rows when they land.
 | P20 | The agent writes `.mcp.json` to get a program started | A write to the top-level `.mcp.json` asks whatever a rule says, and "Always allow" offers no Edit rule for it. A written entry is new to the digest, so it waits for approval anyway; a write under `.encode/` is protected already (0041, 0057). | Mitigated |
 | P21 | The page, or something it loads, starts, approves or restarts a server | Report and act are IPC handlers for the app's top frame and for the open folder only. The host checks an action before doing anything (the type from a list, a name the configuration allows, a digest of 64 hexadecimal characters). The agent has no tool for it, and approving needs the folder trusted (0010, 0057). | Mitigated |
 | P22 | Turning a server off damages a settings file, or costs the folder the approval of its grants | The name goes into `disabledMcpjsonServers` only, which takes permission away and is left out of what a folder's approval covers (0041). The file is read as JSON first and written atomically; one that cannot be read is never overwritten. A project's server is turned off in the person's own local settings, not in the shared file (0057). | Mitigated |
+| P23 | Under Auto review a model approves a command that does harm: it was fooled by text the agent read, or it is weak | Fixed checks come first and never read what the model said, so a command that is privileged, networked by hand, outside the project, destructive in git, publishing or unreadable is never put to it. The Reviewer sees only the person's last requests and the one command, answers in a fixed format, and approves only with low risk. Whatever it approves is inside the project and local (0059). | Partial (RP9, R1) |
+| P24 | Text in the command or the files asks the Reviewer to approve ("the user already agreed") | The action is data in a tag with a random suffix, and the Reviewer's instructions say to ignore anything in it that addresses the Reviewer. It is not given files, tool results, web pages or the conversation, only the person's own words. A command that looks planted by what the agent read is to be declined, and the reasons are shown (0059). | Partial (RP9) |
+| P25 | The Reviewer is down, slow, off-format or declining everything, and the agent stalls or is waved through | Every failure puts the question to the person: no model for the role, 20 seconds without an answer, an answer that is not the format, a command too long to read. The Reviewer then stays quiet for 30 seconds, and three declines in a row stop it until the person answers one. Stopping the turn is not taken for a failure (0059). | Mitigated |
+| P26 | The agent writes invisible or look-alike characters into a file or a command and the person approves what they cannot read | The lines a call adds are scanned for direction controls, invisible, tag and control characters, stray variation selectors and look-alike letters. The findings are on the approval card, in the step and in a note to the model, and quote the text with markers instead of the characters (0060). | Partial (RP10) |
+| P27 | A cloned repository uses its agent, skill or instruction files to read another file on the disk (a link to a key), to hang eNCode (a named pipe) or to flood it (a huge file) | Those files are read as regular files of bounded size, without following links, without blocking, with at most 64 agent files per folder, and only if the folder stays inside the project once links are resolved. The user's own folders may use links (0061). | Partial (RP11) |
+| P28 | A subagent definition from a repository grants more than the parent has or runs without end | A definition can only narrow its tools; the tools no subagent may have stay excluded; the mode, policy, approvals and Reviewer are the parent's; its step limit can shorten the run and never lengthen it past the person's own (0006, 0061). | Mitigated |
 
 ### Residual risks
 
@@ -551,6 +558,19 @@ and get their rows when they land.
   all of them, so what one chat made it hold, another chat's calls can see. A server also runs
   for up to five minutes after the folder's last chat is closed. Turning a server off, or
   taking back its approval, stops it for every chat at once.
+- **RP9. The Reviewer is a model.** It can approve something it should not, or decline something fine. What it can
+  approve is bounded by the fixed checks (inside the project, local, no publishing, no network by hand), and a wrong
+  decline costs the person one re-ask. The checks read a command's words, not the program behind them: code the agent
+  writes and then runs (a `package.json` script it edited, then `npm run build`) reaches the Reviewer by its name. The
+  Reviewer is told to ask when a command runs software the project does not already use, and the edit is in the thread,
+  but neither contains it.
+  - Owner: the OS sandbox (R1). Until it exists, work on code you do not trust under Workspace Write.
+- **RP10. The scan warns and does not refuse.** A file built by a shell command or a generator is outside it, and a
+  person can approve a card that lists findings. The model is told to remove what it did not mean to write.
+- **RP11. Other files a repository can fill are not yet read with the same care.** `.encode/settings*.json` and
+  `.mcp.json` are read by `@encode/config` and `@encode/mcp` with a plain read: a link in them is followed and a named
+  pipe blocks the reader.
+  - Owner: the hardening step after the sandbox.
 
 ### Verification
 
@@ -596,5 +616,15 @@ and get their rows when they land.
   tool only), the server's notes reach the model as labeled outside text, turning a server off
   and on writes the settings file and stops and starts the process, and changing the entry
   stops the server and asks again.
+- The tests for the Reviewer (0059) cover the fixed checks in both shells (what passes, what stops, and that a stopped
+  line stays stopped under quoting, spacing and wrappers), the Reviewer's prompt, parsing and every failure path, and in
+  the loop and the session: a decline reaching the model and not the person, a doubt becoming a card, a repeat served
+  from memory, a session grant and a hook that asked skipping the Reviewer, subagents using the parent's, and the
+  streak. The scan for hidden characters (0060) and the reading of repository files (0061) have their own tests,
+  including links and named pipes where the system will create them.
+- An Auto review scenario in the end-to-end run answers the Reviewer from the fake provider: a command is approved and
+  runs, one is declined and does not, one is passed to the person on a card that says so, and a force-push is stopped
+  by the fixed checks without the Reviewer being asked. It also checks what the Reviewer was sent: no tools, the request
+  and one action, nothing else.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.

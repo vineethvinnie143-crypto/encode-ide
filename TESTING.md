@@ -46,7 +46,8 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 
 - The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command
   and before it touches anything outside the folder. Leave it there. **Full access** lets the agent run commands without
-  asking.
+  asking. **Auto review** lets a second model approve low-risk commands for you; it is a judgment call by a model, so
+  use it on projects you know, not on code you do not trust.
 - Open a **copy** of a project you care about, not the only copy.
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
   pages the agent fetches. There is no telemetry and no update check.
@@ -68,6 +69,32 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 
 What is most useful to hear: anything that asked when a rule said it would not, anything that did not ask when it
 should have, and any message you could not understand.
+
+## Auto review
+
+Choose **Auto review** in the permissions menu of the message box. Edits inside the folder and read-only commands run
+as before. For other commands a second model, the **Reviewer**, looks at your recent requests and the command, and
+either lets it run, refuses it, or leaves the question to you. It uses the model you gave the **Review** role under
+**Settings → Roles** (the model you chose for the chat, if you gave it none).
+
+- Ask the agent to do something routine in a copy of a project: run the tests, create a folder, add a file with a
+  command. The step should read **Being reviewed** for a moment and then run, with a small shield on its row. Open the
+  row: it says *Approved by the Reviewer (low risk)* and why.
+- Ask for something the Reviewer should not decide, such as pushing to a remote with `--force`, deleting outside the
+  folder or running `curl`. You get an approval card that says *Auto review leaves this to you* and why, and the
+  Reviewer is not asked at all.
+- Ask for something that has nothing to do with what you are working on and watch for *Declined by the Reviewer*. The
+  row opens by itself and the agent is told why; you are not asked. Three refusals in a row hand the questions back to
+  you until you answer one.
+- Switch the **Review** role to a model that is not there, or switch your connection off: you should simply be asked, as
+  under Workspace Write, never refused.
+- If an approval card lists *Invisible or look-alike characters*, it found text that is drawn differently from how it
+  reads (a zero-width space, a Cyrillic letter inside a Latin word, a direction control). The same list appears on the
+  step after a file was written, and the agent is told to remove them.
+
+What is most useful to hear: a command the Reviewer approved that you would not have, a refusal that made no sense, a
+card that asked although it was plainly routine, and a warning about characters that were fine (or a file where you
+suspect some and got none).
 
 ## Hooks and rewind
 
