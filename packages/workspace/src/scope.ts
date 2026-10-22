@@ -8,6 +8,8 @@ import { actOn, type PermissionsAction, type PermissionsOutcome } from './action
 import { WorkspaceConfig } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
 import { workspaceHooks } from './hooks'
+import { McpHub, type McpHubOptions, type McpReport } from './mcp'
+import { actOnMcp, type McpAction, type McpOutcome } from './mcp-actions'
 import { rememberRules } from './remember'
 import { reportOn, type WorkspaceReport } from './report'
 import { recordingHooks, sessionCheckpoints } from './rewind'
@@ -40,6 +42,10 @@ export interface WorkspacesOptions {
   env?: Record<string, string | undefined>
   /** The conversation's file for a session, for the `transcript_path` that hooks are given. */
   transcriptPath?(sessionId: string): string | undefined
+  /** What a folder's MCP servers do that a screen shows (their state, their tools, their setup), as the folder's real path. Called after a short pause, never in a burst. */
+  onMcpChange?(root: string): void
+  /** For tests: how MCP servers are reached, and how long things are waited for. */
+  mcp?: Pick<McpHubOptions, 'manager' | 'startWaitMs' | 'idleMs'>
 }
 
 /**
@@ -53,6 +59,8 @@ export class Workspaces {
   private readonly trustFile: string | undefined
   private readonly warn: ((message: string) => void) | undefined
   private readonly configs = new Map<string, WorkspaceConfig>()
+  /** A folder's MCP servers, shared by every session in it. Made on first use, let go of when nobody works in the folder. */
+  private readonly hubs = new Map<string, McpHub>()
   private readonly stores: CheckpointStoreOptions | undefined
   /** The stores already tidied by this program, so that opening a second session in a folder does not do it again. */
   private readonly tidied = new Set<string>()
@@ -86,6 +94,47 @@ export class Workspaces {
     return config
   }
 
+  private hub(config: WorkspaceConfig): McpHub {
+    const key = workspaceKey(config.root, this.platform === 'win32')
+    let hub = this.hubs.get(key)
+    if (!hub) {
+      const made: McpHub = new McpHub({
+        config,
+        platform: this.platform,
+        env: this.options.env ?? process.env,
+        ...(this.warn ? { warn: this.warn } : {}),
+        ...(this.options.onMcpChange ? { onChange: () => this.options.onMcpChange?.(config.root) } : {}),
+        onIdle: () => {
+          if (this.hubs.get(key) === made) this.hubs.delete(key)
+          void made.close()
+        },
+        ...this.options.mcp,
+      })
+      this.hubs.set(key, made)
+      hub = made
+    }
+    return hub
+  }
+
+  /** The folder's MCP servers as the Settings screen shows them. The folder may be given as any path to it. */
+  async mcpReport(root: string): Promise<McpReport> {
+    const config = this.config(await realPathOf(root))
+    return this.hub(config).report(await config.refresh())
+  }
+
+  /** Does what the MCP screen asked in a folder, and returns how its servers stand afterwards. */
+  async mcpAct(root: string, action: McpAction): Promise<McpOutcome> {
+    const config = this.config(await realPathOf(root))
+    return actOnMcp(config, this.hub(config), action, { fs: this.fs, platform: this.platform })
+  }
+
+  /** Stops every folder's MCP servers. Quick enough for a program that is closing. */
+  async close(): Promise<void> {
+    const hubs = [...this.hubs.values()]
+    this.hubs.clear()
+    await Promise.all(hubs.map((hub) => hub.close().catch(() => undefined)))
+  }
+
   /** The folder's permissions as the Permissions screen shows them. The folder may be given as any path to it. */
   async report(root: string): Promise<WorkspaceReport> {
     return reportOn(this.config(await realPathOf(root)), this.platform)
@@ -93,7 +142,11 @@ export class Workspaces {
 
   /** Does what the Permissions screen asked in a folder, and returns how the folder stands afterwards. */
   async act(root: string, action: PermissionsAction): Promise<PermissionsOutcome> {
-    return actOn(this.config(await realPathOf(root)), action, { fs: this.fs, platform: this.platform })
+    const config = this.config(await realPathOf(root))
+    const outcome = await actOn(config, action, { fs: this.fs, platform: this.platform })
+    // Trusting a folder, or approving its settings, decides which of its MCP servers may run.
+    await this.hubs.get(workspaceKey(config.root, this.platform === 'win32'))?.follow(config)
+    return outcome
   }
 
   /** The record of what a session's file tools change: the hooks that keep it, the seam the tools call, and the means to put it back. */
@@ -136,7 +189,19 @@ export class Workspaces {
   /** What the host's `scope` option is given. The folder's settings are read before the session opens. */
   readonly scope = async (request: { sessionId: string; root: string; notice(text: string): void }): Promise<SessionScope> => {
     const config = this.config(request.root)
-    await config.refresh()
+    const hub = this.hub(config)
+    // Taken before anything is awaited, so that the hub cannot be let go of between getting it and holding it.
+    const release = hub.acquire()
+    try {
+      hub.sync(await config.refresh())
+      return this.scopeOf(request, config, hub, release)
+    } catch (error) {
+      release()
+      throw error
+    }
+  }
+
+  private scopeOf(request: { sessionId: string; root: string; notice(text: string): void }, config: WorkspaceConfig, hub: McpHub, release: () => void): SessionScope {
     const recording = this.recorder(request, config)
     const { env, hookRunner, transcriptPath } = this.options
     return {
@@ -155,15 +220,18 @@ export class Workspaces {
       rules: config.rules,
       extraRoots: () => config.current().extraRoots,
       // A picture that cannot be rebuilt refuses everything until it can (see WorkspaceConfig.refresh); this only reports why.
+      // The folder's MCP servers follow the same picture.
       refresh: async () => {
         try {
-          await config.refresh()
+          hub.sync(await config.refresh())
         } catch (error) {
           this.warn?.(`Could not reload the settings of ${request.root}: ${error instanceof Error ? error.message : String(error)}`)
         }
       },
       remember: rememberRules(config, this.fs, this.platform),
       shell: () => ({ extraEnv: config.current().effective.env }),
+      external: hub,
+      release: async () => release(),
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
     }
   }

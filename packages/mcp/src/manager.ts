@@ -125,7 +125,8 @@ export class McpUnavailableError extends Error {
 
 const own = (map: object | undefined, key: string) => map !== undefined && Object.hasOwn(map, key)
 
-function describeSetup(setup: ServerSetup): Pick<ServerStatus, 'summary' | 'envNames' | 'headerNames'> {
+/** What approving a server would run, in words for the approval card: the command line or the address, and the names of what it is given. */
+export function describeSetup(setup: ServerSetup): Pick<ServerStatus, 'summary' | 'envNames' | 'headerNames'> {
   if (setup.type === 'stdio') {
     const words = [setup.command, ...setup.args].map((word) => (/^[A-Za-z0-9_@+=:,./\\~${}-]+$/.test(word) ? word : JSON.stringify(word)))
     return { summary: words.join(' '), envNames: Object.keys(setup.env).sort(), headerNames: [] }

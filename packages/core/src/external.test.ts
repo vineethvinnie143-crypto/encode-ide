@@ -191,6 +191,18 @@ describe('a session with tools from outside', () => {
     assert.equal(h.client.requests.length, 1)
   })
 
+  it('leaves out a tool that cannot be added, says so, and still runs the turn', async () => {
+    const warnings: string[] = []
+    const external = source([outside('Read'), outside('mcp__demo__ok')])
+    const h = await sessionHarness({ script: [{ text: 'fine' }], env: { external, warn: (message: string) => warnings.push(message) } })
+    assert.equal((await h.session.start({ text: 'go', mode: 'code' })).kind, 'done')
+    const names = toolNames(h.client.requests[0])
+    assert.equal(names.filter((name) => name === 'Read').length, 1)
+    assert.ok(names.includes('mcp__demo__ok'))
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /The tool Read was left out: A tool called Read is already registered/)
+  })
+
   it('carries on without the tools when asking the source fails', async () => {
     const external = source([outside('mcp__demo__one')])
     external.ready = async () => {

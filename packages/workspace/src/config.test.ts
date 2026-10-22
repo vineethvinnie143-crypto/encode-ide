@@ -238,13 +238,44 @@ describe('a folder\'s settings', () => {
     assert.equal((await config.assessor('git status', context)).decision, 'allow')
   })
 
+  it('list the servers of the three MCP files with the settings that allow them, and follow the files', async () => {
+    const { root, home, config } = await setup(
+      { '.mcp.json': json({ mcpServers: { shared: { command: 'a' } } }), '.encode/settings.json': json({ enableAllProjectMcpServers: true, disabledMcpjsonServers: ['off'] }) },
+      { '.encode/mcp.json': json({ mcpServers: { mine: { command: 'b' } } }) },
+    )
+    let snapshot = await config.refresh()
+    const listed = () => config.current().mcp.servers.map((server) => `${server.scope}:${server.name}`).sort()
+    assert.deepEqual(listed(), ['project:shared', 'user:mine'])
+    assert.deepEqual(snapshot.mcp.problems, [])
+    // A restriction applies at once; what grants waits for the folder to be trusted and its settings approved.
+    assert.deepEqual(snapshot.mcp.policy, { enableAll: false, enabled: [], disabled: ['off'] })
+
+    await config.trustStore.trust(root, folderConfigDigest(snapshot.sources))
+    snapshot = await config.refresh()
+    assert.deepEqual(snapshot.mcp.policy, { enableAll: true, enabled: [], disabled: ['off'] })
+
+    // A file changed under it, one that appeared, and one that is not JSON: each is seen at the next refresh.
+    const before = snapshot.mcp.servers.find((server) => server.name === 'shared')!.digest
+    await write(path.join(root, '.mcp.json'), json({ mcpServers: { shared: { command: 'a', args: ['--more'] } } }))
+    await write(path.join(root, '.encode', 'mcp.json'), json({ mcpServers: { extra: { command: 'c' } } }))
+    snapshot = await config.refresh()
+    assert.deepEqual(listed(), ['project:extra', 'project:shared', 'user:mine'])
+    assert.notEqual(snapshot.mcp.servers.find((server) => server.name === 'shared')!.digest, before)
+    await write(path.join(home, '.encode', 'mcp.json'), '{ nope')
+    snapshot = await config.refresh()
+    assert.equal(snapshot.mcp.problems.length, 1)
+    assert.match(snapshot.mcp.problems[0], /mcp\.json/)
+    assert.deepEqual(listed(), ['project:extra', 'project:shared'])
+    assert.equal(snapshot.broken, null, 'a user MCP file that is not JSON stops the servers it holds, not everything else')
+  })
+
   it('share one read among callers that arrive together', async () => {
     const { root, home } = await setup()
     let reads = 0
     const base = (await import('./fs')).nodeWorkspaceFs
     const config = new WorkspaceConfig({ root, home, fs: { ...base, read: async (file) => (reads++, base.read(file)) } })
     await Promise.all([config.refresh(), config.refresh(), config.refresh()])
-    // Four files, once; the build reads three of them again for the rules.
-    assert.ok(reads <= 8, `read ${reads} times`)
+    // Seven files, once (the three settings files, the trust file and the three MCP files); the build reads six of them again for the rules and the servers.
+    assert.ok(reads <= 14, `read ${reads} times`)
   })
 })

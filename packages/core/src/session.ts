@@ -637,7 +637,7 @@ export class AgentSession {
 
   private buildRegistry(definitions: ReturnType<AgentSession['definitions']>): ToolRegistry {
     const settings = this.env.settings()
-    return createToolRegistry(
+    const registry = createToolRegistry(
       {
         dialect: this.shell.dialect,
         platform: this.env.platform,
@@ -646,8 +646,18 @@ export class AgentSession {
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
       },
-      [...(this.env.extraTools ?? []), ...(this.env.external?.list() ?? [])],
+      [...(this.env.extraTools ?? [])],
     )
+    // A tool from outside that cannot be added (its name is taken, its schema is not an object) is left out and said so;
+    // one odd server must not stop the turn.
+    for (const tool of this.env.external?.list() ?? []) {
+      try {
+        registry.register(tool)
+      } catch (error) {
+        this.env.warn?.(`The tool ${tool.definition.name} was left out: ${errorMessage(error)}`)
+      }
+    }
+    return registry
   }
 
   /** Text that must survive a compaction: where the agent is, and the project's instructions. */
