@@ -41,6 +41,11 @@ const isAction = (entry: MenuEntry): entry is MenuAction => entry.kind === undef
  * click anywhere else closes it. The component that opens it decides where
  * focus goes afterwards (`onClose(true)` asks for it to return to the trigger).
  */
+let dbgInstances = 0
+const dbg = (entry: Record<string, unknown>) => {
+  ;((window as unknown as { __menuDbg?: unknown[] }).__menuDbg ??= []).push({ t: Math.round(performance.now()), ...entry })
+}
+
 export function MenuPanel({
   entries,
   anchor,
@@ -79,9 +84,18 @@ export function MenuPanel({
   const [active, setActive] = useState(() => (start === 'none' ? -1 : moveIndex(-1, start, actions.length, isDisabled)))
   const [spot, setSpot] = useState<{ left: number; top: number; side: Side } | null>(null)
 
+  const [dbgId] = useState(() => ++dbgInstances)
+  dbg({ id: dbgId, at: 'render', spot: spot ? 'set' : 'null' })
+  useEffect(() => () => dbg({ id: dbgId, at: 'unmount' }), [dbgId])
   useLayoutEffect(() => {
     const menu = menuNode.current
     if (!menu) return
+    dbg({ id: dbgId, at: 'layout', inline: menu.style.visibility })
+    const watch = new MutationObserver((records) => {
+      for (const record of records) dbg({ id: dbgId, at: 'style', old: record.oldValue, now: menu.getAttribute('style') })
+    })
+    watch.observe(menu, { attributes: true, attributeFilter: ['style'], attributeOldValue: true })
+    setTimeout(() => watch.disconnect(), 3000)
     setSpot(
       place(
         anchor,
@@ -96,6 +110,15 @@ export function MenuPanel({
   useEffect(() => {
     if (!spot) return
     const target = active >= 0 ? itemNodes.current[active] : menuNode.current
+    dbg({
+      id: dbgId,
+      at: 'effect',
+      inline: menuNode.current?.style.visibility,
+      computed: menuNode.current && getComputedStyle(menuNode.current).visibility,
+      connected: menuNode.current?.isConnected,
+      menus: document.querySelectorAll('[role=menu]').length,
+      sameNode: menuNode.current === document.querySelector('[role=menu]'),
+    })
     target?.focus({ preventScroll: true })
   }, [spot, active])
 

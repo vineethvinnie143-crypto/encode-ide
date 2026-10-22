@@ -1324,11 +1324,13 @@ try {
   })()`)
   await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Go to line'))", 6000, 'editor context menu')
   await screenshot('06b-editor-menu.png')
+  console.log('[smoke] menu dbg:', JSON.stringify(await evaluate('window.__menuDbg')), 'focus log:', JSON.stringify(await evaluate('window.__focusLog')))
   let menuHasFocus = true
   await waitFor("!!document.activeElement?.closest('[role=menu]')", 4000, 'focus in the editor menu').catch(async (error) => {
     menuHasFocus = false
     deferred.push(error.message)
     console.log('[smoke] focus log:', JSON.stringify(await evaluate('window.__focusLog')))
+    console.log('[smoke] menu dbg (late):', JSON.stringify(await evaluate('window.__menuDbg')))
     console.log(
       '[smoke] focus is on:',
       await evaluate(`(() => {
