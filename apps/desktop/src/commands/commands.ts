@@ -61,6 +61,8 @@ export interface AppActions {
 
   showShortcuts(): void
   showAbout(): void
+  saveDiagnostics(): void
+  showLogs(): void
 }
 
 export function buildCommands(a: AppActions): Command[] {
@@ -130,6 +132,8 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'session.attention', title: 'Next session that needs you', group: 'Session', keys: ['Ctrl+Alt+A'], run: () => a.nextAttention() },
 
     { id: 'help.shortcuts', title: 'Keyboard shortcuts', group: 'Help', keys: ['Ctrl+/'], run: () => a.showShortcuts() },
+    { id: 'help.diagnostics', title: 'Save diagnostics…', group: 'Help', run: () => a.saveDiagnostics() },
+    { id: 'help.logs', title: 'Show log files', group: 'Help', run: () => a.showLogs() },
     { id: 'help.about', title: 'About eNCode', group: 'Help', run: () => a.showAbout() },
   ]
 

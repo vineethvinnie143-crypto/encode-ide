@@ -1,11 +1,14 @@
-import { BrowserWindow, app, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
-import { appendFileSync } from 'node:fs'
+import { BrowserWindow, app, dialog, ipcMain, shell as osShell, type IpcMainInvokeEvent } from 'electron'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { isRpcError } from '@encode/protocol'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
+import { aboutInfo, currentEnvironment } from './build-info'
+import { diagnosticsFileName } from './services/diagnostics'
 import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
+import type { LogService } from './services/logs'
 import type { ModelsService } from './services/models'
 import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
@@ -38,6 +41,9 @@ export interface IpcDeps {
   agent: AgentHostService
   /** Tells the agent host the settings changed. */
   configureAgent: () => void
+  logs: LogService
+  /** The text of a diagnostics report, made at the moment the user asks for one. */
+  diagnostics: () => Promise<string>
 }
 
 /** What the renderer is allowed to send as an answer to an approval: a yes or no, a short note, "for this session". */
@@ -57,7 +63,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, agent, configureAgent } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, agent, configureAgent, logs, diagnostics } = deps
   const host = agent.client
 
   /**
@@ -103,8 +109,7 @@ export function registerIpc(deps: IpcDeps): void {
     return opened
   }
 
-  handle('app:version', () => process.env.npm_package_version ?? '0.1.0')
-  handle('app:platform', () => process.platform)
+  handle('app:about', () => aboutInfo(currentEnvironment(app.isPackaged)))
   handle('app:user', () => {
     try {
       return os.userInfo().username
@@ -236,6 +241,31 @@ export function registerIpc(deps: IpcDeps): void {
   handle('app:feedback', (text: string) => {
     const file = join(app.getPath('userData'), 'feedback.jsonl')
     appendFileSync(file, `${JSON.stringify({ at: Date.now(), text: String(text) })}\n`)
+  })
+
+  // The report is made now, shown to nobody, and written where the user says; nothing leaves the computer by itself.
+  handle('app:export-diagnostics', async () => {
+    // A test run answers the save dialog in advance; a packaged build never does.
+    const answered = app.isPackaged ? undefined : process.env.ENCODE_DIAGNOSTICS_FILE
+    if (answered) {
+      writeFileSync(answered, await diagnostics(), 'utf8')
+      return answered
+    }
+    const win = getWindow()
+    const options = {
+      title: 'Save diagnostics',
+      defaultPath: join(app.getPath('downloads'), diagnosticsFileName(Date.now())),
+      filters: [{ name: 'Text', extensions: ['txt'] }],
+    }
+    const picked = win && !win.isDestroyed() ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return null
+    writeFileSync(picked.filePath, await diagnostics(), 'utf8')
+    return picked.filePath
+  })
+  handle('app:open-logs', async () => {
+    logs.flush()
+    const failure = await osShell.openPath(logs.dir)
+    if (failure) throw new Error(failure)
   })
 
   handle('jobs:list', () => host.jobs())

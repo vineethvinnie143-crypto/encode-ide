@@ -247,7 +247,8 @@ covers:
   earlier build's sessions;
 - sessions, subagents and Stop;
 - `WebFetch` approvals;
-- compaction.
+- compaction;
+- the About box (version and commit) and the diagnostics report, which must hold no key.
 
 Screenshots and the Electron log land in `apps/desktop/screenshots`. Set
 `ENCODE_SMOKE_OFFLINE=1` to skip the one check that needs the internet.
@@ -277,11 +278,17 @@ remains open. The decisions behind each control are in [docs/adr](docs/adr/READM
 ## Packaging
 
 ```bash
-pnpm dist                     # -> apps/desktop/release/eNCode-<version>-portable.exe
+pnpm build
+pnpm --filter @encode/desktop package   # -> apps/desktop/release/: eNCode-<version>-setup.exe and -portable.exe
 ```
 
-Builds are unsigned until the release milestone (M6), which also adds installers,
-auto-update and Electron fuses.
+CI makes both for every run, starts each the way a tester does (`apps/desktop/scripts/packaged-smoke.mjs`,
+`installer-smoke.mjs`), and keeps them for 30 days when the run is on `main`. Every build carries its version
+and commit: **Help → About eNCode**, and the first line of **Help → Save diagnostics…**.
+[TESTING.md](TESTING.md) is what testers are given.
+
+Builds are unsigned, and there is no auto-update; both come with a public release, which also adds Electron
+fuses.
 
 ## License
 

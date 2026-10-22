@@ -21,6 +21,25 @@ const panels = () => usePanels.getState()
 const sessions = () => useSessions.getState()
 const activeSession = (): SessionSummary | undefined => sessions().sessions.find((session) => session.id === sessions().activeId)
 
+/** Help: the report a tester sends when something goes wrong, and the log files behind it. */
+export const helpActions = {
+  async saveDiagnostics(): Promise<void> {
+    try {
+      const file = await api.app.exportDiagnostics()
+      if (file) ui().notify('success', `Saved diagnostics to ${file}`)
+    } catch (error) {
+      ui().notify('error', `Could not save diagnostics: ${(error as Error).message}`)
+    }
+  },
+  async showLogs(): Promise<void> {
+    try {
+      await api.app.openLogs()
+    } catch (error) {
+      ui().notify('error', `Could not open the log folder: ${(error as Error).message}`)
+    }
+  },
+}
+
 /** Session ids in the order the sidebar lists them, for Alt+1 to Alt+9. */
 function sidebarOrder(): string[] {
   const model = buildSidebar(sessions().sessions, {
@@ -151,6 +170,8 @@ function createAppActions(): AppActions {
 
     showShortcuts: () => ui().setShortcutsOpen(true),
     showAbout: () => ui().setAboutOpen(true),
+    saveDiagnostics: () => void helpActions.saveDiagnostics(),
+    showLogs: () => void helpActions.showLogs(),
   }
 }
 

@@ -23,6 +23,10 @@ jobs:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
       # The smoke must not depend on a third-party service being up.
       ENCODE_SMOKE_OFFLINE: '1'
+      # What the program says about itself in About and in a diagnostics report. A pull request builds a merge
+      # commit; the commit that matters is its head.
+      ENCODE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      ENCODE_CHANNEL: tester
     steps:
       # Third-party code is pinned to full commit hashes; the comments name the releases.
       - name: Check out
@@ -68,6 +72,42 @@ jobs:
 
       - name: End-to-end smoke
         run: pnpm e2e
+
+      # The programs testers are given, unsigned: an installer and a portable program. Each is started the
+      # way a tester starts it, so a broken package fails here and not on someone's computer.
+      - name: Package
+        run: pnpm --filter @encode/desktop package
+
+      - name: Packaged program starts
+        working-directory: apps/desktop
+        run: node scripts/packaged-smoke.mjs release/win-unpacked/eNCode.exe
+
+      - name: Portable program starts
+        working-directory: apps/desktop
+        run: node scripts/packaged-smoke.mjs (Get-ChildItem release/*-portable.exe).FullName
+
+      - name: Installer installs, starts and uninstalls
+        working-directory: apps/desktop
+        run: node scripts/installer-smoke.mjs
+
+      - name: Name the build
+        id: build
+        run: |
+          $short = $env:ENCODE_COMMIT.Substring(0, 7)
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "name=eNCode-windows-$short-run${{ github.run_number }}"
+
+      # Only what reached main, or was started by hand on a branch, is kept to be handed out.
+      - name: Keep the programs
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.build.outputs.name }}
+          path: |
+            apps/desktop/release/*-setup.exe
+            apps/desktop/release/*-portable.exe
+            TESTING.md
+          if-no-files-found: error
+          retention-days: 30
 
       # Every run, so a UI change can be reviewed by eye in both themes.
       - name: Keep screenshots and the Electron log

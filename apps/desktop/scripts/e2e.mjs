@@ -89,6 +89,8 @@ const env = {
   ENCODE_HOME: home,
   ENCODE_DEBUG_PORT: String(debugPort),
   ENCODE_FAKE_PROVIDER_PORT: String(providerPort),
+  // Where "Save diagnostics" writes without asking, so the smoke can read the report.
+  ENCODE_DIAGNOSTICS_FILE: path.join(sandbox, 'diagnostics.txt'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
 }
 delete env.VITE_DEV_SERVER_URL

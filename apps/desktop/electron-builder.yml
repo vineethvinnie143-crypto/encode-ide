@@ -10,17 +10,35 @@ files:
 asar: true
 # No native modules are bundled: the shell and terminal are hand-written.
 npmRebuild: false
+# Unsigned: the builds are for the owner and a few testers (see TESTING.md), and Windows SmartScreen says so.
 win:
   target:
+    - target: nsis
+      arch:
+        - x64
     - target: portable
       arch:
         - x64
   icon: build/icon.ico
+# Installs for the current user, with no administrator prompt.
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: eNCode
+  uninstallDisplayName: eNCode
+  # Sessions and settings are the user's: removing the program leaves them.
+  deleteAppDataOnUninstall: false
+  artifactName: eNCode-${version}-setup.exe
+# One file, nothing installed; it unpacks itself at every start, so it starts slower.
 portable:
   artifactName: eNCode-${version}-portable.exe
 linux:
   target:
     - AppImage
+  executableName: encode
   category: Development
 mac:
   target:

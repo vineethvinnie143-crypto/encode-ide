@@ -16,6 +16,7 @@
     "e2e": "node scripts/e2e.mjs",
     "perf": "node scripts/e2e.mjs perf.mjs",
     "fake-provider": "node scripts/fake-provider.mjs",
+    "package": "electron-builder --win --x64",
     "package:dir": "electron-builder --win --x64 --dir",
     "dist": "node scripts/build.mjs && electron-builder --win --x64"
   },

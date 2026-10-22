@@ -1,20 +1,25 @@
-import { app, BrowserWindow, Menu, protocol, safeStorage, shell as osShell } from 'electron'
+import { app, BrowserWindow, Menu, protocol, safeStorage, screen, shell as osShell } from 'electron'
 import os from 'node:os'
 import path from 'node:path'
 import { hostConfigOf } from './agent-host/config'
 import { spawnAgentHost } from './agent-host/electron'
 import { AgentHostService } from './agent-host/service'
 import { applyNativeAppearance, followSystemTheme } from './appearance'
+import { aboutInfo, currentEnvironment } from './build-info'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
+import { diagnosticsReport } from './services/diagnostics'
 import { GitService } from './services/git'
+import { LogService } from './services/logs'
 import { ModelsService } from './services/models'
+import { redact } from './services/redact'
 import { ScheduleService } from './services/schedules'
 import { SettingsService, serverOf } from './services/settings'
 import { ShellService } from './services/shell'
 import { SkillService, migrateLegacySkills } from './services/skills'
 import { WorkspaceService } from './services/workspace'
 import { createMainWindow } from './window'
+import { buildLine } from '../shared/about'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -53,16 +58,37 @@ if (!gotLock) {
     }
 
     const userData = app.getPath('userData')
+    // The user's own folder (instructions, skills, agents) is shared with the command line.
+    // A test run points it at a throwaway home; a packaged build never does.
+    const home = (!app.isPackaged && process.env.ENCODE_HOME) || os.homedir()
+    const userDir = path.join(home, '.encode')
+
     const settings = new SettingsService(userData, safeStorage)
+
+    // What this process prints is kept in userData/logs, without keys or the user's name, for a diagnostics report.
+    // Decrypting the keys is not free, so the list the log scrubs against is read again every few seconds only.
+    let secrets: string[] = []
+    let secretsAt = 0
+    const knownKeys = (): string[] => {
+      if (Date.now() - secretsAt > 5_000) {
+        secrets = settings.secrets()
+        secretsAt = Date.now()
+      }
+      return secrets
+    }
+    const logs = new LogService(path.join(userData, 'logs'), { redact: (text) => redact(text, { home, secrets: knownKeys() }) })
+    logs.captureConsole()
+    process.on('uncaughtExceptionMonitor', (error) => console.error('[eNCode] uncaught exception:', error))
+    process.on('unhandledRejection', (reason) => console.error('[eNCode] unhandled rejection:', reason))
+    app.on('child-process-gone', (_event, details) => console.error(`[eNCode] a ${details.type} process is gone: ${details.reason} (code ${details.exitCode})`))
+    const about = aboutInfo(currentEnvironment(app.isPackaged))
+    console.info(`[eNCode] ${buildLine(about)} on ${about.os} ${about.arch}`)
+
     const workspace = new WorkspaceService()
     const models = new ModelsService(settings)
     const git = new GitService(workspace)
     const shell = new ShellService()
 
-    // The user's own folder (instructions, skills, agents) is shared with the command line.
-    // A test run points it at a throwaway home; a packaged build never does.
-    const home = (!app.isPackaged && process.env.ENCODE_HOME) || os.homedir()
-    const userDir = path.join(home, '.encode')
     migrateLegacySkills(path.join(userData, 'skills'), path.join(userDir, 'skills'))
     const skills = new SkillService(() => workspace.current?.root ?? null, userDir, (dir) => osShell.openPath(dir))
 
@@ -130,6 +156,33 @@ if (!gotLock) {
       console.error('[eNCode] renderer process gone:', details.reason)
     })
 
+    const diagnostics = async (): Promise<string> => {
+      const sessions = await agentHost.client.sessions().catch(() => null)
+      const cpus = os.cpus()
+      const primary = screen.getPrimaryDisplay().id
+      return diagnosticsReport({
+        about,
+        generatedAt: Date.now(),
+        system: {
+          totalMemory: os.totalmem(),
+          freeMemory: os.freemem(),
+          cpuCount: cpus.length,
+          cpuModel: cpus[0]?.model.trim() ?? 'unknown',
+          locale: app.getLocale(),
+          displays: screen.getAllDisplays().map((display) => ({ width: display.size.width, height: display.size.height, scale: display.scaleFactor, primary: display.id === primary })),
+        },
+        settings: settings.get(),
+        agentHost: agentHost.health(),
+        sessions: sessions ? { total: sessions.length, archived: sessions.filter((session) => session.archived).length } : null,
+        workspaceOpen: workspace.current !== null,
+        environment: Object.keys(process.env).filter((name) => name.startsWith('ENCODE_')).sort(),
+        logLines: logs.tail(400),
+        logDir: logs.dir,
+        // Read fresh: a report is the one place a key must never appear.
+        redact: { home, secrets: settings.secrets() },
+      })
+    }
+
     registerIpc({
       getWindow: () => mainWindow,
       settings,
@@ -141,6 +194,8 @@ if (!gotLock) {
       git,
       agent: agentHost,
       configureAgent,
+      logs,
+      diagnostics,
     })
 
     // Close the sessions and their commands before the process goes: the host is asked, then ended.
@@ -149,8 +204,12 @@ if (!gotLock) {
       if (closing) return
       closing = true
       event.preventDefault()
-      void agentHost.dispose().finally(() => app.quit())
+      void agentHost.dispose().finally(() => {
+        logs.flush()
+        app.quit()
+      })
     })
+    app.on('will-quit', () => logs.flush())
 
     if (process.env.ENCODE_DEVTOOLS === '1') {
       win.webContents.openDevTools({ mode: 'detach' })

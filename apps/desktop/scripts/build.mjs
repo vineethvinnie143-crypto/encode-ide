@@ -1,35 +1,10 @@
 import { build as esbuild } from 'esbuild'
 import { build as viteBuild } from 'vite'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-
-/** Provided by the Electron runtime; everything else is bundled. */
-const external = ['electron']
+import { buildStamp, mainBuildOptions, root } from './main-build.mjs'
 
 export async function buildMain({ production = true } = {}) {
-  return await esbuild({
-    absWorkingDir: root,
-    entryPoints: {
-      main: path.join(root, 'electron/main.ts'),
-      preload: path.join(root, 'electron/preload.ts'),
-      // The agent runs in a utility process of its own.
-      'agent-host': path.join(root, 'electron/agent-host/entry.ts'),
-    },
-    outdir: path.join(root, 'dist/electron'),
-    outExtension: { '.js': '.cjs' },
-    bundle: true,
-    platform: 'node',
-    target: 'node22',
-    format: 'cjs',
-    sourcemap: production ? false : 'inline',
-    external,
-    define: {
-      'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development'),
-    },
-    logLevel: 'info',
-  })
+  return await esbuild(mainBuildOptions({ production }))
 }
 
 const mainOnly = process.argv.includes('--main-only')
@@ -41,7 +16,8 @@ async function main() {
   }
   console.log('[build] electron main, preload and agent host (esbuild)')
   await buildMain({ production: true })
-  console.log('[build] done')
+  const stamp = buildStamp()
+  console.log(`[build] done: eNCode ${stamp.version} (${stamp.channel}) ${stamp.commit ? stamp.commit.slice(0, 7) : 'no commit'}${stamp.dirty ? ' + local changes' : ''}`)
 }
 
 main().catch((err) => {

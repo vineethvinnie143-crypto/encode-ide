@@ -18,6 +18,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { connect, sleep } from './cdp.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const port = process.env.ENCODE_DEBUG_PORT || '9222'
@@ -31,89 +32,8 @@ const demoPath = path.resolve(process.argv[2]).replace(/\\/g, '/')
 const shotsDir = path.join(root, 'screenshots')
 await fs.mkdir(shotsDir, { recursive: true })
 
-const errors = []
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
-async function findTarget() {
-  for (let attempt = 0; attempt < 120; attempt++) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`)
-      const targets = await response.json()
-      const page = targets.find(
-        (target) => target.type === 'page' && (target.url.startsWith('app://') || target.url.includes('localhost:')),
-      )
-      if (page?.webSocketDebuggerUrl) return page
-    } catch {
-      /* electron not up yet */
-    }
-    await sleep(500)
-  }
-  throw new Error(`Timed out waiting for the Electron page target on port ${port}`)
-}
-
-const target = await findTarget()
+const { target, ws, send, evaluate, waitFor, errors } = await connect(port)
 console.log('[smoke] target:', target.url)
-
-const ws = new WebSocket(target.webSocketDebuggerUrl)
-await new Promise((resolve, reject) => {
-  ws.addEventListener('open', resolve, { once: true })
-  ws.addEventListener('error', reject, { once: true })
-})
-
-let messageId = 0
-const pending = new Map()
-ws.addEventListener('message', (event) => {
-  const message = JSON.parse(event.data)
-  if (message.id && pending.has(message.id)) {
-    const { resolve, reject } = pending.get(message.id)
-    pending.delete(message.id)
-    if (message.error) reject(new Error(`${message.error.message}: ${message.error.data ?? ''}`))
-    else resolve(message.result)
-    return
-  }
-  if (message.method === 'Runtime.exceptionThrown') {
-    errors.push(message.params?.exceptionDetails?.exception?.description ?? 'Unknown exception')
-  }
-  if (message.method === 'Runtime.consoleAPICalled' && message.params?.type === 'error') {
-    errors.push(message.params.args?.map((arg) => arg.value ?? arg.description ?? '').join(' '))
-  }
-})
-
-function send(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const id = ++messageId
-    pending.set(id, { resolve, reject })
-    ws.send(JSON.stringify({ id, method, params }))
-  })
-}
-
-async function evaluate(expression) {
-  const result = await send('Runtime.evaluate', {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-    userGesture: true,
-  })
-  if (result.exceptionDetails) {
-    const description =
-      result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? 'evaluation failed'
-    throw new Error(description)
-  }
-  return result.result?.value
-}
-
-async function waitFor(expression, timeoutMs = 15000, label = expression) {
-  const started = Date.now()
-  while (Date.now() - started < timeoutMs) {
-    try {
-      if (await evaluate(expression)) return true
-    } catch {
-      /* context may be reloading */
-    }
-    await sleep(250)
-  }
-  throw new Error(`Timed out waiting for: ${label}`)
-}
 
 /**
  * Evaluates in the frame, a DevTools target of its own, that has loaded `url`. A frame the page refused to
@@ -1176,6 +1096,58 @@ async function runShellChecks() {
 }
 
 /**
+ * Help > About shows which build this is, and Save diagnostics writes a report that says so, lists the models
+ * without their keys and holds none of the key that was just stored.
+ */
+async function runAboutChecks() {
+  console.log('[smoke] --- about and diagnostics ---')
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))
+  const info = await evaluate('window.eNCode.app.about()')
+  console.log('[smoke] build:', JSON.stringify(info))
+  if (info.version !== pkg.version) throw new Error(`About says version ${info.version}, package.json says ${pkg.version}`)
+  if (!['tester', 'dev'].includes(info.channel)) throw new Error(`unknown channel ${info.channel}`)
+  if (process.env.ENCODE_COMMIT && info.commit !== process.env.ENCODE_COMMIT.toLowerCase()) throw new Error('the build does not carry the commit CI named')
+  if (info.commit && !/^[0-9a-f]{40}$/.test(info.commit)) throw new Error(`the commit is not a hash: ${info.commit}`)
+  if (!info.electron || !info.os) throw new Error('About does not say what it runs on')
+
+  if (!(await click('.tb-menu', 'Help'))) throw new Error('Help menu not found')
+  await waitFor(menuOpen('Help'), 4000, 'Help menu')
+  const items = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  for (const label of ['Keyboard shortcuts', 'Save diagnostics…', 'Show log files', 'About eNCode']) {
+    if (!items.includes(label)) throw new Error(`Help menu is missing ${label}: ${items}`)
+  }
+  await click('.ui-menu [role^="menuitem"]', 'About eNCode')
+  await waitFor("!!document.querySelector('.about-dialog .about-facts')", 6000, 'About shows the build')
+  const shown = await evaluate("document.querySelector('.about-dialog').innerText")
+  if (!shown.includes(`Version ${info.version}`)) throw new Error(`About does not show the version: ${shown}`)
+  if (info.commit && !shown.includes(info.commit.slice(0, 7))) throw new Error('About does not show the commit')
+  await sleep(300)
+  await screenshot('ui-dark-about.png')
+
+  // A key stored a moment ago must not be in the report; the profile is listed with "key stored".
+  const secret = `sk-smoke-about-${Date.now().toString(36)}abcdef`
+  await evaluate(`window.eNCode.settings.setProfileKey('local-mock', ${JSON.stringify(secret)})`)
+  if (!(await click('.about-dialog .ui-dialog-foot .btn', 'Save diagnostics'))) throw new Error('Save diagnostics button not found')
+  const file = process.env.ENCODE_DIAGNOSTICS_FILE
+  if (!file) throw new Error('ENCODE_DIAGNOSTICS_FILE is not set (pnpm e2e sets it)')
+  const started = Date.now()
+  let report = ''
+  while (!report && Date.now() - started < 10000) {
+    report = await fs.readFile(file, 'utf8').catch(() => '')
+    if (!report) await sleep(200)
+  }
+  if (!report.startsWith('eNCode diagnostics')) throw new Error('the diagnostics report was not written')
+  if (!report.includes(`eNCode ${pkg.version} ${info.channel}`)) throw new Error('the report does not say which build it is')
+  if (!/local-mock|Local mock/i.test(report) || !report.includes('key stored')) throw new Error('the report does not list the model with its key as stored')
+  if (report.includes(secret)) throw new Error('the diagnostics report holds an API key')
+  if (!/^ {2}\d{4}-\d\d-\d\dT/m.test(report)) throw new Error('the report has no log lines')
+  await waitFor("[...document.querySelectorAll('.ui-toast, .toast')].some((node) => node.textContent.includes('Saved diagnostics'))", 6000, 'a note that the report was saved')
+  await key({ key: 'Escape' })
+  await waitFor("!document.querySelector('.about-dialog')", 4000, 'Escape closes About')
+  console.log('[smoke] about and diagnostics checks passed')
+}
+
+/**
  * Settings > Appearance: a choice previews at once, Cancel puts the saved look back, Save
  * keeps it across a reload. Captures the main window and the Appearance page in both themes.
  */
@@ -1613,6 +1585,7 @@ try {
   await screenshot('12-final.png')
 
   await runShellChecks()
+  await runAboutChecks()
   await runPanelChecks()
   await runFontChecks()
   await runAppearanceChecks()
