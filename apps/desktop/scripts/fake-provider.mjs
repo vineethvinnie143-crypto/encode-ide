@@ -221,7 +221,9 @@ let lastAuthorization = null
 let lastRequest = null
 /** The latest request of the Reviewer: what it was given, so the smoke can check it sees little and has no tools. */
 let lastReviewer = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0 }
+/** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
+let lastCodeReview = null
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0 }
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -360,6 +362,26 @@ function reviewerAnswer(user) {
   return JSON.stringify({ verdict: 'ask', risk: 'medium', reason: 'It writes a file you did not mention.' })
 }
 
+/** Ask the Reviewer: one call with the change, each line numbered as in its file, and no tools. */
+const CODE_REVIEWER = 'You are the Reviewer. A developer asks you to review a code change'
+const isCodeReview = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(CODE_REVIEWER))
+
+/** A finding on the first added line of the first file the change shows, the way a model answers. */
+function codeReviewAnswer(user) {
+  const file = /<file path=("(?:[^"\\]|\\.)*")[^>]*>\n([\s\S]*?)\n<\/file>/.exec(user)
+  const added = file ? /^\+(\d+) \| (.*)$/m.exec(file[2]) : null
+  if (!file || !added) return JSON.stringify({ summary: 'There are no changed lines to judge.', findings: [] })
+  const path = JSON.parse(file[1])
+  return `Here is my review.\n\`\`\`json\n${JSON.stringify({
+    summary: 'The change adds a counter; one line of it can divide by zero.',
+    findings: [
+      { file: path, line: Number(added[1]), priority: 'P1', title: 'Divides by zero when the list is empty', body: `Line ${added[1]} divides by the length of a list that can be empty. Return early when it is.` },
+      { file: `b/${path}`, line: Number(added[1]), priority: 'P3', title: 'The counter is never reset', body: 'Reset it where the list is cleared.' },
+      { file: 'not/in/the/change.ts', line: 3, priority: 'P0', title: 'A file the change does not touch', body: 'eNCode drops a finding on a file it did not send.' },
+    ],
+  })}\n\`\`\``
+}
+
 /** The small call that names a session once its first turn is over. */
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
@@ -380,6 +402,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-reviewer') {
       sendJson(response, 200, lastReviewer)
+      return
+    }
+    if (request.url === '/__last-code-review') {
+      sendJson(response, 200, lastCodeReview)
       return
     }
     if (request.url === '/__stats') {
@@ -426,6 +452,14 @@ const server = http.createServer(async (request, response) => {
       stats.titleRequests += 1
       // Quoted and closed with a full stop, as models do: eNCode must take both off.
       await sendText(response, body, '"Provider path check."')
+      return
+    }
+
+    if (isCodeReview(messages)) {
+      stats.codeReviews += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastCodeReview = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, codeReviewAnswer(user))
       return
     }
 

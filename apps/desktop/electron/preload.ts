@@ -100,6 +100,7 @@ const api: EncodeApi = {
     branches: () => invoke('review:branches'),
     commit: (request: ReviewCommitRequest) => invoke('review:commit', request),
     draft: (options?: { all?: boolean }) => invoke('review:draft', options),
+    ask: (scope: ReviewScope, options: ReviewOptions) => invoke('review:ask', scope, options),
   },
   shell: {
     create: (options: ShellCreateOptions) => invoke('shell:create', options),

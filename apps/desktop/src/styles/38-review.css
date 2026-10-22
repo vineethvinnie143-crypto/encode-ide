@@ -669,6 +669,78 @@
   overflow-wrap: anywhere;
 }
 
+/* A finding of the Reviewer: its priority in front, a stripe of that colour, and the problem in a line above the text. */
+.rv-comment.is-reviewer {
+  --finding: var(--text-3);
+  border-left: 2px solid color-mix(in srgb, var(--finding) 70%, transparent);
+}
+.rv-comment.is-reviewer[data-priority='P0'] {
+  --finding: var(--danger);
+}
+.rv-comment.is-reviewer[data-priority='P1'] {
+  --finding: color-mix(in srgb, var(--danger) 55%, var(--warning));
+}
+.rv-comment.is-reviewer[data-priority='P2'] {
+  --finding: var(--warning);
+}
+.rv-finding-priority {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--finding) 16%, transparent);
+  color: var(--finding);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.rv-comment-by {
+  color: var(--text-2);
+}
+.rv-finding-title {
+  margin-top: 4px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.rv-finding-title + .rv-comment-text {
+  color: var(--text-2);
+}
+
+/* What the Reviewer said about the view, above its changes. */
+.rv-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--row-selected);
+}
+.rv-verdict > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.rv-verdict.is-clean > svg {
+  color: var(--success);
+}
+.rv-verdict.has-findings > svg {
+  color: var(--warning);
+}
+.rv-verdict-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.rv-verdict-text strong {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.rv-verdict .icon-btn {
+  flex: none;
+  margin: -4px -6px -4px 0;
+}
+
 .rv-editor {
   padding: 8px;
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));

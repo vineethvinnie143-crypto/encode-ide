@@ -66,6 +66,7 @@ export interface AppActions {
   chooseEffort(): void
   choosePermissions(): void
   reviewLastTurn(): void
+  askReviewer(): void
   canUndo(): boolean
   undoLastTurn(): void
   canRewind(): boolean
@@ -194,6 +195,14 @@ export function buildCommands(a: AppActions): Command[] {
       keywords: 'changes diff agent request',
       enabled: () => a.hasWorkspace(),
       run: () => a.reviewLastTurn(),
+    },
+    {
+      id: 'agent.askReviewer',
+      title: 'Ask the Reviewer',
+      group: 'Session',
+      keywords: 'review code bugs check findings second opinion changes diff',
+      enabled: () => a.hasWorkspace(),
+      run: () => a.askReviewer(),
     },
     { id: 'agent.undo', title: 'Undo the last turn…', group: 'Session', keywords: 'revert changes files', enabled: () => a.canUndo() === true, run: () => a.undoLastTurn() },
     { id: 'agent.rewind', title: 'Rewind…', group: 'Session', keywords: 'go back earlier message restore', enabled: () => a.canRewind() === true, run: () => a.rewind() },

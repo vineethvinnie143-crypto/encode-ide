@@ -77,6 +77,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'policy', aliases: ['permissions'], description: 'Choose what eNCode may do without asking' },
   { name: 'status', description: 'Model, permissions, context and tokens of this session' },
   { name: 'diff', description: 'Open the Review tab' },
+  { name: 'review', args: '[unstaged | staged | branch | commit | turn]', description: 'Ask the Reviewer to check the changes' },
   { name: 'undo', description: 'Put back the files of the last request that changed some' },
   { name: 'rewind', description: 'Go back to an earlier message' },
   { name: 'init', description: 'Write project instructions (AGENTS.md) for this project' },

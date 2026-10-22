@@ -326,6 +326,25 @@ export type ReviewCommitOutcome =
   | { ok: true; commit: ReviewCommit; pushed?: string; pushError?: string }
   | { ok: false; message: string }
 
+/** How much a Reviewer's finding matters: P0 stops everything (broken build, lost data, a hole), P3 is minor. */
+export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+/** A problem the Reviewer found, tied to one line of the change as the review names its file. */
+export interface ReviewFinding {
+  path: string
+  side: 'old' | 'new'
+  line: number
+  priority: FindingPriority
+  title: string
+  body: string
+}
+
+/**
+ * What the Reviewer said about a review's changes: a short verdict and its findings. `files`: how many files it read;
+ * `left`: how many changed files were left out to keep the request small.
+ */
+export type ReviewAskOutcome = { ok: true; summary: string; findings: ReviewFinding[]; files: number; left: number } | { ok: false; message: string }
+
 export interface ModelInfo {
   id: string
   name: string
@@ -887,6 +906,8 @@ export interface EncodeApi {
     commit(request: ReviewCommitRequest): Promise<ReviewCommitOutcome>
     /** A commit message for what is staged (with `all`, every change), drafted by the model of the Small tasks role. */
     draft(options?: { all?: boolean }): Promise<{ ok: true; message: string } | { ok: false; message: string }>
+    /** The Reviewer's findings on the scope's changes, from the model of the Review role. */
+    ask(scope: ReviewScope, options: ReviewOptions): Promise<ReviewAskOutcome>
   }
   shell: {
     create(opts: ShellCreateOptions): Promise<ShellInfo>

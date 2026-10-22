@@ -50,6 +50,8 @@ function stepOf(messages: readonly Message[]): { step: number; failed: boolean }
 export function demoStep(request: CompletionRequest): ScriptedStep {
   // Naming a session takes a model that can say it in a few words: the demo gives no name, so the first words stay.
   if (request.tool === 'Title') return {}
+  // Ask the Reviewer gets an answer it can read, which says the demo reads no code.
+  if (request.tool === 'CodeReview') return { text: JSON.stringify({ summary: 'The offline demo does not read code. Connect a model in Settings, then ask again.', findings: [] }) }
   const messages = request.payload.messages
   const root = rootOf(messages)
   const note = path.join(root, ...DEMO_NOTE.split('/'))

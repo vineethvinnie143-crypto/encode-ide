@@ -233,6 +233,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle('review:branches', () => review.branches())
   handle('review:commit', (request: unknown) => review.commit(commitRequestOf(request)))
   handle('review:draft', (options?: { all?: unknown }) => review.draft(options?.all === true))
+  handle('review:ask', (scope: unknown, options: unknown) => review.askReviewer(reviewScopeOf(scope), reviewOptionsOf(options)))
 
   handle('shell:create', (options: ShellCreateOptions) =>
     shell.create(options, (id) => ({

@@ -175,6 +175,7 @@ function createAppActions(): AppActions {
     chooseEffort: () => agentActions.chooseEffort(),
     choosePermissions: () => agentActions.openMenu('policy'),
     reviewLastTurn: agentActions.reviewLastTurn,
+    askReviewer: () => void agentActions.askReviewer(),
     canUndo: agentActions.canUndo,
     undoLastTurn: agentActions.undo,
     canRewind: agentActions.canRewind,

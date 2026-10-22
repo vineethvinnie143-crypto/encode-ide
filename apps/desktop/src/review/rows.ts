@@ -4,7 +4,7 @@
  * comments under the lines they are about. Every row has a known height, except comments, whose drawn height is
  * measured and given back, so the list can draw only what is on screen whatever the size of the review.
  */
-import type { ReviewFile, ReviewFileChange, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
+import type { FindingPriority, ReviewFile, ReviewFileChange, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
 
 export type DiffLayout = 'unified' | 'split'
 
@@ -20,6 +20,10 @@ export interface ReviewComment extends Anchor {
   text: string
   /** The line as it read when the comment was written, for the message to the agent. */
   excerpt: string
+  /** Written by the Reviewer, with how much it matters and the problem in a line; the person's own have none. */
+  by?: 'reviewer'
+  priority?: FindingPriority
+  title?: string
 }
 
 export type Row =

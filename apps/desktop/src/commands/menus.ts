@@ -71,6 +71,7 @@ export const MENUS: readonly MenuSpec[] = [
       'agent.stop',
       '-',
       'agent.reviewTurn',
+      'agent.askReviewer',
       'agent.undo',
       'agent.rewind',
       'agent.status',

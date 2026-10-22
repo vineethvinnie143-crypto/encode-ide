@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import type { ReviewFile, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
+import type { FindingPriority, ReviewFile, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
 // The token colours (.tok-*) the lines are drawn with are the editor's.
 import '@encode/editor-view/style.css'
 import { DISPLAY_LIMIT, HunkTokens, segmentsOf } from '../../review/highlight'
@@ -91,6 +91,13 @@ const Code = memo(function Code({ text, tokens, words }: { text: string; tokens:
 })
 
 const SIGNS: Record<ReviewLine['kind'], string> = { add: '+', del: '−', ctx: ' ' }
+
+const PRIORITY_HINT: Record<FindingPriority, string> = {
+  P0: 'P0: breaks the build, loses data or opens a security hole',
+  P1: 'P1: a bug people will hit',
+  P2: 'P2: a bug in a rarer case, or a likely regression',
+  P3: 'P3: a small problem',
+}
 
 interface LineProps {
   file: ReviewFile
@@ -274,11 +281,19 @@ function HunkHead({ file, hunk, scope, busy }: { file: ReviewFile; hunk: ReviewH
 
 function CommentCard({ comment, detached }: { comment: ReviewComment; detached: boolean }) {
   const review = useReview.getState()
+  const reviewer = comment.by === 'reviewer'
   return (
-    <div className="rv-comment">
+    <div className={cx('rv-comment', reviewer && 'is-reviewer')} data-priority={reviewer ? (comment.priority ?? 'P2') : undefined}>
       <div className="rv-comment-head">
-        <MessageSquare size={13} />
+        {reviewer ? (
+          <span className="rv-finding-priority" title={PRIORITY_HINT[comment.priority ?? 'P2']}>
+            {comment.priority ?? 'P2'}
+          </span>
+        ) : (
+          <MessageSquare size={13} />
+        )}
         <span className="rv-comment-where">
+          {reviewer && <span className="rv-comment-by">Reviewer · </span>}
           {comment.side === 'old' ? `Old line ${comment.line}` : `Line ${comment.line}`}
           {detached && <span className="rv-comment-gone"> · no longer in this view</span>}
         </span>
@@ -291,6 +306,7 @@ function CommentCard({ comment, detached }: { comment: ReviewComment; detached: 
           </IconButton>
         </span>
       </div>
+      {reviewer && comment.title && <div className="rv-finding-title">{comment.title}</div>}
       <div className="rv-comment-text">{comment.text}</div>
     </div>
   )

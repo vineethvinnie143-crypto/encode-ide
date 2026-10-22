@@ -8,6 +8,7 @@ import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
 import type { RouterSettings } from './router-settings'
 
@@ -86,6 +87,8 @@ export type DesktopHostRequests = HostRequests & {
   sandboxAct: { params: { root: string; action: SandboxAction }; result: SandboxOutcome }
   /** A commit message for the changes given, from the model of the Small tasks role. */
   draftCommit: { params: CommitDraftInput; result: { message: string } }
+  /** What the model of the Review role finds wrong with a change. */
+  codeReview: { params: CodeReviewInput; result: CodeReviewResult }
 }
 
 /**

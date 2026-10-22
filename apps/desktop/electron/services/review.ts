@@ -7,6 +7,7 @@ import { GitError, GitRunner, Repository, ReviewError, type RepositoryOptions } 
 import type {
   ReviewAction,
   ReviewActOutcome,
+  ReviewAskOutcome,
   ReviewBranches,
   ReviewCommit,
   ReviewCommitOutcome,
@@ -15,7 +16,9 @@ import type {
   ReviewOptions,
   ReviewScope,
 } from '../../shared/types'
+import type { CodeReviewInput, CodeReviewResult } from '../agent-host/code-review'
 import type { CommitDraftInput } from '../agent-host/commit-message'
+import { codeReviewInput, REVIEW_CONTEXT } from './review-prompt'
 import { TurnReview, type TurnSource } from './turn-review'
 
 export interface ReviewServiceOptions {
@@ -28,6 +31,8 @@ export interface ReviewServiceOptions {
   trash?: RepositoryOptions['trash']
   /** Asks the Tools role's model for a commit message. */
   draft?: (input: CommitDraftInput) => Promise<string>
+  /** Asks the Review role's model what is wrong with a change. */
+  reviewCode?: (input: CodeReviewInput) => Promise<CodeReviewResult>
   /** The agent's record of what each request changed, for the Turn view; without it that view has nothing to show. */
   turns?: TurnSource
   platform?: NodeJS.Platform
@@ -136,6 +141,29 @@ export class ReviewService {
     } catch (error) {
       // The commit is made; only the push failed, and the person reads why.
       return { ok: true, commit, pushError: describe(error) }
+    }
+  }
+
+  /**
+   * The Reviewer's findings on a scope's changes. It reads more lines around each change than the person may show
+   * (REVIEW_CONTEXT at least), every whitespace change, and as many files as one request holds.
+   */
+  async askReviewer(scope: ReviewScope, options: ReviewOptions): Promise<ReviewAskOutcome> {
+    if (!this.options.reviewCode) return { ok: false, message: 'The Reviewer is not available here.' }
+    const load = await this.load(scope, { context: options.context === Infinity ? Infinity : Math.max(options.context, REVIEW_CONTEXT), ignoreWhitespace: false })
+    if (!load.ok) return { ok: false, message: load.message }
+    const { request, read } = codeReviewInput(load.snapshot)
+    if (!read) {
+      return {
+        ok: false,
+        message: request.left ? 'This change is too large for the Reviewer to read at once. Ask about a part of it: the staged changes, or one commit.' : 'There are no changed lines here for the Reviewer to read.',
+      }
+    }
+    try {
+      const result = await this.options.reviewCode(request)
+      return { ok: true, summary: result.summary, findings: result.findings, files: read, left: request.left }
+    } catch (error) {
+      return { ok: false, message: describe(error) }
     }
   }
 

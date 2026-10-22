@@ -6,6 +6,7 @@ import { EFFORT_INFO, isEffort } from '@shared/models'
 import type { ReasoningEffort } from '@shared/types'
 import { agentActions } from '../../commands/agent'
 import { commandRegistry } from '../../commands/app'
+import type { ScopeKind } from '../../stores/review'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
@@ -20,6 +21,25 @@ export function effortOf(words: string): ReasoningEffort | null | undefined {
   if (['default', 'auto', 'model default', 'reset'].includes(wanted)) return null
   if (wanted === 'extra high' || wanted === 'x high') return 'xhigh'
   return isEffort(wanted) ? wanted : undefined
+}
+
+/** The view `/review` names: as the Review tab's menu does, or in the words people use for it. */
+export function reviewKindOf(words: string): ScopeKind | undefined {
+  const wanted = words.trim().toLowerCase().replace(/\s+/g, ' ')
+  const kinds: Record<string, ScopeKind> = {
+    unstaged: 'unstaged',
+    changes: 'unstaged',
+    'working tree': 'unstaged',
+    staged: 'staged',
+    index: 'staged',
+    branch: 'branch',
+    commit: 'commit',
+    'last commit': 'commit',
+    turn: 'turn',
+    'last turn': 'turn',
+    agent: 'turn',
+  }
+  return kinds[wanted]
 }
 
 export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Promise<void>>> = {
@@ -42,6 +62,12 @@ export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Pro
   status: () => ui().setStatusOpen(true),
   diff: () => {
     if (!commandRegistry.run('view.review')) ui().notify('info', 'Open a folder to review its changes.')
+  },
+  review: (args) => {
+    if (!args) return agentActions.askReviewer()
+    const kind = reviewKindOf(args)
+    if (!kind) return ui().notify('info', `/review takes unstaged, staged, branch, commit or turn, not “${args}”.`)
+    return agentActions.askReviewer(kind)
   },
   undo: () => {
     if (agentActions.canUndo()) agentActions.undo()

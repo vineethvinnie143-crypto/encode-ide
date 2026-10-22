@@ -9,7 +9,7 @@ import { errorText } from '../ipc-error'
 import { getActiveSessionId } from '../stores/active'
 import { useChat } from '../stores/chat'
 import { usePanels } from '../stores/panels'
-import { useReview } from '../stores/review'
+import { useReview, type ScopeKind } from '../stores/review'
 import { useRewind } from '../stores/rewind'
 import { useSettings } from '../stores/settings'
 import { useUi, type ComposerMenu } from '../stores/ui'
@@ -141,6 +141,11 @@ export const agentActions = {
 
   reviewLastTurn(): void {
     useReview.getState().showTurn(null)
+  },
+
+  /** The Reviewer's findings on the changes the Review tab shows (with `kind`, on that view's), as comments there. */
+  askReviewer(kind?: ScopeKind): Promise<void> {
+    return useReview.getState().askReviewer(kind)
   },
 
   async feedback(text?: string): Promise<void> {

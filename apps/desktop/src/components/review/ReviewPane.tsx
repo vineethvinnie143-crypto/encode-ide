@@ -11,7 +11,7 @@ import { useWorkspace } from '../../stores/workspace'
 import { throttle } from '../../throttle'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { ChevronDown, Columns2, GitBranch, GitPullRequest, MessageSquare, RefreshCw, Rows, Settings2 } from '../../ui/icons'
+import { ChevronDown, Columns2, GitBranch, GitPullRequest, MessageSquare, RefreshCw, Rows, Settings2, ShieldCheck, X } from '../../ui/icons'
 import { Menu, type MenuEntry } from '../../ui/Menu'
 import { SkeletonRows } from '../../ui/Skeleton'
 import { Spinner } from '../../ui/Spinner'
@@ -280,6 +280,8 @@ export default function ReviewPane() {
   const viewKey = useReview((state) => state.viewKey())
   const comments = useReview((state) => state.comments[state.viewKey()] ?? NO_COMMENTS)
   const view = useReview((state) => state.view)
+  const asking = useReview((state) => state.asking)
+  const verdict = useReview((state) => state.verdicts[state.viewKey()])
   const running = useChat((state) => state.running)
   // The Turn view is the open conversation's: another conversation is read afresh.
   const conversation = useSessions((state) => (kind === 'turn' ? state.activeId : null))
@@ -358,6 +360,18 @@ export default function ReviewPane() {
           </span>
         )}
         {loading && <Spinner size={14} className="rv-loading" label="Reading the changes" />}
+        {snapshot !== null && snapshot.files.length > 0 && (
+          <IconButton
+            label={asking === viewKey ? 'The Reviewer is reading these changes' : 'Ask the Reviewer'}
+            shortcut="/review"
+            size="md"
+            className="rv-ask"
+            disabled={asking !== null}
+            onClick={() => void useReview.getState().askReviewer()}
+          >
+            {asking === viewKey ? <Spinner size={14} /> : <ShieldCheck size={15} />}
+          </IconButton>
+        )}
         <IconButton label="Refresh" size="md" onClick={() => void useReview.getState().refresh()}>
           <RefreshCw size={15} />
         </IconButton>
@@ -399,6 +413,23 @@ export default function ReviewPane() {
       {!load && !error && (
         <div className="rv-skeleton">
           <SkeletonRows rows={6} label="Reading the changes" />
+        </div>
+      )}
+      {asking === viewKey && (
+        <div className="rv-banner is-quiet rv-verdict" role="status">
+          <Spinner size={13} /> The Reviewer is reading these changes.
+        </div>
+      )}
+      {verdict && asking !== viewKey && (
+        <div className={cx('rv-banner rv-verdict', verdict.findings ? 'has-findings' : 'is-clean')} role="status">
+          <ShieldCheck size={14} />
+          <span className="rv-verdict-text">
+            <strong>{verdict.findings ? `The Reviewer left ${plural(verdict.findings, 'comment')}.` : 'The Reviewer found nothing to fix.'}</strong> {verdict.summary}
+            {verdict.left > 0 && ` It did not read ${plural(verdict.left, 'file')}: the change is too large for one request.`}
+          </span>
+          <IconButton label="Close" size="sm" onClick={() => useReview.getState().dismissVerdict()}>
+            <X size={13} />
+          </IconButton>
         </div>
       )}
       {snapshot?.turn?.busy && snapshot.files.length > 0 && <div className="rv-banner is-quiet">eNCode is working on this conversation. Its changes can be reverted once it is done.</div>}

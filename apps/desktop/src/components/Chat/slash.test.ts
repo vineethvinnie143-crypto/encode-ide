@@ -6,7 +6,7 @@ import { setActiveSessionId } from '../../stores/active'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { findSlash, SLASH_COMMANDS } from './picker'
-import { effortOf, runSlash, SLASH_RUNNERS } from './slash'
+import { effortOf, reviewKindOf, runSlash, SLASH_RUNNERS } from './slash'
 
 const notes: string[] = []
 useUi.setState({ notify: (_kind, text) => void notes.push(text) })
@@ -44,6 +44,28 @@ describe('slash commands', () => {
     assert.deepEqual(useUi.getState().menuRequest, { menu: 'model', id: before + 1 })
     await run('shortcuts')
     assert.equal(useUi.getState().shortcutsOpen, true)
+  })
+})
+
+describe('/review', () => {
+  beforeEach(() => {
+    notes.length = 0
+  })
+
+  it('names a view of the Review tab as its menu does, or in the words people use', () => {
+    const named = (words: string) => reviewKindOf(words)
+    assert.equal(named('unstaged'), 'unstaged')
+    assert.equal(named(' Staged '), 'staged')
+    assert.equal(named('working  tree'), 'unstaged')
+    assert.equal(named('branch'), 'branch')
+    assert.equal(named('last commit'), 'commit')
+    assert.equal(named('Last turn'), 'turn')
+    for (const words of ['everything', 'pr', 'staged files']) assert.equal(named(words), undefined, words)
+  })
+
+  it('names the views for a word it does not know, and asks nothing', async () => {
+    await run('review', 'everything')
+    assert.deepEqual(notes, ['/review takes unstaged, staged, branch, commit or turn, not “everything”.'])
   })
 })
 

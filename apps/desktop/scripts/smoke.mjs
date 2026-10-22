@@ -2280,10 +2280,55 @@ async function runReviewChecks() {
   await until(async () => (await fs.readFile(sample, 'utf8')).includes('second change'), 10000, 'Ctrl+Z brings the reverted change back')
   await waitFor("document.querySelectorAll('.review-pane .rv-hunk-head').length === 1", 10000, 'the change shows again')
   console.log('[smoke] review: staged a hunk, committed it, reverted a file and undid that')
+  await runReviewerChecks()
 
   // Leave the side panel as it was found.
   await key({ key: 'w', code: 'KeyW', ctrlKey: true })
   await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+}
+
+/**
+ * Ask the Reviewer, with the unstaged change of the review checks in view: the offline demo says it reads no code;
+ * a real model is sent the change with numbered lines and no tools, and its findings become comments on those lines,
+ * marked with their priority, while a finding on a file the change does not touch is dropped.
+ */
+async function runReviewerChecks() {
+  console.log('[smoke] --- the Reviewer ---')
+  const findings = "[...document.querySelectorAll('.review-pane .rv-comment.is-reviewer')]"
+  const verdict = "(document.querySelector('.review-pane .rv-verdict')?.textContent ?? '')"
+
+  await click('.review-pane .rv-ask')
+  await waitFor(`!!document.querySelector('.review-pane .rv-verdict.is-clean') && ${verdict}.includes('offline demo does not read code')`, 15000, 'the demo says it reads no code')
+  if (await evaluate(`${findings}.length`)) throw new Error('the demo left findings')
+
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'local-mock' })")
+  await typeInto('.composer-input', '/review unstaged')
+  await sleep(250)
+  await composerKey({ key: 'Enter' })
+  await waitFor(`${findings}.length === 2 && ${verdict}.includes('The Reviewer left 2 comments.')`, 30000, '/review leaves the findings as comments')
+  const shown = await evaluate(`${findings}.map((node) => ({
+    priority: node.dataset.priority,
+    head: node.querySelector('.rv-comment-where')?.textContent ?? '',
+    title: node.querySelector('.rv-finding-title')?.textContent ?? '',
+  }))`)
+  if (JSON.stringify(shown.map((item) => item.priority)) !== '["P1","P3"]') throw new Error(`the findings are ${JSON.stringify(shown)}`)
+  if (shown[0].head !== 'Reviewer · Line 35' || shown[0].title !== 'Divides by zero when the list is empty') throw new Error(`the first finding reads ${JSON.stringify(shown[0])}`)
+  const sent = await (await fetch(`http://127.0.0.1:${providerPort}/__last-code-review`)).json()
+  if (sent.tools.length) throw new Error(`the Reviewer was offered tools: ${JSON.stringify(sent.tools)}`)
+  if (!sent.user.includes('<file path="src/review-me.ts" change="modified">') || !sent.user.includes('+35 | export const value35 = 3500 // second change')) {
+    throw new Error(`the Reviewer was not sent the numbered change: ${sent.user.slice(0, 400)}`)
+  }
+  if (!(await evaluate("document.querySelector('.review-pane .rv-foot')?.textContent ?? ''")).includes('Send 2 comments')) throw new Error('the findings cannot be sent to the agent')
+  await sleep(300)
+  await screenshot('ui-dark-reviewer.png')
+
+  await evaluate(`${findings}[1].querySelector('[aria-label="Delete comment"]').click()`)
+  await waitFor(`${findings}.length === 1`, 4000, 'a finding can be deleted')
+  await click('.review-pane .rv-verdict [aria-label="Close"]')
+  await waitFor("!document.querySelector('.review-pane .rv-verdict')", 4000, 'the verdict closes, and its comments stay')
+  if ((await evaluate(`${findings}.length`)) !== 1) throw new Error('closing the verdict took the comments')
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'demo' })")
+  console.log('[smoke] the Reviewer: ok')
 }
 
 /**
