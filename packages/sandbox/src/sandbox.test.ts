@@ -94,7 +94,8 @@ describe('the sandbox', () => {
     const policy = engine.wrapped[0]
     assert.ok(policy.writable.includes(project))
     assert.ok(policy.writable.includes(path.join(dir, 'sandbox', 'tmp')))
-    assert.ok(policy.protected.includes(path.join(project, '.git', 'hooks')))
+    // The sandbox here is a Linux one, whatever runs the test, so its paths are joined the way a Linux policy joins them.
+    assert.ok(policy.protected.includes(path.posix.join(project, '.git', 'hooks')))
     assert.deepEqual(session.state(), { active: true, required: false, allowUnsandboxed: true, limits: engine.limits })
   })
 
