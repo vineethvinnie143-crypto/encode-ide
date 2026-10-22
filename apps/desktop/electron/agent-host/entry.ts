@@ -2,6 +2,7 @@
  * The utility process: the agent host behind the main process's message port.
  * Bundled on its own (dist/electron/agent-host.cjs).
  */
+import { createWindowsDesktop } from '@encode/tools/windows'
 import { parentPortAsPort, type ParentPortLike } from './ports'
 import { runHostRuntime } from './runtime'
 
@@ -17,4 +18,8 @@ process.on('uncaughtException', (error) => {
   process.exit(1)
 })
 
-runHostRuntime(parentPortAsPort(parent), { onShutdown: () => process.exit(0) })
+// The desktop the Computer tool drives. Nothing starts until a chat turns the tool on and uses it: the helper is
+// built and launched on the first call, and this process's parent (the main process) is among the windows it never touches.
+const desktop = process.platform === 'win32' ? createWindowsDesktop({ log: (message) => console.error(`[agent-host] ${message}`) }) : undefined
+
+runHostRuntime(parentPortAsPort(parent), { onShutdown: () => process.exit(0), hostOptions: desktop ? { desktop } : {} })

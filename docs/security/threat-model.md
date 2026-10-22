@@ -108,15 +108,16 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
 | T29 | A page in the Browser tab reaches the app, or the tab drops a protection the page relied on | The page is another origin, in a frame sandboxed without top navigation, and it has no bridge. Only the responses of the main window's own sub-frames lose X-Frame-Options and `frame-ancestors`, so the tab can show them; every other header and directive stays, and no other request is touched. | Partial (R13) |
-| T30 | The agent clicks and types in a program that runs commands or holds credentials: a terminal, an editor's terminal, a password manager, a system tool | The Computer tool never operates them. `decideApproval` refuses them under every policy, Full access included, and the backend marks eNCode's own window and programs running as administrator (0050). | Partial (R14) |
+| T30 | The agent clicks and types in a program that runs commands or holds credentials: a terminal, an editor's terminal, a password manager, a system tool | The Computer tool never operates them. `decideApproval` refuses them under every policy, Full access included, and the backend marks eNCode's own window (by process id and program path) and programs running as administrator, and never works on them (0050, 0053). | Partial (R14) |
 | T31 | Text on screen steers the model into input the user did not want, or into sending what cannot be taken back | The first use of each application asks, with a warning for browsers, chat and mail. Screen text arrives inside `<screen_content>` marked as data. Keys that leave the window and typing into password fields are refused, a turn is capped at 150 inputs, and moving the mouse or typing stops the agent until the user speaks (0050). | Partial (R2, R14) |
-| T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none (0050). | Mitigated |
+| T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none. The picture the helper takes paints over every window of another program in front of the window and every password field (0050, 0053). | Mitigated |
 | T33 | Two chats drive the mouse at once and act on each other's screens | One chat at a time sends input; another is told the desktop is busy, and the hold ends after 30 seconds without input, on stop or on close (0050). | Mitigated |
 | T34 | A log or a diagnostics report that a tester sends to someone else carries a key, a conversation or the user's name | Every log line is scrubbed before it is kept: keys and tokens by shape, the stored keys by value, e-mail addresses and user names in paths. A report holds no file contents, conversations or remembered folders, is scrubbed again with the keys read fresh, is written only where the user says and is never sent by eNCode (0051). | Partial (R15) |
 | T35 | A key reaches a place the person did not choose: the agent host's configuration, a log, or another server than the one it belongs to | The host's configuration carries a revision number for each key and never a key. When the router needs one it asks the main process, naming the origin it is about to call, and the main process answers only for the origin of that profile's address. An address is `https://`, or `http://` for a server on this computer, with no user name, password, query or fragment: the dialog says so, the model list request (which carries the key) refuses anything else before it is made, and the router drops the connection with the same words. A changed address drops the stored key (0052). | Partial (R16) |
 | T36 | A model call is billed that the person did not choose: a paid model behind a free one, a second key's account, a free model that turns out to charge | Free only is on until the person chooses a model that costs money, and choosing one asks first. In that mode the router refuses every model that is not free. It never falls from a free model to a paid one, or from one key's account to another's, and a model that was billed although it was listed free counts as paid from then on, with a notice (0023, 0024, 0052). | Partial (R16) |
 | T37 | A refused key, a spent balance or a paused connection goes unnoticed, or the same notice floods the person | The router's alerts reach the interface as one notice each, the same one at most once a minute, with a button to the Settings tab that helps. Settings → Roles lists every connection's state and what is paused until when (0052). | Mitigated |
 | T38 | The router's saved state exposes a prompt or a key | `eNCode-models.json` holds health, cooldowns, free-request tallies and learned prices. It is written atomically with owner-only permissions every 30 seconds and at shutdown, and holds no prompt, reply or key (0052). | Mitigated |
+| T39 | The desktop helper is replaced or altered, or reads what the user types | The helper is built on the machine from sources that are in the repository and embedded in the app, into a folder named by their hash; the hash of the built file is recorded beside it and checked before every start, so a changed or half-written copy is built again, never run. It starts with a short list of environment variables and no network code, and its input hooks read only the "injected" flag of an event (never a key, a position or text) and exist only while an action runs (0053). | Partial (R17) |
 
 ## Residual risks
 
@@ -201,8 +202,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   - The never list is by program file name, so a copy of a terminal under another name is not
     caught. The backend marks windows by what they are (console windows, elevated processes), which
     narrows this, and the owner of the list is the Windows backend's record.
-  - Owner: the Windows backend (masking of other programs' windows and password fields in
-    screenshots, the stop key and the "agent is controlling" indicator).
+  - Owner: the Windows backend (0053 masks other programs' windows and password fields in
+    screenshots) and the stop key with the "agent is controlling" indicator that follow it.
 - **R15. A report is scrubbed by shape.** A key of a kind nobody has seen, that eNCode does not hold, can
   get through; and a log line can name a file or folder when something went wrong with it. The report says so and is
   plain text, so the tester reads it before sending it.
@@ -214,6 +215,13 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   as free is its own word, which the router distrusts only after a bill proves it wrong.
   - Owner: the gateway (0020), which will serve the free models from a key of ours, and a per-model "may train on prompts" flag
     from OpenRouter's catalog if it ever offers one.
+- **R17. The desktop helper runs with the user's rights, from a folder the user's other programs can write.** The check of the
+  built file against its recorded hash catches a damaged or half-written copy; it does not stop a program that already runs as
+  the user from replacing both the file and the record, and such a program can do everything the helper can without it. An
+  antivirus program may also block a helper it has never seen, which stops the tool and is reported as such. While an action
+  runs, the helper's input hooks are the only code in eNCode that sees every keystroke and mouse event of the machine; they read
+  one flag of each and nothing else, and a reviewer should check that it stays so.
+  - Owner: the Windows backend (0053), and whoever changes `helper/Input.cs`.
 
 ## Verification
 

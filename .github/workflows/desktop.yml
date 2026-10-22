@@ -1,0 +1,58 @@
+name: Desktop helper
+
+# The Computer tool's Windows helper is built and run on a real desktop here, against a window of our own that
+# records what reaches it. The same tests run in CI.yml with everything else; this one answers in a few minutes
+# and only when the tool's code changes, so a change to it can be tried without waiting for the whole build.
+on:
+  pull_request:
+    paths:
+      - 'packages/tools/src/computer/**'
+      - 'scripts/test.mjs'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+# Read-only token: CI never writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helper:
+    name: Windows desktop helper
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+      ENCODE_SHOTS: ${{ github.workspace }}/packages/tools/screenshots
+    steps:
+      # Third-party code is pinned to full commit hashes; the comments name the releases.
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Computer tool and desktop helper tests
+        run: node scripts/test.mjs packages/tools/src/computer
+
+      - name: Keep what the helper saw
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-helper-${{ github.run_attempt }}
+          path: packages/tools/screenshots
+          if-no-files-found: ignore
+          retention-days: 7

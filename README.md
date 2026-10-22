@@ -8,7 +8,7 @@ node-pty.
 
 **Status:** private development, for the owner and a few testers. M0 (foundation and security),
 the agent engine (M1) and the editor (M4) are in, and the app runs the agent in its own process.
-The model router (M2) is built but not connected to the app yet. Not released. Windows is the
+Every model call goes through the router (M2). Not released. Windows is the
 primary platform; the code stays cross-platform.
 
 ## What it does
@@ -221,10 +221,10 @@ packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, wi
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
 packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
-packages/router/              roles as ordered model lists, health and failover, the free model pool (not connected to the app yet)
+packages/router/              roles as ordered model lists, health and failover, the free model pool
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
-packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web
+packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web, and the Computer tool with its Windows helper
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
@@ -278,6 +278,14 @@ Compare runs on one machine: a machine without a GPU is slower than a PC.
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not
 import Electron, so logic under test takes Electron APIs by injection.
+
+The Computer tool's Windows helper (`packages/tools/src/computer/windows`,
+[ADR 0053](docs/adr/0053-the-windows-desktop-helper-is-our-own-program-built-on-the-machine-from-source-in-the-repository.md))
+is C# that is compiled on first use with the compiler Windows ships. Its arithmetic, key table
+and outline rules are checked against the TypeScript from node:test on any machine with the .NET
+SDK or the Framework compiler; the rest runs on Windows only, against a window of our own
+(`fixture/Fixture.cs`) that records every event it receives, and `.github/workflows/desktop.yml`
+runs just that part in a few minutes when the tool's code changes.
 
 ## Security
 

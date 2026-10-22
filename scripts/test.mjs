@@ -76,6 +76,8 @@ try {
     format: 'esm',
     sourcemap: 'inline',
     logLevel: 'silent',
+    // The Windows desktop helper's C# sources are embedded in the bundle as text.
+    loader: { '.cs': 'text', '.manifest': 'text' },
     plugins: [forbidElectron],
   })
 } catch (error) {

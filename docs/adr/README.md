@@ -42,6 +42,7 @@ say so.
 | [0050](0050-the-desktop-is-used-through-one-tool-one-application-and-one-chat-at-a-time.md) | The desktop is used through one tool, one application and one chat at a time | Accepted |
 | [0051](0051-tester-builds-carry-their-commit-keep-a-scrubbed-log-and-report-in-one-file.md) | Tester builds carry their commit, keep a scrubbed log and report in one file | Accepted |
 | [0052](0052-every-model-call-goes-through-the-router-keys-are-asked-for-by-origin.md) | Every model call goes through the router, and keys are asked for by origin | Accepted |
+| [0053](0053-the-windows-desktop-helper-is-our-own-program-built-on-the-machine-from-source-in-the-repository.md) | The Windows desktop helper is our own program, built on the machine from source in the repository | Accepted |
 
 ## Template
 
