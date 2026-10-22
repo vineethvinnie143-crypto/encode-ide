@@ -729,7 +729,11 @@ describe('ModelRouter: sessions, abort and budget', () => {
 
   it("reports the window of the model a call would use now", async () => {
     const world = new TestWorld({ catalogs: { openrouter: [catalogEntry(A, { contextWindow: 262_144, maxOutputTokens: 32_768 })] } })
-    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768 })
+    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false })
+    const seeing = new TestWorld({
+      catalogs: { openrouter: [catalogEntry(A, { capabilities: { tools: true, parallelTools: true, images: true, reasoning: false, promptCache: false } })] },
+    })
+    assert.equal((await seeing.router.budget('main')).images, true, 'whether the model reads images, so a tool knows whether to attach a screenshot')
     const empty = new TestWorld({ catalogs: {} })
     assert.equal((await empty.router.budget('main')).model, '@free')
   })

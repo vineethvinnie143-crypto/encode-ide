@@ -14,8 +14,12 @@ import path from 'node:path'
 import type { ModelClient, SystemPart } from '@encode/providers'
 import {
   createAgentShell,
+  createDesktopBroker,
   createWebAccess,
   type AgentShellOptions,
+  type DesktopBackend,
+  type DesktopBroker,
+  type DesktopOptions,
   type ManagedShell,
   type PlanVerdict,
   type ShellCommandAssessor,
@@ -71,6 +75,12 @@ export interface HostOptions {
   userDir?: string
   beforeWrite?: ToolContext['beforeWrite']
   extraTools?: readonly Tool[]
+  /**
+   * The desktop the Computer tool drives, shared by every session: one chat at a time sends input to it. The
+   * host stops it when it closes. Sessions get the tool only while the `computer` setting is on.
+   */
+  desktop?: DesktopBackend
+  desktopOptions?: Partial<DesktopOptions>
   reviewPlan?(plan: string, signal: AbortSignal): Promise<PlanVerdict>
   system?: SystemPart[]
   warn?(message: string): void
@@ -107,6 +117,7 @@ export class AgentHost {
   private readonly userDir: string
   private readonly web: WebAccess
   private readonly assessor: ShellCommandAssessor
+  private readonly desktop: DesktopBroker | undefined
 
   constructor(private readonly o: HostOptions) {
     this.store = createSessionStore({ dir: o.dir })
@@ -116,6 +127,7 @@ export class AgentHost {
     this.userDir = o.userDir ?? path.join(this.home, '.encode')
     this.web = o.web ?? createWebAccess()
     this.assessor = o.assessor ?? createDefaultAssessor(this.platform)
+    this.desktop = o.desktop ? createDesktopBroker(o.desktop, o.desktopOptions ? { options: o.desktopOptions } : {}) : undefined
   }
 
   // ------------------------------------------------------------ the environment of a session
@@ -153,6 +165,7 @@ export class AgentHost {
       readRoots: () => [this.userDir, ...this.skillSources(root).map((source) => source.dir)],
       ...(o.beforeWrite ? { beforeWrite: o.beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
+      ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
       ...(o.reviewPlan ? { reviewPlan: o.reviewPlan } : {}),
       ...(o.system ? { system: o.system } : {}),
       ...(o.warn ? { warn: o.warn } : {}),
@@ -443,6 +456,7 @@ export class AgentHost {
     this.timers.clear()
     await Promise.all([...this.retiring.values(), ...[...this.loaded.values()].map((session) => session.dispose())])
     this.loaded.clear()
+    await this.desktop?.dispose().catch(() => undefined)
     await this.store.dispose()
   }
 }

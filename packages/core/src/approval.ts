@@ -14,13 +14,16 @@
  *
  * Under every policy but Full access, writes into protected directories ask
  * (they can make tools run code or steer later turns), as does touching
- * anything outside the workspace, and the first fetch from each site in a
- * session (a URL can carry data out).
+ * anything outside the workspace, the first fetch from each site in a
+ * session (a URL can carry data out) and the first use of each application
+ * on the desktop (the mouse and keyboard reach anything the user can).
+ * Applications the Computer tool never operates are refused under every
+ * policy, like a deny rule.
  */
 import path from 'node:path'
 import { assessCommand, checkFetchUrl, isProtectedPath } from '@encode/permissions'
 import type { ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } from '@encode/tools'
-import { isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
+import { classifyApp, isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
 import type { ApprovalPolicy } from './ui'
 
 export type ApprovalDecision =
@@ -39,6 +42,8 @@ export interface ApprovalContext {
   readRoots?: readonly string[]
   /** Sites the user already let the agent contact in this session. */
   approvedHosts: ReadonlySet<string>
+  /** Applications the user already let the agent use in this session, by program name. */
+  approvedApps: ReadonlySet<string>
   shell: ShellState
   assessor: ShellCommandAssessor
 }
@@ -131,6 +136,17 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
 
     case 'external':
       return policy === 'full-access' ? ALLOW : ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`, false)
+
+    case 'desktop': {
+      if (access.blocked) return deny(`${access.label} is never used: ${access.blocked}.`)
+      if (policy === 'read-only') return deny('The approval policy is Read Only, so eNCode does not use the mouse or the keyboard. Ask the user to switch to Workspace Write.')
+      if (policy === 'full-access' || context.approvedApps.has(access.app)) return ALLOW
+      const caution = classifyApp(access.app).caution
+      return ask(
+        `eNCode asks before the agent uses an application for the first time in a session, because it can click and type anywhere in it. Approving allows ${access.label} until the session ends.${caution ? ` ${caution}` : ''}`,
+        false,
+      )
+    }
   }
 }
 

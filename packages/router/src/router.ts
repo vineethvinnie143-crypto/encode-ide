@@ -988,7 +988,7 @@ export class ModelRouter implements ModelClient {
     const requirements: Requirements = { promptTokens: 0, maxOutputTokens: 1, tools: false, images: false }
     const { candidates } = selectCandidates(this.selection, { role: resolved, refs, requirements, sticky })
     const first = candidates[0]?.info
-    if (first) return { model: first.model, contextWindow: first.contextWindow, maxOutputTokens: first.maxOutputTokens }
+    if (first) return { model: first.model, contextWindow: first.contextWindow, maxOutputTokens: first.maxOutputTokens, images: first.capabilities.images }
     // Nothing runs now: the best guess is the role's first model, available or not.
     for (const ref of refs) {
       const parsed = ref === FREE_POOL ? undefined : parseModelRef(ref)
@@ -996,12 +996,12 @@ export class ModelRouter implements ModelClient {
         const info = this.registry.get(parsed.provider, parsed.model)
         // A model that free-only mode refuses will never run, so it is no guess at what will.
         if (this.config.freeOnly && !info.free) continue
-        return { model: info.model, contextWindow: info.contextWindow, maxOutputTokens: info.maxOutputTokens }
+        return { model: info.model, contextWindow: info.contextWindow, maxOutputTokens: info.maxOutputTokens, images: info.capabilities.images }
       }
       if (ref === FREE_POOL) {
         for (const id of this.config.freePool.providers) {
           const member = this.pool.members(id, resolved, this.config.freePool, sticky)[0]
-          if (member) return { model: member.model, contextWindow: member.contextWindow, maxOutputTokens: member.maxOutputTokens }
+          if (member) return { model: member.model, contextWindow: member.contextWindow, maxOutputTokens: member.maxOutputTokens, images: member.capabilities.images }
         }
       }
     }

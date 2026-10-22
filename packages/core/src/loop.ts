@@ -37,6 +37,7 @@ import {
 import {
   truncateMiddle,
   type AgentShell,
+  type DesktopServices,
   type DiffHunk,
   type FileStateTracker,
   type Goals,
@@ -73,6 +74,7 @@ import {
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
+import { withoutScreensFrom } from './screens'
 import { AgentAbortedError, type AgentSettings, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
 import type { ConversationEntry } from './ui'
 
@@ -104,6 +106,8 @@ export interface LoopServices {
   skills?: Skills
   goals?: Goals
   subagents?: Subagents
+  /** The desktop the Computer tool works on; absent when the session has none. */
+  desktop?: DesktopServices
   beforeWrite?: ToolContext['beforeWrite']
   summarize?: ToolContext['summarize']
 }
@@ -124,6 +128,8 @@ export interface LoopOptions {
   services: LoopServices
   /** Sites the user already let the agent contact; shared between a session's agents. */
   approvedHosts: Set<string>
+  /** Applications the user already let the agent use, by program name; shared like the sites. */
+  approvedApps?: Set<string>
   assessor: ShellCommandAssessor
   /** Directories read without asking, besides the workspace. */
   readRoots?: () => readonly string[]
@@ -230,8 +236,13 @@ export class AgentLoop {
   private fixed = 0
   private contextKey = ''
   private readonly inflight = new Set<ConversationEntry>()
+  private readonly approvedApps: Set<string>
+  /** Whether the model that answered last reads images; unknown until the first request. */
+  private vision: boolean | undefined
 
-  constructor(private readonly o: LoopOptions) {}
+  constructor(private readonly o: LoopOptions) {
+    this.approvedApps = o.approvedApps ?? new Set()
+  }
 
   private get base(): Omit<HookEvent, 'mode'> {
     return { sessionId: this.o.services.sessionId, agentId: this.o.agentId, root: this.o.services.root }
@@ -315,9 +326,11 @@ export class AgentLoop {
       const tools = o.registry.allDefinitions(o.tools)
       await this.noteContext(tools, turn)
       await this.fit(turn)
-      const sent = o.conversation.messages()
       const settings = o.settings()
       const budget = await o.client.budget(o.role, this.query())
+      this.vision = budget.images
+      // A model that cannot read images is not sent the screens it could not see anyway.
+      const sent = budget.images === false ? withoutScreensFrom(o.conversation.messages()) : o.conversation.messages()
       const maxOutputTokens = Math.min(budget.maxOutputTokens, MAX_OUTPUT_TOKENS)
       const payload: ModelRequest = {
         system: o.system,
@@ -583,6 +596,7 @@ export class AgentLoop {
         platform: o.services.platform,
         readRoots: o.readRoots?.(),
         approvedHosts: o.approvedHosts,
+        approvedApps: this.approvedApps,
         shell: o.services.shell.state(),
         assessor: o.assessor,
       })
@@ -679,6 +693,8 @@ export class AgentLoop {
         if (host) o.approvedHosts.add(host)
       }
     }
+    // Allowing an application covers the rest of the session, also when a hook did the allowing.
+    if (access.type === 'desktop' && verdict.kind === 'ask') this.approvedApps.add(access.app)
 
     return { block, tool, input, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent' }
   }
@@ -784,6 +800,15 @@ export class AgentLoop {
       ...(s.subagents ? { subagents: { types: () => s.subagents!.types(), run: (request, signal) => s.subagents!.run({ ...request, entryId: entry.id, ...(progress ? { progress } : {}) }, signal) } } : {}),
       ...(s.skills ? { skills: s.skills } : {}),
       ...(s.goals ? { goals: s.goals } : {}),
+      ...(s.desktop
+        ? {
+            desktop: {
+              ...s.desktop,
+              permitted: (app: string) => o.settings().policy === 'full-access' || this.approvedApps.has(app),
+              vision: () => this.vision === true,
+            },
+          }
+        : {}),
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
       ...(progress ? { progress } : {}),

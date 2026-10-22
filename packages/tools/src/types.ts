@@ -14,6 +14,7 @@
  *   - `ToolRegistry.register`: tools from outside (MCP), with their own schema.
  */
 import type { ImageBlock, TextBlock, ToolDefinition } from '@encode/providers'
+import type { DesktopHandle } from './computer/state'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
 
@@ -50,6 +51,11 @@ export type ToolAccess =
   | { type: 'agent' }
   /** A tool from outside eNCode (MCP); every call asks unless a rule allows it. */
   | { type: 'external'; server: string }
+  /**
+   * Sees or operates an application on the desktop. `app` is its program (notepad.exe), `label` its name
+   * for people, `title` the window's. `blocked` says why it can never be used, when it cannot.
+   */
+  | { type: 'desktop'; app: string; label: string; title: string; blocked?: string }
 
 /** How a call reads in an approval card and in the transcript. */
 export interface ToolSummary {
@@ -356,6 +362,8 @@ export interface ToolContext {
   readonly shell: AgentShell
   readonly jobs: JobManager
   readonly web: WebAccess
+  /** The way to the desktop for the Computer tool; absent where there is none. */
+  readonly desktop?: DesktopHandle
   readonly interaction: Interaction
   readonly subagents?: Subagents
   readonly skills?: Skills

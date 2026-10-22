@@ -108,6 +108,10 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
 | T29 | A page in the Browser tab reaches the app, or the tab drops a protection the page relied on | The page is another origin, in a frame sandboxed without top navigation, and it has no bridge. Only the responses of the main window's own sub-frames lose X-Frame-Options and `frame-ancestors`, so the tab can show them; every other header and directive stays, and no other request is touched. | Partial (R13) |
+| T30 | The agent clicks and types in a program that runs commands or holds credentials: a terminal, an editor's terminal, a password manager, a system tool | The Computer tool never operates them. `decideApproval` refuses them under every policy, Full access included, and the backend marks eNCode's own window and programs running as administrator (0050). | Partial (R14) |
+| T31 | Text on screen steers the model into input the user did not want, or into sending what cannot be taken back | The first use of each application asks, with a warning for browsers, chat and mail. Screen text arrives inside `<screen_content>` marked as data. Keys that leave the window and typing into password fields are refused, a turn is capped at 150 inputs, and moving the mouse or typing stops the agent until the user speaks (0050). | Partial (R2, R14) |
+| T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none (0050). | Mitigated |
+| T33 | Two chats drive the mouse at once and act on each other's screens | One chat at a time sends input; another is told the desktop is busy, and the hold ends after 30 seconds without input, on stop or on close (0050). | Mitigated |
 
 ## Residual risks
 
@@ -185,6 +189,15 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   needs, so a page can read its own cookies and storage, and it can still open pop-ups.
   - Owner: the browser view of UI-7, which is its own surface with its own session, permission
     denial and no header rewriting.
+- **R14. Desktop control is as strong as the user's own hands.** Under Full access nothing asks
+  before a program is used, and under the other policies one click allows a program for the whole
+  session. A browser the user is signed in to can send, buy or delete in their name, and a click
+  that did what the model meant can still be what an injected page wanted.
+  - The never list is by program file name, so a copy of a terminal under another name is not
+    caught. The backend marks windows by what they are (console windows, elevated processes), which
+    narrows this, and the owner of the list is the Windows backend's record.
+  - Owner: the Windows backend (masking of other programs' windows and password fields in
+    screenshots, the stop key and the "agent is controlling" indicator).
 
 ## Verification
 
