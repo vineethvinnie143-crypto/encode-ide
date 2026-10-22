@@ -351,6 +351,46 @@ export type McpAction =
 /** The servers as they are after an action, with what happened in words. */
 export type McpOutcome = { ok: true; report: McpReport; note?: string } | { ok: false; reason: string; report: McpReport }
 
+/** How the sandbox around the agent's commands stands in the open folder, for the Sandbox screen. */
+export interface SandboxReport {
+  /** `active`: commands are confined. `off`: the settings turn it off. `unavailable`: this machine cannot run it. */
+  state: 'active' | 'off' | 'unavailable'
+  engine?: 'bubblewrap' | 'seatbelt' | 'restricted-token'
+  /** Why it is off or unavailable, in words. */
+  reason?: string
+  /** What this system's sandbox can hold back. */
+  limits?: { reads: boolean; network: boolean; protectedPaths: 'exact' | 'best-effort' }
+  /** What applies in this folder: your own settings, tightened by the folder's. */
+  settings: {
+    enabled: boolean
+    required: boolean
+    allowUnsandboxed: boolean
+    caches: boolean
+    network: 'allow' | 'block'
+    allowWrite: string[]
+    denyWrite: string[]
+    denyRead: string[]
+    allowRead: string[]
+  }
+  /** What the folder's own files made stricter than your settings, in words. */
+  tightened: string[]
+  /** What was wrong in the settings files, in words. */
+  problems: string[]
+  /** What is being prepared right now, when something is. */
+  working?: string
+  /** Your settings file, where the switches are saved. */
+  file: string
+}
+
+/** What the Sandbox screen can do: change a switch in your own settings, or check the machine again. */
+export type SandboxAction =
+  | { type: 'set'; key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches'; value: boolean }
+  | { type: 'set'; key: 'network'; value: 'allow' | 'block' }
+  | { type: 'recheck' }
+
+/** The sandbox as it is after an action, with what happened in words. */
+export type SandboxOutcome = { ok: true; report: SandboxReport; note?: string } | { ok: false; reason: string; report: SandboxReport }
+
 /** A request of the person's after which the agent's file tools changed files, for the rewind menu. */
 export interface RewindTurn {
   /** The request's id: the id of its entry in the conversation. */
@@ -751,6 +791,14 @@ export interface EncodeApi {
     /** Does something to one of the open folder's servers and answers with the servers as they stand. */
     act(action: McpAction): Promise<McpOutcome>
     /** A server changed (it started, stopped or failed, or its tools or setup changed): ask for the report again. */
+    onChanged(cb: () => void): () => void
+  }
+  sandbox: {
+    /** The sandbox around the agent's commands in the open folder; null when no folder is open. */
+    report(): Promise<SandboxReport | null>
+    /** Changes a switch or checks the machine again; answers with the sandbox as it stands. */
+    act(action: SandboxAction): Promise<SandboxOutcome>
+    /** The sandbox was checked, or a folder is being prepared: ask for the report again. */
     onChanged(cb: () => void): () => void
   }
 }

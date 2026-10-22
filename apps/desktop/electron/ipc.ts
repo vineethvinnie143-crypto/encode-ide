@@ -25,6 +25,7 @@ import type {
   McpAction,
   PermissionsAction,
   PlanRequest,
+  SandboxAction,
   SearchOptions,
   SessionGoal,
   SessionPatch,
@@ -346,6 +347,17 @@ export function registerIpc(deps: IpcDeps): void {
     const root = workspace.current?.root
     if (!root) throw new Error('Open a folder first.')
     return agent.mcpAct(root, action).catch((error) => Promise.reject(hostFailure(error)))
+  })
+  // The Sandbox screen too.
+  handle('sandbox:report', async () => {
+    const root = workspace.current?.root
+    if (!root) return null
+    return agent.sandboxReport(root).catch((error) => Promise.reject(hostFailure(error)))
+  })
+  handle('sandbox:act', async (action: SandboxAction) => {
+    const root = workspace.current?.root
+    if (!root) throw new Error('Open a folder first.')
+    return agent.sandboxAct(root, action).catch((error) => Promise.reject(hostFailure(error)))
   })
   // The answer is yes or no, or an object with a note and "for this session".
   handle('agent:approve', async (id: string, answer: unknown) => {

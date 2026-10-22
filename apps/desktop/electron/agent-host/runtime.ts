@@ -26,6 +26,7 @@ import {
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
 import { SearchError, createSearchProvider, createWebAccess, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
+import { Sandbox } from '@encode/sandbox'
 import { Workspaces } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
 import type { ModelAlert, ModelStatus } from '../../shared/types'
@@ -84,6 +85,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   const peer = new Peer<DesktopHostApi, MainApi>(port, { onProtocolError: (error) => log(error.message) })
   let host: AgentHost | undefined
   let workspaces: Workspaces | undefined
+  let sandbox: Sandbox | undefined
+  let sandboxListener: (() => void) | undefined
   let config: HostConfig | undefined
   let router: ModelRouter | undefined
   let problems: ConfigProblem[] = []
@@ -281,9 +284,20 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       stateTimer = setInterval(saveState, options.stateIntervalMs ?? 30_000)
       stateTimer.unref?.()
     }
+    // The sandbox around the agent's commands: found out once, here, so that the first session already knows whether it has one.
+    sandbox = init.sandboxDir ? new Sandbox({ dir: init.sandboxDir, home: init.home, warn: (message) => peer.notify('warn', message) }) : undefined
+    sandboxListener = sandbox?.onChange(() => {
+      try {
+        peer.notify('sandbox', { working: sandbox?.working() ?? null })
+      } catch (error) {
+        log(`could not pass on a change of the sandbox: ${describe(error)}`)
+      }
+    })
+    void sandbox?.start()
     // The settings, trust and permission rules of each folder a session works in; the Permissions screen reads the same pictures.
     workspaces = new Workspaces({
       home: init.home,
+      ...(sandbox ? { sandbox } : {}),
       warn: (message) => peer.notify('warn', message),
       onMcpChange: (root) => {
         try {
@@ -389,9 +403,21 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     return workspaces.mcpAct(root, action)
   })
 
+  peer.handle('sandboxReport', async ({ root }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.sandboxReport(root)
+  })
+
+  peer.handle('sandboxAct', async ({ root, action }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.sandboxAct(root, action)
+  })
+
   peer.handle('shutdown', async () => {
     const closing = host
     host = undefined
+    sandboxListener?.()
+    sandboxListener = undefined
     if (stateTimer) clearInterval(stateTimer)
     stateTimer = undefined
     // Both are quick for a program that is going away: the sessions stop their commands, the folders their MCP servers.

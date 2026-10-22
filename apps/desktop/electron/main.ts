@@ -132,6 +132,7 @@ if (!gotLock) {
         legacySessionsFile: path.join(userData, 'eNCode-sessions.json'),
         routerStateFile: path.join(userData, 'eNCode-models.json'),
         checkpointsDir: path.join(userData, 'checkpoints'),
+        sandboxDir: path.join(userData, 'sandbox'),
       }),
       // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {
@@ -148,6 +149,7 @@ if (!gotLock) {
       onJobs: (jobs) => send('jobs:changed', jobs),
       onAlert: (alert) => send('models:alert', alert),
       onMcp: () => send('mcp:changed', undefined),
+      onSandbox: () => send('sandbox:changed', undefined),
     })
     const configureAgent = () => {
       const current = settings.get()
