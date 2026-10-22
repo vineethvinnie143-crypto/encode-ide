@@ -4,9 +4,11 @@ import { api } from '../api'
 import { commentsMessage, scopePhrase } from '../review/comments'
 import { forAgent, inRepository } from '../review/paths'
 import { toggledForAll, type Anchor, type DiffLayout, type ReviewComment } from '../review/rows'
+import { getActiveSessionId } from './active'
 import { useChat } from './chat'
 import { useGit } from './git'
 import { usePanels } from './panels'
+import { useSessions } from './sessions'
 import { useUi } from './ui'
 import { useWorkspace } from './workspace'
 
@@ -22,11 +24,19 @@ export interface ReviewView {
 }
 
 interface ReviewStore {
+  /** The scope shown now. */
   kind: ScopeKind
+  /**
+   * The scope the person picked from the menu, which the tab opens on and which is kept between runs. A file or a
+   * request shown from elsewhere (a step, a change card) changes `kind` only until the last Review tab closes.
+   */
+  chosen: ScopeKind
   /** The base of the Branch view; null: the one eNCode picks (the remote's default branch). */
   base: string | null
   /** The commit of the Commit view; null: the latest. */
   commit: string | null
+  /** The request of the Turn view; null: the latest one that changed files. */
+  turn: string | null
   options: ReviewOptions
   view: ReviewView
   /** The last answer for the scope shown; null before the first. */
@@ -53,6 +63,7 @@ interface ReviewStore {
   setKind(kind: ScopeKind): void
   setBase(base: string | null): void
   setCommit(commit: string): void
+  setTurn(turn: string | null): void
   setOptions(patch: Partial<ReviewOptions>): void
   setView(patch: Partial<ReviewView>): void
   /** Reads the scope again; asked while a read runs, it reads once more when that one ends. */
@@ -75,8 +86,12 @@ interface ReviewStore {
    * folder do. It shows the working tree's changes (in `kind` when given), and the file once a read finds it there.
    */
   showFile(target: string, from: 'repository' | 'folder', kind?: 'unstaged' | 'staged'): void
+  /** Opens the Review tab on what one request of the open conversation changed, at a file named as the agent's tools name it. */
+  showTurn(turn: string, target?: string): void
   /** The file asked for is in view. */
   revealed(): void
+  /** The last Review tab closed: the next one opens on the scope the person chose, and the Turn view on the latest request. */
+  settle(): void
   /** Forgets everything about the folder that was open: another one is. Called when the open folder changes. */
   reset(): void
 }
@@ -96,7 +111,7 @@ function loadSaved(): Saved {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Saved> | null
     if (!raw || typeof raw !== 'object') return DEFAULTS
-    const kind = raw.kind === 'staged' || raw.kind === 'branch' || raw.kind === 'commit' ? raw.kind : 'unstaged'
+    const kind = raw.kind === 'staged' || raw.kind === 'branch' || raw.kind === 'commit' || raw.kind === 'turn' ? raw.kind : 'unstaged'
     const context = raw.options?.context
     return {
       kind,
@@ -137,21 +152,32 @@ function wantedIn(load: ReviewLoad, mine: number): string | null {
   wanted = null
   if (!load.ok) return null
   const { snapshot } = load
-  const path = request.from === 'repository' ? request.target : inRepository(request.target, snapshot.repo, useWorkspace.getState().workspace?.root ?? null)
+  const path =
+    request.from === 'repository'
+      ? request.target
+      : // The Turn view names a file outside the workspace by its absolute path, as the agent's tools do.
+        (inRepository(request.target, snapshot.repo, useWorkspace.getState().workspace?.root ?? null) ?? (snapshot.scope.kind === 'turn' ? request.target : null))
   return path && snapshot.files.some((file) => file.path === path) ? path : null
 }
 
 export const useReview = create<ReviewStore>((set, get) => {
   const saved = loadSaved()
   const persist = () => {
-    const { kind, base, options, view } = get()
-    save({ kind, base, options, view })
+    const { chosen, base, options, view } = get()
+    save({ kind: chosen, base, options, view })
   }
   /** A new scope or option: what was shown no longer applies. */
   const reload = () => {
     set({ load: null, editing: null })
     persist()
     void get().refresh()
+  }
+  /** The scope an action is taken in: in the Turn view, the request the review showed, never one that came after it. */
+  const acting = (): ReviewScope | null => {
+    const scope = get().scope()
+    if (scope?.kind !== 'turn') return scope
+    const load = get().load
+    return load?.ok && load.snapshot.scope.kind === 'turn' && load.snapshot.scope.session === scope.session ? load.snapshot.scope : null
   }
   const show = (load: ReviewLoad, mine: number) => {
     if (mine !== generation) return
@@ -161,8 +187,10 @@ export const useReview = create<ReviewStore>((set, get) => {
 
   return {
     kind: saved.kind,
+    chosen: saved.kind,
     base: saved.base,
     commit: null,
+    turn: null,
     options: saved.options,
     view: saved.view,
     load: null,
@@ -177,7 +205,11 @@ export const useReview = create<ReviewStore>((set, get) => {
     revealPath: null,
 
     scope: () => {
-      const { kind, base, commit, commits } = get()
+      const { kind, base, commit, commits, turn } = get()
+      if (kind === 'turn') {
+        const session = getActiveSessionId()
+        return session ? { kind, session, ...(turn ? { turn } : {}) } : null
+      }
       if (kind === 'branch') return base ? { kind, base } : { kind }
       if (kind === 'commit') {
         const chosen = commit ?? commits?.[0]?.oid ?? null
@@ -188,13 +220,27 @@ export const useReview = create<ReviewStore>((set, get) => {
 
     viewKey: () => {
       const scope = get().scope()
-      if (!scope) return 'commit:'
+      if (!scope) return `${get().kind}:`
+      if (scope.kind === 'turn') {
+        // The latest request is named by the review that found it, so a comment stays with the request it was made on.
+        const load = get().load
+        const shown = load?.ok && load.snapshot.scope.kind === 'turn' && load.snapshot.scope.session === scope.session ? load.snapshot.turn?.id : null
+        return `turn:${scope.session}:${scope.turn ?? shown ?? ''}`
+      }
       return scope.kind === 'branch' ? `branch:${scope.base ?? ''}` : scope.kind === 'commit' ? `commit:${scope.commit}` : scope.kind
     },
 
     setKind: (kind) => {
-      if (kind === get().kind) return
-      set({ kind })
+      const { kind: current, turn, chosen } = get()
+      // Chosen from the menu, the Turn view starts on the latest request.
+      if (kind === current && !(kind === 'turn' && turn !== null)) {
+        if (kind !== chosen) {
+          set({ chosen: kind })
+          persist()
+        }
+        return
+      }
+      set({ kind, chosen: kind, ...(kind === 'turn' ? { turn: null } : {}) })
       reload()
     },
     setBase: (base) => {
@@ -203,6 +249,10 @@ export const useReview = create<ReviewStore>((set, get) => {
     },
     setCommit: (commit) => {
       set({ commit })
+      reload()
+    },
+    setTurn: (turn) => {
+      set({ turn })
       reload()
     },
     setOptions: (patch) => {
@@ -228,7 +278,7 @@ export const useReview = create<ReviewStore>((set, get) => {
             if (get().kind === 'commit' && !get().commits) await get().loadCommits()
             const scope = get().scope()
             if (!scope) {
-              show({ ok: false, message: 'This repository has no commits yet.' }, mine)
+              show({ ok: false, message: get().kind === 'turn' ? 'Open a conversation to review what its requests changed.' : 'This repository has no commits yet.' }, mine)
               continue
             }
             show(await api.review.load(scope, get().options), mine)
@@ -244,7 +294,7 @@ export const useReview = create<ReviewStore>((set, get) => {
     },
 
     act: async (action) => {
-      const scope = get().scope()
+      const scope = acting()
       if (!scope || get().busy) return
       const key = 'hunk' in action ? `${action.type}:${action.hunk}` : 'path' in action ? `${action.type}:${action.path}` : action.type
       set({ busy: key })
@@ -264,7 +314,7 @@ export const useReview = create<ReviewStore>((set, get) => {
     },
 
     undo: async () => {
-      const scope = get().scope()
+      const scope = acting()
       if (!scope || get().busy) return
       set({ busy: 'undo' })
       const mine = ++generation
@@ -315,7 +365,8 @@ export const useReview = create<ReviewStore>((set, get) => {
       if (!list.length || !scope) return
       const load = get().load
       const snapshot = load?.ok ? load.snapshot : null
-      const text = commentsMessage(list, scopePhrase(scope, snapshot), (path) => (snapshot ? forAgent(path, snapshot.repo) : path))
+      const request = snapshot?.turn?.id ? useChat.getState().entries.find((entry) => entry.id === snapshot.turn!.id)?.text : undefined
+      const text = commentsMessage(list, scopePhrase(scope, snapshot, request), (path) => (snapshot ? forAgent(path, snapshot.repo) : path))
       const chat = useChat.getState()
       if (chat.running) chat.enqueue(text, { keepDraft: true })
       else chat.send(text, undefined, { keepDraft: true })
@@ -367,15 +418,34 @@ export const useReview = create<ReviewStore>((set, get) => {
       const next = kind ?? (current === 'unstaged' || current === 'branch' ? current : 'unstaged')
       wanted = { target, from, after: generation }
       usePanels.getState().open('review')
-      if (next !== current) get().setKind(next)
-      else void get().refresh()
+      if (next !== current) {
+        set({ kind: next })
+        reload()
+      } else void get().refresh()
+    },
+    showTurn: (turn, target) => {
+      wanted = target ? { target, from: 'folder', after: generation } : null
+      usePanels.getState().open('review')
+      if (get().kind === 'turn' && get().turn === turn) {
+        void get().refresh()
+        return
+      }
+      set({ kind: 'turn', turn })
+      reload()
     },
     revealed: () => set({ revealPath: null }),
+    settle: () => {
+      const { kind, chosen, turn } = get()
+      if (kind === chosen && turn === null) return
+      generation++
+      wanted = null
+      set({ kind: chosen, turn: null, load: null, loading: false, editing: null, revealPath: null })
+    },
 
     reset: () => {
       generation++
       wanted = null
-      set({ load: null, error: null, busy: null, toggled: new Set(), comments: {}, editing: null, branches: null, commits: null, commit: null, revealPath: null })
+      set({ load: null, error: null, busy: null, toggled: new Set(), comments: {}, editing: null, branches: null, commits: null, commit: null, turn: null, revealPath: null })
     },
   }
 })
@@ -387,4 +457,27 @@ useWorkspace.subscribe(() => {
   if (next === folder) return
   folder = next
   useReview.getState().reset()
+})
+
+// A file or a request shown from elsewhere lasts while the tab is open; closed, the tab opens on the person's scope again.
+const reviewTabOpen = (): boolean => {
+  const { side, bottom } = usePanels.getState()
+  return side.tabs.some((tab) => tab.kind === 'review') || bottom.tabs.some((tab) => tab.kind === 'review')
+}
+let tabOpen = reviewTabOpen()
+usePanels.subscribe(() => {
+  const next = reviewTabOpen()
+  if (next === tabOpen) return
+  tabOpen = next
+  if (!next) useReview.getState().settle()
+})
+
+// The Turn view belongs to the open conversation: another one shows its own latest request (the tab reads it again).
+let session = useSessions.getState().activeId
+useSessions.subscribe(() => {
+  const next = useSessions.getState().activeId
+  if (next === session) return
+  session = next
+  const review = useReview.getState()
+  if (review.turn !== null || review.kind === 'turn') useReview.setState({ turn: null, ...(review.kind === 'turn' ? { load: null, editing: null } : {}) })
 })

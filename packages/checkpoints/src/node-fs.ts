@@ -119,5 +119,15 @@ export function nodeCheckpointFs(): CheckpointFs {
     },
 
     realpath: realpathOf,
+
+    async size(file) {
+      try {
+        const stat = await fs.stat(file)
+        return stat.isFile() ? stat.size : null
+      } catch (error) {
+        if (isAbsent(error)) return null
+        throw error
+      }
+    },
   }
 }

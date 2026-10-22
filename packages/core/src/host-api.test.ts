@@ -122,8 +122,47 @@ describe('the host over a port', () => {
     await refused('setTodos', { sessionId: 's', todos: [{ id: 't', text: 'x', status: 'later' }] })
     await refused('setWorkspace', { root: '' })
     await refused('killJob', {})
+    await refused('turnChanges', { sessionId: 's', limits: { maxFileBytes: -1 } })
+    await refused('turnWrite', { sessionId: 's', write: { file: '/ws/a.ts', expected: 'not-a-hash', next: null } })
+    await refused('turnWrite', { sessionId: 's', write: { file: '/ws/a.ts', expected: null, next: { kept: '../../etc' } } })
+    await refused('turnWrite', { sessionId: 's', write: { file: '', expected: null, next: null } })
     await assert.rejects((caller as unknown as { request(method: string): Promise<unknown> }).request('dropTables'), { code: 'unknown-method' })
     assert.equal(h.client.requests.length, 0)
+  })
+
+  it('carries one request\'s changes and a file write across, bytes and all', async () => {
+    const written: Buffer[] = []
+    const { client, caller } = await connect({
+      script: [{ text: 'ok' }],
+      host: {
+        scope: () => ({
+          checkpoints: {
+            info: async () => ({ available: true, turns: [], canUndo: false }),
+            plan: async (turn) => ({ kind: 'rewind', turn, known: true, files: [], fingerprint: 'fp' }),
+            planRedo: async () => null,
+            apply: async () => ({ ok: true, restored: 0, deleted: 0, skipped: [], failed: [] }),
+            changes: async () => ({ known: true, files: [{ path: 'a.ts', file: '/ws/a.ts', before: { state: 'missing' }, after: { state: 'bytes', hash: 'h', bytes: Buffer.from('new') }, afterFrom: 'now', changedSince: false }] }),
+            write: async (write) => {
+              if (write.next && 'bytes' in write.next) written.push(Buffer.from(write.next.bytes))
+              return { ok: true, previous: null, written: null }
+            },
+          },
+        }),
+      },
+    })
+    const [session] = await client.sessions()
+    await client.start(session.id, { text: 'go', mode: 'code' })
+    const user = (await client.history(session.id)).entries.find((entry) => entry.kind === 'user')!
+    const changes = await client.turnChanges(session.id, user.id)
+    const after = changes.files[0].after
+    assert.equal(after.state === 'bytes' && Buffer.from(after.bytes).toString('utf8'), 'new')
+    const bytes = new TextEncoder().encode('old').buffer as ArrayBuffer
+    assert.deepEqual(await client.turnWrite(session.id, { file: '/ws/a.ts', expected: null, next: { bytes } }), { ok: true, previous: null, written: null })
+    assert.deepEqual(written.map((item) => item.toString('utf8')), ['old'])
+    // Bytes in any other shape are refused before the record sees them.
+    const request = caller as unknown as { request(method: string, params?: unknown): Promise<unknown> }
+    await assert.rejects(request.request('turnWrite', { sessionId: session.id, write: { file: '/ws/a.ts', expected: null, next: { bytes: { 0: 1 } } } }), /ArrayBuffer/)
+    assert.equal(written.length, 1)
   })
 
   it('moves the workspace and reports jobs', async () => {

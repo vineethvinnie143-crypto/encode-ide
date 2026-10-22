@@ -161,6 +161,14 @@
   font-size: var(--fs-12);
 }
 
+.rv-banner.is-quiet {
+  background: var(--row-selected);
+}
+
+.rv-turn-chip {
+  max-width: 320px;
+}
+
 .rv-skeleton {
   padding: 18px 16px;
 }
@@ -402,6 +410,19 @@
   margin-left: auto;
   font-family: var(--font-ui);
   font-size: var(--fs-11);
+  cursor: help;
+}
+
+/* A file of the Turn view that cannot be changed from the review; its title says why. */
+.rv-fixed {
+  height: 20px;
+  margin: 0 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-3);
+  font: 500 var(--fs-11) / 18px var(--font-ui);
+  white-space: nowrap;
   cursor: help;
 }
 

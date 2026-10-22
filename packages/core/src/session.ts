@@ -79,6 +79,10 @@ import {
   type SessionGoal,
   type SessionSummary,
   type TodoItem,
+  type TurnChangeSet,
+  type TurnFileChange,
+  type TurnFileWrite,
+  type TurnWriteOutcome,
 } from './ui'
 
 const MAX_ATTACHMENT_CHARS = 20_000
@@ -162,6 +166,10 @@ export interface SessionCheckpoints {
   planRedo(): Promise<RewindPlan | null>
   /** Carries out a plan the caller made; refuses one the files or the history have moved past. */
   apply(request: Pick<RewindRequest, 'kind' | 'turn' | 'fingerprint' | 'force'>): Promise<RewindOutcome>
+  /** What one request's file tools changed, file by file, for the Review tab; `known` is false when nothing was recorded. */
+  changes?(turn: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<{ known: boolean; at?: number; files: TurnFileChange[] }>
+  /** Writes a file the agent changed, for the person, while it holds what they saw (see `CheckpointService.write`). */
+  write?(write: TurnFileWrite): Promise<TurnWriteOutcome>
 }
 
 function errorMessage(error: unknown): string {
@@ -1146,6 +1154,44 @@ export class AgentSession {
       })
     } catch (error) {
       return { ok: false, reason: 'failed', message: errorMessage(error) }
+    }
+  }
+
+  /**
+   * What one request's file tools changed, for the Review tab: the request asked for, or else the latest one still in
+   * the conversation that changed a file. Nothing changes.
+   */
+  async turnChanges(turn?: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<TurnChangeSet> {
+    const base = { root: this.env.root, files: [], busy: this.controller !== undefined }
+    const { checkpoints } = this.env
+    if (!checkpoints?.changes) return { ...base, turn: null, problem: 'Nothing is recorded for this session: no folder is open.' }
+    const asked = (id: string) => this.entries.some((entry) => entry.id === id && entry.kind === 'user')
+    let chosen = turn ?? null
+    if (chosen === null) {
+      const info = await this.checkpointInfo()
+      if (!info.available) return { ...base, turn: null, problem: info.problem ?? 'Nothing is recorded for this session.' }
+      chosen = [...info.turns].reverse().find((candidate) => candidate.files > 0 && asked(candidate.turn))?.turn ?? null
+      if (chosen === null) return { ...base, turn: null }
+    } else if (!asked(chosen)) {
+      return { ...base, turn: chosen, problem: 'That request is not in this conversation any more.' }
+    }
+    try {
+      const changes = await checkpoints.changes(chosen, limits)
+      return { ...base, turn: chosen, ...(changes.at !== undefined ? { at: changes.at } : {}), files: changes.files, ...(changes.known ? {} : { problem: 'Nothing was recorded for that request.' }) }
+    } catch (error) {
+      return { ...base, turn: chosen, problem: errorMessage(error) }
+    }
+  }
+
+  /** Writes a file the agent changed, for the person; only while nothing runs, so that no tool writes under it. */
+  async turnWrite(write: TurnFileWrite): Promise<TurnWriteOutcome> {
+    const { checkpoints } = this.env
+    if (!checkpoints?.write) return { ok: false, reason: 'unavailable', message: 'Nothing is recorded for this session.' }
+    if (this.controller) return { ok: false, reason: 'busy', message: 'eNCode is working on this session. Stop it first, or wait for it to finish.' }
+    try {
+      return await this.holding(() => checkpoints.write!(write))
+    } catch (error) {
+      return { ok: false, reason: 'refused', message: errorMessage(error) }
     }
   }
 

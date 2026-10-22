@@ -277,4 +277,12 @@ describe('edited files', () => {
       { path: 'a.ts', additions: 5, deletions: 0 },
     ])
   })
+
+  it('names files the way the tools do, by file_path', () => {
+    const calls = [tool('Edit', { file_path: 'src/utils.ts' }, { diff: [hunk(1, 1)] }), tool('Write', { file_path: '/w/new.txt' }, { diff: [hunk(1, 0)] })]
+    assert.deepEqual(editedFiles(calls), [
+      { path: 'src/utils.ts', additions: 1, deletions: 1 },
+      { path: '/w/new.txt', additions: 1, deletions: 0 },
+    ])
+  })
 })

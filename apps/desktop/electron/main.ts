@@ -234,6 +234,11 @@ if (!gotLock) {
       },
       trash: (file) => osShell.trashItem(file),
       draft: (input) => agentHost.draftCommit(input),
+      // The Turn view reads the agent's record of a request's changes, and writes through it.
+      turns: {
+        changes: (sessionId, turn) => agentHost.client.turnChanges(sessionId, turn),
+        write: (sessionId, write) => agentHost.client.turnWrite(sessionId, write),
+      },
     })
 
     registerIpc({

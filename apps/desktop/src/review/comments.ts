@@ -7,9 +7,19 @@ import type { ReviewComment } from './rows'
 
 const EXCERPT_CHARS = 200
 
-/** What the comments are about, in words: "the unstaged changes", "commit 1a2b3c4 (Fix the parser)". */
-export function scopePhrase(scope: ReviewScope, snapshot: ReviewSnapshot | null): string {
+const REQUEST_CHARS = 80
+
+/**
+ * What the comments are about, in words: "the unstaged changes", "commit 1a2b3c4 (Fix the parser)". In the Turn view,
+ * `request` is what the person asked, which names the changes for the agent.
+ */
+export function scopePhrase(scope: ReviewScope, snapshot: ReviewSnapshot | null, request?: string): string {
   switch (scope.kind) {
+    case 'turn': {
+      const asked = request?.replace(/\s+/g, ' ').trim()
+      if (!asked) return 'the changes you made in your last turn'
+      return `the changes you made for my request "${asked.length > REQUEST_CHARS ? `${asked.slice(0, REQUEST_CHARS)}…` : asked}"`
+    }
     case 'unstaged':
       return 'the unstaged changes'
     case 'staged':

@@ -275,7 +275,7 @@ export function editedFiles(entries: readonly ConversationEntry[]): EditedFile[]
   for (const entry of entries) {
     const diff = entry.tool?.diff
     if (!diff?.length) continue
-    const path = String(entry.tool?.input.path ?? '')
+    const path = (entry.tool && toolPath(entry.tool.input)) ?? ''
     if (!path) continue
     const current = files.get(path) ?? { path, additions: 0, deletions: 0 }
     for (const hunk of diff) {

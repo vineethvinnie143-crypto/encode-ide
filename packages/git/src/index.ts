@@ -2,6 +2,7 @@ export { applyHunk, diffContents, hunkHeader, hunkId, reverseHunk, type FileDiff
 export { objectInfo, readObjects, type ObjectInfo } from './objects'
 export { parseRaw, type RawEntry } from './raw'
 export {
+  compareBytes,
   DEFAULT_REVIEW_OPTIONS,
   Repository,
   ReviewError,

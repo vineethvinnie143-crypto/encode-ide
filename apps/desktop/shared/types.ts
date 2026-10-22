@@ -174,8 +174,12 @@ export interface GitStatus {
 // ---------------------------------------------------------------------------
 // The Review tab (the same shapes as @encode/git's, which the main process fills)
 
-/** Unstaged: the working tree against the index. Staged: the index against HEAD. Branch: against the base. Commit: one commit. */
-export type ReviewScope = { kind: 'unstaged' } | { kind: 'staged' } | { kind: 'branch'; base?: string } | { kind: 'commit'; commit: string }
+/**
+ * Unstaged: the working tree against the index. Staged: the index against HEAD. Branch: against the base. Commit: one
+ * commit. Turn: what one request of a session changed, from the agent's record (the latest such request when `turn` is
+ * not given); it needs no git.
+ */
+export type ReviewScope = { kind: 'unstaged' } | { kind: 'staged' } | { kind: 'branch'; base?: string } | { kind: 'commit'; commit: string } | { kind: 'turn'; session: string; turn?: string }
 
 export interface ReviewOptions {
   /** Unchanged lines around each change; Infinity shows whole files. */
@@ -221,6 +225,8 @@ export interface ReviewFile {
   note?: string
   size?: { old?: number; new?: number }
   fingerprint: string
+  /** Turn view: why the file cannot be changed from here (a later request changed it again, it lies outside the folder). */
+  fixed?: string
 }
 
 export interface ReviewCommit {
@@ -244,13 +250,26 @@ export interface ReviewRepo {
   behind?: number
 }
 
+/** The request a Turn view shows. */
+export interface ReviewTurn {
+  /** Null when no request of the session has changed a file yet. */
+  id: string | null
+  /** When it began. */
+  at?: number
+  /** A turn is running, so nothing can be reverted until it ends. */
+  busy: boolean
+}
+
 export interface ReviewSnapshot {
   scope: ReviewScope
+  /** In the Turn view: the open folder, with no branch. */
   repo: ReviewRepo
   files: ReviewFile[]
   added: number
   removed: number
-  counts: { unstaged: number; staged: number }
+  /** Files with unstaged and staged changes, for the scope menu; null in the Turn view, which does not read git. */
+  counts: { unstaged: number; staged: number } | null
+  turn?: ReviewTurn
   base?: { ref: string; oid: string | null }
   commit?: ReviewCommit
   skipped: number

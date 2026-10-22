@@ -168,8 +168,8 @@ started. Tabs, layout and widths are remembered between runs
 
 ## The Review tab
 
-**Review** (`Ctrl+Shift+G`, the rail's Review button, or **Review changes** under the agent's reply) shows the open
-repository's changes as diffs: **Unstaged**, **Staged**, the **Branch** against its base, or one **Commit**. Lines are
+**Review** (`Ctrl+Shift+G` or the rail's Review button) shows the open repository's changes as diffs: **Unstaged**,
+**Staged**, the **Branch** against its base, or one **Commit**. Lines are
 coloured as in the editor, the words that changed are marked, and the layout is unified or side by side.
 
 - Stage, unstage or revert a whole file, or one hunk at a time. A hunk is put into git's index exactly as it is shown,
@@ -185,6 +185,14 @@ coloured as in the editor, the words that changed are marked, and the layout is 
 The tab runs git itself, with the settings that stop a repository's config from starting programs when it is read
 ([ADR 0064](docs/adr/0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md)). Committing
 runs the repository's hooks, as git does.
+
+**Last turn** (in the scope menu, and what **Review changes** under a reply opens) shows what one request of the
+conversation changed with the agent's file tools, from the agent's own record, so it works in a folder without git
+too. A chip beside it picks an earlier request. Revert a hunk, a file or everything the request did; each revert can be
+undone. A file a later request changed again, or whose earlier version eNCode could not keep, is marked **Read only**
+with the reason. **Undo** on the latest change card opens the Rewind dialog on putting that request's files back. A
+card's view lasts until you close the tab; the tab opens again on the scope you picked from the menu
+([ADR 0065](docs/adr/0065-the-turn-view-reads-the-agents-record-and-writes-back-only-over-what-the-person-saw.md)).
 
 ## Shortcuts
 

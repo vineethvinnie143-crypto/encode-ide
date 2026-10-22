@@ -719,3 +719,41 @@ committing and pushing. The agent's own git commands are the shell's (T-rows and
 - The end-to-end run makes the demo folder a repository and drives the tab: the change shows with its colours, one of
   two hunks is staged and git agrees, it is committed with the message typed over the drafted one, a file is reverted
   and Ctrl+Z brings it back.
+
+## The Turn view: reverting from the agent's record (UI-4b)
+
+Written with the pull request that added the Review tab's Last turn view
+([0065](../adr/0065-the-turn-view-reads-the-agents-record-and-writes-back-only-over-what-the-person-saw.md)). It
+covers the new write path: the person reverting part of what one request changed, written by the agent host from the
+checkpoint record, with no git involved.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| V1 | The renderer, or a page that got into it, uses the review to write a file of its choosing | The renderer names a session, a request and an action on a file it was shown; it never sends a path to write or bytes. The main process checks the ids' shape, reads the record again and finds the file in it; the host's schema checks the hashes, the limits and the file name, and accepts bytes only as an `ArrayBuffer`. The host then writes only a file the record tracks, by absolute path, inside the workspace and outside `.git` and `.encode`, checked on its real path. | Mitigated |
+| V2 | A revert undoes work done after the picture was taken (a later request, the person, a formatter) | Every action carries the fingerprint of the file as shown; the main process refuses when the record and the disk give another one. The host writes only while the file holds the hash the person saw. A file a later request changed again is read only. | Mitigated |
+| V3 | A revert races the agent's own writes | The view is read only while the conversation's agent works; a write is refused then, and holds the session while it runs, so no turn starts in the middle. | Mitigated |
+| V4 | A revert cannot be taken back | The host keeps the bytes it replaces in the record before writing (up to the 20 MB it keeps of any file; a larger file is read only), and Undo puts them back over the bytes the revert wrote. The undo list lives until the app closes. | Partial (VR1) |
+| V5 | The record and a later rewind disagree, and the person's revert is flagged as someone else's edit, or overwritten | A review write is recorded as a `wrote` line of its own, so both the review and the Rewind dialog take it as what eNCode last left there. | Mitigated |
+| V6 | A huge request freezes the window or fills memory | The view shows up to 2 MB per file and 48 MB per request; the rest is listed without lines. A file too large to show is hashed without its bytes being held. | Mitigated |
+| V7 | Files outside the workspace, which the record does not keep, are written | They are listed by path with nothing read, and are read only. | Mitigated |
+
+### Residual risks
+
+- **VR1. Undo of a revert lasts until the app closes.** The kept copies stay in the record, but the list of what can be
+  undone is not saved; after a restart a revert is taken back by hand or with the Rewind dialog of a later request.
+  - Owner: none planned.
+- **Changes made by commands are not in the record** (as for the Rewind dialog, P8), so the view does not show them.
+
+### Verification
+
+- The checkpoint service's tests cover the versions a request's files had (found, left, changed again by a later
+  request or by someone else), the limits and the reasons a version is not read, files outside the workspace, writes
+  only over the expected hash with the replaced bytes kept, kept copies put back, made folders removed, and a rewind
+  after a review write finding no conflict.
+- The host's tests carry a request's changes and a write across a port, bytes included, and refuse every other shape.
+- The main process's Turn view is tested with a fake record: hunks, files and everything reverted and undone, a stale
+  picture refused with nothing written, read-only files, and a busy session.
+- The end-to-end run opens the view from the change card in a folder without git, reverts one change and deletes a
+  created file, and Undo brings each back; the change card's Undo then opens the Rewind dialog on the files alone.

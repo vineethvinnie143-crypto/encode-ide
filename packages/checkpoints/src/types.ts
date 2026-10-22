@@ -46,6 +46,8 @@ export interface CheckpointFs {
   exists(target: string): Promise<boolean>
   /** Resolves links on the longest existing prefix of the path and re-attaches the rest. */
   realpath(target: string): Promise<string>
+  /** The size of a file, without reading it; null when there is no file there. Without it, the file is read to learn it. */
+  size?(file: string): Promise<number | null>
 }
 
 // ---------------------------------------------------------------------------
@@ -180,3 +182,62 @@ export interface WriteInfo {
   turnId: string
   toolUseId: string
 }
+
+// ---------------------------------------------------------------------------
+// One turn's changes, for the Review tab
+
+/** Why a version of a file is known only by its hash. */
+export type UnreadWhy =
+  /** Larger than a review reads. */
+  | 'large'
+  /** The review read as much as it may at once. */
+  | 'budget'
+  /** Too large to keep a copy of when it was replaced. */
+  | 'unkept'
+  /** Its saved copy is missing or damaged, or the file could not be read. */
+  | 'lost'
+  /** Outside the workspace, or in .git or .encode: never copied. */
+  | 'outside'
+
+/** One version of a file, as a review reads it. */
+export type TurnVersion = { state: 'missing' } | { state: 'bytes'; hash: Hash; bytes: Buffer } | { state: 'unread'; hash: Hash | null; size: number; why: UnreadWhy }
+
+/** One file a turn's tools changed: how the turn found it, and how it left it. */
+export interface TurnFile {
+  /** Absolute, as the tools wrote it. */
+  path: string
+  before: TurnVersion
+  /** The copy a later turn kept just before it changed the file again (`later`), or the file now (`now`). */
+  after: TurnVersion
+  afterFrom: 'later' | 'now'
+  /** Something other than the agent changed the file after the turn's last write, so `after` holds that change too. */
+  changedSince: boolean
+  /** Why the file cannot be written from a review: where it lies, or that a later turn changed it again. */
+  fixed?: string
+}
+
+export interface TurnChanges {
+  turn: string
+  /** False when nothing was recorded for the turn. */
+  known: boolean
+  /** When the turn began. */
+  at?: number
+  /** By path. */
+  files: TurnFile[]
+}
+
+/** What a review reads at most. */
+export interface ReadLimits {
+  /** A version larger than this is not read. Default 2 MB. */
+  maxFileBytes?: number
+  /** Past this many bytes read for one review, versions are not read. Default 48 MB. */
+  maxTotalBytes?: number
+}
+
+/** What a review write puts in a file: these bytes, a copy the store keeps, or nothing (the file is deleted). */
+export type Replacement = { bytes: Buffer } | { kept: Hash } | null
+
+export type WriteOutcome =
+  /** `previous` is what the file held (kept in the store), `written` what it holds now. */
+  | { ok: true; previous: Hash | null; written: Hash | null }
+  | { ok: false; reason: 'stale' | 'refused'; message: string }

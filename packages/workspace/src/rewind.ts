@@ -1,6 +1,6 @@
 import path from 'node:path'
-import { checkpointHooks, type ApplyOutcome, type CheckpointService, type RewindPlan as StoredPlan } from '@encode/checkpoints'
-import type { AgentHooks, CheckpointInfo, RewindOutcome, RewindPlan, SessionCheckpoints } from '@encode/core'
+import { checkpointHooks, type ApplyOutcome, type CheckpointService, type RewindPlan as StoredPlan, type TurnVersion } from '@encode/checkpoints'
+import type { AgentHooks, ChangeVersion, CheckpointInfo, RewindOutcome, RewindPlan, SessionCheckpoints } from '@encode/core'
 import { isInside } from '@encode/permissions'
 
 /**
@@ -86,5 +86,31 @@ export function sessionCheckpoints(service: CheckpointService, options: RewindOp
       const plan: StoredPlan = { kind: request.kind, turn: request.turn, known: true, files: [], fingerprint: request.fingerprint }
       return outcome(await service.apply(plan, { force: request.force === true }))
     },
+    async changes(turn, limits) {
+      const changes = await service.turnChanges(turn, limits)
+      return {
+        known: changes.known,
+        ...(changes.at !== undefined ? { at: changes.at } : {}),
+        files: changes.files.map((file) => ({
+          path: shown(file.path),
+          file: file.path,
+          before: version(file.before),
+          after: version(file.after),
+          afterFrom: file.afterFrom,
+          changedSince: file.changedSince,
+          ...(file.fixed ? { fixed: file.fixed } : {}),
+        })),
+      }
+    },
+    async write(write) {
+      const { next } = write
+      const replacement = next === null ? null : 'kept' in next ? { kept: next.kept } : { bytes: Buffer.from(next.bytes) }
+      return service.write(write.file, write.expected, replacement)
+    },
   }
+}
+
+/** A version as it crosses to the app: the bytes as they are. */
+function version(value: TurnVersion): ChangeVersion {
+  return value.state === 'bytes' ? { state: 'bytes', hash: value.hash, bytes: value.bytes } : value
 }

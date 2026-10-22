@@ -348,58 +348,9 @@ export class Repository {
         skipped++
         return placeholder(entry, 'Not read: this review is too large to show every file at once.')
       }
-      return this.compare(entry, oldSide, newSide, options, editable, blocked.get(entry.path))
+      return compareSides(entry, oldSide, newSide, options, editable !== null, blocked.get(entry.path))
     })
     return { files, skipped }
-  }
-
-  private compare(entry: Entry, oldSide: Loaded, newSide: Loaded, options: ReviewOptions, editable: 'unstaged' | 'staged' | null, attribute: string | undefined): ReviewFile {
-    const fingerprint = sha1(JSON.stringify([entry.change, oldSide.identity, newSide.identity, modeOf(entry.old), modeOf(entry.new)]))
-    const base: Omit<ReviewFile, 'kind' | 'hunks' | 'added' | 'removed' | 'hunkActions'> = {
-      path: entry.path,
-      ...(entry.oldPath ? { oldPath: entry.oldPath } : {}),
-      change: entry.change,
-      ...(modeOf(entry.old) ? { oldMode: modeOf(entry.old) } : {}),
-      ...(modeOf(entry.new) ? { newMode: modeOf(entry.new) } : {}),
-      fingerprint,
-    }
-    const a = oldSide.content
-    const b = newSide.content
-    if (entry.submodule || a.kind === 'submodule' || b.kind === 'submodule') {
-      return { ...base, kind: 'submodule', hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: 'A submodule is changed as a whole.', note: submoduleNote(entry) }
-    }
-    if (a.kind === 'folder' || b.kind === 'folder') {
-      return { ...base, kind: 'folder', hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: 'A folder with a repository of its own is changed as a whole.', note: 'A folder with its own git repository.' }
-    }
-    if (a.kind === 'binary' || b.kind === 'binary' || a.kind === 'large' || b.kind === 'large') {
-      const kind: FileKind = a.kind === 'large' || b.kind === 'large' ? 'large' : 'binary'
-      const size = { ...(sizeOf(a) !== undefined ? { old: sizeOf(a) } : {}), ...(sizeOf(b) !== undefined ? { new: sizeOf(b) } : {}) }
-      return { ...base, kind, size, hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: kind === 'large' ? 'This file is too large to show by lines.' : 'A binary file is changed as a whole.', note: kind === 'large' ? 'Too large to show here.' : 'Binary file.' }
-    }
-    const oldText: TextContent = a.kind === 'text' ? a : { kind: 'text', lines: [], endings: [], eol: b.kind === 'text' ? b.eol : '\n', bom: false, lossy: false }
-    const newText: TextContent = b.kind === 'text' ? b : { kind: 'text', lines: [], endings: [], eol: oldText.eol, bom: false, lossy: false }
-    const diff = diffContents(oldText, newText, { context: options.context, ignoreWhitespace: options.ignoreWhitespace })
-    const symlink = modeOf(entry.old) === '120000' || modeOf(entry.new) === '120000'
-    let off: string | undefined
-    if (!editable) off = undefined
-    else if (entry.change === 'conflicted') off = 'Resolve the conflict in the file first.'
-    else if (symlink) off = 'A symbolic link is changed as a whole.'
-    else if (oldText.lossy || newText.lossy) off = 'This file is not UTF-8 text, so it is changed as a whole.'
-    else if (attribute) off = attribute
-    else if (options.ignoreWhitespace) off = 'Whitespace is hidden: show it to stage or revert single changes.'
-    else if (diff.approximate) off = 'This diff is approximate, so the file is changed as a whole.'
-    const note = textNote(entry, oldText, newText, diff.hunks.length === 0, a.kind === 'none', b.kind === 'none')
-    return {
-      ...base,
-      kind: symlink ? 'symlink' : 'text',
-      hunks: diff.hunks,
-      added: diff.added,
-      removed: diff.removed,
-      ...(diff.approximate ? { approximate: true } : {}),
-      hunkActions: Boolean(editable) && !off,
-      ...(editable && off ? { hunkActionsOff: off } : {}),
-      ...(note ? { note } : {}),
-    }
   }
 
   /** Reads both sides of each entry within the budget: objects through one `cat-file`, files from the disk. */
@@ -616,7 +567,7 @@ export class Repository {
     const { entry } = await this.entryFor(scope, action.path)
     const read = await this.read([entry])
     const [oldSide, newSide] = read.get(entry)!
-    const file = this.compare(entry, oldSide, newSide, options, scope, (await this.blockedByAttributes(oldSide.content.kind !== 'none' && newSide.content.kind !== 'none' ? [entry.path] : [])).get(entry.path))
+    const file = compareSides(entry, oldSide, newSide, options, true, (await this.blockedByAttributes(oldSide.content.kind !== 'none' && newSide.content.kind !== 'none' ? [entry.path] : [])).get(entry.path))
     if (action.fingerprint && action.fingerprint !== file.fingerprint) throw new ReviewError(`${entry.path} changed since you looked at it. The review shows it as it is now.`, 'stale')
 
     const isHunk = action.type === 'stage-hunk' || action.type === 'unstage-hunk' || action.type === 'revert-hunk'
@@ -860,6 +811,66 @@ export class Repository {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** One file's two sides compared, as the review shows them; `editable` when single hunks may be written back. */
+function compareSides(entry: Entry, oldSide: Loaded, newSide: Loaded, options: ReviewOptions, editable: boolean, attribute: string | undefined): ReviewFile {
+  const fingerprint = sha1(JSON.stringify([entry.change, oldSide.identity, newSide.identity, modeOf(entry.old), modeOf(entry.new)]))
+  const base: Omit<ReviewFile, 'kind' | 'hunks' | 'added' | 'removed' | 'hunkActions'> = {
+    path: entry.path,
+    ...(entry.oldPath ? { oldPath: entry.oldPath } : {}),
+    change: entry.change,
+    ...(modeOf(entry.old) ? { oldMode: modeOf(entry.old) } : {}),
+    ...(modeOf(entry.new) ? { newMode: modeOf(entry.new) } : {}),
+    fingerprint,
+  }
+  const a = oldSide.content
+  const b = newSide.content
+  if (entry.submodule || a.kind === 'submodule' || b.kind === 'submodule') {
+    return { ...base, kind: 'submodule', hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: 'A submodule is changed as a whole.', note: submoduleNote(entry) }
+  }
+  if (a.kind === 'folder' || b.kind === 'folder') {
+    return { ...base, kind: 'folder', hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: 'A folder with a repository of its own is changed as a whole.', note: 'A folder with its own git repository.' }
+  }
+  if (a.kind === 'binary' || b.kind === 'binary' || a.kind === 'large' || b.kind === 'large') {
+    const kind: FileKind = a.kind === 'large' || b.kind === 'large' ? 'large' : 'binary'
+    const size = { ...(sizeOf(a) !== undefined ? { old: sizeOf(a) } : {}), ...(sizeOf(b) !== undefined ? { new: sizeOf(b) } : {}) }
+    return { ...base, kind, size, hunks: [], added: 0, removed: 0, hunkActions: false, hunkActionsOff: kind === 'large' ? 'This file is too large to show by lines.' : 'A binary file is changed as a whole.', note: kind === 'large' ? 'Too large to show here.' : 'Binary file.' }
+  }
+  const oldText: TextContent = a.kind === 'text' ? a : { kind: 'text', lines: [], endings: [], eol: b.kind === 'text' ? b.eol : '\n', bom: false, lossy: false }
+  const newText: TextContent = b.kind === 'text' ? b : { kind: 'text', lines: [], endings: [], eol: oldText.eol, bom: false, lossy: false }
+  const diff = diffContents(oldText, newText, { context: options.context, ignoreWhitespace: options.ignoreWhitespace })
+  const symlink = modeOf(entry.old) === '120000' || modeOf(entry.new) === '120000'
+  let off: string | undefined
+  if (!editable) off = undefined
+  else if (entry.change === 'conflicted') off = 'Resolve the conflict in the file first.'
+  else if (symlink) off = 'A symbolic link is changed as a whole.'
+  else if (oldText.lossy || newText.lossy) off = 'This file is not UTF-8 text, so it is changed as a whole.'
+  else if (attribute) off = attribute
+  else if (options.ignoreWhitespace) off = 'Whitespace is hidden: show it to stage or revert single changes.'
+  else if (diff.approximate) off = 'This diff is approximate, so the file is changed as a whole.'
+  const note = textNote(entry, oldText, newText, diff.hunks.length === 0, a.kind === 'none', b.kind === 'none')
+  return {
+    ...base,
+    kind: symlink ? 'symlink' : 'text',
+    hunks: diff.hunks,
+    added: diff.added,
+    removed: diff.removed,
+    ...(diff.approximate ? { approximate: true } : {}),
+    hunkActions: editable && !off,
+    ...(editable && off ? { hunkActionsOff: off } : {}),
+    ...(note ? { note } : {}),
+  }
+}
+
+/**
+ * Two versions of a file that do not come from git (the agent's record of a request), compared as the review shows
+ * them. `null` is no file. `editable`: single hunks may be written back.
+ */
+export function compareBytes(input: { path: string; change: FileChange; old: Buffer | null; new: Buffer | null; editable: boolean }, options: ReviewOptions): ReviewFile {
+  const side = (bytes: Buffer | null): Loaded => (bytes ? { content: decode(bytes), identity: sha1(bytes), bytes } : { content: { kind: 'none' }, identity: 'none' })
+  const entry: Entry = { path: input.path, change: input.change, old: input.old ? { from: 'worktree' } : { from: 'none' }, new: input.new ? { from: 'worktree' } : { from: 'none' } }
+  return compareSides(entry, side(input.old), side(input.new), options, input.editable, undefined)
+}
 
 function baseName(file: string): string {
   return file.slice(file.lastIndexOf('/') + 1)

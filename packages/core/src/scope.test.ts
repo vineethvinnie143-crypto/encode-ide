@@ -360,6 +360,60 @@ describe('a session scope with checkpoints', () => {
     assert.equal((await rewinding).ok, true)
   })
 
+  it('shows the latest request still in the conversation that changed files, or the one asked for', async () => {
+    const asked: string[] = []
+    const file = { path: 'a.ts', file: '/ws/a.ts', before: { state: 'missing' as const }, after: { state: 'missing' as const }, afterFrom: 'now' as const, changedSince: false }
+    let turns: Array<{ turn: string; at: number; files: number; outside: number }> = []
+    const { checkpoints } = fakeCheckpoints({
+      info: async () => ({ available: true, turns, canUndo: false }),
+      changes: async (turn) => (asked.push(turn), { known: true, at: 9, files: [file] }),
+    })
+    const h = await hostHarness({ script: [{ text: 'first' }, { text: 'second' }], host: { scope: () => ({ checkpoints }) } })
+    const session = await h.host.create()
+    const none = await h.host.turnChanges(session.id)
+    assert.deepEqual([none.turn, none.files, none.busy, none.problem], [null, [], false, undefined])
+
+    await h.host.start(session.id, { text: 'one', mode: 'code' })
+    await h.host.start(session.id, { text: 'two', mode: 'code' })
+    const [first, second] = (await h.host.history(session.id)).entries.filter((entry) => entry.kind === 'user')
+    // The latest request changed nothing; a request cut from the conversation is passed over.
+    turns = [
+      { turn: first.id, at: 1, files: 1, outside: 0 },
+      { turn: 'cut-away', at: 2, files: 3, outside: 0 },
+      { turn: second.id, at: 3, files: 0, outside: 0 },
+    ]
+    const latest = await h.host.turnChanges(session.id)
+    assert.deepEqual([latest.turn, latest.at, latest.files.length], [first.id, 9, 1])
+    assert.equal((await h.host.turnChanges(session.id, second.id)).turn, second.id)
+    assert.deepEqual(asked, [first.id, second.id])
+    assert.match((await h.host.turnChanges(session.id, 'cut-away')).problem ?? '', /not in this conversation/)
+  })
+
+  it('writes a file for the person only while nothing runs, and says why it cannot otherwise', async () => {
+    const writes: string[] = []
+    const { checkpoints } = fakeCheckpoints({ write: async (write) => (writes.push(write.file), { ok: true, previous: null, written: null }) })
+    const h = await hostHarness({
+      scriptFor: () => callOnce(() => ({ name: 'Bash', input: { command: 'npm run build', description: 'build' } })),
+      host: { scope: () => ({ checkpoints }) },
+    })
+    const session = await h.host.create()
+    const write = { file: '/ws/a.ts', expected: null, next: null }
+    const running = h.host.start(session.id, { text: 'build', mode: 'code' })
+    const request = (await until(() => h.of('approval-request', session.id)[0])).request
+    assert.equal((await h.host.turnChanges(session.id)).busy, true)
+    const busy = await h.host.turnWrite(session.id, write)
+    assert.equal(busy.ok === false && busy.reason, 'busy')
+    h.host.approve(request.id, false)
+    await running
+    assert.deepEqual(await h.host.turnWrite(session.id, write), { ok: true, previous: null, written: null })
+    assert.deepEqual(writes, ['/ws/a.ts'])
+
+    const plain = await hostHarness({ script: [{ text: 'ok' }], host: { scope: () => ({}) } })
+    const other = await plain.host.create()
+    assert.match((await plain.host.turnChanges(other.id)).problem ?? '', /Nothing is recorded/)
+    assert.equal((await plain.host.turnWrite(other.id, write)).ok, false)
+  })
+
   it('lets the scope put a line in the conversation', async () => {
     let notice: (text: string) => void = () => undefined
     const h = await hostHarness({ script: [{ text: 'ok' }], host: { scope: (request) => ((notice = request.notice), {}) } })

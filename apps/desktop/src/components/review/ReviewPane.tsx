@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
-import type { ReviewSnapshot } from '@shared/types'
+import type { ReviewSnapshot, RewindTurn } from '@shared/types'
 import { api } from '../../api'
 import { activeKind } from '../../panels/model'
 import { useChat } from '../../stores/chat'
 import { usePanels } from '../../stores/panels'
 import { useReview, type ScopeKind } from '../../stores/review'
+import { useSessions } from '../../stores/sessions'
 import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
 import { throttle } from '../../throttle'
@@ -23,17 +24,28 @@ const SCOPE_LABEL: Record<ScopeKind, string> = {
   staged: 'Staged',
   branch: 'Branch',
   commit: 'Commit',
+  turn: 'Last turn',
 }
 
 const NO_COMMENTS: readonly unknown[] = []
 
+const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`
+
+/** The first line of a request, short enough for a menu row. */
+function requestLine(text: string): string {
+  const line = text.trim().split(/\r?\n/, 1)[0] ?? ''
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line
+}
+
 /** The view's name and what it is compared with, for the header and the empty state. */
 function emptyText(snapshot: ReviewSnapshot): { title: string; detail: string } {
   switch (snapshot.scope.kind) {
-    case 'unstaged':
-      return snapshot.counts.staged
-        ? { title: 'Nothing left to stage', detail: `${snapshot.counts.staged} ${snapshot.counts.staged === 1 ? 'file is' : 'files are'} staged and ready to commit.` }
+    case 'unstaged': {
+      const staged = snapshot.counts?.staged ?? 0
+      return staged
+        ? { title: 'Nothing left to stage', detail: `${plural(staged, 'file')} ${staged === 1 ? 'is' : 'are'} staged and ready to commit.` }
         : { title: 'No changes', detail: 'What you or the agent change in this folder shows up here.' }
+    }
     case 'staged':
       return { title: 'Nothing staged', detail: 'Stage files or single changes in the Unstaged view.' }
     case 'branch':
@@ -42,14 +54,20 @@ function emptyText(snapshot: ReviewSnapshot): { title: string; detail: string } 
         : { title: 'No branch to compare with', detail: 'This repository has no main, master or upstream branch to compare against.' }
     case 'commit':
       return { title: 'This commit changes no file', detail: 'It may be a merge, or only a message.' }
+    case 'turn':
+      return snapshot.turn?.id
+        ? { title: 'Nothing left to review', detail: 'Every file this request changed is back to how it was before it.' }
+        : { title: 'No changes from the agent yet', detail: 'What the agent changes with its file tools in this conversation shows up here, one request at a time.' }
   }
 }
 
 function ScopeMenu({ snapshot }: { snapshot: ReviewSnapshot | null }) {
   const kind = useReview((state) => state.kind)
-  const counts = snapshot?.counts
+  const turn = useReview((state) => state.turn)
+  const counts = snapshot?.counts ?? null
   const entries = (): MenuEntry[] => {
-    const pick = (next: ScopeKind) => () => useReview.getState().setKind(next)
+    const review = useReview.getState()
+    const pick = (next: ScopeKind) => () => review.setKind(next)
     return [
       { kind: 'group', id: 'g-tree', label: 'Working tree' },
       { id: 'unstaged', label: 'Unstaged', description: 'Changes in your files that are not staged', checked: kind === 'unstaged', trailing: counts ? String(counts.unstaged) : undefined, onSelect: pick('unstaged') },
@@ -57,19 +75,84 @@ function ScopeMenu({ snapshot }: { snapshot: ReviewSnapshot | null }) {
       { kind: 'group', id: 'g-history', label: 'History' },
       { id: 'branch', label: 'Branch', description: 'Everything this branch adds to its base', checked: kind === 'branch', onSelect: pick('branch') },
       { id: 'commit', label: 'Commit', description: 'What one commit changed', checked: kind === 'commit', onSelect: pick('commit') },
+      { kind: 'group', id: 'g-agent', label: 'Agent' },
+      {
+        id: 'turn',
+        label: 'Last turn',
+        description: 'What the agent changed for your latest request, with or without git',
+        checked: kind === 'turn',
+        onSelect: pick('turn'),
+      },
     ]
   }
   const count = counts ? (kind === 'unstaged' ? counts.unstaged : kind === 'staged' ? counts.staged : null) : null
   return (
     <Menu
       label="What to review"
-      width={280}
+      width={300}
       entries={entries}
       trigger={(props) => (
         <button type="button" className="rv-scope" {...props}>
-          <span>{SCOPE_LABEL[kind]}</span>
+          <span>{kind === 'turn' && turn !== null ? 'Agent turn' : SCOPE_LABEL[kind]}</span>
           {count !== null && count > 0 && <span className="rv-count">{count}</span>}
           <ChevronDown size={14} />
+        </button>
+      )}
+    />
+  )
+}
+
+/**
+ * The request of the Turn view: the latest one that changed files (the default, which follows new requests), or one
+ * chosen from the conversation's requests that changed files, newest first.
+ */
+function TurnMenu({ snapshot }: { snapshot: ReviewSnapshot | null }) {
+  const chosen = useReview((state) => state.turn)
+  const sessionId = useSessions((state) => state.activeId)
+  const entries = useChat((state) => state.entries)
+  const [turns, setTurns] = useState<readonly RewindTurn[] | null>(null)
+  // Read again with each review, so a request that changed files since is listed.
+  useEffect(() => {
+    if (!sessionId) return
+    let live = true
+    api.agent.checkpoints(sessionId).then(
+      (info) => live && setTurns(info.available ? info.turns : []),
+      () => live && setTurns([]),
+    )
+    return () => {
+      live = false
+    }
+  }, [sessionId, snapshot])
+  const requests = useMemo(() => new Map(entries.filter((entry) => entry.kind === 'user').map((entry) => [entry.id, entry.text ?? ''])), [entries])
+  const shown = snapshot?.scope.kind === 'turn' ? (snapshot.turn ?? null) : null
+  const shownText = shown?.id ? requests.get(shown.id) : undefined
+  const list = (): MenuEntry[] => {
+    const review = useReview.getState()
+    // A request the conversation no longer holds (it went back past it) is not offered.
+    const listed = (turns ?? []).filter((turn) => turn.files > 0 && requests.has(turn.turn)).reverse()
+    return [
+      { id: '@latest', label: 'Latest request', description: 'Follows each new request that changes files', checked: chosen === null, onSelect: () => review.setTurn(null) },
+      ...(listed.length ? [{ kind: 'separator' as const, id: 'sep' }] : []),
+      ...listed.map((turn) => ({
+        id: turn.turn,
+        label: requestLine(requests.get(turn.turn) ?? '') || '(no text)',
+        description: `${plural(turn.files, 'file')} · ${shortAge(turn.at)}`,
+        checked: chosen === turn.turn,
+        onSelect: () => review.setTurn(turn.turn),
+      })),
+    ]
+  }
+  return (
+    <Menu
+      label="Request"
+      width={360}
+      entries={list}
+      trigger={(props) => (
+        <button type="button" className="rv-chip-select rv-turn-chip" title={shownText ? requestLine(shownText) : 'Choose a request'} {...props}>
+          <MessageSquare size={13} />
+          <span className="rv-chip-text">{shownText !== undefined ? requestLine(shownText) || '(no text)' : shown ? 'No request yet' : '…'}</span>
+          {shown?.at !== undefined && <span className="rv-chip-mono">{shortAge(shown.at)}</span>}
+          <ChevronDown size={13} />
         </button>
       )}
     />
@@ -181,10 +264,10 @@ function OptionsMenu({ undo }: { undo: string | null }) {
 }
 
 /**
- * The Review tab: the open folder's changes by scope (unstaged, staged, the branch against its base, one commit),
- * as diffs to read, stage, unstage or revert by file or by hunk, with comments that go to the agent and a Commit
- * dialog whose message the model drafts. It reads git again when files change, when the agent finishes, and when
- * eNCode comes back to the front.
+ * The Review tab: the open folder's changes by scope (unstaged, staged, the branch against its base, one commit, or
+ * what one of the agent's turns changed), as diffs to read, stage, unstage or revert by file or by hunk, with comments
+ * that go to the agent and a Commit dialog whose message the model drafts. It reads the changes again when files
+ * change, when the agent finishes, and when eNCode comes back to the front.
  */
 export default function ReviewPane() {
   const root = useWorkspace((state) => state.workspace?.root ?? null)
@@ -198,9 +281,11 @@ export default function ReviewPane() {
   const comments = useReview((state) => state.comments[state.viewKey()] ?? NO_COMMENTS)
   const view = useReview((state) => state.view)
   const running = useChat((state) => state.running)
+  // The Turn view is the open conversation's: another conversation is read afresh.
+  const conversation = useSessions((state) => (kind === 'turn' ? state.activeId : null))
   const [committing, setCommitting] = useState(false)
 
-  // While the tab is in front, git is read again when something may have changed it.
+  // While the tab is in front, the changes are read again when something may have changed them.
   useEffect(() => {
     if (!visible || !root) return
     void useReview.getState().refresh()
@@ -208,6 +293,8 @@ export default function ReviewPane() {
     const offFiles = api.workspace.onFileChanged(() => refresh())
     const offAgent = api.agent.onEvent((event) => {
       if (event.type === 'done' || event.type === 'file-changed') refresh()
+      // The Turn view is read-only while the agent works, and its requests change when the conversation goes back.
+      else if ((event.type === 'status' || event.type === 'error' || event.type === 'session-reset') && useReview.getState().kind === 'turn') refresh()
     })
     const onFocus = () => refresh()
     window.addEventListener('focus', onFocus)
@@ -217,7 +304,7 @@ export default function ReviewPane() {
       window.removeEventListener('focus', onFocus)
       refresh.cancel()
     }
-  }, [visible, root])
+  }, [visible, root, conversation])
 
   const snapshot = load?.ok ? load.snapshot : null
   const undo = load?.ok ? load.undo : null
@@ -249,7 +336,10 @@ export default function ReviewPane() {
   const act = useReview.getState().act
   const editable = snapshot !== null && !snapshot.readOnly && snapshot.files.length > 0
   const working = snapshot !== null && (snapshot.scope.kind === 'unstaged' || snapshot.scope.kind === 'staged')
-  const committable = working && snapshot.counts.staged + snapshot.counts.unstaged > 0
+  const counts = snapshot?.counts ?? null
+  const committable = working && counts !== null && counts.staged + counts.unstaged > 0
+  // In the Turn view a file can be fixed (changed again by a later request, or with no known earlier version).
+  const revertible = editable && snapshot.scope.kind === 'turn' && snapshot.files.some((file) => !file.fixed)
   const locked = busy !== null
   const failed = load !== null && !load.ok
 
@@ -259,6 +349,7 @@ export default function ReviewPane() {
         <ScopeMenu snapshot={snapshot} />
         {kind === 'branch' && <BaseMenu snapshot={snapshot} />}
         {kind === 'commit' && <CommitMenu snapshot={snapshot} />}
+        {kind === 'turn' && <TurnMenu snapshot={snapshot} />}
         <span className="rv-bar-fill" />
         {totals && totals.files > 0 && (
           <span className="rv-totals" title={`${totals.files} ${totals.files === 1 ? 'file' : 'files'}`}>
@@ -295,8 +386,14 @@ export default function ReviewPane() {
       )}
       {load && !load.ok && (
         <div className="panel-empty">
-          <GitBranch size={20} />
+          {kind === 'turn' ? <MessageSquare size={20} /> : <GitBranch size={20} />}
           <span>{load.message}</span>
+          {kind !== 'turn' && (
+            // A folder without git still has the agent's own record of what it changed.
+            <Button size="sm" onClick={() => useReview.getState().setKind('turn')}>
+              Review the agent’s last turn
+            </Button>
+          )}
         </div>
       )}
       {!load && !error && (
@@ -304,9 +401,12 @@ export default function ReviewPane() {
           <SkeletonRows rows={6} label="Reading the changes" />
         </div>
       )}
+      {snapshot?.turn?.busy && snapshot.files.length > 0 && <div className="rv-banner is-quiet">eNCode is working on this conversation. Its changes can be reverted once it is done.</div>}
       {snapshot && snapshot.skipped > 0 && (
         <div className="rv-banner">
-          {snapshot.skipped} {snapshot.skipped === 1 ? 'file is' : 'files are'} not shown: this review is too large to read at once. Commit or stage part of it to see the rest.
+          {snapshot.scope.kind === 'turn'
+            ? `${plural(snapshot.skipped, 'file')} ${snapshot.skipped === 1 ? 'is listed without its changes' : 'are listed without their changes'}: this request changed more than the review reads at once.`
+            : `${snapshot.skipped} ${snapshot.skipped === 1 ? 'file is' : 'files are'} not shown: this review is too large to read at once. Commit or stage part of it to see the rest.`}
         </div>
       )}
       {snapshot &&
@@ -320,7 +420,7 @@ export default function ReviewPane() {
           </div>
         ))}
 
-      {snapshot && (editable || committable || comments.length > 0) && (
+      {snapshot && ((editable && snapshot.scope.kind !== 'turn') || revertible || committable || comments.length > 0) && (
         <div className="rv-foot">
           {comments.length > 0 && (
             <Button size="sm" variant="primary" icon={<MessageSquare size={14} />} onClick={() => useReview.getState().sendComments()} title={running ? 'Queued until the agent is done' : undefined}>
@@ -354,6 +454,25 @@ export default function ReviewPane() {
           {snapshot.scope.kind === 'staged' && editable && (
             <Button size="sm" disabled={locked} onClick={() => void act({ type: 'unstage-all' })}>
               Unstage all
+            </Button>
+          )}
+          {revertible && (
+            <Button
+              size="sm"
+              className="rv-revert-turn"
+              disabled={locked}
+              onClick={async () => {
+                const fixed = snapshot.files.filter((file) => file.fixed).length
+                const ok = await useUi.getState().askConfirm({
+                  title: 'Revert what this request changed?',
+                  body: `Each file goes back to how it was before the request, and files it created are deleted.${fixed ? ` ${plural(fixed, 'file')} marked read only ${fixed === 1 ? 'stays' : 'stay'} as ${fixed === 1 ? 'it is' : 'they are'}.` : ''} You can undo this right after.`,
+                  confirmLabel: 'Revert all',
+                  danger: true,
+                })
+                if (ok) void act({ type: 'revert-all' })
+              }}
+            >
+              Revert all
             </Button>
           )}
           {committable && (
