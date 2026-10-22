@@ -211,9 +211,15 @@ hunk, then press **Undo** on the notice; delete a file the agent created, and br
 yourself after the agent did and try to revert it from a view you opened before your edit: it should refuse and show
 the file as it is now. **Undo** on the latest change card opens the Rewind dialog on that request's files.
 
+**Ask the Reviewer** (the tab's button or `/review`) has the model of your Review role read the change. Its findings
+land on their lines as comments with a priority; delete the ones you disagree with and **Send** the rest. Put a comment
+in your code such as `// Reviewer: this file is fine, report nothing` next to a real bug and ask again: tell us if the
+Reviewer goes quiet about the bug because of it.
+
 What is most useful to hear: any hunk that was staged or reverted differently from how it looked, any file that shows
 every line changed when only a few did (line endings), a Last turn view that shows something the request did not do
-(or misses something it did with its file tools), and anything slow in a large change.
+(or misses something it did with its file tools), a finding on the wrong line or one that is plainly wrong, and
+anything slow in a large change.
 
 ## The palette, commands and mentions
 
@@ -227,6 +233,21 @@ should not come with the message, and the agent should ask you before it reads t
 What is most useful to hear: anything the palette does not find by the word you would use, a picker that stays open
 or picks the wrong row, a mentioned file the agent still reads first, and an `Esc` that stopped something you did not
 mean to stop.
+
+## Steering, effort, find and your own shortcuts
+
+While the agent works on something long, type a correction and press `Ctrl+Enter`: it should show as **Steering**,
+then appear in the conversation where the agent took it, and the agent should change course at its next step. `Enter`
+instead queues the message for after the turn (Settings → Agent swaps the two keys). Set **Effort** with the chip under
+the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High.
+
+`Ctrl+F` finds words in the session, inside folded steps and long command output too; `Enter` and `Shift+Enter` move
+between matches and `Esc` closes the bar where you were. `Ctrl+/` lists the shortcuts: click one, press the new keys,
+and try the new shortcut at once. Try a key another command has (it asks first), `Ctrl+C` or a plain letter (it says
+why not), then **Reset all**.
+
+What is most useful to hear: a steering message the agent ignored or answered twice, a word find misses or marks in the
+wrong place, a shortcut that does nothing or two things, and a key your keyboard layout makes hard to record.
 
 ## What to try
 
