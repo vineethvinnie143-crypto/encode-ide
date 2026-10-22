@@ -16,7 +16,7 @@ import { HELPER_FILES, HELPER_MANIFEST, type SourceFile } from './sources'
 export const HELPER_EXE = 'encode-sandbox.exe'
 
 /** Changes with the helper's command line, so a helper built for another one is never started. */
-export const HELPER_PROTOCOL = 1
+export const HELPER_PROTOCOL = 2
 
 export interface CompilerRun {
   code: number | null

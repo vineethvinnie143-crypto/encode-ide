@@ -19,7 +19,7 @@ interface Fake extends SandboxEngine {
 function fakeEngine(probe: EngineProbe = { ok: true }): Fake {
   const engine: Fake = {
     name: 'bubblewrap',
-    limits: { reads: true, network: true, protectedPaths: 'exact' },
+    limits: { reads: true, network: true, protectedPaths: 'exact', processes: true },
     probes: 0,
     prepared: [],
     wrapped: [],
@@ -97,6 +97,15 @@ describe('the sandbox', () => {
     // The sandbox here is a Linux one, whatever runs the test, so its paths are joined the way a Linux policy joins them.
     assert.ok(policy.protected.includes(path.posix.join(project, '.git', 'hooks')))
     assert.deepEqual(session.state(), { active: true, required: false, allowUnsandboxed: true, limits: engine.limits })
+  })
+
+  it('gives a repository without a hooks folder an empty one before a command runs, and leaves other folders alone', async () => {
+    const repo = path.join(dir, 'no-hooks')
+    fs.mkdirSync(path.join(repo, '.git'), { recursive: true })
+    const session = make(fakeEngine()).session({ roots: () => [repo, project], settings: () => settings() })
+    await session.wrapSpawn({ ...spec(), cwd: repo })
+    assert.ok(fs.statSync(path.join(repo, '.git', 'hooks')).isDirectory())
+    assert.equal(fs.existsSync(path.join(project, '.git')), false)
   })
 
   it('prepares a set of folders once', async () => {

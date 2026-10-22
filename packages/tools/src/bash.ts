@@ -31,8 +31,12 @@ export interface BashSandbox {
 /** What a command that failed says when the sandbox is what stopped it. */
 const BLOCKED = /operation not permitted|read-only file system|access (?:is|to the path .{1,300}? is) denied|permission denied|\bE(?:PERM|ACCES|ROFS)\b|UnauthorizedAccess|couldn.t create signal pipe|NtCreateDirectoryObject/i
 
-function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandbox: BashSandbox | undefined): string {
-  const shellName = dialect === 'bash' ? (platform === 'win32' ? 'Git Bash' : 'bash') : 'PowerShell'
+/** powershell.exe is Windows PowerShell 5.1, which has no && or ||; pwsh is PowerShell 7, which has them. */
+const isWindowsPowerShell = (program: string | undefined) => Boolean(program && /(^|[\\/])powershell\.exe$/i.test(program))
+
+function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandbox: BashSandbox | undefined, program: string | undefined): string {
+  const legacy = dialect === 'pwsh' && isWindowsPowerShell(program)
+  const shellName = dialect === 'bash' ? (platform === 'win32' ? 'Git Bash' : 'bash') : legacy ? 'Windows PowerShell' : 'PowerShell'
   const lines = [
     `Runs a command in ${shellName} and returns its output.`,
     '',
@@ -43,11 +47,11 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
     `- timeout is in milliseconds: default ${DEFAULT_TIMEOUT_MS} (${DEFAULT_TIMEOUT_MS / 60_000} minutes), at most ${MAX_TIMEOUT_MS} (${MAX_TIMEOUT_MS / 60_000} minutes).`,
     '- For servers, watchers and other commands that keep running, set run_in_background to true instead of adding &. You get an id at once; read new output with BashOutput and stop the command with KillShell.',
     `- Output longer than ${BASH_OUTPUT_LIMIT} characters is shortened in the middle.`,
-    '- Chain commands that depend on each other with &&.',
+    legacy ? '- Windows PowerShell has no && or ||: run commands that depend on each other one per line and check $LASTEXITCODE between them.' : '- Chain commands that depend on each other with &&.',
   ]
   if (sandbox) {
     lines.push(
-      '- Commands run in a sandbox: they can write only in the workspace and the temp folder, and .git/hooks, .git/config and .encode are read-only.' +
+      '- Commands run in a sandbox: they can write only in the workspace and the temp folder, and .git/hooks, .git/config, .encode and .mcp.json are read-only.' +
         (sandbox.escapable
           ? ' If a command fails for that reason (Operation not permitted, Read-only file system, Access is denied), retry it with unsandboxed true; the person is asked first. Never use it on a first try.'
           : ''),
@@ -57,17 +61,20 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
     lines.push('- This is Git Bash on Windows: paths look like /c/Users/me/project, Windows programs (.exe and .cmd) run normally, and forward slashes work in Windows paths.')
   }
   if (dialect === 'pwsh') {
-    lines.push('- This is PowerShell, not bash: use PowerShell syntax (Get-ChildItem, $env:NAME, ; between commands, `& "C:\\path with spaces\\tool.exe"`).')
+    lines.push(
+      `- This is ${legacy ? 'Windows PowerShell 5.1' : 'PowerShell 7'}, not bash: use PowerShell syntax (Get-ChildItem, Remove-Item -Recurse -Force, $env:NAME = 'value', Select-String, ; between commands, \`& "C:\\path with spaces\\tool.exe"\`).`,
+    )
   }
   lines.push('', 'Give description: five to ten words saying what the command does, such as "Run the unit tests" or "Install dependencies".')
   return lines.join('\n')
 }
 
-export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform, sandbox?: BashSandbox): Tool<BashInput> {
+/** `program` is the shell's own path: it tells Windows PowerShell from PowerShell 7. */
+export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform, sandbox?: BashSandbox, program?: string): Tool<BashInput> {
   return {
     definition: {
       name: 'Bash',
-      description: bashDescription(dialect, platform, sandbox),
+      description: bashDescription(dialect, platform, sandbox, program),
       inputSchema: {
         type: 'object',
         properties: {

@@ -105,8 +105,11 @@ export function buildPolicy(input: PolicyInput): EnginePolicy {
     const gitDirs = gitDirectories(root, io, platform)
     for (const dir of gitDirs) {
       if (!roots.some((other) => isUnder(other, dir, api, platform))) writable.push(dir)
-      protectedPaths.push(api.join(dir, 'hooks'), api.join(dir, 'config'), api.join(dir, 'config.worktree'))
+      // `commondir` and `gitdir` say where git finds the shared hooks and configuration: pointing them elsewhere is as good as editing those.
+      protectedPaths.push(api.join(dir, 'hooks'), api.join(dir, 'config'), api.join(dir, 'config.worktree'), api.join(dir, 'commondir'), api.join(dir, 'gitdir'))
     }
+    // In a worktree or a submodule `.git` is a file that says which git directory the folder belongs to.
+    if (io.stat(api.join(root, '.git')) === 'file') protectedPaths.push(api.join(root, '.git'))
     for (const entry of PROTECTED_IN_PROJECT) protectedPaths.push(api.join(root, ...entry.split('/')))
   }
   writable.push(input.temp)

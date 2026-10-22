@@ -9,7 +9,7 @@ export type SandboxTone = 'success' | 'warning' | 'danger'
 const ENGINES: Record<NonNullable<SandboxReport['engine']>, string> = {
   bubblewrap: 'Linux namespaces (bubblewrap)',
   seatbelt: 'macOS Seatbelt',
-  'restricted-token': 'a restricted Windows token',
+  'integrity-level': 'the low integrity level of Windows',
 }
 
 export interface Headline {
@@ -33,7 +33,7 @@ export function headline(report: SandboxReport): Headline {
   }
   // The sandbox itself works; the shell the agent uses is one it cannot confine.
   if (report.shell?.unsupported) {
-    const offer = report.engine === 'restricted-token' ? ' Turn on “Run commands in PowerShell” below to confine them.' : ''
+    const offer = report.engine === 'integrity-level' ? ' Turn on “Run commands in PowerShell” below to confine them.' : ''
     return report.settings.required
       ? { tone: 'danger', title: `${report.shell.name} cannot run in the sandbox, so no command runs`, detail: `${report.shell.unsupported} The settings require the sandbox.${offer}` }
       : { tone: 'warning', title: `${report.shell.name} cannot run in the sandbox`, detail: `${report.shell.unsupported} Commands run with everything you can do on this computer.${offer}` }
@@ -50,6 +50,7 @@ export function limitLines(report: SandboxReport): string[] {
   const lines: string[] = []
   if (!report.limits.reads) lines.push('Commands can still read any file you can, such as your SSH keys. The sandbox limits what they change.')
   if (!report.limits.network) lines.push('Commands can still use the network. This system cannot block it for them.')
+  if (!report.limits.processes) lines.push('Commands can still end other programs you run. The sandbox limits what they change, not what they stop.')
   if (report.limits.protectedPaths === 'best-effort') {
     lines.push('.git/hooks, .git/config and .encode cannot be written by a command, but one that owns the folder around them could delete and recreate them.')
   }
@@ -70,7 +71,7 @@ export interface SwitchRow {
 /** The switches, as they stand: what each says is what turning it on does. */
 export function switchRows(report: SandboxReport): SwitchRow[] {
   const { settings, limits } = report
-  const windows = report.engine === 'restricted-token'
+  const windows = report.engine === 'integrity-level'
   return [
     {
       key: 'enabled',
@@ -83,7 +84,7 @@ export function switchRows(report: SandboxReport): SwitchRow[] {
           {
             key: 'powershell' as const,
             label: 'Run commands in PowerShell',
-            help: 'Git Bash cannot be confined by the Windows sandbox; PowerShell can. With this on, the agent’s commands run in PowerShell in the conversations you start from now on, so the sandbox applies to them.',
+            help: 'Git Bash cannot be confined by the Windows sandbox; PowerShell can. With this on (the default), the agent’s commands run in PowerShell, so the sandbox applies to them. Turned off, they run in Git Bash outside the sandbox. Applies to the conversations you start from now on.',
             checked: settings.powershell,
           },
         ]

@@ -25,6 +25,8 @@ import { webFetchTool, webSearchTool } from './web/tools'
 
 export interface BuiltinToolOptions {
   dialect: ShellDialect
+  /** The shell's own path, which tells Windows PowerShell 5.1 from PowerShell 7. */
+  shellProgram?: string
   platform: NodeJS.Platform
   /** Subagent types the Task tool offers; none leaves Task out (subagents do not start their own). */
   subagentTypes?: readonly SubagentType[]
@@ -46,7 +48,7 @@ export interface BuiltinToolOptions {
 
 export function builtinTools(options: BuiltinToolOptions): Tool[] {
   const tools: Tool[] = [
-    createBashTool(options.dialect, options.platform, options.sandbox) as Tool,
+    createBashTool(options.dialect, options.platform, options.sandbox, options.shellProgram) as Tool,
     bashOutputTool as Tool,
     killShellTool as Tool,
     globTool as Tool,

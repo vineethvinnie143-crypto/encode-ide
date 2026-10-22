@@ -11,7 +11,7 @@ import type { EngineLimits, EnginePolicy, SandboxEngine, SandboxStatus, SpawnSpe
 import { SandboxError } from './errors'
 import { createLinuxEngine } from './linux'
 import { createMacEngine } from './macos'
-import { buildPolicy, type PolicyIo } from './policy'
+import { buildPolicy, gitDirectories, type PolicyIo } from './policy'
 import { DEFAULT_SETTINGS, type SandboxSettings } from './settings'
 import { createWindowsEngine } from './windows/engine'
 
@@ -72,10 +72,10 @@ export const defaultIo: PolicyIo = {
   },
 }
 
-function engineFor(platform: NodeJS.Platform, dir: string): SandboxEngine | undefined {
+function engineFor(platform: NodeJS.Platform, dir: string, home: string, warn?: (message: string) => void): SandboxEngine | undefined {
   if (platform === 'linux') return createLinuxEngine()
   if (platform === 'darwin') return createMacEngine()
-  if (platform === 'win32') return createWindowsEngine({ dir })
+  if (platform === 'win32') return createWindowsEngine({ dir, home, ...(warn ? { warn } : {}) })
   return undefined
 }
 
@@ -98,7 +98,7 @@ export class Sandbox {
   constructor(private readonly options: SandboxOptions) {
     this.platform = options.platform ?? process.platform
     this.home = options.home ?? os.homedir()
-    this.engine = options.engine ?? engineFor(this.platform, options.dir)
+    this.engine = options.engine ?? engineFor(this.platform, options.dir, this.home, options.warn)
     this.io = options.io ?? defaultIo
     this.env = options.env ?? process.env
     this.temp = path.join(options.dir, 'tmp')
@@ -189,6 +189,13 @@ export class Sandbox {
     // The two caches nearly every tool wants must exist to be writable; making them is what the tools would do themselves.
     if (this.platform !== 'win32' && settings.caches) {
       for (const name of ['.npm', '.cache']) await fs.promises.mkdir(path.join(this.home, name), { recursive: true }).catch(() => undefined)
+    }
+    // A protected path that does not exist yet is not held, and git runs what its hooks folder holds outside the sandbox.
+    // A repository without that folder gets an empty one first, as `git init` would have made it.
+    for (const root of scope.roots()) {
+      for (const gitDir of gitDirectories(this.io.realpath(root), this.io, this.platform)) {
+        if (this.io.stat(gitDir) === 'dir') await fs.promises.mkdir(path.join(gitDir, 'hooks')).catch(() => undefined)
+      }
     }
     return buildPolicy({
       platform: this.platform,

@@ -3,51 +3,27 @@
  * error that starts with "encode-sandbox:" and exit code 125. Starting a sandboxed program is not done here but by
  * the shell itself, with the arguments `runArguments` makes (the helper's standard handles are the program's).
  */
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { SandboxError } from '../errors'
 
 export const HELPER_FAILED = 125
 
+const PROGRESS_PREFIX = 'encode-sandbox-progress:'
+
 export interface RunFlags {
-  /** SIDs or names (everyone, users, restricted, logon, authenticated, interactive) the token is restricted to. */
-  restrict: readonly string[]
-  /** Run at the low integrity level (nothing labeled higher can be written, deleted or ended), or at the medium one that a person's own programs run at (for the measurement). */
+  /** `low` (default): the program cannot write, delete or rename what is labeled higher. `medium`: it runs as an ordinary program of the person does (for the measurement). */
   integrity?: 'low' | 'medium'
-  /** The job's limits on the clipboard, other programs' windows and so on (default all). */
-  jobUi?: 'all' | 'none'
-  /** Whether programs the command starts may leave the job (default none). */
-  jobBreakaway?: 'none' | 'ok' | 'silent'
-  /** Where the program starts: the helper's own desktop (default), a desktop of its own, or a window station and desktop of its own. */
-  desktop?: 'inherit' | 'own' | 'own-station'
-  /** hidden: a console nobody sees (default); detached: none; inherit: the helper's own. */
-  console?: 'hidden' | 'detached' | 'inherit'
-  /** Turn administrator groups into deny-only (default true). */
-  lua?: boolean
-  /** Put the program in a job that kills what it left behind (default true). */
-  job?: boolean
-  /** Restrict reads as well as writes (an experiment; default false). */
-  fullRestriction?: boolean
   cwd?: string
+  /** Paths the program may not change: labeled medium, and kept from being renamed or deleted while it runs. Ones that do not exist are skipped. */
+  protect?: readonly string[]
 }
 
-function flagArguments(flags: RunFlags): string[] {
-  const out: string[] = []
-  for (const sid of flags.restrict) out.push('--restrict', sid)
-  if (flags.integrity) out.push('--integrity', flags.integrity)
-  if (flags.console && flags.console !== 'hidden') out.push('--console', flags.console)
-  if (flags.lua === false) out.push('--no-lua')
-  if (flags.job === false) out.push('--no-job')
-  if (flags.jobUi && flags.jobUi !== 'all') out.push('--job-ui', flags.jobUi)
-  if (flags.jobBreakaway && flags.jobBreakaway !== 'none') out.push('--job-breakaway', flags.jobBreakaway)
-  if (flags.desktop && flags.desktop !== 'inherit') out.push('--desktop', flags.desktop)
-  if (flags.fullRestriction) out.push('--full-restriction')
-  return out
-}
-
-/** The helper's arguments to start `file args...` under the restricted token. */
+/** The helper's arguments to start `file args...` at the low integrity level. */
 export function runArguments(flags: RunFlags, file: string, args: readonly string[]): string[] {
-  const out = ['run', ...flagArguments(flags)]
+  const out = ['run']
+  if (flags.integrity) out.push('--integrity', flags.integrity)
   if (flags.cwd) out.push('--cwd', flags.cwd)
+  for (const item of flags.protect ?? []) out.push('--protect', item)
   out.push('--', file, ...args)
   return out
 }
@@ -65,25 +41,95 @@ export interface HelperProbe {
   version?: string
 }
 
-interface Finished {
+export interface LabelResult {
+  ok: boolean
+  /** The folders that were marked now (with `ifMissing`, not the ones that already were). */
+  labeled: string[]
+  folders: number
+  files: number
+  /** Files with more than one link, left as they are: a hard link is how a package manager shares a file with the outside. */
+  linked: number
+  /** Junctions and symbolic links, not followed. */
+  redirected: number
+  /** Items that could not be marked (in use, or owned by another account). */
+  failed: number
+  failures: string[]
+  ms: number
+}
+
+export interface LabelOptions {
+  /** Skip a folder that was marked completely before. */
+  ifMissing?: boolean
+  /** Items marked so far, about once a second. */
+  onProgress?(done: number): void
+  timeoutMs?: number
+}
+
+export interface Finished {
   code: number | null
   stdout: string
   stderr: string
 }
 
-export function runHelper(exe: string, args: readonly string[], timeoutMs: number): Promise<Finished> {
+/** Runs the helper to the end. Lines of progress on standard error go to `onProgress` and are not part of `stderr`. */
+export function runHelper(exe: string, args: readonly string[], timeoutMs: number, onProgress?: (done: number) => void): Promise<Finished> {
   return new Promise((resolve) => {
-    execFile(exe, [...args], { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => {
-      const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : null) : 0
-      const why = error && code === null ? `\n${error.message}` : ''
-      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') + why })
+    let stdout = ''
+    let stderr = ''
+    let pending = ''
+    let settled = false
+    let child: ReturnType<typeof spawn>
+    const finish = (value: Finished) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = setTimeout(() => {
+      child?.kill()
+      finish({ code: null, stdout, stderr: `${stderr}\nThe sandbox helper did not finish in ${Math.round(timeoutMs / 1000)} seconds.` })
+    }, timeoutMs)
+    timer.unref()
+    try {
+      child = spawn(exe, [...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (error) {
+      finish({ code: null, stdout, stderr: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    child.stdout?.setEncoding('utf8')
+    child.stderr?.setEncoding('utf8')
+    child.stdout?.on('data', (text: string) => {
+      stdout += text
+      if (stdout.length > 8 * 1024 * 1024) child.kill()
+    })
+    const line = (text: string) => {
+      if (text.startsWith(PROGRESS_PREFIX)) {
+        const done = Number(text.slice(PROGRESS_PREFIX.length).trim())
+        if (Number.isFinite(done)) onProgress?.(done)
+      } else if (text) {
+        stderr += `${text}\n`
+      }
+    }
+    child.stderr?.on('data', (text: string) => {
+      pending += text
+      let at = pending.indexOf('\n')
+      while (at >= 0) {
+        line(pending.slice(0, at).replace(/\r$/, ''))
+        pending = pending.slice(at + 1)
+        at = pending.indexOf('\n')
+      }
+    })
+    child.once('error', (error) => finish({ code: null, stdout, stderr: `${stderr}${error.message}` }))
+    child.once('close', (code) => {
+      line(pending.replace(/\r$/, ''))
+      finish({ code, stdout, stderr })
     })
   })
 }
 
 /** Runs a helper command whose answer is JSON; a failure is a SandboxError with the helper's own words. */
-export async function helperJson<T>(exe: string, args: readonly string[], timeoutMs: number): Promise<T> {
-  const done = await runHelper(exe, args, timeoutMs)
+export async function helperJson<T>(exe: string, args: readonly string[], timeoutMs: number, onProgress?: (done: number) => void): Promise<T> {
+  const done = await runHelper(exe, args, timeoutMs, onProgress)
   if (done.code !== 0) {
     const line = done.stderr.split(/\r?\n/).find((text) => text.startsWith('encode-sandbox:'))
     throw new SandboxError('failed', line ? line.slice('encode-sandbox:'.length).trim() : `The sandbox helper stopped with code ${done.code}. ${done.stderr.trim().split(/\r?\n/)[0] ?? ''}`.trim())
@@ -95,38 +141,32 @@ export async function helperJson<T>(exe: string, args: readonly string[], timeou
   }
 }
 
-export function probeHelper(exe: string, flags: RunFlags, timeoutMs = 20_000): Promise<HelperProbe> {
-  return helperJson<HelperProbe>(exe, ['probe', ...flagArguments(flags)], timeoutMs)
+export function probeHelper(exe: string, timeoutMs = 20_000): Promise<HelperProbe> {
+  return helperJson<HelperProbe>(exe, ['probe'], timeoutMs)
 }
 
-export function grantFolder(exe: string, sid: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; granted: string[]; ms: number }> {
-  const args = ['grant', '--sid', sid, '--path', folder]
-  for (const item of protect) args.push('--protect', item)
-  return helperJson(exe, args, timeoutMs)
+/** What the engine asks of the helper; tests give it another. */
+export interface HelperClient {
+  probe(exe: string): Promise<HelperProbe>
+  label(exe: string, folders: readonly string[], protect: readonly string[], options?: LabelOptions): Promise<LabelResult>
+  unlabel(exe: string, folders: readonly string[], protect: readonly string[]): Promise<{ ok: boolean; ms: number }>
+  /** Runs the helper (`run ...` starts a program in the sandbox) and waits for it. */
+  run(exe: string, args: readonly string[], timeoutMs: number): Promise<Finished>
 }
 
-export function revokeFolder(exe: string, sid: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; ms: number }> {
-  const args = ['revoke', '--sid', sid, '--path', folder]
-  for (const item of protect) args.push('--protect', item)
-  return helperJson(exe, args, timeoutMs)
-}
-
-export async function foldersWithGrant(exe: string, sid: string, folders: readonly string[], timeoutMs = 60_000): Promise<string[]> {
-  if (!folders.length) return []
-  const args = ['check', '--sid', sid]
+/** Marks the folders (everything in them, now and later) so that low-integrity programs may write them; the protected paths inside stay medium. */
+export function labelFolders(exe: string, folders: readonly string[], protect: readonly string[], options: LabelOptions = {}): Promise<LabelResult> {
+  const args = ['label']
   for (const folder of folders) args.push('--path', folder)
-  return (await helperJson<{ present: string[] }>(exe, args, timeoutMs)).present
-}
-
-/** Labels the folder low (everything in it, now and later) and the protected paths inside it medium. */
-export function labelFolder(exe: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; labeled: string[]; ms: number }> {
-  const args = ['label', '--path', folder]
   for (const item of protect) args.push('--protect', item)
-  return helperJson(exe, args, timeoutMs)
+  if (options.ifMissing) args.push('--if-missing')
+  return helperJson<LabelResult>(exe, args, options.timeoutMs ?? 30 * 60_000, options.onProgress)
 }
 
-export function unlabelFolder(exe: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; ms: number }> {
-  const args = ['unlabel', '--path', folder]
+/** Takes the marks away again. */
+export function unlabelFolders(exe: string, folders: readonly string[], protect: readonly string[], timeoutMs = 30 * 60_000): Promise<{ ok: boolean; ms: number }> {
+  const args = ['unlabel']
+  for (const folder of folders) args.push('--path', folder)
   for (const item of protect) args.push('--protect', item)
   return helperJson(exe, args, timeoutMs)
 }
@@ -145,7 +185,9 @@ export async function processSecurity(exe: string, pids: readonly number[], time
   return (await helperJson<{ processes: string[] }>(exe, args, timeoutMs)).processes
 }
 
-/** The window station and desktop the helper is on, and who may use them, as the helper sees them. */
-export function desktopInfo(exe: string, timeoutMs = 20_000): Promise<Record<string, string>> {
-  return helperJson<Record<string, string>>(exe, ['desktop-info'], timeoutMs)
+export const defaultClient: HelperClient = {
+  probe: (exe) => probeHelper(exe),
+  label: labelFolders,
+  unlabel: (exe, folders, protect) => unlabelFolders(exe, folders, protect),
+  run: (exe, args, timeoutMs) => runHelper(exe, args, timeoutMs),
 }

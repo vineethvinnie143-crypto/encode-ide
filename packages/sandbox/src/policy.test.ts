@@ -51,6 +51,18 @@ describe('the policy for a session', () => {
     assert.ok(policy.protected.includes('/repo/.git/config'))
   })
 
+  it('keeps the pointers that say where git finds its hooks and configuration read-only', () => {
+    const io = fake({
+      '/work/p/.git': 'gitdir: /repo/.git/worktrees/p\n',
+      '/repo/.git/worktrees/p/commondir': '../..\n',
+    })
+    const policy = buildPolicy({ ...base, settings: settings({ caches: false }), io })
+    for (const item of ['/work/p/.git', '/repo/.git/worktrees/p/commondir', '/repo/.git/worktrees/p/gitdir', '/repo/.git/worktrees/p/hooks', '/repo/.git/worktrees/p/config.worktree']) assert.ok(policy.protected.includes(item), item)
+    const plain = buildPolicy({ ...base, settings: settings({ caches: false }), io: fake({ '/work/p/.git': null }) })
+    assert.ok(plain.protected.includes('/work/p/.git/hooks'))
+    assert.ok(!plain.protected.includes('/work/p/.git'), 'a .git folder is not read-only as a whole; git writes in it')
+  })
+
   it('does not list a git directory twice when it is inside a root', () => {
     const policy = buildPolicy({ ...base, settings: settings({ caches: false }), io: fake({ '/work/p/.git': null }) })
     assert.equal(policy.writable.filter((folder) => folder.includes('.git')).length, 0)

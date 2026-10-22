@@ -48,6 +48,9 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
   and before it touches anything outside the folder. Leave it there. **Full access** lets the agent run commands without
   asking. **Auto review** lets a second model approve low-risk commands for you; it is a judgment call by a model, so
   use it on projects you know, not on code you do not trust.
+- Every command the agent runs is in the **sandbox** (Settings → Sandbox): it can change files only in the open
+  folder, its git folder, and a temp and cache folder of the sandbox's own. On Windows it can still read your files,
+  use the network and end other programs, and the screen says so.
 - Open a **copy** of a project you care about, not the only copy.
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
   pages the agent fetches. There is no telemetry and no update check.
@@ -69,6 +72,24 @@ Every build that reaches `main` is kept for 30 days as an artifact of its CI run
 
 What is most useful to hear: anything that asked when a rule said it would not, anything that did not ask when it
 should have, and any message you could not understand.
+
+## The sandbox
+
+**Settings → Sandbox** says whether the agent's commands are confined, and what that does not cover on this computer.
+
+- On Windows the agent's commands run in **PowerShell**, because the sandbox can confine it and cannot confine Git
+  Bash. The first command in a folder prepares the folder, which can take a minute for a large one; the screen says
+  how far it is. Later commands start at once.
+- Approve a command that writes a file in your Documents folder (for example
+  `Set-Content $HOME\Documents\encode-test.txt hi`). It should fail with "Access to the path … is denied", and the agent should
+  then ask you before running it outside the sandbox. Answer no, and it should stop or find another way.
+- A command that cannot work inside (pushing over SSH, or a git hook while a Git Bash window is open) asks to run
+  outside, each time. Turn off **Let a command ask to leave the sandbox** and no command runs outside it.
+- Turn off **Run commands in PowerShell** to go back to Git Bash. Commands then run outside the sandbox, and the screen
+  says so.
+
+What is most useful to hear: a command that works outside eNCode and fails inside it, a write outside the folder
+that went through, and any sentence on the screen that did not match what happened.
 
 ## Auto review
 
@@ -207,6 +228,7 @@ text: read it before you send it. **Help → Show log files** opens the folder t
 | Sessions | `%APPDATA%\eNCode\sessions\` |
 | Logs | `%APPDATA%\eNCode\logs\` |
 | Your instructions, skills and agents | `%USERPROFILE%\.encode\` |
+| The sandbox's helper, its temp and cache folders, and the folders it prepared | `%APPDATA%\eNCode\sandbox\` |
 
 Updating means installing the next build over the last one: everything above stays.
 
@@ -218,6 +240,9 @@ Updating means installing the next build over the last one: everything above sta
 ## Known limits
 
 - Windows only for now; macOS and Linux are not tested.
+- On Windows the sandbox limits what a command changes, not what it reads or sends, and it cannot confine Git Bash. A
+  folder it prepared keeps its marks after eNCode closes: they let programs that run at Windows' low integrity level,
+  as the sandboxed commands do, write there.
 - Not signed, so SmartScreen warns on first start, and some antivirus programs look closely at a new program.
 - No automatic updates: a new build is a new download.
 - A network that needs a proxy does not work yet for model requests.

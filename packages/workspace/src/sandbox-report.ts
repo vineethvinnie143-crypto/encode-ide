@@ -46,6 +46,7 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
   if (!all.allowUnsandboxed && own.allowUnsandboxed) tightened.push("This folder's settings do not let a command leave the sandbox.")
   if (!all.network && own.network) tightened.push("This folder's settings block the network for commands.")
   if (!all.caches && own.caches) tightened.push("This folder's settings keep the package caches read-only.")
+  if (all.powershell && !own.powershell && platform === 'win32') tightened.push("This folder's settings run commands in PowerShell, so the sandbox applies to them.")
   if (all.denyWrite.length > own.denyWrite.length) tightened.push(`This folder's settings keep ${plural(all.denyWrite.length - own.denyWrite.length, 'more path', 'more paths')} read-only.`)
   if (all.denyRead.length > own.denyRead.length) tightened.push(`This folder's settings hide ${plural(all.denyRead.length - own.denyRead.length, 'more path', 'more paths')} from commands.`)
 

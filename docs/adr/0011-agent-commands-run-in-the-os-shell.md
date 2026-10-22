@@ -31,5 +31,6 @@ between keeping the eNCode Shell for the agent and running the OS shell.
   - Workspace Write, Read Only and Full access are unaffected.
 - Program resolution ([0005](0005-programs-from-absolute-path-entries.md)) still applies to
   locating the shell itself. The shell must start by its absolute path.
-- OS sandboxing (Seatbelt on macOS, bubblewrap on Linux, M3) wraps the shell process.
-  Windows has no equivalent yet, so approvals remain the control there.
+- The operating system's sandbox wraps the shell process: bubblewrap on Linux, Seatbelt on
+  macOS, the low integrity level on Windows, where it confines PowerShell and not Git Bash
+  ([0063](0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md)).

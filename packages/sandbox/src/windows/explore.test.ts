@@ -3,7 +3,8 @@
  * of other programs inside the folders that were labeled low, while the programs an agent runs still work
  * (PowerShell, node, cmd, git, and Git Bash). It runs only on Windows with ENCODE_SANDBOX_EXPLORE=1 (the sandbox
  * workflow sets it) and prints a table. Its answers decided the engine in engine.ts; it stays so that a Windows
- * update that changes them is seen.
+ * update that changes them is seen. The programs run as the sandbox starts them: through the helper, with the protected
+ * paths of a project (git's hooks and configuration, eNCode's settings) given to it.
  */
 import assert from 'node:assert/strict'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
@@ -14,7 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { ensureHelper, type HelperBuild } from './build'
-import { desktopInfo, labelFolder, probeHelper, processSecurity, readLabels, runArguments, unlabelFolder, type RunFlags } from './client'
+import { labelFolders, probeHelper, processSecurity, readLabels, runArguments, unlabelFolders, type RunFlags } from './client'
 
 const explore = process.platform === 'win32' && process.env.ENCODE_SANDBOX_EXPLORE === '1'
 
@@ -24,11 +25,8 @@ interface Variant {
   name: string
   /** direct: the program as it is (shows that the probes work and what a program can do unconfined); low: the low integrity level. */
   mode: 'direct' | 'low'
-  flags?: Omit<RunFlags, 'restrict' | 'integrity'>
   /** Only the probes of these programs. */
   programs?: Program[]
-  /** Git Bash is started through a junction to its folder, which gives the MSYS runtime another installation key. */
-  junction?: boolean
   /** A Git Bash of the person's own (not sandboxed) is open while the probes run, as a terminal they have open would be. */
   withBash?: boolean
 }
@@ -37,7 +35,6 @@ const VARIANTS: Variant[] = [
   { name: 'none', mode: 'direct' },
   { name: 'Low (no bash open)', mode: 'low', programs: ['bash'] },
   { name: 'Low', mode: 'low', withBash: true },
-  { name: 'Low junction', mode: 'low', junction: true, withBash: true, programs: ['bash'] },
 ]
 
 const WHERE = ['temp', 'profile', 'public', 'cdrive', 'wintemp', 'programdata'] as const
@@ -287,6 +284,59 @@ function buildProbes(): Probe[] {
         }
         await c.restoreProtected()
       },
+    },
+    {
+      name: 'ps rename .git (it holds the protected hooks)',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Rename-Item -Path ${q(path.join(c.root, '.git'))} -NewName git-moved -ErrorAction Stop`),
+      effect: (c) => exists(path.join(c.root, 'git-moved')),
+      after: async (c) => {
+        if (exists(path.join(c.root, 'git-moved'))) {
+          rm(path.join(c.root, '.git'))
+          fs.renameSync(path.join(c.root, 'git-moved'), path.join(c.root, '.git'))
+        }
+        await c.restoreProtected()
+      },
+    },
+    {
+      name: 'ps write .encode/settings.json (protected)',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Add-Content -Path ${q(path.join(c.root, '.encode', 'settings.json'))} -Value x -ErrorAction Stop`),
+      effect: (c) => fs.readFileSync(path.join(c.root, '.encode', 'settings.json'), 'utf8').includes('x'),
+      after: (c) => fs.writeFileSync(path.join(c.root, '.encode', 'settings.json'), '{}\n'),
+    },
+    {
+      name: 'ps create a file in .encode (protected)',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Set-Content -Path ${q(path.join(c.root, '.encode', 'new.json'))} -Value x -ErrorAction Stop`),
+      before: (c) => rm(path.join(c.root, '.encode', 'new.json')),
+      effect: (c) => exists(path.join(c.root, '.encode', 'new.json')),
+      after: (c) => rm(path.join(c.root, '.encode', 'new.json')),
+    },
+    {
+      name: 'ps rename .encode (protected)',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Rename-Item -Path ${q(path.join(c.root, '.encode'))} -NewName encode-moved -ErrorAction Stop`),
+      effect: (c) => exists(path.join(c.root, 'encode-moved')),
+      after: async (c) => {
+        if (exists(path.join(c.root, 'encode-moved'))) {
+          rm(path.join(c.root, '.encode'))
+          fs.renameSync(path.join(c.root, 'encode-moved'), path.join(c.root, '.encode'))
+        }
+        await c.restoreProtected()
+      },
+    },
+    {
+      name: 'ps write .mcp.json (protected)',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Set-Content -Path ${q(path.join(c.root, '.mcp.json'))} -Value x -ErrorAction Stop`),
+      effect: (c) => fs.readFileSync(path.join(c.root, '.mcp.json'), 'utf8').includes('x'),
+      after: (c) => fs.writeFileSync(path.join(c.root, '.mcp.json'), '{}\n'),
     },
     {
       name: 'ps delete and recreate .git/hooks (protected)',
@@ -655,10 +705,6 @@ function findPwsh(): string | undefined {
   return fs.existsSync(candidate) ? candidate : undefined
 }
 
-function randomSid(): string {
-  return `S-1-5-21-${[randomInt(1, 2 ** 31 - 1), randomInt(1, 2 ** 31 - 1), randomInt(1, 2 ** 31 - 1)].join('-')}-${randomInt(1000, 9999)}`
-}
-
 function tree(root: string, dirs: number, filesPerDir: number): number {
   let count = 0
   for (let d = 0; d < dirs; d++) {
@@ -762,7 +808,7 @@ describe('what keeps the programs of an agent working and its writes inside the 
     const newMediumVictim = async (): Promise<number> => {
       rm(mediumPidFile)
       const script = `require('fs').writeFileSync(${JSON.stringify(mediumPidFile)}, String(process.pid)); setTimeout(() => {}, 600000)`
-      const holder = spawn(build.exe, runArguments({ restrict: [], integrity: 'medium' }, process.execPath, ['-e', script]), { stdio: 'ignore', windowsHide: true })
+      const holder = spawn(build.exe, runArguments({ integrity: 'medium' }, process.execPath, ['-e', script]), { stdio: 'ignore', windowsHide: true })
       holder.unref()
       cleanup.push(() => holder.kill())
       for (let i = 0; i < 50 && !fs.existsSync(mediumPidFile); i++) await new Promise((resolve) => setTimeout(resolve, 200))
@@ -777,29 +823,42 @@ describe('what keeps the programs of an agent working and its writes inside the 
     const startup = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
     fs.mkdirSync(startup, { recursive: true })
 
-    for (const flags of [{ restrict: [], integrity: 'low' as const }, { restrict: [], integrity: 'medium' as const }]) {
-      say(`probe ${JSON.stringify(flags)}: ${JSON.stringify(await probeHelper(build.exe, flags).catch(failure))}`)
-    }
+    say(`probe: ${JSON.stringify(await probeHelper(build.exe).catch(failure))}`)
     for (const line of await processSecurity(build.exe, [victim.pid!, victimMedium]).catch((error: Error) => [`could not read the security of the programs: ${error.message}`])) say(`process ${line}`)
 
     // Label the folders, with timing; and a big tree for the cost of propagation.
     const git = await exec('git', ['init', '-q', root], 30_000)
     say(`git init for the fixture: ${git.code}`)
-    const protect = [path.join(root, '.git', 'hooks'), path.join(root, '.git', 'config')]
+    fs.mkdirSync(path.join(root, '.encode'), { recursive: true })
+    fs.writeFileSync(path.join(root, '.encode', 'settings.json'), '{}\n')
+    fs.writeFileSync(path.join(root, '.mcp.json'), '{}\n')
+    // What the engine gives the helper for a project (policy.ts).
+    const protect = ['.git/hooks', '.git/config', '.encode', '.mcp.json'].map((item) => path.join(root, ...item.split('/')))
     const labelStarted = Date.now()
-    say(`label on a small tree: ${JSON.stringify(await labelFolder(build.exe, root, protect).catch(failure))} wall=${Date.now() - labelStarted}ms`)
-    say(`label on the temp folder: ${JSON.stringify(await labelFolder(build.exe, temp, []).catch(failure))}`)
-    const sample = [root, path.join(root, 'sub'), path.join(root, 'sub', 'deep', 'existing.txt'), path.join(root, '.git'), path.join(root, '.git', 'hooks'), path.join(root, '.git', 'hooks', 'pre-commit.sample'), path.join(root, '.git', 'config'), path.join(root, '.git', 'HEAD'), path.join(root, 'jx'), junction, temp, outside.profile]
+    say(`label on a small tree: ${JSON.stringify(await labelFolders(build.exe, [root], protect).catch(failure))} wall=${Date.now() - labelStarted}ms`)
+    say(`label on the temp folder: ${JSON.stringify(await labelFolders(build.exe, [temp], []).catch(failure))}`)
+    say(`label again, only if missing: ${JSON.stringify(await labelFolders(build.exe, [root], protect, { ifMissing: true }).catch(failure))}`)
+    const sample = [root, path.join(root, 'sub'), path.join(root, 'sub', 'deep', 'existing.txt'), path.join(root, '.git'), path.join(root, '.git', 'hooks'), path.join(root, '.git', 'hooks', 'pre-commit.sample'), path.join(root, '.git', 'config'), path.join(root, '.git', 'HEAD'), path.join(root, '.encode'), path.join(root, '.encode', 'settings.json'), path.join(root, '.mcp.json'), path.join(root, 'jx'), junction, temp, outside.profile]
     for (const line of await readLabels(build.exe, sample).catch((error: Error) => [`could not read the labels: ${error.message}`])) say(`label of ${line}`)
 
-    // A hard link from the folder to a file outside it: labeling the folder labels the file wherever it is linked.
+    // A hard link from the folder to a file outside it: the system's own walk would label the file wherever it is
+    // linked; the helper's walk leaves a file with more than one link alone, so the file outside stays unlabeled.
     const hardTarget = path.join(outside.profile, 'hl-label-target.txt')
     fs.writeFileSync(hardTarget, 'target\n')
     fs.linkSync(hardTarget, path.join(root, 'hl-label.txt'))
     say(`label of the target of a hard link before the folder is labeled again: ${(await readLabels(build.exe, [hardTarget]).catch((error: Error) => [error.message])).join(' ')}`)
-    await labelFolder(build.exe, root, protect).catch(failure)
+    say(`label again with a hard link inside: ${JSON.stringify(await labelFolders(build.exe, [root], protect).catch(failure))}`)
     say(`label of the target of a hard link after: ${(await readLabels(build.exe, [hardTarget]).catch((error: Error) => [error.message])).join(' ')}`)
     rm(hardTarget, path.join(root, 'hl-label.txt'))
+
+    // A path longer than the classic limit of 260 characters, as deep node_modules folders have.
+    let long = path.join(root, 'long')
+    while (long.length < 300) long = path.join(long, 'a-rather-long-folder-name')
+    fs.mkdirSync(long, { recursive: true })
+    fs.writeFileSync(path.join(long, 'deep.txt'), 'deep\n')
+    say(`label with a path of ${long.length} characters: ${JSON.stringify(await labelFolders(build.exe, [root], protect).catch(failure))}`)
+    say(`label of the long path: ${(await readLabels(build.exe, [path.join(long, 'deep.txt')]).catch((error: Error) => [error.message])).join(' ')}`)
+    rm(path.join(root, 'long'))
 
     const big = path.join(base, 'big')
     fs.mkdirSync(big)
@@ -808,14 +867,14 @@ describe('what keeps the programs of an agent working and its writes inside the 
     say(`made a tree of ${files} files in ${Date.now() - t0}ms`)
     const deep = path.join(big, 'd7', 'e47', 'f9.txt')
     const t2 = Date.now()
-    say(`label on ${files} files: ${JSON.stringify(await labelFolder(build.exe, big, []).catch(failure))}, wall ${Date.now() - t2}ms`)
+    say(`label on ${files} files: ${JSON.stringify(await labelFolders(build.exe, [big], []).catch(failure))}, wall ${Date.now() - t2}ms`)
     say(`label of a file deep in the big tree: ${(await readLabels(build.exe, [deep]).catch((error: Error) => [error.message])).join(' ')}`)
     const t3 = Date.now()
-    say(`unlabel on ${files} files: ${JSON.stringify(await unlabelFolder(build.exe, big, []).catch(failure))}, wall ${Date.now() - t3}ms`)
+    say(`unlabel on ${files} files: ${JSON.stringify(await unlabelFolders(build.exe, [big], []).catch(failure))}, wall ${Date.now() - t3}ms`)
 
     const restoreProtected = async () => {
       // A command that got past the labels may have changed what is protected; the test puts it back, labels included.
-      await labelFolder(build.exe, root, protect)
+      await labelFolders(build.exe, [root], protect)
     }
     const ctx: Context = {
       root,
@@ -835,21 +894,7 @@ describe('what keeps the programs of an agent working and its writes inside the 
       restoreProtected,
     }
     say(`bash=${ctx.bash ?? 'none'} pwsh7=${ctx.ps7 ?? 'none'}`)
-    // Git Bash through a junction to the folder it is installed in: the MSYS runtime derives the name of the objects
-    // it shares from the path of its own library, so another path is another installation.
-    const gitJunction = path.join(base, 'git-junction')
-    let bashJunction: string | undefined
-    if (ctx.bash) {
-      const gitRoot = path.dirname(path.dirname(ctx.bash))
-      try {
-        fs.symlinkSync(gitRoot, gitJunction, 'junction')
-        bashJunction = path.join(gitJunction, 'usr', 'bin', 'bash.exe')
-      } catch (error) {
-        say(`could not make a junction to ${gitRoot}: ${(error as Error).message}`)
-      }
-    }
-    const programOf = (program: Program, variant: Variant): string | undefined =>
-      program === 'ps' ? (ctx.ps7 ?? ctx.ps5) : program === 'ps5' ? ctx.ps5 : program === 'cmd' ? ctx.cmd : program === 'node' ? ctx.node : variant.junction ? bashJunction : ctx.bash
+    const programOf = (program: Program): string | undefined => (program === 'ps' ? (ctx.ps7 ?? ctx.ps5) : program === 'ps5' ? ctx.ps5 : program === 'cmd' ? ctx.cmd : program === 'node' ? ctx.node : ctx.bash)
 
     // A Git Bash the person has open, not sandboxed.
     let openBash: ChildProcess | undefined
@@ -873,7 +918,7 @@ describe('what keeps the programs of an agent working and its writes inside the 
       }
       const dead = new Set<string>()
       for (const probe of probes) {
-        const file = programOf(probe.program, variant)
+        const file = programOf(probe.program)
         if (!file) {
           column.push('n/a')
           continue
@@ -897,12 +942,8 @@ describe('what keeps the programs of an agent working and its writes inside the 
         await probe.before?.(ctx)
         // As the sandbox sets them: the temp folder and the package caches are inside what the program may write.
         const env: NodeJS.ProcessEnv = { ...process.env, TEMP: temp, TMP: temp, TMPDIR: temp, npm_config_cache: path.join(temp, 'npm-cache'), npm_config_update_notifier: 'false' }
-        if (variant.junction) {
-          const key = Object.keys(env).find((name) => name.toLowerCase() === 'path') ?? 'PATH'
-          env[key] = [path.join(gitJunction, 'mingw64', 'bin'), path.join(gitJunction, 'usr', 'bin'), env[key] ?? ''].join(path.delimiter)
-        }
         const began = Date.now()
-        const flags: RunFlags = { restrict: [], integrity: 'low', ...variant.flags }
+        const flags: RunFlags = { integrity: 'low', protect }
         const done = variant.mode === 'direct' ? await exec(file, probe.args(ctx), 40_000, { cwd: root, env }) : await exec(build.exe, runArguments(flags, file, probe.args(ctx)), 40_000, { cwd: root, env })
         const took = Date.now() - began
         if (probe.name === 'ps echo' || probe.name === 'ps5 echo') startupTimes[`${probe.name} / ${variant.name}`] = took
@@ -946,12 +987,11 @@ describe('what keeps the programs of an agent working and its writes inside the 
       }
       say(`start-up ${label}: direct median ${median(direct)}ms (${direct.join(',')}), through the helper median ${median(wrapped)}ms (${wrapped.join(',')})`)
     }
-    const low: RunFlags = { restrict: [], integrity: 'low' }
+    const low: RunFlags = { integrity: 'low', protect }
     await cost('cmd /c exit (Low)', ctx.cmd, ['/d', '/c', 'exit 0'], low)
     await cost('node -e 0 (Low)', ctx.node, ['-e', '0'], low)
     await cost('powershell 5.1 -Command exit (Low)', ctx.ps5, ps('exit 0'), low)
     if (ctx.ps7) await cost('pwsh 7 -Command exit (Low)', ctx.ps7, ps('exit 0'), low)
-    if (bashJunction) await cost('bash -c true (Low, through the junction)', bashJunction, ['-c', 'true'], low)
 
     // What the job object does: nothing a command left running outlives it.
     const spawnedPid = path.join(root, 'grandchild.pid')
@@ -974,7 +1014,7 @@ describe('what keeps the programs of an agent working and its writes inside the 
     if (running && alive(running)) process.kill(running)
 
     // Taking the labels away leaves the folder as it was.
-    say(`unlabel: ${JSON.stringify(await unlabelFolder(build.exe, root, protect).catch(failure))}`)
+    say(`unlabel: ${JSON.stringify(await unlabelFolders(build.exe, [root], protect).catch(failure))}`)
     for (const line of await readLabels(build.exe, [root, path.join(root, 'sub', 'deep', 'existing.txt'), path.join(root, '.git', 'hooks'), path.join(root, '.git', 'config')]).catch((error: Error) => [`could not read the labels: ${error.message}`])) say(`label after unlabel of ${line}`)
 
     const out = process.env.ENCODE_SANDBOX_EXPLORE_OUT

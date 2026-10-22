@@ -355,11 +355,11 @@ export type McpOutcome = { ok: true; report: McpReport; note?: string } | { ok: 
 export interface SandboxReport {
   /** `active`: commands are confined. `off`: the settings turn it off. `unavailable`: this machine cannot run it. */
   state: 'active' | 'off' | 'unavailable'
-  engine?: 'bubblewrap' | 'seatbelt' | 'restricted-token'
+  engine?: 'bubblewrap' | 'seatbelt' | 'integrity-level'
   /** Why it is off or unavailable, in words. */
   reason?: string
   /** What this system's sandbox can hold back. */
-  limits?: { reads: boolean; network: boolean; protectedPaths: 'exact' | 'best-effort' }
+  limits?: { reads: boolean; network: boolean; protectedPaths: 'exact' | 'best-effort'; processes: boolean }
   /** The shell commands run in on this computer, and why the sandbox cannot confine it when it cannot. */
   shell?: { name: string; unsupported?: string }
   /** What applies in this folder: your own settings, tightened by the folder's. */

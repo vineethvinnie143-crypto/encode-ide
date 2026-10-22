@@ -12,7 +12,7 @@ export interface SpawnSpec {
   cwd: string
 }
 
-export type EngineName = 'bubblewrap' | 'seatbelt' | 'restricted-token'
+export type EngineName = 'bubblewrap' | 'seatbelt' | 'integrity-level'
 
 export interface EnginePolicy {
   /** Folders a command may write, as real paths: the project folders, the sandbox's temp folder and the caches. */
@@ -36,8 +36,10 @@ export interface EngineLimits {
   reads: boolean
   /** Can the network be blocked? */
   network: boolean
-  /** `exact`: a protected path cannot be changed, deleted or replaced. `best-effort`: it cannot be written, but its parent's owner can delete it. */
+  /** `exact`: a protected path that exists cannot be changed, deleted, renamed or replaced. `best-effort`: it cannot be written, but something may get around that. */
   protectedPaths: 'exact' | 'best-effort'
+  /** Can a command be kept from ending, signalling or looking into the person's other programs? */
+  processes: boolean
 }
 
 export interface EngineProbe {
@@ -51,7 +53,7 @@ export interface SandboxEngine {
   readonly limits: EngineLimits
   /** Starts a trivial confined program and checks that a write inside is allowed and one outside is not. */
   probe(): Promise<EngineProbe>
-  /** Makes the policy's folders ready (Windows: the permission entries). Idempotent; may take a while the first time. */
+  /** Makes the policy's folders ready (Windows: the integrity marks). Idempotent; may take a while the first time. */
   prepare(policy: EnginePolicy, onProgress?: (message: string) => void): Promise<void>
   /** Rewrites a spawn so that the program runs confined. */
   wrap(spec: SpawnSpec, policy: EnginePolicy): SpawnSpec

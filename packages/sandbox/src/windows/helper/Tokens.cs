@@ -7,10 +7,9 @@ using System.Security.Principal;
 namespace Encode.Sandbox
 {
     /// <summary>
-    /// The token a sandboxed command runs under: the caller's own, restricted so that it can write only where one of
-    /// the restricting SIDs is allowed to (and/or lowered to a lower integrity level, which cannot write what is
-    /// labeled higher). Reading is not restricted. The caller's privileges are dropped and an administrator's group
-    /// is turned into deny-only.
+    /// The token a sandboxed command runs under: the caller's own, without its privileges, with an administrator's
+    /// group turned into deny-only, and lowered to the low integrity level, which cannot write, delete or rename
+    /// anything labeled higher. Reading is not restricted.
     /// </summary>
     internal static class Tokens
     {
@@ -21,38 +20,36 @@ namespace Encode.Sandbox
             return token;
         }
 
-        public static IntPtr Restrict(IntPtr token, IList<SecurityIdentifier> restricting, bool writeRestricted, bool lua)
+        /// <summary>The own token without privileges and administrator rights, at the integrity level (0x1000 low, 0x2000 medium).</summary>
+        public static IntPtr Lowered(IntPtr own, uint rid)
         {
-            int size = Marshal.SizeOf(typeof(SID_AND_ATTRIBUTES));
-            IntPtr array = restricting.Count == 0 ? IntPtr.Zero : Marshal.AllocHGlobal(size * restricting.Count);
-            List<IntPtr> sids = new List<IntPtr>();
+            IntPtr token;
+            if (!Native.CreateRestrictedToken(own, Native.DISABLE_MAX_PRIVILEGE | Native.LUA_TOKEN, 0, IntPtr.Zero, 0, IntPtr.Zero, 0, IntPtr.Zero, out token))
+            {
+                // Some systems refuse the administrator rewrite; the integrity level, not the groups, is what confines the program.
+                int error = Marshal.GetLastWin32Error();
+                if (!Native.CreateRestrictedToken(own, Native.DISABLE_MAX_PRIVILEGE, 0, IntPtr.Zero, 0, IntPtr.Zero, 0, IntPtr.Zero, out token)) throw new SandboxException("CreateRestrictedToken", error);
+            }
             try
             {
-                for (int i = 0; i < restricting.Count; i++)
-                {
-                    IntPtr sid = Sids.ToUnmanaged(restricting[i]);
-                    sids.Add(sid);
-                    SID_AND_ATTRIBUTES entry = new SID_AND_ATTRIBUTES();
-                    entry.Sid = sid;
-                    entry.Attributes = 0;
-                    Marshal.StructureToPtr(entry, new IntPtr(array.ToInt64() + i * size), false);
-                }
-                uint flags = Native.DISABLE_MAX_PRIVILEGE;
-                if (writeRestricted && restricting.Count > 0) flags |= Native.WRITE_RESTRICTED;
-                if (lua) flags |= Native.LUA_TOKEN;
-                IntPtr restricted;
-                if (!Native.CreateRestrictedToken(token, flags, 0, IntPtr.Zero, 0, IntPtr.Zero, (uint)restricting.Count, array, out restricted)) throw SandboxException.Last("CreateRestrictedToken");
-                return restricted;
+                // What the program makes (pipes, events, sections) must be open to it. An administrator's token names the
+                // Administrators group there, which is deny-only in this one, so the person's own SID is named too.
+                List<SecurityIdentifier> allowed = new List<SecurityIdentifier>();
+                allowed.Add(Sids.TokenUserSid(own));
+                allowed.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
+                allowed.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+                SetDefaultDacl(token, allowed);
+                SetIntegrity(token, rid);
+                return token;
             }
-            finally
+            catch
             {
-                foreach (IntPtr sid in sids) Marshal.FreeHGlobal(sid);
-                if (array != IntPtr.Zero) Marshal.FreeHGlobal(array);
+                Native.CloseHandle(token);
+                throw;
             }
         }
 
-        /// <summary>Lowers the token's integrity level (0x1000 low): it can then write only what is labeled that low or lower.</summary>
-        public static void SetIntegrity(IntPtr token, uint rid)
+        private static void SetIntegrity(IntPtr token, uint rid)
         {
             SecurityIdentifier level = new SecurityIdentifier("S-1-16-" + rid);
             IntPtr sid = Sids.ToUnmanaged(level);
@@ -73,11 +70,7 @@ namespace Encode.Sandbox
             }
         }
 
-        /// <summary>
-        /// What the new token's objects (pipes, processes, sections the command makes) are open to. Without this they
-        /// belong to the restricted token's own default, which the restricted half of every check would refuse.
-        /// </summary>
-        public static void SetDefaultDacl(IntPtr token, IList<SecurityIdentifier> allowed)
+        private static void SetDefaultDacl(IntPtr token, IList<SecurityIdentifier> allowed)
         {
             RawAcl acl = new RawAcl(GenericAcl.AclRevision, allowed.Count);
             foreach (SecurityIdentifier sid in allowed) acl.InsertAce(acl.Count, new CommonAce(AceFlags.None, AceQualifier.AccessAllowed, 0x10000000, sid, false, null));

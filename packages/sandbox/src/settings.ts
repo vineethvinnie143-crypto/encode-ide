@@ -26,7 +26,7 @@ export interface SandboxSettings {
   allowRead: string[]
   /** Let commands write the usual package caches in the person's home (npm, pnpm, pip, cargo...). Default true. */
   caches: boolean
-  /** Windows: run commands in PowerShell, which the sandbox can confine and Git Bash it cannot. Default false. */
+  /** Windows: run commands in PowerShell, which the sandbox can confine and Git Bash it cannot. Turn it off to use Git Bash, whose commands then run outside the sandbox. Default true. */
   powershell: boolean
 }
 
@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: Readonly<SandboxSettings> = {
   denyRead: [],
   allowRead: [],
   caches: true,
-  powershell: false,
+  powershell: true,
 }
 
 export interface SandboxSource {

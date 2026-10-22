@@ -75,7 +75,7 @@ export function createMacEngine(options: MacEngineOptions = {}): SandboxEngine {
   const exec = options.sandboxExec ?? SANDBOX_EXEC
   return {
     name: 'seatbelt',
-    limits: { reads: true, network: true, protectedPaths: 'exact' },
+    limits: { reads: true, network: true, protectedPaths: 'exact', processes: false },
     async probe(): Promise<EngineProbe> {
       if (!fs.existsSync(exec)) return { ok: false, reason: 'sandbox-exec was not found on this Mac.' }
       const inside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'encode-sandbox-probe-')))

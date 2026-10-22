@@ -657,6 +657,7 @@ export class AgentSession {
     const registry = createToolRegistry(
       {
         dialect: this.shell.dialect,
+        shellProgram: this.shell.program,
         platform: this.env.platform,
         subagentTypes: definitions,
         skills: this.env.skills.list().slice(0, 20),

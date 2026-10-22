@@ -150,8 +150,12 @@ export class Workspaces {
     return detectShell(this.options.env ?? process.env, this.platform, this.prefersPowerShell(snapshot.effective.sandbox) ? 'pwsh' : undefined)
   }
 
-  /** Asked for by the settings. Only Windows has a choice to make; elsewhere shell detection ignores it. */
+  /**
+   * PowerShell, so that the sandbox can confine the commands: the default wherever there is a sandbox and it is on,
+   * unless the person turned it off. Only Windows has a choice to make; elsewhere shell detection ignores it.
+   */
   private prefersPowerShell(sources: ConfigSnapshot['effective']['sandbox']): boolean {
+    if (!this.options.sandbox) return false
     const settings = resolveSandboxSettings(sources)
     return settings.enabled && settings.powershell
   }

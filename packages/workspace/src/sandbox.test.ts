@@ -12,7 +12,7 @@ const json = (value: unknown) => JSON.stringify(value)
 function engine(probe: { ok: boolean; reason?: string } = { ok: true }, unsupported?: SandboxEngine['unsupported']): SandboxEngine {
   return {
     name: 'bubblewrap',
-    limits: { reads: true, network: true, protectedPaths: 'exact' },
+    limits: { reads: true, network: true, protectedPaths: 'exact', processes: true },
     probe: async () => probe,
     prepare: async () => undefined,
     wrap: (spec) => spec,
@@ -35,7 +35,7 @@ describe('the Sandbox screen', () => {
     const report = await workspaces.sandboxReport(root)
     assert.equal(report.state, 'active')
     assert.equal(report.engine, 'bubblewrap')
-    assert.deepEqual(report.limits, { reads: true, network: true, protectedPaths: 'exact' })
+    assert.deepEqual(report.limits, { reads: true, network: true, protectedPaths: 'exact', processes: true })
     assert.equal(report.settings.network, 'allow')
     assert.equal(report.settings.allowUnsandboxed, true)
     assert.deepEqual(report.tightened, [])
@@ -69,19 +69,16 @@ describe('the Sandbox screen', () => {
     }
   })
 
-  it('asks for PowerShell when the person turned it on, and not when a folder tried to turn it off', async () => {
-    const asked = await setup(undefined, { sandbox: { powershell: true } })
-    const scope = await asked.workspaces.scope({ sessionId: 's1', root: asked.root, notice: () => undefined })
-    assert.equal(scope.shell!().prefer, 'pwsh')
-    assert.equal((await asked.workspaces.sandboxReport(asked.root)).settings.powershell, true)
-    const refused = await setup({ sandbox: { powershell: false } }, { sandbox: { powershell: true } })
-    const kept = await refused.workspaces.scope({ sessionId: 's1', root: refused.root, notice: () => undefined })
-    assert.equal(kept.shell!().prefer, 'pwsh')
-    const none = await setup(undefined, undefined)
-    assert.equal((await none.workspaces.scope({ sessionId: 's1', root: none.root, notice: () => undefined })).shell!().prefer, undefined)
+  it('asks for PowerShell unless the person turned it off, whatever a folder says', async () => {
+    const preferOf = async (made: Awaited<ReturnType<typeof setup>>) => (await made.workspaces.scope({ sessionId: 's1', root: made.root, notice: () => undefined })).shell!().prefer
+    const plain = await setup(undefined, undefined)
+    assert.equal(await preferOf(plain), 'pwsh')
+    assert.equal((await plain.workspaces.sandboxReport(plain.root)).settings.powershell, true)
+    assert.equal(await preferOf(await setup({ sandbox: { powershell: false } }, undefined)), 'pwsh', 'a folder cannot turn it off')
+    assert.equal(await preferOf(await setup(undefined, { sandbox: { powershell: false } })), undefined)
+    assert.equal(await preferOf(await setup({ sandbox: { powershell: true } }, { sandbox: { powershell: false } })), 'pwsh', 'a folder can turn it on')
     // With the sandbox off there is nothing to make room for.
-    const off = await setup(undefined, { sandbox: { powershell: true, enabled: false } })
-    assert.equal((await off.workspaces.scope({ sessionId: 's1', root: off.root, notice: () => undefined })).shell!().prefer, undefined)
+    assert.equal(await preferOf(await setup(undefined, { sandbox: { enabled: false } })), undefined)
   })
 
   it('shows what the folder tightened, and nothing it tried to loosen', async () => {

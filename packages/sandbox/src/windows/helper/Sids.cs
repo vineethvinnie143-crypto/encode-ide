@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -28,35 +27,6 @@ namespace Encode.Sandbox
 
     internal static class Sids
     {
-        /// <summary>A SID from its text, or from one of the names the experiments use for the well-known ones.</summary>
-        public static SecurityIdentifier Resolve(string spec, IntPtr token)
-        {
-            switch (spec.ToLowerInvariant())
-            {
-                case "everyone": return new SecurityIdentifier(WellKnownSidType.WorldSid, null);
-                case "users": return new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                case "authenticated": return new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null);
-                case "restricted": return new SecurityIdentifier("S-1-5-12");
-                case "interactive": return new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
-                case "system": return new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-                case "admins": return new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-                case "user": return TokenUserSid(token);
-                case "logon":
-                    SecurityIdentifier logon = LogonSid(token);
-                    if (logon == null) throw new SandboxException("The logon session has no logon SID.");
-                    return logon;
-                default:
-                    try
-                    {
-                        return new SecurityIdentifier(spec);
-                    }
-                    catch (ArgumentException)
-                    {
-                        throw new SandboxException("Not a SID: " + spec);
-                    }
-            }
-        }
-
         public static SecurityIdentifier TokenUserSid(IntPtr token)
         {
             uint needed;

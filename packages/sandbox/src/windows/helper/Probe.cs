@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Security.Principal;
 
@@ -8,7 +7,7 @@ namespace Encode.Sandbox
     /// <summary>Whether this machine lets the helper do its work, shown to the person as the sandbox's state.</summary>
     internal static class Probe
     {
-        public static string Run(RunOptions options)
+        public static string Run()
         {
             JsonObject json = new JsonObject();
             IntPtr own = IntPtr.Zero;
@@ -32,17 +31,8 @@ namespace Encode.Sandbox
                 if (own != IntPtr.Zero) Native.CloseHandle(own);
             }
 
-            // The real test: a program starts under the restricted token, in a job, and its exit code comes back.
+            // The real test: a program starts at the low integrity level, in a job, and its exit code comes back.
             RunOptions test = new RunOptions();
-            test.Restrict.AddRange(options.Restrict);
-            test.WriteRestricted = options.WriteRestricted;
-            test.Lua = options.Lua;
-            test.UseJob = options.UseJob;
-            test.Integrity = options.Integrity;
-            test.JobUi = options.JobUi;
-            test.JobBreakaway = options.JobBreakaway;
-            test.Desktop = options.Desktop;
-            test.Console = options.Console;
             test.Program = Path.Combine(Environment.SystemDirectory, "cmd.exe");
             test.Args.Add("/d");
             test.Args.Add("/c");
@@ -52,7 +42,7 @@ namespace Encode.Sandbox
                 int code = Runner.Run(test);
                 json.Bool("ok", code == 7);
                 json.Number("code", code);
-                if (code != 7) json.Text("error", "A test program started under the restricted token returned " + code + " instead of 7.");
+                if (code != 7) json.Text("error", "A test program started at the low integrity level returned " + code + " instead of 7.");
             }
             catch (SandboxException error)
             {

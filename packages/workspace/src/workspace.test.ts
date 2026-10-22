@@ -343,7 +343,7 @@ describe('the workspaces of a program', () => {
     const policies: EnginePolicy[] = []
     const engine: SandboxEngine = {
       name: 'bubblewrap',
-      limits: { reads: true, network: true, protectedPaths: 'exact' },
+      limits: { reads: true, network: true, protectedPaths: 'exact', processes: true },
       probe: async () => ({ ok: true }),
       prepare: async () => undefined,
       wrap: (spec, policy) => {

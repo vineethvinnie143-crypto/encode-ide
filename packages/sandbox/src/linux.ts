@@ -73,7 +73,7 @@ export function createLinuxEngine(options: LinuxEngineOptions = {}): SandboxEngi
   const bwrap = options.bwrap ?? findBwrap(options.env)
   return {
     name: 'bubblewrap',
-    limits: { reads: true, network: true, protectedPaths: 'exact' },
+    limits: { reads: true, network: true, protectedPaths: 'exact', processes: true },
     async probe(): Promise<EngineProbe> {
       if (!bwrap) return { ok: false, reason: 'bubblewrap (bwrap) is not installed. Install the "bubblewrap" package to run commands in a sandbox.' }
       const inside = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-sandbox-probe-'))
