@@ -1,1 +1,8 @@
+export type { EngineLimits, EngineName, EnginePolicy, EngineProbe, SandboxEngine, SandboxState, SandboxStatus, SpawnSpec } from './engine'
 export { SandboxError } from './errors'
+export { PROTECTED_IN_PROJECT, buildPolicy, gitDirectories } from './policy'
+export type { PolicyInput, PolicyIo } from './policy'
+export { Sandbox, defaultIo } from './sandbox'
+export type { SandboxOptions, SessionSandbox, SessionScope } from './sandbox'
+export { DEFAULT_SETTINGS, expandPath, resolveSandboxSettings } from './settings'
+export type { ResolvedSandboxSettings, SandboxScope, SandboxSettings, SandboxSource } from './settings'
