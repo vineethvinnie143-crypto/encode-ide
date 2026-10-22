@@ -12,8 +12,6 @@ namespace Encode.Desktop
     /// <summary>Screenshots: taking them, painting over what the model must not see, shrinking them, and telling whether two are the same picture.</summary>
     internal static class Imaging
     {
-        public const int Columns = 64;
-        public const int Rows = 40;
         private const int PngLimit = 900000;
         private static readonly Color MaskColor = Color.FromArgb(0x6E, 0x6E, 0x76);
 
@@ -70,36 +68,24 @@ namespace Encode.Desktop
             }
         }
 
-        /// <summary>The picture as a grid of 64 x 40 average brightnesses: small enough to compare often, fine enough to see a line of text change.</summary>
-        public static byte[] Thumb(Bitmap bitmap)
-        {
-            return Thumb(bitmap, 1);
-        }
-
-        /// <summary>With `step` 2, every second pixel in each direction: four times faster, for the polling that waits for a window to settle.</summary>
-        public static byte[] Thumb(Bitmap bitmap, int step)
+        /// <summary>The picture's brightness, pixel by pixel; with `step` 2, every second pixel in each direction: four times faster, for the polling that waits for a window to settle.</summary>
+        public static Frame Sample(Bitmap bitmap, int step)
         {
             int width = bitmap.Width;
             int height = bitmap.Height;
-            long[] sums = new long[Columns * Rows];
-            int[] counts = new int[Columns * Rows];
-            int[] column = new int[width];
-            for (int x = 0; x < width; x++) column[x] = (int)((long)x * Columns / width);
+            Frame frame = new Frame((width + step - 1) / step, (height + step - 1) / step, step);
             BitmapData data = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
             try
             {
                 byte[] row = new byte[width * 3];
+                int at = 0;
                 for (int y = 0; y < height; y += step)
                 {
                     Marshal.Copy(new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride), row, 0, row.Length);
-                    int baseCell = (int)((long)y * Rows / height) * Columns;
                     for (int x = 0; x < width; x += step)
                     {
                         int i = x * 3;
-                        int luma = (row[i + 2] * 299 + row[i + 1] * 587 + row[i] * 114) / 1000;
-                        int cell = baseCell + column[x];
-                        sums[cell] += luma;
-                        counts[cell]++;
+                        frame.Luma[at++] = (byte)((row[i + 2] * 299 + row[i + 1] * 587 + row[i] * 114) / 1000);
                     }
                 }
             }
@@ -107,18 +93,7 @@ namespace Encode.Desktop
             {
                 bitmap.UnlockBits(data);
             }
-            byte[] result = new byte[Columns * Rows];
-            for (int cell = 0; cell < result.Length; cell++) result[cell] = counts[cell] == 0 ? (byte)0 : (byte)(sums[cell] / counts[cell]);
-            return result;
-        }
-
-        /// <summary>How many cells of the grid differ by at least `threshold` brightness levels.</summary>
-        public static int ChangedCells(byte[] a, byte[] b, int threshold)
-        {
-            if (a == null || b == null || a.Length != b.Length) return int.MaxValue;
-            int changed = 0;
-            for (int i = 0; i < a.Length; i++) if (Math.Abs(a[i] - b[i]) >= threshold) changed++;
-            return changed;
+            return frame;
         }
 
         /// <summary>The picture at the size it is sent, as base64: PNG, or JPEG when the window is a photograph and PNG would be huge.</summary>

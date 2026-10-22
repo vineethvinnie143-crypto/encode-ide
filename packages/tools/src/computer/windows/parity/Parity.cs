@@ -25,6 +25,7 @@ internal static class Parity
         answer["away"] = Away(Args.Arr(cases, "away"));
         answer["json"] = RoundTrip(Args.Arr(cases, "json"));
         answer["outline"] = Outlines(Args.Arr(cases, "outline"));
+        answer["diff"] = Diffs(Args.Arr(cases, "diff"));
         StreamWriter writer = new StreamWriter(Console.OpenStandardOutput(), utf8);
         writer.Write(Json.Write(answer));
         writer.Flush();
@@ -105,6 +106,42 @@ internal static class Parity
                 result["ok"] = false;
             }
             results.Add(result);
+        }
+        return results;
+    }
+
+    // ---------------------------------------------------------------- changed pictures
+
+    /// <summary>A white picture with rectangles [x, y, width, height, brightness] painted on it.</summary>
+    private static Frame Painted(int width, int height, int step, List<object> rectangles)
+    {
+        Frame frame = new Frame(width, height, step);
+        for (int i = 0; i < frame.Luma.Length; i++) frame.Luma[i] = 255;
+        if (rectangles == null) return frame;
+        foreach (object rectangle in rectangles)
+        {
+            int[] r = Args.Ints(rectangle, 5);
+            for (int y = r[1]; y < r[1] + r[3]; y++)
+            {
+                for (int x = r[0]; x < r[0] + r[2]; x++) frame.Luma[y * width + x] = (byte)r[4];
+            }
+        }
+        return frame;
+    }
+
+    private static List<object> Diffs(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            Dictionary<string, object> c = Args.Obj(item);
+            int width = Args.Int(c, "width", 100);
+            int height = Args.Int(c, "height", 100);
+            int step = Args.Int(c, "step", 1);
+            Frame a = Painted(width, height, step, Args.Arr(c, "a"));
+            Frame b = Painted(Args.Int(c, "width2", width), Args.Int(c, "height2", height), step, Args.Arr(c, "b"));
+            results.Add(Frames.Differs(a, b));
         }
         return results;
     }

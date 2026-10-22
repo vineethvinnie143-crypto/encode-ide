@@ -22,7 +22,8 @@ namespace Encode.Desktop
     /// <summary>What a window looked like the last time anyone looked, to tell whether it has changed.</summary>
     internal sealed class LookMemory
     {
-        public byte[] Thumb;
+        public Frame Frame;
+        public int Stamp;
         public string Signature;
         public Box WindowBox;
         public string Title;
@@ -45,6 +46,7 @@ namespace Encode.Desktop
     {
         public const string Version = "1";
         private const int MaxCaptures = 64;
+        private const int MaxMemories = 6;
 
         private readonly WindowTable windows = new WindowTable();
         private readonly UiaService uia = new UiaService();
@@ -52,6 +54,7 @@ namespace Encode.Desktop
         private readonly Dictionary<string, CaptureRecord> captures = new Dictionary<string, CaptureRecord>();
         private readonly Queue<string> captureOrder = new Queue<string>();
         private readonly Dictionary<string, LookMemory> memory = new Dictionary<string, LookMemory>();
+        private int memoryClock;
         private int captureCounter;
 
         public object Handle(string op, Dictionary<string, object> args, Cancel cancel)
@@ -340,7 +343,7 @@ namespace Encode.Desktop
                 Imaging.Paint(bitmap, shot, masks);
                 if (!zoom)
                 {
-                    byte[] thumb = Imaging.Thumb(bitmap);
+                    Frame frame = Imaging.Sample(bitmap, 1);
                     LookMemory previous;
                     memory.TryGetValue(w.Id, out previous);
                     string signature = outline != null ? Signature(outline) : (previous != null ? previous.Signature : null);
@@ -348,13 +351,15 @@ namespace Encode.Desktop
                         || !previous.WindowBox.Same(w.Box)
                         || previous.Title != w.Title
                         || (outline != null && previous.Signature != signature)
-                        || Imaging.ChangedCells(previous.Thumb, thumb, 10) >= 3;
+                        || Frames.Differs(previous.Frame, frame);
                     LookMemory next = new LookMemory();
-                    next.Thumb = thumb;
+                    next.Frame = frame;
+                    next.Stamp = ++memoryClock;
                     next.Signature = signature;
                     next.WindowBox = w.Box;
                     next.Title = w.Title;
                     memory[w.Id] = next;
+                    Forget();
                 }
                 if (options.Image == "true" || (options.Image == "changed" && changed) || zoom) data = Imaging.Encode(bitmap, imageWidth, imageHeight, out mediaType);
             }
@@ -427,11 +432,30 @@ namespace Encode.Desktop
             return json;
         }
 
+        /// <summary>A picture of each window is kept to tell whether it changed; only the windows looked at most recently keep theirs.</summary>
+        private void Forget()
+        {
+            while (memory.Count > MaxMemories)
+            {
+                string oldest = null;
+                int stamp = int.MaxValue;
+                foreach (KeyValuePair<string, LookMemory> pair in memory)
+                {
+                    if (pair.Value.Stamp < stamp)
+                    {
+                        stamp = pair.Value.Stamp;
+                        oldest = pair.Key;
+                    }
+                }
+                memory.Remove(oldest);
+            }
+        }
+
         /// <summary>Waits until the window stops changing: the picture is the same on consecutive looks. False when the time ran out first.</summary>
         private bool Settle(WindowRecord window, int maxMs, Cancel cancel)
         {
             Stopwatch clock = Stopwatch.StartNew();
-            byte[] previous = null;
+            Frame previous = null;
             Box previousBox = window.Box;
             int same = 0;
             Cancel.Sleep(cancel, Math.Min(60, maxMs));
@@ -441,17 +465,17 @@ namespace Encode.Desktop
                 if (now == null || now.State == "minimized") return true;
                 Box area = now.Box.Intersect(Screens.Virtual());
                 if (area.IsEmpty) return true;
-                byte[] thumb;
+                Frame frame;
                 using (Bitmap bitmap = Imaging.Grab(area))
                 {
                     Imaging.Paint(bitmap, area, OverlapMasks(now, area));
-                    thumb = Imaging.Thumb(bitmap, 2);
+                    frame = Imaging.Sample(bitmap, 2);
                 }
-                bool unchanged = previous != null && now.Box.Same(previousBox) && Imaging.ChangedCells(previous, thumb, 6) == 0;
+                bool unchanged = previous != null && now.Box.Same(previousBox) && !Frames.Differs(previous, frame);
                 same = unchanged ? same + 1 : 0;
                 if (same >= 2) return true;
                 if (clock.ElapsedMilliseconds >= maxMs) return false;
-                previous = thumb;
+                previous = frame;
                 previousBox = now.Box;
                 Cancel.Sleep(cancel, 70);
             }

@@ -45,8 +45,10 @@ describe('the name of a build', () => {
     assert.notEqual(base, helperHash(FILES, 'm2'))
   })
 
-  it('belongs to the sources that are in the repository', () => {
-    assert.equal(HELPER_FILES.length, 13)
+  it('belongs to the sources that are in the repository', async () => {
+    // A .cs file left out of sources.ts would not be in the build, and the helper would not compile on a user's machine.
+    const onDisk = (await fs.readdir(path.join(process.cwd(), 'packages', 'tools', 'src', 'computer', 'windows', 'helper'))).filter((name) => name.endsWith('.cs')).sort()
+    assert.deepEqual(HELPER_FILES.map((file) => file.name).sort(), onDisk)
     for (const file of HELPER_FILES) assert.ok(file.text.length > 100, `${file.name} is embedded`)
     assert.match(HELPER_MANIFEST, /<assembly/)
   })

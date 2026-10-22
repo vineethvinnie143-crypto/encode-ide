@@ -34,6 +34,7 @@ interface State {
   box: number[]
   canvas: number[]
   notes: string
+  subject: string
   secret: string
   remember: boolean
   color: string
@@ -236,6 +237,15 @@ async function command(fixture: Fixture, text: string): Promise<void> {
   await eventually(async () => !(await fs.access(`${fixture.file}.cmd`).then(() => true, () => false)), `"${fixture.title}" to take the command "${text}"`)
 }
 
+/**
+ * Empties the multi-line Notes box the way a person does. It is a document, not a field with a value, so it cannot be set
+ * whole: it is clicked, everything is selected and deleted.
+ */
+async function clearNotes(window: WindowInfo, ref: string): Promise<void> {
+  await desktop.act(actOf(window, [clickElement(ref), keys({ modifiers: ['ctrl'], key: 'a' }), keys({ modifiers: [], key: 'delete' })]), SIGNAL)
+  await a.until((now) => now.notes === '', 'the notes to be empty')
+}
+
 /** Waits until the fixture has recorded `count` more events than it had, and returns them. */
 async function eventsAfter(fixture: Fixture, before: number, count: number): Promise<string[]> {
   const state = await eventually(async () => {
@@ -316,8 +326,10 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     assert.equal(named(look, 'Add item').role, 'button')
     assert.ok(named(look, 'Remember me').can.includes('toggle'))
     assert.equal(named(look, 'Remember me').role, 'checkbox')
-    assert.ok(named(look, 'Notes').can.includes('set_value'))
-    assert.equal(named(look, 'Notes').role, 'edit')
+    assert.equal(named(look, 'Notes').role, 'document', 'a multi-line box is a document')
+    assert.ok(!named(look, 'Notes').can.includes('set_value'), 'and has no value to set')
+    assert.equal(named(look, 'Subject').role, 'edit')
+    assert.ok(named(look, 'Subject').can.includes('set_value'))
     assert.equal(named(look, 'Items').role, 'list')
     assert.equal(named(look, 'Color').role, 'combobox')
     assert.equal(named(look, 'Ready').role, 'text')
@@ -349,9 +361,11 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
       assert.equal(again.capture.data, undefined, 'and then no picture is sent')
     }
     const typed = await desktop.act(actOf(window, [{ kind: 'type', text: 'x' }], { look: { image: 'changed', outline: 'full', maxElements: 300, ...IMAGE } }), SIGNAL)
-    assert.equal(typed.look?.changed, true)
+    await a.until((now) => now.notes === 'x', 'the letter to arrive')
+    assert.equal(typed.look?.changed, true, 'one typed letter is a change')
     assert.ok(typed.look?.capture.data, 'a changed window comes with its picture')
-    await desktop.act(actOf(window, [keys({ modifiers: ['ctrl'], key: 'a' }), keys({ modifiers: [], key: 'delete' })]), SIGNAL)
+    assert.equal(named(typed.look ?? null, 'Notes').value, 'x', 'the focused text area shows what it holds')
+    await clearNotes(window, notes.ref)
   })
 
   it('uses a button through its own interface, without moving the mouse', async () => {
@@ -482,13 +496,26 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
 
   it('sets the text of a field directly, and types after it', async () => {
     const window = await a.window()
-    const notes = named(await desktop.look(lookOf(window, { image: false }), SIGNAL), 'Notes')
-    const set = await desktop.act(actOf(window, [{ kind: 'set_value', element: notes.ref, text: 'first line' }]), SIGNAL)
+    const look = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+    const subject = named(look, 'Subject')
+    const set = await desktop.act(actOf(window, [{ kind: 'set_value', element: subject.ref, text: 'first line' }]), SIGNAL)
     assert.deepEqual(set.performed.map((done) => [done.kind, done.via]), [['set_value', 'value']])
-    await a.until((now) => now.notes === 'first line', 'the text to be set')
-    assert.equal(named(set.look, 'Notes').value, 'first line', 'the outline shows the text')
-    await desktop.act(actOf(window, [{ kind: 'type', text: ' + typed', target: { element: notes.ref } }]), SIGNAL)
-    await a.until((now) => now.notes === 'first line + typed', 'the typed text to follow it')
+    await a.until((now) => now.subject === 'first line', 'the text to be set')
+    assert.equal(named(set.look, 'Subject').value, 'first line', 'the outline shows the text')
+    await desktop.act(actOf(window, [clickElement(subject.ref), keys({ modifiers: [], key: 'end' }), { kind: 'type', text: ' + typed' }]), SIGNAL)
+    await a.until((now) => now.subject === 'first line + typed', 'the typed text to follow it')
+    await desktop.act(actOf(window, [{ kind: 'set_value', element: subject.ref, text: '' }]), SIGNAL)
+    await a.until((now) => now.subject === '', 'the field to be empty')
+  })
+
+  it('says so when a text area cannot be set whole, and leaves it alone', async () => {
+    const window = await a.window()
+    const notes = named(await desktop.look(lookOf(window, { image: false }), SIGNAL), 'Notes')
+    const error = await failure(desktop.act(actOf(window, [{ kind: 'set_value', element: notes.ref, text: 'nope' }]), SIGNAL))
+    assert.equal(error.code, 'failed')
+    assert.match(error.message, /cannot be set directly\. Click it and type instead/)
+    await sleep(200)
+    assert.equal((await a.state()).notes, '')
   })
 
   it('types every kind of text exactly, long text and new lines and letters from other alphabets included', async () => {
@@ -503,7 +530,8 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
       `emoji ${String.fromCodePoint(0x1f600)} done`,
       'The quick brown fox jumps over the lazy dog. '.repeat(14),
     ].join('\n')
-    await desktop.act(actOf(window, [{ kind: 'set_value', element: notes.ref, text: '' }, { kind: 'type', text: '', target: { element: notes.ref } }, { kind: 'type', text }], { settleMs: 400 }), SIGNAL)
+    await clearNotes(window, notes.ref)
+    await desktop.act(actOf(window, [{ kind: 'type', text }], { settleMs: 400 }), SIGNAL)
     const typed = await eventually(async () => {
       const state = await a.state()
       return state.notes.length >= text.length ? state : undefined
@@ -514,7 +542,8 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
   it('presses key combinations, and refuses the ones that leave the window', async () => {
     const window = await a.window()
     const notes = named(await desktop.look(lookOf(window, { image: false }), SIGNAL), 'Notes')
-    await desktop.act(actOf(window, [{ kind: 'set_value', element: notes.ref, text: '' }, { kind: 'type', text: 'abc', target: { element: notes.ref } }]), SIGNAL)
+    await clearNotes(window, notes.ref)
+    await desktop.act(actOf(window, [{ kind: 'type', text: 'abc', target: { element: notes.ref } }]), SIGNAL)
     await a.until((now) => now.notes === 'abc', 'the text to be typed')
     await desktop.act(actOf(window, [keys({ modifiers: ['ctrl'], key: 'a' }, { modifiers: [], key: 'delete' })]), SIGNAL)
     await a.until((now) => now.notes === '', 'select-all and delete to clear the field')
@@ -629,7 +658,7 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
   it('stops when the caller gives up, leaves nothing pressed and carries on afterwards', async () => {
     const window = await a.window()
     const notes = named(await desktop.look(lookOf(window, { image: false }), SIGNAL), 'Notes')
-    await desktop.act(actOf(window, [{ kind: 'set_value', element: notes.ref, text: '' }, clickElement(notes.ref)]), SIGNAL)
+    await clearNotes(window, notes.ref)
     const long = 'abcdefghijklmnopqrstuvwxyz'.repeat(1_600)
     const controller = new AbortController()
     const started = Date.now()

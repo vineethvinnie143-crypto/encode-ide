@@ -103,6 +103,7 @@ namespace Encode.Fixture
     {
         private readonly string statePath;
         private readonly TextBox notes = new TextBox();
+        private readonly TextBox subject = new TextBox();
         private readonly TextBox secret = new TextBox();
         private readonly Button add = new Button();
         private readonly Button openDialog = new Button();
@@ -117,6 +118,7 @@ namespace Encode.Fixture
         private int activated;
         private int counter;
         private bool dialogOpen;
+        private string lastPolled = "";
 
         public FixtureForm(string statePath, int left, int top, string title)
         {
@@ -144,6 +146,13 @@ namespace Encode.Fixture
             secret.Location = new Point(320, 28);
             secret.Size = new Size(220, 24);
             secret.TextChanged += delegate { Soon(); };
+
+            // A single line, which (unlike the multi-line Notes) has a value that can be set whole.
+            Label subjectLabel = new Label { Text = "Subject:", Location = new Point(320, 60), Size = new Size(120, 18) };
+            subject.AccessibleName = "Subject";
+            subject.Location = new Point(320, 80);
+            subject.Size = new Size(220, 24);
+            subject.TextChanged += delegate { Soon(); };
 
             add.Text = "Add item";
             add.Location = new Point(10, 122);
@@ -190,7 +199,7 @@ namespace Encode.Fixture
             action.Click += delegate { Log("menu Canvas action"); };
             canvas.ContextMenuStrip = menu;
 
-            Controls.AddRange(new Control[] { notesLabel, notes, secretLabel, secret, add, openDialog, remember, color, items, status, canvas });
+            Controls.AddRange(new Control[] { notesLabel, notes, secretLabel, secret, subjectLabel, subject, add, openDialog, remember, color, items, status, canvas });
 
             Activated += delegate
             {
@@ -209,8 +218,24 @@ namespace Encode.Fixture
                 Write();
             };
             commands.Interval = 100;
-            commands.Tick += delegate { RunCommand(); };
+            commands.Tick += delegate
+            {
+                RunCommand();
+                Poll();
+            };
             commands.Start();
+        }
+
+        /// <summary>
+        /// A list item selected through UI Automation is selected without the control telling the form, so the record is also
+        /// written when what it shows has changed since it was last written.
+        /// </summary>
+        private void Poll()
+        {
+            string now = items.SelectedIndex.ToString(CultureInfo.InvariantCulture) + "|" + color.SelectedIndex.ToString(CultureInfo.InvariantCulture) + "|" + (ContainsFocus ? "1" : "0");
+            if (now == lastPolled) return;
+            lastPolled = now;
+            Write();
         }
 
         /// <summary>Typing writes a change per character; one record per moment is enough.</summary>
@@ -342,6 +367,7 @@ namespace Encode.Fixture
             sb.Append(",\"box\":").Append(Rect(Bounds));
             sb.Append(",\"canvas\":").Append(Rect(canvas.RectangleToScreen(canvas.ClientRectangle)));
             sb.Append(",\"notes\":").Append(Quote(notes.Text));
+            sb.Append(",\"subject\":").Append(Quote(subject.Text));
             sb.Append(",\"secret\":").Append(Quote(secret.Text));
             sb.Append(",\"remember\":").Append(remember.Checked ? "true" : "false");
             sb.Append(",\"color\":").Append(Quote(color.SelectedItem == null ? "" : color.SelectedItem.ToString()));

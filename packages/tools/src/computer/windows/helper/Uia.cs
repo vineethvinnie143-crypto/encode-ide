@@ -196,6 +196,7 @@ namespace Encode.Desktop
             request.Add(RangeValuePattern.Pattern);
             request.Add(RangeValuePattern.ValueProperty);
             request.Add(RangeValuePattern.IsReadOnlyProperty);
+            request.Add(TextPattern.Pattern);
             request.Add(ScrollPattern.Pattern);
             request.Add(ScrollPattern.HorizontallyScrollableProperty);
             request.Add(ScrollPattern.VerticallyScrollableProperty);
@@ -270,6 +271,7 @@ namespace Encode.Desktop
             ExpandCollapsePattern expand;
             ValuePattern value;
             RangeValuePattern range;
+            TextPattern text;
             ScrollPattern scroll;
 
             if (Has(element, TogglePattern.Pattern, out toggle))
@@ -304,6 +306,19 @@ namespace Encode.Desktop
             {
                 if (!range.Cached.IsReadOnly && enabled) can.Add("set_value");
                 node.Value = range.Cached.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (node.Focused && !node.Password && Has(element, TextPattern.Pattern, out text))
+            {
+                // A text area that has no value to read (a multi-line box, a document): the one that has the keyboard
+                // holds what is being typed, and the model can only check its typing against the text itself.
+                try
+                {
+                    node.Value = Clip(text.DocumentRange.GetText(2001), 2000);
+                }
+                catch (Exception)
+                {
+                    node.Value = null;
+                }
             }
             if (Has(element, ScrollPattern.Pattern, out scroll) && (scroll.Cached.HorizontallyScrollable || scroll.Cached.VerticallyScrollable)) can.Add("scroll");
             if (node.Password) states.Add("password");

@@ -5,6 +5,7 @@
  */
 import actions from './helper/Actions.cs'
 import errors from './helper/Errors.cs'
+import frames from './helper/Frames.cs'
 import geometry from './helper/Geometry.cs'
 import imaging from './helper/Imaging.cs'
 import input from './helper/Input.cs'
@@ -26,6 +27,7 @@ export interface SourceFile {
 export const HELPER_FILES: readonly SourceFile[] = [
   { name: 'Actions.cs', text: actions },
   { name: 'Errors.cs', text: errors },
+  { name: 'Frames.cs', text: frames },
   { name: 'Geometry.cs', text: geometry },
   { name: 'Imaging.cs', text: imaging },
   { name: 'Input.cs', text: input },

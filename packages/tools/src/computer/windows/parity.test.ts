@@ -19,7 +19,7 @@ import parityText from './parity/Parity.cs'
 import { HELPER_FILES } from './sources'
 
 const run = promisify(execFile)
-const PURE = ['Json.cs', 'Geometry.cs', 'Keys.cs', 'Outline.cs']
+const PURE = ['Json.cs', 'Geometry.cs', 'Keys.cs', 'Outline.cs', 'Frames.cs']
 
 type Cases = Record<string, unknown[]>
 type Answer = Record<string, any[]>
@@ -234,6 +234,53 @@ describe('the helper agrees with the tool', () => {
     invalid.forEach((text, index) => assert.equal(json[valid.length + index].ok, false, `refuses ${text.slice(0, 40)}`))
     // Nothing the helper writes may contain a raw line separator or control character: the client reads the stream line by line.
     for (const entry of json.slice(0, valid.length)) assert.doesNotMatch(entry.text, new RegExp(`[\\x00-\\x1f${String.fromCodePoint(0x2028, 0x2029)}]`))
+  })
+})
+
+// ---------------------------------------------------------------- changed pictures
+
+type Rect = [number, number, number, number, number]
+const rect = (x: number, y: number, w: number, h: number, v = 0): Rect => [x, y, w, h, v]
+
+async function differs(cases: { a?: Rect[]; b?: Rect[]; width?: number; height?: number; step?: number; width2?: number; height2?: number }[]): Promise<boolean[]> {
+  const { diff } = await ask({ diff: cases })
+  return diff as boolean[]
+}
+
+describe('the helper tells a change from a caret blinking', () => {
+  it('sees no change in two pictures that are the same, or that differ below what the eye takes for a change', async (t) => {
+    if (!harness) return t.skip(why)
+    const [same, noise, faint] = await differs([{ a: [rect(5, 5, 40, 40, 100)], b: [rect(5, 5, 40, 40, 100)] }, { a: [], b: [rect(10, 10, 1, 1, 240)] }, { a: [], b: [rect(0, 0, 100, 100, 240)] }])
+    assert.deepEqual([same, noise, faint], [false, false, false])
+  })
+
+  it('takes a thin bar as tall as a line of text for a caret, at 100%, 200% and 300% scale', async (t) => {
+    if (!harness) return t.skip(why)
+    const result = await differs([
+      { a: [], b: [rect(30, 20, 1, 15)] },
+      { a: [rect(30, 20, 1, 15)], b: [] },
+      { a: [], b: [rect(30, 20, 2, 30)] },
+      { a: [], b: [rect(30, 20, 3, 45)] },
+      { a: [], b: [rect(30, 20, 1, 8)] },
+      { a: [], b: [rect(30, 20, 1, 15)], step: 2, width: 50, height: 50 },
+    ])
+    assert.deepEqual(result, [false, false, false, false, false, false])
+  })
+
+  it('takes everything else for a change, however small', async (t) => {
+    if (!harness) return t.skip(why)
+    const result = await differs([
+      { a: [], b: [rect(30, 20, 7, 10)] }, // a letter
+      { a: [rect(30, 20, 1, 15)], b: [rect(35, 20, 1, 15)] }, // a caret that moved: two bars
+      { a: [], b: [rect(10, 10, 8, 8)] }, // a tick in a check box
+      { a: [], b: [rect(10, 10, 3, 3)] }, // a status dot
+      { a: [], b: [rect(10, 5, 2, 90)] }, // a thin line, taller than any caret
+      { a: [], b: [rect(10, 10, 1, 7)] }, // shorter than any caret
+      { a: [], b: [rect(0, 0, 100, 100, 0)] }, // all of it
+      { a: [], b: [], width: 100, height: 100, width2: 90, height2: 100 }, // a different size
+      { a: [], b: [rect(30, 20, 1, 15), rect(60, 20, 1, 15)] }, // two bars apart
+    ])
+    assert.deepEqual(result, [true, true, true, true, true, true, true, true, true])
   })
 })
 
