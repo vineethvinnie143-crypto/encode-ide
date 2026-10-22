@@ -1,0 +1,19 @@
+{
+  "name": "@encode/sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The operating-system sandbox for the commands the agent runs: bubblewrap on Linux, Seatbelt on macOS, a write-restricted token on Windows.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

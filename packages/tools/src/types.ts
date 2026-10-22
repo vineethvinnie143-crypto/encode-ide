@@ -43,8 +43,8 @@ export type ToolAccess =
   | { type: 'read'; paths: string[] }
   /** Creates, changes or deletes these absolute paths. */
   | { type: 'write'; paths: string[] }
-  /** Runs a shell line in `cwd`. */
-  | { type: 'command'; command: string; cwd: string; background: boolean }
+  /** Runs a shell line in `cwd`. `unsandboxed`: it asks to run outside the sandbox, which only the person may allow. */
+  | { type: 'command'; command: string; cwd: string; background: boolean; unsandboxed?: boolean }
   /** Fetches from the network. */
   | { type: 'web'; url: string }
   /** Starts a subagent, which asks for its own calls. */
@@ -165,12 +165,21 @@ export interface SpawnSpec {
 /** Rewrites how a command is spawned, to run it inside a sandbox. Must return an absolute `file`. */
 export type SpawnWrapper = (spec: SpawnSpec) => SpawnSpec | Promise<SpawnSpec>
 
+/** What the shell knows of the sandbox around its commands (absent where it has none). */
+export interface SandboxView {
+  /** Commands are confined right now. False when the sandbox is off or unavailable. */
+  active: boolean
+  /** A command may ask to run outside it; the person is asked each time. */
+  allowUnsandboxed: boolean
+}
+
 export interface ShellState {
   /** Where the next command starts. */
   cwd: string
   /** The environment the next command starts with, exports included. */
   env: Record<string, string>
   dialect: ShellDialect
+  sandbox?: SandboxView
 }
 
 export interface ShellAssessment {
@@ -199,6 +208,8 @@ export type ShellCommandAssessor = (
 export interface ShellRunOptions {
   /** ms; clamped to the shell's maximum. */
   timeoutMs?: number
+  /** Run outside the sandbox. The caller has been allowed by the person; the shell does not ask. */
+  unsandboxed?: boolean
   signal: AbortSignal
   /** Live output, for the UI. */
   onOutput?(text: string): void
@@ -241,7 +252,7 @@ export interface JobInfo {
 }
 
 export interface JobManager {
-  start(command: string, options: { cwd?: string }): Promise<JobInfo>
+  start(command: string, options: { cwd?: string; unsandboxed?: boolean }): Promise<JobInfo>
   /** Output since the last read, optionally only lines matching `filter`. */
   read(id: string, options?: { filter?: RegExp }): { job: JobInfo; output: string } | undefined
   kill(id: string): Promise<boolean>

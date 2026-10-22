@@ -20,6 +20,12 @@
  * Applications the Computer tool never operates are refused under every
  * policy, like a deny rule.
  *
+ * A command that asks to run outside the sandbox (`unsandboxed`) is the
+ * person's to allow, under every policy including Full access: the sandbox is
+ * what bounds a command that was approved, or never asked about, and a
+ * command must not be able to lift it for itself. No rule, no Always allow
+ * and no Reviewer answers that question; the settings can refuse it outright.
+ *
  * The user's permission rules (settings files, `@encode/permissions`) come in
  * three places, always in this order: a deny rule refuses under every policy;
  * a policy that denies (Read Only) or that never asks (Full access) is not
@@ -179,6 +185,11 @@ async function decideAccess(access: ToolAccess, context: ApprovalContext): Promi
         dialect: context.shell.dialect,
       })
       if (verdict.decision === 'deny') return deny(verdict.reason)
+      if (access.unsandboxed && context.shell.sandbox?.active) {
+        if (policy === 'read-only') return deny('The approval policy is Read Only, which keeps every command in the sandbox. Ask the user to switch to Workspace Write if the command is needed.')
+        if (!context.shell.sandbox.allowUnsandboxed) return deny('The settings do not let commands run outside the sandbox.')
+        return ask('This command asks to run outside the sandbox, which is what limits what a command can change. Only you can allow that.')
+      }
       if (policy === 'full-access') return ALLOW
       const byRule = verdict.source === 'rule'
       if (policy === 'read-only') {
@@ -240,7 +251,8 @@ export function alwaysAllowFor(access: ToolAccess, context: { root: string; plat
   const windows = context.platform === 'win32'
   switch (access.type) {
     case 'command':
-      return suggestRule({ type: 'command', line: access.command, dialect: context.dialect })
+      // A rule lets a line run; it does not lift the sandbox, so there is nothing to remember for a call that asks to.
+      return access.unsandboxed ? null : suggestRule({ type: 'command', line: access.command, dialect: context.dialect })
     case 'write':
       return access.paths.length === 1 ? suggestRule({ type: 'edit', path: access.paths[0], root: context.root, windows }) : null
     case 'read':
@@ -264,7 +276,7 @@ export function grantKey(access: ToolAccess): string | undefined {
     case 'write':
       return access.paths.length ? `${access.type}\u0000${[...access.paths].sort().join('\u0000')}` : undefined
     case 'command':
-      return `command\u0000${access.cwd}\u0000${access.command.replace(/\s+/g, ' ').trim()}`
+      return `${access.unsandboxed ? 'command-outside-sandbox' : 'command'}\u0000${access.cwd}\u0000${access.command.replace(/\s+/g, ' ').trim()}`
     default:
       return undefined
   }

@@ -52,6 +52,7 @@ say so.
 | [0060](0060-text-that-reads-differently-from-how-it-runs-is-shown-to-the-person-and-told-to-the-model.md) | Text that reads differently from how it runs is shown to the person and told to the model | Accepted, builds on 0004, 0012 and 0032 |
 | [0061](0061-subagents-are-defined-in-markdown-and-what-a-repository-fills-is-read-as-a-stranger-s-file.md) | Subagents are defined in Markdown, and what a repository fills is read as a stranger's file | Accepted, builds on 0006, 0041 and 0055 |
 | [0062](0062-every-step-pays-for-the-whole-request-so-its-parts-have-a-budget-and-the-large-ones-wait-until-asked-for.md) | Every step pays for the whole request, so its parts have a budget and the large ones wait until asked for | Accepted, builds on 0009 and 0057 |
+| [0063](0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md) | The agent's commands run in the operating system's sandbox, and the person is told what it does not hold back | Accepted, builds on 0004, 0011, 0041, 0053 and 0059 |
 
 ## Template
 

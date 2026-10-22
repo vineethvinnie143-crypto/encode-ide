@@ -6,7 +6,8 @@
  * bash.exe is WSL's launcher, not Git Bash, and is never used.
  * macOS and Linux: bash.
  *
- * ENCODE_SHELL names a shell explicitly (an absolute path to bash or pwsh).
+ * ENCODE_SHELL names a shell explicitly (an absolute path to bash or pwsh). On Windows a caller may prefer
+ * PowerShell: the sandbox can confine it and cannot confine Git Bash.
  */
 import path from 'node:path'
 import type { ShellDialect } from '../types'
@@ -57,7 +58,16 @@ function standardLocations(env: Env, names: string[][]): string[] {
   return out
 }
 
-export function detectShell(env: Env = process.env, platform: NodeJS.Platform = process.platform): ShellProgram | undefined {
+function powerShell(env: Env): ShellProgram | undefined {
+  const pwshOnPath = searchPath('pwsh', env, 'win32')
+  if (pwshOnPath) return { file: pwshOnPath, dialect: 'pwsh', source: 'path' }
+  const pwsh = standardLocations(env, [['PowerShell', '7', 'pwsh.exe'], ['PowerShell', '7-preview', 'pwsh.exe']]).find(isFile)
+  if (pwsh) return { file: pwsh, dialect: 'pwsh', source: 'standard' }
+  const windowsPowerShell = windowsSystemProgram(path.win32.join('WindowsPowerShell', 'v1.0', 'powershell.exe'))
+  return isFile(windowsPowerShell) ? { file: windowsPowerShell, dialect: 'pwsh', source: 'windows-powershell' } : undefined
+}
+
+export function detectShell(env: Env = process.env, platform: NodeJS.Platform = process.platform, prefer?: ShellDialect): ShellProgram | undefined {
   const configured = envValue(env, 'ENCODE_SHELL', platform)?.trim()
   if (configured) {
     const dialect = dialectOf(configured)
@@ -71,16 +81,13 @@ export function detectShell(env: Env = process.env, platform: NodeJS.Platform = 
     return pwsh ? { file: pwsh, dialect: 'pwsh', source: 'path' } : undefined
   }
 
+  if (prefer === 'pwsh') {
+    const preferred = powerShell(env)
+    if (preferred) return preferred
+  }
   const fromGit = gitBashFromGit(env)
   if (fromGit) return { file: fromGit, dialect: 'bash', source: 'git' }
   const gitBash = standardLocations(env, [['Git', 'bin', 'bash.exe']]).find(isFile)
   if (gitBash) return { file: gitBash, dialect: 'bash', source: 'standard' }
-
-  const pwshOnPath = searchPath('pwsh', env, 'win32')
-  if (pwshOnPath) return { file: pwshOnPath, dialect: 'pwsh', source: 'path' }
-  const pwsh = standardLocations(env, [['PowerShell', '7', 'pwsh.exe'], ['PowerShell', '7-preview', 'pwsh.exe']]).find(isFile)
-  if (pwsh) return { file: pwsh, dialect: 'pwsh', source: 'standard' }
-
-  const windowsPowerShell = windowsSystemProgram(path.win32.join('WindowsPowerShell', 'v1.0', 'powershell.exe'))
-  return isFile(windowsPowerShell) ? { file: windowsPowerShell, dialect: 'pwsh', source: 'windows-powershell' } : undefined
+  return powerShell(env)
 }

@@ -29,6 +29,7 @@
     "@encode/protocol": "workspace:*",
     "@encode/providers": "workspace:*",
     "@encode/router": "workspace:*",
+    "@encode/sandbox": "workspace:*",
     "@encode/testkit": "workspace:*",
     "@encode/text": "workspace:*",
     "@encode/tools": "workspace:*",

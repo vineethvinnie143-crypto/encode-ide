@@ -26,6 +26,7 @@ import { uniqueName } from './models/connect'
 import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
 import RolesSettings from './models/RolesSettings'
 import McpPane from './mcp/McpPane'
+import SandboxPane from './sandbox/SandboxPane'
 import PermissionsPane from './permissions/PermissionsPane'
 import { SearchSettings } from './search/SearchSettings'
 
@@ -279,6 +280,9 @@ export default function SettingsModal() {
             </button>
             <button className={tab === 'mcp' ? 'is-on' : ''} onClick={() => setTab('mcp')}>
               MCP
+            </button>
+            <button className={tab === 'sandbox' ? 'is-on' : ''} onClick={() => setTab('sandbox')}>
+              Sandbox
             </button>
             <button className={tab === 'appearance' ? 'is-on' : ''} onClick={() => setTab('appearance')}>
               Appearance
@@ -595,6 +599,8 @@ export default function SettingsModal() {
             <PermissionsPane />
           ) : tab === 'mcp' ? (
             <McpPane onOpenTab={setTab} />
+          ) : tab === 'sandbox' ? (
+            <SandboxPane />
           ) : (
             <AppearanceSettings
               value={draft.appearance}
@@ -609,10 +615,12 @@ export default function SettingsModal() {
               ? 'Permission changes apply at once. Nothing here waits for Save.'
               : tab === 'mcp'
                 ? 'Changes to MCP servers apply at once. Nothing here waits for Save.'
-                : 'Model calls go straight from this app to your provider. No eNCode server is involved.'}
+                : tab === 'sandbox'
+                  ? 'Changes to the sandbox apply to the next command. Nothing here waits for Save.'
+                  : 'Model calls go straight from this app to your provider. No eNCode server is involved.'}
           </span>
           <div className="settings-footer-actions">
-            {tab === 'permissions' || tab === 'mcp' ? (
+            {tab === 'permissions' || tab === 'mcp' || tab === 'sandbox' ? (
               <button className="btn primary" onClick={close}>
                 Done
               </button>

@@ -143,10 +143,12 @@ It is line-oriented, not a PTY, so full-screen programs such as vim and less are
 supported.
 
 The agent's `Bash` tool does not use it. It runs the operating system's own shell, so commands
-mean what models and project scripts expect: Git Bash on Windows (then PowerShell 7, then
-Windows PowerShell), bash elsewhere, or the shell that `ENCODE_SHELL` names
+mean what models and project scripts expect: bash on macOS and Linux; on Windows PowerShell 7
+(or Windows PowerShell), which the sandbox can confine, and Git Bash when the sandbox or its
+"Run commands in PowerShell" switch is off; or the shell that `ENCODE_SHELL` names
 ([ADR 0011](docs/adr/0011-agent-commands-run-in-the-os-shell.md)). Approvals read the command
-before it runs.
+before it runs, and the operating system's sandbox limits what it can change
+([ADR 0063](docs/adr/0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md)).
 
 ## The side panel and the bottom panel
 

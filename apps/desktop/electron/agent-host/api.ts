@@ -7,7 +7,7 @@
 import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
-import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
+import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { RouterSettings } from './router-settings'
 
 /** What the host needs to know about the user's settings, and nothing else of them. */
@@ -44,6 +44,8 @@ export interface HostInit {
   routerStateFile?: string
   /** Where what the agent's file tools change is kept so that a rewind can put it back; without it nothing is kept. */
   checkpointsDir?: string
+  /** The sandbox's own folder (its temp folder, and on Windows its helper); without it commands run unconfined. */
+  sandboxDir?: string
 }
 
 /** The result of a test call to one model. */
@@ -75,10 +77,17 @@ export type DesktopHostRequests = HostRequests & {
   mcpReport: { params: { root: string; start?: boolean }; result: McpReport }
   /** Does something to one of a folder's MCP servers; answers with the servers as they stand afterwards. */
   mcpAct: { params: { root: string; action: McpAction }; result: McpOutcome }
+  /** The sandbox around the agent's commands in a folder, for the Sandbox screen. */
+  sandboxReport: { params: { root: string }; result: SandboxReport }
+  /** Changes a switch of the sandbox or checks the machine again; answers with the sandbox as it stands afterwards. */
+  sandboxAct: { params: { root: string; action: SandboxAction }; result: SandboxOutcome }
 }
 
-/** What the host serves. `mcp`: a folder's MCP servers changed what the screen shows (the folder is named as the host knows it). */
-export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert; mcp: { root: string } } }
+/**
+ * What the host serves. `mcp`: a folder's MCP servers changed what the screen shows (the folder is named as the host knows it).
+ * `sandbox`: the sandbox was checked or is preparing a folder, so the Sandbox screen should ask again.
+ */
+export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert; mcp: { root: string }; sandbox: { working: string | null } } }
 
 /** What the main process serves to the host. */
 export type MainApi = {

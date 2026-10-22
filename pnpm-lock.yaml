@@ -38,6 +38,9 @@ importers:
       '@encode/router':
         specifier: workspace:*
         version: link:../../packages/router
+      '@encode/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
       '@encode/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
@@ -330,6 +333,18 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/sandbox:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/testkit:
     devDependencies:
       '@types/node':
@@ -393,6 +408,9 @@ importers:
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions
+      '@encode/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       '@encode/tools':
         specifier: workspace:*
         version: link:../tools

@@ -81,9 +81,10 @@ and Codex's automatic modes let a second model judge the routine ones. The model
 - **The floor reads a command's words, not the program behind them.** Code the agent writes and then runs (it edits a
   `package.json` script, then `npm run build`) reaches the Reviewer by its name alone. The Reviewer is told to ask when
   the command runs software the project does not already use, which helps, and the edit is on screen in the thread, but
-  neither contains it. The operating-system sandbox is what does (threat model R1, RP9). Until it exists, a person who
-  works on code they do not trust uses Workspace Write.
-- Windows has no sandbox either way. The floor and the approvals are the control there.
+  neither contains it. The operating-system sandbox is what does (0063, threat model R1, RP9). Where it is off or
+  cannot start, a person who works on code they do not trust uses Workspace Write.
+- On Windows the sandbox limits what a command changes, not what it reads, sends or ends (0063). There the floor and
+  the approvals remain the control for those.
 - The reviewer role can be pointed at any model, free or paid, like every other role. Free only keeps its meaning: the
   call goes through the router, which refuses a paid model in that mode and never falls from a free model to a paid one
   (0024, 0052). With no usable model the person is asked, exactly as before this decision. On the free pool a

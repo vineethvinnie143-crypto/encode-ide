@@ -106,8 +106,14 @@ describe('the built-in tool set', () => {
       'Bash', 'BashOutput', 'KillShell', 'Glob', 'Grep', 'Read', 'Edit', 'MultiEdit', 'Write', 'WebFetch', 'WebSearch',
       'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal',
     ])
-    const bash = builtinTools({ dialect: 'pwsh', platform: 'win32', only: ['Bash'] })[0]
-    assert.match(bash.definition.description, /This is PowerShell, not bash/)
+    const bash = builtinTools({ dialect: 'pwsh', platform: 'win32', only: ['Bash'], shellProgram: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' })[0]
+    assert.match(bash.definition.description, /This is PowerShell 7, not bash/)
+    assert.match(bash.definition.description, /Chain commands that depend on each other with &&/)
+    const legacy = builtinTools({ dialect: 'pwsh', platform: 'win32', only: ['Bash'], shellProgram: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' })[0]
+    assert.match(legacy.definition.description, /Runs a command in Windows PowerShell and/)
+    assert.match(legacy.definition.description, /This is Windows PowerShell 5\.1, not bash/)
+    assert.match(legacy.definition.description, /has no && or \|\|/)
+    assert.doesNotMatch(legacy.definition.description, /Chain commands that depend on each other with &&/)
     const gitBash = builtinTools({ dialect: 'bash', platform: 'win32', only: ['Bash'] })[0]
     assert.match(gitBash.definition.description, /Runs a command in Git Bash/)
     const registry = createToolRegistry({ dialect: 'bash', platform: 'linux', subagentTypes: BUILTIN_SUBAGENT_TYPES, skills: [{ name: 's', description: 'd' }], completion: true })

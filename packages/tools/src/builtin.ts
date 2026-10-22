@@ -4,7 +4,7 @@
  * built per session and then kept unchanged, keeping the prompt prefix
  * stable.
  */
-import { bashOutputTool, createBashTool, killShellTool } from './bash'
+import { bashOutputTool, createBashTool, killShellTool, type BashSandbox } from './bash'
 import { computerTool } from './computer/tool'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
 import {
@@ -25,6 +25,8 @@ import { webFetchTool, webSearchTool } from './web/tools'
 
 export interface BuiltinToolOptions {
   dialect: ShellDialect
+  /** The shell's own path, which tells Windows PowerShell 5.1 from PowerShell 7. */
+  shellProgram?: string
   platform: NodeJS.Platform
   /** Subagent types the Task tool offers; none leaves Task out (subagents do not start their own). */
   subagentTypes?: readonly SubagentType[]
@@ -38,13 +40,15 @@ export interface BuiltinToolOptions {
   web?: boolean
   /** The Computer tool, for sessions that have a desktop to use. Default false. */
   computer?: boolean
+  /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
+  sandbox?: BashSandbox
   /** Only these tools, by name. */
   only?: readonly string[]
 }
 
 export function builtinTools(options: BuiltinToolOptions): Tool[] {
   const tools: Tool[] = [
-    createBashTool(options.dialect, options.platform) as Tool,
+    createBashTool(options.dialect, options.platform, options.sandbox, options.shellProgram) as Tool,
     bashOutputTool as Tool,
     killShellTool as Tool,
     globTool as Tool,

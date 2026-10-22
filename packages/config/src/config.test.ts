@@ -141,6 +141,29 @@ describe('resolveSettings', () => {
   })
 })
 
+describe('the sandbox key', () => {
+  const sources: SettingsSource[] = [
+    { scope: 'user', file: 'u', problems: [], unsafe: [], settings: { sandbox: { network: 'block' } } },
+    { scope: 'project', file: 'p', problems: [], unsafe: [], settings: { sandbox: { denyWrite: ['secrets'] }, env: { A: '1' } } },
+  ]
+
+  it('is passed on from a folder that is not approved, because the sandbox takes only what tightens it from a folder', () => {
+    const effective = resolveSettings(sources, { folderApproved: false })
+    assert.deepEqual(effective.sandbox, [
+      { scope: 'user', config: { network: 'block' } },
+      { scope: 'project', config: { denyWrite: ['secrets'] } },
+    ])
+    assert.deepEqual(effective.heldBack, ['p: env'])
+    assert.deepEqual(resolveSettings(sources, { folderApproved: true }).sandbox, effective.sandbox)
+  })
+
+  it('is not something a folder needs to be approved for, so changing it does not ask again', () => {
+    const settings = (sandbox: unknown): SettingsSource[] => [{ scope: 'project', file: 'p', problems: [], unsafe: [], settings: { sandbox } }]
+    assert.equal(folderConfigDigest(settings({ denyWrite: ['a'] })), null)
+    assert.equal(folderConfigDigest([{ scope: 'project', file: 'p', problems: [], unsafe: [], settings: { sandbox: { enabled: true }, env: { A: '1' } } }]), folderConfigDigest([{ scope: 'project', file: 'p', problems: [], unsafe: [], settings: { env: { A: '1' } } }]))
+  })
+})
+
 describe('workspace trust', () => {
   const project = (settings: SettingsSource['settings']): SettingsSource[] => [{ scope: 'project', file: 'p', problems: [], unsafe: [], settings }]
 

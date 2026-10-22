@@ -11,6 +11,7 @@ import type {
   PermissionsAction,
   PlanRequest,
   RewindRequest,
+  SandboxAction,
   SearchOptions,
   SessionGoal,
   SessionPatch,
@@ -124,6 +125,11 @@ const api: EncodeApi = {
     report: (options) => invoke('mcp:report', options),
     act: (action: McpAction) => invoke('mcp:act', action),
     onChanged: (callback) => on('mcp:changed', callback),
+  },
+  sandbox: {
+    report: () => invoke('sandbox:report'),
+    act: (action: SandboxAction) => invoke('sandbox:act', action),
+    onChanged: (callback) => on('sandbox:changed', callback),
   },
   agent: {
     sessions: () => invoke('agent:sessions'),

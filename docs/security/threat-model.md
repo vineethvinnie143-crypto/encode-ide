@@ -79,7 +79,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| T1 | Prompt injection makes the agent run a harmful command | Four approval policies. Auto review runs a proven read-only line whose real paths stay inside and whose programs live outside the workspace (0004), and puts any other command through fixed checks and then a Reviewer model before the person is asked; a model's yes never widens what the checks allow (0059). Subagents inherit the policy (0006). | Partial (R1, R2, RP9) |
+| T1 | Prompt injection makes the agent run a harmful command | Four approval policies. Auto review runs a proven read-only line whose real paths stay inside and whose programs live outside the workspace (0004), and puts any other command through fixed checks and then a Reviewer model before the person is asked; a model's yes never widens what the checks allow (0059). Subagents inherit the policy (0006). Every command runs in the operating system's sandbox, which limits what it can change whatever the policy (0063). | Partial (R1, R2, RP9) |
 | T2 | Data leaves in a URL after an injection | First fetch per site asks in every mode and policy but Full access (0007) | Mitigated |
 | T3 | SSRF to localhost, the LAN or cloud metadata | Public addresses only, checked at connect time against every resolved address. Same-host redirects, size and time caps (0007). | Mitigated |
 | T4 | A repository's git config starts a program (fsmonitor, bare repo discovery) | `core.fsmonitor=false` and `safe.bareRepository=explicit` on every git eNCode runs (0004) | Partial (R3, R4) |
@@ -104,7 +104,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T23 | Lost or corrupted sessions | Append-only logs in an owner-only folder, so a crash costs at most the line being written (0031). Settings and the key vault use atomic private writes. | Partial (R11) |
 | T24 | A crash or a hang in the agent takes the app, or the conversation, with it | The agent runs in its own process, restarted with a growing pause, and the user is told which sessions were mid-turn (0030). Sessions are append-only logs: a crash costs at most the line being written (0031). | Mitigated |
 | T25 | Hostile or malformed messages between the main process and the host | Both ends check the envelope and validate params against a schema before a handler runs. Errors cross as a code and a message, never a stack (0030). | Mitigated |
-| T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). | Partial (R1) |
+| T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). On Linux and macOS the sandbox also hides the usual credential folders and takes out the variables that lead to the person's agents and keyrings (0063). | Partial (R1, RP12) |
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
 | T29 | A page in the Browser tab reaches the app, or the tab drops a protection the page relied on | The page is another origin, in a frame sandboxed without top navigation, and it has no bridge. Only the responses of the main window's own sub-frames lose X-Frame-Options and `frame-ancestors`, so the tab can show them; every other header and directive stays, and no other request is touched. | Partial (R13) |
@@ -130,11 +130,13 @@ Each item names what remains, why it is acceptable for now, and who closes it.
 
 - **R1. Full access means full access.** Under that policy nothing asks. It is an explicit
   user choice, labeled in the composer.
-  - Owner: M3 adds OS sandboxing (Seatbelt, bubblewrap) to bound it on macOS and Linux. It is
-    the next M3 pull request, after the one that holds the rules, trust, hooks, checkpoints,
-    MCP client, web search providers and the Reviewer.
-  - Windows has no equivalent yet. Approvals are the only control there, and the plan's risk
-    table says so.
+  - The operating system's sandbox bounds it
+    ([0063](../adr/0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md)):
+    under every policy, Full access included, a command changes only the project folders, a
+    temp folder and the package caches, on Linux, macOS and Windows. On Windows it can still
+    read, use the network and end other programs (RP12).
+  - Where the sandbox is off or cannot start, approvals are the only control, and the Sandbox
+    screen says so.
 - **R2. Prompt injection inside allowed actions.** Injected text can still steer which
   allowed files the agent reads and what it writes inside the workspace.
   - Untrusted web content is labeled, but labels are advisory.
@@ -238,7 +240,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   a search from a request made to send the key away; the host is the process that reads web pages and tool output. The
   key opens searches on the person's account with that provider and nothing else, which is also what a model key held by
   the same host for the length of a call opens at its provider (0052). Use a key with a spending limit.
-  - Owner: whoever changes `electron/agent-host/runtime.ts` or the sandbox of the host (M3, OS sandbox).
+  - Owner: whoever changes `electron/agent-host/runtime.ts`. The OS sandbox (0063) confines the agent's commands, not
+    the host.
 
 ## Verification
 
@@ -493,8 +496,8 @@ Written with the pull request that added `@encode/config`, `@encode/hooks`,
 `@encode/checkpoints` and `@encode/mcp` and extended `@encode/permissions`. These packages
 are libraries with their own tests. The permission rules, workspace trust, "Always allow" and
 the Permissions screen are wired into the app (0055, P11 to P13), and so are hooks, checkpoints
-and rewind (0056, P14 to P17) and the MCP client with its screen (0057, P18 to P22). The OS
-sandbox is a later M3 pull request and gets its rows when it lands. Web search providers have their
+and rewind (0056, P14 to P17) and the MCP client with its screen (0057, P18 to P22). The
+operating system's sandbox is P29 to P34 (0063). Web search providers have their
 rows in the main table (T42 to T44, 0058). The Reviewer, the scan for hidden characters and subagent
 definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 
@@ -530,6 +533,12 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 | P26 | The agent writes invisible or look-alike characters into a file or a command and the person approves what they cannot read | The lines a call adds are scanned for direction controls, invisible, tag and control characters, stray variation selectors and look-alike letters. The findings are on the approval card, in the step and in a note to the model, and quote the text with markers instead of the characters (0060). | Partial (RP10) |
 | P27 | A cloned repository uses its agent, skill or instruction files to read another file on the disk (a link to a key), to hang eNCode (a named pipe) or to flood it (a huge file) | Those files are read as regular files of bounded size, without following links, without blocking, with at most 64 agent files per folder, and only if the folder stays inside the project once links are resolved. The user's own folders may use links (0061). | Partial (RP11) |
 | P28 | A subagent definition from a repository grants more than the parent has or runs without end | A definition can only narrow its tools; the tools no subagent may have stay excluded; the mode, policy, approvals and Reviewer are the parent's; its step limit can shorten the run and never lengthen it past the person's own (0006, 0061). | Mitigated |
+| P29 | A command changes what lies outside the project: the person's documents and settings, what runs at sign-in, the registry | Every command the agent runs is confined by the operating system: only the project folders, their git directories, a temp folder and the package caches are writable, under every approval policy (0063). | Mitigated on Linux and Windows; macOS until it has run on a Mac (RP16) |
+| P30 | A command plants what runs later outside the sandbox: a git hook, git's configuration, the folder's settings, an MCP server | Those paths stay read-only inside the writable folders on every system. On Windows they are marked again before every command, and that hold is best effort, which the Sandbox screen says. A repository without a hooks folder gets an empty one first (0063). | Partial (RP12, RP14) |
+| P31 | The sandbox holds less than the person is told, or is off without their knowing | Each engine must pass a test at start (a write inside allowed, one outside refused); one that fails is unavailable, with its reason on the Sandbox screen, and the settings can require the sandbox so that no command runs without it. The screen names the engine and says in a sentence each thing it does not hold back on this system (0063). | Mitigated |
+| P32 | A repository's settings turn the sandbox off or widen it | A folder's files can only tighten it. `allowWrite` and `allowRead` are read from the person's own settings only, and a key a folder may not set is ignored and reported (0041, 0063). | Mitigated |
+| P33 | The agent takes a command out of the sandbox | Only the person can let a command run outside it: it asks under every policy, Full access included, Read Only refuses it, and no rule, "Always allow" or Reviewer answers for the person. The settings can forbid asking (0063). | Mitigated |
+| P34 | Preparing a folder on Windows opens more than the project to commands | A whole drive or share, the home folder and what holds it, the folders where programs keep their settings, Windows' own folders, and the helper's and the program's folders are refused. The folders marked are listed in the sandbox's state, and `release` takes the marks off (0063). | Partial (RP13) |
 
 ### Residual risks
 
@@ -543,15 +552,16 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 - **RP3. Rules read shell words as text.** A link inside the workspace that points at a denied
   file is not recognised in a shell word, and PowerShell 5.1's `-Recurse` follows directory
   junctions. The file tools resolve real paths before they consult the rules.
-  - Owner: the OS sandbox (next M3 pull request) on macOS and Linux. Windows keeps prompts.
+  - Owner: the OS sandbox (0063), which bounds what a shell word can reach for writing on every system, and for
+    reading on Linux and macOS.
 - **RP4. Checkpoints see only the file tools.** A shell command's side effects are not
   recorded, the agent must be idle while a rewind runs, and file modes and owners are not
   saved. Redo restores files, not the conversation. The Rewind dialog says so every time.
 - **RP5. MCP over HTTP has no OAuth.** A server that needs it does not connect. Redirects are not
   followed, so a server behind one fails instead of leaking headers.
 - **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
-  for. A folder cannot install one without the user's approval, and the sandbox will not cover
-  them.
+  for. A folder cannot install one without the user's approval, and the sandbox (0063) does not
+  cover them: it confines the agent's commands.
 - **RP7. Closed.** The MCP client was not in the app until 0057; P2 to P4 and the server
   halves of P1 and P4 now act in the product.
 - **RP8. A folder's chats share its servers.** A server that keeps state keeps one state for
@@ -564,13 +574,38 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   writes and then runs (a `package.json` script it edited, then `npm run build`) reaches the Reviewer by its name. The
   Reviewer is told to ask when a command runs software the project does not already use, and the edit is in the thread,
   but neither contains it.
-  - Owner: the OS sandbox (R1). Until it exists, work on code you do not trust under Workspace Write.
+  - Owner: the OS sandbox (0063, R1), which bounds what such code can change. Where it is off or cannot start, work on
+    code you do not trust under Workspace Write.
 - **RP10. The scan warns and does not refuse.** A file built by a shell command or a generator is outside it, and a
   person can approve a card that lists findings. The model is told to remove what it did not mean to write.
 - **RP11. Other files a repository can fill are not yet read with the same care.** `.encode/settings*.json` and
   `.mcp.json` are read by `@encode/config` and `@encode/mcp` with a plain read: a link in them is followed and a named
   pipe blocks the reader.
   - Owner: the hardening step after the sandbox.
+- **RP12. On Windows the sandbox holds writes only.** A command can read what the person can read, use the network and
+  end the person's other programs, so a key or a file it can read it can also send. Its hold on the protected paths
+  is best effort: they cannot be written, but the folders around them are the command's to change. The Sandbox screen
+  says each of these in a sentence. Linux holds all of it back and macOS reads, the network and the protected paths.
+  - Owner: none planned. Hiding files and blocking the network for one program need more than a program without
+    administrator rights can set up. Where a project's hooks or settings matter, keep approvals on (Workspace Write or
+    Auto review): a command that changes them is still asked about.
+- **RP13. The marks on Windows stay.** A folder the sandbox marked can be written by any program of the person's that
+  runs at the low integrity level, not only by eNCode's commands, until the marks are taken off. Few programs run at
+  that level, and the folders that may be marked leave out the home folder, drives, settings folders and Windows' own.
+  - Owner: UI-6, a way to take the marks off from the Sandbox screen (`release` exists).
+- **RP14. What does not exist yet is not held.** A protected path that is missing when a command starts can be created
+  by it. What it creates under `.encode/` or in `.mcp.json` waits for the person's approval anyway (0041, 0057), and a
+  missing hooks folder is made before the first command. Not yet protected: the git folders of submodules under
+  `.git/modules`, and hooks that a repository's git configuration places inside the project (husky's `.husky/`), whose
+  changes show in the diff.
+  - Owner: the hardening step.
+- **RP15. Git Bash on Windows is outside the sandbox.** With "Run commands in PowerShell" off, commands run in Git Bash
+  unconfined, and the screen says so. Git's hook scripts and, by default, its ssh use Git Bash's runtime and can fail
+  inside the sandbox while a Git Bash is open; the agent then asks to run that command outside.
+  - Owner: none; it is how that runtime is built.
+- **RP16. The Seatbelt profile has not run on a Mac.** The test at start keeps a profile that does not hold from being
+  used, and the screen then says the sandbox is unavailable.
+  - Owner: the first Mac build.
 
 ### Verification
 
@@ -626,5 +661,13 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   runs, one is declined and does not, one is passed to the person on a card that says so, and a force-push is stopped
   by the fixed checks without the Reviewer being asked. It also checks what the Reviewer was sent: no tools, the request
   and one action, nothing else.
+- The sandbox (0063): the policy, the settings and how they merge, the bubblewrap arguments and the Seatbelt profile
+  are unit tests, and bubblewrap runs for real on Linux where user namespaces are allowed (writes inside and not
+  outside, the protected paths, hidden credentials, a private `/tmp`, other processes out of reach). On Windows the
+  engine runs in CI against the real helper: writes, deletes and renames inside the project; writes outside it, in the
+  Startup folder and in the registry refused; writes, deletes and replacements of the protected files refused; a git
+  commit; nested programs; a leftover program ended; the start-up cost; the marks taken off again. The shell,
+  workspace and screen tests cover the PowerShell default, a folder that cannot turn it off, leaving the sandbox only
+  with the person's answer, and every sentence the screen shows.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.

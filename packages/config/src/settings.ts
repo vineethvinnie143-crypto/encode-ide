@@ -14,11 +14,12 @@ import type { RuleBehavior, RuleSource } from '@encode/permissions'
  * dropped the same way, so one typo never disables the rest of a file.
  *
  * Project and local files come with the folder, so whoever wrote the folder
- * wrote them. What they restrict (deny and ask rules, disabled MCP servers)
- * always applies. What they grant (allow rules, a default mode, extra
- * directories, hooks, environment variables, MCP servers, sandbox
- * settings) applies only once the user trusts the workspace and has
- * approved that exact configuration; see trust.ts.
+ * wrote them. What they restrict (deny and ask rules, disabled MCP servers,
+ * and the sandbox, which a folder's file can only make stricter) always
+ * applies. What they grant (allow rules, a default mode, extra directories,
+ * hooks, environment variables, MCP servers) applies only once the user
+ * trusts the workspace and has approved that exact configuration; see
+ * trust.ts.
  */
 
 export type SettingsScope = 'user' | 'project' | 'local' | 'cli'
@@ -229,8 +230,11 @@ export function isFolderSource(scope: SettingsScope): boolean {
   return scope === 'project' || scope === 'local'
 }
 
-/** The keys a folder source may restrict with even before the user approves it. */
-const RESTRICTING_KEYS = new Set(['disabledMcpjsonServers'])
+/**
+ * The keys a folder source may restrict with even before the user approves it. `sandbox` is one because the sandbox's
+ * settings (checked in @encode/sandbox) take from a folder only what makes it stricter and ignore the rest.
+ */
+const RESTRICTING_KEYS = new Set(['disabledMcpjsonServers', 'sandbox'])
 
 /**
  * What a folder's settings grant, for the approval digest: everything but
@@ -267,6 +271,7 @@ export interface EffectiveSettings {
   hooks: Array<{ scope: SettingsScope; config: unknown }>
   model?: string
   mcp: { enableAll: boolean; enabled: string[]; disabled: string[] }
+  /** The `sandbox` key of every source that has one, folder sources included: the sandbox takes only what tightens it from those. */
   sandbox: Array<{ scope: SettingsScope; config: unknown }>
   /** Problems from every source, prefixed with the file they came from. */
   problems: string[]
@@ -306,6 +311,7 @@ export function resolveSettings(sources: readonly SettingsSource[], options: { f
       for (const text of settings.permissions?.[behavior] ?? []) out.rules.push({ behavior, text, source: ruleSource })
     }
     out.mcp.disabled.push(...(settings.disabledMcpjsonServers ?? []))
+    if (settings.sandbox !== undefined) out.sandbox.push({ scope: source.scope, config: settings.sandbox })
 
     if (!grants) {
       const granting = grantingPart(settings)
@@ -320,7 +326,6 @@ export function resolveSettings(sources: readonly SettingsSource[], options: { f
     if (settings.model) out.model = settings.model
     if (settings.enableAllProjectMcpServers !== undefined) out.mcp.enableAll = settings.enableAllProjectMcpServers
     out.mcp.enabled.push(...(settings.enabledMcpjsonServers ?? []))
-    if (settings.sandbox !== undefined) out.sandbox.push({ scope: source.scope, config: settings.sandbox })
   }
   return out
 }

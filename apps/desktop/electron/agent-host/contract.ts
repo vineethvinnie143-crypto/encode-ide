@@ -29,6 +29,8 @@ export type HostToRenderer = [
   Expect<Same<Workspace.McpReport, Ui.McpReport>>,
   Expect<Same<Workspace.McpServerView, Ui.McpServerView>>,
   Expect<Same<Workspace.McpOutcome, Ui.McpOutcome>>,
+  Expect<Same<Workspace.SandboxReport, Ui.SandboxReport>>,
+  Expect<Same<Workspace.SandboxOutcome, Ui.SandboxOutcome>>,
   Expect<Same<Core.CheckpointInfo, Ui.CheckpointInfo>>,
   Expect<Same<Core.RewindPlan, Ui.RewindPlan>>,
   Expect<Same<Core.RewindOutcome, Ui.RewindOutcome>>,
@@ -43,5 +45,6 @@ export type RendererToHost = [
   Expect<Same<Core.AgentMode, Ui.AgentMode>>,
   Expect<Same<Workspace.PermissionsAction, Ui.PermissionsAction>>,
   Expect<Same<Workspace.McpAction, Ui.McpAction>>,
+  Expect<Same<Workspace.SandboxAction, Ui.SandboxAction>>,
   Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
 ]
