@@ -25,10 +25,14 @@ export function isRendererUrl(url: string): boolean {
   return url.startsWith('app://renderer/')
 }
 
-/** The renderer's address. It carries the appearance, so the first frame is drawn in the right theme. */
+/**
+ * The renderer's address. It carries the appearance, so the first frame is drawn in the right theme, and
+ * says whether the system draws the window buttons, so the title bar is laid out right from the first frame.
+ */
 function rendererUrl(appearance: Appearance): string {
   const url = new URL(devServer ?? 'app://renderer/index.html')
   for (const [name, value] of Object.entries(appearanceParams(appearance))) url.searchParams.set(name, value)
+  if (NATIVE_CAPTIONS) url.searchParams.set('captions', 'native')
   return url.toString()
 }
 

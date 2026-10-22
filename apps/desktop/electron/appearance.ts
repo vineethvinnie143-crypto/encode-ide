@@ -8,8 +8,11 @@ export function windowBackground(): string {
   return WINDOW_BACKGROUND[currentTheme()]
 }
 
-/** Windows draws the window buttons itself (minimise, maximise, close, with snap layouts), over the title bar; this is how. */
-export const NATIVE_CAPTIONS = process.platform === 'win32'
+/**
+ * Windows draws the window buttons itself (minimise, maximise, close, with snap layouts), over the title bar.
+ * ENCODE_NATIVE_CAPTIONS=1 asks for the same on other systems, which is how the title bar's layout for them is tried.
+ */
+export const NATIVE_CAPTIONS = process.platform === 'win32' || process.env.ENCODE_NATIVE_CAPTIONS === '1'
 
 export function captionOverlay(): { color: string; symbolColor: string; height: number } {
   const theme = currentTheme()

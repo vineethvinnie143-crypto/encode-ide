@@ -1041,6 +1041,16 @@ async function runShellChecks() {
   if (sizes.titlebar !== 44 || sizes.rail !== 52 || sizes.railButton !== 38) throw new Error('the title bar or icon rail is not the specified size')
   if (sizes.sidebar < 220 || sizes.sidebar > 480) throw new Error('the sidebar is outside its 220 to 480 px range')
 
+  // Windows draws the window buttons itself over the right end of the bar; elsewhere the bar draws its own.
+  const captions = await evaluate(`(() => {
+    const bar = document.querySelector('.titlebar')
+    return { native: bar.classList.contains('has-native-captions'), custom: !!document.querySelector('.caption'), padding: parseFloat(getComputedStyle(bar).paddingRight) }
+  })()`)
+  console.log('[smoke] window buttons:', JSON.stringify(captions))
+  const expectNative = process.platform === 'win32' || process.env.ENCODE_NATIVE_CAPTIONS === '1'
+  if (captions.native !== expectNative || captions.custom === expectNative) throw new Error('the title bar draws the window buttons twice, or not at all')
+  if (expectNative && (captions.padding < 100 || captions.padding > 200)) throw new Error('the title bar does not leave room for the system window buttons')
+
   // Menus: a click opens, the arrow keys move to the next menu, Escape closes.
   if (!(await click('.tb-menu', 'View'))) throw new Error('View menu not found')
   await waitFor(menuOpen('View'), 4000, 'View menu')
