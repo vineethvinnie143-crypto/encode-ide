@@ -121,6 +121,47 @@ describe('Grep', () => {
     assert.equal(paged.content, 'app.ts:2:function start() {\n(2 more lines; raise offset or head_limit, or narrow the search.)'.replace('app.ts', 'src/app.ts'))
   })
 
+  it('searches an older ANSI file, and gives up on a binary file after its first 8 KB', async () => {
+    const e = String.fromCodePoint(0xe9)
+    const root = await tempWorkspace({
+      'legacy.lua': Buffer.concat([Buffer.from('-- caf'), Buffer.from([0xe9]), Buffer.from('\nprint("needle")\n')]),
+      'image.dat': Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]), Buffer.alloc(20_000, 0x61), Buffer.from(' needle ')]),
+      'utf16.txt': Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('needle in utf16\n', 'utf16le')]),
+    })
+    const ctx = testContext(root)
+    assert.deepEqual(textOf((await grepTool.run({ pattern: 'needle' }, ctx)).content).split('\n').sort(), ['legacy.lua', 'utf16.txt'])
+    const content = await grepTool.run({ pattern: `caf${e}`, output_mode: 'content' }, ctx)
+    assert.equal(content.content, `legacy.lua:1:-- caf${e}`)
+  })
+
+  it('reads many files at once and answers in the same order every time', async () => {
+    const tree: Record<string, string> = {}
+    for (let index = 0; index < 120; index++) tree[`pkg${index % 7}/file${String(index).padStart(3, '0')}.ts`] = `// ${index}\n${index % 3 === 0 ? 'target()\n' : 'other()\n'}`
+    const root = await tempWorkspace(tree)
+    const ctx = testContext(root)
+    const first = await grepTool.run({ pattern: 'target', output_mode: 'content', '-n': false }, ctx)
+    const lines = textOf(first.content).split('\n')
+    assert.equal(lines.length, 40)
+    assert.deepEqual(lines, [...lines].sort())
+    assert.deepEqual(lines, textOf((await grepTool.run({ pattern: 'target', output_mode: 'content', '-n': false }, ctx)).content).split('\n'))
+    assert.equal(first.display?.output, '40 matches')
+    assert.equal(textOf((await grepTool.run({ pattern: 'target', output_mode: 'count', glob: 'pkg3/*.ts' }, ctx)).content).split('\n').length, 6)
+  })
+
+  it('stops a content search that finds far too much, at a whole number of files in path order, and says so', async () => {
+    const tree: Record<string, string> = {}
+    for (let index = 0; index < 48; index++) tree[`part${String(index).padStart(2, '0')}.txt`] = 'hit\n'.repeat(40_000)
+    const root = await tempWorkspace(tree)
+    const outcome = await grepTool.run({ pattern: 'hit', output_mode: 'content', head_limit: 2 }, testContext(root))
+    const text = textOf(outcome.content)
+    assert.ok(text.startsWith('part00.txt:1:hit\npart00.txt:2:hit\n'))
+    const stopped = /\(The search stopped after ([\d,]+) lines? of matches; narrow the pattern, path or glob\.\)/.exec(text)
+    assert.ok(stopped, text.slice(-200))
+    const kept = Number(stopped[1].replace(/,/g, ''))
+    assert.ok(kept >= 100_000 && kept < 48 * 40_000, `${kept} lines kept`)
+    assert.match(text, /\(at least \d+ more lines; raise offset or head_limit, or narrow the search\.\)/)
+  })
+
   it('refuses unknown types and broken patterns before running', () => {
     assert.match(grepTool.check!({ pattern: 'x', type: 'cobol' }) ?? '', /type must be one of/)
     assert.match(grepTool.check!({ pattern: '(' }) ?? '', /not a valid regular expression/)

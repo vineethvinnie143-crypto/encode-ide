@@ -8,14 +8,17 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { globBase, globMatcher, globToRegExp } from './glob'
 import { displayPath, realPathOf, resolveInputPath, toPosix } from './paths'
-import { decodeText, plural } from './text'
+import { decodeText, looksLikeText, MAX_TEXT_FILE_BYTES, plural, SNIFF_BYTES, type DecodedText } from './text'
 import type { Tool, ToolContext, ToolOutcome } from './types'
 import { walk, type WalkEntry } from './walk'
 
 const GLOB_LIMIT = 100
 const GREP_DEFAULT_LIMIT = 250
-const GREP_MAX_FILE_BYTES = 20 * 1024 * 1024
 const GREP_MAX_LINE = 500
+/** Files read at once. A tree of thousands of small files is bound by the wait for the disk, not by the search. */
+const GREP_CONCURRENCY = 16
+/** Lines of matches held in memory; a search that finds more stops there and says so. */
+const GREP_KEEP_LINES = 100_000
 const WALK_LIMIT = 200_000
 
 function fail(content: string): ToolOutcome {
@@ -219,10 +222,80 @@ function clip(line: string): string {
 
 interface FileMatches {
   file: WalkEntry
-  /** 0-based line indexes that match. */
-  lines: number[]
   count: number
-  text: string[]
+  /** The lines to show for this file (content mode only). */
+  block: string[]
+}
+
+/**
+ * A file's text for searching, or undefined when it is too big, cannot be read or is binary. A binary
+ * file is given up on after its first 8 KB, so a tree of images and archives is not read whole.
+ */
+async function readForSearch(file: string): Promise<DecodedText | undefined> {
+  let handle: Awaited<ReturnType<typeof fs.open>>
+  try {
+    handle = await fs.open(file, 'r')
+  } catch {
+    return undefined
+  }
+  try {
+    const { size } = await handle.stat()
+    if (!size || size > MAX_TEXT_FILE_BYTES) return undefined
+    const bytes = Buffer.allocUnsafe(size)
+    const fill = async (from: number, to: number) => {
+      while (from < to) {
+        const { bytesRead } = await handle.read(bytes, from, to - from, from)
+        if (!bytesRead) break
+        from += bytesRead
+      }
+      return from
+    }
+    const head = await fill(0, Math.min(size, SNIFF_BYTES))
+    if (!looksLikeText(bytes.subarray(0, head))) return undefined
+    return decodeText(bytes.subarray(0, await fill(head, size)))
+  } catch {
+    return undefined
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
+}
+
+/** Runs `work` on every item, `limit` at a time, taking them in order; the first failure or an abort stops the rest. */
+async function eachInPool<T>(items: readonly T[], limit: number, signal: AbortSignal, work: (item: T, index: number) => Promise<void>): Promise<void> {
+  let next = 0
+  let failed = false
+  const worker = async () => {
+    while (!failed) {
+      if (signal.aborted) throw signal.reason
+      const index = next++
+      if (index >= items.length) return
+      try {
+        await work(items[index], index)
+      } catch (error) {
+        failed = true
+        throw error
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
+/** The lines Grep prints for one file: each match with its context, groups apart marked by `--`. */
+function contentLines(name: string, found: { lines: number[]; split: string[] }, before: number, after: number, numbers: boolean): string[] {
+  const shown = new Set<number>()
+  for (const line of found.lines) {
+    for (let index = Math.max(0, line - before); index <= Math.min(found.split.length - 1, line + after); index++) shown.add(index)
+  }
+  const hits = new Set(found.lines)
+  const out: string[] = []
+  let previous = -2
+  for (const index of [...shown].sort((a, b) => a - b)) {
+    if ((before || after) && previous >= 0 && index > previous + 1) out.push('--')
+    const separator = hits.has(index) ? ':' : '-'
+    out.push(`${name}${numbers ? `${separator}${index + 1}` : ''}${separator}${clip(found.split[index])}`)
+    previous = index
+  }
+  return out
 }
 
 function matchLines(text: string, regex: RegExp, multiline: boolean): { lines: number[]; count: number; split: string[] } {
@@ -353,67 +426,54 @@ export const grepTool: Tool<GrepInput> = {
       truncatedWalk = result.truncated
     }
 
-    const matches: FileMatches[] = []
-    for (const file of candidates) {
-      if (ctx.signal.aborted) throw ctx.signal.reason
-      let bytes: Buffer
-      try {
-        const size = (await fs.stat(file.absolute)).size
-        if (size > GREP_MAX_FILE_BYTES) continue
-        bytes = await fs.readFile(file.absolute)
-      } catch {
-        continue
+    // Content comes out in path order, so the files are taken in that order and a search that finds too
+    // much stops at a prefix; the other modes are put in order afterwards, newest first.
+    const inContent = mode === 'content'
+    const order = inContent ? [...candidates].sort((a, b) => (a.relative < b.relative ? -1 : 1)) : candidates
+    const before = input['-B'] ?? input['-C'] ?? 0
+    const after = input['-A'] ?? input['-C'] ?? 0
+    const numbers = input['-n'] ?? true
+    const found: (FileMatches | undefined)[] = new Array(order.length)
+    let kept = 0
+    let stoppedEarly = false
+    await eachInPool(order, GREP_CONCURRENCY, ctx.signal, async (file, index) => {
+      if (inContent && kept >= GREP_KEEP_LINES) {
+        stoppedEarly = true
+        return
       }
-      const decoded = decodeText(bytes)
-      if (!decoded) continue
-      const found = matchLines(decoded.text, regex, multiline)
-      if (found.count) matches.push({ file, lines: found.lines, count: found.count, text: found.split })
-    }
+      const decoded = await readForSearch(file.absolute)
+      if (!decoded) return
+      const hit = matchLines(decoded.text, regex, multiline)
+      if (!hit.count) return
+      const block = inContent ? contentLines(shownPath(file.absolute, ctx), hit, before, after, numbers) : []
+      kept += block.length
+      found[index] = { file, count: hit.count, block }
+    })
+    const matches = found.filter((match): match is FileMatches => match !== undefined)
 
     if (!matches.length) return { ok: true, content: truncatedWalk ? 'No matches in the files searched (the tree was too large to search completely; narrow path or glob).' : 'No matches found.' }
 
-    const ordered = mode === 'content' ? matches.sort((a, b) => (a.file.relative < b.file.relative ? -1 : 1)) : await (async () => {
-      const files = await newestFirst(matches.map((match) => match.file), ctx.signal)
-      const byFile = new Map(matches.map((match) => [match.file, match]))
-      return files.map((file) => byFile.get(file)!)
-    })()
+    const ordered = inContent
+      ? matches
+      : await (async () => {
+          const files = await newestFirst(matches.map((match) => match.file), ctx.signal)
+          const byFile = new Map(matches.map((match) => [match.file, match]))
+          return files.map((file) => byFile.get(file)!)
+        })()
 
     const name = (match: FileMatches) => shownPath(match.file.absolute, ctx)
-    let out: string[]
-    if (mode === 'files_with_matches') {
-      out = ordered.map(name)
-    } else if (mode === 'count') {
-      out = ordered.map((match) => `${name(match)}:${match.count}`)
-    } else {
-      const before = input['-B'] ?? input['-C'] ?? 0
-      const after = input['-A'] ?? input['-C'] ?? 0
-      const numbers = input['-n'] ?? true
-      out = []
-      for (const match of ordered) {
-        const shownLines = new Set<number>()
-        for (const line of match.lines) {
-          for (let index = Math.max(0, line - before); index <= Math.min(match.text.length - 1, line + after); index++) shownLines.add(index)
-        }
-        const hits = new Set(match.lines)
-        let previous = -2
-        for (const index of [...shownLines].sort((a, b) => a - b)) {
-          if ((before || after) && previous >= 0 && index > previous + 1) out.push('--')
-          const separator = hits.has(index) ? ':' : '-'
-          out.push(`${name(match)}${numbers ? `${separator}${index + 1}` : ''}${separator}${clip(match.text[index])}`)
-          previous = index
-        }
-      }
-    }
+    const out = mode === 'files_with_matches' ? ordered.map(name) : mode === 'count' ? ordered.map((match) => `${name(match)}:${match.count}`) : ordered.flatMap((match) => match.block)
 
     const offset = input.offset ?? 0
     const limit = input.head_limit ?? GREP_DEFAULT_LIMIT
     const page = out.slice(offset, offset + limit)
     const remaining = out.length - offset - page.length
-    const total = mode === 'content' ? plural(ordered.reduce((sum, match) => sum + match.count, 0), 'match', 'matches') : plural(ordered.length, 'file')
-    const tail = remaining > 0 ? `\n(${remaining} more ${mode === 'content' ? 'lines' : 'entries'}; raise offset or head_limit, or narrow the search.)` : ''
+    const total = inContent ? plural(ordered.reduce((sum, match) => sum + match.count, 0), 'match', 'matches') : plural(ordered.length, 'file')
+    const tail = remaining > 0 ? `\n(${stoppedEarly ? 'at least ' : ''}${remaining} more ${inContent ? 'lines' : 'entries'}; raise offset or head_limit, or narrow the search.)` : ''
+    const stopped = stoppedEarly ? `\n(The search stopped after ${plural(kept, 'line')} of matches; narrow the pattern, path or glob.)` : ''
     return {
       ok: true,
-      content: (page.length ? page.join('\n') : '(offset is past the end of the results)') + tail + (truncatedWalk ? '\n(The tree was too large to search completely; narrow path or glob.)' : ''),
+      content: (page.length ? page.join('\n') : '(offset is past the end of the results)') + tail + stopped + (truncatedWalk ? '\n(The tree was too large to search completely; narrow path or glob.)' : ''),
       display: { output: total },
     }
   },

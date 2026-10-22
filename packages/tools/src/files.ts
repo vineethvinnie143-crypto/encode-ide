@@ -14,11 +14,12 @@ import { buildDiff } from './diff'
 import { applyEdit, applyEdits, changedRegion, type EditSpec } from './edit'
 import { stateOf, staleness } from './file-state'
 import { displayPath, realPathOf, resolveInputPath } from './paths'
-import { decodeText, encodeText, lineEndingOf, numberLines, plural, splitLines, type TextEncodingName } from './text'
+import { decodeText, encodeText, lineEndingOf, MAX_TEXT_FILE_BYTES, numberLines, plural, splitLines, UnencodableTextError, type TextEncodingName } from './text'
 import type { Tool, ToolContext, ToolOutcome } from './types'
 
 export const READ_DEFAULT_LIMIT = 2000
-const READ_MAX_CHARS = 256_000
+/** What one Read puts in the conversation: about 25,000 tokens. Longer ranges are cut to fit. */
+const READ_MAX_CHARS = 100_000
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024
 const SNIPPET_MAX_LINES = 40
 
@@ -78,6 +79,26 @@ async function missingFile(file: string, ctx: ToolContext, advice: string): Prom
   return fail(`${shown(file, ctx)} does not exist.${hint}${advice ? ` ${advice}` : ''}`)
 }
 
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
+const LIMIT_MB = MAX_TEXT_FILE_BYTES / 1024 / 1024
+
+/** A file too big to load whole, with a way to get at the part that matters. */
+function tooBig(file: string, size: number, ctx: ToolContext, reading: boolean): ToolOutcome {
+  const bash = ctx.shell.dialect !== 'pwsh'
+  const advice = reading
+    ? `Search it with Grep, or look at part of it through Bash (${bash ? 'head -n 200, tail -n 200 or sed -n "100,200p"' : 'Get-Content -TotalCount 200 or Get-Content -Tail 200'}).`
+    : 'Change it through Bash (a sed command or a short script) instead.'
+  return fail(`${shown(file, ctx)} is ${megabytes(size)}, more than the ${LIMIT_MB} MB that ${reading ? 'Read loads' : 'Edit and Write load'} whole. ${advice}`)
+}
+
+/** The model is told what the file's own encoding cannot hold, so it can choose other characters. */
+function unencodable(file: string, error: UnencodableTextError, ctx: ToolContext): ToolOutcome {
+  return fail(
+    `${shown(file, ctx)} is an older ANSI text file (Windows-1252, not UTF-8) and cannot hold ${JSON.stringify(error.character)}. ` +
+      "Leave that character out or use one the file can hold; converting the file to UTF-8 is the user's decision.",
+  )
+}
+
 interface Loaded {
   bytes: Buffer
   text: string
@@ -89,6 +110,7 @@ async function loadForWrite(file: string, ctx: ToolContext): Promise<Loaded | nu
   const stats = await statOf(file)
   if (!stats) return null
   if (stats.isDirectory()) return fail(`${shown(file, ctx)} is a directory, not a file.`)
+  if (stats.size > MAX_TEXT_FILE_BYTES) return tooBig(file, stats.size, ctx, false)
   const bytes = await fs.readFile(file)
   const freshness = await staleness(ctx.files, file, bytes)
   if (freshness.kind === 'unread') return fail(`${shown(file, ctx)} has not been read in this session. Read it first, then try again.`)
@@ -222,6 +244,7 @@ export const readTool: Tool<ReadInput> = {
     if (extension === '.pdf') {
       return fail(`${shown(file, ctx)} is a PDF, which Read cannot show yet. If a converter such as pdftotext is installed, run it through Bash.`)
     }
+    if (stats.size > MAX_TEXT_FILE_BYTES) return tooBig(file, stats.size, ctx, true)
 
     const bytes = await fs.readFile(file)
     const decoded = decodeText(bytes)
@@ -258,7 +281,8 @@ export const readTool: Tool<ReadInput> = {
     const note = partial
       ? `\n\n(Lines ${offset}-${end} of ${lines.length}${cutForSize ? ', shortened to fit' : ''}. Pass offset and limit to read other lines.)`
       : ''
-    return { ok: true, content: body + note, display: { output: `${plural(end - offset + 1, 'line')}${partial ? ` of ${lines.length}` : ''}` } }
+    const ansi = decoded.encoding === 'windows-1252' ? '\n\n(This is an older ANSI file, not UTF-8: it is shown as Windows-1252, and an edit writes it back the same way.)' : ''
+    return { ok: true, content: body + note + ansi, display: { output: `${plural(end - offset + 1, 'line')}${partial ? ` of ${lines.length}` : ''}` } }
   },
 }
 
@@ -272,6 +296,7 @@ interface WriteInput extends Record<string, unknown> {
 
 async function currentText(file: string): Promise<string> {
   try {
+    if ((await fs.stat(file)).size > MAX_TEXT_FILE_BYTES) return ''
     const decoded = decodeText(await fs.readFile(file))
     return decoded?.text ?? ''
   } catch {
@@ -319,7 +344,13 @@ export const writeTool: Tool<WriteInput> = {
     const file = filePath(input, ctx)
     const loaded = await loadForWrite(file, ctx)
     if (isOutcome(loaded)) return loaded
-    const bytes = inFileStyle(input.content, loaded)
+    let bytes: Buffer
+    try {
+      bytes = inFileStyle(input.content, loaded)
+    } catch (error) {
+      if (error instanceof UnencodableTextError) return unencodable(file, error, ctx)
+      throw error
+    }
     await writeFileBytes(ctx, file, bytes, loaded?.bytes ?? null)
     const lines = splitLines(input.content).length
     return {
@@ -358,18 +389,27 @@ async function runEdits(file: string, edits: EditSpec[], ctx: ToolContext): Prom
   if (isOutcome(loaded)) return loaded
   const name = shown(file, ctx)
 
-  // An empty old_string creates the file, or fills an empty one.
-  if (edits.length === 1 && !edits[0].old_string) {
-    if (loaded && loaded.text.trim()) return fail(`old_string is empty, but ${name} already has content. Give the exact text to replace.`)
-    const text = edits[0].new_string
-    await writeFileBytes(ctx, file, inFileStyle(text, loaded), loaded?.bytes ?? null)
-    return { ok: true, content: `${loaded ? 'Filled' : 'Created'} ${name} (${plural(splitLines(text).length, 'line')}).`, display: { diff: buildDiff(file, loaded?.text ?? '', text) }, changed: [file] }
-  }
-  if (!loaded) return missingFile(file, ctx, 'Use Write to create a new file.')
+  try {
+    // An empty old_string creates the file, or fills an empty one.
+    if (edits.length === 1 && !edits[0].old_string) {
+      if (loaded && loaded.text.trim()) return fail(`old_string is empty, but ${name} already has content. Give the exact text to replace.`)
+      const text = edits[0].new_string
+      await writeFileBytes(ctx, file, inFileStyle(text, loaded), loaded?.bytes ?? null)
+      return { ok: true, content: `${loaded ? 'Filled' : 'Created'} ${name} (${plural(splitLines(text).length, 'line')}).`, display: { diff: buildDiff(file, loaded?.text ?? '', text) }, changed: [file] }
+    }
+    if (!loaded) return missingFile(file, ctx, 'Use Write to create a new file.')
 
-  const outcome = applyEdits(loaded.text, edits)
-  if (!outcome.ok) return fail(`${name}: ${outcome.error}`)
-  await writeFileBytes(ctx, file, encodeText(outcome.text, loaded.encoding), loaded.bytes)
+    const outcome = applyEdits(loaded.text, edits)
+    if (!outcome.ok) return fail(`${name}: ${outcome.error}`)
+    await writeFileBytes(ctx, file, encodeText(outcome.text, loaded.encoding), loaded.bytes)
+    return finishedEdit(file, name, loaded, outcome, ctx)
+  } catch (error) {
+    if (error instanceof UnencodableTextError) return unencodable(file, error, ctx)
+    throw error
+  }
+}
+
+function finishedEdit(file: string, name: string, loaded: Loaded, outcome: { text: string; replacements: number }, ctx: ToolContext): ToolOutcome {
   const replaced = outcome.replacements > 1 ? ` (${outcome.replacements} replacements)` : ''
   const lines = snippet(loaded.text, outcome.text)
   return {

@@ -88,6 +88,54 @@ function candidates(text: string, edit: EditSpec): Candidate[] {
   return list
 }
 
+/** The 1-based lines where `search` starts, the first few. */
+function startLines(text: string, search: string, limit = 5): number[] {
+  const found: number[] = []
+  let line = 1
+  let from = 0
+  for (let index = text.indexOf(search); index !== -1 && found.length < limit; index = text.indexOf(search, index + search.length)) {
+    for (let newline = text.indexOf('\n', from); newline !== -1 && newline < index; newline = text.indexOf('\n', from)) {
+      line++
+      from = newline + 1
+    }
+    found.push(line)
+  }
+  return found
+}
+
+const HINT_LINES = 12
+
+/**
+ * Where the file has the text the model meant: the same lines with other spacing, or at least the
+ * same first line. A model that is told where to look copies the real text instead of guessing again.
+ */
+function notFoundHint(text: string, oldString: string): string {
+  const wanted = oldString.split(/\r?\n/)
+  while (wanted.length > 1 && !wanted[wanted.length - 1].trim()) wanted.pop()
+  const squeeze = (line: string) => line.trim().replace(/\s+/g, ' ')
+  const keys = wanted.map(squeeze)
+  if (!keys.some(Boolean)) return ''
+  const lines = text.split(/\r?\n/)
+
+  const starts: number[] = []
+  for (let start = 0; start + keys.length <= lines.length && starts.length < 4; start++) {
+    if (squeeze(lines[start]) === keys[0] && keys.every((key, offset) => squeeze(lines[start + offset]) === key)) starts.push(start)
+  }
+  if (starts.length === 1) {
+    const [start] = starts
+    const shown = lines.slice(start, start + Math.min(keys.length, HINT_LINES))
+    const range = keys.length > 1 ? `lines ${start + 1}-${start + keys.length}` : `line ${start + 1}`
+    return ` The same text is at ${range} with different spacing (indentation, tabs or trailing spaces). It reads:\n${shown.join('\n')}${keys.length > HINT_LINES ? '\n…' : ''}\nCopy it from here, spacing included.`
+  }
+  if (starts.length > 1) return ` The same text with different spacing is at lines ${starts.map((start) => start + 1).join(', ')}; copy the one you mean from Read, spacing included.`
+
+  const lead = keys.findIndex((key) => key.length >= 6)
+  if (lead === -1) return ''
+  const hits = lines.flatMap((line, index) => (squeeze(line) === keys[lead] ? [index + 1] : [])).slice(0, 3)
+  if (!hits.length) return ''
+  return ` Line ${hits.join(', ')} of the file has the same text as line ${lead + 1} of old_string, but the lines around it differ. Read that part again and copy it exactly.`
+}
+
 /** Applies one replacement. Errors are written for the model, and name what to do next. */
 export function applyEdit(text: string, edit: EditSpec): EditOutcome {
   if (edit.old_string === edit.new_string) {
@@ -101,9 +149,10 @@ export function applyEdit(text: string, edit: EditSpec): EditOutcome {
     const count = countOccurrences(finder, candidate.search)
     if (!count) continue
     if (count > 1 && !edit.replace_all) {
+      const where = startLines(finder, candidate.search)
       return {
         ok: false,
-        error: `old_string occurs ${count} times. Add surrounding lines so it matches exactly one place, or set replace_all to true to change every occurrence.`,
+        error: `old_string occurs ${count} times (lines ${where.join(', ')}${count > where.length ? ', …' : ''}). Add surrounding lines so it matches exactly one place, or set replace_all to true to change every occurrence.`,
       }
     }
     const result = replaceAt(text, candidate.search, candidate.replacement, Boolean(edit.replace_all), finder)
@@ -111,7 +160,7 @@ export function applyEdit(text: string, edit: EditSpec): EditOutcome {
   }
   return {
     ok: false,
-    error: 'old_string was not found in the file. Read the file again and copy the text exactly, including indentation, without the line-number prefix.',
+    error: `old_string was not found in the file. Read the file again and copy the text exactly, including indentation, without the line-number prefix.${notFoundHint(text, edit.old_string)}`,
   }
 }
 
