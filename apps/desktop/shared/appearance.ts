@@ -64,6 +64,16 @@ export const WINDOW_BACKGROUND: Record<ResolvedTheme, string> = {
   light: '#edeff3',
 }
 
+/**
+ * The 1 px line Windows 11 draws around a window. Left to the system it takes the user's accent colour (a pink
+ * or green hairline around a dark window), so eNCode paints it in the colour of the chrome it borders: the
+ * window then ends in its own edge, with no line of another colour.
+ */
+export const WINDOW_BORDER: Record<ResolvedTheme, string> = {
+  dark: WINDOW_BACKGROUND.dark,
+  light: WINDOW_BACKGROUND.light,
+}
+
 /** The glyphs of the native window buttons (Windows draws them over the title bar), chosen to stand out from `WINDOW_BACKGROUND`. */
 export const CAPTION_SYMBOL: Record<ResolvedTheme, string> = {
   dark: '#d3d8e2',

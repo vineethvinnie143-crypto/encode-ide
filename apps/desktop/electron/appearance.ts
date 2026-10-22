@@ -1,11 +1,19 @@
 import { nativeTheme, type BrowserWindow } from 'electron'
-import { CAPTION_SYMBOL, TITLE_BAR_HEIGHT, WINDOW_BACKGROUND, type Appearance } from '../shared/appearance'
+import { CAPTION_SYMBOL, TITLE_BAR_HEIGHT, WINDOW_BACKGROUND, WINDOW_BORDER, type Appearance } from '../shared/appearance'
 
 const currentTheme = () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
 
 /** The window colour for the theme Electron is using now. */
 export function windowBackground(): string {
   return WINDOW_BACKGROUND[currentTheme()]
+}
+
+/**
+ * The colour of the line Windows 11 draws around the window, which would otherwise be the user's accent
+ * colour. Undefined elsewhere: the option and the call exist on Windows only.
+ */
+export function windowBorder(): string | undefined {
+  return process.platform === 'win32' ? WINDOW_BORDER[currentTheme()] : undefined
 }
 
 /**
@@ -19,9 +27,11 @@ export function captionOverlay(): { color: string; symbolColor: string; height: 
   return { color: WINDOW_BACKGROUND[theme], symbolColor: CAPTION_SYMBOL[theme], height: TITLE_BAR_HEIGHT }
 }
 
-/** The window and its native buttons in the colours of the theme in use. */
+/** The window, its border and its native buttons in the colours of the theme in use. */
 function paint(win: BrowserWindow): void {
   win.setBackgroundColor(windowBackground())
+  const border = windowBorder()
+  if (border) win.setAccentColor(border)
   if (NATIVE_CAPTIONS) win.setTitleBarOverlay(captionOverlay())
 }
 
