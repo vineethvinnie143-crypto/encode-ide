@@ -43,6 +43,7 @@ import {
 } from '@encode/tools'
 import { estimateTokens } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
+import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
 import type { RuleJudge } from './approval'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
@@ -118,6 +119,8 @@ export interface SessionEnv {
   beforeWrite?: ToolContext['beforeWrite']
   /** Tools from outside eNCode, offered besides the built-in ones. */
   extraTools?: readonly Tool[]
+  /** Tools that come and go while the session is open (MCP servers); read when a turn starts. */
+  external?: ExternalToolSource
   /**
    * The desktop the Computer tool works on, made for one session. Absent where there is no desktop to use. The
    * session calls `backend.dispose()` when it stops using it (stop, reset, close), so a desktop shared between
@@ -204,6 +207,8 @@ function missingShell(error: unknown, root: string): ManagedShell {
 interface TurnState {
   mode?: AgentMode
   memory?: string
+  /** What the model was last told the MCP servers say about themselves ('' when nothing). */
+  external?: string
   date?: string
   /** The workspace root the model was last told about. */
   root?: string
@@ -632,7 +637,7 @@ export class AgentSession {
 
   private buildRegistry(definitions: ReturnType<AgentSession['definitions']>): ToolRegistry {
     const settings = this.env.settings()
-    return createToolRegistry(
+    const registry = createToolRegistry(
       {
         dialect: this.shell.dialect,
         platform: this.env.platform,
@@ -643,6 +648,16 @@ export class AgentSession {
       },
       [...(this.env.extraTools ?? [])],
     )
+    // A tool from outside that cannot be added (its name is taken, its schema is not an object) is left out and said so;
+    // one odd server must not stop the turn.
+    for (const tool of this.env.external?.list() ?? []) {
+      try {
+        registry.register(tool)
+      } catch (error) {
+        this.env.warn?.(`The tool ${tool.definition.name} was left out: ${errorMessage(error)}`)
+      }
+    }
+    return registry
   }
 
   /** Text that must survive a compaction: where the agent is, and the project's instructions. */
@@ -650,6 +665,8 @@ export class AgentSession {
     const parts = [environmentReminder(await gatherEnvironment(this.env.root, this.shell, this.env.platform))]
     const memory = renderMemory(await this.memory())
     if (memory) parts.push(memory)
+    const notes = renderExternalNotes(this.env.external?.instructions?.() ?? [])
+    if (notes) parts.push(notes)
     return parts
   }
 
@@ -685,7 +702,7 @@ export class AgentSession {
   /** What decides the tool list: a change takes effect with the next turn. */
   private toolsKey(): string {
     const settings = this.env.settings()
-    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer)])
+    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? ''])
   }
 
   private getLoop(): AgentLoop {
@@ -798,6 +815,14 @@ export class AgentSession {
       this.turn.memory = fingerprint
     }
 
+    // What the MCP servers say about their own tools: told once it is known, and again when it changes.
+    const notes = this.env.external?.instructions?.() ?? []
+    const noted = externalNotesFingerprint(notes)
+    if (noted !== (this.turn.external ?? '')) {
+      add(renderExternalNotes(notes, Boolean(this.turn.external)))
+      this.turn.external = noted
+    }
+
     const hookEvent = { sessionId: this.id, agentId: 'main', root: env.root, mode, signal }
     if (!this.started) {
       this.started = true
@@ -862,6 +887,8 @@ export class AgentSession {
     const turnId = newRecordId()
     try {
       this.setStatus('thinking')
+      // Servers that are still starting get a moment to bring their tools: the list is fixed for the turn once it begins.
+      await this.env.external?.ready?.(signal).catch(() => undefined)
       const prompt = await this.promptBlocks(input, text, mode, turnId, signal)
       if ('blocked' in prompt) {
         this.notice(`A hook refused this request: ${prompt.blocked}`)

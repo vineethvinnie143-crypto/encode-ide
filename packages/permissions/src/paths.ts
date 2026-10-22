@@ -26,14 +26,31 @@ function hasWindowsRoot(target: string): boolean {
  */
 const PROTECTED_SEGMENTS = new Set(['.git', '.encode'])
 
+/** Files at the top of a workspace that name programs eNCode starts. */
+const GUARDED_ROOT_FILES = new Set(['.mcp.json'])
+
+/** A path segment as Windows reads it: without the trailing dots, spaces and `:stream` suffix it strips, and without case. */
+function plainName(segment: string): string {
+  return segment.split(':', 1)[0].replace(/[. ]+$/, '').toLowerCase()
+}
+
 /**
  * True when a workspace-relative path touches a protected directory. Matching
  * ignores case and the trailing dots, spaces and `:stream` suffixes Windows
  * strips, so `.GIT`, `.git.` and `.git::$INDEX_ALLOCATION` all count.
  */
 export function isProtectedPath(relative: string): boolean {
-  return relative.split(/[\\/]+/).some((segment) => {
-    const name = segment.split(':', 1)[0].replace(/[. ]+$/, '').toLowerCase()
-    return PROTECTED_SEGMENTS.has(name)
-  })
+  return relative.split(/[\\/]+/).some((segment) => PROTECTED_SEGMENTS.has(plainName(segment)))
+}
+
+/**
+ * True for a protected path and for the files at the top of the workspace that
+ * name programs to start (`.mcp.json`). A write there asks whatever a rule says,
+ * since what it holds could run code later; unlike the folders above, a rewind
+ * may put such a file back, because the person asks for that themselves.
+ */
+export function isGuardedPath(relative: string): boolean {
+  if (isProtectedPath(relative)) return true
+  const segments = relative.split(/[\\/]+/).filter((segment) => segment && segment !== '.')
+  return segments.length === 1 && GUARDED_ROOT_FILES.has(plainName(segments[0]))
 }

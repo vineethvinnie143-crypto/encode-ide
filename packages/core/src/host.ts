@@ -28,6 +28,7 @@ import {
   type WebAccess,
 } from '@encode/tools'
 import { createDefaultAssessor, refuseEverything, type RuleJudge } from './approval'
+import type { ExternalToolSource } from './external'
 import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
@@ -73,6 +74,8 @@ export interface SessionScope {
   beforeWrite?: ToolContext['beforeWrite']
   /** What the session's file tools changed, and the means to put it back. */
   checkpoints?: SessionCheckpoints
+  /** The tools of the folder's MCP servers, which come and go while the session is open. */
+  external?: ExternalToolSource
   /** Options for this session's shells, asked for each time one is made, merged over the host's. */
   shell?: () => Omit<AgentShellOptions, 'root'>
   /** The session closed: let go of what was held for it. */
@@ -211,6 +214,7 @@ export class AgentHost {
       ...(scope?.remember ? { remember: scope.remember } : {}),
       ...(scope?.release ? { release: scope.release } : {}),
       ...(scope?.checkpoints ? { checkpoints: scope.checkpoints } : {}),
+      ...(scope?.external ? { external: scope.external } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
       skills: createSkills(() => this.skillSources(root)),

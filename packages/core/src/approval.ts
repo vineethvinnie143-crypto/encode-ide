@@ -28,7 +28,7 @@
  * for (protected folders, a Read Only policy, desktop applications).
  */
 import path from 'node:path'
-import { assessCommand, checkFetchUrl, isProtectedPath, suggestRule, type RuleQuery, type RuleSuggestion, type RuleVerdict } from '@encode/permissions'
+import { assessCommand, checkFetchUrl, isGuardedPath, isProtectedPath, suggestRule, type RuleQuery, type RuleSuggestion, type RuleVerdict } from '@encode/permissions'
 import type { ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } from '@encode/tools'
 import { classifyApp, isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
 import type { ApprovalPolicy } from './ui'
@@ -103,10 +103,10 @@ async function outsideWorkspace(paths: readonly string[], context: ApprovalConte
 
 async function protectedTarget(paths: readonly string[], context: ApprovalContext): Promise<string | undefined> {
   for (const target of paths) {
-    if (isProtectedPath(path.relative(context.root, target))) return target
+    if (isGuardedPath(path.relative(context.root, target))) return target
     // Spellings that only resolve to .git on disk, such as Windows short names (GIT~1).
     const real = await realPathOf(target)
-    if (isProtectedPath(path.relative(context.root, real))) return target
+    if (isGuardedPath(path.relative(context.root, real))) return target
   }
   return undefined
 }
@@ -156,7 +156,10 @@ async function decideAccess(access: ToolAccess, context: ApprovalContext): Promi
       if (policy === 'read-only') return deny('The approval policy is Read Only, so eNCode does not change files. Ask the user to switch to Workspace Write.')
       // A protected folder is asked about whatever a rule says: a rule cannot vouch for what could run code later.
       const guarded = await protectedTarget(access.paths, context)
-      if (guarded) return ask(`${shown(guarded, context.root)} is in a protected folder: changes there can run code or steer the agent.`, false)
+      if (guarded) {
+        const folder = isProtectedPath(path.relative(context.root, guarded))
+        return ask(`${shown(guarded, context.root)} ${folder ? 'is in a protected folder' : 'is a protected file'}: changes there can run code or steer the agent.`, false)
+      }
       if (verdict?.decision === 'ask') return askByRule(verdict.reason)
       if (verdict?.decision === 'allow') return ALLOW
       const outside = await outsideWorkspace(access.paths, context, context.extraRoots)

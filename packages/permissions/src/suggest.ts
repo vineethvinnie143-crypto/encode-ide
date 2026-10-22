@@ -158,6 +158,8 @@ const PROTECTED = new Set(['.git', '.encode', '.ssh', '.aws', '.gnupg'])
 function suggestPath(tool: 'Edit' | 'Read', target: string, root: string, windows: boolean): RuleSuggestion | null {
   const parts = relativeInside(target, root, windows)
   if (!parts || parts.some((part) => PROTECTED.has(part.toLowerCase()))) return null
+  // The MCP file names programs to start: the approval asks before a write there whatever a rule says, so none is offered.
+  if (tool === 'Edit' && parts.length === 1 && parts[0].toLowerCase() === '.mcp.json') return null
   const verb = tool === 'Edit' ? 'edit' : 'read'
   // A file at the top of the project is named exactly (package.json, tsconfig.json); anywhere deeper, its folder.
   if (parts.length === 1) return { rules: [`${tool}(/${parts[0]})`], label: `${verb} ${parts[0]}` }

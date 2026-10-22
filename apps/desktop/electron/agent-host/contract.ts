@@ -26,6 +26,9 @@ export type HostToRenderer = [
   Expect<Same<Workspace.WorkspaceReport, Ui.PermissionsReport>>,
   Expect<Same<Workspace.PermissionsOutcome, Ui.PermissionsOutcome>>,
   Expect<Same<Workspace.HookView, Ui.PermissionHookView>>,
+  Expect<Same<Workspace.McpReport, Ui.McpReport>>,
+  Expect<Same<Workspace.McpServerView, Ui.McpServerView>>,
+  Expect<Same<Workspace.McpOutcome, Ui.McpOutcome>>,
   Expect<Same<Core.CheckpointInfo, Ui.CheckpointInfo>>,
   Expect<Same<Core.RewindPlan, Ui.RewindPlan>>,
   Expect<Same<Core.RewindOutcome, Ui.RewindOutcome>>,
@@ -39,5 +42,6 @@ export type RendererToHost = [
   Expect<Same<Core.ApprovalPolicy, Ui.ApprovalPolicy>>,
   Expect<Same<Core.AgentMode, Ui.AgentMode>>,
   Expect<Same<Workspace.PermissionsAction, Ui.PermissionsAction>>,
+  Expect<Same<Workspace.McpAction, Ui.McpAction>>,
   Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
 ]

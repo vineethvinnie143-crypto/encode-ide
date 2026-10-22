@@ -6,7 +6,7 @@
  */
 import type { HostEvents, HostRequests } from '@encode/core'
 import type { ModelMode } from '../../shared/models'
-import type { ApprovalPolicy, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
+import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { RouterSettings } from './router-settings'
 
 /** What the host needs to know about the user's settings, and nothing else of them. */
@@ -66,10 +66,14 @@ export type DesktopHostRequests = HostRequests & {
   permissionsReport: { params: { root: string }; result: PermissionsReport }
   /** Does something to a folder's settings; answers with the folder as it stands afterwards. */
   permissionsAct: { params: { root: string; action: PermissionsAction }; result: PermissionsOutcome }
+  /** A folder's MCP servers, for the MCP screen. */
+  mcpReport: { params: { root: string; start?: boolean }; result: McpReport }
+  /** Does something to one of a folder's MCP servers; answers with the servers as they stand afterwards. */
+  mcpAct: { params: { root: string; action: McpAction }; result: McpOutcome }
 }
 
-/** What the host serves. */
-export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert } }
+/** What the host serves. `mcp`: a folder's MCP servers changed what the screen shows (the folder is named as the host knows it). */
+export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert; mcp: { root: string } } }
 
 /** What the main process serves to the host. */
 export type MainApi = {

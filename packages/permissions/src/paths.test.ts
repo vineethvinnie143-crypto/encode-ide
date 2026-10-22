@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { isInside, isProtectedPath } from './paths'
+import { isGuardedPath, isInside, isProtectedPath } from './paths'
 
 describe('isInside', () => {
   it('follows POSIX path rules', () => {
@@ -44,5 +44,23 @@ describe('isProtectedPath', () => {
     for (const target of ['.gitignore', '.github/workflows/ci.yml', 'src/git.ts', 'encode.md', '..', '.']) {
       assert.equal(isProtectedPath(target), false, target)
     }
+  })
+})
+
+describe('isGuardedPath', () => {
+  it('covers the protected folders and the MCP file at the top of the workspace, spelled any way Windows reads it', () => {
+    for (const target of ['.git/config', '.encode/mcp.json', '.mcp.json', './.mcp.json', '.MCP.JSON', '.mcp.json.', '.mcp.json ', '.mcp.json::$DATA', '.mcp.json:stream', '.\\.mcp.json']) {
+      assert.equal(isGuardedPath(target), true, target)
+    }
+  })
+
+  it('leaves the rest alone, and a file of that name further down', () => {
+    for (const target of ['mcp.json', 'sub/.mcp.json', 'src/.mcp.json.bak', '.mcp.jsonl', '.mcp', 'x.mcp.json', '..', '.']) {
+      assert.equal(isGuardedPath(target), false, target)
+    }
+  })
+
+  it('does not widen what a rewind leaves alone', () => {
+    assert.equal(isProtectedPath('.mcp.json'), false)
   })
 })

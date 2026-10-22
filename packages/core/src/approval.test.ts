@@ -60,6 +60,17 @@ describe('edits', () => {
     assert.equal((await decideApproval(write(path.join(full.root, '.git', 'config'), '/etc/hosts'), full)).kind, 'allow')
   })
 
+  it('ask before the MCP file at the top of the workspace is written, whatever a rule says, and not for one further down', async () => {
+    const ctx = await context('workspace-write')
+    const decision = await decideApproval(write(path.join(ctx.root, '.mcp.json')), ctx)
+    assert.equal(decision.kind, 'ask')
+    assert.match(decision.kind === 'ask' ? decision.reason : '', /protected file/)
+    assert.equal(decision.kind === 'ask' && decision.grantable, false)
+    assert.equal((await decideApproval(write(path.join(ctx.root, 'sub', '.mcp.json')), ctx)).kind, 'allow')
+    const full = await context('full-access')
+    assert.equal((await decideApproval(write(path.join(full.root, '.mcp.json')), full)).kind, 'allow')
+  })
+
   it('let the user approve for the session what is outside the workspace or a command, but never a protected folder', async () => {
     const ctx = await context('workspace-write')
     const outside = await decideApproval(write(path.join(os.tmpdir(), 'elsewhere.txt')), ctx)

@@ -279,6 +279,69 @@ export type PermissionsAction =
 /** The folder as it is after an action, with what happened in words. */
 export type PermissionsOutcome = { ok: true; report: PermissionsReport; note?: string } | { ok: false; reason: string; report: PermissionsReport }
 
+/** One tool of an MCP server, as the MCP screen lists it. The words are the server's. */
+export interface McpToolView {
+  /** The name the model calls it by. */
+  name: string
+  description: string
+}
+
+export type McpServerState = 'disabled' | 'needs-approval' | 'connecting' | 'connected' | 'failed' | 'stopped'
+
+/** One MCP server of the open folder as the MCP screen shows it. */
+export interface McpServerView {
+  name: string
+  /** Yours (your own file) or the project's. */
+  scope: 'user' | 'project'
+  /** The file the entry was read from. */
+  file: string
+  state: McpServerState
+  /** In words: why approval is needed, what failed. */
+  detail?: string
+  /** What approving is for: the exact setup the card showed. */
+  digest: string
+  /** What approving would run: the command line or the address. */
+  summary: string
+  /** Names only; the values never leave the files. */
+  envNames: string[]
+  headerNames: string[]
+  /** Variables of your own environment that the entry reads. */
+  variables: string[]
+  tools: McpToolView[]
+  resources: number
+  prompts: number
+  hasInstructions: boolean
+  problems: string[]
+  /** The last lines the server printed, for finding out why it failed. */
+  log: string[]
+}
+
+/** The open folder's MCP servers as the MCP screen shows them. */
+export interface McpReport {
+  root: string
+  /** A project's server cannot be approved before the folder is trusted. */
+  trusted: boolean
+  /** Why no server runs under these settings, or null. */
+  broken: string | null
+  /** Servers are still being started. */
+  starting: boolean
+  servers: McpServerView[]
+  /** What was wrong in the files, in words. */
+  problems: string[]
+  files: { user: string; project: string; encode: string }
+}
+
+/** What the MCP screen can do to a folder's servers. */
+export type McpAction =
+  | { type: 'approve'; name: string; /** The digest of the setup the person was shown. */ digest: string }
+  | { type: 'forget'; name: string }
+  | { type: 'restart'; name: string }
+  | { type: 'turn-off'; name: string }
+  | { type: 'turn-on'; name: string }
+
+/** The servers as they are after an action, with what happened in words. */
+export type McpOutcome = { ok: true; report: McpReport; note?: string } | { ok: false; reason: string; report: McpReport }
+
 /** A request of the person's after which the agent's file tools changed files, for the rewind menu. */
 export interface RewindTurn {
   /** The request's id: the id of its entry in the conversation. */
@@ -649,5 +712,16 @@ export interface EncodeApi {
     report(): Promise<PermissionsReport | null>
     /** Does something to the open folder's settings and answers with the folder as it stands. */
     act(action: PermissionsAction): Promise<PermissionsOutcome>
+  }
+  mcp: {
+    /**
+     * The open folder's MCP servers and how they stand; null when no folder is open. `start: false` looks without
+     * starting any server (what the banner above the composer does); the MCP screen starts them, as a chat would.
+     */
+    report(options?: { start?: boolean }): Promise<McpReport | null>
+    /** Does something to one of the open folder's servers and answers with the servers as they stand. */
+    act(action: McpAction): Promise<McpOutcome>
+    /** A server changed (it started, stopped or failed, or its tools or setup changed): ask for the report again. */
+    onChanged(cb: () => void): () => void
   }
 }

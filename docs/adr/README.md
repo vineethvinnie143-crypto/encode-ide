@@ -46,6 +46,7 @@ say so.
 | [0054](0054-computer-use-is-opt-in-visible-while-it-runs-and-stoppable-from-anywhere.md) | Computer use is opt-in, visible while it runs, and stoppable from anywhere | Accepted |
 | [0055](0055-a-folders-permissions-are-one-snapshot-that-fails-closed.md) | A folder's permissions are one snapshot that fails closed | Accepted, builds on 0040 and 0041 |
 | [0056](0056-hooks-run-from-the-trusted-snapshot-and-every-write-is-kept-before-it-is-made.md) | Hooks run from the trusted snapshot, and every write is kept before it is made | Accepted, builds on 0042, 0043 and 0055 |
+| [0057](0057-mcp-servers-run-from-the-folders-files-one-hub-per-folder-and-looking-starts-nothing.md) | MCP servers run from the folder's files, one hub per folder, and looking starts nothing | Accepted, builds on 0044, 0055 and 0056 |
 
 ## Template
 

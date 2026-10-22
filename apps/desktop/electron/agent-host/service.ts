@@ -9,7 +9,7 @@
  */
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
-import type { ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
+import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport } from '../../shared/types'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 
 export interface HostProcess {
@@ -30,6 +30,8 @@ export interface AgentHostServiceOptions {
   onJobs(jobs: BackgroundJob[]): void
   /** The model router has something the person should hear: a key was refused, a quota is spent, a model is closed to the account. */
   onAlert?(alert: ModelAlert): void
+  /** A folder's MCP servers changed what the MCP screen shows. */
+  onMcp?(root: string): void
   log?(message: string): void
   /** The pause before the first restart, ms; it doubles with every failure. Default 400. */
   restartDelayMs?: number
@@ -127,6 +129,16 @@ export class AgentHostService {
     return (await this.ready()).request('permissionsAct', { root, action }, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
+  /** A folder's MCP servers and how they stand. */
+  async mcpReport(root: string, options: { start?: boolean } = {}): Promise<McpReport> {
+    return (await this.ready()).request('mcpReport', { root, ...(options.start === false ? { start: false } : {}) }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Does something to one of a folder's MCP servers; the servers as they stand afterwards come back. */
+  async mcpAct(root: string, action: McpAction): Promise<McpOutcome> {
+    return (await this.ready()).request('mcpAct', { root, action }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
   private ready(): Promise<Peer<MainApi, DesktopHostApi>> {
     if (this.disposed) return Promise.reject(new Error('eNCode is closing.'))
     if (this.starting) return this.starting
@@ -161,6 +173,7 @@ export class AgentHostService {
     })
     peer.on('jobs', (jobs) => this.o.onJobs(jobs))
     peer.on('alert', (alert) => this.o.onAlert?.(alert))
+    peer.on('mcp', ({ root }) => this.o.onMcp?.(root))
     peer.on('warn', (message) => this.log(message))
     child.onExit(() => this.exited(child, peer))
 

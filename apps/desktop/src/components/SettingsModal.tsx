@@ -23,6 +23,7 @@ import AppearanceSettings from './AppearanceSettings'
 import { uniqueName } from './models/connect'
 import { PRESETS, isAnthropicUrl, type Preset } from './models/presets'
 import RolesSettings from './models/RolesSettings'
+import McpPane from './mcp/McpPane'
 import PermissionsPane from './permissions/PermissionsPane'
 
 export default function SettingsModal() {
@@ -234,6 +235,9 @@ export default function SettingsModal() {
             </button>
             <button className={tab === 'permissions' ? 'is-on' : ''} onClick={() => setTab('permissions')}>
               Permissions
+            </button>
+            <button className={tab === 'mcp' ? 'is-on' : ''} onClick={() => setTab('mcp')}>
+              MCP
             </button>
             <button className={tab === 'appearance' ? 'is-on' : ''} onClick={() => setTab('appearance')}>
               Appearance
@@ -535,6 +539,8 @@ export default function SettingsModal() {
             </div>
           ) : tab === 'permissions' ? (
             <PermissionsPane />
+          ) : tab === 'mcp' ? (
+            <McpPane onOpenTab={setTab} />
           ) : (
             <AppearanceSettings
               value={draft.appearance}
@@ -547,10 +553,12 @@ export default function SettingsModal() {
           <span className="settings-hint">
             {tab === 'permissions'
               ? 'Permission changes apply at once. Nothing here waits for Save.'
-              : 'Model calls go straight from this app to your provider. No eNCode server is involved.'}
+              : tab === 'mcp'
+                ? 'Changes to MCP servers apply at once. Nothing here waits for Save.'
+                : 'Model calls go straight from this app to your provider. No eNCode server is involved.'}
           </span>
           <div className="settings-footer-actions">
-            {tab === 'permissions' ? (
+            {tab === 'permissions' || tab === 'mcp' ? (
               <button className="btn primary" onClick={close}>
                 Done
               </button>

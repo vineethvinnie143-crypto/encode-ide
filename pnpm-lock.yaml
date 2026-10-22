@@ -387,6 +387,9 @@ importers:
       '@encode/hooks':
         specifier: workspace:*
         version: link:../hooks
+      '@encode/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions

@@ -482,18 +482,18 @@ Written with the pull request that added `@encode/config`, `@encode/hooks`,
 `@encode/checkpoints` and `@encode/mcp` and extended `@encode/permissions`. These packages
 are libraries with their own tests. The permission rules, workspace trust, "Always allow" and
 the Permissions screen are wired into the app (0055, P11 to P13), and so are hooks, checkpoints
-and rewind (0056, P14 to P17); the MCP client is still waiting to be (RP7). The OS sandbox, search
-providers, subagent definitions and the reviewer gate are later M3 pull requests and get their
-rows when they land.
+and rewind (0056, P14 to P17) and the MCP client with its screen (0057, P18 to P22). The OS
+sandbox, search providers, subagent definitions and the reviewer gate are later M3 pull requests
+and get their rows when they land.
 
 ### Threats and controls
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Mitigated for rules, environment, extra folders and hooks (0056); MCP waits for its wiring (RP7) |
-| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). | Partial (RP7) |
-| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). | Partial (RP1) |
-| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). | Partial (RP2) |
+| P1 | A cloned repository grants itself authority: allow rules, hooks, environment variables, MCP servers | Its restrictions apply, its grants wait for trust and for approval of that exact configuration by digest. A change from a pull or from the agent turns the grants off again (0041). | Mitigated for rules, environment, extra folders, hooks (0056) and MCP servers (0057) |
+| P2 | A project's `.mcp.json` starts a program or contacts a site | A project server runs only in a trusted folder, after approval of its exact entry, and never replaces a server the user set up. A changed entry stops at once (0044). In the app the approval card names the command or address it would run (0057). | Mitigated (RP6) |
+| P3 | An MCP result steers the model | Results are labeled as outside text, cut to size, stripped of control and invisible characters, and every call asks. A server's hints never decide anything, and sampling and elicitation are refused (0044). What a server says about itself reaches the model as labeled notes in the turn's reminders, cut to size, with the block's own tags defanged, and never in the system prompt (0057). | Partial (RP1) |
+| P4 | An MCP server or its configuration leaks credentials | Stdio servers get an allowlisted environment, headers go only to the configured site, redirects are never followed, and `${VAR}` expands only in approved entries (0044). The approval card names the variables and headers an entry sets or reads, never their values (0057). | Mitigated (RP2) |
 | P5 | A command line hides a second command from the rules (`;`, `&&`, `$(...)`, wrappers, here-documents, `bash < script`, redirects) | Rules are judged over the parsed commands: a deny or ask on any command decides the line, an allow needs a rule for every command, run-time words never satisfy a literal, and a redirect that writes is never allowed by a Bash rule (0040). | Mitigated; the shell assessor is in the app (RP3 for what text cannot see) |
 | P6 | A path rule is sidestepped by spelling: `..`, extra slashes, case on Windows | Paths are normalized before matching (`.` and `..` resolved), and Windows matching ignores case (0040). The file tools ask the rules about the real path. | Mitigated for the file tools; partial for shell words (RP3) |
 | P7 | A hook that broke, hangs or loops waves a call through or stalls the agent | A `PreToolUse` hook that cannot run or times out denies the call, every hook has a timeout and its whole process tree is stopped, and `Stop` hooks may send the agent back three times at most (0042). A hook also stops with the turn, and where there is no shell to run it in a guard denies (0056). | Mitigated in the app (RP6) |
@@ -507,6 +507,11 @@ rows when they land.
 | P15 | A hook from a cloned repository runs code the person never read | A folder's hooks run only when the folder is trusted and its settings, as they are now, were approved; the Permissions screen shows the text that waits. They run with the person's rights, in the agent's environment with secret-looking variables removed unless the settings name them (0041, 0056). | Mitigated (RP6) |
 | P16 | The record of what the agent changes fails, and either stops a guard from running or makes a rewind promise what it cannot do | The recording hooks come first and cannot throw: a failure is told once and the person's hooks still run. The write itself is refused, naming the file, when its earlier version cannot be kept, so a change that cannot be taken back is not made (0056). | Mitigated |
 | P17 | A rewind cuts the conversation while files are still wrong, or runs while the agent writes | The conversation is cut only when every file went back, and a rewind holds the session so no turn starts in the middle and the dialog is disabled while the agent works (0056). | Mitigated |
+| P18 | Opening a cloned folder, or the screen that lists its MCP servers, starts a program the person never read | Looking starts nothing: the banner reads with `start: false`, which brings no server in line with the files and reports from the settings and the person's approvals alone. A server starts when a chat is opened in the folder, and only if the settings allow it: the person's own, or a project's after the folder is trusted and that exact entry was approved. A server that waits never starts (0057). | Mitigated |
+| P19 | A server keeps running from an entry that is no longer the approved one: a pull or the agent changed `.mcp.json` | One hub per folder follows the folder's snapshot, read again before every turn and every tool call. A changed entry has a new digest: its server stops at once and waits for approval again. While the snapshot is broken no server runs. "Approve" carries the digest the card showed and is refused when the entry changed since, when the folder is not trusted, or when nothing waits (0044, 0055, 0057). | Mitigated |
+| P20 | The agent writes `.mcp.json` to get a program started | A write to the top-level `.mcp.json` asks whatever a rule says, and "Always allow" offers no Edit rule for it. A written entry is new to the digest, so it waits for approval anyway; a write under `.encode/` is protected already (0041, 0057). | Mitigated |
+| P21 | The page, or something it loads, starts, approves or restarts a server | Report and act are IPC handlers for the app's top frame and for the open folder only. The host checks an action before doing anything (the type from a list, a name the configuration allows, a digest of 64 hexadecimal characters). The agent has no tool for it, and approving needs the folder trusted (0010, 0057). | Mitigated |
+| P22 | Turning a server off damages a settings file, or costs the folder the approval of its grants | The name goes into `disabledMcpjsonServers` only, which takes permission away and is left out of what a folder's approval covers (0041). The file is read as JSON first and written atomically; one that cannot be read is never overwritten. A project's server is turned off in the person's own local settings, not in the shared file (0057). | Mitigated |
 
 ### Residual risks
 
@@ -514,8 +519,9 @@ rows when they land.
   The control is that every call asks, with the server and tool named, and that a result
   cannot change a permission.
 - **RP2. `${VAR}` in an approved project MCP entry can send an environment value to the URL
-  the entry configures.** The approval card must name the variables the entry reads.
-  - Owner: the app's approval card.
+  the entry configures.** The approval card names the variables the entry reads and the
+  headers and variables it sets (0057), so the person decides knowing it; the values are
+  never shown.
 - **RP3. Rules read shell words as text.** A link inside the workspace that points at a denied
   file is not recognised in a shell word, and PowerShell 5.1's `-Recurse` follows directory
   junctions. The file tools resolve real paths before they consult the rules.
@@ -528,10 +534,12 @@ rows when they land.
 - **RP6. Hooks and approved MCP servers run with the user's full rights.** That is what they are
   for. A folder cannot install one without the user's approval, and the sandbox will not cover
   them.
-- **RP7. The MCP client is not in the app yet.** Until it is wired, P2 to P4 and the server
-  halves of P1 and P4 do not act in the product. `docs/m3-integration.md` lists the wiring; the
-  rules, trust, "Always allow", hooks, checkpoints and rewind are done.
-  - Owner: the integration pull request that follows.
+- **RP7. Closed.** The MCP client was not in the app until 0057; P2 to P4 and the server
+  halves of P1 and P4 now act in the product.
+- **RP8. A folder's chats share its servers.** A server that keeps state keeps one state for
+  all of them, so what one chat made it hold, another chat's calls can see. A server also runs
+  for up to five minutes after the folder's last chat is closed. Turning a server off, or
+  taking back its approval, stops it for every chat at once.
 
 ### Verification
 
@@ -554,7 +562,13 @@ rows when they land.
   (shape, size and scope checked). Its hook and rewind tests cover hooks that wait for trust,
   settings read again before a prompt, the agent's environment, a guard that cannot be read
   stopping the folder, a write refused when its earlier version cannot be kept, a failing record
-  that is told once and still lets prompt hooks run, and a plan the files moved past.
+  that is told once and still lets prompt hooks run, and a plan the files moved past. Its MCP
+  tests cover the hub with an in-memory transport: a project's server waiting for trust and
+  then for approval, a changed entry stopping its server, the folder's files followed, the key
+  of the tools staying put across a reconnect, turning off and on (and the file that still
+  turns it off), broken settings running nothing, a server that fails or is slow, a look that
+  starts nothing, hubs shared by sessions and closed when idle, and the shape of every action
+  the screen may send.
 - The end-to-end run drives the app: a command asks, "Always allow" saves one rule in the
   private file and trusts the folder, the same command then runs unasked and a different one
   asks, settings that arrive from a pull wait behind a banner and the Permissions screen shows
@@ -563,6 +577,13 @@ rows when they land.
   the prompt and each change of a file, and a guard refuses a command before it can ask. Through
   the Rewind dialog the agent's changes to one request go back (files only), Undo brings them
   back, a file the person edited since is left alone unless overwriting is ticked, and "Code and
-  conversation" puts the request back in the composer.
+  conversation" puts the request back in the composer. A third scenario runs MCP servers with a
+  real child process: the banner names the project's server that waits and a look starts
+  nothing, the screen shows the person's own server running and the project's one waiting (its
+  approval blocked until the folder is trusted), approving starts it and lists its tools, the
+  agent calls them (a tool is asked about by name, and "Always allow" saves one rule for that
+  tool only), the server's notes reach the model as labeled outside text, turning a server off
+  and on writes the settings file and stops and starts the process, and changing the entry
+  stops the server and asks again.
 - CI runs all of it on Windows. The packages were also type-checked against the core pull
   request's seams in a scratch merge.

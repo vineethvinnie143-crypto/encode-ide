@@ -12,6 +12,7 @@ import {
 } from '@encode/config'
 import { refuseEverything, type RuleJudge } from '@encode/core'
 import { loadHookGroups, type HookGroup } from '@encode/hooks'
+import { loadMcpConfig, mcpConfigFiles, type McpPolicy, type McpServerEntry } from '@encode/mcp'
 import { createShellAssessor, parseRule, RuleSet, type DiskProbe, type PermissionRule } from '@encode/permissions'
 import { realPathOf, type ShellCommandAssessor } from '@encode/tools'
 import type { WorkspaceFs } from './fs'
@@ -38,8 +39,17 @@ export interface WorkspaceConfigOptions {
   trustFile?: string
   /** Checks read-only verdicts on disk. Default: the real disk. */
   probe?: DiskProbe
-  /** Other files whose change means the picture is stale (the MCP files), by absolute path. */
+  /** Other files whose change means the picture is stale, by absolute path. */
   also?: readonly string[]
+}
+
+/** The MCP servers the folder's files describe, and which of them the settings allow to run. */
+export interface McpSnapshot {
+  /** Every server of the three files, as written (variables are not filled in). */
+  servers: McpServerEntry[]
+  /** What was wrong in the files, in words. */
+  problems: string[]
+  policy: McpPolicy
 }
 
 export interface ConfigSnapshot {
@@ -52,6 +62,8 @@ export interface ConfigSnapshot {
   extraRoots: string[]
   /** The hooks that apply: the user's own, and the folder's once it is trusted and its settings approved. Empty while the settings are broken. */
   hooks: HookGroup[]
+  /** The folder's MCP servers; none of them runs while `broken` is set. */
+  mcp: McpSnapshot
   /** What was wrong with the settings, the rules and the hooks, in words. */
   problems: string[]
   /**
@@ -129,7 +141,8 @@ export class WorkspaceConfig {
     this.trust = new TrustStore(this.trustFile, this.fs, this.platform === 'win32')
     this.probe = options.probe ?? nodeDiskProbe(options.root, { platform: this.platform })
     const files = settingsFiles(options.home, options.root, api)
-    this.watched = [files.user, files.project, files.local, this.trustFile, ...(options.also ?? [])]
+    const servers = mcpConfigFiles(options.home, options.root, api).map((entry) => entry.file)
+    this.watched = [files.user, files.project, files.local, this.trustFile, ...servers, ...(options.also ?? [])]
   }
 
   /** The trust store this folder's picture is built from; the same file every folder's is. */
@@ -218,6 +231,7 @@ export class WorkspaceConfig {
       const expanded = directory === '~' ? this.home : /^~[\\/]/.test(directory) ? api.join(this.home, directory.slice(2)) : directory
       extraRoots.push(await realPathOf(api.resolve(this.root, expanded)).catch(() => api.resolve(this.root, expanded)))
     }
+    const servers = await loadMcpConfig({ home: this.home, root: this.root, read: (file) => this.fs.read(file), platform: this.platform })
     return {
       root: this.root,
       sources,
@@ -226,6 +240,7 @@ export class WorkspaceConfig {
       rules,
       extraRoots,
       hooks: broken ? [] : hooks.groups,
+      mcp: { servers: servers.servers, problems: servers.problems, policy: { enableAll: effective.mcp.enableAll, enabled: effective.mcp.enabled, disabled: effective.mcp.disabled } },
       problems: [...effective.problems, ...problems, ...hooks.problems],
       broken,
       judge: refusal?.rules ?? rules,

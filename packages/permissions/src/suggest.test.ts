@@ -106,9 +106,10 @@ describe('suggested rules for files, sites and tools', () => {
   })
 
   it('offers nothing outside the project, in folders that always ask, or with glob characters in the name', () => {
-    for (const target of ['/etc/hosts', '/work/../etc/x', '/work/.git/config', '/work/.encode/settings.json', '/work/a/.ssh/id', '/work/src/[id].tsx', '/work/src/a*b/x.ts', '/work', '/workshop/a.ts']) {
+    for (const target of ['/etc/hosts', '/work/../etc/x', '/work/.git/config', '/work/.encode/settings.json', '/work/a/.ssh/id', '/work/src/[id].tsx', '/work/src/a*b/x.ts', '/work', '/workshop/a.ts', '/work/.mcp.json']) {
       assert.equal(suggestRule({ type: 'edit', path: target, root: '/work', windows: false }), null, target)
     }
+    assert.deepEqual(suggestRule({ type: 'read', path: '/work/.mcp.json', root: '/work', windows: false })?.rules, ['Read(/.mcp.json)'], 'reading it is harmless')
   })
 
   it('allows what it was made from, and not a sibling folder', () => {

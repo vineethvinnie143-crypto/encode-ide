@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { parseRule, type RuleBehavior } from '@encode/permissions'
 import { isFolderSource, loadSettingsSources, settingsFiles, type SettingsScope } from './settings'
+import { isObject, readSettingsDocument, writeSettingsDocument } from './settings-document'
 import { folderConfigDigest, type TrustFs, type TrustStore } from './trust'
 
 /**
@@ -47,10 +48,6 @@ export type RuleEditResult =
     }
   | { ok: false; reason: string }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /** `change` gets the rule list and the rule's text as it is stored, and returns the new list, or null when there is nothing to change. */
 async function edit(options: RuleEditOptions, change: (list: string[], text: string) => string[] | null): Promise<RuleEditResult> {
   const parsed = parseRule(options.text, options.behavior, options.scope)
@@ -59,23 +56,9 @@ async function edit(options: RuleEditOptions, change: (list: string[], text: str
   const platform = options.platform ?? process.platform
   const file = settingsFiles(options.home, options.root, platform === 'win32' ? path.win32 : path.posix)[options.scope]
 
-  let current: string | null
-  try {
-    current = await options.fs.read(file)
-  } catch (error) {
-    return { ok: false, reason: `${file} could not be read: ${error instanceof Error ? error.message : String(error)}` }
-  }
-  let document: Record<string, unknown> = {}
-  if (current !== null && current.trim() !== '') {
-    let raw: unknown
-    try {
-      raw = JSON.parse(current.replace(/^\uFEFF/, ''))
-    } catch (error) {
-      return { ok: false, reason: `${file} is not valid JSON (${error instanceof Error ? error.message : String(error)}); fix it before saving a rule there.` }
-    }
-    if (!isObject(raw)) return { ok: false, reason: `${file} does not hold a settings object; fix it before saving a rule there.` }
-    document = raw
-  }
+  const loaded = await readSettingsDocument(options.fs, file, 'saving a rule')
+  if (!loaded.ok) return loaded
+  const document = loaded.document
   const permissions = document.permissions
   if (permissions !== undefined && !isObject(permissions)) return { ok: false, reason: `"permissions" in ${file} is not an object.` }
   const existing = permissions?.[options.behavior]
@@ -93,11 +76,8 @@ async function edit(options: RuleEditOptions, change: (list: string[], text: str
 
   const next = { ...document, permissions: { ...(permissions as Record<string, unknown> | undefined), [options.behavior]: after } }
   if (after.length === 0 && permissions !== undefined) delete (next.permissions as Record<string, unknown>)[options.behavior]
-  try {
-    await options.fs.writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`)
-  } catch (error) {
-    return { ok: false, reason: `${file} could not be written: ${error instanceof Error ? error.message : String(error)}` }
-  }
+  const unwritten = await writeSettingsDocument(options.fs, file, next)
+  if (unwritten) return { ok: false, reason: unwritten }
 
   // A rule that takes something away applies at once, wherever it is written: only a folder's allow rules wait for its approval.
   if (!folder || options.behavior !== 'allow') return { ok: true, file, changed: true, approved: true }

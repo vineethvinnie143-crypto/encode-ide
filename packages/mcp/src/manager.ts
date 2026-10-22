@@ -125,7 +125,29 @@ export class McpUnavailableError extends Error {
 
 const own = (map: object | undefined, key: string) => map !== undefined && Object.hasOwn(map, key)
 
-function describeSetup(setup: ServerSetup): Pick<ServerStatus, 'summary' | 'envNames' | 'headerNames'> {
+export type ServerDecision = { run: true } | { run: false; state: 'disabled' | 'needs-approval'; detail: string }
+
+/**
+ * Whether a server may run under the settings and the folder's trust record, or why not, in words for the person.
+ * The one place this is decided: the manager asks it before it starts anything, and a screen that must not start
+ * anything asks it to say where each server stands.
+ */
+export function decideServer(entry: McpServerEntry, policy: McpPolicy, record: TrustRecord): ServerDecision {
+  if (policy.disabled.includes(entry.name)) return { run: false, state: 'disabled', detail: 'Turned off in the settings (disabledMcpjsonServers).' }
+  if (entry.scope === 'user') return { run: true }
+  if (!record.trusted) return { run: false, state: 'needs-approval', detail: 'This folder is not trusted yet. Trust it to let its MCP servers run.' }
+  if (policy.enableAll || policy.enabled.includes(entry.name)) return { run: true }
+  const approved = own(record.mcpServers, entry.name) ? record.mcpServers![entry.name] : undefined
+  if (approved === entry.digest) return { run: true }
+  return {
+    run: false,
+    state: 'needs-approval',
+    detail: approved ? 'Its setup changed since you approved it. Check the new setup before you approve it again.' : 'This project asks to run an MCP server. Read what it starts before you approve it.',
+  }
+}
+
+/** What approving a server would run, in words for the approval card: the command line or the address, and the names of what it is given. */
+export function describeSetup(setup: ServerSetup): Pick<ServerStatus, 'summary' | 'envNames' | 'headerNames'> {
   if (setup.type === 'stdio') {
     const words = [setup.command, ...setup.args].map((word) => (/^[A-Za-z0-9_@+=:,./\\~${}-]+$/.test(word) ? word : JSON.stringify(word)))
     return { summary: words.join(' '), envNames: Object.keys(setup.env).sort(), headerNames: [] }
@@ -295,24 +317,15 @@ export class McpManager implements ToolCaller, ResourceSource {
   }
 
   /** Whether the server may run now, or why not. */
-  private async decide(entry: McpServerEntry): Promise<{ run: true } | { run: false; state: 'disabled' | 'needs-approval'; detail: string }> {
-    if (this.policy.disabled.includes(entry.name)) return { run: false, state: 'disabled', detail: 'Turned off in the settings (disabledMcpjsonServers).' }
-    if (entry.scope === 'user') return { run: true }
+  private async decide(entry: McpServerEntry): Promise<ServerDecision> {
+    if (entry.scope === 'user' && !this.policy.disabled.includes(entry.name)) return { run: true }
     let record: TrustRecord
     try {
       record = await this.options.trust.get(this.options.root)
     } catch {
       record = { trusted: false }
     }
-    if (!record.trusted) return { run: false, state: 'needs-approval', detail: 'This folder is not trusted yet. Trust it to let its MCP servers run.' }
-    if (this.policy.enableAll || this.policy.enabled.includes(entry.name)) return { run: true }
-    const approved = own(record.mcpServers, entry.name) ? record.mcpServers![entry.name] : undefined
-    if (approved === entry.digest) return { run: true }
-    return {
-      run: false,
-      state: 'needs-approval',
-      detail: approved ? 'Its setup changed since you approved it. Check the new setup before you approve it again.' : 'This project asks to run an MCP server. Read what it starts before you approve it.',
-    }
+    return decideServer(entry, this.policy, record)
   }
 
   private async settle(runtimes: Runtime[]): Promise<void> {

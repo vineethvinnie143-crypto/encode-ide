@@ -108,6 +108,14 @@ const SCENARIOS = {
     { text: 'Now a command.', call: { name: 'Bash', args: { command: 'echo computer-check-ok' } } },
     { text: 'Computer check finished.' },
   ],
+  // A tool of an MCP server asks like any tool. "Always allow" saves a rule for that tool alone: the same tool then runs
+  // without asking, and the server's other tool still asks.
+  'mcp-check': [
+    { text: 'Calling the server.', call: { name: 'mcp__fake__echo', args: { text: 'mcp-check-ok' } } },
+    { text: 'Calling it again.', call: { name: 'mcp__fake__echo', args: { text: 'mcp-check-again' } } },
+    { text: 'Now the other tool.', call: { name: 'mcp__fake__add', args: { a: 2, b: 3 } } },
+    { text: 'MCP check finished.' },
+  ],
   // A second request in a session that already finished a task or was stopped.
   'follow-up': [{ text: 'Follow-up handled.' }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.

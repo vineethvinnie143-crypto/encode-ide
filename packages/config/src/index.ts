@@ -1,3 +1,4 @@
+export * from './mcp-settings'
 export * from './node-fs'
 export * from './settings'
 export * from './trust'

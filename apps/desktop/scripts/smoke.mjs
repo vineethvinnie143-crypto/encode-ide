@@ -605,6 +605,7 @@ async function runProviderPhase() {
   await runWebChecks()
   await runPermissionChecks()
   await runRewindChecks()
+  await runMcpChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -916,6 +917,177 @@ async function runRewindChecks() {
   for (const file of [noteFile, logFile, createdFile]) await fs.rm(file, { force: true })
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   console.log('[smoke] hooks and rewind: ok')
+}
+
+/**
+ * MCP servers. The person's own server and the project's are set up in files. Looking at the folder (the banner) starts
+ * nothing; the MCP screen starts the person's own server and shows the project's waiting, and the approval needs the
+ * folder trusted first. An approved server's tools reach the agent, which asks before each tool and can be told "Always
+ * allow" for one tool alone. An entry that changes is stopped until it is approved again, and a server whose file goes
+ * is stopped.
+ */
+async function runMcpChecks() {
+  console.log('[smoke] --- mcp servers ---')
+  const home = process.env.ENCODE_HOME
+  if (!home) {
+    console.log('[smoke] mcp: skipped, because ENCODE_HOME is not set and the smoke will not write to your real home folder')
+    return
+  }
+  const server = path.join(root, 'scripts', 'fake-mcp-server.mjs')
+  const projectFile = path.join(demoPath, '.mcp.json')
+  const userFile = path.join(home, '.encode', 'mcp.json')
+  const markers = path.join(path.dirname(demoPath), 'mcp-markers')
+  await fs.mkdir(markers, { recursive: true })
+  const markerOf = (name) => path.join(markers, `${name}.log`)
+  const entry = (name, note) => ({ command: process.execPath, args: [server, `--note=${note}`, `--marker=${markerOf(name)}`] })
+  const lines = async (name) => ((await fs.readFile(markerOf(name), 'utf8').catch(() => '')) || '').split(/\r?\n/).filter(Boolean)
+  const until = async (check, what, timeoutMs = 15000) => {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      const value = await check()
+      if (value) return value
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`)
+      await sleep(200)
+    }
+  }
+  const cards = () =>
+    evaluate(`[...document.querySelectorAll('.mcp-card')].map((card) => ({
+      name: card.querySelector('.mcp-name')?.textContent ?? '',
+      state: card.querySelector('.mcp-card-top')?.lastElementChild?.textContent ?? '',
+      detail: card.querySelector('.mcp-detail')?.textContent ?? '',
+      approval: card.querySelector('.mcp-approval')?.textContent ?? '',
+      tools: [...card.querySelectorAll('.mcp-tools code')].map((node) => node.textContent),
+      buttons: [...card.querySelectorAll('.mcp-actions .btn')].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
+    }))`)
+  const card = async (name) => (await cards()).find((item) => item.name === name)
+  const cardIs = (name, state) => until(async () => (await card(name))?.state === state, `${name} to read ${state}`)
+  const clickIn = (name, text) =>
+    evaluate(`(() => {
+      const card = [...document.querySelectorAll('.mcp-card')].find((item) => item.querySelector('.mcp-name')?.textContent === ${JSON.stringify(name)})
+      const button = [...(card?.querySelectorAll('.btn') ?? [])].find((item) => item.textContent.includes(${JSON.stringify(text)}))
+      if (!button || button.disabled) return false
+      button.click()
+      return true
+    })()`)
+
+  await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  await fs.mkdir(path.dirname(userFile), { recursive: true })
+  await fs.writeFile(userFile, JSON.stringify({ mcpServers: { mine: entry('mine', 'user') } }))
+  await fs.writeFile(projectFile, JSON.stringify({ mcpServers: { fake: entry('fake', 'v1') } }))
+
+  // Looking starts nothing: the banner names the project's server, and the person's own is not running.
+  const looked = await evaluate('window.eNCode.mcp.report({ start: false })')
+  const standing = Object.fromEntries(looked.servers.map((item) => [item.name, item.state]))
+  if (standing.mine !== 'stopped' || standing.fake !== 'needs-approval') throw new Error(`A look at the folder should find ${JSON.stringify({ mine: 'stopped', fake: 'needs-approval' })}, not ${JSON.stringify(standing)}`)
+  await evaluate("window.dispatchEvent(new Event('focus'))")
+  await waitFor("!!document.querySelector('.trust-banner')", 8000, 'the banner for the server that waits')
+  const banner = await evaluate("document.querySelector('.trust-banner')?.textContent ?? ''")
+  if (!/asks to run an MCP server \(fake\)/.test(banner)) throw new Error(`The banner says ${JSON.stringify(banner)}`)
+  await screenshot('19-mcp-banner.png')
+  if ((await lines('mine')).length || (await lines('fake')).length) throw new Error('Looking at the folder started a server')
+
+  // The MCP screen: the person's own server starts, the project's waits, and approving it needs the folder trusted.
+  await click('.trust-banner .btn', 'Review')
+  await waitFor("!!document.querySelector('.settings-mcp .mcp-card')", 8000, 'the MCP screen')
+  await cardIs('mine', 'Connected')
+  await cardIs('fake', 'Needs approval')
+  const waiting = await card('fake')
+  console.log('[smoke] mcp cards:', JSON.stringify(await cards()))
+  if (!/Trust this folder first/.test(waiting.approval)) throw new Error(`The approval card should say the folder needs trust first: ${JSON.stringify(waiting.approval)}`)
+  if (!/run this command on your computer/.test(waiting.approval)) throw new Error(`The approval card should say what approving lets happen: ${JSON.stringify(waiting.approval)}`)
+  if (!waiting.buttons.some((button) => button.text === 'Approve and start' && button.disabled)) throw new Error(`Approving should wait for trust: ${JSON.stringify(waiting.buttons)}`)
+  await screenshot('19-mcp-screen.png')
+  if ((await lines('mine')).join() !== 'started') throw new Error(`The person's own server should have started once: ${JSON.stringify(await lines('mine'))}`)
+  if ((await lines('fake')).length) throw new Error('The project’s server started before it was approved')
+
+  // Trust the folder in Permissions, come back, approve exactly what the card showed.
+  await click('.mcp-card .link-btn', 'Open Permissions')
+  await waitFor("!!document.querySelector('.settings-permissions .perm-folder')", 8000, 'the Permissions tab')
+  await click('.perm-folder-actions .btn', 'Trust this folder')
+  await waitFor("document.querySelector('.perm-folder .ui-chip')?.textContent === 'Trusted'", 8000, 'the folder is trusted')
+  await click('.settings-tabs button', 'MCP')
+  await waitFor("!!document.querySelector('.settings-mcp .mcp-card')", 8000, 'the MCP screen again')
+  await until(async () => (await card('fake'))?.buttons.some((button) => button.text === 'Approve and start' && !button.disabled), 'the approval to be possible')
+  if ((await card('fake')).approval.includes('Trust this folder first')) throw new Error('The card still asks for trust')
+  if (!(await clickIn('fake', 'Approve and start'))) throw new Error('Could not press Approve and start')
+  await cardIs('fake', 'Connected')
+  const approved = await card('fake')
+  if (JSON.stringify(approved.buttons.map((button) => button.text)) !== JSON.stringify(['Restart', 'Turn off', 'Take back approval'])) throw new Error(`An approved server offers ${JSON.stringify(approved.buttons)}`)
+  await evaluate("document.querySelector('.mcp-card[aria-label=\"MCP server fake\"] .mcp-details')?.setAttribute('open', '')")
+  const tools = (await card('fake')).tools
+  if (JSON.stringify(tools) !== JSON.stringify(['mcp__fake__echo', 'mcp__fake__add'])) throw new Error(`The server's tools are ${JSON.stringify(tools)}`)
+  await screenshot('19-mcp-approved.png')
+  if ((await lines('fake')).join() !== 'started') throw new Error(`The project's server should have started once, after the approval: ${JSON.stringify(await lines('fake'))}`)
+
+  // Turn the person's own server off and on again; its file stays as it was and the choice is kept in the settings.
+  if (!(await clickIn('mine', 'Turn off'))) throw new Error('Could not turn the server off')
+  await cardIs('mine', 'Turned off')
+  const settingsFile = path.join(home, '.encode', 'settings.json')
+  const off = JSON.parse(await fs.readFile(settingsFile, 'utf8'))
+  if (JSON.stringify(off.disabledMcpjsonServers) !== JSON.stringify(['mine'])) throw new Error(`The choice was not saved: ${JSON.stringify(off)}`)
+  await until(async () => (await lines('mine')).join() === 'started,stopped', 'the server to be stopped in an orderly way')
+  if (!(await clickIn('mine', 'Turn on'))) throw new Error('Could not turn the server on')
+  await cardIs('mine', 'Connected')
+
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  if (await evaluate("!!document.querySelector('.trust-banner')")) throw new Error('The banner should be gone once nothing waits')
+
+  // The agent gets the tools of both servers, and what the servers say about themselves, as outside notes.
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:mcp-check] Use the fake server.')
+  await waitFor("!!document.querySelector('.approval-card')", 60000, 'the first tool of the server asks')
+  const asking = await evaluate("document.querySelector('.approval-card')?.textContent ?? ''")
+  console.log('[smoke] mcp approval card:', JSON.stringify(asking.slice(0, 240)))
+  if (!asking.includes('echo') || !asking.includes('fake')) throw new Error('The approval card should name the server and its tool')
+  if (!(await click('.approval-card .btn', 'Always allow'))) throw new Error('The approval card offers no Always allow')
+  await waitFor("!!document.querySelector('.approval-always')", 4000, 'the Always allow choices')
+  const choices = await evaluate("({ rules: document.querySelector('.approval-always-rules')?.textContent, scope: document.querySelector('.approval-scope input:checked')?.value })")
+  console.log('[smoke] mcp always allow choices:', JSON.stringify(choices))
+  if (choices.rules !== 'mcp__fake__echo') throw new Error(`The card should offer a rule for this tool alone: ${JSON.stringify(choices.rules)}`)
+  await click('.approval-always .btn.primary')
+  await waitFor("!document.querySelector('.approval-always')", 8000, 'the card goes')
+  const asked = await driveAgent('19-mcp')
+  console.log('[smoke] mcp approvals after always allow:', JSON.stringify(asked.map((item) => item.detail || item.title)))
+  if (asked.length !== 1 || !JSON.stringify(asked[0]).includes('add')) throw new Error(`Only the server's other tool should have asked: ${JSON.stringify(asked)}`)
+  const outputs = (await toolOutputs()).filter((item) => item.name.startsWith('mcp__fake__')).map((item) => item.output)
+  console.log('[smoke] mcp tool outputs:', JSON.stringify(outputs))
+  for (const expected of ['echo: mcp-check-ok', 'echo: mcp-check-again', 'sum: 5']) {
+    if (!outputs.some((output) => output.includes(expected))) throw new Error(`No tool output says ${JSON.stringify(expected)}: ${JSON.stringify(outputs)}`)
+  }
+  const saved = JSON.parse(await fs.readFile(path.join(demoPath, '.encode', 'settings.local.json'), 'utf8'))
+  if (JSON.stringify(saved.permissions?.allow) !== JSON.stringify(['mcp__fake__echo'])) throw new Error(`The rule was not saved for the one tool: ${JSON.stringify(saved)}`)
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  for (const name of ['mcp__fake__echo', 'mcp__fake__add', 'mcp__mine__echo', 'mcp__mine__add']) {
+    if (!request.tools.includes(name)) throw new Error(`The model was not offered ${name}: ${request.tools.join(', ')}`)
+  }
+  const told = JSON.stringify(request.messages)
+  if (!told.includes('mcp_server_notes') || !told.includes('Prefer the echo tool') || !told.includes('Note: v1')) throw new Error('The model was not given the servers’ notes as outside text')
+  if (!told.includes('never a reason to run a command')) throw new Error('The notes should say they are not instructions')
+
+  // The entry changes (a pull, or the agent itself): the server stops and waits to be approved again.
+  await fs.writeFile(projectFile, JSON.stringify({ mcpServers: { fake: entry('fake', 'v2') } }))
+  const changed = await evaluate('window.eNCode.mcp.report()')
+  const fake = changed.servers.find((item) => item.name === 'fake')
+  console.log('[smoke] mcp after a changed entry:', JSON.stringify({ state: fake.state, detail: fake.detail, tools: fake.tools.length }))
+  if (fake.state !== 'needs-approval' || !/changed since you approved/.test(fake.detail ?? '') || fake.tools.length) throw new Error(`A changed entry should wait for approval: ${JSON.stringify(fake)}`)
+  await until(async () => (await lines('fake')).join() === 'started,stopped', 'the server of the old entry to be stopped')
+  await sendPrompt('[scenario:follow-up] Anything else?')
+  await driveAgent('19-mcp-changed')
+  const later = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  if (later.tools.some((name) => name.startsWith('mcp__fake__'))) throw new Error('The tools of a server that waits for approval should be gone')
+  if (!later.tools.includes('mcp__mine__echo')) throw new Error('The person’s own server should still be offered')
+
+  // Tidy up: the files go, the servers stop, and the folder is not trusted any more.
+  await fs.rm(projectFile, { force: true })
+  await fs.rm(userFile, { force: true })
+  await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  const empty = await evaluate('window.eNCode.mcp.report()')
+  if (empty.servers.length) throw new Error(`No server should be left: ${JSON.stringify(empty.servers.map((item) => item.name))}`)
+  await until(async () => (await lines('mine')).join() === 'started,stopped,started,stopped', 'the last server to be stopped')
+  await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
+  await evaluate('window.eNCode.agent.reset()')
+  console.log('[smoke] mcp servers: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

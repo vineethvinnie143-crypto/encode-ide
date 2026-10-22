@@ -234,7 +234,7 @@ packages/editor/              the editor without a DOM: state, commands, search,
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
 packages/hooks/               user hooks in Claude Code's format, run in the agent's shell and environment
-packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval
+packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval; the app runs it through the workspace package's hub
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
 packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
@@ -242,7 +242,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web, and the Computer tool with its Windows helper
-packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, and the record behind Rewind
+packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
