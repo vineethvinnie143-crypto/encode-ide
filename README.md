@@ -41,8 +41,15 @@ Windows is the primary platform; the code stays cross-platform.
 - **Any model.** It works with any OpenAI-compatible endpoint and OpenRouter's catalog
   (including free models), with presets for DeepSeek, OpenAI, Ollama and LM Studio. Long
   sessions are compacted into a summary instead of failing at the context limit.
+- **Its own editor.** Not Monaco or CodeMirror. Files open into a virtualized editor with
+  tokenizers for 35 languages, multiple cursors, find and replace, undo that survives tab
+  switches, and a million-line file scrolls with a native scrollbar. Characters that make
+  text read differently from how it is stored (bidi controls, zero-width and hidden
+  characters) are drawn as labelled markers. The editor can also show a change against a
+  baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
+  agent core lands.
 - **Hand-written internals.**
-  - an editor engine and tokenizer;
+  - the editor: a text model, an editing engine, a DOM view and tokenizers;
   - the eNCode Shell (an interpreter, not cmd.exe or PowerShell);
   - an ANSI terminal buffer;
   - a Myers diff;
@@ -138,7 +145,17 @@ started. Tabs, layout and widths are remembered between runs
 | Rename, pin, archive, mark unread | `Ctrl+Alt+R`, `Ctrl+Alt+P`, `Ctrl+Shift+A`, `Ctrl+Shift+U` |
 | Zoom in, out, reset | `Ctrl+=`, `Ctrl+-`, `Ctrl+0` |
 | Full screen | `F11` |
-| Find in file | `Ctrl+F` (in the editor) |
+| Find, replace in the file | `Ctrl+F`, `Ctrl+H` (in the editor) |
+| Go to a line, `line` or `line:column` | `Ctrl+G` (in the editor) |
+| Comment the line, indent, outdent | `Ctrl+/`, `Ctrl+]`, `Ctrl+[` (in the editor) |
+| Move a line, copy a line | `Alt+Up`/`Down`, `Shift+Alt+Up`/`Down` (in the editor) |
+| Select the next occurrence, all occurrences | `Ctrl+D`, `Ctrl+Shift+L` (in the editor) |
+| Add a cursor above or below | `Ctrl+Alt+Up`/`Down`, or `Alt`+click (in the editor) |
+| Delete the line | `Ctrl+Shift+K` (in the editor) |
+| Leave the editor with the keyboard | `Esc`, then `Tab` (a plain `Tab` indents) |
+
+The editor takes its own keys while it has focus, so `Ctrl+/`, `Ctrl+[` and `Ctrl+]` comment
+and indent there instead of listing the shortcuts and moving between sessions.
 
 Opening a folder, or a session from another project, is refused while any session runs or
 waits for you: the agent works in the open folder, so switching would point its edits at the
@@ -156,6 +173,7 @@ apps/desktop/                 the Electron app (@encode/desktop)
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
     components/panels/        the side and bottom panels: tab strip, pages, New tab
+    editor/                   the open documents: text, history and what is on disk
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)
@@ -167,11 +185,15 @@ apps/desktop/                 the Electron app (@encode/desktop)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
+packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
+packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
+packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
 packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
 packages/testkit/             seeded property testing
+packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
@@ -184,6 +206,7 @@ scripts/                      repository tooling: test runner, source checks
 ```bash
 pnpm typecheck                # every package
 pnpm test                     # unit tests (node:test); pnpm test shell compaction filters by path
+pnpm test:browser             # the editor view in a real Chromium over the DevTools protocol
 pnpm build                    # renderer with Vite, main and preload with esbuild
 pnpm e2e                      # the full smoke against the built app, in a throwaway sandbox
 ```
@@ -192,7 +215,9 @@ pnpm e2e                      # the full smoke against the built app, in a throw
 eNCode a temporary profile, and drives the real UI over the Chrome DevTools Protocol. The run
 covers:
 
-- the editor;
+- the editor: what is drawn equals the file, typing, saving and undoing against the file on
+  disk, find, quick open, go to line, the context menu, a change from disk that keeps the
+  cursor, and the discard prompts;
 - the demo agent;
 - the shell, running `node` and `npm`;
 - a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs;
@@ -203,6 +228,9 @@ covers:
 
 Screenshots and the Electron log land in `apps/desktop/screenshots`. Set
 `ENCODE_SMOKE_OFFLINE=1` to skip the one check that needs the internet.
+
+`pnpm test:browser` needs a Chromium-based browser (it finds Chrome or Edge, or takes
+`ENCODE_BROWSER`) and writes screenshots to the folder named by `ENCODE_SHOTS`.
 
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not

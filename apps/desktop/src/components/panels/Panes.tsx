@@ -44,6 +44,7 @@ export function EditorPane() {
   const tabs = useEditor((state) => state.tabs)
   const activePath = useEditor((state) => state.activePath)
   const cursor = useEditor((state) => state.cursor)
+  const info = useEditor((state) => state.info)
   const active = tabs.find((tab) => tab.path === activePath) ?? null
   return (
     <div className="editor-pane">
@@ -62,6 +63,8 @@ export function EditorPane() {
         <span>
           Ln {cursor.line}, Col {cursor.column}
         </span>
+        {active && <span>{info.indent}</span>}
+        {active && <span>{info.eol}</span>}
         <span>{active ? (active.dirty ? 'unsaved' : 'saved') : '—'}</span>
       </div>
     </div>

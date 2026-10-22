@@ -1,9 +1,9 @@
 # eNCode threat model
 
 Version 1, 2026-10-21, written with M0. It covers the desktop app as built from this
-repository. The free-tier gateway and accounts (M5) and the permission rules, trust, hooks,
-checkpoints and MCP client (M3) have their own sections at the end. The CLI and the router get
-theirs when they land.
+repository. The free-tier gateway and accounts (M5), the editor and documents (M4), and the
+permission rules, trust, hooks, checkpoints and MCP client (M3) have their own sections at the
+end. The CLI and the router get theirs when they land.
 
 Review this document whenever a change touches a trust boundary below, and at the end of
 every milestone.
@@ -299,6 +299,118 @@ Status: **Mitigated**, or **Partial** (a residual risk is listed below).
   through sign-in, streaming, failover, refresh, sign-out, the cron job, the kill switch and a
   suspension, then checks every request the fake OpenRouter received against the firewall's
   promises. CI runs it on Windows.
+
+## The editor and documents
+
+Version 1, 2026-10-21, written with M4. It covers `packages/text`, `packages/diff`,
+`packages/editor`, `packages/editor-view` and the desktop app's open documents
+([0033](../adr/0033-the-editor-is-our-own-engine.md),
+[0034](../adr/0034-documents-live-outside-the-ui-store.md)). The terminal, the language
+server client and the review of the agent's edits get their entries when they land.
+
+### What we protect here
+
+| Asset | Why it matters |
+| --- | --- |
+| The user's unsaved work | An edit that exists only in memory. Losing it, or writing it over a newer file, cannot be undone. |
+| The files on disk | A save writes the document's text to a path. It must be the file the user opened, in the project they opened it in. |
+| What the user sees | Review depends on the screen showing what the file holds. If text can read differently from how it is stored, a reviewer approves code they did not read. |
+| The renderer | File content is untrusted input to the code that draws it, and the renderer holds the bridge (R7). |
+| The window's responsiveness | A file that freezes the editor costs the user their session. |
+
+Who we defend against: a repository or a pull request that hides behavior in text, which the
+agent reads as well as the user; a file that is huge or built to be slow; text that arrives
+through the clipboard or a drop; and programs the user runs (the agent, a formatter, git)
+writing to a file that is open.
+
+### Trust boundaries
+
+```
+ disk ──workspace.read (UTF-8, 12 MiB cap)──► open documents ──► editor state ──► view ──► DOM (text nodes only)
+ view ──edits──► editor state ──► snapshot ──workspace.write (path resolved in main)──► disk
+ clipboard, drop ──text/plain only──► view
+```
+
+1. **Disk to document.** The main process reads the file. It refuses files over 12 MiB and
+   files that are binary or not valid UTF-8, so the editor never holds bytes it cannot write
+   back.
+2. **Document to screen.** Text reaches the DOM as text nodes. The characters that would make
+   it read differently never reach the DOM at all: the view draws a marker in their place.
+3. **Document to disk.** A save sends a workspace-relative path and the text. The main process
+   resolves the path against the root and checks it (T6, T7). The path was the one the
+   document was opened under, and documents are dropped when the project changes.
+
+### Threats and controls
+
+Status: **Mitigated**, or **Partial** (a residual risk is listed below).
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| E1 | A file reads differently from how it runs, or hides text: bidi controls, zero-width and filler characters, hidden ASCII in the tag block (T18 for the repository's own sources) | Control, bidi, zero-width, filler and tag characters are drawn as labelled markers (`U+202E`) and the character itself never reaches the DOM. Every line is laid out in stored order (`unicode-bidi: bidi-override`), so a bidi control that did slip through could not reorder what follows. Markers take the place of the characters in cursor movement and clicks, and copying still copies the real text. | Partial (ER1, ER2) |
+| E2 | File content, a paste or a drop runs as markup or script in the renderer | The view writes text nodes and class names only. Highlighting yields token kinds as numbers, never markup. Paste and drop take `text/plain` and nothing else, and dropped files are left to the main process, which cancels navigation (0010). CSP without inline script or eval. | Mitigated |
+| E3 | A save lands in the wrong file or project | Documents are keyed by workspace-relative path. Renaming a file or folder moves its documents, deleting one closes them, and opening, switching or closing the project settles unsaved changes and then drops every document. The main process resolves every write against the workspace root (T6). | Mitigated |
+| E4 | Edits are lost without the user deciding so | "Unsaved" is derived from the text and the history point, never a flag that can go stale. A save marks exactly the snapshot it wrote, so typing during the write stays unsaved. Closing a tab, the others or all of them, and changing project, ask first. Undo history survives tab switches and the panel being hidden. | Partial (ER6) |
+| E5 | A file changes on disk under an open document (the agent, a formatter, git), and the editor shows or saves stale text | A change the workspace watcher or the agent reports reaches a document without unsaved changes as a line diff of its own, so the cursor and scroll stay and it can be undone. A document with unsaved changes keeps the user's text, and its save first reads the file and compares it with the text last read or written there. If someone else changed it, the save asks before overwriting. Cancel leaves the changes unsaved. | Partial (ER3, ER4) |
+| E6 | A huge or pathological file freezes the window | Files over 12 MiB do not open. Only the lines in view are drawn, long lines in pieces, and the scroll range is scaled so a million-line file scrolls natively. Highlighting runs on a time budget, stops where states converge, and tokenizes at most the first 10,000 characters of a line. Counting find results is time-sliced. | Partial (ER5) |
+| E7 | The editor reaches beyond itself: clipboard, drag and drop | The clipboard is read and written only inside the user's own copy, cut and paste events, on the hidden textarea. A drag that carries files is not handled by the editor. | Mitigated |
+
+### Residual risks
+
+- **ER1. Right-to-left text is shown in stored order.** That is deliberate: the display
+  cannot be used to disguise code. It costs readability for Hebrew, Arabic and similar
+  scripts.
+  - Owner: M4. An opt-in view that reorders text but keeps every marker is possible later.
+- **ER2. Look-alikes and invisible variation selectors are not marked.** Letters that look
+  alike across scripts (Cyrillic `a` for Latin `a`), a no-break space, an ideographic space
+  and the braille blank draw like the characters they imitate. Variation selectors (U+FE00 to
+  U+FE0F, U+E0100 to U+E01EF) are invisible, but emoji and some Japanese text need them, so
+  marking them would flag ordinary text.
+  - The agent reads these files too. Stripping or flagging hidden characters in what tools
+    return to the model belongs to the agent's side, not to the editor.
+  - Owner: M3 (reviewer gate: flag identifiers that mix scripts, report hidden characters in
+    diffs), and M4 for an opt-in "show non-ASCII" mode.
+- **ER3. A change on disk while a document has unsaved changes is not shown.** The editor
+  keeps the user's text and the save asks before overwriting, but the prompt only names the
+  file: there is no comparison to look at. The check and the write are two steps, so a change
+  in the milliseconds between them is lost. The watcher can miss events too (it stops on an
+  error and skips some folders), which the save-time check covers.
+  - Owner: M4 follow-up. A "compare with disk" view built on the review machinery, and a
+    write that fails when the file's modification time moved.
+- **ER4. Encoding and line-ending fidelity.** Files are UTF-8 only. A byte order mark is
+  dropped on save, a file with mixed line endings is written back with one (CRLF if any line
+  has it), and a lone carriage return becomes a line feed. Git shows these as changes.
+  - Owner: M4 follow-up. Keep the encoding, the byte order mark and each line's ending in
+    the document.
+- **ER5. A user-supplied regular expression can backtrack for as long as it likes.** Counting
+  is time-sliced between matches, but nothing can interrupt one `RegExp` call in the
+  renderer, so a pattern with catastrophic backtracking on a long line freezes the window
+  until it returns. The pattern is the user's own.
+  - Owner: M4. Run the counting in a worker with a deadline, or refuse nested quantifiers.
+- **ER6. Unsaved text is held in memory only.** A crash or a killed process loses what was
+  typed since the last save. There is no recovery file.
+  - Owner: M4 follow-up, with the conflict check: write recoverable copies of dirty
+    documents to the profile folder.
+
+### Verification
+
+- `@encode/text`, `@encode/diff` and `@encode/editor` have unit and property tests: change
+  sets against a plain-string model, diffs that reproduce their target and hunks that apply and
+  unapply, editing commands, history, search, the highlighter (including where it stops) and
+  `reload`.
+- `line.test.ts` checks that control, bidi, filler and tag characters become markers of their
+  own and that highlighting never loses a character, in nine languages. `docs.test.ts` covers
+  the open documents: unsaved from the text, saves that outlive typing, changes from outside
+  (the cursor stays and the document is never reported as edited), whether the file is still
+  the one that was read, and renames.
+- 34 browser scenarios drive the view in a real Chromium over the DevTools protocol: caret and
+  mouse, a million and a half lines, IME, the clipboard, long lines, find and replace, review,
+  fractional display scaling, a hidden container, switching documents and the Tab escape. One
+  checks that none of the characters the markers stand for is in the DOM. CI runs them on
+  Windows.
+- The end-to-end smoke types into the real app, saves, undoes and checks the file on disk,
+  checks that a change from disk keeps the cursor, the discard prompts and that a file
+  changed behind the editor's back is not overwritten until the user says so (Cancel writes
+  nothing, Overwrite does), and opens the editor's own menu.
 
 ## Permission rules, trust, hooks, checkpoints and the MCP client (M3)
 

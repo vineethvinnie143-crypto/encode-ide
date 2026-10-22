@@ -11,7 +11,6 @@ body {
   line-height: 22px;
 }
 
-.code-editor,
 .terminal-lines,
 .tool-row-detail,
 .tool-row-output,
@@ -55,10 +54,6 @@ body {
   font-size: calc(11px + var(--ui-small));
 }
 
-.code-editor {
-  font-size: 12.5px;
-}
-
 .terminal-lines {
   font-size: var(--code-size);
 }
@@ -69,9 +64,6 @@ body {
 .terminal-lines { font-size: var(--code-size); }
 
 .approval-detail, .trajectory-detail pre, .diff-view { font-size: var(--code-size); }
-.code-editor { font-size: 12px; line-height: 19px; }
-.code-gutter { line-height: 19px; }
-.code-current-line { height: 19px; }
 .term-line { min-height: 19px; }
 
 /* Tool-change card + diff metrics */

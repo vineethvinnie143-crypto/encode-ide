@@ -1,0 +1,19 @@
+{
+  "name": "@encode/text",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's document model: an immutable text tree of lines, and change sets that edit and map it.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

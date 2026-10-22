@@ -17,6 +17,15 @@ importers:
       '@encode/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../../packages/diff
+      '@encode/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@encode/editor-view':
+        specifier: workspace:*
+        version: link:../../packages/editor-view
       '@encode/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -29,6 +38,9 @@ importers:
       '@encode/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
+      '@encode/text':
+        specifier: workspace:*
+        version: link:../../packages/text
       '@encode/tools':
         specifier: workspace:*
         version: link:../../packages/tools
@@ -164,6 +176,62 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/diff:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/editor:
+    dependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../diff
+      '@encode/text':
+        specifier: workspace:*
+        version: link:../text
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/editor-view:
+    dependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../diff
+      '@encode/editor':
+        specifier: workspace:*
+        version: link:../editor
+      '@encode/text':
+        specifier: workspace:*
+        version: link:../text
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/gateway-protocol:
     devDependencies:
       '@types/node':
@@ -258,6 +326,18 @@ importers:
 
   packages/testkit:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/text:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

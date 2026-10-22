@@ -301,7 +301,7 @@ export function Menu({
   )
 }
 
-/** A menu at a point, for right-click. */
+/** A menu at a point, for right-click. `onClose(true)` asks the opener to take focus back, as after Escape. */
 export function ContextMenu({
   x,
   y,
@@ -313,7 +313,7 @@ export function ContextMenu({
   y: number
   entries: readonly MenuEntry[]
   label: string
-  onClose: () => void
+  onClose: (refocus: boolean) => void
 }) {
   return (
     <MenuPanel
