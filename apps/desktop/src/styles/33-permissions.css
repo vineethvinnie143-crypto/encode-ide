@@ -1,0 +1,368 @@
+/* ============================================================
+   Permissions: the settings tab, the trust banner above the
+   composer, and the "Always allow" choices on an approval
+   ============================================================ */
+
+.settings-permissions {
+  padding: 20px 24px 28px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+}
+
+.perm-folder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.perm-folder-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.perm-folder-id {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+.perm-folder-id svg {
+  flex-shrink: 0;
+}
+.perm-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+}
+.perm-folder-text {
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.perm-folder-text.is-danger {
+  color: var(--danger);
+}
+.perm-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.perm-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.perm-warning svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--warning);
+}
+
+.perm-problems {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 19px;
+}
+.perm-problems.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+.perm-problems-title {
+  margin-bottom: 4px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.perm-problems ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.perm-problems li {
+  overflow-wrap: anywhere;
+}
+
+.perm-waiting {
+  margin-top: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.perm-waiting summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.perm-waiting summary::-webkit-details-marker {
+  display: none;
+}
+.perm-waiting-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+}
+.perm-waiting-hint {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: var(--fs-12);
+}
+.perm-waiting pre {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+  line-height: 19px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.perm-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.perm-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.perm-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 14px 8px;
+}
+.perm-group-title {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.perm-group-help {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.perm-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 4px 8px 4px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.perm-rule-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+  overflow-wrap: anywhere;
+}
+.perm-rule.is-waiting .perm-rule-text {
+  color: var(--text-3);
+}
+.perm-rule-pad {
+  width: 24px;
+  flex-shrink: 0;
+}
+
+.perm-add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.perm-add-text {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+}
+.perm-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.perm-add-row select {
+  flex: 1;
+  min-width: 0;
+}
+.perm-add-help {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 19px;
+}
+.perm-add-help code,
+.perm-list code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.perm-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+}
+
+/* A line above the composer when the open folder needs the person */
+.trust-banner {
+  flex-shrink: 0;
+  margin: 0 var(--thread-gutter) 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-1));
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 19px;
+}
+.trust-banner svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.trust-banner.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface-1));
+}
+.trust-banner.is-danger svg {
+  color: var(--danger);
+}
+.trust-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Approval card: "Always allow" shows what will be saved and where */
+.approval-always {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.approval-always-head {
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.approval-always-head b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.approval-always-rules {
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+  line-height: 19px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.approval-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.approval-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.approval-scope:hover {
+  border-color: var(--border-strong);
+}
+.approval-scope.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.approval-scope input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.approval-scope-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.approval-scope-label {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+}
+.approval-scope-where {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.approval-always-note {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.approval-trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 2px 2px 0;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+  cursor: pointer;
+}
+.approval-trust input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.approval-trust-note {
+  display: block;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}

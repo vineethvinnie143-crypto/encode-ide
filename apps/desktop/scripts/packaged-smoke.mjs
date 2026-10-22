@@ -124,7 +124,19 @@ try {
   )
   await evaluate(`window.eNCode.agent.remove(${JSON.stringify(session.id)})`)
   await evaluate('window.eNCode.workspace.close()')
-  fs.rmSync(project, { recursive: true, force: true })
+  // The program may still be letting go of the folder (a command or a status check ending); that is not what is tested here.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.rmSync(project, { recursive: true, force: true })
+      break
+    } catch (error) {
+      if (attempt >= 24) {
+        console.warn(`[packaged] could not remove ${project} (${error.message}); leaving it`)
+        break
+      }
+      await sleep(250)
+    }
+  }
 
   // The page holds no secret and no development hook.
   const exposed = await evaluate('Object.keys(window).filter((name) => /^(process|require|module|Buffer)$/.test(name))')

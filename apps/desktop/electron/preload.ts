@@ -6,6 +6,7 @@ import type {
   BackgroundJob,
   EncodeApi,
   ModelAlert,
+  PermissionsAction,
   PlanRequest,
   SearchOptions,
   SessionGoal,
@@ -107,6 +108,10 @@ const api: EncodeApi = {
     read: (name: string) => invoke('skills:read', name),
     create: (name: string, description?: string) => invoke('skills:create', name, description),
     openFolder: () => invoke('skills:open-folder'),
+  },
+  permissions: {
+    report: () => invoke('permissions:report'),
+    act: (action: PermissionsAction) => invoke('permissions:act', action),
   },
   agent: {
     sessions: () => invoke('agent:sessions'),

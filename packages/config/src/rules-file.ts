@@ -42,7 +42,7 @@ export type RuleEditResult =
       file: string
       /** False when the rule was already there (saving) or was not there (removing). */
       changed: boolean
-      /** Whether the rule applies now: always for the user's file, and for a folder's while its configuration is approved. */
+      /** Whether the rule applies now: always for the user's file and for a rule that deny or asks, and for a folder's allow rule while its configuration is approved. */
       approved: boolean
     }
   | { ok: false; reason: string }
@@ -99,7 +99,8 @@ async function edit(options: RuleEditOptions, change: (list: string[], text: str
     return { ok: false, reason: `${file} could not be written: ${error instanceof Error ? error.message : String(error)}` }
   }
 
-  if (!folder) return { ok: true, file, changed: true, approved: true }
+  // A rule that takes something away applies at once, wherever it is written: only a folder's allow rules wait for its approval.
+  if (!folder || options.behavior !== 'allow') return { ok: true, file, changed: true, approved: true }
   if (!options.trust || !wasApproved) return { ok: true, file, changed: true, approved: false }
   const digest = await loadDigest()
   if (digest !== null) await options.trust.approveConfig(options.root, digest)

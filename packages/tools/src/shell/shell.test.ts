@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
+import { gitSafetyProblem } from '@encode/permissions'
 import { bashOutputTool, createBashTool, killShellTool } from '../bash'
 import { tempWorkspace, testContext, textOf } from '../testing'
 import { detectShell } from './detect'
@@ -39,6 +40,18 @@ describe('agentEnvironment', () => {
     assert.equal(env.GIT_TERMINAL_PROMPT, '0')
     assert.equal(env.GIT_CONFIG_COUNT, '2')
     assert.equal(env.GIT_CONFIG_KEY_0, 'core.fsmonitor')
+    assert.equal(env.GIT_OPTIONAL_LOCKS, '0')
+  })
+
+  it('is one the permission rules accept for git, so git is not asked about for that alone', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const { env } = agentEnvironment({ PATH: '/bin', Path: 'C:\\Windows' }, { platform })
+      assert.equal(gitSafetyProblem(env, platform === 'win32'), null, platform)
+    }
+    // A setting the user already had stays, after eNCode's own would be undone by it: the rules ask.
+    const own = agentEnvironment({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.pager', GIT_CONFIG_VALUE_0: 'x' }, { platform: 'linux' }).env
+    assert.equal(own.GIT_CONFIG_COUNT, '3')
+    assert.notEqual(gitSafetyProblem(own, false), null)
   })
 })
 

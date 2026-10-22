@@ -52,7 +52,7 @@ import {
   type ToolRegistry,
   type WebAccess,
 } from '@encode/tools'
-import { decideApproval, grantKey, hostOf, type ApprovalDecision } from './approval'
+import { alwaysAllowFor, decideApproval, grantKey, hostOf, type ApprovalDecision, type RuleJudge } from './approval'
 import {
   applyCompaction,
   CHARS_PER_TOKEN,
@@ -75,7 +75,7 @@ import {
 import type { AgentHooks, HookEvent } from './hooks'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { withoutScreensFrom } from './screens'
-import { AgentAbortedError, type AgentSettings, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
+import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type Conversation, type LoopEnd, type Surface, type Turn } from './types'
 import type { ConversationEntry } from './ui'
 
 /** What a call may ask of the model for its answer. */
@@ -132,6 +132,12 @@ export interface LoopOptions {
   /** Applications the user already let the agent use, by program name; shared like the sites. */
   approvedApps?: Set<string>
   assessor: ShellCommandAssessor
+  /** The user's rules for reads, edits, sites and outside tools; shell lines are judged by the assessor. */
+  rules?: RuleJudge
+  /** Folders outside the workspace the user counts as part of it. */
+  extraRoots?: () => readonly string[]
+  /** Brings the rules and the trust the assessor holds up to date with their files; awaited before each call is judged. */
+  refresh?: () => Promise<void>
   /** Directories read without asking, besides the workspace. */
   readRoots?: () => readonly string[]
   /** Text that must survive a compaction, such as the project's memory files. */
@@ -230,6 +236,12 @@ function relativeToRoot(root: string, file: string, platform: NodeJS.Platform): 
   const relative = api.relative(root, file)
   if (!relative || relative.startsWith('..') || api.isAbsolute(relative)) return file
   return relative.split(api.sep).join('/')
+}
+
+/** What a rule that names a tool puts in parentheses: the skill, or the kind of subagent. */
+function specifierOf(tool: string, input: Record<string, unknown>): { specifier?: string } {
+  const value = tool === 'Skill' ? input.skill : tool === 'Task' ? input.subagent_type : undefined
+  return typeof value === 'string' && value ? { specifier: value } : {}
 }
 
 export class AgentLoop {
@@ -593,7 +605,7 @@ export class AgentLoop {
     this.inflight.clear()
   }
 
-  private async judge(access: ToolAccess): Promise<ApprovalDecision> {
+  private async judge(access: ToolAccess, call: { name: string; input: Record<string, unknown> }): Promise<ApprovalDecision> {
     const { o } = this
     try {
       return await decideApproval(access, {
@@ -602,6 +614,9 @@ export class AgentLoop {
         home: o.services.home,
         platform: o.services.platform,
         readRoots: o.readRoots?.(),
+        ...(o.rules ? { rules: o.rules } : {}),
+        ...(o.extraRoots ? { extraRoots: o.extraRoots() } : {}),
+        tool: { name: call.name, ...specifierOf(call.name, call.input) },
         approvedHosts: o.approvedHosts,
         approvedApps: this.approvedApps,
         shell: o.services.shell.state(),
@@ -634,6 +649,8 @@ export class AgentLoop {
     const problem = o.registry.check(block.name, block.input, turn.mode)
     if (problem) return refuse(problem, 'error')
     const tool = o.registry.get(block.name)!
+    // The user may have changed a rule, or the folder's settings, since the last call.
+    await o.refresh?.().catch(() => undefined)
 
     let input = block.input
     const pre = await this.hook('preToolUse', { ...this.event(turn), tool: block.name, toolUseId: block.id, input })
@@ -652,15 +669,20 @@ export class AgentLoop {
     } catch (error) {
       return refuse(`${block.name} could not be checked: ${errorMessage(error)}`, 'error')
     }
-    const verdict = await this.judge(access)
+    const verdict = await this.judge(access, { name: block.name, input })
     if (verdict.kind === 'deny') return refuse(verdict.reason, 'rejected', `Refused by the approval policy: ${verdict.reason}`)
 
     let ask: string | undefined
     let grant: string | undefined
+    let always: AlwaysAllow | undefined
     if (verdict.kind === 'ask') {
       ask = pre?.decision === 'allow' ? undefined : verdict.reason
       // A hook that asked wants to see each call.
       if (verdict.grantable && pre?.decision !== 'ask') grant = grantKey(access)
+      // So does a rule that asked: an allow rule would lose to it.
+      if (!verdict.byRule && pre?.decision !== 'ask') {
+        always = alwaysAllowFor(access, { root: o.services.root, platform: o.services.platform, dialect: o.services.shell.state().dialect }) ?? undefined
+      }
     } else if (pre?.decision === 'ask') ask = pre.reason || 'A hook asks for approval.'
     if (ask !== undefined) {
       entry.tool = { ...entry.tool!, state: 'waiting' }
@@ -685,6 +707,7 @@ export class AgentLoop {
           input: trimInput(input),
           preview: summary.preview?.slice(0, MAX_PREVIEW_HUNKS),
           ...(grant ? { grant } : {}),
+          ...(always ? { always } : {}),
         },
         turn.signal,
       )

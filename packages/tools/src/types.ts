@@ -49,8 +49,11 @@ export type ToolAccess =
   | { type: 'web'; url: string }
   /** Starts a subagent, which asks for its own calls. */
   | { type: 'agent' }
-  /** A tool from outside eNCode (MCP); every call asks unless a rule allows it. */
-  | { type: 'external'; server: string }
+  /**
+   * A tool from outside eNCode (MCP); every call asks unless a rule allows it. `tool` is the tool's name as
+   * permission rules spell it (the `ruleTool` of its identity), so a rule can name one tool of a server.
+   */
+  | { type: 'external'; server: string; tool?: string }
   /**
    * Sees or operates an application on the desktop. `app` is its program (notepad.exe), `label` its name
    * for people, `title` the window's. `blocked` says why it can never be used, when it cannot.
@@ -165,6 +168,13 @@ export interface ShellAssessment {
   paths?: string[]
   /** External programs the line starts, as typed. */
   programs?: string[]
+  /**
+   * What decided: a permission rule (the user's word, which says nothing about what the line does), the
+   * read-only check, or neither. Without it an allow is a read-only proof, as the built-in assessor's is.
+   */
+  source?: 'rule' | 'read-only' | 'default'
+  /** For an allow by a rule: whether the line is also proven read-only, which is all a Read Only policy runs. */
+  readOnly?: boolean
 }
 
 /** Judges a shell line before it runs. eNCode's own command rules plug in here. */

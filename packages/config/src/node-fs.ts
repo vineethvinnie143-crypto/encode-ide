@@ -4,13 +4,21 @@ import path from 'node:path'
 import type { ReadText } from './settings'
 import type { TrustFs } from './trust'
 
-/** Reads a file as UTF-8; null when it does not exist. */
+/** Errors that a file being replaced or scanned at that moment gives a reader (Windows above all), and that pass in a few milliseconds. */
+const TRANSIENT_READ_ERRORS = new Set(['EBUSY', 'EPERM', 'EACCES', 'EMFILE', 'ENFILE'])
+const READ_ATTEMPTS = 3
+
+/** Reads a file as UTF-8; null when it does not exist. A read that fails the way a file in the middle of being replaced does is tried again. */
 export const readText: ReadText = async (file) => {
-  try {
-    return await fs.readFile(file, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') return null
-    throw error
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fs.readFile(file, 'utf8')
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (code === 'ENOENT' || code === 'ENOTDIR') return null
+      if (attempt >= READ_ATTEMPTS || !TRANSIENT_READ_ERRORS.has(code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 15 * attempt))
+    }
   }
 }
 

@@ -36,6 +36,8 @@ export interface ShellVerdict {
   reason: string
   /** What decided: a permission rule, the read-only check, or neither. */
   source: 'rule' | 'read-only' | 'default'
+  /** For an allow by a rule: whether the line is also proven read-only, which is all a Read Only policy runs. */
+  readOnly?: boolean
   /** Paths the line may read, when the read-only check allowed it. */
   paths?: string[]
   /** Programs the line starts, when the read-only check allowed it. */
@@ -69,12 +71,14 @@ export function createShellAssessor(options: ShellAssessorOptions): (line: strin
     for (const verdict of [command, reads, writes]) {
       if (verdict?.decision === 'ask') return { decision: 'ask', reason: verdict.reason, source: 'rule' }
     }
-    if (command?.decision === 'allow') return { decision: 'allow', reason: command.reason, source: 'rule' }
 
     const lineContext = { ...context, platform: windows ? ('win32' as const) : ('posix' as const), trusted: options.trusted }
     let verdict: CommandAssessment =
       context.dialect === 'pwsh' ? assessPwshCommand(line, lineContext) : assessBashCommand(line, lineContext)
     if (verdict.decision === 'allow' && options.probe) verdict = await confirmOnDisk(verdict, context.root, options.probe, api)
+    // A rule says the user wants the line to run; it says nothing about what the line does. A Read Only policy runs
+    // only what is proven, so the proof travels with the rule's verdict.
+    if (command?.decision === 'allow') return { decision: 'allow', reason: command.reason, source: 'rule', readOnly: verdict.decision === 'allow' }
     if (verdict.decision === 'allow') {
       return { decision: 'allow', reason: 'read-only', source: 'read-only', paths: verdict.paths, programs: verdict.programs }
     }

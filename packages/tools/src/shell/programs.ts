@@ -98,15 +98,3 @@ export function batchCommand(file: string, args: readonly string[], cmd = window
   }
   return { ok: true, file: cmd, args: ['/d', '/v:off', '/s', '/c', `""${file}"${args.map((arg) => ` ${arg}`).join('')}"`] }
 }
-
-/**
- * git settings that stop a repository's own config from starting programs,
- * for every git eNCode runs (the agent's and the status bar's). They are
- * command-line config, which outranks repository config.
- */
-export const GIT_SAFETY_CONFIG: ReadonlyArray<readonly [string, string]> = [
-  // A repository's config must not start a program on `git status`.
-  ['core.fsmonitor', 'false'],
-  // A bare repository planted in the workspace (dir/HEAD, dir/config) is not picked up by `cd dir; git log -p`.
-  ['safe.bareRepository', 'explicit'],
-]

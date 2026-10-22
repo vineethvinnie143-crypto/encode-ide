@@ -89,11 +89,16 @@ export class TrustStore {
     private readonly windows: boolean,
   ) {}
 
-  private async load(): Promise<TrustFile> {
+  /**
+   * The file as it is. One that cannot be read counts as one that trusts nothing, unless it is about to be written
+   * over (`strict`): a read that failed for a moment must not wipe the trust of every other folder.
+   */
+  private async load(strict = false): Promise<TrustFile> {
     let text: string | null
     try {
       text = await this.fs.read(this.file)
-    } catch {
+    } catch (error) {
+      if (strict) throw error
       text = null
     }
     if (text === null) return { version: 1, workspaces: {} }
@@ -110,7 +115,7 @@ export class TrustStore {
   }
 
   private async update(rootReal: string, change: (record: TrustRecord) => TrustRecord | null): Promise<void> {
-    const data = await this.load()
+    const data = await this.load(true)
     const key = workspaceKey(rootReal, this.windows)
     const next = change(data.workspaces[key] ?? { trusted: false })
     if (next) data.workspaces[key] = next

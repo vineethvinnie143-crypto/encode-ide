@@ -4,6 +4,7 @@ import { useChat } from '../../stores/chat'
 import { useWorkspace } from '../../stores/workspace'
 import { LogoMark } from '../../ui/Logo'
 import { reducedMotion, scrollBehavior } from '../../ui/motion'
+import TrustBanner from '../permissions/TrustBanner'
 import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
 import GoalCard from './GoalCard'
@@ -140,6 +141,7 @@ export default function ChatPanel() {
         )}
       </div>
 
+      <TrustBanner />
       <ApprovalCard />
 
       {ask && (

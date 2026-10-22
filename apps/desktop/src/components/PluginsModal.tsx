@@ -75,8 +75,8 @@ export default function PluginsModal() {
 
             <div className="section-title">Skills</div>
             <div className="info-note">
-              Skills are markdown playbooks the agent can load with the <code>skill</code> tool. User skills live in the
-              app data folder; workspace skills live in <code>.eNCode/skills</code>.
+              Skills are markdown playbooks the agent can load with the <code>skill</code> tool. Yours live in{' '}
+              <code>.encode/skills</code> in your home folder; a project&rsquo;s live in <code>.encode/skills</code> inside it.
             </div>
             {skills.map((skill) => (
               <div className="plugin-row" key={`${skill.source}-${skill.name}`}>

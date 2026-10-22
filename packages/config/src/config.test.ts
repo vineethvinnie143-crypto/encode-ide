@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 import { readText, writeAtomic } from './node-fs'
 import { loadSettingsSources, parseSettings, resolveSettings, type SettingsSource } from './settings'
 import { canonicalJson, folderConfigDigest, TrustStore, trustWarning, type TrustFs } from './trust'
@@ -56,6 +56,18 @@ describe('settings files', () => {
     assert.equal(({} as Record<string, unknown>).polluted, undefined)
   })
 
+  it('says which problems may have lost a restriction: a bad deny or ask list or entry, a file that does not parse, but not a bad allow entry', () => {
+    const lost = (text: string) => parseSettings(text).unsafe
+    assert.deepEqual(lost(JSON.stringify({ permissions: { allow: ['Bash(ls:*)', 3], defaultMode: 'yolo', additionalDirectories: [1] }, env: { 'BAD-NAME': 'x' }, model: 4 })), [])
+    assert.match(lost(JSON.stringify({ permissions: { deny: ['Read(./.env)', 7] } }))[0], /permissions\.deny\[1\]/)
+    assert.match(lost(JSON.stringify({ permissions: { ask: 'Bash' } }))[0], /permissions\.ask must be a list/)
+    assert.match(lost(JSON.stringify({ permissions: [] }))[0], /permissions must be an object/)
+    assert.match(lost('{ "permissions": { "deny": [ }')[0], /not valid JSON/)
+    assert.match(lost('[1]')[0], /JSON object/)
+    assert.match(lost(`{"x":"${'a'.repeat(1024 * 1024)}"}`)[0], /larger than 1 MB/)
+    assert.deepEqual(lost('{"permissions":{"deny":["Read(./.env)"],"allow":["Bash(ls:*)"]},"model":"m"}'), [])
+  })
+
   it('loads user, project, local and command-line settings in order', async () => {
     const read = memoryFiles({
       '/home/u/.encode/settings.json': '{"model":"user"}',
@@ -67,6 +79,9 @@ describe('settings files', () => {
     assert.match(sources[2].problems[0], /not valid JSON/)
     const failing = await loadSettingsSources({ home: HOME, root: ROOT, read: async () => { throw new Error('EACCES') }, platform: 'linux' })
     assert.match(failing[0].problems[0], /could not be read: EACCES/)
+    assert.match(failing[0].unsafe[0], /could not be read: EACCES/)
+    assert.deepEqual(sources[0].unsafe, [])
+    assert.match(sources[2].unsafe[0], /not valid JSON/)
     const windows = await loadSettingsSources({
       home: 'C:\\Users\\u',
       root: 'D:\\ws',
@@ -82,11 +97,12 @@ describe('settings files', () => {
 
 describe('resolveSettings', () => {
   const sources: SettingsSource[] = [
-    { scope: 'user', file: 'u', problems: [], settings: { permissions: { allow: ['Bash(ls:*)'], deny: ['Read(~/.ssh/**)'] }, model: 'a', env: { A: '1' } } },
+    { scope: 'user', file: 'u', problems: [], unsafe: [], settings: { permissions: { allow: ['Bash(ls:*)'], deny: ['Read(~/.ssh/**)'] }, model: 'a', env: { A: '1' } } },
     {
       scope: 'project',
       file: 'p',
-      problems: ['bad entry'],
+      problems: ['bad entry', 'permissions.deny[1] must be a non-empty string'],
+      unsafe: ['permissions.deny[1] must be a non-empty string'],
       settings: {
         permissions: { allow: ['Bash'], deny: ['Bash(curl:*)'], ask: ['Bash(git push:*)'], defaultMode: 'full-access' },
         hooks: { PreToolUse: [] },
@@ -110,7 +126,8 @@ describe('resolveSettings', () => {
     assert.deepEqual(effective.hooks, [])
     assert.deepEqual(effective.mcp, { enableAll: false, enabled: [], disabled: ['bad'] })
     assert.deepEqual(effective.heldBack, ['p: enableAllProjectMcpServers, env, hooks, permissions'])
-    assert.deepEqual(effective.problems, ['p: bad entry'])
+    assert.deepEqual(effective.problems, ['p: bad entry', 'p: permissions.deny[1] must be a non-empty string'])
+    assert.deepEqual(effective.unsafe, ['p: permissions.deny[1] must be a non-empty string'])
   })
 
   it('applies everything once the folder is approved, later sources winning single values', () => {
@@ -125,7 +142,7 @@ describe('resolveSettings', () => {
 })
 
 describe('workspace trust', () => {
-  const project = (settings: SettingsSource['settings']): SettingsSource[] => [{ scope: 'project', file: 'p', problems: [], settings }]
+  const project = (settings: SettingsSource['settings']): SettingsSource[] => [{ scope: 'project', file: 'p', problems: [], unsafe: [], settings }]
 
   it('digests only what a folder grants, independent of key order', () => {
     const a = folderConfigDigest(project({ permissions: { allow: ['Bash'], deny: ['x'] }, env: { A: '1', B: '2' } }))
@@ -133,7 +150,7 @@ describe('workspace trust', () => {
     assert.equal(a, b)
     assert.notEqual(a, folderConfigDigest(project({ permissions: { allow: ['Bash(ls)'] }, env: { A: '1', B: '2' } })))
     assert.equal(folderConfigDigest(project({ permissions: { deny: ['Bash(curl:*)'] } })), null)
-    assert.equal(folderConfigDigest([{ scope: 'user', problems: [], settings: { env: { A: '1' } } }]), null)
+    assert.equal(folderConfigDigest([{ scope: 'user', problems: [], unsafe: [], settings: { env: { A: '1' } } }]), null)
     assert.equal(canonicalJson({ b: [1, { d: 1, c: undefined }], a: 'x' }), '{"a":"x","b":[1,{"d":1}]}')
   })
 
@@ -185,10 +202,52 @@ describe('workspace trust', () => {
     assert.equal(({} as { trusted?: boolean }).trusted, undefined)
   })
 
+  it('does not write over a trust file it could not read, which would forget every other folder', async () => {
+    const files = memoryTrustFs()
+    files.files.set('/t.json', JSON.stringify({ version: 1, workspaces: { '/other': { trusted: true } } }))
+    let failing = true
+    const store = new TrustStore('/t.json', { ...files, read: async (file) => (failing ? Promise.reject(new Error('EBUSY')) : files.read(file)) }, false)
+    await assert.rejects(() => store.trust(ROOT, null), /EBUSY/)
+    // Reading alone still counts a store it cannot read as one that trusts nothing.
+    assert.equal((await store.get('/other')).trusted, false)
+    failing = false
+    await store.trust(ROOT, null)
+    assert.equal((await store.get('/other')).trusted, true)
+    assert.equal((await store.get(ROOT)).trusted, true)
+  })
+
   it('warns before trusting a home folder or a drive root', () => {
     assert.match(trustWarning('/home/u', '/home/u', false)!, /home folder/)
     assert.match(trustWarning('C:\\', 'C:\\Users\\u', true)!, /root of a drive/)
     assert.equal(trustWarning('/home/u/app', '/home/u', false), null)
+  })
+
+  it('reads a file again when it fails the way one being replaced does, and gives up on the rest', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'encode-read-'))
+    const file = path.join(dir, 'settings.json')
+    await fs.writeFile(file, '{"ok":true}')
+    const real = fs.readFile.bind(fs)
+    const failures = ['EBUSY', 'EPERM']
+    const spy = mock.method(fs, 'readFile', (async (target: Parameters<typeof fs.readFile>[0], options: Parameters<typeof fs.readFile>[1]) => {
+      const code = failures.shift()
+      if (code && target === file) throw Object.assign(new Error(code), { code })
+      return real(target, options)
+    }) as unknown as typeof fs.readFile)
+    try {
+      assert.equal(await readText(file), '{"ok":true}')
+      assert.equal(spy.mock.callCount(), 3)
+      // The third failure in a row is reported rather than hidden; a permanent error is not tried again.
+      failures.push('EBUSY', 'EBUSY', 'EBUSY')
+      await assert.rejects(() => readText(file), /EBUSY/)
+      assert.equal(spy.mock.callCount(), 6)
+      failures.length = 0
+      failures.push('EISDIR')
+      await assert.rejects(() => readText(file), /EISDIR/)
+      assert.equal(spy.mock.callCount(), 7)
+    } finally {
+      spy.mock.restore()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('writes the store atomically on disk', async () => {

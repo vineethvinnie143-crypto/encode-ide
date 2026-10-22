@@ -50,10 +50,19 @@ export interface ApprovalRequest {
   preview?: DiffHunk[]
   /** True when the user may approve this and its like for the rest of the session. */
   grantable?: boolean
+  /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
+  always?: { label: string; rules: string[] }
 }
 
-/** The user's answer to an approval request. A bare boolean is approve or refuse. */
-export type ApprovalAnswer = boolean | { approved: boolean; note?: string; remember?: 'session' }
+/** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */
+export type RuleScope = 'user' | 'project' | 'local'
+
+/**
+ * The user's answer to an approval request. A bare boolean is approve or refuse. `remember` approves for the rest
+ * of the session, or saves the rules the request offered (`always`) in the settings file `scope` names, which is
+ * the project's private one by default.
+ */
+export type ApprovalAnswer = boolean | { approved: boolean; note?: string; remember?: 'session' | 'always'; scope?: RuleScope }
 
 /** A question waiting for the user's answer. */
 export interface AskRequest {

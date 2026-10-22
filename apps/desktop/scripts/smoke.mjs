@@ -603,6 +603,7 @@ async function runProviderPhase() {
 
   await runSubagentChecks()
   await runWebChecks()
+  await runPermissionChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -680,6 +681,96 @@ async function runWebChecks() {
   if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
     throw new Error('WebFetch reached a private address')
   }
+}
+
+/**
+ * "Always allow" on an approval saves a rule for the command and trusts the folder with it, so the same command runs
+ * without asking and another still asks. The folder's own settings then wait for review, are read on the Permissions
+ * tab and approved there; a rule is added and removed by hand; trust is taken back.
+ */
+async function runPermissionChecks() {
+  console.log('[smoke] --- permissions ---')
+  const localFile = path.join(demoPath, '.encode', 'settings.local.json')
+  const projectFile = path.join(demoPath, '.encode', 'settings.json')
+  await evaluate('window.eNCode.agent.reset()')
+  const first = await evaluate('window.eNCode.permissions.report()')
+  if (!first || first.trusted || first.broken) throw new Error(`The demo folder should start untrusted and readable: ${JSON.stringify(first)}`)
+
+  await sendPrompt('[scenario:always-allow] Run a command twice, then another one.')
+  await waitFor("!!document.querySelector('.approval-card')", 60000, 'the first command asks')
+  if (!(await click('.approval-card .btn', 'Always allow'))) throw new Error('The approval card offers no Always allow')
+  await waitFor("!!document.querySelector('.approval-always')", 4000, 'the Always allow choices')
+  const choices = await evaluate(`({
+    rules: document.querySelector('.approval-always-rules')?.textContent,
+    scope: document.querySelector('.approval-scope input:checked')?.value,
+    trust: document.querySelector('.approval-trust input')?.checked ?? null,
+    note: document.querySelector('.approval-always-note')?.textContent,
+  })`)
+  console.log('[smoke] always allow choices:', JSON.stringify(choices))
+  if (choices.rules !== 'Bash(echo always-allow-ok)') throw new Error('The card does not show the rule it would save')
+  if (choices.scope !== 'local') throw new Error('The rule should go to the private settings by default')
+  if (choices.trust !== true) throw new Error('A folder with no settings of its own should be offered trust with the rule, ticked')
+  if (!/applies at once/.test(choices.note)) throw new Error(`The note does not say the rule applies at once: ${choices.note}`)
+  await screenshot('17-always-allow.png')
+  await click('.approval-always .btn.primary')
+  await waitFor("!document.querySelector('.approval-always')", 8000, 'the card goes')
+  const asked = await driveAgent('17-always-allow')
+  console.log('[smoke] approvals after always allow:', JSON.stringify(asked.map((card) => card.detail)))
+  if (asked.length !== 1 || !asked[0].detail.includes('echo another-command-ok')) throw new Error('Only the different command should have asked')
+  const saved = JSON.parse(await fs.readFile(localFile, 'utf8'))
+  if (JSON.stringify(saved.permissions?.allow) !== JSON.stringify(['Bash(echo always-allow-ok)'])) throw new Error(`The rule was not saved: ${JSON.stringify(saved)}`)
+  const outputs = (await toolOutputs()).filter((entry) => entry.name === 'Bash').map((entry) => entry.output.trim())
+  if (outputs.filter((output) => output.includes('always-allow-ok')).length !== 2) throw new Error(`Both runs of the command should have happened: ${JSON.stringify(outputs)}`)
+  const trusted = await evaluate('window.eNCode.permissions.report()')
+  if (!trusted.trusted || !trusted.configApproved) throw new Error('Trusting the folder with the rule should leave it trusted and approved')
+
+  // The folder's own settings arrive (a pull, say): they wait for review, and a banner says so.
+  await fs.mkdir(path.dirname(projectFile), { recursive: true })
+  await fs.writeFile(projectFile, JSON.stringify({ permissions: { allow: ['Bash(echo from-folder)'] } }))
+  await evaluate("window.dispatchEvent(new Event('focus'))")
+  await waitFor("!!document.querySelector('.trust-banner')", 8000, 'the banner for settings that changed')
+  const banner = await evaluate("document.querySelector('.trust-banner')?.textContent ?? ''")
+  if (!/changed since you approved/.test(banner)) throw new Error(`The banner says ${JSON.stringify(banner)}`)
+  await screenshot('17-trust-banner.png')
+  await click('.trust-banner .btn')
+  await waitFor("!!document.querySelector('.settings-permissions .perm-folder')", 8000, 'the Permissions tab')
+  const chip = () => evaluate("document.querySelector('.perm-folder .ui-chip')?.textContent ?? ''")
+  if ((await chip()) !== 'Settings changed') throw new Error(`The folder reads ${JSON.stringify(await chip())}`)
+  const waiting = await evaluate("document.querySelector('.perm-waiting pre')?.textContent ?? ''")
+  if (!waiting.includes('Bash(echo from-folder)')) throw new Error('The settings that wait are not shown')
+  const mine = await evaluate("[...document.querySelectorAll('.perm-rule')].map((row) => [row.querySelector('.perm-rule-text').textContent, row.classList.contains('is-waiting')])")
+  console.log('[smoke] rules while waiting:', JSON.stringify(mine))
+  // The folder's settings are one thing to approve, so the rule saved earlier waits with the one that arrived.
+  if (!mine.some(([text, held]) => text === 'Bash(echo always-allow-ok)' && held)) throw new Error('The saved rule should be listed, and wait with the rest of the folder’s settings')
+  if (!mine.some(([text, held]) => text === 'Bash(echo from-folder)' && held)) throw new Error('The folder’s own rule should be listed and waiting')
+  await screenshot('17-permissions.png')
+
+  await click('.perm-folder-actions .btn', 'Approve these settings')
+  await waitFor("document.querySelector('.perm-folder .ui-chip')?.textContent === 'Trusted'", 8000, 'the settings are approved')
+  if (await evaluate("!!document.querySelector('.perm-rule.is-waiting') || !!document.querySelector('.perm-waiting')")) throw new Error('Nothing should wait after the approval')
+
+  // A rule by hand, then removed.
+  await typeInto('.perm-add-text', 'Read(./secret.txt)')
+  await click('.perm-add .ui-segment', 'Never allow')
+  await click('.perm-add .btn.primary')
+  await waitFor("[...document.querySelectorAll('.perm-rule-text')].some((node) => node.textContent === 'Read(./secret.txt)')", 8000, 'the rule is added')
+  const denied = await evaluate("document.querySelector('.perm-group')?.querySelector('.perm-group-title')?.textContent ?? ''")
+  if (denied !== 'Never allow') throw new Error(`Denials should be listed first, not ${JSON.stringify(denied)}`)
+  const secret = JSON.parse(await fs.readFile(localFile, 'utf8'))
+  if (JSON.stringify(secret.permissions?.deny) !== JSON.stringify(['Read(./secret.txt)'])) throw new Error('The rule was not written to the private settings')
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('.perm-rule')].find((item) => item.querySelector('.perm-rule-text').textContent === 'Read(./secret.txt)')
+    row.querySelector('button').click()
+  })()`)
+  await waitFor("![...document.querySelectorAll('.perm-rule-text')].some((node) => node.textContent === 'Read(./secret.txt)')", 8000, 'the rule is removed')
+
+  // Trust is taken back, and the agent can no longer use what the folder grants.
+  await click('.perm-folder-actions .btn', 'Stop trusting this folder')
+  await waitFor("document.querySelector('.perm-folder .ui-chip')?.textContent === 'Not trusted'", 8000, 'trust is taken back')
+  await click('.settings-footer .btn.primary')
+  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
+  console.log('[smoke] permissions: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

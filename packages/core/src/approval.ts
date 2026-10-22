@@ -19,18 +19,42 @@
  * on the desktop (the mouse and keyboard reach anything the user can).
  * Applications the Computer tool never operates are refused under every
  * policy, like a deny rule.
+ *
+ * The user's permission rules (settings files, `@encode/permissions`) come in
+ * three places, always in this order: a deny rule refuses under every policy;
+ * a policy that denies (Read Only) or that never asks (Full access) is not
+ * changed by an ask rule; an allow rule skips the question the policy would
+ * have asked, except where the question guards something a rule cannot vouch
+ * for (protected folders, a Read Only policy, desktop applications).
  */
 import path from 'node:path'
-import { assessCommand, checkFetchUrl, isProtectedPath } from '@encode/permissions'
+import { assessCommand, checkFetchUrl, isProtectedPath, suggestRule, type RuleQuery, type RuleSuggestion, type RuleVerdict } from '@encode/permissions'
 import type { ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } from '@encode/tools'
 import { classifyApp, isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
 import type { ApprovalPolicy } from './ui'
 
 export type ApprovalDecision =
   | { kind: 'allow' }
-  /** `grantable`: the user may approve this and its like for the rest of the session. Protected folders never are. */
-  | { kind: 'ask'; reason: string; grantable: boolean }
+  /**
+   * `grantable`: the user may approve this and its like for the rest of the session. Protected folders never are.
+   * `byRule`: a rule of the user's says to ask, so no rule of theirs could stop the question (an allow rule loses
+   * to it) and approving covers this call only.
+   */
+  | { kind: 'ask'; reason: string; grantable: boolean; byRule?: true }
   | { kind: 'deny'; reason: string }
+
+/** What decisions ask of the user's permission rules; a `RuleSet` is one. */
+export interface RuleJudge {
+  evaluate(query: RuleQuery): RuleVerdict | null
+}
+
+/** A judge of rules and an assessor of shell lines that refuse everything and say why: for a folder whose settings cannot be relied on. */
+export function refuseEverything(reason: string): { rules: RuleJudge; assessor: ShellCommandAssessor } {
+  return {
+    assessor: async () => ({ decision: 'deny', reason }),
+    rules: { evaluate: () => ({ decision: 'deny', reason, rule: { behavior: 'deny', tool: '*', source: 'managed', text: '*' } }) },
+  }
+}
 
 export interface ApprovalContext {
   policy: ApprovalPolicy
@@ -40,6 +64,15 @@ export interface ApprovalContext {
   platform: NodeJS.Platform
   /** Real paths of directories read without asking, besides the workspace: skills, memory files. */
   readRoots?: readonly string[]
+  /**
+   * The user's rules for reads, edits, sites, outside tools and tools by name. Shell lines are judged by the
+   * assessor, which holds the same rules (so a Bash rule and the read-only check are weighed together).
+   */
+  rules?: RuleJudge
+  /** Folders outside the workspace the user listed as part of it: read and edited as if inside it. */
+  extraRoots?: readonly string[]
+  /** The tool being called, for rules that name a tool: `WebSearch`, `Skill(deploy)`, `Task(reviewer)`. */
+  tool?: { name: string; specifier?: string }
   /** Sites the user already let the agent contact in this session. */
   approvedHosts: ReadonlySet<string>
   /** Applications the user already let the agent use in this session, by program name. */
@@ -50,6 +83,7 @@ export interface ApprovalContext {
 
 const ALLOW: ApprovalDecision = { kind: 'allow' }
 const ask = (reason: string, grantable = true): ApprovalDecision => ({ kind: 'ask', reason, grantable })
+const askByRule = (reason: string): ApprovalDecision => ({ kind: 'ask', reason, grantable: false, byRule: true })
 const deny = (reason: string): ApprovalDecision => ({ kind: 'deny', reason })
 
 function shown(file: string, root: string): string {
@@ -83,26 +117,50 @@ export function hostOf(url: string): string | null {
   return checked.ok ? checked.host : null
 }
 
+/**
+ * What the policy and the user's rules make of one call. Rules that name the tool (`WebSearch`, `Skill(deploy)`) are
+ * weighed after the call's own access: a deny refuses, an ask asks where the policy would have run it, and an allow
+ * answers only the question of a first visit to a site.
+ */
 export async function decideApproval(access: ToolAccess, context: ApprovalContext): Promise<ApprovalDecision> {
-  const { policy } = context
+  const decided = await decideAccess(access, context)
+  const named = context.tool && context.rules ? context.rules.evaluate({ type: 'tool', tool: context.tool.name, ...(context.tool.specifier !== undefined ? { specifier: context.tool.specifier } : {}) }) : null
+  if (!named) return decided
+  if (named.decision === 'deny') return deny(named.reason)
+  if (decided.kind === 'deny') return decided
+  if (named.decision === 'ask') return decided.kind === 'allow' && context.policy !== 'full-access' ? askByRule(named.reason) : decided
+  return decided.kind === 'ask' && access.type === 'web' && !decided.byRule ? ALLOW : decided
+}
+
+async function decideAccess(access: ToolAccess, context: ApprovalContext): Promise<ApprovalDecision> {
+  const { policy, rules } = context
   switch (access.type) {
     case 'none':
     case 'agent':
       return ALLOW
 
     case 'read': {
+      const verdict = rules?.evaluate({ type: 'read', paths: access.paths })
+      if (verdict?.decision === 'deny') return deny(verdict.reason)
       if (policy === 'full-access') return ALLOW
-      const outside = await outsideWorkspace(access.paths, context, context.readRoots)
+      if (verdict?.decision === 'ask') return askByRule(verdict.reason)
+      if (verdict?.decision === 'allow') return ALLOW
+      const outside = await outsideWorkspace(access.paths, context, [...(context.readRoots ?? []), ...(context.extraRoots ?? [])])
       return outside ? ask(`${shown(outside, context.root)} is outside the workspace, and what the agent reads is sent to the model.`) : ALLOW
     }
 
     case 'write': {
+      const verdict = rules?.evaluate({ type: 'write', paths: access.paths })
+      if (verdict?.decision === 'deny') return deny(verdict.reason)
       if (policy === 'full-access') return ALLOW
       if (policy === 'read-only') return deny('The approval policy is Read Only, so eNCode does not change files. Ask the user to switch to Workspace Write.')
-      const outside = await outsideWorkspace(access.paths, context)
-      if (outside) return ask(`${shown(outside, context.root)} is outside the workspace.`)
+      // A protected folder is asked about whatever a rule says: a rule cannot vouch for what could run code later.
       const guarded = await protectedTarget(access.paths, context)
-      return guarded ? ask(`${shown(guarded, context.root)} is in a protected folder: changes there can run code or steer the agent.`, false) : ALLOW
+      if (guarded) return ask(`${shown(guarded, context.root)} is in a protected folder: changes there can run code or steer the agent.`, false)
+      if (verdict?.decision === 'ask') return askByRule(verdict.reason)
+      if (verdict?.decision === 'allow') return ALLOW
+      const outside = await outsideWorkspace(access.paths, context, context.extraRoots)
+      return outside ? ask(`${shown(outside, context.root)} is outside the workspace.`) : ALLOW
     }
 
     case 'command': {
@@ -115,17 +173,25 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
       })
       if (verdict.decision === 'deny') return deny(verdict.reason)
       if (policy === 'full-access') return ALLOW
+      const byRule = verdict.source === 'rule'
       if (policy === 'read-only') {
-        return verdict.decision === 'allow'
+        // A rule that allows a line says the user wants it to run, not that it changes nothing.
+        const proven = verdict.decision === 'allow' && (!byRule || verdict.readOnly === true)
+        return proven
           ? ALLOW
           : deny(`The approval policy is Read Only, which runs only commands proven read-only. ${verdict.reason} Ask the user to switch to Workspace Write if the command is needed.`)
       }
-      if (verdict.decision === 'ask') return ask(verdict.reason)
+      if (verdict.decision === 'ask') return byRule ? askByRule(verdict.reason) : ask(verdict.reason)
+      if (byRule) return ALLOW
       return policy === 'workspace-write' ? ask('Workspace Write asks before every command.') : ALLOW
     }
 
     case 'web': {
+      const verdict = rules?.evaluate({ type: 'web', url: access.url })
+      if (verdict?.decision === 'deny') return deny(verdict.reason)
       if (policy === 'full-access') return ALLOW
+      if (verdict?.decision === 'ask') return askByRule(verdict.reason)
+      if (verdict?.decision === 'allow') return ALLOW
       const host = hostOf(access.url)
       if (!host || context.approvedHosts.has(host)) return ALLOW
       return ask(
@@ -134,8 +200,14 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
       )
     }
 
-    case 'external':
-      return policy === 'full-access' ? ALLOW : ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`, false)
+    case 'external': {
+      const verdict = rules?.evaluate({ type: 'mcp', server: access.server, tool: access.tool ?? '' })
+      if (verdict?.decision === 'deny') return deny(verdict.reason)
+      if (policy === 'full-access') return ALLOW
+      if (verdict?.decision === 'ask') return askByRule(verdict.reason)
+      if (verdict?.decision === 'allow') return ALLOW
+      return ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`, false)
+    }
 
     case 'desktop': {
       if (access.blocked) return deny(`${access.label} is never used: ${access.blocked}.`)
@@ -147,6 +219,28 @@ export async function decideApproval(access: ToolAccess, context: ApprovalContex
         false,
       )
     }
+  }
+}
+
+/**
+ * The rule "Always allow" would save for a call the user is asked about: the narrowest one that would have allowed
+ * it, or null when no rule could say what the call does (or when the question cannot be answered by a rule).
+ */
+export function alwaysAllowFor(access: ToolAccess, context: { root: string; platform: NodeJS.Platform; dialect: 'bash' | 'pwsh' }): RuleSuggestion | null {
+  const windows = context.platform === 'win32'
+  switch (access.type) {
+    case 'command':
+      return suggestRule({ type: 'command', line: access.command, dialect: context.dialect })
+    case 'write':
+      return access.paths.length === 1 ? suggestRule({ type: 'edit', path: access.paths[0], root: context.root, windows }) : null
+    case 'read':
+      return access.paths.length === 1 ? suggestRule({ type: 'read', path: access.paths[0], root: context.root, windows }) : null
+    case 'web':
+      return suggestRule({ type: 'web', url: access.url })
+    case 'external':
+      return access.tool ? suggestRule({ type: 'mcp', server: access.server, tool: access.tool }) : null
+    default:
+      return null
   }
 }
 

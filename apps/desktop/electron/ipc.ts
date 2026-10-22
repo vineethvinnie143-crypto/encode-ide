@@ -20,6 +20,7 @@ import { isRendererUrl } from './window'
 import type {
   AgentStartInput,
   ApprovalAnswer,
+  PermissionsAction,
   PlanRequest,
   SearchOptions,
   SessionGoal,
@@ -48,14 +49,20 @@ export interface IpcDeps {
   onSessionRemoved?: (sessionId: string) => void
 }
 
-/** What the renderer is allowed to send as an answer to an approval: a yes or no, a short note, "for this session". */
+/**
+ * What the renderer is allowed to send as an answer to an approval: a yes or no, a short note, "for this session",
+ * or "always" with the settings file the rule goes to. Only an approval can be remembered.
+ */
 export function approvalAnswerOf(answer: unknown): ApprovalAnswer {
   if (typeof answer !== 'object' || answer === null) return { approved: Boolean(answer) }
-  const given = answer as { approved?: unknown; note?: unknown; remember?: unknown }
+  const given = answer as { approved?: unknown; note?: unknown; remember?: unknown; scope?: unknown }
+  const approved = given.approved === true
+  const scope = given.scope === 'user' || given.scope === 'project' || given.scope === 'local' ? given.scope : undefined
   return {
-    approved: given.approved === true,
+    approved,
     ...(typeof given.note === 'string' && given.note.trim() ? { note: given.note.slice(0, 2_000) } : {}),
-    ...(given.remember === 'session' ? { remember: 'session' as const } : {}),
+    ...(approved && given.remember === 'session' ? { remember: 'session' as const } : {}),
+    ...(approved && given.remember === 'always' ? { remember: 'always' as const, ...(scope ? { scope } : {}) } : {}),
   }
 }
 
@@ -302,6 +309,17 @@ export function registerIpc(deps: IpcDeps): void {
     skills.create(String(name), description ? String(description) : undefined),
   )
   handle('skills:open-folder', () => skills.openFolder())
+  // The Permissions screen is about the folder that is open; the renderer never names one.
+  handle('permissions:report', async () => {
+    const root = workspace.current?.root
+    if (!root) return null
+    return agent.permissionsReport(root).catch((error) => Promise.reject(hostFailure(error)))
+  })
+  handle('permissions:act', async (action: PermissionsAction) => {
+    const root = workspace.current?.root
+    if (!root) throw new Error('Open a folder first.')
+    return agent.permissionsAct(root, action).catch((error) => Promise.reject(hostFailure(error)))
+  })
   // The answer is yes or no, or an object with a note and "for this session".
   handle('agent:approve', async (id: string, answer: unknown) => {
     await host.approve(String(id), approvalAnswerOf(answer))

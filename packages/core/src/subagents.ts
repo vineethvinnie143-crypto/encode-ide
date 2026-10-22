@@ -30,6 +30,7 @@ import {
   type SubagentType,
   type ToolRegistry,
 } from '@encode/tools'
+import type { RuleJudge } from './approval'
 import { memoryConversation } from './conversation'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
@@ -129,6 +130,9 @@ export interface SubagentsOptions {
   createShell: () => AgentShell & { dispose?(): Promise<void> }
   approvedHosts: Set<string>
   assessor: ShellCommandAssessor
+  rules?: RuleJudge
+  extraRoots?: () => readonly string[]
+  refresh?: () => Promise<void>
   readRoots?: () => readonly string[]
   preface?: () => Promise<string[]> | string[]
 }
@@ -236,6 +240,9 @@ export function createSubagents(options: SubagentsOptions): Subagents {
         services: { ...options.services, shell, files: cloneTracker(options.files) },
         approvedHosts: options.approvedHosts,
         assessor: options.assessor,
+        ...(options.rules ? { rules: options.rules } : {}),
+        ...(options.extraRoots ? { extraRoots: options.extraRoots } : {}),
+        ...(options.refresh ? { refresh: options.refresh } : {}),
         ...(options.readRoots ? { readRoots: options.readRoots } : {}),
         ...(options.preface ? { preface: options.preface } : {}),
         maxSteps: Math.min(options.settings().maxSteps, MAX_SUBAGENT_STEPS),

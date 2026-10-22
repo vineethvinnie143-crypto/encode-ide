@@ -24,6 +24,7 @@ import {
   type ModelRole,
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
+import { Workspaces } from '@encode/workspace'
 import type { ModelAlert, ModelStatus } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
@@ -73,6 +74,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   const log = options.log ?? ((message: string) => console.error(`[agent-host] ${message}`))
   const peer = new Peer<DesktopHostApi, MainApi>(port, { onProtocolError: (error) => log(error.message) })
   let host: AgentHost | undefined
+  let workspaces: Workspaces | undefined
   let config: HostConfig | undefined
   let router: ModelRouter | undefined
   let problems: ConfigProblem[] = []
@@ -242,6 +244,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       stateTimer = setInterval(saveState, options.stateIntervalMs ?? 30_000)
       stateTimer.unref?.()
     }
+    // The settings, trust and permission rules of each folder a session works in; the Permissions screen reads the same pictures.
+    workspaces = new Workspaces({ home: init.home, warn: (message) => peer.notify('warn', message) })
     const created = new AgentHost({
       dir: init.dir,
       home: init.home,
@@ -251,6 +255,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       emit: (event) => peer.notify('event', event),
       onJobs: (jobs) => peer.notify('jobs', jobs),
       warn: (message) => peer.notify('warn', message),
+      scope: workspaces.scope,
       ...options.hostOptions,
     })
     if (init.legacySessionsFile) {
@@ -290,6 +295,16 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     if (!router) return
     for (const provider of Object.keys(config?.providers ?? {})) router.keysChanged(provider)
     await router.refresh({ force: true }).catch(() => undefined)
+  })
+
+  peer.handle('permissionsReport', async ({ root }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.report(root)
+  })
+
+  peer.handle('permissionsAct', async ({ root, action }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.act(root, action)
   })
 
   peer.handle('shutdown', async () => {
