@@ -1100,7 +1100,7 @@ async function runFontChecks() {
   // Cancel puts Windows' fonts back.
   await click('.settings-footer .btn', 'Cancel')
   await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
-  if (!(await bodyFont()).startsWith('system-ui') || (await sizeOf('.composer-input')) !== 14) throw new Error('Cancel did not put the fonts back')
+  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('system-ui') && parseFloat(getComputedStyle(document.querySelector('.composer-input')).fontSize) === 14", 4000, 'Cancel puts the fonts back')
 
   // Saved, Inter is there from the first frame of the next load.
   await openAppearanceSettings()

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import {
   Check,
   Eye,
@@ -65,7 +65,8 @@ export default function SettingsModal() {
   useEffect(() => {
     if (draftAppearance) applyAppearance(draftAppearance)
   }, [draftAppearance])
-  useEffect(
+  // A layout effect, so the saved look is back in the commit that removes the dialog and no frame is drawn with the preview.
+  useLayoutEffect(
     () => () => {
       const saved = useSettings.getState().settings
       if (saved) applyAppearance(saved.appearance)
