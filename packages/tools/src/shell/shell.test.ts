@@ -225,6 +225,9 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     // A failure that reads like a block gets the hint; the same words from a command outside the sandbox, or one that succeeded, do not.
     const blocked = await bash.run({ command: 'touch /etc/x' }, fake({ active: true, allowUnsandboxed: true }, 'touch: cannot touch /etc/x: Read-only file system', 1))
     assert.match(textOf(blocked.content), /This may be the sandbox\. .* unsandboxed true/)
+    // Windows: a program of the Git runtime started from PowerShell cannot start in the sandbox, and says so in its own words.
+    const msys = await bash.run({ command: 'ssh host' }, fake({ active: true, allowUnsandboxed: true }, '0 [main] ssh (4) C:\\Git\\usr\\bin\\ssh.exe: *** fatal error - couldn\'t create signal pipe, Win32 error 5', 1))
+    assert.match(textOf(msys.content), /This may be the sandbox\./)
     const plain = await bash.run({ command: 'false' }, fake({ active: true, allowUnsandboxed: true }, 'boom', 1))
     assert.ok(!textOf(plain.content).includes('sandbox'))
     const outside = await bash.run({ command: 'touch /etc/x', unsandboxed: true }, fake({ active: true, allowUnsandboxed: true }, 'touch: Permission denied', 1))

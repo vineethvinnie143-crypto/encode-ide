@@ -12,6 +12,9 @@ namespace Encode.Sandbox
     ///   grant --sid S --path P [--protect X]...   lets the SID write P (and everything in it)
     ///   revoke --sid S --path P [--protect X]...  takes that back
     ///   check --sid S --path P            whether P carries the entry
+    ///   label --path P [--protect X]...   labels P (and everything in it) low, so that low-integrity programs may write it
+    ///   unlabel --path P [--protect X]... takes the labels away
+    ///   labels --path P...                the labels the paths carry
     ///   probe [options]                   whether a program can be started this way here
     ///
     /// Answers other than a program's own output are one line of JSON on standard output. A failure is a line on
@@ -68,6 +71,9 @@ namespace Encode.Sandbox
                     case "--cwd": parsed.Run.Cwd = Value(args, ref i); break;
                     case "--no-lua": parsed.Run.Lua = false; break;
                     case "--no-job": parsed.Run.UseJob = false; break;
+                    case "--integrity": parsed.Run.Integrity = Value(args, ref i); break;
+                    case "--job-ui": parsed.Run.JobUi = Value(args, ref i); break;
+                    case "--job-breakaway": parsed.Run.JobBreakaway = Value(args, ref i); break;
                     case "--full-restriction": parsed.Run.WriteRestricted = false; break;
                     case "--sid": parsed.Sid = Value(args, ref i); break;
                     case "--path": parsed.Paths.Add(Value(args, ref i)); break;
@@ -96,7 +102,7 @@ namespace Encode.Sandbox
         {
             try
             {
-                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, probe or version.");
+                if (args.Length == 0) throw new SandboxException("No command. Use run, grant, revoke, check, label, unlabel, labels, probe or version.");
                 switch (args[0])
                 {
                     case "version":
@@ -106,13 +112,13 @@ namespace Encode.Sandbox
                     {
                         Parsed parsed = Parse(args, 1);
                         if (string.IsNullOrEmpty(parsed.Run.Program)) throw new SandboxException("No program to run.");
-                        if (parsed.Run.Restrict.Count == 0) throw new SandboxException("--restrict is required.");
+                        if (parsed.Run.Restrict.Count == 0 && parsed.Run.Integrity.Length == 0) throw new SandboxException("--restrict or --integrity is required.");
                         return Runner.Run(parsed.Run);
                     }
                     case "probe":
                     {
                         Parsed parsed = Parse(args, 1);
-                        if (parsed.Run.Restrict.Count == 0) parsed.Run.Restrict.Add("everyone");
+                        if (parsed.Run.Restrict.Count == 0 && parsed.Run.Integrity.Length == 0) parsed.Run.Restrict.Add("everyone");
                         Say(Probe.Run(parsed.Run));
                         return 0;
                     }
@@ -152,6 +158,43 @@ namespace Encode.Sandbox
                         List<string> present = new List<string>();
                         foreach (string path in parsed.Paths) if (Acls.Has(path, sid)) present.Add(path);
                         Say(new JsonObject().Bool("ok", true).List("present", present).ToString());
+                        return 0;
+                    }
+                    case "label":
+                    {
+                        Parsed parsed = Parse(args, 1);
+                        if (parsed.Paths.Count == 0) throw new SandboxException("--path is required.");
+                        DateTime begun = DateTime.UtcNow;
+                        List<string> done = new List<string>();
+                        foreach (string path in parsed.Paths)
+                        {
+                            if (parsed.IfMissing && Labels.IsLow(path)) continue;
+                            if (!System.IO.Directory.Exists(path)) throw new SandboxException("Not a folder: " + path);
+                            Labels.Apply(path, "low", false);
+                            done.Add(path);
+                        }
+                        // What the command must not change inside is labeled medium again, and no longer takes the folder's label.
+                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "medium", true);
+                        Say(new JsonObject().Bool("ok", true).List("labeled", done).Number("ms", (long)(DateTime.UtcNow - begun).TotalMilliseconds).ToString());
+                        return 0;
+                    }
+                    case "unlabel":
+                    {
+                        Parsed parsed = Parse(args, 1);
+                        if (parsed.Paths.Count == 0) throw new SandboxException("--path is required.");
+                        DateTime begun = DateTime.UtcNow;
+                        foreach (string item in parsed.Protect) if (System.IO.Directory.Exists(item) || System.IO.File.Exists(item)) Labels.Apply(item, "", false);
+                        foreach (string path in parsed.Paths) if (System.IO.Directory.Exists(path)) Labels.Apply(path, "", false);
+                        Say(new JsonObject().Bool("ok", true).Number("ms", (long)(DateTime.UtcNow - begun).TotalMilliseconds).ToString());
+                        return 0;
+                    }
+                    case "labels":
+                    {
+                        Parsed parsed = Parse(args, 1);
+                        if (parsed.Paths.Count == 0) throw new SandboxException("--path is required.");
+                        List<string> found = new List<string>();
+                        foreach (string path in parsed.Paths) found.Add(path + " => " + Labels.Get(path));
+                        Say(new JsonObject().Bool("ok", true).List("labels", found).ToString());
                         return 0;
                     }
                     default:

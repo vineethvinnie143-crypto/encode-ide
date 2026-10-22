@@ -11,6 +11,12 @@ export const HELPER_FAILED = 125
 export interface RunFlags {
   /** SIDs or names (everyone, users, restricted, logon, authenticated, interactive) the token is restricted to. */
   restrict: readonly string[]
+  /** Run at the low integrity level: nothing labeled higher can be written, deleted or ended. */
+  integrity?: 'low'
+  /** The job's limits on the clipboard, other programs' windows and so on (default all). */
+  jobUi?: 'all' | 'none'
+  /** Whether programs the command starts may leave the job (default none). */
+  jobBreakaway?: 'none' | 'ok' | 'silent'
   /** hidden: a console nobody sees (default); detached: none; inherit: the helper's own. */
   console?: 'hidden' | 'detached' | 'inherit'
   /** Turn administrator groups into deny-only (default true). */
@@ -22,14 +28,22 @@ export interface RunFlags {
   cwd?: string
 }
 
-/** The helper's arguments to start `file args...` under the restricted token. */
-export function runArguments(flags: RunFlags, file: string, args: readonly string[]): string[] {
-  const out = ['run']
+function flagArguments(flags: RunFlags): string[] {
+  const out: string[] = []
   for (const sid of flags.restrict) out.push('--restrict', sid)
+  if (flags.integrity) out.push('--integrity', flags.integrity)
   if (flags.console && flags.console !== 'hidden') out.push('--console', flags.console)
   if (flags.lua === false) out.push('--no-lua')
   if (flags.job === false) out.push('--no-job')
+  if (flags.jobUi && flags.jobUi !== 'all') out.push('--job-ui', flags.jobUi)
+  if (flags.jobBreakaway && flags.jobBreakaway !== 'none') out.push('--job-breakaway', flags.jobBreakaway)
   if (flags.fullRestriction) out.push('--full-restriction')
+  return out
+}
+
+/** The helper's arguments to start `file args...` under the restricted token. */
+export function runArguments(flags: RunFlags, file: string, args: readonly string[]): string[] {
+  const out = ['run', ...flagArguments(flags)]
   if (flags.cwd) out.push('--cwd', flags.cwd)
   out.push('--', file, ...args)
   return out
@@ -79,13 +93,7 @@ export async function helperJson<T>(exe: string, args: readonly string[], timeou
 }
 
 export function probeHelper(exe: string, flags: RunFlags, timeoutMs = 20_000): Promise<HelperProbe> {
-  const args = ['probe']
-  for (const sid of flags.restrict) args.push('--restrict', sid)
-  if (flags.console && flags.console !== 'hidden') args.push('--console', flags.console)
-  if (flags.lua === false) args.push('--no-lua')
-  if (flags.job === false) args.push('--no-job')
-  if (flags.fullRestriction) args.push('--full-restriction')
-  return helperJson<HelperProbe>(exe, args, timeoutMs)
+  return helperJson<HelperProbe>(exe, ['probe', ...flagArguments(flags)], timeoutMs)
 }
 
 export function grantFolder(exe: string, sid: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; granted: string[]; ms: number }> {
@@ -105,4 +113,24 @@ export async function foldersWithGrant(exe: string, sid: string, folders: readon
   const args = ['check', '--sid', sid]
   for (const folder of folders) args.push('--path', folder)
   return (await helperJson<{ present: string[] }>(exe, args, timeoutMs)).present
+}
+
+/** Labels the folder low (everything in it, now and later) and the protected paths inside it medium. */
+export function labelFolder(exe: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; labeled: string[]; ms: number }> {
+  const args = ['label', '--path', folder]
+  for (const item of protect) args.push('--protect', item)
+  return helperJson(exe, args, timeoutMs)
+}
+
+export function unlabelFolder(exe: string, folder: string, protect: readonly string[], timeoutMs = 15 * 60_000): Promise<{ ok: boolean; ms: number }> {
+  const args = ['unlabel', '--path', folder]
+  for (const item of protect) args.push('--protect', item)
+  return helperJson(exe, args, timeoutMs)
+}
+
+/** The labels the paths carry, as "path => S:(ML;...)" lines. */
+export async function readLabels(exe: string, paths: readonly string[], timeoutMs = 60_000): Promise<string[]> {
+  const args = ['labels']
+  for (const item of paths) args.push('--path', item)
+  return (await helperJson<{ labels: string[] }>(exe, args, timeoutMs)).labels
 }

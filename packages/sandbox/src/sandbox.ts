@@ -35,8 +35,8 @@ export interface SessionScope {
 }
 
 export interface SessionSandbox {
-  /** Whether commands run in the sandbox right now, and if not why not. */
-  state(): { active: boolean; reason?: string; required: boolean; allowUnsandboxed: boolean; limits?: EngineLimits }
+  /** Whether commands run in the sandbox right now, and if not why not. Give the shell's program to learn whether it can run in it. */
+  state(program?: string): { active: boolean; reason?: string; required: boolean; allowUnsandboxed: boolean; limits?: EngineLimits }
   /** Rewrites a spawn. Throws a SandboxError when the sandbox is required and not available, or a folder cannot be prepared. */
   wrapSpawn(spec: SpawnSpec): Promise<SpawnSpec>
   /** The folder the shell keeps its scripts in while the sandbox is active, so that they are readable and writable inside it. */
@@ -128,6 +128,11 @@ export class Sandbox {
   /** What is being prepared right now ("Preparing C:\\work for the sandbox"), or nothing. */
   working(): string | undefined {
     return this.progress
+  }
+
+  /** Why a program cannot run in this system's sandbox (Windows: Git Bash), or nothing. */
+  unsupported(file: string): string | undefined {
+    return this.engine?.unsupported?.(file)
   }
 
   onChange(listener: () => void): () => void {
@@ -222,13 +227,16 @@ export class Sandbox {
   session(scope: SessionScope): SessionSandbox {
     const sandbox = this
     return {
-      state() {
+      state(program) {
         const settings = scope.settings()
         const base = { required: settings.required, allowUnsandboxed: settings.allowUnsandboxed }
         if (!settings.enabled) return { ...base, active: false, reason: 'The sandbox is turned off in the settings.' }
         const status = sandbox.result
-        if (status.state !== 'active') return { ...base, active: false, reason: status.reason ?? 'The sandbox is not available.', ...(status.limits ? { limits: status.limits } : {}) }
-        return { ...base, active: true, ...(status.limits ? { limits: status.limits } : {}) }
+        const limits = status.limits ? { limits: status.limits } : {}
+        if (status.state !== 'active') return { ...base, active: false, reason: status.reason ?? 'The sandbox is not available.', ...limits }
+        const unsupported = program ? sandbox.unsupported(program) : undefined
+        if (unsupported) return { ...base, active: false, reason: unsupported, ...limits }
+        return { ...base, active: true, ...limits }
       },
 
       async wrapSpawn(spec) {
@@ -237,6 +245,11 @@ export class Sandbox {
         await sandbox.start()
         if (sandbox.result.state !== 'active' || !sandbox.engine) {
           if (settings.required) throw new SandboxError('unavailable', `Commands are not run because the settings require the sandbox and it is not available: ${sandbox.result.reason ?? 'unknown reason'}`)
+          return spec
+        }
+        const unsupported = sandbox.engine.unsupported?.(spec.file)
+        if (unsupported) {
+          if (settings.required) throw new SandboxError('unavailable', `Commands are not run because the settings require the sandbox. ${unsupported}`)
           return spec
         }
         const policy = await sandbox.policy(scope)

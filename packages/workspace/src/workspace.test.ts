@@ -357,7 +357,7 @@ describe('the workspaces of a program', () => {
     // The probe has settled by the time the session has its scope, so the first request already says what Bash runs in.
     assert.equal(sandbox.status().state, 'active')
     const shell = scope.shell!()
-    assert.deepEqual(shell.sandbox!(), { active: true, allowUnsandboxed: true })
+    assert.deepEqual(shell.sandbox!('/bin/bash'), { active: true, allowUnsandboxed: true })
     const wrapped = await shell.wrapSpawn!({ file: '/bin/bash', args: ['x.sh'], env: { PATH: '/usr/bin' }, cwd: root })
     assert.equal(wrapped.file, '/usr/bin/fake-sandbox')
     assert.ok(policies[0].writable.includes(root))
@@ -369,7 +369,7 @@ describe('the workspaces of a program', () => {
     // The person turns it off in their own settings: the next command is not rewritten.
     await fs.writeFile(path.join(home, '.encode', 'settings.json'), json({ sandbox: { enabled: false } }))
     await scope.refresh!()
-    assert.equal(shell.sandbox!().active, false)
+    assert.equal(shell.sandbox!('/bin/bash').active, false)
     assert.equal((await shell.wrapSpawn!({ file: '/bin/bash', args: ['x.sh'], env: {}, cwd: root })).file, '/bin/bash')
   })
 

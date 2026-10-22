@@ -23,8 +23,16 @@ export interface WindowsEngineOptions {
   flags?: Omit<RunFlags, 'restrict'>
 }
 
-/** What the explore test found to keep Git Bash, PowerShell, node and cmd working (see explore.test.ts). */
+/** What the explore test found to keep PowerShell, node, cmd and git working (see explore.test.ts). */
 export const DEFAULT_EXTRA_SIDS: readonly string[] = ['everyone']
+
+/**
+ * Programs of the MSYS runtime (Git Bash). It makes objects whose access lists name only the person, Administrators
+ * and SYSTEM, which a restricted token can open only if it is restricted to one of them, and any of them is on the
+ * access list of everything the person owns: the restriction would then protect nothing. The measurement shows it
+ * (explore.test.ts: "couldn't create signal pipe", "NtCreateDirectoryObject"). PowerShell does not have this problem.
+ */
+const MSYS_SHELLS = new Set(['bash.exe', 'sh.exe', 'zsh.exe', 'dash.exe'])
 
 interface State {
   version: 1
@@ -161,6 +169,10 @@ export function createWindowsEngine(options: WindowsEngineOptions): SandboxEngin
         }
         if (changed) await save(value)
       })
+    },
+
+    unsupported(file: string): string | undefined {
+      return MSYS_SHELLS.has(path.win32.basename(file).toLowerCase()) ? 'Git Bash cannot run inside the Windows sandbox, because its runtime needs access that the sandbox withholds. PowerShell can.' : undefined
     },
 
     wrap(spec: SpawnSpec, policy: EnginePolicy): SpawnSpec {

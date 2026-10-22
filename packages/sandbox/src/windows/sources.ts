@@ -6,6 +6,7 @@
  */
 import acls from './helper/Acls.cs'
 import json from './helper/Json.cs'
+import labels from './helper/Labels.cs'
 import native from './helper/Native.cs'
 import probe from './helper/Probe.cs'
 import program from './helper/Program.cs'
@@ -22,6 +23,7 @@ export interface SourceFile {
 export const HELPER_FILES: readonly SourceFile[] = [
   { name: 'Acls.cs', text: acls },
   { name: 'Json.cs', text: json },
+  { name: 'Labels.cs', text: labels },
   { name: 'Native.cs', text: native },
   { name: 'Probe.cs', text: probe },
   { name: 'Program.cs', text: program },

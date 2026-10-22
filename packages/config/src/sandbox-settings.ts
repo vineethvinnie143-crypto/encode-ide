@@ -12,7 +12,7 @@ import type { TrustFs } from './trust'
  */
 
 export type SandboxChange =
-  | { key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches'; value: boolean }
+  | { key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'powershell'; value: boolean }
   | { key: 'network'; value: 'allow' | 'block' }
 
 export interface SandboxChangeOptions {
@@ -31,7 +31,7 @@ export type SandboxChangeResult =
     }
   | { ok: false; reason: string }
 
-const FLAGS: readonly string[] = ['enabled', 'required', 'allowUnsandboxed', 'caches']
+const FLAGS: readonly string[] = ['enabled', 'required', 'allowUnsandboxed', 'caches', 'powershell']
 
 /** Checks a change that came from a screen; the types are not trusted. Returns the reason it is refused, or null. */
 export function sandboxChangeProblem(change: unknown): string | null {

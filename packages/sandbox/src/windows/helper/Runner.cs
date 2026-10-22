@@ -12,6 +12,12 @@ namespace Encode.Sandbox
         public bool WriteRestricted = true;
         public bool Lua = true;
         public bool UseJob = true;
+        /// <summary>"low": the program runs at the low integrity level and cannot write what is labeled higher. Empty: unchanged.</summary>
+        public string Integrity = "";
+        /// <summary>"all": the job limits the clipboard, other programs' windows and so on; "none": it does not.</summary>
+        public string JobUi = "all";
+        /// <summary>"none": nothing leaves the job; "ok": a program started with CREATE_BREAKAWAY_FROM_JOB may; "silent": every child leaves it.</summary>
+        public string JobBreakaway = "none";
         /// <summary>hidden: a console nobody sees; detached: none; inherit: the helper's own.</summary>
         public string Console = "hidden";
         public string Cwd;
@@ -20,8 +26,9 @@ namespace Encode.Sandbox
     }
 
     /// <summary>
-    /// Starts a program under a restricted token inside a job object, hands it the helper's own standard handles and
-    /// waits for it. The job kills everything the program started when the helper goes away, however it goes.
+    /// Starts a program under a restricted and/or lowered token inside a job object, hands it the helper's own
+    /// standard handles and waits for it. The job kills everything the program started when the helper goes away,
+    /// however it goes.
     /// </summary>
     internal static class Runner
     {
@@ -79,7 +86,7 @@ namespace Encode.Sandbox
             }
         }
 
-        private static IntPtr CreateJob()
+        private static IntPtr CreateJob(RunOptions options)
         {
             IntPtr job = Native.CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw SandboxException.Last("CreateJobObject");
@@ -87,17 +94,22 @@ namespace Encode.Sandbox
             {
                 JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
                 limits.BasicLimitInformation.LimitFlags = Native.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if (options.JobBreakaway == "ok") limits.BasicLimitInformation.LimitFlags |= Native.JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+                else if (options.JobBreakaway == "silent") limits.BasicLimitInformation.LimitFlags |= Native.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
                 SetJobInformation(job, Native.JobObjectExtendedLimitInformation, limits);
                 // No clipboard, no desktop switching, no USER handles of other programs, no system parameters.
                 // A failure here leaves the job without its UI limits; the kill-on-close above is what is relied on.
-                try
+                if (options.JobUi != "none")
                 {
-                    JOBOBJECT_BASIC_UI_RESTRICTIONS ui = new JOBOBJECT_BASIC_UI_RESTRICTIONS();
-                    ui.UIRestrictionsClass = Native.JOB_OBJECT_UILIMIT_ALL_BUT_NONE;
-                    SetJobInformation(job, Native.JobObjectBasicUIRestrictions, ui);
-                }
-                catch (SandboxException)
-                {
+                    try
+                    {
+                        JOBOBJECT_BASIC_UI_RESTRICTIONS ui = new JOBOBJECT_BASIC_UI_RESTRICTIONS();
+                        ui.UIRestrictionsClass = Native.JOB_OBJECT_UILIMIT_ALL_BUT_NONE;
+                        SetJobInformation(job, Native.JobObjectBasicUIRestrictions, ui);
+                    }
+                    catch (SandboxException)
+                    {
+                    }
                 }
                 return job;
             }
@@ -126,12 +138,17 @@ namespace Encode.Sandbox
             IntPtr restricted = Tokens.Restrict(own, restricting, options.WriteRestricted, options.Lua);
             try
             {
-                List<SecurityIdentifier> allowed = new List<SecurityIdentifier>();
-                allowed.Add(Sids.TokenUserSid(own));
-                allowed.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
-                allowed.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
-                foreach (SecurityIdentifier sid in restricting) if (!allowed.Contains(sid)) allowed.Add(sid);
-                Tokens.SetDefaultDacl(restricted, allowed);
+                if (restricting.Count > 0)
+                {
+                    List<SecurityIdentifier> allowed = new List<SecurityIdentifier>();
+                    allowed.Add(Sids.TokenUserSid(own));
+                    allowed.Add(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
+                    allowed.Add(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+                    foreach (SecurityIdentifier sid in restricting) if (!allowed.Contains(sid)) allowed.Add(sid);
+                    Tokens.SetDefaultDacl(restricted, allowed);
+                }
+                if (options.Integrity == "low") Tokens.SetIntegrity(restricted, 0x1000);
+                else if (options.Integrity.Length > 0) throw new SandboxException("Unknown integrity level: " + options.Integrity);
                 return restricted;
             }
             catch
@@ -154,7 +171,7 @@ namespace Encode.Sandbox
             {
                 own = Tokens.OpenOwn();
                 token = MakeToken(own, options);
-                if (options.UseJob) job = CreateJob();
+                if (options.UseJob) job = CreateJob(options);
 
                 IntPtr[] standard = new IntPtr[] { Native.GetStdHandle(-10), Native.GetStdHandle(-11), Native.GetStdHandle(-12) };
                 List<IntPtr> inherited = new List<IntPtr>();

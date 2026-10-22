@@ -1,6 +1,7 @@
 import { sandboxChangeProblem, setSandboxSetting, type SandboxChange } from '@encode/config'
 import type { Sandbox } from '@encode/sandbox'
-import type { WorkspaceConfig } from './config'
+import type { ShellProgram } from '@encode/tools'
+import type { ConfigSnapshot, WorkspaceConfig } from './config'
 import type { WorkspaceFs } from './fs'
 import { sandboxReport, type SandboxReport } from './sandbox-report'
 
@@ -25,10 +26,13 @@ export async function actOnSandbox(
   config: WorkspaceConfig,
   sandbox: Sandbox | undefined,
   action: SandboxAction,
-  options: { fs?: WorkspaceFs; platform?: NodeJS.Platform } = {},
+  options: { fs?: WorkspaceFs; platform?: NodeJS.Platform; shell?: (snapshot: ConfigSnapshot) => ShellProgram | undefined } = {},
 ): Promise<SandboxOutcome> {
   const platform = options.platform ?? process.platform
-  const look = async () => sandboxReport(sandbox, await config.refresh(), config.home, platform)
+  const look = async () => {
+    const snapshot = await config.refresh()
+    return sandboxReport(sandbox, snapshot, config.home, platform, options.shell?.(snapshot))
+  }
   const refused = async (reason: string): Promise<SandboxOutcome> => ({ ok: false, reason, report: await look() })
   const problem = sandboxActionProblem(action)
   if (problem) return refused(problem)
@@ -58,6 +62,8 @@ function overruled(change: SandboxChange, report: SandboxReport): string | undef
       return change.value && !settings.allowUnsandboxed ? 'does not let a command leave the sandbox' : undefined
     case 'caches':
       return change.value && !settings.caches ? 'keeps the package caches read-only' : undefined
+    case 'powershell':
+      return !change.value && settings.powershell ? 'runs commands in PowerShell' : undefined
     case 'network':
       return change.value === 'allow' && settings.network === 'block' ? 'blocks the network' : undefined
   }

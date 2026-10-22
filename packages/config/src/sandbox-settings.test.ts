@@ -58,7 +58,7 @@ describe('changing the sandbox from Settings', () => {
     for (const change of [null, 'enabled', {}, { key: 'enabled' }, { key: 'enabled', value: 'yes' }, { key: 'network', value: true }, { key: 'allowWrite', value: ['/'] }, { key: 'network', value: 'maybe' }]) {
       assert.notEqual(sandboxChangeProblem(change), null, JSON.stringify(change))
     }
-    for (const change of [{ key: 'enabled', value: true }, { key: 'required', value: false }, { key: 'allowUnsandboxed', value: false }, { key: 'caches', value: true }, { key: 'network', value: 'allow' }, { key: 'network', value: 'block' }]) {
+    for (const change of [{ key: 'enabled', value: true }, { key: 'required', value: false }, { key: 'allowUnsandboxed', value: false }, { key: 'caches', value: true }, { key: 'powershell', value: true }, { key: 'network', value: 'allow' }, { key: 'network', value: 'block' }]) {
       assert.equal(sandboxChangeProblem(change), null, JSON.stringify(change))
     }
   })

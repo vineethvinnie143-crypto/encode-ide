@@ -12,6 +12,7 @@ describe('sandbox settings', () => {
     assert.equal(settings.allowUnsandboxed, true)
     assert.equal(settings.network, true)
     assert.equal(settings.caches, true)
+    assert.equal(settings.powershell, false)
   })
 
   it('take what the user says, the command line over the user’s files', () => {
@@ -29,9 +30,10 @@ describe('sandbox settings', () => {
   it('let a folder’s settings make the sandbox stricter and nothing else', () => {
     const settings = resolveSandboxSettings([
       { scope: 'user', config: { network: true } },
-      { scope: 'project', config: { required: true, network: 'block', allowUnsandboxed: false, caches: false, denyWrite: ['dist'], denyRead: ['secrets'] } },
+      { scope: 'project', config: { required: true, network: 'block', allowUnsandboxed: false, caches: false, powershell: true, denyWrite: ['dist'], denyRead: ['secrets'] } },
     ])
     assert.equal(settings.required, true)
+    assert.equal(settings.powershell, true)
     assert.equal(settings.network, false)
     assert.equal(settings.allowUnsandboxed, false)
     assert.equal(settings.caches, false)
@@ -45,17 +47,19 @@ describe('sandbox settings', () => {
       { scope: 'user', config: { network: 'block', allowUnsandboxed: false } },
       {
         scope: 'project',
-        config: { enabled: false, required: false, allowUnsandboxed: true, network: 'allow', caches: true, allowWrite: ['/'], allowRead: ['~/.ssh'] },
+        config: { enabled: false, required: false, allowUnsandboxed: true, network: 'allow', caches: true, powershell: false, allowWrite: ['/'], allowRead: ['~/.ssh'] },
       },
       { scope: 'local', config: { enabled: false } },
+      { scope: 'user', config: { powershell: true } },
     ])
+    assert.equal(settings.powershell, true, 'a folder cannot turn it off for the person')
     assert.equal(settings.enabled, true)
     assert.equal(settings.required, false)
     assert.equal(settings.allowUnsandboxed, false)
     assert.equal(settings.network, false)
     assert.deepEqual(settings.allowWrite, [])
     assert.deepEqual(settings.allowRead, [])
-    assert.equal(settings.problems.length, 8)
+    assert.equal(settings.problems.length, 9)
     assert.ok(settings.problems.every((problem) => /ignored/.test(problem)))
   })
 

@@ -116,6 +116,13 @@ namespace Encode.Sandbox
         public const int TokenIsRestricted = 40;
 
         public const uint SE_GROUP_LOGON_ID = 0xC0000000;
+        public const uint SE_GROUP_INTEGRITY = 0x00000020;
+
+        public const int SE_FILE_OBJECT = 1;
+        public const uint LABEL_SECURITY_INFORMATION = 0x00000010;
+        public const uint PROTECTED_SACL_SECURITY_INFORMATION = 0x40000000;
+        public const uint UNPROTECTED_SACL_SECURITY_INFORMATION = 0x10000000;
+        public const uint SDDL_REVISION_1 = 1;
 
         public const uint CREATE_SUSPENDED = 0x00000004;
         public const uint DETACHED_PROCESS = 0x00000008;
@@ -127,6 +134,8 @@ namespace Encode.Sandbox
         public static readonly IntPtr PROC_THREAD_ATTRIBUTE_HANDLE_LIST = new IntPtr(0x00020002);
 
         public const uint JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008;
+        public const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800;
+        public const uint JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000;
         public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
         public const int JobObjectBasicUIRestrictions = 4;
         public const int JobObjectExtendedLimitInformation = 9;
@@ -203,6 +212,24 @@ namespace Encode.Sandbox
 
         [DllImport("advapi32.dll", SetLastError = true)]
         public static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, uint size, out uint needed);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string text, uint revision, out IntPtr descriptor, out uint size);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern bool ConvertSecurityDescriptorToStringSecurityDescriptor(IntPtr descriptor, uint revision, uint information, out IntPtr text, out uint size);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern bool GetSecurityDescriptorSacl(IntPtr descriptor, out bool present, out IntPtr sacl, out bool defaulted);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint SetNamedSecurityInfo(string name, int type, uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint GetNamedSecurityInfo(string name, int type, uint information, out IntPtr owner, out IntPtr group, out IntPtr dacl, out IntPtr sacl, out IntPtr descriptor);
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr LocalFree(IntPtr memory);
 
         [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern bool CreateProcessAsUser(

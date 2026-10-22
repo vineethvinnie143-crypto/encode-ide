@@ -145,6 +145,27 @@ describe('the sandbox', () => {
     assert.equal(required.state().required, true)
   })
 
+  it('runs a program the engine cannot confine as it is, and says why, unless the settings require the sandbox', async () => {
+    const engine = fakeEngine()
+    engine.unsupported = (file) => (file.endsWith('bash.exe') ? 'Git Bash cannot run in the sandbox.' : undefined)
+    const sandbox = make(engine)
+    await sandbox.start()
+    const optional = sandbox.session({ roots: () => [project], settings: () => settings() })
+    const bash = { ...spec(), file: '/git/bin/bash.exe' }
+    assert.deepEqual(await optional.wrapSpawn(bash), bash)
+    assert.equal(engine.wrapped.length, 0)
+    assert.equal((await optional.wrapSpawn({ ...spec(), file: '/pwsh/pwsh.exe' })).file, '/usr/bin/fake-sandbox')
+    assert.equal(optional.state('/pwsh/pwsh.exe').active, true)
+    assert.equal(optional.state().active, true, 'with no program given nothing is known against it')
+    const refused = optional.state('/git/bin/bash.exe')
+    assert.equal(refused.active, false)
+    assert.equal(refused.reason, 'Git Bash cannot run in the sandbox.')
+    assert.equal(sandbox.unsupported('/git/bin/bash.exe'), 'Git Bash cannot run in the sandbox.')
+
+    const required = sandbox.session({ roots: () => [project], settings: () => settings({ required: true }) })
+    await assert.rejects(required.wrapSpawn(bash), (error: unknown) => error instanceof SandboxError && /require the sandbox/.test(error.message) && /Git Bash cannot run/.test(error.message))
+  })
+
   it('has no sandbox for a system without an engine', async () => {
     const sandbox = make(undefined, { platform: 'freebsd' as NodeJS.Platform })
     const status = await sandbox.start()

@@ -4,9 +4,9 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import { realPathOf } from '@encode/tools'
+import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
-import { WorkspaceConfig } from './config'
+import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
 import { workspaceHooks } from './hooks'
 import { McpHub, type McpHubOptions, type McpReport } from './mcp'
@@ -141,13 +141,25 @@ export class Workspaces {
   /** The sandbox around the agent's commands as it stands in a folder, for the Sandbox screen. The folder may be given as any path to it. */
   async sandboxReport(root: string): Promise<SandboxReport> {
     const config = this.config(await realPathOf(root))
-    return sandboxReport(this.options.sandbox, await config.refresh(), this.home, this.platform)
+    const snapshot = await config.refresh()
+    return sandboxReport(this.options.sandbox, snapshot, this.home, this.platform, this.shellFor(snapshot))
+  }
+
+  /** The shell the agent's commands run in for a folder's settings (PowerShell when they ask for it on Windows). */
+  private shellFor(snapshot: ConfigSnapshot): ShellProgram | undefined {
+    return detectShell(this.options.env ?? process.env, this.platform, this.prefersPowerShell(snapshot.effective.sandbox) ? 'pwsh' : undefined)
+  }
+
+  /** Asked for by the settings. Only Windows has a choice to make; elsewhere shell detection ignores it. */
+  private prefersPowerShell(sources: ConfigSnapshot['effective']['sandbox']): boolean {
+    const settings = resolveSandboxSettings(sources)
+    return settings.enabled && settings.powershell
   }
 
   /** Does what the Sandbox screen asked, and returns how the sandbox stands afterwards. */
   async sandboxAct(root: string, action: SandboxAction): Promise<SandboxOutcome> {
     const config = this.config(await realPathOf(root))
-    return actOnSandbox(config, this.options.sandbox, action, { fs: this.fs, platform: this.platform })
+    return actOnSandbox(config, this.options.sandbox, action, { fs: this.fs, platform: this.platform, shell: (snapshot) => this.shellFor(snapshot) })
   }
 
   /** Calls back when the sandbox's state changes (it was checked, or a folder is being prepared). Returns the way to stop. */
@@ -282,12 +294,13 @@ export class Workspaces {
       remember: rememberRules(config, this.fs, this.platform),
       shell: () => ({
         extraEnv: config.current().effective.env,
+        ...(this.prefersPowerShell(config.current().effective.sandbox) ? { prefer: 'pwsh' as const } : {}),
         ...(sandbox
           ? {
               wrapSpawn: sandbox.wrapSpawn,
               scratchRoot: sandbox.scratchRoot,
-              sandbox: () => {
-                const { active, allowUnsandboxed } = sandbox.state()
+              sandbox: (program: string) => {
+                const { active, allowUnsandboxed } = sandbox.state(program)
                 return { active, allowUnsandboxed }
               },
             }

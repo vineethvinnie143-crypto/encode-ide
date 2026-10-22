@@ -55,6 +55,8 @@ export interface SandboxEngine {
   prepare(policy: EnginePolicy, onProgress?: (message: string) => void): Promise<void>
   /** Rewrites a spawn so that the program runs confined. */
   wrap(spec: SpawnSpec, policy: EnginePolicy): SpawnSpec
+  /** Why this program cannot run inside the sandbox on this system (Windows: Git Bash), in words for the person, or nothing when it can. */
+  unsupported?(file: string): string | undefined
 }
 
 export type SandboxState = 'active' | 'unavailable' | 'disabled'

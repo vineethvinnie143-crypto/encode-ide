@@ -38,6 +38,9 @@ namespace Encode.Sandbox
             test.WriteRestricted = options.WriteRestricted;
             test.Lua = options.Lua;
             test.UseJob = options.UseJob;
+            test.Integrity = options.Integrity;
+            test.JobUi = options.JobUi;
+            test.JobBreakaway = options.JobBreakaway;
             test.Console = options.Console;
             test.Program = Path.Combine(Environment.SystemDirectory, "cmd.exe");
             test.Args.Add("/d");

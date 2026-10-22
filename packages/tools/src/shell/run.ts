@@ -144,6 +144,8 @@ export interface AgentShellOptions {
   root: string
   /** Default: detected (Git Bash, then PowerShell on Windows; bash elsewhere). */
   program?: ShellProgram
+  /** On Windows, look for this shell first (PowerShell can run in the sandbox, Git Bash cannot). Ignored where it is not found. */
+  prefer?: ShellDialect
   /** The environment to start from. Default: this process's. */
   baseEnv?: Record<string, string | undefined>
   /** Variable names to keep although they look like secrets. */
@@ -152,8 +154,8 @@ export interface AgentShellOptions {
   extraEnv?: Record<string, string>
   /** Rewrites every spawn, to run commands inside a sandbox. */
   wrapSpawn?: SpawnWrapper
-  /** Whether that wrapper confines commands right now, and whether a command may ask to leave it. Read each time. */
-  sandbox?: () => SandboxView
+  /** Whether that wrapper confines commands right now, and whether a command may ask to leave it. Read each time; given the shell's own program, which a sandbox may be unable to confine. */
+  sandbox?: (shell: string) => SandboxView
   /**
    * Where the scripts of confined commands are kept, when the system's temp folder is not one a command can use
    * (a sandbox gives commands a temp folder of their own). Undefined: the system's.
@@ -194,7 +196,7 @@ export class ShellUnavailableError extends Error {
 
 export function createAgentShell(options: AgentShellOptions): ManagedShell {
   const platform = options.platform ?? process.platform
-  const program = options.program ?? detectShell(options.baseEnv ?? process.env, platform)
+  const program = options.program ?? detectShell(options.baseEnv ?? process.env, platform, options.prefer)
   if (!program) throw new ShellUnavailableError(platform)
   const { env, removed } = agentEnvironment(options.baseEnv ?? process.env, { platform, keep: options.keepEnv, extra: options.extraEnv })
   const pathApi = platform === 'win32' ? path.win32 : path.posix
@@ -379,7 +381,7 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     dialect: program.dialect,
     program: program.file,
     removedEnv: removed,
-    state: (): ShellState => ({ cwd, env: { ...env }, dialect: program.dialect, ...(options.sandbox ? { sandbox: options.sandbox() } : {}) }),
+    state: (): ShellState => ({ cwd, env: { ...env }, dialect: program.dialect, ...(options.sandbox ? { sandbox: options.sandbox(program.file) } : {}) }),
     run,
     start,
     async setCwd(dir) {

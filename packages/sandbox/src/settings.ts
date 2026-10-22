@@ -26,6 +26,8 @@ export interface SandboxSettings {
   allowRead: string[]
   /** Let commands write the usual package caches in the person's home (npm, pnpm, pip, cargo...). Default true. */
   caches: boolean
+  /** Windows: run commands in PowerShell, which the sandbox can confine and Git Bash it cannot. Default false. */
+  powershell: boolean
 }
 
 export const DEFAULT_SETTINGS: Readonly<SandboxSettings> = {
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: Readonly<SandboxSettings> = {
   denyRead: [],
   allowRead: [],
   caches: true,
+  powershell: false,
 }
 
 export interface SandboxSource {
@@ -54,7 +57,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-const KEYS = new Set(['enabled', 'required', 'allowUnsandboxed', 'network', 'allowWrite', 'denyWrite', 'denyRead', 'allowRead', 'caches'])
+const KEYS = new Set(['enabled', 'required', 'allowUnsandboxed', 'network', 'allowWrite', 'denyWrite', 'denyRead', 'allowRead', 'caches', 'powershell'])
 
 /** `network` is written `"allow"`/`"block"` (or a boolean). */
 function networkOf(value: unknown): boolean | undefined {
@@ -94,7 +97,7 @@ export function resolveSandboxSettings(sources: readonly SandboxSource[]): Resol
     const config = source.config
     for (const key of Object.keys(config)) if (!KEYS.has(key)) out.problems.push(`${label}: sandbox.${key} is not a setting`)
 
-    const flag = (key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches', tighter: boolean) => {
+    const flag = (key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'powershell', tighter: boolean) => {
       const value = config[key]
       if (value === undefined) return
       if (typeof value !== 'boolean') {
@@ -111,6 +114,7 @@ export function resolveSandboxSettings(sources: readonly SandboxSource[]): Resol
     flag('required', true)
     flag('allowUnsandboxed', false)
     flag('caches', false)
+    flag('powershell', true)
 
     if (config.network !== undefined) {
       const network = networkOf(config.network)

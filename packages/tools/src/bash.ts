@@ -29,7 +29,7 @@ export interface BashSandbox {
 }
 
 /** What a command that failed says when the sandbox is what stopped it. */
-const BLOCKED = /operation not permitted|read-only file system|access (?:is|to the path .{1,300}? is) denied|permission denied|\bE(?:PERM|ACCES|ROFS)\b|UnauthorizedAccess/i
+const BLOCKED = /operation not permitted|read-only file system|access (?:is|to the path .{1,300}? is) denied|permission denied|\bE(?:PERM|ACCES|ROFS)\b|UnauthorizedAccess|couldn.t create signal pipe|NtCreateDirectoryObject/i
 
 function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandbox: BashSandbox | undefined): string {
   const shellName = dialect === 'bash' ? (platform === 'win32' ? 'Git Bash' : 'bash') : 'PowerShell'

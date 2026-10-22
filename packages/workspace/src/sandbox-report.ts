@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { settingsFiles } from '@encode/config'
 import { resolveSandboxSettings, type EngineLimits, type EngineName, type Sandbox, type SandboxSettings } from '@encode/sandbox'
+import type { ShellProgram } from '@encode/tools'
 import type { ConfigSnapshot } from './config'
 
 /** How the sandbox around the agent's commands stands in one folder, for the Sandbox screen. */
@@ -12,8 +13,10 @@ export interface SandboxReport {
   reason?: string
   /** What this engine can hold back, so the screen can say what is not covered here. */
   limits?: EngineLimits
+  /** The shell commands run in on this computer, and why the sandbox cannot confine it when it cannot. */
+  shell?: { name: string; unsupported?: string }
   /** What applies in this folder: the person's own settings, tightened by the folder's. */
-  settings: Pick<SandboxSettings, 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'allowWrite' | 'denyWrite' | 'denyRead' | 'allowRead'> & { network: 'allow' | 'block' }
+  settings: Pick<SandboxSettings, 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'powershell' | 'allowWrite' | 'denyWrite' | 'denyRead' | 'allowRead'> & { network: 'allow' | 'block' }
   /** What the folder's own files made stricter than the person's settings, in words. */
   tightened: string[]
   /** What was wrong in the settings files, in words. */
@@ -28,7 +31,13 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnapshot, home: string, platform: NodeJS.Platform): SandboxReport {
+/** What a person calls the shell: Git Bash, not bash.exe. */
+export function shellName(shell: ShellProgram, platform: NodeJS.Platform): string {
+  if (shell.dialect === 'bash') return platform === 'win32' ? 'Git Bash' : 'bash'
+  return /powershell\.exe$/i.test(shell.file) ? 'Windows PowerShell' : 'PowerShell'
+}
+
+export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnapshot, home: string, platform: NodeJS.Platform, shell?: ShellProgram): SandboxReport {
   const sources = snapshot.effective.sandbox
   const all = resolveSandboxSettings(sources)
   const own = resolveSandboxSettings(sources.filter((source) => source.scope === 'user' || source.scope === 'cli'))
@@ -41,6 +50,7 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
   if (all.denyRead.length > own.denyRead.length) tightened.push(`This folder's settings hide ${plural(all.denyRead.length - own.denyRead.length, 'more path', 'more paths')} from commands.`)
 
   const status = sandbox?.status()
+  const unsupported = shell ? sandbox?.unsupported(shell.file) : undefined
   let state: SandboxReport['state']
   let reason: string | undefined
   if (!all.enabled) {
@@ -49,6 +59,9 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
   } else if (!sandbox || !status || status.state !== 'active') {
     state = 'unavailable'
     reason = status?.reason ?? 'This build has no sandbox.'
+  } else if (unsupported) {
+    state = 'unavailable'
+    reason = unsupported
   } else {
     state = 'active'
   }
@@ -58,11 +71,13 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
     ...(status?.engine ? { engine: status.engine } : {}),
     ...(reason ? { reason } : {}),
     ...(status?.limits ? { limits: status.limits } : {}),
+    ...(shell ? { shell: { name: shellName(shell, platform), ...(unsupported ? { unsupported } : {}) } } : {}),
     settings: {
       enabled: all.enabled,
       required: all.required,
       allowUnsandboxed: all.allowUnsandboxed,
       caches: all.caches,
+      powershell: all.powershell,
       network: all.network ? 'allow' : 'block',
       allowWrite: all.allowWrite,
       denyWrite: all.denyWrite,

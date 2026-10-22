@@ -1,9 +1,10 @@
 /**
- * Not a test of behaviour but a measurement: which sets of restricting SIDs let the programs an agent runs work
- * (PowerShell, node, cmd, git, and Git Bash to show that it cannot) while keeping writes inside the folders that
- * were granted. It runs only on Windows with ENCODE_SANDBOX_EXPLORE=1 (the sandbox workflow sets it) and prints a
- * table. Its answers decided the SIDs in engine.ts and that Git Bash is not run in the sandbox; it stays so that a
- * Windows update that changes them is seen.
+ * Not a test of behaviour but a measurement: how well each way of restricting a program on Windows keeps writes
+ * inside the folders that were granted (write-restricted token with a set of restricting SIDs, or the low
+ * integrity level with the folders labeled low) while the programs an agent runs still work (PowerShell, node, cmd,
+ * git, and Git Bash). It runs only on Windows with ENCODE_SANDBOX_EXPLORE=1 (the sandbox workflow sets it) and
+ * prints a table. Its answers decided the engine in engine.ts; it stays so that a Windows update that changes them
+ * is seen.
  */
 import assert from 'node:assert/strict'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
@@ -14,29 +15,42 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { ensureHelper, type HelperBuild } from './build'
-import { grantFolder, probeHelper, runArguments, runHelper, type RunFlags } from './client'
+import { grantFolder, labelFolder, probeHelper, readLabels, runArguments, unlabelFolder, type RunFlags } from './client'
 
 const explore = process.platform === 'win32' && process.env.ENCODE_SANDBOX_EXPLORE === '1'
 
+type Program = 'ps' | 'ps5' | 'cmd' | 'node' | 'bash'
+
 interface Variant {
   name: string
-  extra: string[]
-  console?: RunFlags['console']
-  lua?: boolean
-  /** Run the program as it is, with no helper: shows that the probes themselves work and what a program can do unconfined. */
-  direct?: boolean
-  /** Only the probes marked `basic`. */
-  basicOnly?: boolean
+  /** direct: the program as it is (shows that the probes work and what a program can do unconfined); sid: a write-restricted token; low: the low integrity level. */
+  mode: 'direct' | 'sid' | 'low'
+  /** sid: the restricting SIDs besides the sandbox's own. */
+  extra?: string[]
+  flags?: Omit<RunFlags, 'restrict' | 'integrity'>
+  /** Only these probes (by name). */
+  only?: string[]
+  /** Only the probes of these programs. */
+  programs?: Program[]
+  /** Git Bash is started through a junction to its folder, which gives the MSYS runtime another installation key. */
+  junction?: boolean
+  /** A Git Bash of the person's own (not sandboxed) is open while the probes run, as a terminal they have open would be. */
+  withBash?: boolean
 }
 
+const CHILDREN = ['ps echo', 'cmd > NUL', 'node write in root', 'node starts cmd and node', 'node starts node only']
+
 const VARIANTS: Variant[] = [
-  { name: 'none', extra: [], direct: true },
-  { name: 'S+E+U+R', extra: ['everyone', 'users', 'restricted'] },
-  { name: 'S+E+L', extra: ['everyone', 'logon'] },
-  { name: 'S+L', extra: ['logon'] },
-  { name: 'S+E+R+L', extra: ['everyone', 'restricted', 'logon'] },
-  { name: 'S+E+L detached', extra: ['everyone', 'logon'], console: 'detached', basicOnly: true },
-  { name: 'S+E+L nolua', extra: ['everyone', 'logon'], lua: false, basicOnly: true },
+  { name: 'none', mode: 'direct' },
+  { name: 'S+E+L', mode: 'sid', extra: ['everyone', 'logon'] },
+  { name: 'S+E+L nojob', mode: 'sid', extra: ['everyone', 'logon'], flags: { job: false }, only: CHILDREN },
+  { name: 'S+E+L ui-none', mode: 'sid', extra: ['everyone', 'logon'], flags: { jobUi: 'none' }, only: CHILDREN },
+  { name: 'Low (no bash open)', mode: 'low', programs: ['bash'] },
+  { name: 'Low', mode: 'low', withBash: true },
+  { name: 'Low nojob', mode: 'low', flags: { job: false }, only: CHILDREN },
+  { name: 'Low ui-none', mode: 'low', flags: { jobUi: 'none' }, only: CHILDREN },
+  { name: 'Low breakaway', mode: 'low', flags: { jobBreakaway: 'ok' }, only: CHILDREN },
+  { name: 'Low junction', mode: 'low', junction: true, withBash: true, programs: ['bash'] },
 ]
 
 const WHERE = ['temp', 'profile', 'public', 'cdrive', 'wintemp', 'programdata'] as const
@@ -45,6 +59,7 @@ interface Context {
   root: string
   temp: string
   outside: Record<string, string>
+  junction: string
   bash?: string
   ps5: string
   ps7?: string
@@ -53,9 +68,8 @@ interface Context {
   victim: number
   port: number
   startup: string
+  localLow: string
 }
-
-type Program = 'ps' | 'ps5' | 'cmd' | 'node' | 'bash'
 
 interface Probe {
   name: string
@@ -66,12 +80,14 @@ interface Probe {
   effect?: (ctx: Context) => boolean | Promise<boolean>
   /** The output must match (allow). */
   contains?: RegExp
-  /** Run for every variant, also the ones that only get the basic probes. After the first of a kind that failed, the others of that program are skipped. */
+  /** Run for every variant that runs the program. When a probe of a program that is marked basic fails, the other probes of that program are skipped in that variant. */
   basic?: boolean
   /** Put the world in the state the probe needs, before it runs. */
   before?: (ctx: Context) => void | Promise<void>
   /** Take away what the probe left, after it ran. */
   after?: (ctx: Context) => void | Promise<void>
+  /** Always print what the program said. */
+  show?: boolean
 }
 
 const win = (file: string) => file.replace(/\//g, '\\')
@@ -103,6 +119,7 @@ async function taskExists(): Promise<boolean> {
 }
 
 function buildProbes(): Probe[] {
+  let gitConfig = ''
   const probes: Probe[] = [
     { name: 'bash echo', expect: 'info', basic: true, program: 'bash', args: () => ['-c', 'echo hello-from-bash'], contains: /hello-from-bash/ },
     { name: 'ps echo', expect: 'allow', basic: true, program: 'ps', args: () => ps('Write-Output hello-from-ps'), contains: /hello-from-ps/ },
@@ -116,6 +133,14 @@ function buildProbes(): Probe[] {
       args: (c) => ['-e', `require('fs').writeFileSync(${JSON.stringify(path.join(c.root, 'n.txt'))}, 'x')`],
       before: (c) => rm(path.join(c.root, 'n.txt')),
       effect: (c) => exists(path.join(c.root, 'n.txt')),
+    },
+    {
+      name: 'ps who am i',
+      expect: 'info',
+      show: true,
+      program: 'ps',
+      args: () => ps('(whoami /groups | Select-String -Pattern "Mandatory Label|Administrators" | ForEach-Object { $_.Line.Trim() -replace "\\s+", " " }) -join " ; "'),
+      contains: /./,
     },
     {
       name: 'ps write in root',
@@ -132,6 +157,14 @@ function buildProbes(): Probe[] {
       args: (c) => ps(`Add-Content -Path ${q(path.join(c.root, 'sub', 'deep', 'existing.txt'))} -Value more -ErrorAction Stop`),
       before: (c) => fs.writeFileSync(path.join(c.root, 'sub', 'deep', 'existing.txt'), 'before\n'),
       effect: (c) => fs.readFileSync(path.join(c.root, 'sub', 'deep', 'existing.txt'), 'utf8').includes('more'),
+    },
+    {
+      name: 'ps append to a file made after prepare',
+      expect: 'allow',
+      program: 'ps',
+      args: (c) => ps(`Add-Content -Path ${q(path.join(c.root, 'late.txt'))} -Value more -ErrorAction Stop`),
+      before: (c) => fs.writeFileSync(path.join(c.root, 'late.txt'), 'late\n'),
+      effect: (c) => fs.readFileSync(path.join(c.root, 'late.txt'), 'utf8').includes('more'),
     },
     {
       name: 'ps delete in root',
@@ -203,7 +236,12 @@ function buildProbes(): Probe[] {
       expect: 'deny',
       program: 'ps',
       args: (c) => ps(`Add-Content -Path ${q(path.join(c.root, '.git', 'config'))} -Value '[alias]' -ErrorAction Stop`),
+      before: (c) => {
+        gitConfig ||= fs.readFileSync(path.join(c.root, '.git', 'config'), 'utf8')
+        fs.writeFileSync(path.join(c.root, '.git', 'config'), gitConfig)
+      },
       effect: (c) => fs.readFileSync(path.join(c.root, '.git', 'config'), 'utf8').includes('[alias]'),
+      after: (c) => fs.writeFileSync(path.join(c.root, '.git', 'config'), gitConfig),
     },
     ...WHERE.map(
       (where): Probe => ({
@@ -217,12 +255,30 @@ function buildProbes(): Probe[] {
       }),
     ),
     {
+      name: 'ps write through a junction in root',
+      expect: 'deny',
+      program: 'ps',
+      args: (c) => ps(`Set-Content -Path ${q(path.join(c.root, 'jx', 'escaped.txt'))} -Value x -ErrorAction Stop`),
+      before: (c) => rm(path.join(c.junction, 'escaped.txt')),
+      effect: (c) => exists(path.join(c.junction, 'escaped.txt')),
+      after: (c) => rm(path.join(c.junction, 'escaped.txt')),
+    },
+    {
+      name: 'ps write in LocalLow',
+      expect: 'info',
+      program: 'ps',
+      args: (c) => ps(`Set-Content -Path ${q(path.join(c.localLow, 'encode-probe.txt'))} -Value x -ErrorAction Stop`),
+      before: (c) => rm(path.join(c.localLow, 'encode-probe.txt')),
+      after: (c) => rm(path.join(c.localLow, 'encode-probe.txt')),
+    },
+    {
       name: 'ps delete a file outside',
       expect: 'deny',
       program: 'ps',
       args: (c) => ps(`Remove-Item -Path ${q(path.join(c.outside.profile, 'keep.txt'))} -ErrorAction Stop`),
       before: (c) => fs.writeFileSync(path.join(c.outside.profile, 'keep.txt'), 'keep'),
       effect: (c) => !exists(path.join(c.outside.profile, 'keep.txt')),
+      after: (c) => rm(path.join(c.outside.profile, 'keep.txt')),
     },
     {
       name: 'ps write in the Startup folder',
@@ -290,6 +346,13 @@ function buildProbes(): Probe[] {
       contains: /child-ok[\s\S]*grandchild-ok/,
     },
     {
+      name: 'node starts node only',
+      expect: 'allow',
+      program: 'node',
+      args: () => ['-e', "const cp=require('child_process');console.log(cp.execFileSync(process.execPath,['-e','console.log(\"grandchild-ok\")']).toString().trim())"],
+      contains: /grandchild-ok/,
+    },
+    {
       name: 'node loopback socket',
       expect: 'allow',
       program: 'node',
@@ -297,6 +360,65 @@ function buildProbes(): Probe[] {
       contains: /loopback-ok/,
     },
     { name: 'cmd registry write HKCU', expect: 'deny', program: 'cmd', args: () => ['/d', '/c', 'reg add HKCU\\Software\\EncodeSandboxProbe /v x /d 1 /f'], effect: () => registryKeyExists(), after: async () => void (await exec('reg', ['delete', 'HKCU\\Software\\EncodeSandboxProbe', '/f'], 20_000)) },
+
+    // Git Bash: what the agent writes by default.
+    {
+      name: 'bash write in root',
+      expect: 'allow',
+      program: 'bash',
+      args: (c) => ['-c', `echo x > '${posix(path.join(c.root, 'b.txt'))}'`],
+      before: (c) => rm(path.join(c.root, 'b.txt')),
+      effect: (c) => exists(path.join(c.root, 'b.txt')),
+    },
+    {
+      name: 'bash git add + commit in root',
+      expect: 'allow',
+      program: 'bash',
+      args: (c) => ['-c', `cd '${posix(c.root)}' && echo y > b2.txt && git add b2.txt && git -c user.email=a@b.c -c user.name=n commit -qm three && git log --oneline | head -1`],
+      before: (c) => rm(path.join(c.root, 'b2.txt')),
+      contains: /three/,
+    },
+    {
+      name: 'bash runs node and cmd',
+      expect: 'allow',
+      program: 'bash',
+      args: () => ['-c', 'node -e "console.log(\'nested-node-ok\')" && cmd //c echo nested-cmd-ok'],
+      contains: /nested-node-ok[\s\S]*nested-cmd-ok/,
+    },
+    {
+      name: 'bash write outside (profile)',
+      expect: 'deny',
+      program: 'bash',
+      args: (c) => ['-c', `echo x > '${posix(path.join(c.outside.profile, 'b-escaped.txt'))}'`],
+      before: (c) => rm(path.join(c.outside.profile, 'b-escaped.txt')),
+      effect: (c) => exists(path.join(c.outside.profile, 'b-escaped.txt')),
+      after: (c) => rm(path.join(c.outside.profile, 'b-escaped.txt')),
+    },
+    {
+      name: 'bash delete a file outside',
+      expect: 'deny',
+      program: 'bash',
+      args: (c) => ['-c', `rm -f '${posix(path.join(c.outside.profile, 'keep-b.txt'))}'`],
+      before: (c) => fs.writeFileSync(path.join(c.outside.profile, 'keep-b.txt'), 'keep'),
+      effect: (c) => !exists(path.join(c.outside.profile, 'keep-b.txt')),
+      after: (c) => rm(path.join(c.outside.profile, 'keep-b.txt')),
+    },
+    {
+      name: 'bash stop a program outside',
+      expect: 'deny',
+      program: 'bash',
+      args: (c) => ['-c', `taskkill //F //PID ${c.victim}`],
+      effect: (c) => !alive(c.victim),
+    },
+    {
+      name: 'bash write .git/hooks (protected)',
+      expect: 'deny',
+      program: 'bash',
+      args: (c) => ['-c', `echo x > '${posix(path.join(c.root, '.git', 'hooks', 'pre-commit'))}'`],
+      before: (c) => rm(path.join(c.root, '.git', 'hooks', 'pre-commit')),
+      effect: (c) => exists(path.join(c.root, '.git', 'hooks', 'pre-commit')),
+      after: (c) => rm(path.join(c.root, '.git', 'hooks', 'pre-commit')),
+    },
   ]
   return probes
 }
@@ -341,8 +463,9 @@ function exec(file: string, args: string[], timeoutMs: number, options: { cwd?: 
 }
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+const flat = (text: string, max = 700) => text.replace(/\s*\r?\n\s*/g, ' ; ').replace(/\s+/g, ' ').slice(0, max)
 
-describe('which restricting SIDs keep the agent’s programs working (Windows, explore)', { skip: !explore }, () => {
+describe('what keeps the programs of an agent working and its writes inside the granted folders (Windows, explore)', { skip: !explore }, () => {
   const cleanup: Array<() => void> = []
   after(() => {
     for (const run of cleanup.reverse()) {
@@ -360,6 +483,7 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
       lines.push(text)
       console.log(`[explore] ${text}`)
     }
+    const failure = (error: Error) => ({ error: error.message })
 
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-sbx-'))
     cleanup.push(() => fs.rmSync(base, { recursive: true, force: true }))
@@ -394,6 +518,13 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
     }
     for (const dir of new Set(Object.values(outside))) cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }))
 
+    // A junction inside the folder that leads out of it, made before the folder is prepared.
+    const junction = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-sbx-jx-'))
+    cleanup.push(() => fs.rmSync(junction, { recursive: true, force: true }))
+    fs.symlinkSync(junction, path.join(root, 'jx'), 'junction')
+    const localLow = path.join(os.homedir(), 'AppData', 'LocalLow')
+    fs.mkdirSync(localLow, { recursive: true })
+
     // The server end of a connection that the other end resets is a normal thing here; it must not end the run.
     const server = net.createServer((socket) => {
       socket.on('error', () => undefined)
@@ -415,19 +546,23 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
     const startup = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
     fs.mkdirSync(startup, { recursive: true })
 
-    for (const flags of [{ restrict: [sid, 'everyone', 'logon'] }, { restrict: [sid, 'logon'], lua: false }]) {
-      say(`probe ${JSON.stringify(flags)}: ${JSON.stringify(await probeHelper(build.exe, flags))}`)
+    for (const flags of [{ restrict: [sid, 'everyone', 'logon'] }, { restrict: [], integrity: 'low' as const }, { restrict: [sid, 'logon'], lua: false }]) {
+      say(`probe ${JSON.stringify(flags)}: ${JSON.stringify(await probeHelper(build.exe, flags).catch(failure))}`)
     }
 
-    // Grant, with timing; and a big tree for the cost of propagation.
+    // Prepare the folders both ways, with timing; and a big tree for the cost of propagation.
     const git = await exec('git', ['init', '-q', root], 30_000)
     say(`git init for the fixture: ${git.code}`)
     const protect = [path.join(root, '.git', 'hooks'), path.join(root, '.git', 'config')]
     const started = Date.now()
     const granted = await grantFolder(build.exe, sid, root, protect)
     say(`grant on a small tree: ${JSON.stringify(granted)} wall=${Date.now() - started}ms`)
-    const granted2 = await grantFolder(build.exe, sid, temp, [])
-    say(`grant on the temp folder: ${JSON.stringify(granted2)}`)
+    say(`grant on the temp folder: ${JSON.stringify(await grantFolder(build.exe, sid, temp, []))}`)
+    const labelStarted = Date.now()
+    say(`label on a small tree: ${JSON.stringify(await labelFolder(build.exe, root, protect).catch(failure))} wall=${Date.now() - labelStarted}ms`)
+    say(`label on the temp folder: ${JSON.stringify(await labelFolder(build.exe, temp, []).catch(failure))}`)
+    const sample = [root, path.join(root, 'sub'), path.join(root, 'sub', 'deep', 'existing.txt'), path.join(root, '.git'), path.join(root, '.git', 'hooks'), path.join(root, '.git', 'hooks', 'pre-commit.sample'), path.join(root, '.git', 'config'), path.join(root, '.git', 'HEAD'), path.join(root, 'jx'), junction, temp, outside.profile]
+    for (const line of await readLabels(build.exe, sample).catch((error: Error) => [`could not read the labels: ${error.message}`])) say(`label of ${line}`)
     for (const [label, target] of [
       ['a pre-existing nested file', path.join(root, 'sub', 'deep', 'existing.txt')],
       ['.git/hooks', path.join(root, '.git', 'hooks')],
@@ -436,7 +571,7 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
       ['C:\\ProgramData', process.env.ProgramData ?? 'C:\\ProgramData'],
       [`${drive}\\`, `${drive}\\`],
     ]) {
-      say(`icacls of ${label}: ${(await exec('icacls', [target], 20_000)).out.replace(/\s*\r?\n\s*/g, ' ; ').replace(/\s+/g, ' ').slice(0, 700)}`)
+      say(`icacls of ${label}: ${flat((await exec('icacls', [target], 20_000)).out)}`)
     }
 
     const big = path.join(base, 'big')
@@ -447,11 +582,18 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
     const t1 = Date.now()
     const bigGrant = await grantFolder(build.exe, sid, big, [])
     say(`grant on ${files} files: helper says ${bigGrant.ms}ms, wall ${Date.now() - t1}ms`)
+    const deep = path.join(big, 'd7', 'e47', 'f9.txt')
+    const t2 = Date.now()
+    say(`label on ${files} files: ${JSON.stringify(await labelFolder(build.exe, big, []).catch(failure))}, wall ${Date.now() - t2}ms`)
+    say(`label of a file deep in the big tree: ${(await readLabels(build.exe, [deep]).catch((error: Error) => [error.message])).join(' ')}`)
+    const t3 = Date.now()
+    say(`unlabel on ${files} files: ${JSON.stringify(await unlabelFolder(build.exe, big, []).catch(failure))}, wall ${Date.now() - t3}ms; labels now: ${(await readLabels(build.exe, [deep, big]).catch((error: Error) => [error.message])).join(' ')}`)
 
     const ctx: Context = {
       root,
       temp,
       outside,
+      junction,
       bash: findBash(),
       ps5: path.join(system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ps7: findPwsh(),
@@ -460,31 +602,55 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
       victim: victim.pid!,
       port: (server.address() as net.AddressInfo).port,
       startup,
+      localLow,
     }
     say(`bash=${ctx.bash ?? 'none'} pwsh7=${ctx.ps7 ?? 'none'}`)
-    const programOf = (program: Program): string | undefined =>
-      program === 'ps' ? (ctx.ps7 ?? ctx.ps5) : program === 'ps5' ? ctx.ps5 : program === 'cmd' ? ctx.cmd : program === 'node' ? ctx.node : ctx.bash
+    let bashJunction: string | undefined
+    if (ctx.bash) {
+      const gitRoot = path.dirname(path.dirname(ctx.bash))
+      try {
+        fs.symlinkSync(gitRoot, path.join(base, 'git-junction'), 'junction')
+        bashJunction = path.join(base, 'git-junction', 'bin', 'bash.exe')
+      } catch (error) {
+        say(`could not make a junction to ${gitRoot}: ${(error as Error).message}`)
+      }
+    }
+    const programOf = (program: Program, variant: Variant): string | undefined =>
+      program === 'ps' ? (ctx.ps7 ?? ctx.ps5) : program === 'ps5' ? ctx.ps5 : program === 'cmd' ? ctx.cmd : program === 'node' ? ctx.node : variant.junction ? bashJunction : ctx.bash
+
+    // A Git Bash the person has open, not sandboxed.
+    let openBash: ChildProcess | undefined
+    const openGitBash = () => {
+      if (openBash || !ctx.bash) return
+      openBash = spawn(ctx.bash, ['-c', 'sleep 900'], { stdio: 'ignore', windowsHide: true })
+      openBash.unref()
+      cleanup.push(() => openBash?.kill())
+    }
 
     const probes = buildProbes()
-    const table: string[][] = [['probe', ...VARIANTS.map((variant) => variant.name)]]
+    const columns: string[][] = []
     const detail: string[] = []
-    const dead = new Set<string>()
     const startupTimes: Record<string, number> = {}
-    for (const probe of probes) {
-      const row = [`${probe.name} [${probe.expect}]`]
-      for (const variant of VARIANTS) {
-        const file = programOf(probe.program)
+    for (const variant of VARIANTS) {
+      const column: string[] = []
+      columns.push(column)
+      if (variant.withBash) {
+        openGitBash()
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      }
+      const dead = new Set<string>()
+      for (const probe of probes) {
+        const file = programOf(probe.program, variant)
         if (!file) {
-          row.push('n/a')
+          column.push('n/a')
           continue
         }
-        if (variant.basicOnly && !probe.basic) {
-          row.push('-')
+        if ((variant.only && !variant.only.includes(probe.name)) || (variant.programs && !variant.programs.includes(probe.program))) {
+          column.push('-')
           continue
         }
-        const key = `${variant.name}|${probe.program}`
-        if (dead.has(key) && !probe.basic) {
-          row.push('skip')
+        if (dead.has(probe.program) && !probe.basic) {
+          column.push('skip')
           continue
         }
         if (!alive(ctx.victim)) {
@@ -494,14 +660,8 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
         await probe.before?.(ctx)
         const env = { ...process.env, TEMP: temp, TMP: temp, TMPDIR: temp }
         const began = Date.now()
-        const done = variant.direct
-          ? await exec(file, probe.args(ctx), 40_000, { cwd: root, env })
-          : await exec(
-              build.exe,
-              runArguments({ restrict: [sid, ...variant.extra], ...(variant.console ? { console: variant.console } : {}), ...(variant.lua === false ? { lua: false } : {}) }, file, probe.args(ctx)),
-              40_000,
-              { cwd: root, env },
-            )
+        const flags: RunFlags = variant.mode === 'low' ? { restrict: [], integrity: 'low', ...variant.flags } : { restrict: [sid, ...(variant.extra ?? [])], ...variant.flags }
+        const done = variant.mode === 'direct' ? await exec(file, probe.args(ctx), 40_000, { cwd: root, env }) : await exec(build.exe, runArguments(flags, file, probe.args(ctx)), 40_000, { cwd: root, env })
         const took = Date.now() - began
         if (probe.name === 'ps echo' || probe.name === 'ps5 echo') startupTimes[`${probe.name} / ${variant.name}`] = took
         const effect = probe.effect ? await probe.effect(ctx) : undefined
@@ -510,29 +670,28 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
         if (probe.expect === 'allow') {
           const good = done.code === 0 && effect !== false && matched
           cell = good ? 'ok' : done.code === null ? 'TIMEOUT' : `FAIL(${done.code}${effect === false ? ',no effect' : ''}${matched ? '' : ',output'})`
-          if (!good && probe.basic) dead.add(key)
+          if (!good && probe.basic) dead.add(probe.program)
         } else if (probe.expect === 'deny') {
           // A denied action must not have taken effect. Without an `effect` the exit code decides.
           const escaped = effect === undefined ? done.code === 0 : effect
           cell = escaped ? 'ESCAPED' : 'denied'
         } else {
           cell = done.code === 0 && matched ? 'ok' : done.code === null ? 'TIMEOUT' : `FAIL(${done.code})`
-          if (cell !== 'ok' && probe.basic) dead.add(key)
+          if (cell !== 'ok' && probe.basic) dead.add(probe.program)
         }
-        row.push(cell)
-        if (cell !== 'ok' && cell !== 'denied') detail.push(`${variant.name} / ${probe.name}: code=${done.code} ${took}ms :: ${done.out.replace(/\s+/g, ' ').slice(0, 260)}`)
+        column.push(cell)
+        if ((cell !== 'ok' && cell !== 'denied') || probe.show) detail.push(`${variant.name} / ${probe.name}: ${cell} code=${done.code} ${took}ms :: ${done.out.replace(/\s+/g, ' ').slice(0, 300)}`)
         await probe.after?.(ctx)
-        if (probe.name === 'ps delete a file outside') rm(path.join(outside.profile, 'keep.txt'))
       }
-      table.push(row)
     }
+    const table: string[][] = [['probe', ...VARIANTS.map((variant) => variant.name)], ...probes.map((probe, row) => [`${probe.name} [${probe.expect}]`, ...columns.map((column) => column[row])])]
     const widths = table[0].map((_, column) => Math.max(...table.map((row) => row[column].length)))
     for (const row of table) say(row.map((cell, column) => cell.padEnd(widths[column])).join(' | '))
     for (const line of detail) say(`detail: ${line}`)
     say(`start-up of PowerShell through the helper, one run each: ${JSON.stringify(startupTimes)}`)
 
     // The cost of starting a program through the helper, against starting it directly.
-    const cost = async (label: string, file: string, args: string[]) => {
+    const cost = async (label: string, file: string, args: string[], flags: RunFlags) => {
       const direct: number[] = []
       const wrapped: number[] = []
       for (let i = 0; i < 5; i++) {
@@ -540,36 +699,48 @@ describe('which restricting SIDs keep the agent’s programs working (Windows, e
         await exec(file, args, 40_000, { cwd: root })
         direct.push(Date.now() - began)
         began = Date.now()
-        await exec(build.exe, runArguments({ restrict: [sid, 'everyone', 'logon'] }, file, args), 40_000, { cwd: root })
+        await exec(build.exe, runArguments(flags, file, args), 40_000, { cwd: root })
         wrapped.push(Date.now() - began)
       }
       say(`start-up ${label}: direct median ${median(direct)}ms (${direct.join(',')}), through the helper median ${median(wrapped)}ms (${wrapped.join(',')})`)
     }
-    await cost('cmd /c exit', ctx.cmd, ['/d', '/c', 'exit 0'])
-    await cost('node -e 0', ctx.node, ['-e', '0'])
-    await cost('powershell 5.1 -Command exit', ctx.ps5, ps('exit 0'))
-    if (ctx.ps7) await cost('pwsh 7 -Command exit', ctx.ps7, ps('exit 0'))
+    const sets: Array<[string, RunFlags]> = [
+      ['S+E+L', { restrict: [sid, 'everyone', 'logon'] }],
+      ['Low', { restrict: [], integrity: 'low' }],
+    ]
+    for (const [name, flags] of sets) {
+      await cost(`cmd /c exit (${name})`, ctx.cmd, ['/d', '/c', 'exit 0'], flags)
+      await cost(`node -e 0 (${name})`, ctx.node, ['-e', '0'], flags)
+      await cost(`powershell 5.1 -Command exit (${name})`, ctx.ps5, ps('exit 0'), flags)
+      if (ctx.ps7) await cost(`pwsh 7 -Command exit (${name})`, ctx.ps7, ps('exit 0'), flags)
+      if (ctx.bash) await cost(`bash -c true (${name})`, ctx.bash, ['-c', 'true'], flags)
+    }
 
     // What the job object does: nothing a command left running outlives it.
-    const flags: RunFlags = { restrict: [sid, 'everyone', 'logon'] }
-    const spawnedPid = path.join(root, 'grandchild.pid')
-    rm(spawnedPid)
-    const leaver = `const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});require('fs').writeFileSync(${JSON.stringify(spawnedPid)},String(c.pid));c.unref()`
-    await exec(build.exe, runArguments(flags, ctx.node, ['-e', leaver]), 40_000, { cwd: root })
-    const grandchild = Number(fs.existsSync(spawnedPid) ? fs.readFileSync(spawnedPid, 'utf8') : 0)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    say(`a program left running by a command that ended: pid ${grandchild || 'unknown'} ${grandchild ? (alive(grandchild) ? 'STILL RUNNING' : 'was ended with the command') : ''}`)
-    if (grandchild && alive(grandchild)) process.kill(grandchild)
+    for (const [name, flags] of sets) {
+      const spawnedPid = path.join(root, 'grandchild.pid')
+      rm(spawnedPid)
+      const leaver = `const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',detached:true});require('fs').writeFileSync(${JSON.stringify(spawnedPid)},String(c.pid));c.unref()`
+      await exec(build.exe, runArguments(flags, ctx.node, ['-e', leaver]), 40_000, { cwd: root })
+      const grandchild = Number(fs.existsSync(spawnedPid) ? fs.readFileSync(spawnedPid, 'utf8') : 0)
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      say(`(${name}) a program left running by a command that ended: pid ${grandchild || 'unknown'} ${grandchild ? (alive(grandchild) ? 'STILL RUNNING' : 'was ended with the command') : ''}`)
+      if (grandchild && alive(grandchild)) process.kill(grandchild)
 
-    rm(spawnedPid)
-    const longRunner = `require('fs').writeFileSync(${JSON.stringify(spawnedPid)},String(process.pid));setInterval(()=>{},1000)`
-    const helperProcess = spawn(build.exe, runArguments(flags, ctx.node, ['-e', longRunner]), { cwd: root, stdio: 'ignore', windowsHide: true })
-    for (let i = 0; i < 50 && !fs.existsSync(spawnedPid); i++) await new Promise((resolve) => setTimeout(resolve, 200))
-    const running = Number(fs.existsSync(spawnedPid) ? fs.readFileSync(spawnedPid, 'utf8') : 0)
-    helperProcess.kill()
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    say(`a command whose helper was killed: pid ${running || 'unknown'} ${running ? (alive(running) ? 'STILL RUNNING' : 'ended with the helper') : ''}`)
-    if (running && alive(running)) process.kill(running)
+      rm(spawnedPid)
+      const longRunner = `require('fs').writeFileSync(${JSON.stringify(spawnedPid)},String(process.pid));setInterval(()=>{},1000)`
+      const helperProcess = spawn(build.exe, runArguments(flags, ctx.node, ['-e', longRunner]), { cwd: root, stdio: 'ignore', windowsHide: true })
+      for (let i = 0; i < 50 && !fs.existsSync(spawnedPid); i++) await new Promise((resolve) => setTimeout(resolve, 200))
+      const running = Number(fs.existsSync(spawnedPid) ? fs.readFileSync(spawnedPid, 'utf8') : 0)
+      helperProcess.kill()
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      say(`(${name}) a command whose helper was killed: pid ${running || 'unknown'} ${running ? (alive(running) ? 'STILL RUNNING' : 'ended with the helper') : ''}`)
+      if (running && alive(running)) process.kill(running)
+    }
+
+    // Taking the labels away leaves the folder as it was.
+    say(`unlabel: ${JSON.stringify(await unlabelFolder(build.exe, root, protect).catch(failure))}`)
+    for (const line of await readLabels(build.exe, [root, path.join(root, 'sub', 'deep', 'existing.txt'), path.join(root, '.git', 'hooks'), path.join(root, '.git', 'config')]).catch((error: Error) => [`could not read the labels: ${error.message}`])) say(`label after unlabel of ${line}`)
 
     const out = process.env.ENCODE_SANDBOX_EXPLORE_OUT
     if (out) fs.writeFileSync(out, lines.join('\n'))

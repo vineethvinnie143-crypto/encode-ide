@@ -9,21 +9,22 @@ import { Workspaces } from './scope'
 
 const json = (value: unknown) => JSON.stringify(value)
 
-function engine(probe: { ok: boolean; reason?: string } = { ok: true }): SandboxEngine {
+function engine(probe: { ok: boolean; reason?: string } = { ok: true }, unsupported?: SandboxEngine['unsupported']): SandboxEngine {
   return {
     name: 'bubblewrap',
     limits: { reads: true, network: true, protectedPaths: 'exact' },
     probe: async () => probe,
     prepare: async () => undefined,
     wrap: (spec) => spec,
+    ...(unsupported ? { unsupported } : {}),
   }
 }
 
-async function setup(folderSettings: unknown | undefined, userSettings: unknown | undefined, probe?: { ok: boolean; reason?: string }) {
+async function setup(folderSettings: unknown | undefined, userSettings: unknown | undefined, probe?: { ok: boolean; reason?: string }, unsupported?: SandboxEngine['unsupported']) {
   const root = await fs.realpath(await tempWorkspace(folderSettings === undefined ? {} : { '.encode/settings.json': json(folderSettings) }))
   const home = await fs.realpath(await tempWorkspace(userSettings === undefined ? {} : { '.encode/settings.json': json(userSettings) }))
   const dir = await fs.realpath(await tempWorkspace())
-  const sandbox = new Sandbox({ platform: process.platform, home, dir, engine: engine(probe), env: {} })
+  const sandbox = new Sandbox({ platform: process.platform, home, dir, engine: engine(probe, unsupported), env: {} })
   await sandbox.start()
   return { root, home, workspaces: new Workspaces({ home, platform: process.platform, sandbox }), sandbox }
 }
@@ -52,6 +53,35 @@ describe('the Sandbox screen', () => {
     assert.equal(brokenReport.reason, 'bubblewrap is not installed.')
     const none = new Workspaces({ home: broken.home, platform: process.platform })
     assert.equal((await none.sandboxReport(broken.root)).state, 'unavailable')
+  })
+
+  it('names the shell commands run in, and says so when the sandbox cannot confine it', async () => {
+    const plain = await setup(undefined, undefined)
+    const fine = await plain.workspaces.sandboxReport(plain.root)
+    assert.equal(fine.state, 'active')
+    assert.ok(fine.shell && !fine.shell.unsupported, 'the shell is named and nothing is said against it')
+    const declined = await setup(undefined, undefined, undefined, (file) => (path.basename(file) === 'bash' || path.basename(file) === 'bash.exe' ? 'This shell cannot run in the sandbox.' : undefined))
+    const report = await declined.workspaces.sandboxReport(declined.root)
+    if (report.shell?.name === 'bash' || report.shell?.name === 'Git Bash') {
+      assert.equal(report.state, 'unavailable')
+      assert.equal(report.reason, 'This shell cannot run in the sandbox.')
+      assert.equal(report.shell.unsupported, 'This shell cannot run in the sandbox.')
+    }
+  })
+
+  it('asks for PowerShell when the person turned it on, and not when a folder tried to turn it off', async () => {
+    const asked = await setup(undefined, { sandbox: { powershell: true } })
+    const scope = await asked.workspaces.scope({ sessionId: 's1', root: asked.root, notice: () => undefined })
+    assert.equal(scope.shell!().prefer, 'pwsh')
+    assert.equal((await asked.workspaces.sandboxReport(asked.root)).settings.powershell, true)
+    const refused = await setup({ sandbox: { powershell: false } }, { sandbox: { powershell: true } })
+    const kept = await refused.workspaces.scope({ sessionId: 's1', root: refused.root, notice: () => undefined })
+    assert.equal(kept.shell!().prefer, 'pwsh')
+    const none = await setup(undefined, undefined)
+    assert.equal((await none.workspaces.scope({ sessionId: 's1', root: none.root, notice: () => undefined })).shell!().prefer, undefined)
+    // With the sandbox off there is nothing to make room for.
+    const off = await setup(undefined, { sandbox: { powershell: true, enabled: false } })
+    assert.equal((await off.workspaces.scope({ sessionId: 's1', root: off.root, notice: () => undefined })).shell!().prefer, undefined)
   })
 
   it('shows what the folder tightened, and nothing it tried to loosen', async () => {
