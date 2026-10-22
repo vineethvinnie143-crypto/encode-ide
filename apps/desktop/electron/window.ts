@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { appearanceParams, type Appearance } from '../shared/appearance'
-import { NATIVE_CAPTIONS, captionOverlay, windowBackground } from './appearance'
+import { NATIVE_CAPTIONS, captionOverlay, windowBackground, windowBorder } from './appearance'
 import { allowFraming } from './framing'
 
 /** The Vite dev server, honoured only by an unpackaged build. */
@@ -75,6 +75,8 @@ export function createMainWindow(appearance: Appearance): BrowserWindow {
     show: false,
     title: 'eNCode',
     backgroundColor: windowBackground(),
+    // Windows 11 draws a 1 px line around the window in the user's accent colour; here it takes the chrome's.
+    accentColor: windowBorder(),
     // On Windows the system draws the window buttons over our title bar: the right glyphs, hover and press
     // states, and the snap layouts of Windows 11. Elsewhere the title bar draws its own (TitleBar.tsx).
     ...(NATIVE_CAPTIONS ? { titleBarStyle: 'hidden' as const, titleBarOverlay: captionOverlay() } : { frame: false }),

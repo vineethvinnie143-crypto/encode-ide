@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import {
   CAPTION_SYMBOL,
@@ -16,6 +17,7 @@ import {
   sameAppearance,
   uiFontStack,
   WINDOW_BACKGROUND,
+  WINDOW_BORDER,
   type Appearance,
 } from './appearance'
 
@@ -153,6 +155,15 @@ describe('fonts', () => {
     assert.equal(large['--ui-small'], '3px')
     const custom = fontVariables({ ...DEFAULT_APPEARANCE, uiFont: 'Calibri', uiSize: 12 })
     assert.equal(custom['--ui-small'], '-2px', 'a font picked by name gets the size change only')
+  })
+
+  it('paints the window border in the chrome colour of each theme, so no accent line shows around the window', () => {
+    const tokens = readFileSync('apps/desktop/src/theme/tokens.css', 'utf8')
+    const chrome = (selector: string) => new RegExp(`${selector}\\s*\\{[^}]*--chrome:\\s*(#[0-9a-f]{6})`, 'i').exec(tokens)?.[1]
+    for (const [theme, selector] of [['dark', ':root'], ['light', ":root\\[data-theme='light'\\]"]] as const) {
+      assert.equal(WINDOW_BORDER[theme], chrome(selector)?.toLowerCase(), `${theme}: the border is the --chrome of tokens.css`)
+      assert.equal(WINDOW_BORDER[theme], WINDOW_BACKGROUND[theme])
+    }
   })
 
   it('draws the native window buttons in colours that read on the title bar', () => {
