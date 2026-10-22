@@ -6,12 +6,22 @@ import { PaneFor } from './SidePanel'
 import { TabStrip } from './TabStrip'
 
 /** Under the thread and the side panel: terminals and the agent's background jobs. Ctrl+J shows and hides it. */
-export default function BottomPanel({ open, height, onResizeStart }: { open: boolean; height: number; onResizeStart: (event: React.PointerEvent) => void }) {
+export default function BottomPanel({
+  panelRef,
+  open,
+  height,
+  onResizeStart,
+}: {
+  panelRef: React.Ref<HTMLElement>
+  open: boolean
+  height: number
+  onResizeStart: (event: React.PointerEvent) => void
+}) {
   const tabs = usePanels((state) => state.bottom.tabs)
   const activeId = usePanels((state) => state.bottom.activeId)
 
   return (
-    <section className={cx('bottom-panel', !open && 'is-closed')} style={{ height }} aria-label="Bottom panel">
+    <section ref={panelRef} className={cx('bottom-panel', !open && 'is-closed')} style={{ height }} aria-label="Bottom panel">
       <div className="resizer resizer-h" onPointerDown={onResizeStart} />
       <TabStrip
         compact

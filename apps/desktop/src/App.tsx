@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
 import BottomPanel from './components/panels/BottomPanel'
@@ -53,8 +53,26 @@ export default function App() {
 
   const sidebar = useResizable({ initial: 272, min: 220, max: 480, axis: 'x', persistKey: 'eNCode.sidebar.v1' })
   // The side panel is also held under 60% of the window in CSS, so a big saved width cannot cover the thread.
-  const side = useResizable({ initial: 440, min: 360, max: 1400, axis: 'x', invert: true, persistKey: 'eNCode.sidepanel.v1' })
-  const bottom = useResizable({ initial: 280, min: 140, max: 720, axis: 'y', invert: true, persistKey: 'eNCode.bottompanel.v1' })
+  const sideRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLElement>(null)
+  const side = useResizable({
+    initial: 440,
+    min: 360,
+    max: 1400,
+    axis: 'x',
+    invert: true,
+    persistKey: 'eNCode.sidepanel.v1',
+    measure: () => sideRef.current?.getBoundingClientRect().width,
+  })
+  const bottom = useResizable({
+    initial: 280,
+    min: 140,
+    max: 720,
+    axis: 'y',
+    invert: true,
+    persistKey: 'eNCode.bottompanel.v1',
+    measure: () => bottomRef.current?.getBoundingClientRect().height,
+  })
 
   useKeymap()
 
@@ -127,12 +145,12 @@ export default function App() {
 
               {/* The panel stays mounted while hidden, so a browser keeps its page and a terminal its shells. */}
               {layout === 'split' && <div className="resizer resizer-v" onPointerDown={side.onPointerDown} />}
-              <div className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
+              <div ref={sideRef} className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
                 <SidePanel />
               </div>
             </div>
 
-            {bottomTabs > 0 && <BottomPanel open={bottomOpen} height={bottom.size} onResizeStart={bottom.onPointerDown} />}
+            {bottomTabs > 0 && <BottomPanel panelRef={bottomRef} open={bottomOpen} height={bottom.size} onResizeStart={bottom.onPointerDown} />}
           </div>
         </div>
       </div>

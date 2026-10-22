@@ -723,6 +723,11 @@ async function runSessionViewChecks() {
  */
 async function runPanelChecks() {
   console.log('[smoke] --- panels ---')
+  // The layout rules below depend on the window's size, and a runner's screen can be smaller than the window: fix it.
+  const windowSize = { width: 1480, height: 920 }
+  const sizeWindow = (size) => send('Emulation.setDeviceMetricsOverride', { ...size, deviceScaleFactor: 1, mobile: false })
+  await sizeWindow(windowSize)
+  await sleep(300)
   const titles = () => evaluate("[...document.querySelectorAll('.side-panel .panel-tab-title')].map((node) => node.textContent)")
   const inFront = "document.querySelector('.side-panel .panel-tab.is-active .panel-tab-title')?.textContent"
   const layoutIs = (name) => `document.querySelector('.side-panel')?.dataset.layout === '${name}' && !document.querySelector('.right-wrap').classList.contains('is-hidden')`
@@ -816,6 +821,18 @@ async function runPanelChecks() {
   await drag('.workrow > .resizer-v', 60, 0)
   await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'dragging the divider right narrows the panel')
 
+  // In a narrow window the panel is held under 60% of the row, and a drag starts from the width on screen, not the saved one.
+  await sizeWindow({ width: 1024, height: 768 })
+  await waitFor("document.querySelector('.right-wrap').getBoundingClientRect().width <= document.querySelector('.workrow').getBoundingClientRect().width * 0.6 + 1", 4000, 'a narrow window holds the panel under 60% of the row')
+  const held = await width('.right-wrap')
+  if (held >= wide - 2) throw new Error(`the panel was not held back in a narrow window (${held} px, saved ${wide} px)`)
+  await drag('.workrow > .resizer-v', 40, 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${held - 40}) < 2`, 4000, 'a drag in a narrow window starts from the width on screen')
+  await sizeWindow(windowSize)
+  await sleep(300)
+  await drag('.workrow > .resizer-v', Math.round((await width('.right-wrap')) - wide), 0)
+  await waitFor(`Math.abs(document.querySelector('.right-wrap').getBoundingClientRect().width - ${wide}) < 2`, 4000, 'the panel is back at its width')
+
   // Bottom panel: the shell stays alive while the panel is hidden, and the panel resizes.
   const bottomShown = "!!document.querySelector('.bottom-panel') && !document.querySelector('.bottom-panel').classList.contains('is-closed')"
   await key({ key: '`', code: 'Backquote', ctrlKey: true })
@@ -853,6 +870,8 @@ async function runPanelChecks() {
   await waitFor("!document.querySelector('.browser-address')", 4000, 'the Browser tab closed')
   await key({ key: '1', code: 'Digit1', ctrlKey: true })
   await waitFor(`${inFront} === ${JSON.stringify(start[0])}`, 4000, 'back on the first tab')
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
 }
 
 /**
