@@ -4,6 +4,8 @@ import { TransportError, classifyHttpFailure } from '@encode/providers'
 import { refusalMessage, refusalOf } from './access'
 import { OPENROUTER_REFUSALS } from './testing'
 
+const MINUTE = 60_000
+
 const HOUR = 60 * 60_000
 const DAY = 24 * HOUR
 
@@ -29,6 +31,12 @@ describe('refusalOf', () => {
     const error = classified(403, OPENROUTER_REFUSALS.appOnly('thinkingmachines/inkling:free'))
     assert.equal(error.kind, 'auth')
     assert.deepEqual(refusalOf('openrouter', error), { kind: 'app-only', ms: DAY })
+  })
+
+  it("knows a preset's server tool that the chat-completions API refuses, and sets the model aside for a short while", () => {
+    const error = classified(400, OPENROUTER_REFUSALS.serverTool('openrouter:shell'))
+    assert.equal(error.kind, 'invalid-request')
+    assert.deepEqual(refusalOf('openrouter', error), { kind: 'server-tool', ms: 15 * MINUTE })
   })
 
   it('treats any other 403 as a refusal of that model for an hour, never as a refused key', () => {
@@ -90,6 +98,15 @@ describe('refusalMessage', () => {
     assert.match(message, /thinkingmachines\/inkling:free/)
     assert.match(message, /coding apps/)
     assert.doesNotMatch(message, /key/i)
+  })
+
+  it('tells the user which tool, in which preset to look, and how long the model is skipped', () => {
+    const error = classified(400, OPENROUTER_REFUSALS.serverTool('openrouter:shell'))
+    const message = refusalMessage('server-tool', '@preset/deepseek', error.message)
+    assert.match(message, /^OpenRouter added its openrouter:shell tool/)
+    assert.match(message, /preset/)
+    assert.match(message, /skips @preset\/deepseek for 15 minutes/)
+    assert.doesNotMatch(message, /HTTP 400/)
   })
 
   it("quotes the provider on a refusal it cannot explain, and keeps it short", () => {

@@ -560,6 +560,32 @@ describe('ModelRouter: models the account cannot use', () => {
     assert.equal((await world.complete()).text, 'A, back')
   })
 
+  it('sets aside a model whose preset has a server tool the API refuses, for minutes, and says what to change', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.serverTool(), faults.reply('A, preset fixed')] } })
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.deepEqual(world.router.status().blocks, [], 'neither the key nor the provider is blocked')
+    const alert = world.alerts.find((entry) => entry.type === 'model-refused')
+    assert.equal(alert?.type === 'model-refused' && alert.reason, 'server-tool')
+    assert.match(alert?.type === 'model-refused' ? alert.message : '', /openrouter:shell.*preset/)
+    // It is not a model without tools: that would be learned, and outlive the fix.
+    assert.equal(world.router.registry.get('openrouter', A).capabilities.tools, true)
+    assert.equal(stateOf(world, A)?.lastFailure?.kind, 'server-tool')
+    assert.equal(stateOf(world, A)?.failures, 0, 'a refusal is not ill health')
+
+    await world.clock.advance(15 * 60_000 - 1)
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.callsTo(A).length, 1)
+    await world.clock.advance(1)
+    assert.equal((await world.complete()).text, 'A, preset fixed')
+  })
+
+  it('lets the user try a preset again as soon as it is fixed', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.serverTool(), faults.reply('A, preset fixed')] } })
+    assert.equal((await world.complete()).text, `hello from ${B}`)
+    assert.equal(world.router.retryRefused('openrouter'), 1)
+    assert.equal((await world.complete()).text, 'A, preset fixed')
+  })
+
   it('still stops at a moderation refusal rather than route around it', async () => {
     const world = freeWorld({ behavior: { [A]: faults.contentFilter() } })
     const { outcome } = await world.complete()
