@@ -5,8 +5,9 @@
  *   pnpm build && pnpm e2e
  *
  * The demo fixture is copied to a temporary workspace and eNCode gets a
- * temporary profile (ENCODE_USER_DATA_DIR), so neither the repository nor the
- * real profile is touched. Electron listens for DevTools on a free local port,
+ * temporary profile (ENCODE_USER_DATA_DIR) and a temporary home (ENCODE_HOME,
+ * where ~/.encode would be), so neither the repository nor the real profile
+ * and home are touched. Electron listens for DevTools on a free local port,
  * and its whole process tree is stopped afterwards. Screenshots and the
  * Electron log land in ./screenshots.
  *
@@ -30,7 +31,7 @@ function fail(message) {
   process.exit(1)
 }
 
-for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/renderer/index.html']) {
+for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/renderer/index.html']) {
   if (!fs.existsSync(path.join(root, built))) fail(`${built} is missing. Run pnpm build first.`)
 }
 
@@ -52,8 +53,28 @@ function freePort() {
 const sandbox = fs.mkdtempSync(path.join(fs.realpathSync.native(process.env.RUNNER_TEMP || os.tmpdir()), 'encode-e2e-'))
 const workspace = path.join(sandbox, 'demo-project')
 const profile = path.join(sandbox, 'profile')
+const home = path.join(sandbox, 'home')
 fs.cpSync(path.join(root, 'test', 'fixtures', 'demo-project'), workspace, { recursive: true })
 fs.mkdirSync(profile)
+fs.mkdirSync(home)
+// The session file of the earlier build: eNCode brings it into its own session store at the first start.
+fs.writeFileSync(
+  path.join(profile, 'eNCode-sessions.json'),
+  JSON.stringify({
+    sessions: [
+      {
+        id: 'legacy-smoke',
+        title: 'An earlier session',
+        createdAt: 1000,
+        updatedAt: 2000,
+        entries: [
+          { id: 'u1', kind: 'user', text: 'What does add do?', createdAt: 1000 },
+          { id: 'a1', kind: 'assistant', text: 'It adds two numbers.', createdAt: 1500 },
+        ],
+      },
+    ],
+  }),
+)
 fs.rmSync(shotsDir, { recursive: true, force: true })
 fs.mkdirSync(shotsDir, { recursive: true })
 
@@ -61,6 +82,7 @@ const [debugPort, providerPort] = await Promise.all([freePort(), freePort()])
 const env = {
   ...process.env,
   ENCODE_USER_DATA_DIR: profile,
+  ENCODE_HOME: home,
   ENCODE_DEBUG_PORT: String(debugPort),
   ENCODE_FAKE_PROVIDER_PORT: String(providerPort),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',

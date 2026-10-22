@@ -30,8 +30,8 @@ export interface ProfileConfig {
 export interface ProfileClientOptions {
   /** The profile in use now, read at every call so a change applies to the next one. */
   profile(): ProfileConfig | null
-  /** A profile's key, asked for at every call so that it does not rest in memory here. */
-  apiKey?(profileId: string): Promise<string | undefined> | string | undefined
+  /** A profile's key, asked for at every call so that it does not rest in memory here. The profile says which server the key is about to be sent to. */
+  apiKey?(profile: ProfileConfig): Promise<string | undefined> | string | undefined
   demo?: ModelClient
   direct?: Pick<DirectClientOptions, 'adapters' | 'attempts' | 'idleTimeoutMs' | 'maxWaitMs' | 'now' | 'sleep'>
 }
@@ -51,7 +51,7 @@ export function createProfileClient(options: ProfileClientOptions): ModelClient 
       const now = options.profile()
       const profile = now && now.kind !== 'demo' ? now : lastDirect
       if (!profile) throw new Error(NO_MODEL_MESSAGE)
-      const apiKey = await options.apiKey?.(profile.id)
+      const apiKey = await options.apiKey?.(profile)
       return routeFor({
         provider: profile.id,
         baseUrl: profile.baseUrl,

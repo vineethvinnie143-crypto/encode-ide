@@ -1,16 +1,18 @@
-import { app, BrowserWindow, Menu, protocol, safeStorage } from 'electron'
+import { app, BrowserWindow, Menu, protocol, safeStorage, shell as osShell } from 'electron'
+import os from 'node:os'
 import path from 'node:path'
-import { AgentManager } from './agent/manager'
+import { hostConfigOf } from './agent-host/config'
+import { spawnAgentHost } from './agent-host/electron'
+import { AgentHostService } from './agent-host/service'
 import { applyNativeAppearance, followSystemTheme } from './appearance'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
 import { GitService } from './services/git'
-import { JobService } from './services/jobs'
 import { ModelsService } from './services/models'
 import { ScheduleService } from './services/schedules'
-import { SettingsService } from './services/settings'
+import { SettingsService, serverOf } from './services/settings'
 import { ShellService } from './services/shell'
-import { SkillService } from './services/skills'
+import { SkillService, migrateLegacySkills } from './services/skills'
 import { WorkspaceService } from './services/workspace'
 import { createMainWindow } from './window'
 
@@ -50,11 +52,19 @@ if (!gotLock) {
       registerAppProtocol()
     }
 
-    const settings = new SettingsService(app.getPath('userData'), safeStorage)
+    const userData = app.getPath('userData')
+    const settings = new SettingsService(userData, safeStorage)
     const workspace = new WorkspaceService()
     const models = new ModelsService(settings)
     const git = new GitService(workspace)
     const shell = new ShellService()
+
+    // The user's own folder (instructions, skills, agents) is shared with the command line.
+    // A test run points it at a throwaway home; a packaged build never does.
+    const home = (!app.isPackaged && process.env.ENCODE_HOME) || os.homedir()
+    const userDir = path.join(home, '.encode')
+    migrateLegacySkills(path.join(userData, 'skills'), path.join(userDir, 'skills'))
+    const skills = new SkillService(() => workspace.current?.root ?? null, userDir, (dir) => osShell.openPath(dir))
 
     applyNativeAppearance(settings.get().appearance, null)
     const win = createMainWindow(settings.get().appearance)
@@ -62,25 +72,34 @@ if (!gotLock) {
     followSystemTheme(() => mainWindow)
 
     const send = (channel: string, payload: unknown) => {
-      if (!win.isDestroyed()) win.webContents.send(channel, payload)
+      const target = mainWindow
+      if (target && !target.isDestroyed()) target.webContents.send(channel, payload)
     }
 
-    const jobs = new JobService(shell, (list) => send('jobs:changed', list))
-    const skills = new SkillService(() => workspace.current?.root ?? null)
-
-    const agent = new AgentManager({
-      settings,
-      workspace,
-      shell,
-      jobs,
-      skills,
-      emit: (event) => send('agent:event', event),
-      contextWindow: (profile) => models.contextWindow(profile),
+    // The agent runs in a utility process; this side hands it the settings it needs and the keys it asks for.
+    const agentHost = new AgentHostService({
+      spawn: () => spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => console.error(`[agent-host] ${line}`)),
+      init: () => ({
+        dir: path.join(userData, 'sessions'),
+        home,
+        workspace: workspace.current?.root ?? null,
+        legacySessionsFile: path.join(userData, 'eNCode-sessions.json'),
+      }),
+      // A key goes only to the server it was entered for: the host names the address it is about to call.
+      apiKey: (profileId, baseUrl) => {
+        const profile = settings.raw().profiles.find((candidate) => candidate.id === profileId)
+        const server = serverOf(baseUrl)
+        return profile && server && serverOf(profile.baseUrl) === server ? settings.keyFor(profileId) : ''
+      },
+      onEvent: (event) => send('agent:event', event),
+      onJobs: (jobs) => send('jobs:changed', jobs),
     })
+    const configureAgent = () => agentHost.configure(hostConfigOf(settings.get(), (profile) => models.contextWindow(profile)))
+    configureAgent()
 
     const schedules = new ScheduleService(async (schedule) => {
-      void agent.start(schedule.sessionId, { text: schedule.prompt, mode: 'code' }).catch(() => {
-        /* session may have been removed */
+      void agentHost.client.start(schedule.sessionId, { text: schedule.prompt, mode: 'code' }).catch(() => {
+        /* the session may have been removed */
       })
     })
 
@@ -96,12 +115,14 @@ if (!gotLock) {
 
     workspace.setChangeHandler((paths) => send('workspace:file-changed', paths))
 
+    // Start the host now rather than at the first request, so schedules and background work are ready.
+    void agentHost.start().catch((error) => console.error('[agent-host] could not start:', error))
+
     win.on('maximize', () => send('window:state', { maximized: true }))
     win.on('unmaximize', () => send('window:state', { maximized: false }))
     win.on('closed', () => {
       shell.disposeAll()
       schedules.dispose()
-      agent.dispose()
       mainWindow = null
     })
 
@@ -114,12 +135,21 @@ if (!gotLock) {
       settings,
       workspace,
       shell,
-      jobs,
       schedules,
       skills,
       models,
       git,
-      agent,
+      agent: agentHost,
+      configureAgent,
+    })
+
+    // Close the sessions and their commands before the process goes: the host is asked, then ended.
+    let closing = false
+    app.on('before-quit', (event) => {
+      if (closing) return
+      closing = true
+      event.preventDefault()
+      void agentHost.dispose().finally(() => app.quit())
     })
 
     if (process.env.ENCODE_DEVTOOLS === '1') {

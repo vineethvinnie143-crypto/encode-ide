@@ -68,9 +68,9 @@ async function fixture(options: { script?: Parameters<typeof createScriptedClien
       return { port: mainSide, kill: record.kill, onExit: (handler) => (onExit = handler) }
     },
     init: () => ({ dir, home, workspace, legacySessionsFile: undefined }),
-    apiKey: (profileId) => {
-      keysAsked.push(profileId)
-      return `key-for-${profileId}`
+    apiKey: (profileId, baseUrl) => {
+      keysAsked.push(`${profileId} ${baseUrl}`)
+      return baseUrl.startsWith('http://127.0.0.1') ? `key-for-${profileId}` : ''
     },
     onEvent: (event) => events.push(event),
     onJobs: () => undefined,
@@ -144,8 +144,14 @@ describe('the agent host service', () => {
     const f = await fixture()
     await f.service.start()
     const peer = f.processes[0].runtime.peer
-    assert.equal(await peer.request('key', { profileId: 'p1' }), 'key-for-p1')
-    assert.deepEqual(f.keysAsked, ['p1'])
+    assert.equal(await peer.request('key', { profileId: 'p1', baseUrl: 'http://127.0.0.1:9/v1' }), 'key-for-p1')
+    // A key goes only to the server it was entered for: the main process decides, and says nothing otherwise.
+    assert.equal(await peer.request('key', { profileId: 'p1', baseUrl: 'https://elsewhere.example/v1' }), '')
+    assert.deepEqual(f.keysAsked, ['p1 http://127.0.0.1:9/v1', 'p1 https://elsewhere.example/v1'])
+    // The host is another process: a request that is not shaped as agreed never reaches the key vault.
+    await assert.rejects((peer as unknown as { request(method: string, params: unknown): Promise<unknown> }).request('key', { profileId: 'p1' }), { code: 'invalid-params' })
+    await assert.rejects((peer as unknown as { request(method: string, params: unknown): Promise<unknown> }).request('key', { profileId: 'p1', baseUrl: 'x', extra: 1 }), { code: 'invalid-params' })
+    assert.equal(f.keysAsked.length, 2)
     await assert.rejects((peer as unknown as { request(method: string): Promise<unknown> }).request('cancelEverything'), { code: 'unknown-method' })
   })
 

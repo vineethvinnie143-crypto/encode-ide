@@ -65,7 +65,12 @@ async function main() {
   // 2. esbuild watch for main + preload, restart electron on rebuild
   const ctx = await context({
     absWorkingDir: root,
-    entryPoints: [path.join(root, 'electron/main.ts'), path.join(root, 'electron/preload.ts')],
+    entryPoints: {
+      main: path.join(root, 'electron/main.ts'),
+      preload: path.join(root, 'electron/preload.ts'),
+      // The agent runs in a utility process of its own.
+      'agent-host': path.join(root, 'electron/agent-host/entry.ts'),
+    },
     outdir: path.join(root, 'dist/electron'),
     outExtension: { '.js': '.cjs' },
     bundle: true,

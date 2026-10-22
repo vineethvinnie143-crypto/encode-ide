@@ -1,21 +1,32 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, shell } from 'electron'
 import type { SkillInfo } from '../../shared/types'
 
 const TEMPLATE = (name: string, description: string): string =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nDescribe when to use this skill and the exact steps to follow.\n`
 
-/** Skills are markdown files the agent can load on demand with the `skill` tool. */
+/**
+ * Skills are markdown files the agent can load on demand with the Skill tool.
+ * The agent finds them in the same two places: the user's own folder
+ * (~/.encode/skills, shared with the command line) and the workspace's
+ * .encode/skills.
+ */
 export class SkillService {
-  constructor(private readonly workspaceRoot: () => string | null) {}
+  /** `userDir`: the user's own folder, ~/.encode. `openPath` shows a folder in the system's file manager. */
+  constructor(
+    private readonly workspaceRoot: () => string | null,
+    private readonly userDir: string,
+    private readonly openPath: (dir: string) => Promise<unknown> = async () => undefined,
+  ) {}
+
+  private get userSkills(): string {
+    return path.join(this.userDir, 'skills')
+  }
 
   private dirs(): { dir: string; source: SkillInfo['source'] }[] {
-    const list: { dir: string; source: SkillInfo['source'] }[] = [
-      { dir: path.join(app.getPath('userData'), 'skills'), source: 'user' },
-    ]
+    const list: { dir: string; source: SkillInfo['source'] }[] = [{ dir: this.userSkills, source: 'user' }]
     const root = this.workspaceRoot()
-    if (root) list.push({ dir: path.join(root, '.eNCode', 'skills'), source: 'workspace' })
+    if (root) list.push({ dir: path.join(root, '.encode', 'skills'), source: 'workspace' })
     return list
   }
 
@@ -63,7 +74,7 @@ export class SkillService {
   create(name: string, description = ''): SkillInfo {
     const safe = name.trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '')
     if (!safe) throw new Error('Skill name is required')
-    const dir = path.join(app.getPath('userData'), 'skills')
+    const dir = this.userSkills
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, `${safe}.md`)
     if (!fs.existsSync(file)) fs.writeFileSync(file, TEMPLATE(safe, description || `Use when working on ${safe}.`), 'utf8')
@@ -71,8 +82,34 @@ export class SkillService {
   }
 
   async openFolder(): Promise<void> {
-    const dir = path.join(app.getPath('userData'), 'skills')
-    fs.mkdirSync(dir, { recursive: true })
-    await shell.openPath(dir)
+    fs.mkdirSync(this.userSkills, { recursive: true })
+    await this.openPath(this.userSkills)
   }
+}
+
+/**
+ * Skills an earlier build kept in its data folder move to the user's folder,
+ * where the agent looks for them. Copies only what is not there yet, and
+ * leaves the originals alone.
+ */
+export function migrateLegacySkills(legacyDir: string, userSkillsDir: string): number {
+  let names: string[]
+  try {
+    names = fs.readdirSync(legacyDir)
+  } catch {
+    return 0
+  }
+  let copied = 0
+  for (const name of names) {
+    const target = path.join(userSkillsDir, name)
+    if (fs.existsSync(target)) continue
+    try {
+      fs.mkdirSync(userSkillsDir, { recursive: true })
+      fs.cpSync(path.join(legacyDir, name), target, { recursive: true, errorOnExist: true })
+      copied++
+    } catch {
+      /* leave it where it is */
+    }
+  }
+  return copied
 }

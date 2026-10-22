@@ -16,70 +16,84 @@ import http from 'node:http'
 const port = Number(process.env.FAKE_PROVIDER_PORT || 8787)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// A step is the model's next message: some text, and a tool call when it has not finished yet.
+// The calls use the tool names and inputs of the agent engine (Claude Code's contracts).
 const SCENARIOS = {
   default: [
     {
       text: 'I will create provider-check.txt so we can verify the real provider path.',
-      call: { name: 'write_file', args: { path: 'provider-check.txt', content: 'hello from a real provider stream\n' } },
+      call: { name: 'Write', args: { file_path: 'provider-check.txt', content: 'hello from a real provider stream\n' } },
     },
     {
       text: 'File written. Running a command to verify the shell.',
-      call: { name: 'run_command', args: { command: 'echo provider-command-ok' } },
+      call: { name: 'Bash', args: { command: 'echo provider-command-ok' } },
     },
     {
-      text: 'All verified.',
-      call: {
-        name: 'attempt_completion',
-        args: { result: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.' },
-      },
+      text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
   // The subagent's command must ask on the parent's card.
   'subagent-check': [
     {
       text: 'Delegating a shell check to a subagent.',
-      call: { name: 'task', args: { prompt: '[scenario:subagent-command] Run echo subagent-command-ok and report back.' } },
+      call: {
+        name: 'Task',
+        args: {
+          description: 'Shell check',
+          prompt: '[scenario:subagent-command] Run echo subagent-command-ok and report back.',
+          subagent_type: 'general-purpose',
+        },
+      },
     },
-    { text: 'The subagent reported back.', call: { name: 'attempt_completion', args: { result: 'Delegation verified.' } } },
+    { text: 'Delegation verified.' },
   ],
   'subagent-command': [
-    { text: 'Running the check.', call: { name: 'pwsh', args: { command: 'echo subagent-command-ok' } } },
-    { text: '', call: { name: 'attempt_completion', args: { result: 'Subagent ran the command.' } } },
+    { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo subagent-command-ok' } } },
+    { text: 'Subagent ran the command.' },
   ],
   // Started in Plan mode: the subagent must not be able to write either.
   'plan-escalation': [
     {
       text: 'Delegating to a subagent.',
-      call: { name: 'task', args: { prompt: '[scenario:subagent-write] Create escalation.txt.' } },
+      call: {
+        name: 'Task',
+        args: { description: 'Create a file', prompt: '[scenario:subagent-write] Create escalation.txt.', subagent_type: 'general-purpose' },
+      },
     },
-    { text: 'Done.', call: { name: 'attempt_completion', args: { result: 'Plan mode delegation finished.' } } },
+    { text: 'Plan mode delegation finished.' },
   ],
-  // web_fetch asks once for a new site, then refuses it because localhost is a private address.
+  // WebFetch asks once for a new site, then refuses it because localhost is a private address.
   'web-check': [
-    { text: 'Fetching a page.', call: { name: 'web_fetch', args: { url: `http://localhost:${port}/health` } } },
-    { text: 'Fetching another page on the same site.', call: { name: 'web_fetch', args: { url: `http://localhost:${port}/v1/models` } } },
-    { text: '', call: { name: 'attempt_completion', args: { result: 'Web check finished.' } } },
+    {
+      text: 'Fetching a page.',
+      call: { name: 'WebFetch', args: { url: `http://localhost:${port}/health`, prompt: 'What does the page say?' } },
+    },
+    {
+      text: 'Fetching another page on the same site.',
+      call: { name: 'WebFetch', args: { url: `http://localhost:${port}/v1/models`, prompt: 'Which models are listed?' } },
+    },
+    { text: 'Web check finished.' },
   ],
   'subagent-write': [
-    { text: 'Creating the file.', call: { name: 'write', args: { path: 'escalation.txt', content: 'must not exist\n' } } },
-    { text: '', call: { name: 'attempt_completion', args: { result: 'Subagent finished.' } } },
+    { text: 'Creating the file.', call: { name: 'Write', args: { file_path: 'escalation.txt', content: 'must not exist\n' } } },
+    { text: 'Subagent finished.' },
   ],
   // A second request in a session that already finished a task or was stopped.
-  'follow-up': [{ text: 'Following up.', call: { name: 'attempt_completion', args: { result: 'Follow-up handled.' } } }],
-  // The second request is refused as too long until the transcript carries a summary.
+  'follow-up': [{ text: 'Follow-up handled.' }],
+  // The second request is refused as too long until the transcript carries a summary. Each step
+  // reads a file, so there are older steps to summarize by the time the conversation is compacted.
   overflow: [
-    { text: 'Looking around first.', call: { name: 'glob', args: { path: '', depth: 1 } } },
-    {
-      text: 'Finishing.',
-      overflowUntilCompacted: true,
-      call: { name: 'attempt_completion', args: { result: 'Compaction verified.' } },
-    },
+    { text: 'Looking around first.', call: { name: 'Glob', args: { pattern: '**/*' } } },
+    { text: 'Reading the readme.', call: { name: 'Read', args: { file_path: 'README.md' } } },
+    { text: 'Compaction verified.', overflowUntilCompacted: true },
   ],
 }
 
 let requestCount = 0
 /** The Authorization header of the latest chat request, so the smoke can check keys reach the provider. */
 let lastAuthorization = null
+/** The tools offered and the messages sent in the latest request that offered tools, so the smoke can check the contract. */
+let lastRequest = null
 const stats = { summaryRequests: 0, overflowRefusals: 0, invalidTranscripts: 0 }
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
@@ -188,6 +202,10 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, { authorization: lastAuthorization })
       return
     }
+    if (request.url === '/__last-request') {
+      sendJson(response, 200, lastRequest)
+      return
+    }
     if (request.url === '/__stats') {
       sendJson(response, 200, stats)
       return
@@ -221,6 +239,7 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
+    lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages }
     const step = stepOf(messages)
     if (step.overflowUntilCompacted && !compacted(messages)) {
       stats.overflowRefusals += 1
@@ -236,9 +255,13 @@ const server = http.createServer(async (request, response) => {
       })
       return
     }
+    console.log(`[fake-provider] ${body.model ?? '?'} scenario=${scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
+    if (!step.call) {
+      await sendText(response, body, step.text)
+      return
+    }
     const callId = `call_${requestCount}_${step.call.name}`
     const args = JSON.stringify(step.call.args)
-    console.log(`[fake-provider] ${body.model ?? '?'} scenario=${scenarioOf(messages)} call=${step.call.name} stream=${Boolean(body.stream)}`)
 
     if (!body.stream) {
       sendJson(response, 200, {
