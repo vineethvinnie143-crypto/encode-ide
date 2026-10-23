@@ -398,6 +398,14 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
   servers: the footer says **file too large**, and hover, suggestions and Go to definition have nothing for it.
   A **minified file** with one very long line can be read, typed in and scrolled to the end of that line; only the
   first 10,000 characters of a line are coloured.
+- **Word wrap**: **Alt+Z** (or **View → Turn word wrap on**) wraps long lines onto rows below, so nothing scrolls
+  sideways. Rows after the first are indented as the line is. The arrow keys move by row, End goes to the end of
+  the row and pressed again to the end of the line, and Home does the same at the start. **Settings → Editor**
+  chooses where lines wrap (the window's edge, a column, or whichever comes first) and the column. In a very large
+  file, turning it on keeps the line at the top of the view where it is while the rest of the file is wrapped.
+- **Spaces and tabs**: select some text and its spaces show as faint dots and its tabs as lines. **View → Show
+  whitespace** shows every one in the file until you turn it off; **Settings → Editor** picks which show the rest of
+  the time (none, at line edges and in runs, in the selection, at line ends, or all). The text itself is unchanged.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
@@ -412,7 +420,9 @@ wrong block, brackets in the wrong colour, and a minimap that is out of step wit
 colours: a hint in the wrong place or left behind after you edit, a click or the cursor landing on the wrong side of
 one, and colours that flicker, lag or stay wrong after the server has answered. For large files: anything that feels
 slow (say which file size and what you did), colours that stay wrong once they have filled in, and the cursor or a
-click landing in the wrong place in a very long line.
+click landing in the wrong place in a very long line. For word wrap: a row that breaks in a strange place or runs
+past the edge, the cursor drawn at the wrong end of a row, arrows or Home and End going somewhere unexpected, and the
+text jumping when you resize the window or turn wrapping on.
 
 ## Worktrees
 
@@ -484,5 +494,6 @@ Updating means installing the next build over the last one: everything above sta
 - Language servers: installing a server with one click is not in the editor yet; it comes with the next builds.
   Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
-- The editor does not wrap long lines yet (it comes with the next builds). A file over 256 MB does not open; a 100 MB
-  file takes about half a gigabyte of memory while open.
+- Word wrap is one setting for every file. Inlay hints are not counted when a row is wrapped, so a row with hints can
+  run a little past the edge; a column selection (Shift+Alt+drag) still goes by whole lines. A file over 256 MB does not
+  open; a 100 MB file takes about half a gigabyte of memory while open.

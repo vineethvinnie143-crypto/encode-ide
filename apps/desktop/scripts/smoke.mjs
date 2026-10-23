@@ -1498,6 +1498,7 @@ async function runLanguageServerChecks() {
   await runEditorSymbolChecks(markerLines)
   await runEditorStructureChecks(markerLines)
   await runEditorHintsChecks(markerLines)
+  await runWrapChecks()
   await runLargeFileChecks()
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
@@ -2464,6 +2465,83 @@ async function runEditorHintsChecks(markerLines) {
   await until(async () => (await markerLines()).includes('close lsp-hints.ts'), 10000, 'the server to let the file go')
   await evaluate("window.eNCode.workspace.delete('src/lsp-hints.ts').catch(() => null)")
   console.log('[smoke] editor hints: ok')
+}
+
+/**
+ * Word wrap and spaces in the app: Alt+Z wraps a long line into rows that fit, End stops at a row's end before the
+ * line's, Show whitespace marks every space and tab, a selection marks its own, and Settings > Editor turns wrapping on.
+ */
+async function runWrapChecks() {
+  console.log('[smoke] --- word wrap and whitespace ---')
+  const long = Array.from({ length: 90 }, (_, index) => `word${index}`).join(' ')
+  const source = [long, '\tindented with a tab  ', 'short', ''].join('\n')
+  await evaluate(`window.eNCode.workspace.write('src/wrap.txt', ${JSON.stringify(source)})`)
+  await quickOpen('src/wrap.txt', 'word0 word1')
+  const EDITOR = "document.querySelector('.code-editor > .enc-editor')"
+  const WRAPPED = `${EDITOR}.classList.contains('enc-wrap')`
+  // Rows of the long line as drawn: 0 when it is one row, -1 when it is not drawn.
+  const LONG_ROWS = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-line')].find((line) => line.textContent.startsWith('word0 '))?.querySelectorAll('.enc-row').length ?? -1`
+  const SIDEWAYS = `(() => { const scroller = ${EDITOR}.querySelector('.enc-scroller'); return scroller.scrollWidth > scroller.clientWidth + 1 })()`
+  const MARKS = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-line .enc-ws')].map((node) => node.classList.contains('enc-ws-tab') ? 'tab' : 'space')`
+  const FOOTER = "document.querySelector('.editor-footer-side')?.textContent ?? ''"
+  const column = async () => Number(/Ln 1, Col (\d+)/.exec(await evaluate(FOOTER))?.[1] ?? 0)
+  try {
+    if (await evaluate(WRAPPED)) throw new Error('Word wrap is on before it was turned on')
+    if (!(await evaluate(SIDEWAYS))) throw new Error('The long line does not run off to the right without word wrap')
+
+    // Alt+Z: the long line in rows that fit the editor, nothing to scroll sideways, its text as it was.
+    await focusEditor()
+    await pressKey('z', { alt: true })
+    await until(async () => (await evaluate(LONG_ROWS)) > 1, 6000, 'the long line wrapped into rows').catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify({ wrapped: await evaluate(WRAPPED), rows: await evaluate(LONG_ROWS) })}`)
+    })
+    if (await evaluate(SIDEWAYS)) throw new Error('The editor still scrolls sideways with word wrap on')
+    if (!(await evaluate(`${RENDERED_LINES}.includes(${JSON.stringify(long)})`))) throw new Error("Wrapping changed the long line's text")
+    await screenshot('28-editor-wrap.png')
+
+    // End goes to the end of the row first, then on to the end of the line.
+    await focusEditor()
+    await pressKey('Home', { ctrl: true })
+    await cursorAt(1, 1, 'the cursor at the start of the file')
+    await pressKey('End')
+    await until(async () => (await column()) > 1, 6000, 'End to the end of the first row')
+    const rowEnd = await column()
+    if (rowEnd >= long.length + 1) throw new Error(`End went to the end of the line (column ${rowEnd}), not of its first row`)
+    await pressKey('End')
+    await cursorAt(1, long.length + 1, 'End again to the end of the line')
+
+    // Show whitespace marks every space and tab; hidden again, only a selection's are marked.
+    if ((await evaluate(MARKS)).length) throw new Error(`Spaces are marked with nothing selected: ${JSON.stringify(await evaluate(MARKS))}`)
+    await focusEditor()
+    await runFromPalette('Show whitespace')
+    await until(async () => (await evaluate(MARKS)).includes('tab'), 6000, 'every space and tab marked')
+    await screenshot('29-editor-whitespace.png')
+    await focusEditor()
+    await runFromPalette('Hide whitespace')
+    await until(async () => (await evaluate(MARKS)).length === 0, 6000, 'the marks gone')
+    await focusEditor()
+    await pressKey('a', { ctrl: true })
+    await until(async () => (await evaluate(MARKS)).length > 3, 6000, 'the spaces in the selection marked')
+    await pressKey('ArrowLeft')
+    await until(async () => (await evaluate(MARKS)).length === 0, 6000, 'no marks once nothing is selected')
+
+    // Alt+Z turns it off again; Settings > Editor turns it on.
+    await pressKey('z', { alt: true })
+    await until(async () => !(await evaluate(WRAPPED)) && (await evaluate(LONG_ROWS)) === 0, 6000, 'word wrap off')
+    await openSettings('Editor')
+    if (!(await click('#word-wrap'))) throw new Error('No word wrap switch in Settings > Editor')
+    await waitFor("document.querySelector('#word-wrap')?.getAttribute('aria-checked') === 'true'", 4000, 'the switch on')
+    await closeSettings()
+    await until(async () => (await evaluate(LONG_ROWS)) > 1, 6000, 'word wrap on from Settings')
+    await focusEditor()
+    await pressKey('z', { alt: true })
+    await until(async () => (await evaluate(LONG_ROWS)) === 0, 6000, 'word wrap off for the checks after these')
+  } finally {
+    if (await evaluate("!!document.querySelector('.settings-page')").catch(() => false)) await closeSettings().catch(() => null)
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'wrap.txt')?.querySelector('.tab-close')?.click()`).catch(() => null)
+    await evaluate("window.eNCode.workspace.delete('src/wrap.txt').catch(() => null)").catch(() => null)
+  }
+  console.log('[smoke] word wrap and whitespace: ok')
 }
 
 /** The most each step with a 100 MB file may take in the app, in milliseconds, on the slowest machine it runs on. */

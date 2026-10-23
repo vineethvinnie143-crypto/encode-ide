@@ -4,7 +4,7 @@ import { dialogOpen } from '../../commands/useKeymap'
 import { useSettings } from '../../stores/settings'
 import { useUi, type SettingsSection } from '../../stores/ui'
 import { cx } from '../../ui/cx'
-import { Archive, ArrowLeft, Bell, Bot, Code2, Gear, Keyboard, Layers, Network, Package, Palette, Search, Shield, Sparkles, type Icon } from '../../ui/icons'
+import { Archive, ArrowLeft, Bell, Bot, Code2, FileCode2, Gear, Keyboard, Layers, Network, Package, Palette, Search, Shield, Sparkles, type Icon } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import { keyToMove, moveIndex } from '../../ui/nav'
 import { Spinner } from '../../ui/Spinner'
@@ -16,6 +16,7 @@ import SandboxPane from '../sandbox/SandboxPane'
 import { AgentSection } from './AgentSection'
 import { AppearanceSection } from './AppearanceSection'
 import { ArchivedSection } from './ArchivedSection'
+import { EditorSection } from './EditorSection'
 import { GeneralSection } from './GeneralSection'
 import { ModelsSection } from './ModelsSection'
 import { NotificationsSection } from './NotificationsSection'
@@ -26,6 +27,7 @@ const ICONS: Record<SettingsSection, Icon> = {
   general: Gear,
   notifications: Bell,
   appearance: Palette,
+  editor: FileCode2,
   shortcuts: Keyboard,
   models: Bot,
   roles: Layers,
@@ -235,6 +237,8 @@ function SectionBody({ section, settings }: { section: SettingsSection; settings
       return <NotificationsSection settings={settings} />
     case 'appearance':
       return <AppearanceSection settings={settings} />
+    case 'editor':
+      return <EditorSection />
     case 'shortcuts':
       return <ShortcutsSection />
     case 'models':

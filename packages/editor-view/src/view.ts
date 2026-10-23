@@ -29,7 +29,7 @@ import { FOLD_COLUMN, FoldController } from './folding'
 import { HeightMap, ScrollScale, sameHidden, type HiddenLines, type Zone } from './heights'
 import { InputHandler } from './input'
 import { Keymap, defaultBindings, isMac, type KeyBinding } from './keymap'
-import { DEPRECATED, fillLine, isSimpleText, withBrackets, withSemantic, type DrawnInlay, type InlaySpec, type SemanticSpan } from './line'
+import { DEPRECATED, fillLine, fillRows, isSimpleText, withBrackets, withSemantic, type DrawnInlay, type InlaySpec, type SemanticSpan } from './line'
 import { LineItems } from './line-items'
 import { MinimapController } from './minimap'
 import { PointerHandler } from './pointer'
@@ -37,6 +37,7 @@ import { RectPool } from './rects'
 import { ReviewController } from './review-view'
 import { SnippetController } from './snippet'
 import { StickyController } from './sticky'
+import { MIN_WRAP_WIDTH, WrapLayout, rowEnd, rowOf, rowStart, sameSpec, type LineWrap, type WrapSpec } from './wrap'
 
 /** Lines longer than this are drawn in part: the piece around the viewport. */
 export const LONG_LINE = 4000
@@ -64,6 +65,12 @@ const GUTTER_PAD_RIGHT = 12
 const SCAN_LIMIT = 50_000
 /** Lines in the first batch for the highlighting thread, and after each edit. */
 const FIRST_BATCH = 256
+/** A wrapped line of more rows than this is drawn in part: the rows around the view. */
+const MAX_DRAWN_ROWS = 240
+/** Rows kept drawn past the view in such a line. */
+const ROW_MARGIN = 60
+/** The breaks of a line drawn in one row. */
+const ONE_ROW: LineWrap = { breaks: [], indent: 0 }
 
 export interface EditorViewConfig {
   state: EditorState
@@ -99,6 +106,21 @@ export interface EditorViewConfig {
    * tokenizes ahead in idle time.
    */
   highlighting?: HighlightService | null
+  /**
+   * Long lines break into rows that fit the text area ('on'), or the text area and `wrapColumn`, whichever is
+   * narrower ('bounded'), and nothing scrolls sideways; or into rows of `wrapColumn` columns however wide the text area
+   * is ('column'). Default 'off'.
+   */
+  wordWrap?: 'off' | 'on' | 'bounded' | 'column'
+  /** The column 'bounded' and 'column' wrap at. Default 80. */
+  wrapColumn?: number
+  /** The rows after a line's first are indented as the line is (unless that takes more than half the row). Default true. */
+  wrapIndent?: boolean
+  /**
+   * Spaces and tabs drawn as faint marks: 'all' of them, those at either end of a line and runs between words
+   * ('boundary'), those at the end of a line ('trailing'), those in a selection ('selection'), or none. Default 'none'.
+   */
+  renderWhitespace?: 'none' | 'boundary' | 'selection' | 'trailing' | 'all'
 }
 
 type Options = Required<
@@ -116,6 +138,10 @@ type Options = Required<
     | 'stickyScroll'
     | 'bracketColors'
     | 'minimap'
+    | 'wordWrap'
+    | 'wrapColumn'
+    | 'wrapIndent'
+    | 'renderWhitespace'
   >
 >
 
@@ -164,6 +190,12 @@ interface LineEl {
   /** The hints it was drawn with, and where they were drawn. */
   inlays: readonly InlaySpec[] | undefined
   drawnInlays: readonly DrawnInlay[]
+  /** The breaks it was drawn with when it wraps, and the rows of it in the DOM (all of them unless it has very many). */
+  wrap: LineWrap | null
+  rowFrom: number
+  rowTo: number
+  /** The stretches its spaces and tabs were marked in, as a key. */
+  whitespace: string
 }
 
 interface ZoneEntry {
@@ -282,6 +314,21 @@ export class EditorView {
   private tokenCache = new Map<number, { base: readonly number[]; brackets: readonly number[]; semantic: readonly SemanticSpan[] | undefined; tokens: readonly number[] }>()
   /** A server's semantic tokens, by line, followed through edits until it answers again. */
   private readonly semantic = new LineItems<SemanticSpan>((span, from, to) => ({ from, to, kind: span.kind }))
+  /** While long lines wrap: the rows of every line, and the breaks of the lines drawn and asked about. */
+  private wrapping: WrapLayout | null = null
+  /** The text at the top of the view, and how far into its row the view starts, held while rows change above it. */
+  private anchor: { pos: number; offset: number } | null = null
+  /**
+   * Where `restoreAnchor` last put the view, and the scroll offset that came of it. While the view stays there the next
+   * hold takes this text again rather than reading it back from a scroll offset rounded to whole pixels (in a large file
+   * one scroll pixel is several layout pixels), so the many holds of a large file's rows settling do not drift.
+   */
+  private placed: { pos: number; offset: number; scrollTop: number } | null = null
+  private settleWork = 0
+  /** A wrapped line is drawn only in part (the rows near the view), so scrolling may need to draw again. */
+  private partialRows = false
+  /** The layout heights the last drawing covers, the view and its overscan. */
+  private drawWindow = { top: 0, bottom: 0 }
   /** A server's inlay hints, by line, followed through edits until it answers again. */
   private readonly inlays = new LineItems<InlaySpec>((inlay, from, to) => ({ ...inlay, from, to }))
 
@@ -300,6 +347,10 @@ export class EditorView {
       stickyScroll: config.stickyScroll ?? false,
       bracketColors: config.bracketColors ?? false,
       minimap: config.minimap ?? false,
+      wordWrap: config.wordWrap ?? 'off',
+      wrapColumn: config.wrapColumn ?? 80,
+      wrapIndent: config.wrapIndent ?? true,
+      renderWhitespace: config.renderWhitespace ?? 'none',
     }
     this.highlighting = config.highlighting ?? null
     this.mac = isMac(config.platform ?? (typeof navigator === 'undefined' ? '' : navigator.platform))
@@ -452,6 +503,21 @@ export class EditorView {
     this.state = tr.state
     if (tr.docChanged) {
       carryColumnIndexes(tr.changes, before.doc, tr.state.doc)
+      if (this.wrapping) {
+        this.wrapping.update(tr.changes, before.doc, tr.state.doc)
+        this.scheduleSettle()
+      }
+      if (this.anchor) this.anchor.pos = tr.changes.mapPos(this.anchor.pos)
+      const placed = this.placed
+      if (placed) {
+        // An edit before the text at the top moves it; one after leaves it where it was put.
+        let before = false
+        tr.changes.forEach((fromA) => {
+          if (fromA < placed.pos) before = true
+        })
+        if (before) this.placed = null
+        else placed.pos = tr.changes.mapPos(placed.pos)
+      }
       this.highlighter.update(tr.changes, tr.state.doc)
       this.folding.documentChanged(tr.changes, before.doc, tr.state.doc)
       this.semantic.map(tr.changes, before.doc)
@@ -488,6 +554,10 @@ export class EditorView {
     this.zones = []
     this.bracketCache = null
     this.maxCols = 0
+    // The rows of the new document are laid out when it is drawn.
+    this.wrapping = null
+    this.anchor = null
+    this.placed = null
     for (const el of this.lineEls.values()) this.release(el)
     this.lineEls.clear()
     this.rendered = { first: 0, last: -1 }
@@ -612,6 +682,10 @@ export class EditorView {
   setOptions(options: Partial<Options>): void {
     if (options.folding === false && this.options.folding) this.folding.unfoldAll()
     const brackets = options.bracketColors !== undefined && options.bracketColors !== this.options.bracketColors
+    // Wrapping on or off, or at another width, keeps the text at the top of the view where it is.
+    if ((options.wordWrap ?? this.options.wordWrap) !== this.options.wordWrap || (options.wrapColumn ?? this.options.wrapColumn) !== this.options.wrapColumn || (options.wrapIndent ?? this.options.wrapIndent) !== this.options.wrapIndent) {
+      this.holdAnchor()
+    }
     Object.assign(this.options, options)
     if (brackets) {
       this.highlighter.setBrackets(this.options.bracketColors ? this.state.config.language.brackets : null)
@@ -815,6 +889,8 @@ export class EditorView {
     if (scrollTop === this.lastScroll.top && scrollLeft === this.lastScroll.left) return
     const vertical = scrollTop !== this.lastScroll.top
     const sideways = scrollLeft !== this.lastScroll.left
+    // Scrolled while text is held at the top for rows about to change: it is held as far from there as the view moved.
+    if (vertical && this.anchor && this.lastScroll.top >= 0) this.anchor.offset += this.scale.toDoc(scrollTop) - this.scale.toDoc(this.lastScroll.top)
     this.lastScroll = { top: scrollTop, left: scrollLeft }
     if (vertical && this.scale.scaled) this.placeLayers()
     if (sideways) this.placeFixedZones()
@@ -854,7 +930,18 @@ export class EditorView {
     const margin = this.metrics.lineHeight * 3
     const above = first <= 1 || this.heights.top(first) <= top - margin
     const below = last >= this.heights.lineCount || this.heights.bottom(last) >= top + this.viewport.height + margin
-    return above && below
+    if (!above || !below) return false
+    if (!this.partialRows) return true
+    // A line drawn in part covers the view only while its drawn rows do.
+    const lineHeight = this.metrics.lineHeight
+    for (const el of this.lineEls.values()) {
+      if (!el.wrap || el.rowTo - el.rowFrom > el.wrap.breaks.length) continue
+      const lineTop = this.heights.top(el.line)
+      const from = Math.max(lineTop, top - margin)
+      const to = Math.min(this.heights.bottom(el.line), top + this.viewport.height + margin)
+      if (from < to && (lineTop + el.rowFrom * lineHeight > from || lineTop + el.rowTo * lineHeight < to)) return false
+    }
+    return true
   }
 
   private hasLongLines(): boolean {
@@ -870,6 +957,185 @@ export class EditorView {
     this.maxCols = Math.max(this.maxCols, longest)
   }
 
+  // ----------------------------------------------------------------- word wrap
+
+  /** Whether long lines break into rows. */
+  get wrapped(): boolean {
+    return this.wrapping !== null
+  }
+
+  /** Lines wrap to the text area, so nothing scrolls sideways. */
+  private get rowsFit(): boolean {
+    return this.wrapping !== null && this.options.wordWrap !== 'column'
+  }
+
+  /** The breaks of a line as it is drawn: none unless lines wrap. */
+  wrapOf(line: Line): LineWrap {
+    return this.wrapping ? this.wrapping.wrap(line.text) : ONE_ROW
+  }
+
+  /** The rows long lines break into for the text area as it is now; null when they do not wrap. */
+  private wrapSpec(): WrapSpec | null {
+    const mode = this.options.wordWrap
+    if (mode === 'off') return null
+    const { charWidth, paddingX } = this.metrics
+    // The text area less its padding and the minimap over its right side, with room for the caret after a full row.
+    const room = Math.floor((this.viewport.width - this.gutterWidth - this.minimapWidth - paddingX * 2) / charWidth) - 1
+    const column = Math.max(1, Math.floor(this.options.wrapColumn))
+    const width = mode === 'column' ? column : mode === 'bounded' ? Math.min(room, column) : room
+    return { width: Math.max(MIN_WRAP_WIDTH, width), tabSize: this.state.config.tabSize, indent: this.options.wrapIndent }
+  }
+
+  /** Lays the rows out again when wrapping was turned on or off or the width it wraps to changed, keeping the text at the top. */
+  private layoutWrap(): void {
+    const spec = this.wrapSpec()
+    // Nothing scrolls sideways while the rows fit the text area.
+    const fits = spec !== null && this.options.wordWrap !== 'column'
+    if (this.root.classList.contains('enc-wrap') !== fits) this.root.classList.toggle('enc-wrap', fits)
+    if (spec ? this.wrapping !== null && sameSpec(spec, this.wrapping.spec) : this.wrapping === null) return
+    this.holdAnchor()
+    this.wrapping = spec ? new WrapLayout(spec, this.state.doc) : null
+    // Every line is drawn again, in its new rows or in one.
+    for (const el of this.lineEls.values()) this.release(el)
+    this.lineEls.clear()
+    if (!spec) this.scanLongestLine()
+    this.scheduleSettle()
+  }
+
+  /** The columns the scrollable area takes while lines wrap: none past the text area, unless they wrap at a column wider than it. */
+  private wrappedColumns(): number {
+    return this.options.wordWrap === 'column' && this.wrapping ? this.wrapping.spec.width + 1 : 0
+  }
+
+  /** Remembers the text at the top of the view, to keep it there while rows change above it. The first hold stands until it is used. */
+  private holdAnchor(): void {
+    if (this.anchor || this.rendered.last < this.rendered.first) return
+    const placed = this.placed
+    if (placed && placed.scrollTop === this.scroller.scrollTop) {
+      this.anchor = { pos: placed.pos, offset: placed.offset }
+      return
+    }
+    const doc = this.state.doc
+    const top = this.scale.toDoc(this.scroller.scrollTop)
+    const line = doc.line(Math.max(1, Math.min(doc.lineCount, this.heights.lineAt(top))))
+    const wrap = this.wrapOf(line)
+    const row = Math.min(wrap.breaks.length, this.heights.rowAt(line.number, top))
+    this.anchor = { pos: line.from + rowStart(wrap, row), offset: top - (this.heights.top(line.number) + row * this.metrics.lineHeight) }
+  }
+
+  /** Scrolls so the text held by `holdAnchor` is where it was (moved by as much as the view was scrolled since: `onScroll`). */
+  private restoreAnchor(): void {
+    const anchor = this.anchor
+    if (!anchor) return
+    this.anchor = null
+    const doc = this.state.doc
+    const pos = Math.min(anchor.pos, doc.length)
+    const line = doc.lineAt(pos)
+    const row = rowOf(this.wrapOf(line), pos - line.from)
+    const y = this.heights.top(line.number) + row * this.metrics.lineHeight + anchor.offset
+    this.scroller.scrollTop = Math.max(0, this.scale.toScroll(y))
+    this.placed = { pos, offset: anchor.offset, scrollTop: this.scroller.scrollTop }
+  }
+
+  /** Gives lines `first`..`last` their real rows, holding the text at the top first; true when some had others. */
+  private settleWindow(first: number, last: number): boolean {
+    const layout = this.wrapping!
+    const from = Math.max(first, layout.frontier)
+    if (from > last) return false
+    const texts = this.state.doc.lineTexts(from, last)
+    let changed = false
+    for (let index = 0; index < texts.length; index++) {
+      if (layout.settleLine(from + index, texts[index], () => this.holdAnchor())) changed = true
+    }
+    return changed
+  }
+
+  // ----------------------------------------------------------------- moving by rows
+
+  /** The visual column of `offset` in row `row` of a line: from the text area's left edge, the row's indent counted. */
+  private columnInRow(line: Line, wrap: LineWrap, row: number, offset: number): number {
+    const start = rowStart(wrap, row)
+    const text = line.text.slice(start, rowEnd(wrap, row, line.text.length))
+    return (row > 0 ? wrap.indent : 0) + columnAt(text, offset - start, this.state.config.tabSize)
+  }
+
+  /** The cursor in row `row` of `line` nearest to visual column `goal`; past a row a break ends, at that row's end. */
+  private cursorInRow(line: Line, wrap: LineWrap, row: number, goal: number): SelectionRange {
+    const start = rowStart(wrap, row)
+    const end = rowEnd(wrap, row, line.text.length)
+    const column = Math.max(0, goal - (row > 0 ? wrap.indent : 0))
+    const offset = start + indexAtColumn(line.text.slice(start, end), column, this.state.config.tabSize)
+    return SelectionRange.cursor(line.from + offset, goal, row < wrap.breaks.length && offset >= end ? -1 : undefined)
+  }
+
+  /**
+   * `range` moved `rows` rows down (negative: up), as the arrow keys move while lines wrap: to the column of the row
+   * nearest the range's goal, folded lines stepped over. Past either end of the document it goes to that end, or with
+   * `stop` gives null (a cursor added above the first row).
+   */
+  verticalMove(range: SelectionRange, rows: number, extend: boolean, stop = false): SelectionRange | null {
+    const doc = this.state.doc
+    const collapse = !extend && !range.empty
+    const start = collapse ? (rows < 0 ? range.from : range.to) : range.head
+    let line = doc.lineAt(start)
+    let wrap = this.wrapOf(line)
+    let row = rowOf(wrap, start - line.from, start === range.head ? range.assoc : undefined)
+    const goal = !collapse && range.goalColumn !== undefined ? range.goalColumn : this.columnInRow(line, wrap, row, start - line.from)
+    for (let left = rows; left !== 0; left -= Math.sign(left)) {
+      if (left > 0 && row < wrap.breaks.length) row++
+      else if (left < 0 && row > 0) row--
+      else {
+        const next = this.folding.step(line.number, Math.sign(left))
+        if (next < 1 || next > doc.lineCount) return stop ? null : SelectionRange.cursor(next < 1 ? 0 : doc.length, goal)
+        line = doc.line(next)
+        wrap = this.wrapOf(line)
+        row = left > 0 ? 0 : wrap.breaks.length
+      }
+    }
+    return this.cursorInRow(line, wrap, row, goal)
+  }
+
+  /**
+   * Home or End while lines wrap: to the start or the end of the row the head is in, and from there on to the line's,
+   * Home to its first non-blank character and then its start, as without wrapping.
+   */
+  rowEdge(range: SelectionRange, end: boolean): SelectionRange {
+    const line = this.state.doc.lineAt(range.head)
+    const wrap = this.wrapOf(line)
+    const offset = range.head - line.from
+    const row = rowOf(wrap, offset, range.assoc)
+    if (end) {
+      const to = rowEnd(wrap, row, line.text.length)
+      return row < wrap.breaks.length && offset !== to ? SelectionRange.cursor(line.from + to, undefined, -1) : SelectionRange.cursor(line.to)
+    }
+    const from = rowStart(wrap, row)
+    if (row > 0 && offset !== from) return SelectionRange.cursor(line.from + from)
+    const indent = leadingWhitespace(line.text).length
+    return SelectionRange.cursor(line.from + (offset === indent ? 0 : indent))
+  }
+
+  /** Breaks the lines of a large document still guessed, a stretch at a time while the editor is idle. */
+  private scheduleSettle(): void {
+    if (this.settleWork || this.destroyed || !this.wrapping || this.wrapping.complete) return
+    const run = (deadline?: IdleDeadline) => {
+      this.settleWork = 0
+      const layout = this.wrapping
+      if (!layout || this.destroyed) return
+      const budget = deadline ? Math.min(12, deadline.timeRemaining()) : 8
+      let moved = false
+      const more = layout.settle(this.state.doc, performance.now() + Math.max(2, budget), () => {
+        this.holdAnchor()
+        moved = true
+      })
+      if (moved) this.requestRender()
+      if (more) this.scheduleSettle()
+    }
+    this.settleWork =
+      typeof requestIdleCallback === 'function'
+        ? requestIdleCallback(run, { timeout: 1000 })
+        : (setTimeout(run, 16) as unknown as number)
+  }
+
   // ----------------------------------------------------------------- rendering
 
   /** Brings the DOM in line with the state. Usually called through the frame scheduler. */
@@ -881,24 +1147,7 @@ export class EditorView {
     const { lineHeight, charWidth } = this.metrics
     const doc = this.state.doc
 
-    // Layout: heights, the scroll scale, the gutter and the scrollable size.
-    const hidden = this.hiddenLines()
-    const isHidden = (line: number) => hidden.some((range) => range.from <= line && line <= range.to)
-    const zoneList: Zone[] = this.zones
-      .filter((entry) => !hidden.length || !isHidden(entry.after))
-      .sort((a, b) => a.after - b.after)
-      .map((entry) => ({ id: entry.id, after: entry.after, height: entry.zone.height }))
-    const padBottom = this.options.scrollBeyondEnd ? Math.max(0, viewportHeight - lineHeight * 2) : 0
-    if (
-      this.heights.lineHeight !== lineHeight ||
-      this.heights.lineCount !== doc.lineCount ||
-      this.heights.padBottom !== padBottom ||
-      !sameZones(this.heights.zoneList, zoneList) ||
-      !sameHidden(this.heights.hidden, hidden)
-    ) {
-      this.heights = new HeightMap(lineHeight, doc.lineCount, zoneList, padBottom, hidden)
-    }
-    this.scale = new ScrollScale(this.heights.totalHeight, viewportHeight)
+    // The gutter and the minimap first: what is left between them is what long lines wrap to.
     const digits = Math.max(3, String(doc.lineCount).length)
     const foldColumn = this.options.folding ? FOLD_COLUMN : 0
     const gutterWidth = (this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12) + foldColumn
@@ -908,16 +1157,71 @@ export class EditorView {
       this.gutter.style.width = `${gutterWidth}px`
       this.root.style.setProperty('--enc-gutter-w', `${gutterWidth}px`)
     }
-    this.setTextWidth(this.maxCols)
-    const scrollHeight = `${this.scale.scrollHeight}px`
-    if (this.sizer.style.height !== scrollHeight) this.sizer.style.height = scrollHeight
+    this.layoutWrap()
+
+    // Layout: heights, the scroll scale and the scrollable size.
+    const hidden = this.hiddenLines()
+    const isHidden = (line: number) => hidden.some((range) => range.from <= line && line <= range.to)
+    const zoneList: Zone[] = this.zones
+      .filter((entry) => !hidden.length || !isHidden(entry.after))
+      .sort((a, b) => a.after - b.after)
+      .map((entry) => ({ id: entry.id, after: entry.after, height: entry.zone.height }))
+    const padBottom = this.options.scrollBeyondEnd ? Math.max(0, viewportHeight - lineHeight * 2) : 0
+    const layout = (): void => {
+      const rows = this.wrapping?.rows ?? null
+      const others =
+        this.heights.lineHeight !== lineHeight ||
+        this.heights.lineCount !== doc.lineCount ||
+        this.heights.padBottom !== padBottom ||
+        !sameZones(this.heights.zoneList, zoneList) ||
+        !sameHidden(this.heights.hidden, hidden)
+      if (others || this.heights.rows !== rows || (rows !== null && this.heights.rowsVersion !== rows.version)) {
+        this.heights = new HeightMap(lineHeight, doc.lineCount, zoneList, padBottom, hidden, rows)
+      }
+      // The view moves with what changed besides the rows, so the text it was put at no longer stands.
+      if (others) this.placed = null
+      this.scale = new ScrollScale(this.heights.totalHeight, viewportHeight)
+      const scrollHeight = `${this.scale.scrollHeight}px`
+      if (this.sizer.style.height !== scrollHeight) this.sizer.style.height = scrollHeight
+    }
+    // The text held at the top of the view goes back there; its own line is given its real rows first.
+    const anchored = (): void => {
+      const anchor = this.anchor
+      if (anchor && this.wrapping) {
+        const line = doc.lineAt(Math.min(anchor.pos, doc.length))
+        if (this.wrapping.settleLine(line.number, line.text)) layout()
+      }
+      this.restoreAnchor()
+    }
+    layout()
+    this.setTextWidth(this.wrapping ? this.wrappedColumns() : this.maxCols)
 
     if (this.pendingScroll) {
       this.scroller.scrollTop = this.pendingScroll.top
       this.scroller.scrollLeft = this.pendingScroll.left
       this.pendingScroll = null
     }
-    if (this.pendingReveal) this.applyReveal()
+    anchored()
+    const reveal = this.pendingReveal
+    if (reveal) this.applyReveal()
+
+    const overscan = Math.max(lineHeight * 12, viewportHeight * 0.6)
+    let top = this.scale.toDoc(this.scroller.scrollTop)
+    let first = this.heights.lineAt(top - overscan)
+    let last = this.heights.lineAt(top + viewportHeight + overscan)
+    // The lines about to be drawn get their real rows (a large document starts from rows guessed by length), and the
+    // text at the top of the view stays where it is while they do.
+    for (let pass = 0; pass < 3 && this.wrapping && !this.wrapping.complete && this.settleWindow(first, last); pass++) {
+      layout()
+      anchored()
+      if (reveal) {
+        this.pendingReveal = reveal
+        this.applyReveal()
+      }
+      top = this.scale.toDoc(this.scroller.scrollTop)
+      first = this.heights.lineAt(top - overscan)
+      last = this.heights.lineAt(top + viewportHeight + overscan)
+    }
 
     const scrollTop = this.scroller.scrollTop
     const scrollLeft = this.scroller.scrollLeft
@@ -933,10 +1237,7 @@ export class EditorView {
       }
     }
     this.docLeft = docLeft
-    const top = this.scale.toDoc(scrollTop)
-    const overscan = Math.max(lineHeight * 12, viewportHeight * 0.6)
-    const first = this.heights.lineAt(top - overscan)
-    const last = this.heights.lineAt(top + viewportHeight + overscan)
+    this.drawWindow = { top: top - overscan, bottom: top + viewportHeight + overscan }
     const origin = this.scale.scaled ? this.heights.top(first) : 0
     if (origin !== this.origin) {
       this.origin = origin
@@ -981,9 +1282,10 @@ export class EditorView {
 
   private drawLines(first: number, last: number, docLeft: number, visibleWidth: number): void {
     const doc = this.state.doc
-    const { charWidth } = this.metrics
+    const { charWidth, lineHeight } = this.metrics
     const tabSize = this.state.config.tabSize
     const heights = this.heights
+    const layout = this.wrapping
     // Release what scrolled out of range or was folded away.
     for (const [number, el] of this.lineEls) {
       if (number < first || number > last || heights.isHidden(number)) {
@@ -992,8 +1294,10 @@ export class EditorView {
       }
     }
     const active = this.activeLines()
+    const whitespace = this.options.renderWhitespace
     let widest = this.maxCols
     const unmeasured: LineEl[] = []
+    this.partialRows = false
     for (let number = heights.nextVisible(first); number <= last; number = heights.nextVisible(number + 1)) {
       const info = doc.line(number)
       const highlighted = this.lineTokens(number)
@@ -1003,16 +1307,33 @@ export class EditorView {
         el.line = number
         this.lineEls.set(number, el)
       }
-      const top = this.heights.top(number) - this.origin
+      const lineTop = heights.top(number)
+      const wrap = layout ? layout.wrap(info.text) : null
+      const rows = wrap ? wrap.breaks.length + 1 : 1
+      let rowFrom = 0
+      let rowTo = rows
+      if (rows > MAX_DRAWN_ROWS) {
+        // A line of very many rows is drawn in part, the rows near the view, cut again only as the view nears their edge.
+        const wantFrom = Math.max(0, Math.min(rows - 1, Math.floor((this.drawWindow.top - lineTop) / lineHeight)))
+        const wantTo = Math.max(wantFrom + 1, Math.min(rows, Math.ceil((this.drawWindow.bottom - lineTop) / lineHeight)))
+        const keep = el.wrap === wrap && el.text === info.text && el.rowFrom <= wantFrom && el.rowTo >= wantTo
+        rowFrom = keep ? el.rowFrom : Math.max(0, wantFrom - ROW_MARGIN)
+        rowTo = keep ? el.rowTo : Math.min(rows, wantTo + ROW_MARGIN)
+        this.partialRows = true
+      }
+      const top = lineTop + rowFrom * lineHeight - this.origin
       if (el.top !== top) {
         el.top = top
         el.dom.style.top = `${top}px`
-        if (el.number) el.number.style.top = `${top}px`
+        if (el.number) el.number.style.top = `${lineTop - this.origin}px`
       }
-      const long = info.text.length > LONG_LINE
+      const long = !wrap && info.text.length > LONG_LINE
       let from = 0
       let to = info.text.length
-      if (long) {
+      if (wrap) {
+        from = rowStart(wrap, rowFrom)
+        to = rowEnd(wrap, rowTo - 1, info.text.length)
+      } else if (long) {
         const firstCol = Math.max(0, Math.floor(Math.max(0, docLeft) / charWidth) - LONG_MARGIN)
         const lastCol = Math.floor((docLeft + visibleWidth) / charWidth) + LONG_MARGIN
         // Re-cut the piece only when the viewport nears its edge.
@@ -1027,20 +1348,46 @@ export class EditorView {
       }
       // A long line is drawn in part, and with no hints.
       const inlays = long ? undefined : this.inlays.line(number)
-      if (el.text !== info.text || !sameTokens(el.tokens, highlighted.tokens) || el.from !== from || el.to !== to || el.exact !== highlighted.exact || el.inlays !== inlays) {
-        // What comes before the drawn piece, less what lies left of the layers' edge.
-        const lead = from > 0 || this.originX > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth - this.originX) : undefined
-        el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays)
+      const marks = whitespace === 'none' ? null : this.whitespaceIn(info, whitespace, from, to)
+      const marked = marks ? marks.join(';') : ''
+      if (
+        el.text !== info.text ||
+        !sameTokens(el.tokens, highlighted.tokens) ||
+        el.from !== from ||
+        el.to !== to ||
+        el.exact !== highlighted.exact ||
+        el.inlays !== inlays ||
+        el.wrap !== wrap ||
+        el.rowFrom !== rowFrom ||
+        el.rowTo !== rowTo ||
+        el.whitespace !== marked
+      ) {
+        if (wrap && rows > 1) {
+          el.drawnInlays = fillRows(el.dom, info.text, highlighted.tokens, wrap, rowFrom, rowTo, inlays, marks)
+          el.dom.style.height = `${(rowTo - rowFrom) * lineHeight}px`
+        } else {
+          // What comes before the drawn piece, less what lies left of the layers' edge.
+          const lead = from > 0 || this.originX > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth - this.originX) : undefined
+          el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays, marks)
+          if (el.dom.style.height) el.dom.style.height = ''
+        }
         el.text = info.text
         el.tokens = highlighted.tokens
         el.from = from
         el.to = to
         el.exact = highlighted.exact
         el.inlays = inlays
+        el.wrap = wrap
+        el.rowFrom = rowFrom
+        el.rowTo = rowTo
+        el.whitespace = marked
         // A line with hints is as wide as the browser draws it.
         el.simple = this.metrics.monospace && !inlays && (long || isSimpleText(info.text))
-        if (el.simple || info.text.length > 2000) widest = Math.max(widest, columnAt(info.text, info.text.length, tabSize))
-        else unmeasured.push(el)
+        // While lines wrap, the scrollable width does not follow the text.
+        if (!layout) {
+          if (el.simple || info.text.length > 2000) widest = Math.max(widest, columnAt(info.text, info.text.length, tabSize))
+          else unmeasured.push(el)
+        }
       }
       if (el.number) {
         const label = String(number)
@@ -1068,6 +1415,56 @@ export class EditorView {
       if (el.number.className !== name) el.number.className = name
     }
     if (widest > this.maxCols) this.growWidth(widest)
+  }
+
+  /**
+   * The stretches of `line` (offsets in it) whose spaces and tabs are drawn with a mark, within `from`..`to`: all of
+   * them; those in a selection; the run at the end; or at the 'boundary', the runs at either end, runs of two or more
+   * and any tab, but not the single spaces between words.
+   */
+  private whitespaceIn(line: Line, mode: Options['renderWhitespace'], from: number, to: number): [number, number][] | null {
+    const text = line.text
+    if (from >= to) return null
+    if (mode === 'all') return [[from, to]]
+    if (mode === 'selection') {
+      const out: [number, number][] = []
+      for (const range of this.state.selection.ranges) {
+        const start = Math.max(range.from - line.from, from)
+        const end = Math.min(range.to - line.from, to)
+        if (!range.empty && start < end) out.push([start, end])
+      }
+      if (!out.length) return null
+      out.sort((a, b) => a[0] - b[0])
+      const merged: [number, number][] = [out[0]]
+      for (const next of out.slice(1)) {
+        const last = merged[merged.length - 1]
+        if (next[0] <= last[1]) last[1] = Math.max(last[1], next[1])
+        else merged.push(next)
+      }
+      return merged
+    }
+    let end = text.length
+    while (end > 0 && isBlankCode(text.charCodeAt(end - 1))) end--
+    if (mode === 'trailing') return end < to ? [[Math.max(end, from), to]] : null
+    // The boundary: from the start of the run `from` may be inside, run by run.
+    const out: [number, number][] = []
+    let pos = from
+    while (pos > 0 && isBlankCode(text.charCodeAt(pos - 1))) pos--
+    while (pos < to) {
+      if (!isBlankCode(text.charCodeAt(pos))) {
+        pos++
+        continue
+      }
+      let next = pos
+      let tab = false
+      while (next < text.length && isBlankCode(text.charCodeAt(next))) {
+        if (text.charCodeAt(next) === 9) tab = true
+        next++
+      }
+      if (pos === 0 || next === text.length || next - pos > 1 || tab) out.push([Math.max(pos, from), Math.min(next, to)])
+      pos = next
+    }
+    return out.length ? out : null
   }
 
   /** Makes the scrollable area wide enough for `cols` columns. */
@@ -1116,7 +1513,7 @@ export class EditorView {
     const number = document.createElement('div')
     number.className = 'enc-gutter-num'
     this.gutterLayer.append(number)
-    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true, inlays: undefined, drawnInlays: [] }
+    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true, inlays: undefined, drawnInlays: [], wrap: null, rowFrom: 0, rowTo: 0, whitespace: '' }
   }
 
   private release(el: LineEl): void {
@@ -1127,6 +1524,11 @@ export class EditorView {
     el.top = NaN
     el.inlays = undefined
     el.drawnInlays = []
+    el.wrap = null
+    el.rowFrom = 0
+    el.rowTo = 0
+    el.whitespace = ''
+    if (el.dom.style.height) el.dom.style.height = ''
     if (this.spare.length < 200) this.spare.push(el)
   }
 
@@ -1164,6 +1566,15 @@ export class EditorView {
     return lines
   }
 
+  /** The band line `n` takes in the layers, all its rows, cut to what is drawn: its top and height. */
+  private band(n: number): { top: number; height: number } {
+    const top = this.heights.top(n)
+    if (!this.wrapping) return { top: top - this.origin, height: this.metrics.lineHeight }
+    const from = Math.max(top, this.drawWindow.top)
+    const to = Math.min(this.heights.bottom(n), this.drawWindow.bottom)
+    return { top: from - this.origin, height: Math.max(0, to - from) }
+  }
+
   private drawLayers(first: number, last: number): void {
     const doc = this.state.doc
     const { lineHeight, charWidth } = this.metrics
@@ -1181,7 +1592,8 @@ export class EditorView {
       }
       for (const number of lines) {
         if (number < first || number > last || this.heights.isHidden(number)) continue
-        this.backgrounds.rect('enc-line-active', 0, this.heights.top(number) - this.origin, fullWidth, lineHeight)
+        const band = this.band(number)
+        if (band.height > 0) this.backgrounds.rect('enc-line-active', 0, band.top, fullWidth, band.height)
       }
     }
     if (this.options.indentGuides) this.drawGuides(first, last)
@@ -1189,7 +1601,8 @@ export class EditorView {
     for (const source of this.sources.values()) source.lines?.(doc, first, last, lineSpecs)
     for (const spec of lineSpecs) {
       if (this.heights.isHidden(spec.line)) continue
-      this.backgrounds.rect(spec.className, 0, this.heights.top(spec.line) - this.origin, fullWidth, lineHeight)
+      const band = this.band(spec.line)
+      if (band.height > 0) this.backgrounds.rect(spec.className, 0, band.top, fullWidth, band.height)
     }
     this.backgrounds.end()
 
@@ -1200,7 +1613,8 @@ export class EditorView {
         const header = range.from - 1
         if (header < first || header > last || header < 1) continue
         const line = doc.line(header)
-        const el = this.foldPool.rect('', this.xOf(line, line.text.length) + charWidth * 0.6, this.heights.top(header) - this.origin + 3, charWidth * 3, lineHeight - 6)
+        const { x, row } = this.place(line, line.text.length, -1)
+        const el = this.foldPool.rect('', x + charWidth * 0.6, this.heights.top(header) + row * lineHeight - this.origin + 3, charWidth * 3, lineHeight - 6)
         el.dataset.line = String(header)
       }
     }
@@ -1236,8 +1650,8 @@ export class EditorView {
       selection.ranges.forEach((range, index) => {
         const line = doc.lineAt(range.head)
         if (line.number < first || line.number > last || this.heights.isHidden(line.number)) return
-        const x = this.xOf(line, range.head - line.from)
-        const top = this.heights.top(line.number) - this.origin
+        const { x, row } = this.place(line, range.head - line.from, range.assoc)
+        const top = this.heights.top(line.number) + row * lineHeight - this.origin
         const main = index === selection.mainIndex ? ' enc-cursor-main' : ''
         if (style === 'block') this.cursorPool.rect(`enc-cursor-block${main}`, x, top, charWidth, lineHeight)
         else if (style === 'underline') this.cursorPool.rect(`enc-cursor-underline${main}`, x, top + lineHeight - 2, charWidth, 2)
@@ -1247,10 +1661,10 @@ export class EditorView {
     this.cursorPool.end()
   }
 
-  /** Draws `from`..`to` as one rectangle per line in view; returns how many it drew. */
+  /** Draws `from`..`to` as one rectangle per line in view, or per row when lines wrap; returns how many it drew. */
   private drawRange(pool: RectPool, from: number, to: number, className: string, first: number, last: number, selection: boolean, limit: number): number {
     const doc = this.state.doc
-    const { lineHeight, charWidth } = this.metrics
+    const { lineHeight, charWidth, paddingX } = this.metrics
     const startLine = Math.max(first, doc.lineAt(from).number)
     const endLine = Math.min(last, doc.lineAt(to).number)
     const heights = this.heights
@@ -1259,6 +1673,29 @@ export class EditorView {
       const line = doc.line(number)
       const start = Math.max(from, line.from) - line.from
       const end = Math.min(to, line.to) - line.from
+      if (this.wrapping) {
+        const wrap = this.wrapOf(line)
+        const lineTop = heights.top(number)
+        // The rows the range covers, of those drawn.
+        const firstRow = Math.max(rowOf(wrap, start), Math.floor((this.drawWindow.top - lineTop) / lineHeight))
+        const lastRow = Math.min(rowOf(wrap, end, -1), Math.ceil((this.drawWindow.bottom - lineTop) / lineHeight))
+        // A row the selection runs on from reaches the edge the rows wrap at.
+        const edge = paddingX + this.wrapping.spec.width * charWidth - this.originX
+        for (let row = Math.max(0, firstRow); row <= lastRow && drawn < limit; row++) {
+          const rowTo = rowEnd(wrap, row, line.text.length)
+          const a = Math.max(start, rowStart(wrap, row))
+          const b = Math.min(end, rowTo)
+          const left = this.xInRow(line, wrap, row, a)
+          let right = b === a ? left : this.xInRow(line, wrap, row, b)
+          const last = row === wrap.breaks.length
+          if (selection && (last ? to > line.to : to > line.from + rowTo)) right = last ? right + charWidth * SHORT : Math.max(right, edge)
+          else if (!selection && right === left) right = left + 2
+          if (right <= left) continue
+          pool.rect(className, left, lineTop + row * lineHeight - this.origin, right - left, lineHeight)
+          drawn++
+        }
+        continue
+      }
       let left = this.xOf(line, start)
       let right = end === start ? left : this.xOf(line, end)
       // A selection that runs on past the line's end shows the line break.
@@ -1307,7 +1744,10 @@ export class EditorView {
       if (levels < 1 && width <= unit) continue
       const count = Math.max(0, Math.ceil(width / unit) - 1)
       if (count < 1) continue
-      const el = this.backgrounds.rect('enc-guides', paddingX - this.originX, this.heights.top(number) - this.origin, count * unit * charWidth, lineHeight)
+      // A wrapped line's guides run down all its rows.
+      const band = this.band(number)
+      if (band.height <= 0) continue
+      const el = this.backgrounds.rect('enc-guides', paddingX - this.originX, band.top, count * unit * charWidth, band.height)
       el.style.backgroundSize = `${unit * charWidth}px 100%`
     }
   }
@@ -1332,6 +1772,7 @@ export class EditorView {
 
   /** x of an offset in a line, from the left edge of the editor's text area (padding included). */
   xOf(line: Line, offset: number): number {
+    if (this.wrapping) return this.place(line, offset).x
     const { charWidth, paddingX } = this.metrics
     const el = this.lineEls.get(line.number)
     if (el && !el.simple && el.text === line.text) {
@@ -1341,18 +1782,54 @@ export class EditorView {
     return paddingX + columnAt(line.text, offset, this.state.config.tabSize) * charWidth - this.originX
   }
 
+  /**
+   * Where offset `offset` of `line` is drawn: x in the layers, and the row of the line it is in (0 unless it wraps).
+   * At a break `assoc` -1 is the end of the row before it, otherwise the start of the row after it.
+   */
+  place(line: Line, offset: number, assoc?: -1 | 1): { x: number; row: number } {
+    const wrap = this.wrapOf(line)
+    if (!wrap.breaks.length) return { x: this.wrapping ? this.xInRow(line, wrap, 0, offset) : this.xOf(line, offset), row: 0 }
+    const row = rowOf(wrap, offset, assoc)
+    return { x: this.xInRow(line, wrap, row, offset), row }
+  }
+
+  /** x in the layers of `offset`, which is in row `row` of a wrapped line (or at its end). */
+  private xInRow(line: Line, wrap: LineWrap, row: number, offset: number): number {
+    const el = this.lineEls.get(line.number)
+    if (el && !el.simple && el.text === line.text && el.wrap === wrap && row >= el.rowFrom && row < el.rowTo) {
+      const x = this.domX(el, offset, row)
+      if (x !== null) return x
+    }
+    const { charWidth, paddingX } = this.metrics
+    const start = rowStart(wrap, row)
+    const text = line.text.slice(start, rowEnd(wrap, row, line.text.length))
+    const indent = row > 0 ? wrap.indent : 0
+    return paddingX + (indent + columnAt(text, offset - start, this.state.config.tabSize)) * charWidth - this.originX
+  }
+
   private range: Range | null = null
 
-  /** x of `offset` measured in the DOM, relative to the line element; null when it cannot be. */
-  private domX(el: LineEl, offset: number): number | null {
+  /**
+   * x of `offset` measured in the DOM, relative to the line element; null when it cannot be. In a wrapped line it is
+   * measured in row `row`, whose own end it may be.
+   */
+  private domX(el: LineEl, offset: number, row?: number): number | null {
     if (offset < el.from || offset > el.to) return null
     // At a type's hint the caret stays with the text before it: the hint's left edge.
     for (const inlay of el.drawnInlays) {
       if (inlay.col === offset && inlay.caretBefore) return inlay.el.getBoundingClientRect().left - el.dom.getBoundingClientRect().left
       if (inlay.col > offset) break
     }
-    const walker = document.createTreeWalker(el.dom, NodeFilter.SHOW_TEXT)
+    let host: Node = el.dom
     let position = el.from
+    if (row !== undefined && el.wrap?.breaks.length) {
+      const rowEl = el.dom.children[row - el.rowFrom]
+      if (!rowEl) return null
+      host = rowEl
+      position = rowStart(el.wrap, row)
+      if (offset < position || offset > rowEnd(el.wrap, row, el.text.length)) return null
+    }
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
     let last: Text | null = null
     for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
       const end = position + node.data.length
@@ -1360,7 +1837,9 @@ export class EditorView {
       position = end
       last = node
     }
-    return last ? this.measureAt(el, last, last.data.length) : this.metrics.paddingX
+    if (last) return this.measureAt(el, last, last.data.length)
+    // An empty line; a row always has text.
+    return host === el.dom ? this.metrics.paddingX : null
   }
 
   private measureAt(el: LineEl, node: Text, index: number): number {
@@ -1384,55 +1863,89 @@ export class EditorView {
     return range.getBoundingClientRect().right - base
   }
 
-  /** The offset in `line` nearest to x (measured as in `xOf`). */
+  /** The offset in `line` nearest to x (measured as in `xOf`); in a wrapped line, in its first row. */
   offsetAtX(line: Line, x: number): number {
+    if (this.wrapping) return this.offsetInRow(line, this.wrapOf(line), 0, x)
     const { charWidth, paddingX } = this.metrics
     const tabSize = this.state.config.tabSize
     const el = this.lineEls.get(line.number)
     if (!el || el.simple || el.text !== line.text) {
       return indexAtColumn(line.text, Math.max(0, (x + this.originX - paddingX) / charWidth), tabSize)
     }
+    return this.measuredOffset(el, line.text, el.from, el.to, x)
+  }
+
+  /** The offset in row `row` of `line` nearest to x; past the row's end, its end. */
+  private offsetInRow(line: Line, wrap: LineWrap, row: number, x: number): number {
     const text = line.text
+    const start = rowStart(wrap, row)
+    const end = rowEnd(wrap, row, text.length)
+    const el = this.lineEls.get(line.number)
+    if (!el || el.simple || el.text !== text || el.wrap !== wrap || row < el.rowFrom || row >= el.rowTo) {
+      const { charWidth, paddingX } = this.metrics
+      const column = Math.max(0, (x + this.originX - paddingX) / charWidth - (row > 0 ? wrap.indent : 0))
+      return start + indexAtColumn(text.slice(start, end), column, this.state.config.tabSize)
+    }
+    return this.measuredOffset(el, text, start, end, x, wrap.breaks.length ? row : undefined)
+  }
+
+  /** The offset between `from` and `to` of a drawn line (in row `row` when it wraps) nearest to x, measured in the DOM. */
+  private measuredOffset(el: LineEl, text: string, from: number, to: number, x: number, row?: number): number {
     // A point on a hint is its column: the hint is no text to put the caret inside.
     if (el.drawnInlays.length) {
       const base = el.dom.getBoundingClientRect().left
       for (const inlay of el.drawnInlays) {
+        if (inlay.col < from || inlay.col > to) continue
         const box = inlay.el.getBoundingClientRect()
         if (x >= box.left - base && x < box.right - base) return inlay.col
       }
     }
-    let low = el.from
-    let high = el.to
+    let low = from
+    let high = to
     while (low < high) {
       const mid = (low + high) >>> 1
-      if ((this.domX(el, mid) ?? Infinity) < x) low = mid + 1
+      if ((this.domX(el, mid, row) ?? Infinity) < x) low = mid + 1
       else high = mid
     }
     // `low` is the first offset at or right of x. The caret goes to the character boundary there or to the one before it, whichever is nearer.
-    const after = low <= 0 ? 0 : low >= text.length ? text.length : nextCluster(text, previousCluster(text, low))
-    const before = after <= 0 ? 0 : previousCluster(text, after)
-    const afterX = this.domX(el, after) ?? x
-    const beforeX = this.domX(el, before) ?? x
+    const after = low <= from ? from : low >= to ? to : nextCluster(text, previousCluster(text, low))
+    const before = after <= from ? from : previousCluster(text, after)
+    const afterX = this.domX(el, after, row) ?? x
+    const beforeX = this.domX(el, before, row) ?? x
     return x - beforeX < afterX - x ? before : after
   }
 
-  /** Where `pos` is inside the editor's layers: x from the text area's left edge, y from the top of the drawn window. */
-  layerCoords(pos: number): { x: number; y: number } {
+  /**
+   * Where `pos` is inside the editor's layers: x from the text area's left edge, y from the top of the drawn window
+   * (the top of its row when lines wrap; at a break, `assoc` -1 is the end of the row before it).
+   */
+  layerCoords(pos: number, assoc?: -1 | 1): { x: number; y: number } {
     const line = this.state.doc.lineAt(Math.min(pos, this.state.doc.length))
-    return { x: this.xOf(line, pos - line.from), y: this.heights.top(line.number) - this.origin }
+    const { x, row } = this.place(line, pos - line.from, assoc)
+    return { x, y: this.heights.top(line.number) + row * this.metrics.lineHeight - this.origin }
   }
 
-  /** The document position at client coordinates. */
-  posAtCoords(clientX: number, clientY: number): number {
+  /**
+   * The document position at client coordinates. When lines wrap, `out.assoc` is set to -1 for a point past the end
+   * of a row that a break ends, where the caret is drawn at that row's end.
+   */
+  posAtCoords(clientX: number, clientY: number, out?: { assoc?: -1 | 1 }): number {
     const doc = this.state.doc
     const scrollerRect = this.scroller.getBoundingClientRect()
     const docY = this.scale.toDoc(this.scroller.scrollTop) + (clientY - scrollerRect.top)
+    if (out) out.assoc = undefined
     // Above the first line and below the last are the start and the end of the document, whatever x is.
     if (docY < 0) return 0
     if (docY >= this.heights.contentHeight) return doc.length
     const number = Math.min(doc.lineCount, Math.max(1, this.heights.lineAt(docY)))
     const line = doc.line(number)
-    return line.from + this.offsetAtX(line, this.layerX(clientX))
+    const x = this.layerX(clientX)
+    if (!this.wrapping) return line.from + this.offsetAtX(line, x)
+    const wrap = this.wrapOf(line)
+    const row = Math.min(wrap.breaks.length, this.heights.rowAt(number, docY))
+    const offset = this.offsetInRow(line, wrap, row, x)
+    if (out && row < wrap.breaks.length && offset === wrap.breaks[row]) out.assoc = -1
+    return line.from + offset
   }
 
   /** The client x of the gutter's right edge. */
@@ -1447,13 +1960,13 @@ export class EditorView {
     return Math.min(this.state.doc.lineCount, Math.max(1, this.heights.lineAt(docY)))
   }
 
-  /** Client coordinates of the caret position `pos`: where a popup would anchor. */
-  coordsAtPos(pos: number): { left: number; top: number; bottom: number } {
+  /** Client coordinates of the caret position `pos`: where a popup would anchor. At a break, `assoc` as in `layerCoords`. */
+  coordsAtPos(pos: number, assoc?: -1 | 1): { left: number; top: number; bottom: number } {
     const doc = this.state.doc
     const line = doc.lineAt(pos)
     const scrollerRect = this.scroller.getBoundingClientRect()
-    const x = this.xOf(line, pos - line.from)
-    const top = scrollerRect.top + (this.heights.top(line.number) - this.scale.toDoc(this.scroller.scrollTop))
+    const { x, row } = this.place(line, pos - line.from, assoc)
+    const top = scrollerRect.top + (this.heights.top(line.number) + row * this.metrics.lineHeight - this.scale.toDoc(this.scroller.scrollTop))
     return { left: this.layer.getBoundingClientRect().left + x, top, bottom: top + this.metrics.lineHeight }
   }
 
@@ -1473,9 +1986,9 @@ export class EditorView {
   }
 
   /** Whether `pos` is on screen. */
-  isVisible(pos: number): boolean {
+  isVisible(pos: number, assoc?: -1 | 1): boolean {
     const line = this.state.doc.lineAt(pos)
-    const top = this.heights.top(line.number)
+    const top = this.heights.top(line.number) + rowOf(this.wrapOf(line), pos - line.from, assoc) * this.metrics.lineHeight
     const view = this.scale.toDoc(this.scroller.scrollTop)
     return top >= view && top + this.metrics.lineHeight <= view + this.viewport.height
   }
@@ -1528,6 +2041,11 @@ export class EditorView {
     return this.heights.top(n)
   }
 
+  /** The bottom of line `n`'s last row in layout pixels. */
+  lineBottom(n: number): number {
+    return this.heights.bottom(n)
+  }
+
   /** Scrolls so layout offset `y` is at the top of the view. */
   scrollToDocY(y: number): void {
     this.scroller.scrollTop = Math.max(0, this.scale.toScroll(y))
@@ -1561,7 +2079,12 @@ export class EditorView {
     const { lineHeight, charWidth } = this.metrics
     const view = this.scale.toDoc(this.scroller.scrollTop)
     const height = this.viewport.height
-    const lineTop = this.heights.top(line.number)
+    // The row the position is in, when lines wrap; the main cursor's side of a break.
+    const main = this.state.selection.main
+    const assoc = main.head === pos ? main.assoc : undefined
+    const wrap = this.wrapOf(line)
+    const row = rowOf(wrap, pos - line.from, assoc)
+    const lineTop = this.heights.top(line.number) + row * lineHeight
     const marginY = Math.min(lineHeight * 3, Math.max(0, (height - lineHeight) / 2))
     // Lines pinned at the top cover the text under them: a line revealed upward stops below them.
     const pinned = Math.min(this.sticky.height, Math.max(0, height / 3))
@@ -1573,9 +2096,14 @@ export class EditorView {
     if (target !== view) this.scroller.scrollTop = Math.max(0, this.scale.toScroll(target))
 
     // Horizontally: keep the position clear of both edges of the text area. The line may never have been drawn, so the scrollable width may not reach it yet.
-    const cols = columnAt(line.text, line.text.length, this.state.config.tabSize)
-    if (cols > this.maxCols) this.growWidth(cols)
-    const x = this.metrics.paddingX + columnAt(line.text, pos - line.from, this.state.config.tabSize) * charWidth
+    if (this.rowsFit) return
+    let x: number
+    if (this.wrapping) x = this.xInRow(line, wrap, row, pos - line.from) + this.originX
+    else {
+      const cols = columnAt(line.text, line.text.length, this.state.config.tabSize)
+      if (cols > this.maxCols) this.growWidth(cols)
+      x = this.metrics.paddingX + columnAt(line.text, pos - line.from, this.state.config.tabSize) * charWidth
+    }
     const visible = this.viewport.width - this.gutterWidth - this.minimapWidth
     const marginX = Math.min(charWidth * 6, visible / 4)
     const left = this.hscale.toDoc(this.scroller.scrollLeft)
@@ -1625,6 +2153,11 @@ export class EditorView {
     return this.highlighter.done
   }
 
+  /** Whether every line has its real rows (always, when lines do not wrap). */
+  get wrapDone(): boolean {
+    return !this.wrapping || this.wrapping.complete
+  }
+
   /** Selects a range and scrolls to it. */
   select(anchor: number, head = anchor): void {
     this.dispatch({ selection: EditorSelection.create([new SelectionRange(anchor, head)]), origin: 'select', scrollIntoView: true })
@@ -1634,9 +2167,10 @@ export class EditorView {
     if (this.destroyed) return
     this.destroyed = true
     if (this.frame) cancelAnimationFrame(this.frame)
-    if (this.idleWork) {
-      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(this.idleWork)
-      else clearTimeout(this.idleWork)
+    for (const work of [this.idleWork, this.settleWork]) {
+      if (!work) continue
+      if (typeof cancelIdleCallback === 'function') cancelIdleCallback(work)
+      else clearTimeout(work)
     }
     this.blink?.cancel()
     this.find.destroy()
@@ -1650,6 +2184,10 @@ export class EditorView {
     // A long line counted for this editor is not kept after it.
     forgetColumnIndexes()
   }
+}
+
+function isBlankCode(code: number): boolean {
+  return code === 32 || code === 9
 }
 
 function sameZones(a: readonly Zone[], b: readonly Zone[]): boolean {

@@ -36,6 +36,14 @@ const LIMITS = {
   longMove: 50,
   /** A click on the text far into that line, drawn. */
   longClick: 50,
+  /** The same file wrapped at 40 columns: open, the worst far jump and wheel turn, a keystroke (typical, worst). */
+  wrapOpen: 3000,
+  wrapJump: 100,
+  wrapScroll: 50,
+  wrapTypeMedian: 25,
+  wrapTypeWorst: 100,
+  /** Every line's rows known, broken while the editor is idle, from the moment the file opened. */
+  wrapSettle: 15_000,
 }
 
 /**
@@ -272,6 +280,128 @@ export const large = [
 
       measures.heapMB = await ev(() => Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1e6))
       report('100 MB')
+      await ev(() => {
+        window.view.destroy()
+        window.__text = null
+      })
+    },
+  },
+  {
+    name: '100 MB of code wrapped at 40 columns: opens, jumps, scrolls and types within the measured limits, the top held still as rows settle',
+    timeout: 180_000,
+    async run({ ev, assert, settle }) {
+      for (const key of Object.keys(measures)) delete measures[key]
+      await ev((source) => {
+        window.__text = new Function(`return ${source}`)()(100 * 1024 * 1024)
+      }, generate.toString())
+      within(assert, 'wrapOpen', await ev(mountLarge, 'big.js', { wordWrap: 'column', wrapColumn: 40 }))
+      const shown = () =>
+        ev(() => {
+          const view = window.view
+          const wrapped = [...document.querySelectorAll('.enc-lines .enc-line')].filter((el) => el.querySelectorAll('.enc-row').length > 1)
+          return { wrapped: wrapped.length, sideways: view.scroller.scrollWidth > view.scroller.clientWidth }
+        })
+      assert.ok(await ev(() => window.view.wrapped))
+      assert.equal(await ev(linesMatch), null)
+      let drawn = await shown()
+      assert.ok(drawn.wrapped > 0 && !drawn.sideways, `${drawn.wrapped} lines drawn as rows; sideways ${drawn.sideways}`)
+
+      // Far jumps, each drawn at once from the rows known or guessed.
+      const jumps = await ev(() => {
+        const view = window.view
+        const out = []
+        for (const fraction of [0.5, 0.9, 0.25, 1, 0.75, 0.05]) {
+          const started = performance.now()
+          view.scroller.scrollTop = (view.scroller.scrollHeight - view.scroller.clientHeight) * fraction
+          view.flush()
+          out.push(performance.now() - started)
+        }
+        return out
+      })
+      within(assert, 'wrapJump', Math.max(...jumps))
+      await settle()
+      assert.equal(await ev(linesMatch), null)
+
+      // Wheel-sized steps through the middle.
+      const steps = await ev(() => {
+        const view = window.view
+        view.scroller.scrollTop = (view.scroller.scrollHeight - view.scroller.clientHeight) * 0.6
+        view.flush()
+        const out = []
+        for (let step = 0; step < 30; step++) {
+          const started = performance.now()
+          view.scroller.scrollTop += 120
+          view.flush()
+          out.push(performance.now() - started)
+        }
+        return out
+      })
+      within(assert, 'wrapScroll', Math.max(...steps))
+      assert.equal(await ev(linesMatch), null)
+
+      // Typing at the end of a line that wraps, in the middle of the file; the caret stays in view.
+      const typing = await ev(() => {
+        const view = window.view
+        const { EditorSelection } = window.enc
+        const middle = Math.floor(view.state.doc.lineCount / 14) * 7 + 3
+        const line = view.state.doc.line(middle)
+        view.dispatch({ selection: EditorSelection.cursor(line.to), scrollIntoView: true })
+        view.flush()
+        const out = []
+        for (const char of ' + typed.length;') {
+          const started = performance.now()
+          const pos = view.state.selection.main.head
+          view.dispatch({ changes: { from: pos, insert: char }, selection: EditorSelection.cursor(pos + 1), origin: 'input.type', scrollIntoView: true })
+          view.flush()
+          out.push(performance.now() - started)
+        }
+        const caret = view.coordsAtPos(view.state.selection.main.head)
+        const box = view.scroller.getBoundingClientRect()
+        return {
+          out: out.sort((a, b) => a - b),
+          typed: view.state.doc.line(middle).text.endsWith(' + typed.length;'),
+          inView: caret.top >= box.top && caret.bottom <= box.bottom,
+        }
+      })
+      assert.ok(typing.typed, 'the typed text is in the line')
+      assert.ok(typing.inView, 'the caret is in view')
+      within(assert, 'wrapTypeMedian', typing.out[Math.floor(typing.out.length / 2)])
+      within(assert, 'wrapTypeWorst', typing.out[typing.out.length - 1])
+
+      // Left alone: the rows still guessed are broken in idle time, and the line at the top of the view stays there.
+      const top = () => ev(() => ({ line: window.view.lineAtDocY(window.view.scrollTopInDoc), done: window.view.wrapDone }))
+      const before = await top()
+      const settled = await ev(
+        () =>
+          new Promise((resolve) => {
+            const check = () => {
+              if (window.view.wrapDone) resolve(performance.now() - window.__opened)
+              else setTimeout(check, 50)
+            }
+            check()
+          }),
+      )
+      within(assert, 'wrapSettle', settled)
+      await settle()
+      const after = await top()
+      assert.ok(after.done)
+      assert.equal(after.line, before.line, 'the top line stayed while rows settled')
+      assert.equal(await ev(linesMatch), null)
+
+      // The end of the file, by key, is on screen once the rows near it are known.
+      const end = await ev(() => {
+        const view = window.view
+        view.runCommand('cursorDocEnd')
+        view.flush()
+        const numbers = [...document.querySelectorAll('.enc-gutter-num')].map((el) => Number(el.textContent))
+        return { last: view.state.doc.lineCount, shown: numbers.includes(view.state.doc.lineCount) }
+      })
+      assert.ok(end.shown, `line ${end.last} is on screen`)
+      drawn = await shown()
+      assert.ok(!drawn.sideways)
+
+      measures.heapMB = await ev(() => Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1e6))
+      report('100 MB wrapped')
       await ev(() => {
         window.view.destroy()
         window.__text = null

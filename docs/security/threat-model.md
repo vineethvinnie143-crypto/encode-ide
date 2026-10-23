@@ -1355,3 +1355,40 @@ so a file crafted to stall or crash the editor is the main concern.
   worker once it fails, and scroll, click and select at both ends of a line wider than the browser's limit.
 - The end-to-end run opens a 100 MB file in the app, checks that the worker started and the footer says the file is
   too large for the servers, and times the end of the file, its colours, typing, find, save and a change on disk.
+
+## Word wrap and whitespace (Editor and language intelligence 5b)
+
+Written with the pull request that wraps long lines into rows and marks spaces and tabs
+([0080](../adr/0080-long-lines-wrap-into-rows-the-layout-counts-and-spaces-and-tabs-are-marked-without-changing-the-text.md)).
+Nothing new crosses a process boundary: the wrap layout and the marks are worked out in the editor's page from the
+text it already has, and the settings are kept in the page's own storage. The concerns are a file crafted to make
+wrapping slow, and text drawn in a way that misleads about what the file holds.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| R1 | A file crafted to make wrapping slow (millions of lines, one huge line, lines with no place to break) stalls the page | A document over 2 million characters starts from rows guessed by length and is broken in idle time, 12 ms at a time; only the lines about to be drawn are broken before a frame. A line with no place to break is cut between characters. A line of more than 240 rows draws only the rows near the view. Changing a line's rows is O(log n) in the line count. A browser test holds 100 MB wrapped at 40 columns to measured limits, and one wraps a line of a million characters. | Mitigated |
+| R2 | Wrapped text drawn in the wrong place, or a caret at the wrong end of a row, misleads the person about what they are editing | Every coordinate goes through one conversion from (line, offset, side of the break) to (row, x); the side is kept on the selection (`assoc`), so the caret at a row's end and at the next row's start are told apart. Browser tests check clicks, the caret, selections and the arrows at a break. | Mitigated |
+| R3 | A break inside a character cluster (an emoji with a modifier, a letter with its accent) splits what is shown | Breaks are made only between clusters; plain ASCII is measured in one step and everything else a cluster at a time. Unit tests break text with accents, wide characters and surrogate pairs. | Mitigated |
+| R4 | Marking spaces and tabs changes the text that is copied, saved or measured | The marks are spans around the existing characters, drawn as backgrounds; the characters are unchanged, so copying, saving, clicks and column counting see the same text. A browser test checks the drawn text equals the line. | Mitigated |
+| R5 | The text at the top jumps while a large file's rows settle, so an edit lands where the person did not mean | The place at the top is held before rows change and restored after, without drift across many holds; a browser test types, waits for every row to settle, and checks the top line did not move. | Mitigated |
+| R6 | Saved editor settings in the page's storage are malformed or tampered with | Every field is checked when read back (a known value, a number within 20 to 400 columns), and anything else takes its default. | Mitigated |
+
+### Residual risks
+
+- **Inlay hints are not counted in a row's width**: a row with hints can run a little past the edge; nothing is
+  hidden, and the hints are not text.
+- **Rows in a large file are a guess until they settle** (about a second for 100 MB here, longer on a slow machine):
+  the scroll bar's size and a far jump's landing place can shift a little meanwhile; the line at the top does not.
+
+### Verification
+
+- The wrap unit tests check where lines break (spaces, marks, brackets, wide characters, long words, clusters), the
+  indent of rows, tab stops, edits that break again only what they change against breaking from scratch, and the row
+  counts through edits, guesses and settling.
+- The browser tests check rows that fit, indents and tab stops, the caret and clicks at a break, selections across
+  rows, arrows and Home and End by row, resizing and turning wrapping on and off keeping the top line, a line of a
+  million characters, each way of showing spaces, and 100 MB wrapped at 40 columns within its limits.
+- The end-to-end run turns wrapping on with Alt+Z and from Settings > Editor, checks End by row in the footer, and
+  shows and hides spaces and tabs.

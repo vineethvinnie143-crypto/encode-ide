@@ -10,5 +10,6 @@ import { fold } from './scenarios/fold.mjs'
 import { structure } from './scenarios/structure.mjs'
 import { hints } from './scenarios/hints.mjs'
 import { large } from './scenarios/large.mjs'
+import { wrap } from './scenarios/wrap.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large, ...wrap]

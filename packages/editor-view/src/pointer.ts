@@ -71,7 +71,9 @@ export class PointerHandler {
         return
       }
     }
-    const pos = inGutter ? state.doc.line(view.lineAtClientY(event.clientY)).from : view.posAtCoords(event.clientX, event.clientY)
+    // Past the end of a row a break ends, the caret goes at that row's end.
+    const at: { assoc?: -1 | 1 } = {}
+    const pos = inGutter ? state.doc.line(view.lineAtClientY(event.clientY)).from : view.posAtCoords(event.clientX, event.clientY, at)
     const clicks = ((Math.max(1, event.detail) - 1) % 3) + 1
     const command = view.mac ? event.metaKey : event.ctrlKey
     const add = event.altKey && !event.shiftKey
@@ -109,7 +111,7 @@ export class PointerHandler {
       this.begin({ mode: 'char', base: state.selection.ranges.filter((_, index) => index !== state.selection.mainIndex), origin: SelectionRange.cursor(main.anchor), column: 0, line: 0 }, event)
       return
     }
-    const origin = clicks === 1 ? SelectionRange.cursor(pos) : clicks === 2 ? wordRangeAt(state, pos) : lineRangeAt(state, pos)
+    const origin = clicks === 1 ? SelectionRange.cursor(pos, undefined, at.assoc) : clicks === 2 ? wordRangeAt(state, pos) : lineRangeAt(state, pos)
     const mode: Mode = clicks === 1 ? 'char' : clicks === 2 ? 'word' : 'line'
     this.begin({ mode, base, origin, column: 0, line: 0 }, event)
     this.apply(event.clientX, event.clientY, pos)
@@ -161,14 +163,15 @@ export class PointerHandler {
     const view = this.view
     const state = view.state
     const inGutter = drag.mode === 'line' && !!document.elementFromPoint(clientX, clientY)?.closest('.enc-gutter')
-    const pos = known ?? (inGutter ? state.doc.line(view.lineAtClientY(clientY)).from : view.posAtCoords(clientX, clientY))
+    const at: { assoc?: -1 | 1 } = { assoc: drag.origin.assoc }
+    const pos = known ?? (inGutter ? state.doc.line(view.lineAtClientY(clientY)).from : view.posAtCoords(clientX, clientY, at))
     let ranges: SelectionRange[]
     if (drag.mode === 'column') {
       ranges = this.columnRanges(drag, clientX, view.lineAtClientY(clientY))
     } else {
       let range: SelectionRange
       if (drag.mode === 'char') {
-        range = new SelectionRange(drag.origin.anchor, pos)
+        range = new SelectionRange(drag.origin.anchor, pos, undefined, at.assoc)
       } else {
         const unit = drag.mode === 'word' ? wordRangeAt(state, pos) : lineRangeAt(state, pos)
         range =

@@ -72,6 +72,8 @@ export const MENUS: readonly MenuSpec[] = [
       'view.stickyScroll',
       'view.bracketColors',
       'view.minimap',
+      'view.wordWrap',
+      'view.whitespace',
       'view.inlayHints',
       'view.semanticHighlighting',
       '-',

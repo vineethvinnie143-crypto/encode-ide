@@ -104,6 +104,12 @@
   outline: none;
   overscroll-behavior: contain;
   cursor: text;
+  /* The scrollbar's room is kept, so the width rows wrap to does not change as it comes and goes. */
+  scrollbar-gutter: stable;
+}
+/* Rows fit the text area: nothing scrolls sideways. */
+.enc-wrap .enc-scroller {
+  overflow-x: hidden;
 }
 
 .enc-scroller::-webkit-scrollbar {
@@ -330,6 +336,23 @@
 }
 .enc-ligatures .enc-line {
   font-variant-ligatures: contextual;
+}
+/* A row of a wrapped line; the rows after the first are indented from it. */
+.enc-row {
+  height: var(--enc-line-h);
+}
+
+/* Spaces and tabs drawn with a mark: a dot in every space's cell, a line across a tab. */
+.enc-ws-space {
+  background-image: radial-gradient(circle at 50% 50%, var(--e-whitespace) 0 1px, transparent 1.6px);
+  background-size: var(--enc-char-w, 7px) 100%;
+  background-repeat: repeat-x;
+}
+.enc-ws-tab {
+  background-image: linear-gradient(var(--e-whitespace), var(--e-whitespace));
+  background-size: calc(100% - 6px) 1px;
+  background-position: 3px 50%;
+  background-repeat: no-repeat;
 }
 
 .enc-line-active {

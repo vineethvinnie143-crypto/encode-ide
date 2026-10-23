@@ -109,7 +109,7 @@ export class StickyController {
     chosen = chosen.filter((range) => leadingWhitespace(view.state.doc.line(range.start).text).length < view.state.doc.line(range.start).text.length)
     return chosen.map((range, index) => {
       // The block's last line is about to leave: its heading is pushed up with it.
-      const bottom = view.lineTop(range.end) + lineHeight - top
+      const bottom = view.lineBottom(range.end) - top
       return { line: range.start, push: Math.min(0, bottom - (index + 1) * lineHeight) }
     }).filter((entry, index, all) => index < all.length - 1 || entry.push > -lineHeight)
   }

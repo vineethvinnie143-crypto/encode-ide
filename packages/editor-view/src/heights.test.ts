@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { check, gen, type Gen } from '@encode/testkit'
 import { HeightMap, MAX_SCROLL_HEIGHT, ScrollScale, type Zone } from './heights'
+import { RowMap } from './wrap'
 
 /** Lays the lines and zones out one by one, the slow way. */
 function model(lineHeight: number, lineCount: number, zones: readonly Zone[]) {
@@ -223,3 +224,60 @@ describe('HeightMap with folded lines', () => {
     assert.equal(map.hiddenBefore(10), 6)
   })
 })
+
+describe('HeightMap with wrapped lines', () => {
+  it('lays out lines of several rows, with folds and zones, as adding them up one by one does', async () => {
+    const rowsGen = gen.array(gen.weighted([4, gen.int(1, 1)], [2, gen.int(2, 4)], [1, gen.int(5, 40)]), 1, 3000)
+    await check(gen.tuple(scenarios, rowsGen, gen.array(gen.tuple(gen.int(1, 3000), gen.int(0, 30)), 0, 6)), ([{ lineHeight, zones }, rowList, folds]) => {
+      const lineCount = rowList.length
+      const ranges = folds.map(([from, length]) => ({ from: Math.min(lineCount, from), to: Math.min(lineCount, from + length) }))
+      const hidden = new Set<number>()
+      for (const range of ranges) for (let line = range.from; line <= range.to; line++) hidden.add(line)
+      const shown = zones.map((zone) => ({ ...zone, after: Math.min(zone.after, lineCount) })).filter((zone) => !hidden.has(zone.after))
+      const rows = new RowMap(rowList)
+      const map = new HeightMap(lineHeight, lineCount, shown, 0, ranges, rows)
+      // The slow way: a line that shows is its rows tall.
+      const sorted = shown.map((zone, index) => ({ zone, index })).sort((a, b) => a.zone.after - b.zone.after || a.index - b.index)
+      const tops: number[] = []
+      const zoneTops: number[] = []
+      let y = 0
+      let next = 0
+      const placeZones = (after: number) => {
+        while (next < sorted.length && sorted[next].zone.after === after) {
+          zoneTops.push(y)
+          y += sorted[next++].zone.height
+        }
+      }
+      placeZones(0)
+      for (let line = 1; line <= lineCount; line++) {
+        tops[line] = y
+        if (!hidden.has(line)) y += rowList[line - 1] * lineHeight
+        placeZones(line)
+      }
+      tops[lineCount + 1] = y
+      assert.equal(map.contentHeight, y)
+      for (let line = 1; line <= lineCount + 1; line++) assert.equal(map.top(line), tops[line], `top of line ${line}`)
+      for (let index = 0; index < zoneTops.length; index++) assert.equal(map.zoneTop(index), zoneTops[index], `zone ${index}`)
+      for (let line = 1; line <= lineCount; line++) {
+        if (hidden.has(line)) continue
+        assert.equal(map.bottom(line), tops[line] + rowList[line - 1] * lineHeight)
+        // Any y in any row of a line that shows finds the line, and the row.
+        const row = (line * 7) % rowList[line - 1]
+        const at = tops[line] + row * lineHeight + lineHeight / 2
+        assert.equal(map.lineAt(at), line, `lineAt in row ${row} of line ${line}`)
+        assert.equal(map.rowAt(line, at), row)
+      }
+    })
+  })
+
+  it('takes the rows as they are when it is made', () => {
+    const rows = new RowMap([1, 3, 1])
+    const map = new HeightMap(10, 3, [], 0, [], rows)
+    assert.equal(map.top(3), 40)
+    assert.equal(map.rowsVersion, rows.version)
+    rows.set(2, 1)
+    assert.notEqual(rows.version, map.rowsVersion, 'the map knows it is out of date')
+    assert.equal(new HeightMap(10, 3, [], 0, [], rows).top(3), 20)
+  })
+})
+

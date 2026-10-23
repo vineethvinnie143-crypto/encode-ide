@@ -1,4 +1,5 @@
 import { TOKEN_NAMES, T } from '@encode/editor'
+import { rowEnd, rowStart, type LineWrap } from './wrap'
 
 /** The class a token kind is drawn with. */
 export const TOKEN_CLASSES: readonly string[] = TOKEN_NAMES.map((name) => `tok-${name}`)
@@ -237,6 +238,9 @@ export function segmentsOf(text: string, tokens: readonly number[], from = 0, to
  * spans. `lead` goes in front: the spacer that stands in for the part of a
  * long line that is not drawn. `highlights` are ranges (sorted, apart) drawn
  * with the class `enc-zone-mark`, for the words that changed in a review.
+ * The spaces and tabs inside `whitespace` (ranges, sorted and apart) are drawn
+ * with a mark: a run of spaces as one span of class `enc-ws-space`, a tab as
+ * one of `enc-ws-tab`, the text itself unchanged so offsets still count.
  */
 export function fillLine(
   dom: HTMLElement,
@@ -247,10 +251,17 @@ export function fillLine(
   lead?: Node,
   highlights?: readonly (readonly [number, number])[],
   inlays?: readonly InlaySpec[],
+  whitespace?: readonly (readonly [number, number])[] | null,
 ): DrawnInlay[] {
   const nodes: Node[] = lead ? [lead] : []
   const drawn: DrawnInlay[] = []
   let nextInlay = 0
+  // Pieces are added in order, so the stretch of marked whitespace a position might be in only moves on.
+  let stretch = 0
+  const markedAt = (pos: number): boolean => {
+    while (stretch < whitespace!.length && whitespace![stretch][1] <= pos) stretch++
+    return stretch < whitespace!.length && whitespace![stretch][0] <= pos
+  }
   // The hints at or before column `col` that are not drawn yet go in now.
   const flush = (col: number) => {
     if (!inlays) return
@@ -262,16 +273,8 @@ export function fillLine(
       drawn.push({ col: inlay.from, el, caretBefore: inlay.kind !== 'parameter' })
     }
   }
-  const add = (piece: string, kind: number, control: boolean, marked: boolean) => {
-    if (control) {
-      const span = document.createElement('span')
-      span.className = marked ? 'enc-ctrl enc-zone-mark' : 'enc-ctrl'
-      span.dataset.label = controlLabel(piece)
-      // Not the character itself: a bidi control in the DOM would still reorder the text after it.
-      // One blank per UTF-16 unit it stands for, so offsets keep counting the way the document does.
-      span.textContent = ' '.repeat(piece.length)
-      nodes.push(span)
-    } else if (kind === T.plain && !marked) {
+  const addText = (piece: string, kind: number, marked: boolean) => {
+    if (kind === T.plain && !marked) {
       nodes.push(document.createTextNode(piece))
     } else {
       const span = document.createElement('span')
@@ -281,11 +284,39 @@ export function fillLine(
       nodes.push(span)
     }
   }
+  const add = (piece: string, start: number, kind: number, control: boolean, marked: boolean) => {
+    if (control) {
+      const span = document.createElement('span')
+      span.className = marked ? 'enc-ctrl enc-zone-mark' : 'enc-ctrl'
+      span.dataset.label = controlLabel(piece)
+      // Not the character itself: a bidi control in the DOM would still reorder the text after it.
+      // One blank per UTF-16 unit it stands for, so offsets keep counting the way the document does.
+      span.textContent = ' '.repeat(piece.length)
+      nodes.push(span)
+      return
+    }
+    if (!whitespace?.length || !WHITESPACE.test(piece)) return addText(piece, kind, marked)
+    let at = 0
+    while (at < piece.length) {
+      let blank = at
+      while (blank < piece.length && !(isBlank(piece.charCodeAt(blank)) && markedAt(start + blank))) blank++
+      if (blank > at) addText(piece.slice(at, blank), kind, marked)
+      if (blank >= piece.length) break
+      const code = piece.charCodeAt(blank)
+      let end = blank + 1
+      if (code === 32) while (end < piece.length && piece.charCodeAt(end) === 32 && markedAt(start + end)) end++
+      const span = document.createElement('span')
+      span.className = `${code === 32 ? 'enc-ws enc-ws-space' : 'enc-ws enc-ws-tab'}${marked ? ' enc-zone-mark' : ''}`
+      span.textContent = piece.slice(blank, end)
+      nodes.push(span)
+      at = end
+    }
+  }
   const segments = segmentsOf(text, tokens, from, to)
   for (const segment of inlays?.length ? splitAt(segments, inlays) : segments) {
     flush(segment.start)
     if (!highlights?.length || segment.control) {
-      add(segment.text, segment.kind, segment.control, !!highlights?.some(([a, b]) => a <= segment.start && segment.start < b))
+      add(segment.text, segment.start, segment.kind, segment.control, !!highlights?.some(([a, b]) => a <= segment.start && segment.start < b))
       continue
     }
     // Cut the segment at the edges of the highlighted ranges.
@@ -295,14 +326,49 @@ export function fillLine(
       if (b <= cursor || a >= end) continue
       const markFrom = Math.max(a, cursor)
       const markTo = Math.min(b, end)
-      if (markFrom > cursor) add(text.slice(cursor, markFrom), segment.kind, false, false)
-      add(text.slice(markFrom, markTo), segment.kind, false, true)
+      if (markFrom > cursor) add(text.slice(cursor, markFrom), cursor, segment.kind, false, false)
+      add(text.slice(markFrom, markTo), markFrom, segment.kind, false, true)
       cursor = markTo
     }
-    if (cursor < end) add(text.slice(cursor, end), segment.kind, false, false)
+    if (cursor < end) add(text.slice(cursor, end), cursor, segment.kind, false, false)
   }
   flush(to)
   dom.replaceChildren(...nodes)
+  return drawn
+}
+
+const WHITESPACE = /[ \t]/
+const isBlank = (code: number): boolean => code === 32 || code === 9
+
+/**
+ * Fills a wrapped line's element with its rows `rowFrom`..`rowTo`, a block each, as `fillLine` fills a line: rows
+ * after the first are indented by the line's wrap indent. A hint goes in the row its column starts (at a break, the
+ * row after it; at the line's end, the last).
+ */
+export function fillRows(
+  dom: HTMLElement,
+  text: string,
+  tokens: readonly number[],
+  wrap: LineWrap,
+  rowFrom: number,
+  rowTo: number,
+  inlays?: readonly InlaySpec[],
+  whitespace?: readonly (readonly [number, number])[] | null,
+): DrawnInlay[] {
+  const rows: HTMLElement[] = []
+  const drawn: DrawnInlay[] = []
+  for (let row = rowFrom; row < rowTo; row++) {
+    const from = rowStart(wrap, row)
+    const to = rowEnd(wrap, row, text.length)
+    const el = document.createElement('div')
+    el.className = 'enc-row'
+    if (row > 0 && wrap.indent) el.style.paddingLeft = `calc(var(--enc-char-w) * ${wrap.indent})`
+    const last = row === wrap.breaks.length
+    const mine = inlays?.length ? inlays.filter((inlay) => inlay.from >= from && (inlay.from < to || (last && inlay.from === to))) : undefined
+    for (const inlay of fillLine(el, text, tokens, from, to, undefined, undefined, mine, whitespace)) drawn.push(inlay)
+    rows.push(el)
+  }
+  dom.replaceChildren(...rows)
   return drawn
 }
 
