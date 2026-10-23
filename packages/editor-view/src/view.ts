@@ -248,6 +248,31 @@ function pixelRatio(): number {
   return typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1
 }
 
+/**
+ * Editors that check the screen's scale once a second, for a change no media query was told of (Windows' headless
+ * browser with an emulated scale tells none after the first). One timer for all of them, running only while some
+ * editor is open and the page is shown; each check reads one number per editor.
+ */
+const ratioChecks = new Set<() => void>()
+let ratioTimer: ReturnType<typeof setInterval> | null = null
+
+function checkRatios(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  for (const check of ratioChecks) check()
+}
+
+function checkRatioEverySecond(check: () => void): () => void {
+  ratioChecks.add(check)
+  if (!ratioTimer && typeof setInterval === 'function') ratioTimer = setInterval(checkRatios, 1_000)
+  return () => {
+    ratioChecks.delete(check)
+    if (!ratioChecks.size && ratioTimer) {
+      clearInterval(ratioTimer)
+      ratioTimer = null
+    }
+  }
+}
+
 /** The range, a quarter of a thousandth wide, that the resolution media queries see lies in: found by halving. */
 function mediaResolution(): { low: number; high: number } {
   let low = 0
@@ -998,10 +1023,18 @@ export class EditorView {
    * changed, or the page was zoomed. The minimap and the line heights follow. The query is made around the resolution
    * media queries see, which need not equal `devicePixelRatio` to the last digit, so it always matches when made and
    * is told of the next change; the page's ratio can follow the media's some frames late, so after a change it is read
-   * each frame for a second, and rendering checks it too. Returns what stops watching.
+   * each frame for a second. Rendering checks it too, and so does a check once a second shared by all editors, for
+   * the browsers that tell no query at all. Returns what stops watching.
    */
   private watchPixelRatio(): () => void {
-    if (typeof matchMedia !== 'function') return () => {}
+    const stopChecking = checkRatioEverySecond(() => {
+      // Only a shown editor: a hidden one has nothing to measure, and is measured once it is shown.
+      if (!this.destroyed && this.viewport.width > 0 && this.root.isConnected && pixelRatio() !== this.measuredRatio) {
+        this.onProbeResize()
+        this.requestRender()
+      }
+    })
+    if (typeof matchMedia !== 'function') return stopChecking
     let query: MediaQueryList | null = null
     let frame = 0
     const watch = (): void => {
@@ -1025,6 +1058,7 @@ export class EditorView {
     }
     watch()
     return () => {
+      stopChecking()
       query?.removeEventListener('change', told)
       cancelAnimationFrame(frame)
     }
