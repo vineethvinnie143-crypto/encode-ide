@@ -5,8 +5,10 @@ signed and does not update itself. Windows 10 or 11, 64-bit.
 
 ## Get it
 
-Every build that reaches `main` is kept for 30 days as an artifact of its CI run (GitHub → Actions → the run →
-*Artifacts*), named `eNCode-windows-<commit>-run<number>`. It holds:
+A tester build comes from a CI run started by hand on `main` (GitHub → Actions → CI → *Run workflow*). It is kept
+for 14 days as an artifact of that run (GitHub → Actions → the run → *Artifacts*), named
+`eNCode-windows-<commit>-run<number>`; only the newest build is kept, to stay within the repository's storage. It
+holds:
 
 | File | Use it when |
 | --- | --- |

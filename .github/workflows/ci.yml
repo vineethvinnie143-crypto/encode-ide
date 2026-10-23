@@ -6,7 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Read-only token: CI never writes to the repository.
+# Read-only token: CI never writes to the repository. The artifact storage job below is the one exception: it may
+# delete old artifacts of this repository's runs, and nothing else.
 permissions:
   contents: read
 
@@ -15,6 +16,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A private repository's artifact storage is small (500 MB on a free account), and every run adds screenshots,
+  # while a build is about 200 MB. This keeps the newest build and a day of screenshots, so a run is never refused
+  # for space. It never fails the run.
+  storage:
+    name: Artifact storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Delete old artifacts, keeping the newest build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/artifacts.tsv"
+          cutoff=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | [.id, .name, .created_at] | @tsv' > "$list"
+          newest=$(awk -F'\t' '$2 ~ /^eNCode-windows-/ && $3 > best { best = $3; id = $1 } END { print id }' "$list")
+          while IFS=$'\t' read -r id name created; do
+            if [[ $name == eNCode-windows-* ]]; then
+              [[ $id == "$newest" ]] && continue
+            elif [[ $created > $cutoff ]]; then
+              continue
+            fi
+            gh api -X DELETE "repos/$REPO/actions/artifacts/$id" > /dev/null
+            echo "deleted $name ($created)"
+          done < "$list"
+
   windows:
     name: Windows
     runs-on: windows-latest
@@ -103,9 +136,10 @@ jobs:
           $short = $env:ENCODE_COMMIT.Substring(0, 7)
           Add-Content -Path $env:GITHUB_OUTPUT -Value "name=eNCode-windows-$short-run${{ github.run_number }}"
 
-      # Only what reached main, or was started by hand on a branch, is kept to be handed out.
+      # A build is handed out from a run started by hand (Actions, CI, Run workflow). Pushes to main do not keep
+      # theirs: two builds of about 200 MB fill a private repository's artifact storage.
       - name: Keep the programs
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.build.outputs.name }}
@@ -114,11 +148,12 @@ jobs:
             apps/desktop/release/*-portable.exe
             TESTING.md
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
 
-      # Every run, so a UI change can be reviewed by eye in both themes.
+      # Every run, so a UI change can be reviewed by eye in both themes. Full storage loses the pictures, not the run.
       - name: Keep screenshots and the Electron log
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-${{ github.run_attempt }}
@@ -126,4 +161,4 @@ jobs:
             apps/desktop/screenshots
             packages/editor-view/screenshots
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
