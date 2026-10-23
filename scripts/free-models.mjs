@@ -164,12 +164,14 @@ async function liveCheck(mod, key, catalog, report, options) {
     if (result.blocked) {
       // Shut out of this model by the account or the app: nothing against its price, and the router skips it from now on.
       shutOut++
-      console.log(`  – ${pick.model}: skipped. ${clean(result.message)}`)
+      // A refusal the router cannot explain is said plainly; what OpenRouter wrote follows, for whoever runs this.
+      const said = result.blocked === 'forbidden' && result.detail ? ` (${clean(result.detail)})` : ''
+      console.log(`  – ${pick.model}: skipped. ${clean(result.message)}${said}`)
       continue
     }
     tried++
     if (!result.ok) {
-      console.log(`  ✖ ${pick.model}: ${clean(result.message)}`)
+      console.log(`  ✖ ${pick.model}: ${clean(result.message)}${result.detail ? ` (${clean(result.detail)})` : ''}`)
       continue
     }
     answered++

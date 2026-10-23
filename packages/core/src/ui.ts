@@ -6,6 +6,7 @@
  * shape for shape; the desktop's agent host checks at compile time that each
  * is assignable to the renderer's, so the renderer keeps its API unchanged.
  */
+import type { PauseReason } from '@encode/providers'
 import type { AgentMode, DiffHunk, JobStatus } from '@encode/tools'
 
 export type { AgentMode, DiffHunk, DiffLine } from '@encode/tools'
@@ -30,6 +31,25 @@ export interface ToolReview {
   reason: string
 }
 
+/** What the person can do about a problem the chat shows, offered as buttons under it. */
+export type ProblemAction = 'retry' | 'switch-model' | 'settings' | 'diagnostics'
+
+/**
+ * The kind of trouble behind an error in the chat: why no model could run (the router's reasons), or the loop's and
+ * eNCode's own (`context`: the conversation does not fit; `empty`: the model said nothing; `host`: the agent process
+ * stopped; `internal`: a fault in eNCode).
+ */
+export type ProblemCode = PauseReason | 'context' | 'empty' | 'host' | 'internal'
+
+export interface EntryProblem {
+  code: ProblemCode
+  actions: ProblemAction[]
+  /** Epoch ms after which trying again can work. */
+  retryAt?: number
+  /** The request was tried again from here: the problem offers nothing more. */
+  resolved?: boolean
+}
+
 export interface ConversationEntry {
   id: string
   kind: EntryKind
@@ -49,6 +69,10 @@ export interface ConversationEntry {
   }
   /** The model that wrote an assistant entry. */
   model?: string
+  /** On an error: what kind it is and what can be done about it. */
+  problem?: EntryProblem
+  /** The longer account behind an error or a notice (what a provider said, keys removed), shown folded. */
+  details?: string
   createdAt: number
 }
 
@@ -310,7 +334,8 @@ export type AgentEventBody =
   | { type: 'mode'; mode: AgentMode }
   | { type: 'file-changed'; path: string }
   | { type: 'done'; summary: string }
-  | { type: 'error'; message: string }
+  /** The request ended on a problem. `entryId`: the entry that shows it, when the session made one. */
+  | { type: 'error'; message: string; problem?: EntryProblem; entryId?: string }
   | { type: 'session-reset' }
   | { type: 'title'; title: string }
 

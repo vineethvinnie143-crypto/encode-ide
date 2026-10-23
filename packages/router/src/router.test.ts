@@ -236,6 +236,10 @@ describe('ModelRouter: keys', () => {
     assert.equal(outcome.kind === 'paused' && outcome.reason, 'auth')
     assert.doesNotMatch(JSON.stringify(outcome), /secret-value/)
     assert.doesNotMatch(JSON.stringify(world.alerts), /secret-value/)
+    // The alert says what happened in a sentence; what the provider wrote goes with it as detail, without the key.
+    const [alert] = world.alerts
+    assert.equal(alert.message, 'openrouter did not accept the API key.')
+    assert.match(alert.detail ?? '', /HTTP 401: Incorrect API key provided: \[redacted\]/)
   })
 })
 
@@ -397,8 +401,8 @@ describe('ModelRouter: only free models enabled', () => {
     const { outcome, events } = await world.complete()
     assert.equal(outcome.kind === 'paused' && outcome.reason, 'no-model')
     const message = outcome.kind === 'paused' ? outcome.message : ''
-    assert.match(message, /Only free models are enabled, and none of the main role's models is free/)
-    assert.match(message, /Add "@free" to the role in Settings, or turn off free-only mode/)
+    assert.equal(message, 'Only free models are allowed, and none of the models chosen for this chat is free. Choose free models for it in Settings, or turn off free-only mode.')
+    assert.match(outcome.kind === 'paused' ? (outcome.detail ?? '') : '', /is not a free model, and only free models are enabled/)
     assert.deepEqual([world.calls.length, events.length], [0, 0])
   })
 
@@ -449,7 +453,7 @@ describe('ModelRouter: only free models enabled', () => {
     world = guarded({ main: ['@free'] }, { keys: flipping, catalogs: { openrouter: [catalogEntry(A)] }, router: { onLog: (entry) => logs.push(`${entry.level}: ${entry.message}`) } })
     const { outcome } = await world.complete()
     assert.equal(outcome.kind === 'paused' && outcome.reason, 'no-model')
-    assert.equal(outcome.kind === 'paused' && outcome.message, 'The free pool has no model for the main role right now.')
+    assert.equal(outcome.kind === 'paused' && outcome.message, 'The free models have nothing for this chat right now.')
     assert.equal(world.calls.length, 0, 'nothing was sent')
     assert.deepEqual(logs, [`warn: ${A} is not a free model, and only free models are enabled`])
   })
@@ -826,7 +830,8 @@ describe('ModelRouter: key reads', () => {
     const world = freeWorld({ keys: failing })
     const { outcome } = await world.complete()
     assert.equal(outcome.kind === 'paused' && outcome.reason, 'auth')
-    assert.match(outcome.kind === 'paused' ? outcome.message : '', /Reading the key for openrouter failed: keychain locked/)
+    assert.equal(outcome.kind === 'paused' && outcome.message, 'eNCode could not read the API key for openrouter.')
+    assert.match(outcome.kind === 'paused' ? (outcome.detail ?? '') : '', /Reading the key for openrouter failed: keychain locked/)
     assert.doesNotMatch(JSON.stringify(outcome), /secret-value/)
   })
 

@@ -126,9 +126,10 @@ export type ClientEvent =
   | { type: 'tool-call'; index: number; id?: string; name?: string; arguments: string }
   /** The current attempt failed: forget what it streamed. Another attempt may follow. */
   | { type: 'discard'; reason: string }
-  | { type: 'switch'; from: string; to: string; reason: string }
-  /** Nothing can run before `until` (epoch ms). */
-  | { type: 'wait'; until: number; reason: string }
+  /** `reason` is one plain sentence on why `from` was left; `detail` the longer account, with the provider's own words. */
+  | { type: 'switch'; from: string; to: string; reason: string; detail?: string }
+  /** Nothing can run before `until` (epoch ms). `reason` is one plain sentence; `detail` the longer account. */
+  | { type: 'wait'; until: number; reason: string; detail?: string }
 
 export interface CompletionRequest {
   role: ModelRole
@@ -165,8 +166,11 @@ export type CompletionOutcome =
     }
   /** The prompt does not fit: compact to below `window` and call again. */
   | { kind: 'compact'; window: number; used?: number }
-  /** Nothing can run now. `retryAt` (epoch ms) when a wait would help. */
-  | { kind: 'paused'; reason: PauseReason; message: string; retryAt?: number }
+  /**
+   * Nothing can run now. `message` says why in plain words, for the person; `detail` is the longer account, with what
+   * the provider wrote (keys removed), for a Details fold and a report. `retryAt` (epoch ms) when a wait would help.
+   */
+  | { kind: 'paused'; reason: PauseReason; message: string; detail?: string; retryAt?: number }
 
 /** The numbers of the model a call would run on now, for compacting before sending. */
 export interface ModelBudget {

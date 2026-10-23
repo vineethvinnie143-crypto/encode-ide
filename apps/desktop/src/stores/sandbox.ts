@@ -1,6 +1,7 @@
 import { create } from '../store'
 import type { SandboxAction, SandboxOutcome, SandboxReport } from '@shared/types'
 import { api } from '../api'
+import { errorText } from '../ipc-error'
 
 interface SandboxStore {
   /** The sandbox in the open folder as last read; null when no folder is open or nothing was read yet. */
@@ -29,7 +30,7 @@ export const useSandbox = create<SandboxStore>((set) => ({
       const report = await api.sandbox.report()
       if (mine === generation) set({ report, error: null, loading: false })
     } catch (error) {
-      if (mine === generation) set({ error: (error as Error).message, loading: false })
+      if (mine === generation) set({ error: errorText(error), loading: false })
     }
   },
 
@@ -40,7 +41,7 @@ export const useSandbox = create<SandboxStore>((set) => ({
       if (mine === generation) set({ report: outcome.report, error: null, loading: false })
       return outcome
     } catch (error) {
-      if (mine === generation) set({ error: (error as Error).message, loading: false })
+      if (mine === generation) set({ error: errorText(error), loading: false })
       return null
     }
   },

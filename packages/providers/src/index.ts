@@ -9,3 +9,5 @@ export { acceptedToolName, acceptableToolNames, acceptingToolNames, isAcceptedTo
 export { createOpenAICompatibleAdapter, createOpenRouterAdapter, type OpenAICompatibleOptions } from './openai'
 export { createAnthropicAdapter, ANTHROPIC_VERSION, type AnthropicOptions } from './anthropic'
 export * from './direct-client'
+export * from './plain'
+export * from './redact'

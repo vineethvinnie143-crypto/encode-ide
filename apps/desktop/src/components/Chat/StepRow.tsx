@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -24,6 +24,7 @@ import { cx } from '../../ui/cx'
 import { TAKEN_OVER, computerStep } from './computer-step'
 import DiffView, { shownDiffLines } from './DiffView'
 import { reviewLine } from './review-text'
+import { WorkRoot, shownPath } from './shown-path'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
 const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
@@ -93,7 +94,7 @@ const STATE_LABEL: Record<string, string> = {
   error: 'Failed',
 }
 
-function detailOf(entry: ConversationEntry): string {
+function detailOf(entry: ConversationEntry, root: string | null): string {
   const tool = entry.tool
   if (!tool) return ''
   const input = tool.input ?? {}
@@ -109,7 +110,7 @@ function detailOf(entry: ConversationEntry): string {
     case 'write_file':
     case 'edit':
     case 'replace_in_file':
-      return toolPath(input) ?? ''
+      return shownPath(toolPath(input) ?? '', root)
     case 'Glob':
       return String(input.pattern ?? '')
     case 'glob':
@@ -185,8 +186,8 @@ function StepNotes({ tool }: { tool: NonNullable<ConversationEntry['tool']> }) {
 
 type Tool = NonNullable<ConversationEntry['tool']>
 
-/** What a step's row and its opened body show, worked out once for the row and for find. */
-function stepParts(entry: ConversationEntry, tool: Tool) {
+/** What a step's row and its opened body show, worked out once for the row and for find; files are named from `root`. */
+function stepParts(entry: ConversationEntry, tool: Tool, root: string | null = null) {
   const meta = TOOL_META[tool.name] ?? { label: tool.name.replace(/_/g, ' '), icon: FileText }
   const state = tool.state ?? 'done'
   const isComputer = tool.name === 'Computer'
@@ -198,7 +199,7 @@ function stepParts(entry: ConversationEntry, tool: Tool) {
   return {
     icon: meta.icon,
     label: computer?.label ?? meta.label,
-    detail: computer ? computer.detail : detailOf(entry),
+    detail: computer ? computer.detail : detailOf(entry, root),
     state,
     isShell: stepKind(tool.name) === 'shell',
     hasBody: isComputer
@@ -207,8 +208,13 @@ function stepParts(entry: ConversationEntry, tool: Tool) {
     output,
     // With nothing else to show, the body shows what the step was given.
     showsInput: !tool.diff?.length && !output && !tool.review && Object.keys(tool.input ?? {}).length > 0,
+    // A write with its diff says its size in lines; one without says it in bytes.
     sizeLabel:
-      typeof content === 'string' && content.length > 0 ? (content.length >= 1024 ? `${Math.round(content.length / 1024)}KB` : `${content.length}B`) : '',
+      !tool.diff?.length && typeof content === 'string' && content.length > 0
+        ? content.length >= 1024
+          ? `${Math.round(content.length / 1024)}KB`
+          : `${content.length}B`
+        : '',
   }
 }
 
@@ -242,6 +248,7 @@ export function foldedStep(entry: ConversationEntry): { head: string; body: stri
 /** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
 function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
   const tool = entry.tool
+  const root = useContext(WorkRoot)
   // A step the Reviewer declined opens by itself: the person was not asked, so the reason is the first thing they want.
   const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting' || tool?.review?.verdict === 'declined')
   const head = useRef<HTMLButtonElement>(null)
@@ -260,7 +267,8 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
 
   if (!tool) return null
 
-  const { icon: Icon, label, detail, state, isShell, hasBody, output, showsInput, sizeLabel } = stepParts(entry, tool)
+  const { icon: Icon, label, detail, state, isShell, hasBody, output, showsInput, sizeLabel } = stepParts(entry, tool, root)
+  const fullPath = toolPath(tool.input ?? {})
   const approved = tool.review?.by === 'reviewer' && tool.review.verdict === 'approved'
   const warned = Boolean(tool.warnings?.length)
   const additions = tool.diff?.reduce((total, hunk) => total + hunk.lines.filter((line) => line.type === 'add').length, 0) ?? 0
@@ -284,7 +292,11 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
       >
         <Icon size={14} className="tool-row-icon" />
         <span className="tool-row-label">{label}</span>
-        {detail && <span className="tool-row-detail">{detail}</span>}
+        {detail && (
+          <span className="tool-row-detail" title={fullPath && fullPath !== detail ? fullPath : undefined}>
+            {detail}
+          </span>
+        )}
         {sizeLabel && <span className="tool-row-size">{sizeLabel}</span>}
         {(additions > 0 || deletions > 0) && (
           <span className="diff-stats">

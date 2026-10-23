@@ -21,6 +21,7 @@ import { fileMention, fileOptions, findSlash, indexFiles, parseSlash, replaceTri
 import { sendAction, sendKeys } from './send-key'
 import { runSlash } from './slash'
 import { conversationStats } from './stats'
+import { errorText } from '../../ipc-error'
 
 const MAX_LINES = 12
 const LINE = 22
@@ -272,7 +273,7 @@ export default function Composer() {
       }
       setAttachments((previous) => [...previous, { path: activePath, content: file.content }])
     } catch (error) {
-      notify('error', (error as Error).message)
+      notify('error', errorText(error))
     }
   }
 

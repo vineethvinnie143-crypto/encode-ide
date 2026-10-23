@@ -36,6 +36,8 @@ const SCENARIOS = {
       text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
+  // The smoke makes this one fail on purpose (see /__fail), then lets it through when the person tries again.
+  'retry-check': [{ text: 'Answered after trying again.' }],
   // The agent asks to plan first; the person says to go ahead.
   'plan-first': [
     { text: 'This touches several files, so a plan first.', call: { name: 'EnterPlanMode', args: { reason: 'The change touches several files.' } } },
@@ -236,6 +238,13 @@ let lastReviewer = null
 /** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
 let lastCodeReview = null
 const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0 }
+/**
+ * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
+ * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
+ */
+let failMode = 'off'
+/** Shaped like a key, so eNCode must take it out of what it shows; not the format of any real provider's keys. */
+const LEAKED_KEY = 'sk-smoke-not-a-real-key-0123456789'
 
 // Deterministic usage so the smoke suite can assert totals and cache-hit %.
 // The first request has no cache; later ones report a cached portion.
@@ -420,6 +429,11 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, lastCodeReview)
       return
     }
+    if (request.url?.startsWith('/__fail/') && request.method === 'POST') {
+      failMode = request.url.slice('/__fail/'.length)
+      sendJson(response, 200, { failMode })
+      return
+    }
     if (request.url === '/__stats') {
       sendJson(response, 200, stats)
       return
@@ -492,6 +506,17 @@ const server = http.createServer(async (request, response) => {
     // The connection check asks for one call to a tool named echo, the way a person's first message would ask for work.
     const check = body.tools.some((tool) => (tool.function?.name ?? tool.name) === 'echo')
     if (!check) lastRequest = { tools: body.tools.map((tool) => tool.function?.name ?? tool.name), messages, model: body.model ?? null, effort: body.reasoning_effort ?? null }
+    if (!check && failMode !== 'off' && scenarioOf(messages) === 'retry-check') {
+      console.log(`[fake-provider] retry-check fails on purpose: ${failMode}`)
+      if (failMode === 'auth') {
+        sendJson(response, 401, {
+          error: { message: `Incorrect API key provided: ${LEAKED_KEY}. You can find your API key at https://platform.example.test/api-keys.`, type: 'invalid_request_error', code: 'invalid_api_key' },
+        })
+        return
+      }
+      await sendText(response, body, '')
+      return
+    }
     const step = check ? { text: '', call: { name: 'echo', args: { text: 'eNCode' } } } : stepOf(messages)
     const used = tokensOf(raw)
     const window = !check && step.overflowUntilCompacted ? overflowWindow(body, messages) : Infinity

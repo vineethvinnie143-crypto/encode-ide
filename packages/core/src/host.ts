@@ -39,6 +39,7 @@ import { createSkills, type SkillSource } from './skills'
 import type { AgentSource } from './subagents'
 import type { AgentSettings, TurnEnd } from './types'
 import type {
+  AgentMode,
   AgentEvent,
   AgentHistory,
   AgentStartInput,
@@ -378,6 +379,13 @@ export class AgentHost {
     const id = sessionId || (await this.sessions())[0].id
     const session = await this.open(id)
     const end = await session.start(input)
+    this.afterTurn(session, end)
+  }
+
+  /** Runs a session's last request again from where a problem stopped it; resolves when it ends. */
+  async retry(sessionId: string, mode?: AgentMode): Promise<void> {
+    const session = await this.open(sessionId)
+    const end = await session.retry(mode ? { mode } : {})
     this.afterTurn(session, end)
   }
 

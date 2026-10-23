@@ -77,6 +77,7 @@ import {
   type CompactionPlan,
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
+import { describeError, detailsOf, plainError } from './problems'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
@@ -183,8 +184,23 @@ interface FitOptions {
   instructions?: string
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
+
+/** "14:05", in the person's own clock. */
+function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+/** A router key ("openrouter:qwen/qwen3-coder"), or a client's label for one ("OpenRouter: qwen/qwen3-coder"), as "qwen/qwen3-coder (OpenRouter)". */
+function modelOf(key: string): string {
+  const colon = key.indexOf(':')
+  return colon > 0 ? `${key.slice(colon + 1).trim()} (${key.slice(0, colon).trim()})` : key
+}
+
+/** An entry's `details`, when there are any. */
+function folded(text: string | undefined, home?: string): { details?: string } {
+  const details = detailsOf(text, home)
+  return details ? { details } : {}
 }
 
 function trimInput(input: Record<string, unknown>): Record<string, unknown> {
@@ -416,10 +432,10 @@ export class AgentLoop {
             }
             return
           case 'switch':
-            o.surface.settle(o.surface.entry({ kind: 'notice', text: `Switched from ${event.from} to ${event.to}: ${event.reason}` }))
+            o.surface.settle(o.surface.entry({ kind: 'notice', text: `Switched to ${modelOf(event.to)}. ${event.reason}`, ...folded(event.detail, o.services.home) }))
             return
           case 'wait':
-            o.surface.settle(o.surface.entry({ kind: 'notice', text: `Waiting until ${new Date(event.until).toLocaleTimeString()}: ${event.reason}` }))
+            o.surface.settle(o.surface.entry({ kind: 'notice', text: `${event.reason} Waiting until ${clock(event.until)}.`, ...folded(event.detail, o.services.home) }))
             return
           default:
             return
@@ -438,7 +454,8 @@ export class AgentLoop {
       })
 
       if (outcome.kind === 'paused') {
-        return { kind: 'end', end: { kind: 'paused', reason: outcome.reason, message: outcome.message, ...(outcome.retryAt ? { retryAt: outcome.retryAt } : {}) } }
+        const { reason, message, detail, retryAt } = outcome
+        return { kind: 'end', end: { kind: 'paused', reason, message, ...(detail ? { detail } : {}), ...(retryAt ? { retryAt } : {}) } }
       }
       if (outcome.kind === 'compact') {
         if (overflows++ >= MAX_OVERFLOW_RETRIES) {
@@ -446,7 +463,7 @@ export class AgentLoop {
           const fixed = Math.ceil(this.fixed * this.meter.scale)
           const share = fixed > outcome.window / 2 ? ` eNCode's instructions and tools alone take about ${fixed.toLocaleString('en-US')} tokens.` : ''
           const message = `The conversation does not fit the model's context window (${outcome.window.toLocaleString('en-US')} tokens), even after compacting it.${share} Choose a model with a larger window.`
-          return { kind: 'end', end: { kind: 'failed', message } }
+          return { kind: 'end', end: { kind: 'failed', code: 'context', message } }
         }
         if (outcome.used) this.meter.calibrate(sent, this.fixed, outcome.used)
         await this.fit(turn, { force: true, window: outcome.window })
@@ -456,9 +473,9 @@ export class AgentLoop {
       const { message, usage, finish } = outcome
       o.surface.usage(usage)
       if (isEmptyReply(message)) {
-        if (finish === 'content_filter') return { kind: 'end', end: { kind: 'failed', message: "The provider's safety system stopped the reply." } }
+        if (finish === 'content_filter') return { kind: 'end', end: { kind: 'failed', code: 'refused', message: "The provider's safety system stopped the reply." } }
         if (empties++ < MAX_EMPTY_RETRIES) continue
-        return { kind: 'end', end: { kind: 'failed', message: 'The model returned an empty response. Check the model and provider settings.' } }
+        return { kind: 'end', end: { kind: 'failed', code: 'empty', message: 'The model kept sending empty replies. Try again, or choose another model.' } }
       }
 
       this.meter.record(sent, this.fixed, usage)
@@ -675,7 +692,7 @@ export class AgentLoop {
         assessor: o.assessor,
       })
     } catch (error) {
-      return { kind: 'ask', reason: `eNCode could not check this call (${errorMessage(error)}).`, grantable: false }
+      return { kind: 'ask', reason: `eNCode could not check this call: ${lowerFirst(plainError(error))}`, grantable: false }
     }
   }
 
@@ -719,7 +736,7 @@ export class AgentLoop {
     try {
       access = await tool.access(input, ctx)
     } catch (error) {
-      return refuse(`${block.name} could not be checked: ${errorMessage(error)}`, 'error')
+      return refuse(`${block.name} could not be checked: ${lowerFirst(plainError(error))}`, 'error')
     }
     const verdict = await this.judge(access, { name: block.name, input })
     if (verdict.kind === 'deny') return refuse(verdict.reason, 'rejected', `Refused by the approval policy: ${verdict.reason}`)
@@ -836,7 +853,7 @@ export class AgentLoop {
         inside: isInsideReal,
       })
     } catch (error) {
-      return { outcome: 'person', by: 'floor', reason: `eNCode could not check the command (${errorMessage(error)}).` }
+      return { outcome: 'person', by: 'floor', reason: `eNCode could not check the command: ${lowerFirst(plainError(error))}` }
     }
     if (!screened.reviewable) return { outcome: 'person', by: 'floor', reason: sentence(screened.reason) }
 
@@ -889,7 +906,7 @@ export class AgentLoop {
         this.settleEntry(entry, { state: 'rejected', ok: false, output: 'Stopped.' })
         throw new AgentAbortedError()
       }
-      outcome = { ok: false, content: `Error: ${errorMessage(error)}` }
+      outcome = { ok: false, content: plainError(error) }
     }
     progress.stop()
 
@@ -1003,8 +1020,9 @@ export class AgentLoop {
       return ((await fn.call(this.o.hooks, event)) ?? undefined) as Awaited<ReturnType<NonNullable<AgentHooks[K]>>> | undefined
     } catch (error) {
       // A broken guard must not wave calls through.
-      if (name === 'preToolUse') return { decision: 'deny', reason: `A preToolUse hook failed (${errorMessage(error)}), so the call was not run.` } as never
-      this.o.surface.settle(this.o.surface.entry({ kind: 'notice', text: `The ${name} hook failed: ${errorMessage(error)}` }))
+      if (name === 'preToolUse') return { decision: 'deny', reason: `the PreToolUse hook could not run (${lowerFirst(plainError(error)).replace(/\.$/, '')}), so the call was not run.` } as never
+      const hook = name.charAt(0).toUpperCase() + name.slice(1)
+      this.o.surface.settle(this.o.surface.entry({ kind: 'notice', text: `The ${hook} hook could not run.`, ...folded(describeError(error), this.o.services.home) }))
       return undefined
     }
   }

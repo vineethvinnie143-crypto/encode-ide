@@ -8,6 +8,7 @@ import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
+import { Details } from '../../ui/Details'
 import { Check, ChevronDown, Plus, RefreshCw, Trash2 } from '../../ui/icons'
 import { Select, type SelectOption } from '../../ui/Select'
 import { KeyField } from '../models/KeyField'
@@ -112,7 +113,7 @@ function ConnectionForm({ settings, profile, onRemoved }: { settings: Settings; 
   const [freeOnly, setFreeOnly] = useState(true)
   const [loading, setLoading] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; message: string; detail?: string } | null>(null)
   const storage = settings.keyStorage
   const active = profile.id === settings.activeProfileId
 
@@ -259,8 +260,9 @@ function ConnectionForm({ settings, profile, onRemoved }: { settings: Settings; 
       )}
 
       {result && (
-        <div className={result.ok ? 'ok-text' : 'error-text'} role="status">
-          {result.message}
+        <div className={cx('details-row', result.ok ? 'ok-text' : 'error-text')} role="status">
+          <span>{result.message}</span>
+          {result.detail && <Details text={result.detail} />}
         </div>
       )}
 

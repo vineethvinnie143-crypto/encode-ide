@@ -1,0 +1,178 @@
+/* ============================================================
+   Problems: a request that ended on one, with what can be done,
+   and the details folded under it and under a notice
+   ============================================================ */
+
+.problem-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--border));
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface-1));
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+}
+.problem-card.is-settled {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+
+.problem-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.problem-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.problem-card.is-settled .problem-icon {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.problem-text {
+  min-width: 0;
+  padding-top: 1px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.problem-card.is-settled .problem-text {
+  color: var(--text-2);
+}
+
+.problem-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  padding-left: 32px;
+}
+.problem-foot .problem-details-toggle {
+  margin-left: auto;
+}
+
+.problem-details-toggle {
+  height: 24px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out);
+}
+.problem-details-toggle:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+.problem-details-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.problem-chevron {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.problem-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.problem-details {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.problem-details-body {
+  position: relative;
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+}
+.problem-details-body pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 36px 10px 12px;
+  overflow: auto;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 17px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.problem-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.problem-copy:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+/* A notice with details: the toggle follows the line, the text opens under it. */
+.notice-body {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 4px;
+}
+.notice-body .problem-details-toggle {
+  height: 18px;
+  padding: 0 4px;
+  font-size: var(--fs-11);
+}
+
+/* A line of text or a way forward, with the details after it: in a dialog or a settings result. */
+.details-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+}
+.details-row .problem-details-toggle {
+  margin-left: -6px;
+}
+.details-row > span + .problem-details-toggle {
+  margin-left: 0;
+}
+.connect-problem .details-row {
+  margin-top: 6px;
+}
+.connect-problem .details-row .connect-way {
+  margin-top: 0;
+}

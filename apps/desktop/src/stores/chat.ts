@@ -2,6 +2,7 @@ import { create } from '../store'
 import type {
   AgentEvent,
   AgentStatus,
+  EntryProblem,
   ApprovalAnswer,
   ApprovalRequest,
   ConversationEntry,
@@ -17,6 +18,8 @@ import { useSettings } from './settings'
 import { isBusy } from './sidebar-model'
 import { useStatus } from './status'
 import { useUi } from './ui'
+import { errorText } from '../ipc-error'
+import { HOST_STOPPED_MESSAGE, localProblemEntry } from '@shared/problems'
 
 export interface AskState {
   id: string
@@ -52,6 +55,8 @@ interface ChatStore {
   load(sessionId: string): Promise<void>
   /** Starts a turn. `keepDraft`: the message comes from elsewhere (the Review tab), so what the composer holds stays. */
   send(text: string, attachments?: { path: string; content: string }[], options?: { keepDraft?: boolean }): void
+  /** Runs the last request again from where a problem stopped it. */
+  retry(): void
   stop(): Promise<void>
   clear(): Promise<void>
   /** Answers one approval (the first, unless an id is given); the card leaves the list at once. */
@@ -84,6 +89,21 @@ function upsertEntry(entries: ConversationEntry[], entry: ConversationEntry): Co
   next[index] = entry
   return next
 }
+
+/** A problem only the app knows of (the agent process stopped), shown once: a second report of it adds nothing. */
+function withLocalProblem(entries: ConversationEntry[], text: string, problem: EntryProblem): ConversationEntry[] {
+  const last = entries.at(-1)
+  if (last?.kind === 'error' && last.text === text && !last.problem?.resolved) return entries
+  return [...entries, localProblemEntry(text, problem)]
+}
+
+/** Trying again puts the problems the app showed out of action; the session does the same for its own. */
+function resolveLocalProblems(entries: ConversationEntry[]): ConversationEntry[] {
+  if (!entries.some((entry) => entry.id.startsWith('problem-') && entry.problem && !entry.problem.resolved)) return entries
+  return entries.map((entry) => (entry.id.startsWith('problem-') && entry.problem && !entry.problem.resolved ? { ...entry, problem: { ...entry.problem, resolved: true } } : entry))
+}
+
+const HOST_PROBLEM: EntryProblem = { code: 'host', actions: ['retry'] }
 
 /** What a session's request was handed and did not take goes to the front of its queue, in the order it was sent. */
 function giveBack(sessionId: string): void {
@@ -198,9 +218,28 @@ export const useChat = create<ChatStore>((set, get) => ({
         attachments,
       })
       .catch((error: Error) => {
-        set({ running: false, status: 'error' })
-        useUi.getState().notify('error', error.message)
+        const text = errorText(error)
+        // The agent process stopping is a problem in the chat, with Retry; anything else (no folder open) is a notice.
+        if (text === HOST_STOPPED_MESSAGE) set((state) => ({ running: false, status: 'error', entries: withLocalProblem(state.entries, text, HOST_PROBLEM) }))
+        else {
+          set({ running: false, status: 'error' })
+          useUi.getState().notify('error', text)
+        }
       })
+  },
+
+  retry: () => {
+    if (get().running) return
+    const sessionId = getActiveSessionId()
+    set((state) => ({ running: true, status: 'thinking', approvals: [], ask: null, streamStartedAt: 0, streamChars: 0, entries: resolveLocalProblems(state.entries) }))
+    void api.agent.retry(sessionId, useSettings.getState().settings?.agentMode ?? 'code').catch((error: Error) => {
+      const text = errorText(error)
+      if (text === HOST_STOPPED_MESSAGE) set((state) => ({ running: false, status: 'error', entries: withLocalProblem(state.entries, text, HOST_PROBLEM) }))
+      else {
+        set({ running: false, status: 'error' })
+        useUi.getState().notify('error', text)
+      }
+    })
   },
 
   stop: async () => {
@@ -231,7 +270,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     try {
       await api.agent.approve(approval.id, answer)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -242,7 +281,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     try {
       await api.agent.answer(ask.id, text)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -322,7 +361,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     // A session in the background: start it directly; its events reach the sidebar through the sessions store.
     void api.agent
       .start(sessionId, { text: next.text, mode: useSettings.getState().settings?.agentMode ?? 'code' })
-      .catch((error: Error) => useUi.getState().notify('error', error.message))
+      .catch((error: Error) => useUi.getState().notify('error', errorText(error)))
   },
 
   applyEvent: (event) => {
@@ -376,8 +415,16 @@ export const useChat = create<ChatStore>((set, get) => ({
         })
         break
       case 'error':
-        set({ running: false, status: 'error', approvals: [], ask: null })
-        useUi.getState().notify('error', event.message)
+        // The problem is in the chat: the session's own entry, or, when the session could not make one, the app's.
+        set((state) => ({
+          running: false,
+          status: 'error',
+          approvals: [],
+          ask: null,
+          entries: event.entryId ? state.entries : withLocalProblem(state.entries, event.message, event.problem ?? HOST_PROBLEM),
+        }))
+        // A model notice that said the same thing a moment ago (a refused key) is now said by the card, with its buttons.
+        if (useUi.getState().toast?.kind === 'error' && event.message.startsWith(useUi.getState().toast!.text)) useUi.getState().dismissToast()
         break
       case 'session-reset':
         set({

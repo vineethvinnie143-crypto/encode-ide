@@ -133,8 +133,10 @@ describe('ModelRouter: catalogs and the free quota', () => {
     await world.router.refresh()
     await world.router.refresh()
     assert.equal(catalogStatus(world)?.models, 1)
-    assert.match(catalogStatus(world)?.error ?? '', /HTTP 503/)
-    assert.equal(world.alerts.filter((alert) => alert.type === 'catalog').length, 1)
+    assert.equal(catalogStatus(world)?.error, 'eNCode could not load the list of models from openrouter.')
+    const catalogAlerts = world.alerts.filter((alert) => alert.type === 'catalog')
+    assert.equal(catalogAlerts.length, 1)
+    assert.match(catalogAlerts[0].detail ?? '', /HTTP 503/)
     openrouter.status = 200
     await world.router.refresh()
     assert.equal(catalogStatus(world)?.error, undefined)
@@ -163,7 +165,7 @@ describe('ModelRouter: catalogs and the free quota', () => {
     assert.equal(outcome.kind, 'paused')
     if (outcome.kind === 'paused') {
       assert.equal(outcome.reason, 'unavailable')
-      assert.match(outcome.message, /free model list from openrouter could not be loaded/)
+      assert.equal(outcome.message, 'The list of free models from openrouter has not loaded yet. Check the connection.')
     }
   })
 })
@@ -195,7 +197,8 @@ describe('ModelRouter: model checks and canaries', () => {
     const value = world({ [C]: faults.serverError(503) })
     const result = await value.clock.run(value.router.checkModel(`openrouter:${C}`))
     assert.equal(result.ok, false)
-    assert.match(result.message, /HTTP 503/)
+    assert.equal(result.message, "vendor/gamma:free had a problem on the provider's side.")
+    assert.match(result.detail ?? '', /HTTP 503/)
     assert.equal(value.router.pool.canary(`openrouter:${C}`), undefined)
     assert.equal(value.router.health.report().models.find((model) => model.key === `openrouter:${C}`)?.failures, 1)
   })

@@ -54,6 +54,7 @@ import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
+import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
 import { pruneScreens, withoutScreens } from './screens'
 import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
 import { DEFAULT_TITLE, newRecordId } from './session-store'
@@ -190,6 +191,11 @@ export interface SessionCheckpoints {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** "14:05", in the person's own clock. */
+function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 /** An entry as the log kept it, made safe to show after a crash: nothing is still streaming or running. */
@@ -533,9 +539,17 @@ export class AgentSession {
     this.notice(text)
   }
 
-  /** Shows a note in the transcript and stores it. */
-  private notice(text: string, kind: 'notice' | 'error' = 'notice'): void {
-    this.settleEntry(this.addEntry({ kind, text }))
+  /** Shows a note in the transcript and stores it; `details` is the longer account behind it, shown folded. */
+  private notice(text: string, kind: 'notice' | 'error' = 'notice', details?: string): ConversationEntry {
+    const folded = detailsOf(details, this.env.home)
+    const entry = this.addEntry({ kind, text, ...(folded ? { details: folded } : {}) })
+    this.settleEntry(entry)
+    return entry
+  }
+
+  /** A hook that could not run: said plainly, with what went wrong folded under it. */
+  private hookFailed(name: string, error: unknown): void {
+    if (!this.disposed) this.notice(`The ${name} hook could not run.`, 'notice', describeError(error))
   }
 
   /** Runs one thing at a time: two questions on screen at once would be unanswerable. */
@@ -647,7 +661,7 @@ export class AgentSession {
     if (!notification || !this.env.root || this.disposed) return
     const event = { sessionId: this.id, agentId: 'main', root: this.env.root, mode: this.turn.mode ?? 'code', kind, title: this.titleValue, message }
     notification.call(this.env.hooks, event).catch((error) => {
-      if (!this.disposed) this.notice(`The notification hook failed: ${errorMessage(error)}`)
+      this.hookFailed('Notification', error)
     })
   }
 
@@ -676,7 +690,7 @@ export class AgentSession {
     try {
       await sessionEnd.call(this.env.hooks, { sessionId: this.id, agentId: 'main', root: this.env.root, mode: this.turn.mode ?? 'code', reason: END_REASONS[detail], detail, signal })
     } catch (error) {
-      if (!this.disposed) this.notice(`The sessionEnd hook failed: ${errorMessage(error)}`)
+      this.hookFailed('SessionEnd', error)
     }
   }
 
@@ -729,7 +743,7 @@ export class AgentSession {
         else this.notice(`Saved ${list} in ${result.where}. It starts to apply once you review this folder's settings (Settings, Permissions).`)
       },
       (error) => {
-        if (!this.disposed) this.notice(`Could not save ${list}: ${errorMessage(error)}`, 'error')
+        if (!this.disposed) this.notice(`Could not save ${list}: ${plainError(error)}`, 'error', describeError(error))
       },
     )
     this.saving = Promise.all([this.saving, saved]).catch(() => undefined)
@@ -985,7 +999,7 @@ export class AgentSession {
         const started = await env.hooks.sessionStart?.({ ...hookEvent, source })
         if (started?.context) add(reminder(started.context))
       } catch (error) {
-        this.notice(`The sessionStart hook failed: ${errorMessage(error)}`)
+        this.hookFailed('SessionStart', error)
       }
       if (this.shellError) this.notice(`Commands cannot run in this session. ${this.shellError}`)
     }
@@ -1004,7 +1018,7 @@ export class AgentSession {
       if (submitted?.block) return { blocked: submitted.block }
       if (submitted?.context) add(reminder(submitted.context))
     } catch (error) {
-      this.notice(`The userPromptSubmit hook failed: ${errorMessage(error)}`)
+      this.hookFailed('UserPromptSubmit', error)
     }
 
     for (const block of await this.mentions(text)) blocks.push(textBlock(block))
@@ -1031,7 +1045,7 @@ export class AgentSession {
       skills: env.skills,
       holds: (block) => this.messages.some((message) => message.role === 'user' && message.content.some((part) => part.type === 'text' && part.text === block)),
     }).catch((error: unknown) => {
-      this.notice(`What the message mentions could not be attached: ${errorMessage(error)}`)
+      this.notice('The files and skills the message mentions could not be attached.', 'notice', describeError(error))
       return []
     })
   }
@@ -1078,7 +1092,7 @@ export class AgentSession {
         }
         if (submitted?.context) blocks.push(textBlock(reminder(submitted.context)))
       } catch (error) {
-        this.notice(`The userPromptSubmit hook failed: ${errorMessage(error)}`)
+        this.hookFailed('UserPromptSubmit', error)
       }
       for (const block of await this.mentions(text)) blocks.push(textBlock(block))
       blocks.push(textBlock(text))
@@ -1093,13 +1107,43 @@ export class AgentSession {
     if (this.controller) throw new Error('eNCode is already working on this session. Stop it first.')
     const text = (input.text ?? '').trim()
     if (!text) throw new Error('Type a request first.')
+    return this.exclusive((controller) => this.runTurn(input, text, controller))
+  }
+
+  /**
+   * Runs the last request again from where it stopped, after a problem ended it (a model that could not answer, the
+   * agent process stopping): no new message, the same request, so Rewind and the Review tab still see one request.
+   */
+  async retry(input: { mode?: AgentMode } = {}): Promise<TurnEnd> {
+    if (this.disposed) throw new Error('This session is closed.')
+    if (!this.env.root) throw new Error('Open a folder before using the agent.')
+    if (this.controller) throw new Error('eNCode is already working on this session. Stop it first.')
+    const turnId = this.unfinishedTurn()
+    if (!turnId) throw new Error('The last request finished, so there is nothing to try again. Send a new message.')
+    const mode: AgentMode = this.turn.mode ?? (input.mode === 'ask' || input.mode === 'plan' ? input.mode : 'code')
+    return this.exclusive((controller) => this.rerunTurn(turnId, mode, controller))
+  }
+
+  /** The request a retry would continue: the last one, unless the model's answer ended it. */
+  private unfinishedTurn(): string | undefined {
+    const last = this.messages.at(-1)
+    if (!last || (last.role === 'assistant' && !last.content.some((part) => part.type === 'tool-use'))) return undefined
+    for (let index = this.records.length - 1; index >= 0; index--) {
+      const turnId = this.records[index].turnId
+      if (turnId) return turnId
+    }
+    return undefined
+  }
+
+  /** One request at a time: `run` holds the session until it ends, and what it leaves behind is cleared after. */
+  private async exclusive(run: (controller: AbortController) => Promise<TurnEnd>): Promise<TurnEnd> {
     const controller = new AbortController()
     this.controller = controller
     this.stopIdleTimer()
-    const run = this.runTurn(input, text, controller)
-    this.current = run.catch(() => undefined)
+    const running = run(controller)
+    this.current = running.catch(() => undefined)
     try {
-      return await run
+      return await running
     } finally {
       // Free before the end of the turn is saved: a client that hears the turn is over may send the next request at once.
       this.controller = undefined
@@ -1146,15 +1190,49 @@ export class AgentSession {
       if (end.kind === 'done' || end.kind === 'stopped') this.naming = this.nameSession(text).catch(() => undefined)
       return end
     } catch (error) {
+      return this.broken(error, signal)
+    }
+  }
+
+  private async rerunTurn(turnId: string, mode: AgentMode, controller: AbortController): Promise<TurnEnd> {
+    const { signal } = controller
+    try {
+      this.setStatus('thinking')
+      this.resolveProblems()
+      await this.env.external?.ready?.(signal).catch(() => undefined)
+      const loop = this.getLoop()
+      this.steerable = true
+      const end = await loop.run({ turnId, mode, signal })
       this.finishStreaming()
-      if (error instanceof AgentAbortedError || signal.aborted) {
-        this.setStatus('idle')
-        this.notice('Stopped.')
-        return { kind: 'cancelled' }
+      this.conclude(end)
+      return end
+    } catch (error) {
+      return this.broken(error, signal)
+    }
+  }
+
+  /** A request that ended on something thrown: the person stopped it, or a fault the chat shows plainly. */
+  private broken(error: unknown, signal: AbortSignal): TurnEnd {
+    this.finishStreaming()
+    if (error instanceof AgentAbortedError || signal.aborted) {
+      this.setStatus('idle')
+      this.notice('Stopped.')
+      return { kind: 'cancelled' }
+    }
+    const shown = problemFromError(error, this.env.home)
+    this.fail(shown)
+    return { kind: 'failed', code: shown.problem.code, message: shown.text, ...(shown.details ? { detail: shown.details } : {}) }
+  }
+
+  /** The problems the last request ended on, once it is tried again: they stay in the conversation, without their buttons. */
+  private resolveProblems(): void {
+    for (let index = this.entries.length - 1; index >= 0; index--) {
+      const entry = this.entries[index]
+      if (entry.kind === 'user' || entry.kind === 'steer') return
+      if (entry.problem && !entry.problem.resolved) {
+        entry.problem = { ...entry.problem, resolved: true }
+        this.settleEntry(entry)
       }
-      const message = errorMessage(error)
-      this.fail(message)
-      return { kind: 'failed', message }
     }
   }
 
@@ -1173,21 +1251,27 @@ export class AgentSession {
         this.setStatus('done')
         this.send({ type: 'done', summary: `Stopped after ${end.steps} steps. Send a follow-up to continue.` })
         return
-      case 'paused':
-        this.fail(end.retryAt ? `${end.message} Try again after ${new Date(end.retryAt).toLocaleTimeString()}.` : end.message)
+      case 'paused': {
+        // A time to try again only where trying again is what helps: a refused key or an empty account waits on the person.
+        const when = end.retryAt && end.retryAt > Date.now() && actionsFor(end.reason).includes('retry') ? ` You can try again at ${clock(end.retryAt)}.` : ''
+        this.fail(problem(end.reason, `${end.message}${when}`, { details: end.detail, home: this.env.home, ...(end.retryAt ? { retryAt: end.retryAt } : {}) }))
         return
+      }
       case 'failed':
-        this.fail(end.message)
+        this.fail(problem(end.code ?? 'internal', end.message, { details: end.detail, home: this.env.home }))
         return
       case 'cancelled':
         return
     }
   }
 
-  private fail(message: string): void {
-    this.notice(message, 'error')
+  /** Ends the request on a problem: an entry that says it plainly and offers what can be done, and the log keeps the details. */
+  private fail(shown: Problem): void {
+    const entry = this.addEntry({ kind: 'error', text: shown.text, problem: shown.problem, ...(shown.details ? { details: shown.details } : {}) })
+    this.settleEntry(entry)
+    if (shown.details) this.env.warn?.(`A request in session ${this.id} ended on a problem (${shown.problem.code}): ${shown.text}\n${shown.details}`)
     this.setStatus('error')
-    this.send({ type: 'error', message })
+    this.send({ type: 'error', message: shown.text, problem: shown.problem, entryId: entry.id })
   }
 
   /** An assistant entry the turn left streaming (it was stopped mid-reply) becomes final. */

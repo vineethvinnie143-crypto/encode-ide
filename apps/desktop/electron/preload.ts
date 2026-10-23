@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { SearchProviderId } from '../shared/search'
 import type {
+  AgentMode,
   AgentEvent,
   ApprovalAnswer,
   AgentStartInput,
@@ -158,6 +159,7 @@ const api: EncodeApi = {
     statuses: () => invoke('agent:statuses'),
     history: (sessionId?: string) => invoke('agent:history', sessionId),
     start: (sessionId: string, input: AgentStartInput) => invoke('agent:start', sessionId, input),
+    retry: (sessionId: string, mode?: AgentMode) => invoke('agent:retry', sessionId, mode),
     cancel: (sessionId: string) => invoke('agent:cancel', sessionId),
     steer: (sessionId: string, text: string, id: string) => invoke('agent:steer', sessionId, text, id),
     reset: (sessionId?: string) => invoke('agent:reset', sessionId),

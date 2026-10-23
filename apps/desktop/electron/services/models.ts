@@ -25,13 +25,39 @@ function listingHeaders(type: string, key: string): Record<string, string> {
   return headers
 }
 
+/**
+ * A connection that could not be listed or checked: a sentence that says what to do, and what the server or the
+ * system said, for a Details fold. The detail is also the error's cause, so a log of it says the same.
+ */
+export class ListingError extends Error {
+  constructor(
+    message: string,
+    readonly detail: string,
+  ) {
+    super(message, { cause: new Error(detail) })
+    this.name = 'ListingError'
+  }
+}
+
 /** What went wrong with a request to a provider, in words that say what to do. */
-function refusal(name: string, status: number, what: string): string {
-  if (status === 401 || status === 403) return `${name} did not accept the key (HTTP ${status}). Copy the whole key again, and check that it belongs to ${name}.`
-  if (status === 404) return `${name} has no ${what} at this address (HTTP 404). Check the base URL.`
-  if (status === 429) return `${name} is limiting requests right now (HTTP 429). Try again in a minute.`
-  if (status >= 500) return `${name} is having trouble (HTTP ${status}). Try again in a moment.`
-  return `${name} answered HTTP ${status} when asked for its ${what}.`
+function refusal(name: string, status: number, what: string): ListingError {
+  const detail = `HTTP ${status} when asked for the ${what}`
+  if (status === 401 || status === 403) return new ListingError(`${name} did not accept the key. Copy the whole key again, and check that it belongs to ${name}.`, detail)
+  if (status === 404) return new ListingError(`${name} has no ${what} at this address. Check the base URL.`, detail)
+  if (status === 429) return new ListingError(`${name} is limiting requests right now. Try again in a minute.`, detail)
+  if (status >= 500) return new ListingError(`${name} is having trouble right now. Try again in a moment.`, detail)
+  return new ListingError(`${name} could not give its ${what}.`, detail)
+}
+
+function unreachable(name: string, error: unknown): ListingError {
+  const cause = error instanceof Error ? ((error.cause as Error | undefined)?.message ?? error.message) : String(error)
+  return new ListingError(`eNCode could not reach ${name}. Check the address and your connection.`, cause)
+}
+
+/** A failed test as the Settings page shows it. */
+function failed(error: unknown): { ok: false; message: string; detail?: string } {
+  if (error instanceof ListingError) return { ok: false, message: error.message, detail: error.detail }
+  return { ok: false, message: error instanceof Error ? error.message : String(error) }
 }
 
 /** A price per token as OpenRouter writes it, in dollars per million tokens for a person. */
@@ -57,10 +83,15 @@ export class ModelsService {
   private async fetchOpenRouter(): Promise<ModelInfo[]> {
     if (this.cache && Date.now() - this.cache.at < CACHE_MS) return this.cache.models
 
-    const res = await this.fetchImpl(`${OPENROUTER_BASE}/models`, {
-      headers: { 'HTTP-Referer': 'https://eNCode.local', 'X-Title': 'eNCode IDE' },
-    })
-    if (!res.ok) throw new Error(refusal('OpenRouter', res.status, 'model list'))
+    let res: Response
+    try {
+      res = await this.fetchImpl(`${OPENROUTER_BASE}/models`, {
+        headers: { 'HTTP-Referer': 'https://eNCode.local', 'X-Title': 'eNCode IDE' },
+      })
+    } catch (error) {
+      throw unreachable('OpenRouter', error)
+    }
+    if (!res.ok) throw refusal('OpenRouter', res.status, 'model list')
 
     const json = (await res.json()) as { data?: Array<Record<string, unknown>> }
     const models: ModelInfo[] = (json.data ?? []).map((m) => {
@@ -108,9 +139,9 @@ export class ModelsService {
     try {
       res = await this.fetchImpl(modelListUrl(provider), { headers: listingHeaders(provider.type, this.settings.keyFor(profile.id)) })
     } catch (error) {
-      throw new Error(`Could not reach ${profile.name}: ${error instanceof Error ? error.message : String(error)}`)
+      throw unreachable(profile.name, error)
     }
-    if (!res.ok) throw new Error(refusal(profile.name, res.status, 'model list'))
+    if (!res.ok) throw refusal(profile.name, res.status, 'model list')
     const local = isLocalUrl(baseUrl)
     return parseModelList(await res.json(), provider)
       .map((entry): ModelInfo => ({
@@ -127,7 +158,7 @@ export class ModelsService {
    * Whether the connection is reachable and the key accepted. OpenRouter's catalog is public, so a wrong key
    * would pass the listing: its /key endpoint is asked for instead.
    */
-  async test(profileId: string): Promise<{ ok: boolean; message: string }> {
+  async test(profileId: string): Promise<{ ok: boolean; message: string; detail?: string }> {
     const profile = this.profileOf(profileId)
     if (!profile) return { ok: false, message: 'Unknown model profile' }
     if (profile.kind === 'demo') return { ok: true, message: 'Offline demo model is always available.' }
@@ -140,10 +171,10 @@ export class ModelsService {
         const res = await this.fetchImpl(`${OPENROUTER_BASE}/key`, {
           headers: { authorization: `Bearer ${key}`, 'HTTP-Referer': 'https://eNCode.local', 'X-Title': 'eNCode IDE' },
         })
-        if (!res.ok) return { ok: false, message: refusal('OpenRouter', res.status, 'key information') }
+        if (!res.ok) return failed(refusal('OpenRouter', res.status, 'key information'))
         return { ok: true, message: `OpenRouter accepted the key · ${summary}` }
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) }
+        return failed(err instanceof ListingError ? err : unreachable('OpenRouter', err))
       }
     }
     if (!profile.baseUrl.trim()) return { ok: false, message: 'Set a base URL first.' }
@@ -154,7 +185,7 @@ export class ModelsService {
         message: models.length ? `Connected · ${models.length} models available` : 'Connected (model list unavailable)',
       }
     } catch (err) {
-      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+      return failed(err)
     }
   }
 }

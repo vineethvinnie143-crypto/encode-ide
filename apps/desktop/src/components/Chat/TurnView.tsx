@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Copy, CornerDownRight, GitFork, Info, Pencil, Undo2 } from '../../ui/icons'
+import { memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Copy, CornerDownRight, GitFork, Pencil, Undo2 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
@@ -13,6 +13,8 @@ import { Button, IconButton } from '../../ui/Button'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
+import { NoticeLine, ProblemCard } from './ProblemCard'
+import { WorkRoot, shownPath } from './shown-path'
 import WorkLog from './WorkLog'
 import { editedFiles, editTotals, type Turn, type TurnPart } from './turns'
 
@@ -96,20 +98,8 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
       </div>
     )
   }
-  if (entry.kind === 'error') {
-    return (
-      <div className="msg msg-error">
-        <AlertTriangle size={14} />
-        <span>{entry.text}</span>
-      </div>
-    )
-  }
-  return (
-    <div className="msg msg-notice">
-      <Info size={13} />
-      <span>{entry.text}</span>
-    </div>
-  )
+  if (entry.kind === 'error') return <ProblemCard entry={entry} />
+  return <NoticeLine entry={entry} />
 }
 
 /** One part of a turn: the message that started it when you sent it while the agent worked, the work log, and the reply. */
@@ -132,6 +122,7 @@ const PartView = memo(function PartView({ part }: { part: TurnPart }) {
  * Rewind dialog on putting this request's files back, keeping the conversation.
  */
 function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
+  const root = useContext(WorkRoot)
   const totals = useMemo(() => editTotals(turn.log), [turn.log])
   const files = useMemo(() => editedFiles(turn.log), [turn.log])
   const running = useChat((state) => state.running)
@@ -198,7 +189,7 @@ function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
           {files.map((file) => (
             <div className="result-file" key={file.path}>
               <span className="result-path" title={file.path}>
-                {file.path}
+                {shownPath(file.path, root)}
               </span>
               <span className="result-stats">
                 <span className="add-stat">+{file.additions}</span>

@@ -11,6 +11,7 @@ import FindBar from './FindBar'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
+import { WorkRoot } from './shown-path'
 import TurnView from './TurnView'
 import { buildTurns, latestEditTurn, reuseTurns, type Turn } from './turns'
 
@@ -111,9 +112,11 @@ export default function ChatPanel() {
               </div>
             )}
 
-            {turns.map((turn) => (
-              <TurnView key={turn.id} turn={turn} latest={turn.id === latestEdit} />
-            ))}
+            <WorkRoot.Provider value={workspace?.root ?? null}>
+              {turns.map((turn) => (
+                <TurnView key={turn.id} turn={turn} latest={turn.id === latestEdit} />
+              ))}
+            </WorkRoot.Provider>
           </div>
         </div>
 

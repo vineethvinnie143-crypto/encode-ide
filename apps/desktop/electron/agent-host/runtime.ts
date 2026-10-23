@@ -16,6 +16,7 @@ import {
   createAnthropicAdapter,
   createOpenAICompatibleAdapter,
   createOpenRouterAdapter,
+  failureSentence,
   type BudgetQuery,
   type ClientEvent,
   type CompletionOutcome,
@@ -159,6 +160,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     kind: alert.type,
     profileId: config?.providers[alert.provider]?.profile ?? null,
     message: humanize(alert.message),
+    ...(alert.detail ? { detail: humanize(alert.detail) } : {}),
     ...('until' in alert && alert.until ? { until: alert.until } : {}),
   })
 
@@ -229,8 +231,9 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   const humanizeEvent = (event: ClientEvent): ClientEvent => {
     switch (event.type) {
       case 'switch':
-        return { ...event, from: humanizeKey(event.from), to: humanizeKey(event.to), reason: humanize(event.reason) }
+        return { ...event, from: humanizeKey(event.from), to: humanizeKey(event.to), reason: humanize(event.reason), ...(event.detail ? { detail: humanize(event.detail) } : {}) }
       case 'wait':
+        return { ...event, reason: humanize(event.reason), ...(event.detail ? { detail: humanize(event.detail) } : {}) }
       case 'discard':
         return { ...event, reason: humanize(event.reason) }
       default:
@@ -245,7 +248,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       const effort = (config?.efforts as Record<string, ReasoningEffort | undefined> | undefined)?.[request.role]
       const asked = effort ? { ...request, payload: { ...request.payload, reasoning: effort } } : request
       const outcome = await pick().complete(onEvent ? { ...asked, onEvent: (event) => onEvent(humanizeEvent(event)) } : asked)
-      return outcome.kind === 'paused' ? { ...outcome, message: humanize(outcome.message) } : outcome
+      return outcome.kind === 'paused' ? { ...outcome, message: humanize(outcome.message), ...(outcome.detail ? { detail: humanize(outcome.detail) } : {}) } : outcome
     },
   }
 
@@ -277,7 +280,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
           name: entry.name,
           ...(catalog?.fetchedAt !== undefined ? { models: catalog.models, free: catalog.free } : {}),
           ...(catalog?.error ? { catalogError: humanize(catalog.error) } : {}),
-          ...(block ? { blocked: { message: humanize(block.reason), until: block.until } } : {}),
+          // What blocks the provider in a sentence; the provider's own words stay in the log.
+          ...(block ? { blocked: { message: humanize(failureSentence({ kind: block.kind }, { model: provider, provider })), until: block.until } } : {}),
           ...(tier?.daily ? { freeLeft: tier.daily.remaining } : {}),
         }
       }),
@@ -363,7 +367,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     // A model that answers but cannot call a tool cannot drive the agent: that is a failed test, with its own words.
     const ok = result.ok && result.toolCall
     const message = result.ok && !result.toolCall ? 'The model answered, but it did not call the tool it was given, so it cannot drive the agent. Choose another model.' : result.message
-    return { ok, message: humanize(message), ...(result.ttftMs !== undefined ? { ms: result.ttftMs } : {}) }
+    return { ok, message: humanize(message), ...(result.detail ? { detail: humanize(result.detail) } : {}), ...(result.ttftMs !== undefined ? { ms: result.ttftMs } : {}) }
   })
 
   peer.handle('modelRecheck', async () => {

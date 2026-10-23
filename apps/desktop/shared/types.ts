@@ -128,7 +128,10 @@ export interface ModelAlert {
   kind: 'key-refused' | 'sign-in' | 'payment' | 'quota' | 'catalog' | 'billed' | 'model-refused'
   /** The profile it is about, when it is one of theirs. */
   profileId: string | null
+  /** In plain words. */
   message: string
+  /** What the provider said, for the log and a report. */
+  detail?: string
   /** When the block ends, ms since the epoch. */
   until?: number
 }
@@ -693,6 +696,25 @@ export interface DiffHunk {
 /** `steer`: a message the person sent while the agent worked, which the running request took in between two steps. */
 export type EntryKind = 'user' | 'steer' | 'assistant' | 'tool' | 'notice' | 'error'
 
+/** What the person can do about a problem the chat shows, offered as buttons under it. */
+export type ProblemAction = 'retry' | 'switch-model' | 'settings' | 'diagnostics'
+
+/**
+ * The kind of trouble behind an error in the chat: why no model could run, or the loop's and eNCode's own
+ * (`context`: the conversation does not fit; `empty`: the model said nothing; `host`: the agent process stopped;
+ * `internal`: a fault in eNCode).
+ */
+export type ProblemCode = 'rate-limit' | 'quota' | 'payment' | 'auth' | 'network' | 'unavailable' | 'no-model' | 'refused' | 'context' | 'empty' | 'host' | 'internal'
+
+export interface EntryProblem {
+  code: ProblemCode
+  actions: ProblemAction[]
+  /** Epoch ms after which trying again can work. */
+  retryAt?: number
+  /** The request was tried again from here: the problem offers nothing more. */
+  resolved?: boolean
+}
+
 export interface ConversationEntry {
   id: string
   kind: EntryKind
@@ -714,6 +736,10 @@ export interface ConversationEntry {
     /** Hidden or look-alike characters found in what the call wrote, one line each. */
     warnings?: string[]
   }
+  /** On an error: what kind it is and what can be done about it. */
+  problem?: EntryProblem
+  /** The longer account behind an error or a notice (what a provider said, keys removed), shown folded. */
+  details?: string
   createdAt: number
 }
 
@@ -793,7 +819,8 @@ export type AgentEventBody =
   | { type: 'mode'; mode: AgentMode }
   | { type: 'file-changed'; path: string }
   | { type: 'done'; summary: string }
-  | { type: 'error'; message: string }
+  /** The request ended on a problem. `entryId`: the entry that shows it, when the session made one. */
+  | { type: 'error'; message: string; problem?: EntryProblem; entryId?: string }
   | { type: 'session-reset' }
   | { type: 'title'; title: string }
 
@@ -926,7 +953,8 @@ export interface EncodeApi {
     openRouter(freeOnly?: boolean): Promise<ModelInfo[]>
     provider(id: string): Promise<ModelInfo[]>
     /** Lists the models, then asks the chosen one for a tool call, the way the agent will. */
-    test(id: string): Promise<{ ok: boolean; message: string }>
+    /** `message` is plain; `detail` is what the provider said, when the call failed on its answer. */
+    test(id: string): Promise<{ ok: boolean; message: string; detail?: string }>
     status(): Promise<ModelStatus>
     /** Lifts what a refused key or a payment problem set, and asks again: after changing a key or adding credit. */
     recheck(): Promise<void>
@@ -972,6 +1000,8 @@ export interface EncodeApi {
     statuses(): Promise<Record<string, AgentStatus>>
     history(sessionId?: string): Promise<AgentHistory>
     start(sessionId: string, input: AgentStartInput): Promise<void>
+    /** Runs the last request again from where a problem stopped it; resolves when it ends. */
+    retry(sessionId: string, mode?: AgentMode): Promise<void>
     cancel(sessionId: string): Promise<void>
     /**
      * Hands a message to the running request, which reads it after its current step and shows it as an entry with the

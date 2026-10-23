@@ -6,6 +6,7 @@ import { Button } from '../../ui/Button'
 import { Dialog } from '../../ui/Dialog'
 import { Sparkles } from '../../ui/icons'
 import { Toggle } from '../../ui/Toggle'
+import { errorText } from '../../ipc-error'
 
 /**
  * Commit, with a message the Small tasks model drafts from the changes as the dialog opens. The person reads and
@@ -34,7 +35,7 @@ export default function CommitDialog({ open, onClose, snapshot }: { open: boolea
       if (result.ok) setMessage(result.message)
       else setError(result.message)
     } catch (error) {
-      if (mine === edits.current) setError((error as Error).message)
+      if (mine === edits.current) setError(errorText(error))
     } finally {
       if (mine === edits.current) setDrafting(false)
     }

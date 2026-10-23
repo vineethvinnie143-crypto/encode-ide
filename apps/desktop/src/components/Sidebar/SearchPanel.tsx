@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CaseSensitive, Regex, Search } from '../../ui/icons'
 import type { SearchResult } from '@shared/types'
 import { api } from '../../api'
+import { errorText } from '../../ipc-error'
 import { useEditor } from '../../stores/editor'
 import { usePanels } from '../../stores/panels'
 import { useWorkspace } from '../../stores/workspace'
@@ -38,7 +39,7 @@ export default function SearchPanel() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError((err as Error).message)
+          setError(errorText(err))
           setResult(null)
         }
       } finally {

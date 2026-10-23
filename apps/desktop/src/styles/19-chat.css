@@ -196,19 +196,6 @@
   font-size: var(--fs-12);
   line-height: 18px;
 }
-.msg-error {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
-  border-radius: var(--r-10);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-  color: var(--danger);
-  font-size: var(--fs-13);
-  line-height: 20px;
-  white-space: pre-wrap;
-}
 
 .markdown > :last-child {
   margin-bottom: 0;

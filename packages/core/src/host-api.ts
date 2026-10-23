@@ -10,6 +10,7 @@
 import type { HandlerOptions, JsonSchema, RequestContext, RequestOptions } from '@encode/protocol'
 import type { AgentHost } from './host'
 import type {
+  AgentMode,
   AgentEvent,
   AgentHistory,
   AgentStartInput,
@@ -38,6 +39,8 @@ export type HostRequests = {
   history: { params: { sessionId?: string } | undefined; result: AgentHistory }
   /** Resolves when the turn ends. */
   start: { params: { sessionId: string; input: AgentStartInput }; result: void }
+  /** Runs the last request again from where a problem stopped it. Resolves when it ends. */
+  retry: { params: { sessionId: string; mode?: AgentMode }; result: void }
   cancel: { params: { sessionId: string }; result: void }
   /** A message for the running turn; null when no turn takes one now (send it as the next request). */
   steer: { params: { sessionId: string; text: string; id?: string }; result: { id: string } | null }
@@ -202,6 +205,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   update: object({ ...sessionId, patch: PATCH }, ['sessionId', 'patch']),
   history: { type: ['object', 'null'], properties: optionalSessionId },
   start: object({ ...sessionId, input: START_INPUT }, ['sessionId', 'input']),
+  retry: object({ ...sessionId, mode: { enum: ['code', 'ask', 'plan'] } }, ['sessionId']),
   cancel: object(sessionId, ['sessionId']),
   steer: object({ ...sessionId, text: text(400_000, 1), id: UUID }, ['sessionId', 'text']),
   reset: { type: ['object', 'null'], properties: optionalSessionId },
@@ -247,6 +251,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('statuses', () => host.statuses())
   on('history', (params) => host.history(params?.sessionId || undefined))
   on('start', ({ sessionId, input }) => host.start(sessionId, input))
+  on('retry', ({ sessionId, mode }) => host.retry(sessionId, mode))
   on('cancel', ({ sessionId }) => host.cancel(sessionId))
   on('steer', ({ sessionId, text: message, id: chosen }) => host.steer(sessionId, message, chosen))
   on('reset', (params) => host.reset(params?.sessionId || undefined))
@@ -296,6 +301,7 @@ export interface HostClient {
   statuses(): Promise<Record<string, AgentStatus>>
   history(sessionId?: string): Promise<AgentHistory>
   start(sessionId: string, input: AgentStartInput): Promise<void>
+  retry(sessionId: string, mode?: AgentMode): Promise<void>
   cancel(sessionId: string): Promise<void>
   /** `id`, when given, names the message's entry: a caller can then match the entry even when it comes before the answer. */
   steer(sessionId: string, text: string, id?: string): Promise<{ id: string } | null>
@@ -336,6 +342,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     statuses: () => caller.request('statuses'),
     history: (sessionId) => caller.request('history', sessionId ? { sessionId } : undefined),
     start: (sessionId, input) => caller.request('start', { sessionId, input }),
+    retry: (sessionId, mode) => caller.request('retry', mode ? { sessionId, mode } : { sessionId }),
     cancel: (sessionId) => caller.request('cancel', { sessionId }),
     steer: (sessionId, text, id) => caller.request('steer', id === undefined ? { sessionId, text } : { sessionId, text, id }),
     reset: (sessionId) => caller.request('reset', sessionId ? { sessionId } : undefined),

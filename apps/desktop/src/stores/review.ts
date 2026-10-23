@@ -12,6 +12,7 @@ import { usePanels } from './panels'
 import { useSessions } from './sessions'
 import { useUi } from './ui'
 import { useWorkspace } from './workspace'
+import { errorText } from '../ipc-error'
 
 export type ScopeKind = ReviewScope['kind']
 
@@ -159,7 +160,7 @@ function save(state: Saved): void {
   }
 }
 
-const describe = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const describe = (error: unknown) => errorText(error)
 
 /** Counts reads, so an old answer cannot replace a newer one. */
 let generation = 0

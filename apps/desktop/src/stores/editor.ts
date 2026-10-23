@@ -2,6 +2,7 @@ import { create } from '../store'
 import { api } from '../api'
 import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, matchesSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
+import { errorText } from '../ipc-error'
 
 export interface Tab {
   path: string
@@ -95,7 +96,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
         revealLine: line ?? null,
       }))
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -228,6 +229,6 @@ async function save(tab: Tab): Promise<void> {
     useEditor.getState().setDirty(tab.path, isDirty(tab.path))
     useUi.getState().notify('success', `Saved ${tab.name}`)
   } catch (error) {
-    useUi.getState().notify('error', `Save failed: ${(error as Error).message}`)
+    useUi.getState().notify('error', `Save failed: ${errorText(error)}`)
   }
 }

@@ -7,6 +7,7 @@ import { useNow } from '../../hooks/useNow'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
+import { Details } from '../../ui/Details'
 import StepRow, { GroupRow, stepsHold } from './StepRow'
 import { formatClock, formatDuration, logItems, stepsOf, summarizeSteps, type LogItem, type Turn } from './turns'
 
@@ -91,7 +92,10 @@ function WorkLog({ log, active, startedAt, endedAt }: WorkLogProps) {
                 return (
                   <div className={cx('worklog-notice', item.entry.kind === 'error' && 'is-error')} key={item.entry.id}>
                     {item.entry.kind === 'error' ? <AlertTriangle size={13} /> : <Info size={13} />}
-                    <span>{item.entry.text}</span>
+                    <div className="notice-body">
+                      <span>{item.entry.text}</span>
+                      {item.entry.details && <Details text={item.entry.details} />}
+                    </div>
                   </div>
                 )
               case 'group':

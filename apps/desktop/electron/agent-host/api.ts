@@ -55,7 +55,10 @@ export interface HostInit {
 /** The result of a test call to one model. */
 export interface ModelCheckResult {
   ok: boolean
+  /** In plain words. */
   message: string
+  /** What the provider said, keys removed, for a Details fold. */
+  detail?: string
   /** What the model took to start answering, ms. */
   ms?: number
 }

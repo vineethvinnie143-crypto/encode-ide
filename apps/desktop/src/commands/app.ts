@@ -17,6 +17,7 @@ import { useWorkspace } from '../stores/workspace'
 import { agentActions } from './agent'
 import { buildCommands, type AppActions } from './commands'
 import { CommandRegistry, type Command } from './registry'
+import { errorText } from '../ipc-error'
 
 const ui = () => useUi.getState()
 const panels = () => usePanels.getState()
@@ -30,14 +31,14 @@ export const helpActions = {
       const file = await api.app.exportDiagnostics()
       if (file) ui().notify('success', `Saved diagnostics to ${file}`)
     } catch (error) {
-      ui().notify('error', `Could not save diagnostics: ${(error as Error).message}`)
+      ui().notify('error', `Could not save diagnostics: ${errorText(error)}`)
     }
   },
   async showLogs(): Promise<void> {
     try {
       await api.app.openLogs()
     } catch (error) {
-      ui().notify('error', `Could not open the log folder: ${(error as Error).message}`)
+      ui().notify('error', `Could not open the log folder: ${errorText(error)}`)
     }
   },
 }
@@ -73,7 +74,7 @@ export const sessionActions = {
       const target = await api.agent.export(session.id)
       if (target) ui().notify('success', `Exported to ${target}`)
     } catch (error) {
-      ui().notify('error', `Could not export: ${(error as Error).message}`)
+      ui().notify('error', `Could not export: ${errorText(error)}`)
     }
   },
   async remove(session: SessionSummary): Promise<void> {

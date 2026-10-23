@@ -4,6 +4,7 @@ import type { Schedule } from '@shared/types'
 import { api } from '../api'
 import { useSessions } from '../stores/sessions'
 import { useUi } from '../stores/ui'
+import { errorText } from '../ipc-error'
 
 export default function AutomationModal() {
   const setAutomationOpen = useUi((state) => state.setAutomationOpen)
@@ -41,7 +42,7 @@ export default function AutomationModal() {
       await refresh()
       notify('success', 'Scheduled task created')
     } catch (error) {
-      notify('error', (error as Error).message)
+      notify('error', errorText(error))
     }
   }
 

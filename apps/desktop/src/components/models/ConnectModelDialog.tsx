@@ -7,6 +7,7 @@ import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
+import { Details } from '../../ui/Details'
 import { Dialog } from '../../ui/Dialog'
 import { AlertTriangle, Bolt, ChevronRight, Key, Play, Search } from '../../ui/icons'
 import { Select } from '../../ui/Select'
@@ -22,8 +23,15 @@ type Step = 'choose' | 'free' | 'own' | 'model'
 const TITLES: Record<Step, string> = { choose: 'Connect a model', free: 'Use free models', own: 'Use your own key', model: 'Choose a model' }
 
 /** Something that stopped the step, and the way past it if there is one. */
+/** The provider's own words from a failed check, when it gave any. */
+function detailOf(result: { ok: boolean; message: string; detail?: string }): { detail?: string } {
+  return 'detail' in result && result.detail ? { detail: result.detail } : {}
+}
+
 interface Problem {
   text: string
+  /** What the provider said, folded under Details. */
+  detail?: string
   /** A way to go on regardless, such as "Use it anyway". */
   way?: { label: string; run: () => void | Promise<void> }
 }
@@ -139,7 +147,7 @@ export default function ConnectModelDialog() {
       hide()
     }
     if (result.ok) await finish()
-    else setProblem({ text: result.message, way: { label: 'Use it anyway', run: finish } })
+    else setProblem({ text: result.message, ...detailOf(result), way: { label: 'Use it anyway', run: finish } })
     if (!stop(id)) setBusy(false)
   }
 
@@ -168,7 +176,7 @@ export default function ConnectModelDialog() {
     if (stop(id)) return
     if (!result.ok) {
       // Not every server lists its models: the person can still name one.
-      setProblem({ text: result.message, way: { label: 'Choose a model anyway', run: toModels } })
+      setProblem({ text: result.message, ...detailOf(result), way: { label: 'Choose a model anyway', run: toModels } })
     } else {
       const listed = useModels.getState().catalogs[next.profileId]?.models ?? []
       if (preset.model && listed.some((model) => model.id === preset.model)) setPicked(preset.model)
@@ -196,7 +204,7 @@ export default function ConnectModelDialog() {
       hide()
       return
     }
-    setProblem({ text: result.message, way: { label: 'Keep this model', run: hide } })
+    setProblem({ text: result.message, ...detailOf(result), way: { label: 'Keep this model', run: hide } })
     setBusy(false)
   }
 
@@ -456,11 +464,14 @@ export default function ConnectModelDialog() {
           <AlertTriangle size={15} />
           <div>
             <div>{problem.text}</div>
-            {problem.way && (
-              <button type="button" className="connect-way" onClick={() => void problem.way?.run()}>
-                {problem.way.label}
-              </button>
-            )}
+            <div className="details-row">
+              {problem.way && (
+                <button type="button" className="connect-way" onClick={() => void problem.way?.run()}>
+                  {problem.way.label}
+                </button>
+              )}
+              {problem.detail && <Details text={problem.detail} />}
+            </div>
           </div>
         </div>
       )}

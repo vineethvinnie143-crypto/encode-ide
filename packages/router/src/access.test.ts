@@ -109,10 +109,9 @@ describe('refusalMessage', () => {
     assert.doesNotMatch(message, /HTTP 400/)
   })
 
-  it("quotes the provider on a refusal it cannot explain, and keeps it short", () => {
+  it("says a refusal it cannot explain plainly, and leaves the provider's words to the details", () => {
     const message = refusalMessage('forbidden', 'vendor/m:free', `HTTP 403: ${'x'.repeat(500)}`)
-    assert.match(message, /refused vendor\/m:free \(HTTP 403: x+\)/)
-    assert.ok(message.length < 400)
-    assert.match(refusalMessage('forbidden', 'vendor/m:free', 'HTTP 403'), /no reason given/)
+    assert.equal(message, 'OpenRouter refused vendor/m:free for this account. eNCode skips it for an hour; the key and the other models are not affected.')
+    assert.doesNotMatch(message, /HTTP|xxx/)
   })
 })

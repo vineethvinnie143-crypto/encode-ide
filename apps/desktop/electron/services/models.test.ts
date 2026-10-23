@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ModelProfile } from '../../shared/types'
-import { ModelsService } from './models'
+import { ListingError, ModelsService } from './models'
 import type { SettingsService } from './settings'
 
 interface Call {
@@ -43,8 +43,9 @@ describe('the OpenRouter connection test', () => {
     const { service } = setup([or], { or: 'sk-or-v1-wrong' }, (url) => (url.endsWith('/key') ? { status: 401 } : { body: catalog }))
     const result = await service.test('or')
     assert.equal(result.ok, false)
-    assert.match(result.message, /did not accept the key \(HTTP 401\)/)
-    assert.doesNotMatch(result.message, /sk-or/)
+    assert.match(result.message, /^OpenRouter did not accept the key\. Copy the whole key again/)
+    assert.equal(result.detail, 'HTTP 401 when asked for the key information')
+    assert.doesNotMatch(JSON.stringify(result), /sk-or/)
   })
 
   it('says so when there is no key yet, and when OpenRouter cannot be reached', async () => {
@@ -53,7 +54,8 @@ describe('the OpenRouter connection test', () => {
     const down = setup([or], { or: 'k' }, () => ({ status: 503 }))
     const result = await down.service.test('or')
     assert.equal(result.ok, false)
-    assert.match(result.message, /having trouble \(HTTP 503\)/)
+    assert.equal(result.message, 'OpenRouter is having trouble right now. Try again in a moment.')
+    assert.equal(result.detail, 'HTTP 503 when asked for the model list')
   })
 })
 
@@ -97,13 +99,16 @@ describe('a provider\'s model list', () => {
 
   it('explains a refusal in words, without the key', async () => {
     for (const [status, pattern] of [
-      [401, /did not accept the key \(HTTP 401\)/],
-      [404, /no model list at this address \(HTTP 404\)/],
+      [401, /did not accept the key\. Copy/],
+      [404, /no model list at this address\. Check the base URL/],
       [429, /limiting requests/],
-      [500, /having trouble \(HTTP 500\)/],
+      [500, /having trouble right now/],
     ] as const) {
       const { service } = setup([profile({ name: 'DeepSeek' })], { p: 'sk-secret' }, () => ({ status }))
-      await assert.rejects(service.provider('p'), (error: Error) => pattern.test(error.message) && error.message.includes('DeepSeek') && !error.message.includes('sk-secret'))
+      await assert.rejects(
+        service.provider('p'),
+        (error: ListingError) => pattern.test(error.message) && error.message.includes('DeepSeek') && !/HTTP|sk-secret/.test(error.message) && error.detail === `HTTP ${status} when asked for the model list`,
+      )
     }
   })
 
@@ -120,7 +125,7 @@ describe('a provider\'s model list', () => {
     const service = new ModelsService(settings, (async () => {
       throw new Error('getaddrinfo ENOTFOUND api.example.test')
     }) as typeof fetch)
-    await assert.rejects(service.provider('p'), /Could not reach Offline: getaddrinfo ENOTFOUND/)
+    await assert.rejects(service.provider('p'), (error: ListingError) => error.message === 'eNCode could not reach Offline. Check the address and your connection.' && error.detail === 'getaddrinfo ENOTFOUND api.example.test')
   })
 })
 
