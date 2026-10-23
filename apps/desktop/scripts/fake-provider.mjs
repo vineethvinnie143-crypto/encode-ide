@@ -36,6 +36,18 @@ const SCENARIOS = {
       text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
+  // The agent asks to plan first; the person says to go ahead.
+  'plan-first': [
+    { text: 'This touches several files, so a plan first.', call: { name: 'EnterPlanMode', args: { reason: 'The change touches several files.' } } },
+    { text: 'Going ahead without a plan, as asked.' },
+  ],
+  // A PDF read by page, then a notebook read and one of its cells changed.
+  'pdf-notebook': [
+    { text: 'Reading the second page.', call: { name: 'Read', args: { file_path: 'smoke.pdf', pages: '2' } } },
+    { text: 'Reading the notebook.', call: { name: 'Read', args: { file_path: 'smoke.ipynb' } } },
+    { text: 'Changing the first cell.', call: { name: 'NotebookEdit', args: { notebook_path: 'smoke.ipynb', cell_id: '0', new_source: 'print(2)' } } },
+    { text: 'Read page 2 and changed the cell.' },
+  ],
   // The subagent's command must ask on the parent's card.
   'subagent-check': [
     {

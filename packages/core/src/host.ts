@@ -32,7 +32,7 @@ import type { ExternalToolSource } from './external'
 import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
-import { AgentSession, type RememberResult, type SessionCheckpoints, type SessionEnv } from './session'
+import { AgentSession, type RememberResult, type SessionCheckpoints, type SessionEnding, type SessionEnv } from './session'
 import type { SessionLog } from './session-records'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
@@ -268,10 +268,10 @@ export class AgentHost {
   }
 
   /** Closes a session that is no longer wanted. It is out of the map at once; `open` waits for the close before it makes another. */
-  private retire(id: string, session: AgentSession): Promise<void> {
+  private retire(id: string, session: AgentSession, ending: SessionEnding = 'closed'): Promise<void> {
     if (this.loaded.get(id) === session) this.loaded.delete(id)
     const closing: Promise<void> = session
-      .dispose()
+      .dispose(ending)
       .catch(() => undefined)
       .finally(() => {
         if (this.retiring.get(id) === closing) this.retiring.delete(id)
@@ -402,7 +402,7 @@ export class AgentHost {
   async remove(sessionId: string): Promise<void> {
     await this.retiring.get(sessionId)
     const session = this.loaded.get(sessionId)
-    if (session) await this.retire(sessionId, session)
+    if (session) await this.retire(sessionId, session, 'deleted')
     await this.store.remove(sessionId)
     this.reportJobs()
   }
@@ -562,7 +562,7 @@ export class AgentHost {
     this.disposed = true
     for (const timer of this.timers) clearTimeout(timer)
     this.timers.clear()
-    await Promise.all([...this.retiring.values(), ...[...this.loaded.values()].map((session) => session.dispose())])
+    await Promise.all([...this.retiring.values(), ...[...this.loaded.values()].map((session) => session.dispose('quit'))])
     this.loaded.clear()
     await this.desktop?.dispose().catch(() => undefined)
     await this.store.dispose()

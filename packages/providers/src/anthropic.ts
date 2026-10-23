@@ -54,11 +54,14 @@ export function anthropicToolId(id: string): string {
   return `${id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64)}_${hash}`
 }
 
-function resultContent(content: ToolResultContent[]): WireBlock[] {
+function resultContent(content: ToolResultContent[], documents: boolean): WireBlock[] {
   const out: WireBlock[] = []
   for (const part of content) {
     if (part.type === 'text') {
       if (part.text) out.push({ type: 'text', text: part.text })
+    } else if (part.type === 'document') {
+      if (documents) out.push({ type: 'document', source: { type: 'base64', media_type: part.mediaType, data: part.data } })
+      else if (part.text) out.push({ type: 'text', text: part.text })
     } else {
       out.push({ type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.data } })
     }
@@ -67,14 +70,14 @@ function resultContent(content: ToolResultContent[]): WireBlock[] {
 }
 
 /** Canonical messages in Anthropic's shape: tool results lead each user turn, other families' thinking is dropped. */
-export function toAnthropicMessages(request: ModelRequest): WireMessage[] {
+export function toAnthropicMessages(request: ModelRequest, options: { documents?: boolean } = {}): WireMessage[] {
   const out: WireMessage[] = []
   for (const message of request.messages) {
     const content: WireBlock[] = []
     if (message.role === 'user') {
       for (const block of message.content) {
         if (block.type !== 'tool-result') continue
-        const parts = resultContent(block.content)
+        const parts = resultContent(block.content, options.documents === true)
         content.push({
           type: 'tool_result',
           tool_use_id: anthropicToolId(block.toolUseId),
@@ -177,7 +180,7 @@ function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: W
 export function buildAnthropicBody(target: TransportTarget, request: ModelRequest, options: Pick<AnthropicOptions, 'openRouter'> = {}): Record<string, unknown> {
   const traits = anthropicTraits(target.model)
   const maxTokens = Math.max(1, Math.min(request.maxOutputTokens ?? DEFAULT_MAX_TOKENS, target.maxOutputTokens))
-  const messages = toAnthropicMessages(request)
+  const messages = toAnthropicMessages(request, { documents: target.capabilities.documents === true })
   const system: WireBlock[] = request.system.filter((part) => part.text).map((part) => ({ type: 'text', text: part.text }))
   // Without eager streaming the API buffers each input parameter, so a long file body is minutes of silence.
   // Proxies may reject the field, so it goes only to Anthropic's own endpoint. The assembler parses strictly and core validates.

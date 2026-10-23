@@ -25,7 +25,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { userText, type ModelClient, type ModelRole, type SystemPart, type Usage } from '@encode/providers'
+import { textBlock, userText, type ModelClient, type ModelRole, type SystemPart, type Usage } from '@encode/providers'
 import {
   createFileStateTracker,
   withoutSeen,
@@ -42,6 +42,7 @@ import type { RuleJudge } from './approval'
 import { memoryConversation } from './conversation'
 import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
+import { reminder } from './prompt'
 import type { AutoReviewer } from './reviewer'
 import { readSmallFile, staysInProject } from './safe-files'
 import { parseFrontMatter } from './skills'
@@ -66,7 +67,7 @@ export interface SubagentDefinition extends SubagentType {
  * What a subagent never gets: it must not start more agents, or touch what only the main agent owns. The Computer
  * tool is one of those: up to four subagents run side by side, and there is one mouse.
  */
-export const SUBAGENT_EXCLUDED: readonly string[] = ['Task', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal', 'TodoWrite', 'attempt_completion', 'Computer']
+export const SUBAGENT_EXCLUDED: readonly string[] = ['Task', 'EnterPlanMode', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal', 'TodoWrite', 'attempt_completion', 'Computer']
 
 /** The most steps a subagent takes before it must report. */
 const MAX_SUBAGENT_STEPS = 40
@@ -209,7 +210,7 @@ export function describeCall(entry: ConversationEntry): string {
   const tool = entry.tool
   if (!tool) return ''
   const input = tool.input
-  const subject = ['file_path', 'path', 'pattern', 'command', 'url', 'query', 'description', 'skill']
+  const subject = ['file_path', 'notebook_path', 'path', 'pattern', 'command', 'url', 'query', 'description', 'skill']
     .map((key) => input[key])
     .find((value): value is string => typeof value === 'string' && value.length > 0)
   const text = subject ? `${tool.name} ${subject.replace(/\s+/g, ' ').slice(0, 100)}` : tool.name
@@ -260,6 +261,10 @@ class SubagentSurface implements Surface {
     return this.parent.ask(this.request.entryId ?? entryId, question, signal)
   }
 
+  async enterPlan(): Promise<{ approved: false; note: string }> {
+    return { approved: false, note: 'A subagent cannot enter plan mode.' }
+  }
+
   async proposePlan(): Promise<{ approved: false; feedback: string }> {
     return { approved: false, feedback: 'A subagent cannot propose plans.' }
   }
@@ -298,7 +303,16 @@ export function createSubagents(options: SubagentsOptions): Subagents {
 
       const agentId = `sub_${++counter}_${request.toolUseId.slice(-6)}`
       const conversation = memoryConversation()
-      await conversation.add(userText(request.prompt), { turnId: agentId })
+      // A SubagentStart hook may give the subagent something to know from the start; it goes before the brief.
+      let context = ''
+      try {
+        const started = await options.hooks.subagentStart?.({ sessionId: options.services.sessionId, agentId, root: options.services.root, mode: request.mode, agentType: definition.name, signal })
+        context = started?.context?.trim() ?? ''
+      } catch (error) {
+        options.parent.settle(options.parent.entry({ kind: 'notice', text: `The subagentStart hook failed: ${error instanceof Error ? error.message : String(error)}` }))
+      }
+      if (signal.aborted) throw new AgentAbortedError()
+      await conversation.add(context ? { role: 'user', content: [textBlock(reminder(context)), textBlock(request.prompt)] } : userText(request.prompt), { turnId: agentId })
       const shell = options.createShell()
       const system = [...options.system, { text: [SUBAGENT_PROMPT, definition.prompt].filter(Boolean).join('\n\n') }]
       const loop = new AgentLoop({

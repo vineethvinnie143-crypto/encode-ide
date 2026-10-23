@@ -5,8 +5,10 @@ signed and does not update itself. Windows 10 or 11, 64-bit.
 
 ## Get it
 
-Every build that reaches `main` is kept for 30 days as an artifact of its CI run (GitHub → Actions → the run →
-*Artifacts*), named `eNCode-windows-<commit>-run<number>`. It holds:
+A tester build comes from a CI run started by hand on `main` (GitHub → Actions → CI → *Run workflow*). It is kept
+for 14 days as an artifact of that run (GitHub → Actions → the run → *Artifacts*), named
+`eNCode-windows-<commit>-run<number>`; only the newest build is kept, to stay within the repository's storage. It
+holds:
 
 | File | Use it when |
 | --- | --- |
@@ -135,8 +137,28 @@ suspect some and got none).
   never ask. Take the trust back and it should ask again. A typo in the hooks of a settings file should stop work in
   that folder and say where, rather than quietly drop the guard.
 
+- A `Notification` hook (same place, `"Notification": [ { "hooks": [ { "type": "command", "command": "..." } ] } ]`)
+  runs when the agent asks for approval or a question, shows a plan, or has waited a minute for you after a turn.
+  `SessionEnd` runs when you clear, delete or quit; `SubagentStart` when the agent hands work to a subagent. Scripts
+  written for Claude Code's versions of these should work as they are.
+
 What is most useful to hear: any change the rewind did not put back, any file it overwrote that you did not tell it
 to, and any hook that ran when the folder was not trusted.
+
+## PDFs, notebooks and planning first
+
+- Put a PDF in a project and ask about it: a long one should start with its outline and page numbers, and the agent
+  should then read the pages it needs ("pages 12-15"). Try one with tables, one in two columns, a scanned one, and one
+  that only opens without a password. With a model that reads PDFs (Claude, GPT-4o or later), ask about a chart or a
+  figure: the pages that have one are sent as pages, and the step says "1 page attached".
+- Ask the agent to change a cell of a Jupyter notebook: only that cell should change, its old outputs cleared, and the
+  rest of the file byte for byte as it was (check with Git).
+- Ask for something larger than a quick fix ("add dark mode to the settings page") under Workspace Write: the agent may
+  ask to plan first. **Go ahead without a plan** should let it carry on; **Plan first** puts it in Plan mode, where it
+  only reads until you approve its plan.
+
+What is most useful to hear: a PDF whose text comes out wrong or in the wrong order (send it if you can), and a
+notebook that changed where it should not have.
 
 ## MCP servers
 
@@ -313,5 +335,7 @@ Updating means installing the next build over the last one: everything above sta
 - No automatic updates: a new build is a new download.
 - A network that needs a proxy does not work yet for model requests.
 - The free models run on an OpenRouter key of your own; eNCode has no free service of its own yet.
+- PDFs: no OCR, so a scanned page without a text layer is readable only by a model that reads PDFs; PDFs that need a
+  password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").

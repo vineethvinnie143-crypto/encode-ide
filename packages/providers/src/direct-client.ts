@@ -169,7 +169,7 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
 
   async function budget(role: ModelRole, query: BudgetQuery = {}): Promise<ModelBudget> {
     const route = await options.route(role, query)
-    return { model: route.target.model, contextWindow: windowOf(route), maxOutputTokens: route.target.maxOutputTokens, images: route.target.capabilities.images }
+    return { model: route.target.model, contextWindow: windowOf(route), maxOutputTokens: route.target.maxOutputTokens, images: route.target.capabilities.images, documents: route.target.capabilities.documents === true }
   }
 
   async function complete(request: CompletionRequest): Promise<CompletionOutcome> {

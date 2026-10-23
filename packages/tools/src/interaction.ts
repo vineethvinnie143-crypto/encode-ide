@@ -1,7 +1,8 @@
 /**
  * Tools that talk to the user or shape the session rather than touch the
- * disk: TodoWrite, AskUserQuestion, ExitPlanMode, Task, Skill, the session
- * goal, and attempt_completion for models that need an explicit way to stop.
+ * disk: TodoWrite, AskUserQuestion, EnterPlanMode, ExitPlanMode, Task, Skill,
+ * the session goal, and attempt_completion for models that need an explicit
+ * way to stop.
  */
 import { plural } from './text'
 import type { GoalStatus, Question, SkillSummary, SubagentType, TodoInput, Tool, ToolOutcome } from './types'
@@ -130,6 +131,47 @@ export const askUserQuestionTool: Tool<AskInput> = {
     const answers = await ctx.interaction.ask(input.questions, ctx.signal)
     const lines = input.questions.map((question, index) => `- ${question.question}\n  ${answers[index]?.trim() || '(no answer)'}`)
     return { ok: true, content: `The user answered:\n${lines.join('\n')}\n\nContinue with these answers in mind.` }
+  },
+}
+
+// ---------------------------------------------------------------------------
+// EnterPlanMode
+
+interface EnterPlanInput extends Record<string, unknown> {
+  reason?: string
+}
+
+/** What the model reads once it is in plan mode: the same rules the plan mode reminder gives. */
+export const PLAN_MODE_ENTERED =
+  'You are in plan mode now. Only the read-only tools work: read and search the code, run nothing that changes anything. Investigate until you can plan the change, then call ExitPlanMode with a concrete, ordered plan. The user reviews it before any work starts.'
+
+export const enterPlanModeTool: Tool<EnterPlanInput> = {
+  definition: {
+    name: 'EnterPlanMode',
+    description: [
+      'Asks the user to switch to plan mode, to agree on the approach before changing anything.',
+      '',
+      'Use it for work worth agreeing on first: a new feature, a change across files, a choice between approaches, or an unclear request. Not for a small fix, a change the user spelled out, or a question.',
+      '',
+      '- In plan mode only read-only tools work: investigate, then call ExitPlanMode with the plan.',
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: { reason: { type: 'string', description: 'One sentence for the user: why a plan should come first.' } },
+      additionalProperties: false,
+    },
+  },
+  kind: 'interaction',
+  readOnly: true,
+  modes: ['code'],
+  access: () => ({ type: 'none' }),
+  describe: (input) => ({ title: 'Plan first', ...(input.reason?.trim() ? { detail: input.reason.trim() } : {}) }),
+  async run(input, ctx) {
+    const consent = await ctx.interaction.enterPlan((input.reason ?? '').trim().slice(0, 500), ctx.signal)
+    if (!consent.approved) {
+      return { ok: true, content: `The user wants you to go ahead without a plan.${consent.note ? ` They said: ${consent.note}` : ''} Carry on with the work in code mode.` }
+    }
+    return { ok: true, content: PLAN_MODE_ENTERED, mode: 'plan' }
   },
 }
 

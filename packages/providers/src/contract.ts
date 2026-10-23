@@ -26,6 +26,8 @@ export interface ModelCapabilities {
   reasoning: boolean
   /** Takes explicit prompt-cache breakpoints (Anthropic's cache_control, also through OpenRouter). */
   promptCache: boolean
+  /** Reads PDFs as documents, the pages as they look and not only their text. Absent means no. */
+  documents?: boolean
 }
 
 /** One concrete model on one provider: what an adapter needs to make a call. */
@@ -173,6 +175,8 @@ export interface ModelBudget {
   maxOutputTokens: number
   /** Whether the model reads images. Absent when the client cannot tell. */
   images?: boolean
+  /** Whether the model reads PDFs as documents. Absent when the client cannot tell. */
+  documents?: boolean
 }
 
 export interface BudgetQuery {

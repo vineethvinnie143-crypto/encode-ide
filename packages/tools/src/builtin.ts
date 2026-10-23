@@ -13,11 +13,13 @@ import {
   createGoalTool,
   createSkillTool,
   createTaskTool,
+  enterPlanModeTool,
   exitPlanModeTool,
   getGoalTool,
   todoWriteTool,
   updateGoalTool,
 } from './interaction'
+import { notebookEditTool } from './notebook'
 import { ToolRegistry } from './registry'
 import { globTool, grepTool } from './search'
 import type { ShellDialect, SkillSummary, SubagentType, Tool } from './types'
@@ -57,10 +59,11 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
     editTool as Tool,
     multiEditTool as Tool,
     writeTool as Tool,
+    notebookEditTool as Tool,
   ]
   if (options.web ?? true) tools.push(webFetchTool as Tool, webSearchTool as Tool)
   if (options.computer) tools.push(computerTool as Tool)
-  tools.push(todoWriteTool as Tool, askUserQuestionTool as Tool, exitPlanModeTool as Tool)
+  tools.push(todoWriteTool as Tool, askUserQuestionTool as Tool, enterPlanModeTool as Tool, exitPlanModeTool as Tool)
   if (options.subagentTypes?.length) tools.push(createTaskTool(options.subagentTypes) as Tool)
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
   if (options.goals ?? true) tools.push(createGoalTool as Tool, updateGoalTool as Tool, getGoalTool)

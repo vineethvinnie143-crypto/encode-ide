@@ -88,5 +88,14 @@ export function workspaceHooks(config: WorkspaceConfig, options: WorkspaceHookOp
     async preCompact(event) {
       return (await now(false))?.preCompact(event)
     },
+    async notification(event) {
+      return (await now(false))?.notification(event)
+    },
+    async sessionEnd(event) {
+      return (await now(false))?.sessionEnd(event)
+    },
+    async subagentStart(event) {
+      return (await now(false))?.subagentStart(event)
+    },
   }
 }

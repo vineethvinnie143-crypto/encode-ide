@@ -19,6 +19,7 @@ import {
   type DesktopServices,
   type JobManager,
   type ManagedShell,
+  type PlanConsent,
   type PlanVerdict,
   type Question,
   type Tool,
@@ -51,11 +52,15 @@ export class RecordingSurface implements Surface {
   readonly usages: Usage[] = []
   readonly changes: string[] = []
   readonly plans: string[] = []
+  /** The reasons given for each EnterPlanMode the agent asked. */
+  readonly planRequests: string[] = []
   todos: TodoInput[] = []
   /** How the test answers an approval request. */
   decide: (prompt: ApprovalPrompt, signal: AbortSignal) => boolean | ApprovalResult | Promise<boolean | ApprovalResult> = () => true
   answer: (question: Question) => string = (question) => question.options[0]?.label ?? ''
   verdict: PlanVerdict = { approved: true }
+  /** How the test answers EnterPlanMode. */
+  consent: PlanConsent = { approved: true }
   private counter = 0
 
   status(status: AgentStatus): void {
@@ -95,6 +100,11 @@ export class RecordingSurface implements Surface {
   async ask(_entryId: string, question: Question): Promise<string> {
     this.questions.push(question)
     return this.answer(question)
+  }
+
+  async enterPlan(_entryId: string, reason: string): Promise<PlanConsent> {
+    this.planRequests.push(reason)
+    return this.consent
   }
 
   async proposePlan(_entryId: string, plan: string): Promise<PlanVerdict> {

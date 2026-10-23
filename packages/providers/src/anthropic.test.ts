@@ -206,6 +206,48 @@ describe('buildAnthropicBody', () => {
     ])
   })
 
+  it('puts a PDF inside its tool result for a model that reads documents, and its text otherwise', () => {
+    const withDocument: ModelRequest = {
+      system: [],
+      tools: [],
+      messages: [
+        { role: 'assistant', content: [{ type: 'tool-use', id: 'toolu_1', name: 'Read', input: { file_path: 'a.pdf' } }] },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool-result',
+              toolUseId: 'toolu_1',
+              content: [
+                { type: 'text', text: 'PDF a.pdf: 2 pages.' },
+                { type: 'document', mediaType: 'application/pdf', data: 'JVBERi0=', name: 'a (page 2).pdf', pages: 1, text: '(Page 2 also has figures.)' },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const reads = buildAnthropicBody(target({ capabilities: { ...CAPS, documents: true } }), withDocument) as { messages: Array<{ content: unknown[] }> }
+    assert.deepEqual(reads.messages[1].content[0], {
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      cache_control: { type: 'ephemeral' },
+      content: [
+        { type: 'text', text: 'PDF a.pdf: 2 pages.' },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } },
+      ],
+    })
+    const cannot = toAnthropicMessages(withDocument)
+    assert.deepEqual(cannot[1].content[0], {
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      content: [
+        { type: 'text', text: 'PDF a.pdf: 2 pages.' },
+        { type: 'text', text: '(Page 2 also has figures.)' },
+      ],
+    })
+  })
+
   it('uses adaptive thinking with summarized display and effort on new models, and no sampling parameters', () => {
     const body = buildAnthropicBody(target(), { ...history, reasoning: 'xhigh', temperature: 0.2 })
     assert.deepEqual(body.thinking, { type: 'adaptive', display: 'summarized' })

@@ -238,6 +238,71 @@ describe('command hooks', () => {
   })
 })
 
+describe('hooks that only look', () => {
+  it('reads Notification, SessionEnd and SubagentStart with their matchers', () => {
+    const { groups, problems } = parseHooksConfig(
+      {
+        Notification: [{ matcher: 'permission_prompt|idle_prompt', hooks: [{ type: 'command', command: 'ping' }] }],
+        SessionEnd: [{ matcher: 'clear', hooks: [{ type: 'command', command: 'bye' }] }],
+        SubagentStart: [{ matcher: 'Explore', hooks: [{ type: 'command', command: 'brief' }] }],
+      },
+      'user',
+    )
+    assert.deepEqual(problems, [])
+    assert.deepEqual(groups.map((group) => group.event), ['Notification', 'SessionEnd', 'SubagentStart'])
+    assert.equal(groups[0].matcher.test('idle_prompt'), true)
+    assert.equal(groups[0].matcher.test('question'), false)
+    assert.equal(groups[1].matcher.test('other'), false)
+    assert.equal(groups[2].matcher.test('Explore'), true)
+  })
+
+  it("tells a Notification hook what the agent waits for, in Claude Code's fields, and only the kinds it matches", async () => {
+    const { hooks, calls, notices } = hooksFor(
+      {
+        Notification: [
+          { matcher: 'permission_prompt', hooks: [{ type: 'command', command: 'ring' }] },
+          { matcher: 'idle_prompt', hooks: [{ type: 'command', command: 'idle' }] },
+        ],
+      },
+      { ring: { exitCode: 2, stderr: 'rang the bell' } },
+    )
+    await hooks.notification({ ...BASE, kind: 'permission_prompt', title: 'Fix the parser', message: 'eNCode needs your approval: Run npm test' })
+    assert.deepEqual(calls.map((call) => call.command), ['ring'])
+    assert.equal(calls[0].stdin.hook_event_name, 'Notification')
+    assert.equal(calls[0].stdin.message, 'eNCode needs your approval: Run npm test')
+    assert.equal(calls[0].stdin.title, 'Fix the parser')
+    assert.equal(calls[0].stdin.notification_type, 'permission_prompt')
+    // It cannot stop anything: exit 2 is a message for the person, as in Claude Code.
+    assert.deepEqual(notices, ['The Notification hook "ring" said: rang the bell'])
+  })
+
+  it("gives a SessionEnd hook Claude Code's reason and eNCode's own", async () => {
+    const { hooks, calls } = hooksFor({ SessionEnd: [{ hooks: [{ type: 'command', command: 'bye' }] }] }, {})
+    await hooks.sessionEnd({ ...BASE, reason: 'prompt_input_exit', detail: 'quit' })
+    assert.equal(calls[0].stdin.hook_event_name, 'SessionEnd')
+    assert.equal(calls[0].stdin.reason, 'prompt_input_exit')
+    assert.equal(calls[0].stdin.encode_reason, 'quit')
+  })
+
+  it('lets a SubagentStart hook add context through its JSON, matched on the agent type', async () => {
+    const { hooks, calls } = hooksFor(
+      {
+        SubagentStart: [
+          { matcher: 'Explore', hooks: [{ type: 'command', command: 'brief' }] },
+          { matcher: 'Plan', hooks: [{ type: 'command', command: 'plan-only' }] },
+          { hooks: [{ type: 'command', command: 'plain' }] },
+        ],
+      },
+      { brief: { stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: 'The tests live in spec/.' } }) }, plain: { stdout: 'printed, not context' } },
+    )
+    const result = await hooks.subagentStart({ ...BASE, agentId: 'sub_1_abc123', agentType: 'Explore' })
+    assert.deepEqual(result, { context: 'The tests live in spec/.' })
+    assert.deepEqual(calls.map((call) => call.command).sort(), ['brief', 'plain'])
+    assert.equal(calls[0].stdin.agent_id, 'sub_1_abc123')
+    assert.equal(calls[0].stdin.agent_type, 'Explore')
+  })
+})
+
 describe('process runner', () => {
   // Node is the "shell" here, so the commands are JavaScript and the test runs the same on every platform.
   const run = createProcessRunner({ file: process.execPath, args: (command) => ['-e', command] })

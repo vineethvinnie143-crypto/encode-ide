@@ -46,7 +46,7 @@ const caps = (overrides: Partial<ModelCapabilities> = {}): ModelCapabilities => 
   ...overrides,
 })
 
-const CLAUDE_CAPS = caps({ images: true, reasoning: true, promptCache: true })
+const CLAUDE_CAPS = caps({ images: true, reasoning: true, promptCache: true, documents: true })
 
 /**
  * Known models by id pattern, first match wins. Ids are matched lowercased with dots as dashes,
@@ -58,11 +58,11 @@ const KNOWN: ReadonlyArray<[RegExp, Omit<ModelInfo, 'family'>]> = [
   [/claude-(?:opus|sonnet)-4-[6-9]/, { contextWindow: 1_000_000, maxOutputTokens: 128_000, capabilities: CLAUDE_CAPS }],
   [/claude-(?:opus|sonnet)-4/, { contextWindow: 200_000, maxOutputTokens: 64_000, capabilities: CLAUDE_CAPS }],
   [/claude-3-7-sonnet/, { contextWindow: 200_000, maxOutputTokens: 64_000, capabilities: CLAUDE_CAPS }],
-  [/claude/, { contextWindow: 200_000, maxOutputTokens: 8_192, capabilities: caps({ images: true, promptCache: true }) }],
-  [/gpt-5/, { contextWindow: 400_000, maxOutputTokens: 128_000, capabilities: caps({ images: true, reasoning: true }) }],
-  [/gpt-4-1/, { contextWindow: 1_047_576, maxOutputTokens: 32_768, capabilities: caps({ images: true }) }],
-  [/gpt-4o/, { contextWindow: 128_000, maxOutputTokens: 16_384, capabilities: caps({ images: true }) }],
-  [/(?:^|\/)o[134](?:-mini|-pro)?(?:$|-)/, { contextWindow: 200_000, maxOutputTokens: 100_000, capabilities: caps({ images: true, reasoning: true }) }],
+  [/claude/, { contextWindow: 200_000, maxOutputTokens: 8_192, capabilities: caps({ images: true, promptCache: true, documents: true }) }],
+  [/gpt-5/, { contextWindow: 400_000, maxOutputTokens: 128_000, capabilities: caps({ images: true, reasoning: true, documents: true }) }],
+  [/gpt-4-1/, { contextWindow: 1_047_576, maxOutputTokens: 32_768, capabilities: caps({ images: true, documents: true }) }],
+  [/gpt-4o/, { contextWindow: 128_000, maxOutputTokens: 16_384, capabilities: caps({ images: true, documents: true }) }],
+  [/(?:^|\/)o[134](?:-mini|-pro)?(?:$|-)/, { contextWindow: 200_000, maxOutputTokens: 100_000, capabilities: caps({ images: true, reasoning: true, documents: true }) }],
   [/deepseek-reasoner|deepseek-r1/, { contextWindow: 128_000, maxOutputTokens: 64_000, capabilities: caps({ reasoning: true }) }],
   [/deepseek/, { contextWindow: 128_000, maxOutputTokens: 8_192, capabilities: caps() }],
   [/gemini-(?:2-5|3)/, { contextWindow: 1_048_576, maxOutputTokens: 65_536, capabilities: caps({ images: true, reasoning: true }) }],

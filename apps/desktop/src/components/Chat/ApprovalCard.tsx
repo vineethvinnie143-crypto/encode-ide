@@ -7,7 +7,7 @@ import { modalOpen } from '../../commands/useKeymap'
 import { DEFAULT_ALWAYS_SCOPE, SCOPE_CHOICES, alwaysRulesText, ruleTiming, scopeNote, trustOffer } from '../../panels/permissions'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { AlertTriangle, ChevronLeft, ChevronRight, ShieldAlert, ShieldCheck } from '../../ui/icons'
+import { AlertTriangle, ChevronLeft, ChevronRight, ListTree, ShieldAlert, ShieldCheck } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import DiffView from './DiffView'
 import { reviewLine } from './review-text'
@@ -21,6 +21,12 @@ import { reviewLine } from './review-text'
  * Under Auto review it says who left the question to the person, and any invisible or look-alike
  * characters in what the call adds are listed above the buttons.
  */
+/** The buttons' words, for a request that is not about touching something. */
+const WORDS: Record<string, { approve: string; session: string; deny: string; explain: string; withNote: string }> = {
+  EnterPlanMode: { approve: 'Plan first', session: 'Plan first whenever it asks', deny: 'Go ahead without a plan', explain: 'Say how to go ahead', withNote: 'Go ahead with this note' },
+}
+const DEFAULT_WORDS = { approve: 'Approve', session: 'Approve for this session', deny: 'Deny', explain: 'Deny and explain', withNote: 'Deny with this note' }
+
 export default function ApprovalCard() {
   const approvals = useChat((state) => state.approvals)
   const answerApproval = useChat((state) => state.answerApproval)
@@ -83,6 +89,7 @@ export default function ApprovalCard() {
 
   if (!approval) return null
 
+  const words = WORDS[approval.tool] ?? DEFAULT_WORDS
   const offer = trustOffer(folder, scope)
   const trusting = offer?.kind === 'offer' && (trustToo ?? offer.checked)
   const timing = trusting ? 'now' : ruleTiming(folder, scope)
@@ -105,7 +112,7 @@ export default function ApprovalCard() {
     <div className="approval-card" role="group" aria-label="Approval needed">
       <div className="approval-top">
         <div className="approval-head">
-          <ShieldAlert size={16} />
+          {approval.tool === 'EnterPlanMode' ? <ListTree size={16} /> : <ShieldAlert size={16} />}
           <span>{approval.title}</span>
         </div>
         {approvals.length > 1 && (
@@ -169,7 +176,7 @@ export default function ApprovalCard() {
               size="sm"
               onClick={() => void answerApproval({ approved: false, note: note.current?.value.trim() || undefined }, id)}
             >
-              Deny with this note <Kbd keys="Ctrl+Enter" />
+              {words.withNote} <Kbd keys="Ctrl+Enter" />
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setExplaining(false)}>
               Cancel <Kbd keys="Esc" />
@@ -217,11 +224,11 @@ export default function ApprovalCard() {
       ) : (
         <div className="approval-actions">
           <Button variant="primary" size="sm" onClick={() => void answerApproval(true, id)}>
-            Approve <Kbd keys="Enter" />
+            {words.approve} <Kbd keys="Enter" />
           </Button>
           {approval.grantable && (
             <Button size="sm" onClick={() => void answerApproval({ approved: true, remember: 'session' }, id)}>
-              Approve for this session
+              {words.session}
             </Button>
           )}
           {approval.always && (
@@ -230,11 +237,11 @@ export default function ApprovalCard() {
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => void answerApproval(false, id)}>
-            Deny <Kbd keys="Esc" />
+            {words.deny} <Kbd keys="Esc" />
           </Button>
           {richAnswers && (
             <Button variant="ghost" size="sm" onClick={() => setExplaining(true)}>
-              Deny and explain
+              {words.explain}
             </Button>
           )}
         </div>

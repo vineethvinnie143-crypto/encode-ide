@@ -822,6 +822,17 @@ export class ModelRouter implements ModelClient {
         return NEXT
       }
       case 'unsupported': {
+        if (error.feature === 'documents') {
+          // The documents' text goes instead, so the same model can take the call again, once.
+          this.registry.learn(key, { documents: false })
+          const retryKey = `${key}:documents`
+          if (state.retried.has(retryKey)) state.excluded.add(key)
+          else {
+            state.retried.add(retryKey)
+            state.forceKey = key
+          }
+          return NEXT
+        }
         if (error.feature === 'tools') this.registry.learn(key, { tools: false })
         else if (error.feature === 'images') this.registry.learn(key, { images: false })
         else this.health.unusable(key, { kind: 'unsupported', message, until: now + DEFAULT_BLOCK_MS.unsupported })
@@ -990,7 +1001,7 @@ export class ModelRouter implements ModelClient {
     const requirements: Requirements = { promptTokens: 0, maxOutputTokens: 1, tools: false, images: false }
     const { candidates } = selectCandidates(this.selection, { role: resolved, refs, requirements, sticky })
     const first = candidates[0]?.info
-    if (first) return { model: first.model, contextWindow: first.contextWindow, maxOutputTokens: first.maxOutputTokens, images: first.capabilities.images }
+    if (first) return { model: first.model, contextWindow: first.contextWindow, maxOutputTokens: first.maxOutputTokens, images: first.capabilities.images, documents: first.capabilities.documents === true }
     // Nothing runs now: the best guess is the role's first model, available or not.
     for (const ref of refs) {
       const parsed = ref === FREE_POOL ? undefined : parseModelRef(ref)
@@ -998,12 +1009,12 @@ export class ModelRouter implements ModelClient {
         const info = this.registry.get(parsed.provider, parsed.model)
         // A model that free-only mode refuses will never run, so it is no guess at what will.
         if (this.config.freeOnly && !info.free) continue
-        return { model: info.model, contextWindow: info.contextWindow, maxOutputTokens: info.maxOutputTokens, images: info.capabilities.images }
+        return { model: info.model, contextWindow: info.contextWindow, maxOutputTokens: info.maxOutputTokens, images: info.capabilities.images, documents: info.capabilities.documents === true }
       }
       if (ref === FREE_POOL) {
         for (const id of this.config.freePool.providers) {
           const member = this.pool.members(id, resolved, this.config.freePool, sticky)[0]
-          if (member) return { model: member.model, contextWindow: member.contextWindow, maxOutputTokens: member.maxOutputTokens, images: member.capabilities.images }
+          if (member) return { model: member.model, contextWindow: member.contextWindow, maxOutputTokens: member.maxOutputTokens, images: member.capabilities.images, documents: member.capabilities.documents === true }
         }
       }
     }

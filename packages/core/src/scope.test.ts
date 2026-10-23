@@ -117,6 +117,44 @@ describe('a session scope', () => {
     assert.match(notice.entry.text ?? '', /\.encode\/settings\.local\.json/)
   })
 
+  it('judges the next call once a rule "Always allow" saves is in place, however long the save takes', async () => {
+    // Shell lines are judged by the scope's assessor, which follows the rules saved in the folder's settings.
+    let saved = false
+    let saves = 0
+    const h = await hostHarness({
+      script: (request) => {
+        const results = request.payload.messages.filter((message) => message.role === 'user' && message.content.some((block) => block.type === 'tool-result')).length
+        return results < 2 ? { calls: [{ name: 'Bash', input: { command: 'npm run build', description: 'build' } }] } : { text: 'done' }
+      },
+      host: {
+        scope: () => ({
+          assessor: async () => (saved ? { decision: 'allow', source: 'rule', reason: 'Allowed by Bash(npm run build:*).' } : { decision: 'ask', reason: 'Not proven read-only.' }),
+          remember: async (): Promise<RememberResult> => {
+            // Slower than running the command and asking the model again: the rule must be in force for that next call.
+            await new Promise((resolve) => setTimeout(resolve, 200))
+            saved = true
+            saves++
+            return { ok: true, where: '.encode/settings.local.json', approved: true, changed: true }
+          },
+        }),
+      },
+    })
+    const session = await h.host.create()
+    const running = h.host.start(session.id, { text: 'build twice', mode: 'code' })
+    const request = (await until(() => h.of('approval-request', session.id)[0])).request
+    h.host.approve(request.id, { approved: true, remember: 'always' })
+    // Refuse what the rule should have spared, so that a regression fails here instead of waiting forever.
+    const refuser = setInterval(() => {
+      for (const { request: extra } of h.of('approval-request', session.id).slice(1)) h.host.approve(extra.id, false)
+    }, 10)
+    await running
+    clearInterval(refuser)
+    assert.equal(saves, 1)
+    assert.equal(h.of('approval-request', session.id).length, 1, 'the same command ran again without asking')
+    const runs = (await h.host.history(session.id)).entries.filter((entry) => entry.tool?.name === 'Bash')
+    assert.equal(runs.length, 2)
+  })
+
   it('saves nothing when the call is refused, and says when a rule has to wait for a review', async () => {
     const saved: string[][] = []
     const h = await hostHarness({

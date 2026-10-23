@@ -235,6 +235,38 @@ describe('buildChatBody', () => {
     ])
   })
 
+  it('sends a PDF to a model that reads documents as a file after the tool message, and its text to one that does not', () => {
+    const request: ModelRequest = {
+      system: [],
+      tools: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'read it' }] },
+        { role: 'assistant', content: [{ type: 'tool-use', id: 'call_1', name: 'Read', input: { file_path: 'a.pdf' } }] },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool-result',
+              toolUseId: 'call_1',
+              content: [
+                { type: 'text', text: 'PDF a.pdf: 2 pages.' },
+                { type: 'document', mediaType: 'application/pdf', data: 'JVBERi0=', name: 'a (page 2).pdf', pages: 1, text: '(Page 2 also has figures.)' },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const caps = { tools: true, parallelTools: true, images: true, reasoning: false, promptCache: false }
+    const reads = buildChatBody(target({ capabilities: { ...caps, documents: true } }), request, false) as { messages: Array<Record<string, unknown>> }
+    assert.deepEqual(reads.messages.slice(2), [
+      { role: 'tool', tool_call_id: 'call_1', content: 'PDF a.pdf: 2 pages.' },
+      { role: 'user', content: [{ type: 'file', file: { filename: 'a (page 2).pdf', file_data: 'data:application/pdf;base64,JVBERi0=' } }] },
+    ])
+    const cannot = buildChatBody(target({ capabilities: caps }), request, false) as { messages: Array<Record<string, unknown>> }
+    assert.deepEqual(cannot.messages.slice(2), [{ role: 'tool', tool_call_id: 'call_1', content: 'PDF a.pdf: 2 pages.\n\n(Page 2 also has figures.)' }])
+  })
+
   it("rewrites ids into Mistral's nine-character form, the same way for calls and results", () => {
     const body = buildChatBody(target({ family: 'mistral' }), history, false) as { messages: Array<Record<string, any>> }
     const call = body.messages[2].tool_calls[0].id

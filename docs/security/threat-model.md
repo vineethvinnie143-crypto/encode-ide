@@ -892,3 +892,54 @@ window with a waiting approval, and a power request.
   sends a test notice, starts a chat with Ctrl+Alt+O in the chats folder, opens the page while the chat's approval comes
   up, presses Enter and Esc and finds the approval still waiting, reads the finished notice (the chat's name, "Finished.",
   none of the agent's words), and archives, restores and deletes the chat from the page.
+
+## Planning first, the looking hooks, notebooks and PDFs (Parity 1)
+
+Written with the pull request that adds EnterPlanMode, the Notification, SessionEnd and SubagentStart hooks,
+NotebookEdit and PDF reading
+([0069](../adr/0069-the-agent-asks-before-planning-hooks-hear-what-it-waits-for-and-pdfs-are-read-by-encodes-own-reader.md)).
+The new paths are a parser that reads any PDF the agent opens, PDF pages sent to the model's provider, the person's
+scripts run when the agent waits or a session ends, and a tool that writes inside notebooks.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| F1 | A PDF exhausts memory or time: a stream that inflates to gigabytes, objects nested without end, a content stream of millions of operators, a form that draws itself | Every decoder stops at 48 MB a stream and 256 MB a read; parsing stops 64 levels deep; a page runs at most 2,000,000 operators and forms 10 deep with no cycles; a read stops after 20 s and yields every 40 ms, so the app stays responsive; files over 100 MB are refused before they are loaded. A limit leaves the page marked as read in part. | Mitigated |
+| F2 | A crafted PDF crashes the reader and takes the agent's step down with it | The reader's own errors become a refusal with a reason ("could not be read as a PDF: ..."), a page that fails becomes a page read in part, and offsets, lengths and counts from the file are checked before use. Unknown filters are refused, image filters never decoded. | Mitigated (residual below) |
+| F3 | A PDF's text carries instructions to the model | It is a tool result like any file's text, with no more authority than Read's other output. ActualText and glyph maps can make the text differ from what a viewer shows, as they can in any reader. | Residual (as for every file the agent reads) |
+| F4 | Pages of a PDF go to the provider when the person did not expect it | Only after the agent read the file, which Read's rules govern (a file outside the workspace asks), only to the model that answered, and only pages that have figures or scans, at most 10 a read and 10 MB. The copy holds what those pages draw: links, form fields, metadata, thumbnails and other pages are left behind. | Mitigated |
+| F5 | A password-protected PDF is opened, or its restrictions removed | Only files with an empty user password open, which any viewer opens. The copy sent to a model is not encrypted, so the author's print and copy restrictions do not travel with it; it is never written to disk. | Accepted |
+| F6 | Megabytes of PDF pile up in the session log or the context | The log keeps each document's text only, compaction replaces old documents with their text, and the context estimate counts 1,800 tokens a page. | Mitigated |
+| F7 | NotebookEdit damages a notebook or changes more than one cell | It splices only the cell's bytes into the file as it was read, refuses a file changed since, keeps the writer's layout, and shows the cell's change as a diff, asking where any write would; a notebook whose cells cannot be followed is written whole and the diff shows it. Edit and MultiEdit refuse notebooks. | Mitigated |
+| F8 | A Notification or SessionEnd hook holds eNCode up, or a failing one breaks a session | These hooks only look: their exit codes stop nothing, their failures become a notice, a SessionEnd hook may hold a quit 5 s and other endings 15 s, and every hook keeps its timeout and is stopped with its process tree. The idle notice is one timer per session, cleared by the next turn or a stop. | Mitigated |
+| F9 | A SubagentStart hook steers a subagent | Its output is context before the subagent's task, as SessionStart's is for the main agent; the hook is the person's (or a trusted folder's, under P15) code, so it has the person's authority. | Accepted |
+| F10 | The model switches to plan mode behind the person's back, or out of it | EnterPlanMode asks under Workspace Write and stricter, says what plan mode does, and runs only in code mode; leaving plan mode still needs the plan approved (ExitPlanMode). Plan mode only takes tools away. | Mitigated |
+
+### Residual risks
+
+- **The PDF reader is new code facing hostile input.** It is written in a memory-safe language and bounded, but a
+  file that makes it read text wrongly, or slowly up to its limits, will exist. Fuzzing it is part of hardening.
+- **Text can differ from what a viewer shows.** Fonts without maps, ActualText and invisible text (a scan's OCR layer
+  is invisible on purpose) are read as the file says.
+- **A scan without a text layer** is only readable by a model that reads PDFs; there is no OCR.
+
+### Verification
+
+- The PDF tests read files from Chromium, LibreOffice and ReportLab and compare their text, outline and layout;
+  open RC4 40 and 128 bit, AES-128 and AES-256 files made by pypdf and refuse one with a password; read a damaged table,
+  a file with no table, object streams behind a predicted cross-reference stream, Type 0 fonts with ToUnicode ranges
+  and surrogate pairs, glyph names, forms (one that draws itself), inline images holding "EI", ActualText and
+  overprinted bold; stop a 64 MB stream, cut a page at its time limit, and keep to the character and page budgets.
+- The copy of chosen pages is read back by the reader and opened by pypdf and pdftotext; it keeps rotation, drops
+  links and encryption, and gives up over its size limit.
+- Read's tests check the outline, pages, the note on what is left, the attachment for a model that reads PDFs and the
+  note for one that does not; the adapter tests send the document inside the tool result (Anthropic) or as a file after
+  it (chat completions) and its text otherwise; the router learns a refusal and asks the same model once more; the
+  session test keeps the document out of the log.
+- The NotebookEdit tests keep every byte outside the cell, across line endings, indentation, string sources, ASCII
+  escaping and missing ids; the hook tests check the notification kinds and order, no idle notice after a stop, the
+  SessionEnd reasons, a session never started owing none, and SubagentStart's context; the session tests check the
+  plan card, a refusal with a note, and a session grant.
+- The end-to-end run shows the plan card with its own buttons and goes ahead on the person's word, reads page 2 of a
+  PDF and changes a notebook cell from the fake provider's scenario, and checks the row that says so.

@@ -13,7 +13,7 @@
  *   - `ShellCommandAssessor`: judges a shell line (eNCode's own command rules).
  *   - `ToolRegistry.register`: tools from outside (MCP), with their own schema.
  */
-import type { ImageBlock, TextBlock, ToolDefinition } from '@encode/providers'
+import type { ToolDefinition, ToolResultContent } from '@encode/providers'
 import type { DesktopHandle } from './computer/state'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
@@ -74,7 +74,7 @@ export interface ToolOutcome {
   /** False when the call failed; the model sees an error result. */
   ok: boolean
   /** What the model reads. */
-  content: string | (TextBlock | ImageBlock)[]
+  content: string | ToolResultContent[]
   /** What the UI shows, when it differs from what the model reads. */
   display?: {
     output?: string
@@ -84,7 +84,7 @@ export interface ToolOutcome {
   changed?: string[]
   /** Ends the turn after this step, with a summary for the user. */
   stop?: { summary: string }
-  /** The session continues in this mode (ExitPlanMode, once the plan is approved). */
+  /** The session continues in this mode (EnterPlanMode, and ExitPlanMode once the plan is approved). */
   mode?: AgentMode
 }
 
@@ -309,6 +309,13 @@ export interface TodoInput {
   activeForm: string
 }
 
+/** The user's answer to the agent asking to plan first. */
+export interface PlanConsent {
+  approved: boolean
+  /** What the user said with a refusal. */
+  note?: string
+}
+
 export interface PlanVerdict {
   approved: boolean
   /** What the user said instead, when they did not approve. */
@@ -360,6 +367,8 @@ export interface SkillSummary {
 export interface Interaction {
   /** AskUserQuestion: one answer per question, as the user's text (labels joined for multi-select). */
   ask(questions: Question[], signal: AbortSignal): Promise<string[]>
+  /** EnterPlanMode: whether the user wants a plan agreed first. */
+  enterPlan(reason: string, signal: AbortSignal): Promise<PlanConsent>
   /** ExitPlanMode: the user's verdict on a plan. */
   proposePlan(plan: string, signal: AbortSignal): Promise<PlanVerdict>
   setTodos(todos: TodoInput[]): void
@@ -409,6 +418,8 @@ export interface ToolContext {
    * did not exist). Checkpoints hook in here; a rejection fails the write.
    */
   beforeWrite?(path: string, previous: Buffer | null, info: WriteInfo): Promise<void>
+  /** Whether the model that answered last reads PDFs as documents (Read then attaches pages with figures). */
+  readsDocuments?(): boolean
   /** Streams live output of a long call to the UI. */
   progress?(text: string): void
   /**

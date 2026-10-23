@@ -56,9 +56,10 @@ jobs:
 
       - name: Keep what the helper saw
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-helper-${{ github.run_attempt }}
           path: packages/tools/screenshots
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3

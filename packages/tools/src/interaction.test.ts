@@ -7,6 +7,7 @@ import {
   createGoalTool,
   createSkillTool,
   createTaskTool,
+  enterPlanModeTool,
   exitPlanModeTool,
   todoWriteTool,
   updateGoalTool,
@@ -17,6 +18,7 @@ import type { GoalState, Interaction, PlanVerdict, TodoInput } from './types'
 function interaction(overrides: Partial<Interaction> = {}): Interaction {
   return {
     ask: async () => [],
+    enterPlan: async () => ({ approved: true }),
     proposePlan: async () => ({ approved: true }),
     setTodos: () => {},
     ...overrides,
@@ -57,6 +59,26 @@ describe('interaction tools', () => {
     assert.match(textOf(rejected.content), /Their feedback: Use SQLite\. Stay in plan mode/)
     const deferred = await run({ approved: false, deferred: true })
     assert.deepEqual(deferred.stop, { summary: 'Plan proposed.' })
+  })
+
+  it('enters plan mode once the user agrees, and carries on in code mode when they do not', async () => {
+    const root = await tempWorkspace()
+    const reasons: string[] = []
+    const run = (consent: { approved: boolean; note?: string }, reason?: string) =>
+      enterPlanModeTool.run(
+        reason === undefined ? {} : { reason },
+        testContext(root, { interaction: interaction({ enterPlan: async (asked) => (reasons.push(asked), consent) }) }),
+      )
+    const entered = await run({ approved: true }, '  Three files change.  ')
+    assert.equal(entered.mode, 'plan')
+    assert.match(textOf(entered.content), /^You are in plan mode now\. Only the read-only tools work/)
+    assert.match(textOf(entered.content), /call ExitPlanMode/)
+    const declined = await run({ approved: false, note: 'Just fix it.' })
+    assert.equal(declined.ok, true)
+    assert.equal(declined.mode, undefined)
+    assert.equal(textOf(declined.content), 'The user wants you to go ahead without a plan. They said: Just fix it. Carry on with the work in code mode.')
+    assert.deepEqual(reasons, ['Three files change.', ''])
+    assert.deepEqual(await enterPlanModeTool.describe({ reason: 'Three files change.' }, testContext(root)), { title: 'Plan first', detail: 'Three files change.' })
   })
 
   it('runs subagents through the context, and lists the types it offers', async () => {
@@ -103,8 +125,8 @@ describe('the built-in tool set', () => {
   it('describes the shell it runs, and leaves out what a session does not have', () => {
     const names = builtinTools({ dialect: 'pwsh', platform: 'win32' }).map((tool) => tool.definition.name)
     assert.deepEqual(names, [
-      'Bash', 'BashOutput', 'KillShell', 'Glob', 'Grep', 'Read', 'Edit', 'MultiEdit', 'Write', 'WebFetch', 'WebSearch',
-      'TodoWrite', 'AskUserQuestion', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal',
+      'Bash', 'BashOutput', 'KillShell', 'Glob', 'Grep', 'Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch',
+      'TodoWrite', 'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal',
     ])
     const bash = builtinTools({ dialect: 'pwsh', platform: 'win32', only: ['Bash'], shellProgram: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' })[0]
     assert.match(bash.definition.description, /This is PowerShell 7, not bash/)
@@ -120,5 +142,8 @@ describe('the built-in tool set', () => {
     assert.ok(registry.has('Task') && registry.has('Skill') && registry.has('attempt_completion'))
     assert.deepEqual(registry.definitions('plan').map((tool) => tool.name).includes('Write'), false)
     assert.equal(registry.check('ExitPlanMode', { plan: 'x' }, 'code'), 'ExitPlanMode is not available in code mode.')
+    assert.equal(registry.check('EnterPlanMode', {}, 'plan'), 'EnterPlanMode is not available in plan mode.')
+    assert.equal(registry.check('EnterPlanMode', {}, 'ask'), 'EnterPlanMode is not available in ask mode.')
+    assert.equal(registry.check('EnterPlanMode', { reason: 'x' }, 'code'), undefined)
   })
 })

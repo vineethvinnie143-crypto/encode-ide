@@ -324,6 +324,17 @@ describe('ModelRouter: context and capabilities', () => {
     assert.deepEqual(world.callsTo(A).map((call) => call.target.maxOutputTokens), [4_096, 32_768 - 30_800])
   })
 
+  it('learns that a model cannot read PDFs and asks it again, once, with their text instead', async () => {
+    const world = freeWorld({ behavior: { [A]: [faults.noDocuments(), faults.reply('read the text')] } })
+    const { text } = await world.complete()
+    assert.equal(text, 'read the text')
+    assert.deepEqual(
+      world.callsTo(A).map((call) => call.target.capabilities.documents),
+      [undefined, false],
+    )
+    assert.equal(world.router.registry.get('openrouter', A).capabilities.documents, false)
+  })
+
   it('learns that a model cannot call tools and leaves it out of tool calls', async () => {
     const world = freeWorld({ behavior: { [A]: faults.noTools(), [B]: faults.toolCall('Read', { path: 'a.ts' }) } })
     const requirements = { promptTokens: 1_000, maxOutputTokens: 4_096, tools: true, images: false }
@@ -751,11 +762,12 @@ describe('ModelRouter: sessions, abort and budget', () => {
 
   it("reports the window of the model a call would use now", async () => {
     const world = new TestWorld({ catalogs: { openrouter: [catalogEntry(A, { contextWindow: 262_144, maxOutputTokens: 32_768 })] } })
-    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false })
+    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false, documents: false })
     const seeing = new TestWorld({
-      catalogs: { openrouter: [catalogEntry(A, { capabilities: { tools: true, parallelTools: true, images: true, reasoning: false, promptCache: false } })] },
+      catalogs: { openrouter: [catalogEntry(A, { capabilities: { tools: true, parallelTools: true, images: true, documents: true, reasoning: false, promptCache: false } })] },
     })
     assert.equal((await seeing.router.budget('main')).images, true, 'whether the model reads images, so a tool knows whether to attach a screenshot')
+    assert.equal((await seeing.router.budget('main')).documents, true, 'and PDFs, so Read knows whether to attach pages with figures')
     const empty = new TestWorld({ catalogs: {} })
     assert.equal((await empty.router.budget('main')).model, '@free')
   })

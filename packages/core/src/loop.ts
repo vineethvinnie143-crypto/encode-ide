@@ -200,14 +200,14 @@ function trimInput(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 function textOf(content: readonly ToolResultContent[]): string {
-  return content.map((part) => (part.type === 'text' ? part.text : '[image]')).join('\n')
+  return content.map((part) => (part.type === 'image' ? '[image]' : part.text)).join('\n')
 }
 
 /** What the model reads of an outcome: never empty, never huge. */
 function modelContent(outcome: ToolOutcome): ToolResultContent[] {
   const parts = typeof outcome.content === 'string' ? [textBlock(outcome.content)] : outcome.content
   const kept = parts
-    .filter((part) => part.type === 'image' || part.text.length > 0)
+    .filter((part) => part.type !== 'text' || part.text.length > 0)
     .map((part) => (part.type === 'text' && part.text.length > MAX_MODEL_RESULT_CHARS ? textBlock(truncateMiddle(part.text, MAX_MODEL_RESULT_CHARS)) : part))
   return kept.length ? kept : [textBlock('(no output)')]
 }
@@ -273,6 +273,8 @@ export class AgentLoop {
   private readonly approvedApps: Set<string>
   /** Whether the model that answered last reads images; unknown until the first request. */
   private vision: boolean | undefined
+  /** Whether it reads PDFs as documents. */
+  private documents: boolean | undefined
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
@@ -387,6 +389,7 @@ export class AgentLoop {
       const settings = o.settings()
       const budget = await o.client.budget(o.role, this.query())
       this.vision = budget.images
+      this.documents = budget.documents
       // A model that cannot read images is not sent the screens it could not see anyway.
       const sent = budget.images === false ? withoutScreensFrom(o.conversation.messages()) : o.conversation.messages()
       const maxOutputTokens = Math.min(budget.maxOutputTokens, MAX_OUTPUT_TOKENS)
@@ -968,6 +971,7 @@ export class AgentLoop {
           }
           return answers
         },
+        enterPlan: (reason, signal) => o.surface.enterPlan(entry.id, reason, signal),
         proposePlan: (plan, signal) => o.surface.proposePlan(entry.id, plan, signal),
         setTodos: (todos) => o.surface.setTodos(todos),
       },
@@ -983,6 +987,7 @@ export class AgentLoop {
             },
           }
         : {}),
+      readsDocuments: () => this.documents === true,
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
       ...(progress ? { progress } : {}),

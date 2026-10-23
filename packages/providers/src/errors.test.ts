@@ -77,6 +77,10 @@ describe('classifyHttpFailure', () => {
     const tools = classifyHttpFailure(404, undefined, '{"error":{"message":"No endpoints found that support tool use."}}')
     assert.equal(tools.kind, 'unsupported')
     assert.equal(tools.feature, 'tools')
+    for (const text of ['This model does not support PDF input.', 'No endpoints found that support file input.', 'Document inputs are not supported for this model.']) {
+      const documents = classifyHttpFailure(400, undefined, JSON.stringify({ error: { message: text } }))
+      assert.deepEqual([documents.kind, documents.feature], ['unsupported', 'documents'], text)
+    }
     assert.equal(classifyHttpFailure(400, undefined, '{"error":{"message":"temperature is invalid"}}').kind, 'invalid-request')
   })
 

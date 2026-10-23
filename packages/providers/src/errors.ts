@@ -37,7 +37,7 @@ export interface TransportErrorDetails {
   window?: number
   used?: number
   /** For unsupported: what is missing. */
-  feature?: 'stream' | 'tools' | 'images'
+  feature?: 'stream' | 'tools' | 'images' | 'documents'
   /**
    * For rate-limit and quota: whom the limit binds. `account` is the whole key
    * (OpenRouter's free-model caps, a gateway quota), so every model behind it
@@ -57,7 +57,7 @@ export class TransportError extends Error {
   readonly retryAt?: number
   readonly window?: number
   readonly used?: number
-  readonly feature?: 'stream' | 'tools' | 'images'
+  readonly feature?: 'stream' | 'tools' | 'images' | 'documents'
   readonly scope?: 'model' | 'account'
   readonly code?: string
   readonly apis?: readonly string[]
@@ -206,6 +206,7 @@ const STREAM_UNSUPPORTED = /stream(?:ing)?\b[^.]{0,40}\b(?:not (?:be )?supported
 const TOOLS_UNSUPPORTED =
   /(?:tools?|tool[ _]use|tool[ _]calling|function[ _]calling)\b[^.]{0,40}\b(?:not (?:be )?supported|unsupported|not available)|does not support (?:tools|tool use|tool calling|function calling)|no endpoints found that support tool use/i
 const IMAGES_UNSUPPORTED = /(?:image|vision)[^.]{0,40}\b(?:not supported|unsupported)|does not support (?:image|vision)|no endpoints found that support image input/i
+const DOCUMENTS_UNSUPPORTED = /(?:pdf|document|file)s?[^.]{0,40}\b(?:not supported|unsupported)|does not support (?:pdf|document|file)|no endpoints found that support (?:file|pdf|document) input/i
 const FILTERED = /moderation|flagged|content (?:policy|filter|management)|safety (?:system|filter)/i
 const QUOTA = /free-models-per-day|daily (?:limit|quota)|quota (?:exceeded|exhausted)|insufficient_quota|exceeded your current quota/i
 
@@ -338,6 +339,7 @@ function kindFromText(message: string): Pick<TransportErrorDetails, 'feature' | 
   if (STREAM_UNSUPPORTED.test(message)) return { kind: 'unsupported', feature: 'stream' }
   if (TOOLS_UNSUPPORTED.test(message)) return { kind: 'unsupported', feature: 'tools' }
   if (IMAGES_UNSUPPORTED.test(message)) return { kind: 'unsupported', feature: 'images' }
+  if (DOCUMENTS_UNSUPPORTED.test(message)) return { kind: 'unsupported', feature: 'documents' }
   return {}
 }
 

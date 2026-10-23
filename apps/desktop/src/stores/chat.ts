@@ -401,6 +401,10 @@ export const useChat = create<ChatStore>((set, get) => ({
       case 'plan':
         set({ plan: event.plan })
         break
+      case 'mode':
+        // The agent went into plan mode itself: what you send next stays in plan mode until you approve its plan.
+        if (useSettings.getState().settings?.agentMode !== event.mode) void useSettings.getState().save({ agentMode: event.mode })
+        break
       case 'usage':
         set((state) => ({
           usageTotals: {
