@@ -1629,3 +1629,60 @@ What is new:
 - Checked by hand in the cloud container: both servers were installed from the npm locks through eNCode's installer
   and run through the hub. Tailwind 4, in a nested web folder, suggested classes and showed a class's CSS. Svelte
   showed a hover in a `.svelte` file.
+
+## Suggestions as you type (Editor and language intelligence 9a)
+
+Written with the pull request that has the editor suggest code as you type, drawn as ghost text
+([0087](../adr/0087-the-editor-suggests-code-as-you-type-from-the-inline-suggestions-role-drawn-as-ghost-text-and-sent-without-secrets.md)).
+
+What is new:
+
+- once typing pauses, the editor sends the text around the cursor, and parts of other open files, to the model of a new
+  role, Inline suggestions;
+- the answer is drawn in the editor as text that is not part of the file, and Tab, Ctrl+Right or Alt+\ take or ask for
+  it;
+- a new IPC call, `code:inline`, and its cancel, `code:inline-cancel`.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| Y1 | A secret written in a file goes to a model provider without anyone asking the model anything | Files whose name says they hold secrets (`.env`, `.npmrc`, `credentials.json`, `secrets.*`, keys and keystores) are never sent, as the file or as a part. In what is sent, anything shaped like a credential becomes `[redacted]`: the log's patterns, assignments to secret-like names, FiveM `server.cfg` key and licence lines, private keys, passwords in URLs, Discord webhooks, Cfx.re keys and long opaque tokens. If that changed the cursor's own line, nothing is asked. The main process redacts again, whatever the page sent. | Mitigated (by pattern: see the residual risks) |
+| Y2 | The folder's rules keep a file from the agent, and suggestions send it anyway | The main process asks the folder's permission judge about every path, the file and each part. A `Read` deny or ask rule leaves it out; for the file itself, nothing is asked. | Mitigated |
+| Y3 | The page asks for a suggestion while the person turned them off, or for a file outside the folder | `code:inline` reads the settings itself and refuses while `inlineState()` says off. The request is checked field by field and cut to its limits, and its path must resolve inside the open folder; anything else is no answer. | Mitigated |
+| Y4 | Suggestions spend the free models' daily requests, or a paid model when only free ones may answer | Under Auto they are off when the role's first model is a free model with a daily limit. With *only free models* set, the role's paid models are skipped, as for every role. If the router would wait for the free models' pace, the suggestion is given up at once. | Mitigated |
+| Y5 | A request per keystroke floods the provider or the router | It asks 300 ms after typing pauses, one at a time: a newer request, a moved cursor or a cancel stops the one before, and the host gives up after 10 seconds. The last 32 answers are kept per place. A refused key, no credit or no model stops asking until the settings change. | Mitigated |
+| Y6 | The file's text tells the model to do something else (prompt injection) | The request has no tools, so the model can only answer text. The prompt says the file is data. What comes back is shown, never run, and becomes text only when the person takes it. | Mitigated (the model can still suggest bad code; see the residual risks) |
+| Y7 | The answer draws differently from the text Tab puts in, for example with bidi controls or characters that draw as nothing | Answers with control characters other than tab and new line, bidi controls, characters that draw as nothing or a `[redacted]` are refused, as are empty answers and ones over 4,000 characters. What is drawn is exactly what Tab takes: on a line too long to draw, nothing is drawn and Tab keeps its meaning. | Mitigated (same rule as 0060) |
+| Y8 | The answer is drawn as markup in the page | The view sets the ghost text as a text node and as an attribute read by CSS `content`, never as HTML. | Mitigated |
+| Y9 | Taking a suggestion writes the file or runs something | Taking it is one edit in the editor, one step for Ctrl+Z, like typing. Nothing is saved or run by it. A read-only file is never asked for. | Mitigated |
+
+### Residual risks
+
+- Redaction works by pattern. A secret that looks like ordinary text, such as a short password in a string with a plain
+  name, can still be sent with the code around it. Keep secrets in a file whose name says so, or turn suggestions off.
+- A suggestion can be wrong or unsafe code, like any completion. It is only text until the person takes it.
+- The provider of the role's model sees the open file around the cursor and parts of other open files.
+
+### Verification
+
+- Host tests (`inline-suggest.test.ts`):
+  - the request goes to the Inline suggestions role, without tools, with low reasoning and a short output;
+  - a wait for the free models gives up at once and says until when, and a refused key stops asking;
+  - a cancel rejects;
+  - replies are cleaned: fences, the cursor marker, an echoed prefix and what the line already has after the cursor
+    are taken out, and several lines stop before the lines that follow;
+  - replies with bidi controls, zero-width characters or a redaction are refused;
+  - secret files and files the folder's rules keep out are never sent, and credentials are taken out, FiveM
+    `server.cfg` lines included.
+- Settings tests (`shared/inline.test.ts`): off, demo and no model; the role order; Auto and the free models; only free
+  models; cutting at whole lines.
+- Editor tests (`ghost-text.test.ts`): what is asked with, where a suggestion fits, which parts of other files go with
+  it, how the ghost follows typing, word by word, the kept answers and the status line.
+- A browser scenario draws ghost text in the view: one line at the caret, several lines as rows that push the next
+  lines down, a replacement, and none after an edit, past the end or in a read-only file. The document never holds
+  it.
+- The desktop smoke, with the fake provider: the status line says they are on; typing asks once per pause, and the
+  request holds the cursor, no secret and no tools; Tab takes it and Ctrl+Z undoes it; Alt+\ draws the kept answer
+  without a new request; Esc puts it away; Ctrl+Right takes a word; an empty line gets two lines; a `secrets.json`
+  file asks nothing; turned off, nothing is asked and the button is gone.

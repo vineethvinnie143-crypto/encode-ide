@@ -269,7 +269,9 @@ let lastRequest = null
 let lastReviewer = null
 /** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
 let lastCodeReview = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0 }
+/** The latest suggestion asked for as you type, for the smoke to check what was sent. */
+let lastInline = null
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, inlineRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -460,6 +462,24 @@ function codeReviewAnswer(user) {
   })}\n\`\`\``
 }
 
+/** The editor's call for a suggestion as you type (ADR 0087): no tools, the file with <cursor/> in it. */
+const INLINE_SYSTEM = 'You are the autocomplete of a code editor.'
+const isInline = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(INLINE_SYSTEM))
+
+/**
+ * What goes at the cursor. Only the smoke's own file gets a suggestion, so typing in every other check sees none and
+ * Tab there keeps its meaning: after `return ` the sum, and a whole line in an empty line, as a model writes them.
+ */
+function inlineAnswer(user) {
+  const file = /<file path="([^"]*)"[^>]*>\n([\s\S]*?)\n<\/file>/.exec(user)
+  if (!file || !file[1].endsWith('ghost-check.ts')) return ''
+  const before = file[2].split('<cursor/>')[0]
+  const line = before.slice(before.lastIndexOf('\n') + 1)
+  if (/return $/.test(line)) return 'a + b'
+  if (!line.trim()) return `${line}// ghost check\n${line}return a + b`
+  return ''
+}
+
 /** The small call that names a session once its first turn is over. */
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
@@ -480,6 +500,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-reviewer') {
       sendJson(response, 200, lastReviewer)
+      return
+    }
+    if (request.url === '/__last-inline') {
+      sendJson(response, 200, lastInline)
       return
     }
     if (request.url === '/__last-code-review') {
@@ -535,6 +559,14 @@ const server = http.createServer(async (request, response) => {
       stats.titleRequests += 1
       // Quoted and closed with a full stop, as models do: eNCode must take both off.
       await sendText(response, body, '"Provider path check."')
+      return
+    }
+
+    if (isInline(messages)) {
+      stats.inlineRequests += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastInline = { model: body.model ?? null, tools: body.tools ?? [], maxTokens: body.max_tokens ?? body.max_completion_tokens ?? null, user }
+      await sendText(response, body, inlineAnswer(user))
       return
     }
 

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
 import { cleanKeybindings } from '../../shared/keybindings'
+import { isInlineSuggest } from '../../shared/inline'
 import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
 import type { AgentMode, ApprovalPolicy, ErrorGate, FollowUp, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
@@ -52,6 +53,7 @@ function defaults(): StoredSettings {
     languageServers: true,
     formatOnSave: false,
     formatOnType: false,
+    inlineSuggest: 'auto',
     errorGate: 'auto',
     notifyDone: 'background',
     notifyNeeds: 'background',
@@ -256,6 +258,7 @@ export class SettingsService {
       languageServers: typeof input.languageServers === 'boolean' ? input.languageServers : base.languageServers,
       formatOnSave: typeof input.formatOnSave === 'boolean' ? input.formatOnSave : base.formatOnSave,
       formatOnType: typeof input.formatOnType === 'boolean' ? input.formatOnType : base.formatOnType,
+      inlineSuggest: isInlineSuggest(input.inlineSuggest) ? input.inlineSuggest : base.inlineSuggest,
       errorGate: isErrorGate(input.errorGate) ? input.errorGate : base.errorGate,
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
@@ -303,6 +306,7 @@ export class SettingsService {
       languageServers: this.data.languageServers,
       formatOnSave: this.data.formatOnSave,
       formatOnType: this.data.formatOnType,
+      inlineSuggest: this.data.inlineSuggest,
       errorGate: this.data.errorGate,
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
@@ -387,6 +391,7 @@ export class SettingsService {
     if (typeof patch.languageServers === 'boolean') next.languageServers = patch.languageServers
     if (typeof patch.formatOnSave === 'boolean') next.formatOnSave = patch.formatOnSave
     if (typeof patch.formatOnType === 'boolean') next.formatOnType = patch.formatOnType
+    if (isInlineSuggest(patch.inlineSuggest)) next.inlineSuggest = patch.inlineSuggest
     if (isErrorGate(patch.errorGate)) next.errorGate = patch.errorGate
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds

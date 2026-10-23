@@ -109,7 +109,8 @@ primary platform; the code stays cross-platform.
   directives and, once installed, every native with its parameters and notes, written from Cfx.re's own typings. JSON (with its schema), CSS, SCSS, Less and
   HTML are read by eNCode's own language server, with nothing to install; in a Tailwind project (a FiveM resource's web
   page included) Tailwind's own server runs beside it for class names, and Svelte files get Svelte's server, each
-  installed with one click. In a
+  installed with one click. Once typing pauses, a model of your choosing suggests the rest of the line or a short
+  block as faded text, taken with Tab, a word at a time with Ctrl+Right, never sent with files that hold secrets. In a
   folder you trust, the language servers (typescript-language-server, pyright,
   rust-analyzer, gopls, clangd, lua-language-server, Eclipse JDT LS and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's

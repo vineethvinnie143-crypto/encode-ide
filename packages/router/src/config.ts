@@ -123,7 +123,7 @@ export interface ConfigProblem {
   message: string
 }
 
-export const BUILT_IN_ROLES = ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility'] as const
+export const BUILT_IN_ROLES = ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility', 'inline'] as const
 
 /** A role left unconfigured uses the list of the role it falls back to; `main` ends every chain. */
 export const ROLE_FALLBACK: Readonly<Record<string, string>> = {
@@ -132,6 +132,7 @@ export const ROLE_FALLBACK: Readonly<Record<string, string>> = {
   reviewer: 'main',
   summarizer: 'utility',
   utility: 'main',
+  inline: 'utility',
 }
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'

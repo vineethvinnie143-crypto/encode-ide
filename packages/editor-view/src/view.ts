@@ -56,6 +56,10 @@ const MAX_SHIFT = 30_000_000
 const PROBE_CHARS = 200
 /** A line draws at most this many hints; a server that sends more for one line is not giving hints. */
 const MAX_INLAYS_PER_LINE = 50
+/** The owner of the rows a suggestion of several lines draws below its line. */
+const GHOST_ZONE = '\u0000ghost'
+/** Which comes first of what is drawn at the same column as the ghost text. */
+const GHOST_ORDER: Readonly<Record<NonNullable<InlaySpec['kind']>, number>> = { compose: 0, type: 1, ghost: 2, parameter: 3 }
 /** The largest kind a semantic token can be drawn as: a token kind with the flags above it. */
 const KIND_LIMIT = 0xfff
 const NO_BRACKETS: readonly number[] = []
@@ -408,6 +412,11 @@ export class EditorView {
    * drawn again for nothing).
    */
   private composition: { text: string; at: Map<number, number[]>; merged: Map<number, { hints: readonly InlaySpec[] | undefined; all: readonly InlaySpec[] }> } | null = null
+  /**
+   * A suggestion drawn at a place in the text as if typed there: its first line among the line's text, the others as
+   * rows below it. `merged` keeps the line's hints with it, while they are the same array.
+   */
+  private ghost: { pos: number; text: string; line: number; col: number; first: string; merged: { hints: readonly InlaySpec[] | undefined; all: readonly InlaySpec[] } | null } | null = null
 
   constructor(config: EditorViewConfig) {
     this.state = config.state
@@ -654,6 +663,7 @@ export class EditorView {
     this.sources.clear()
     for (const zone of [...this.attachedZones]) this.detachZone(zone)
     this.zones = []
+    this.ghost = null
     this.bracketCache = null
     this.maxCols = 0
     // The rows of the new document are laid out when it is drawn.
@@ -804,8 +814,76 @@ export class EditorView {
     return { x: drawn.el.getBoundingClientRect().left - el.dom.getBoundingClientRect().left, y: this.layerCoords(head, assoc).y }
   }
 
-  /** The hints drawn in line `n`: the language server's (none in a line drawn in part), and a composition at each cursor in it. */
+  /**
+   * Ghost text: `text` drawn at `pos` as if it were typed there, faded, and no part of the document. The caret,
+   * selections, copies and a screen reader skip it. Its first line is drawn in the line, before the text after `pos`;
+   * the lines after it are drawn as rows below the line. Any change to the document takes it away, so its owner sets
+   * it again for the text as it is then. Null takes it away. A read-only document, a place past its end or a line drawn
+   * in part shows none.
+   */
+  setGhostText(ghost: { pos: number; text: string } | null): void {
+    const doc = this.state.doc
+    if (!ghost || !ghost.text || this.state.config.readOnly || !Number.isInteger(ghost.pos) || ghost.pos < 0 || ghost.pos > doc.length) {
+      this.dropGhost()
+      return
+    }
+    const current = this.ghost
+    if (current && current.pos === ghost.pos && current.text === ghost.text) return
+    const line = doc.lineAt(ghost.pos)
+    if (line.text.length > LONG_LINE) {
+      this.dropGhost()
+      return
+    }
+    const lines = ghost.text.replace(/\r\n?/g, '\n').split('\n')
+    this.ghost = { pos: ghost.pos, text: ghost.text, line: line.number, col: ghost.pos - line.from, first: lines[0], merged: null }
+    const rest = lines.slice(1)
+    if (!rest.length) {
+      this.setZones(GHOST_ZONE, [])
+    } else {
+      const lineHeight = this.metrics.lineHeight
+      const dom = document.createElement('div')
+      dom.className = 'enc-zone enc-ghost-zone'
+      dom.setAttribute('aria-hidden', 'true')
+      for (const text of rest) {
+        const row = document.createElement('div')
+        row.className = 'enc-ghost-line'
+        row.style.height = `${lineHeight}px`
+        fillLine(row, text, [], 0, text.length)
+        dom.append(row)
+      }
+      this.setZones(GHOST_ZONE, [{ after: line.number, height: rest.length * lineHeight, dom }])
+    }
+    this.requestRender()
+  }
+
+  /** The ghost text drawn now, or null. */
+  get ghostText(): { pos: number; text: string } | null {
+    return this.ghost ? { pos: this.ghost.pos, text: this.ghost.text } : null
+  }
+
+  private dropGhost(): void {
+    if (!this.ghost) return
+    this.ghost = null
+    this.setZones(GHOST_ZONE, [])
+    this.requestRender()
+  }
+
+  /** The hints drawn in line `n`: the language server's and a composition at each cursor in it (see `composedHints`), with the ghost text if it is there. */
   private hintsOf(n: number, long: boolean): readonly InlaySpec[] | undefined {
+    const hints = this.composedHints(n, long)
+    const ghost = this.ghost
+    if (!ghost || ghost.line !== n || long || !ghost.first) return hints
+    if (ghost.merged && ghost.merged.hints === hints) return ghost.merged.all
+    const all: InlaySpec[] = [...(hints ?? []), { from: ghost.col, to: ghost.col, label: ghost.first, kind: 'ghost' }]
+    // At the same column: what an input method composes, a type's hint (it belongs to the name before it), the ghost
+    // text, then a parameter's name (it belongs to the argument after it).
+    all.sort((a, b) => a.from - b.from || GHOST_ORDER[a.kind ?? 'type'] - GHOST_ORDER[b.kind ?? 'type'])
+    ghost.merged = { hints, all }
+    return all
+  }
+
+  /** The hints drawn in line `n`: the language server's (none in a line drawn in part), and a composition at each cursor in it. */
+  private composedHints(n: number, long: boolean): readonly InlaySpec[] | undefined {
     const hints = long ? undefined : this.inlays.line(n)
     const composing = this.composition
     const offsets = composing?.at.get(n)
@@ -898,6 +976,8 @@ export class EditorView {
 
   private mapAfterChange(changes: ChangeSet): void {
     const doc = this.state.doc
+    // A suggestion is for the text it was made for; its owner sets it again for the text as it is now.
+    this.dropGhost()
     this.decorationsVersion++
     for (const [key, source] of [...this.sources]) {
       if (!source.map) continue

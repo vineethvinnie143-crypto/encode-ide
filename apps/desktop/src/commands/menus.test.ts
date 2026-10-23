@@ -226,6 +226,18 @@ describe('menus', () => {
     assert.deepEqual(toggled, ['inlayHints', 'semanticHighlighting'])
   })
 
+  it('turn suggestions as you type on and off, and ask for one on Alt+\\', () => {
+    assert.equal(registryWith({}).titleOf('view.inlineSuggest'), 'Turn suggestions as you type on')
+    let flips = 0
+    const on = registryWith({ hasEditor: () => true, inlineSuggestOn: () => true, toggleInlineSuggest: () => void flips++ })
+    assert.equal(on.titleOf('view.inlineSuggest'), 'Turn suggestions as you type off')
+    void on.run('view.inlineSuggest')
+    assert.equal(flips, 1)
+    const ran: string[] = []
+    void registryWith({ hasEditor: () => true, editorCommand: (name) => void ran.push(name) }).run('editor.inlineSuggest')
+    assert.deepEqual(ran, ['triggerInlineSuggest'])
+  })
+
   it('turn word wrap on and off with Alt+Z, and show every space and tab', () => {
     const off = registryWith({})
     assert.equal(off.titleOf('view.wordWrap'), 'Turn word wrap on')

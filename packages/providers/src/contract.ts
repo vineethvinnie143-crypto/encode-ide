@@ -103,8 +103,8 @@ export interface ProviderAdapter {
   stream(input: StreamInput): AsyncIterable<TransportEvent>
 }
 
-/** The roles of the plan. Users can add their own. */
-export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility' | (string & {})
+/** The roles of the plan (`inline`: the editor's suggestions as you type). Users can add their own. */
+export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility' | 'inline' | (string & {})
 
 /** What a candidate must offer to take this call. */
 export interface Requirements {

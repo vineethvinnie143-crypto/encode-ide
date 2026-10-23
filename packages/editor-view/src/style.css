@@ -48,6 +48,7 @@
   --e-minimap-slider: var(--enc-editor-minimap-slider, rgba(150, 160, 180, 0.12));
   --e-inlay-fg: var(--enc-editor-inlay-fg, #8a91a1);
   --e-inlay-bg: var(--enc-editor-inlay-bg, rgba(150, 160, 180, 0.12));
+  --e-ghost: var(--enc-editor-ghost-fg, #6f7686);
   --e-minimap-slider-hover: var(--enc-editor-minimap-slider-hover, rgba(150, 160, 180, 0.22));
   --e-ui-font: var(--enc-editor-ui-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
 
@@ -697,6 +698,37 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+/* Ghost text: a suggestion drawn faded where it would go until Tab takes it or typing drops it. Like a composition its
+   first line is drawn from an attribute, so the line's offsets count as the document does; its other lines are rows
+   below the line. */
+.enc-inlay-ghost {
+  pointer-events: none;
+}
+.enc-inlay-ghost::before {
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--e-ghost);
+  font-size: inherit;
+  line-height: inherit;
+}
+.enc-ghost-zone {
+  pointer-events: none;
+}
+.enc-ghost-line {
+  box-sizing: border-box;
+  height: var(--enc-line-h);
+  line-height: var(--enc-line-h);
+  padding-left: var(--enc-pad-x, 12px);
+  white-space: pre;
+  tab-size: var(--enc-tab-size, 4);
+  font-variant-ligatures: none;
+  color: var(--e-ghost);
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
 .enc-inlay-pl::before {
   margin-left: 0.5ch;
 }
@@ -1167,6 +1199,15 @@
   .enc-inlay-compose::before {
     border: 0;
     color: CanvasText;
+  }
+  .enc-inlay-ghost::before {
+    border: 0;
+    background: none;
+    color: GrayText;
+  }
+  .enc-ghost-line {
+    forced-color-adjust: none;
+    color: GrayText;
   }
   .enc-fold-pill {
     forced-color-adjust: none;

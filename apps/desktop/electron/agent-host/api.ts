@@ -10,7 +10,7 @@ import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
-import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { ApprovalPolicy, InlineSuggestAnswer, InlineSuggestRequest, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
 import type { RouterSettings } from './router-settings'
@@ -115,6 +115,8 @@ export type DesktopHostRequests = HostRequests & {
   codeAsk: { params: { root: string; ask: EditorAsk }; result: EditorAnswer }
   /** A rename or a code action of the editor's, its preview, or taking one back; after the editor's earlier changes. */
   codeChange: { params: { root: string; request: EditorChangeRequest }; result: EditorChangeResult }
+  /** A suggestion at the editor's cursor from the model of the Inline suggestions role (ADR 0087); the caller cancels one it no longer wants. */
+  inlineSuggest: { params: { root: string; request: InlineSuggestRequest }; result: InlineSuggestAnswer }
 }
 
 /** A file the editor shows, opened, changed or closed, in a folder named as the main process knows it. */

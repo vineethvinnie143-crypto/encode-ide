@@ -36,6 +36,9 @@ export interface AppActions {
    */
   editorLayout(): Record<EditorPart, boolean>
   toggleEditorPart(part: EditorPart): void
+  /** Suggestions as you type: whether the settings and the models have them on, and turning them on or off. */
+  inlineSuggestOn(): boolean
+  toggleInlineSuggest(): void
   /** The keyboard to the breadcrumbs, shown first if they were hidden. */
   focusBreadcrumbs(): void
   searchInFiles(): void
@@ -154,6 +157,7 @@ function editorCommands(a: AppActions): Command[] {
     command('callHierarchy', 'Show call hierarchy', 'callHierarchy', 'Shift+Alt+H', 'code callers calls incoming outgoing who calls function'),
     command('triggerSuggest', 'Show suggestions', 'triggerSuggest', 'Ctrl+Space', 'code completion autocomplete intellisense'),
     command('parameterHints', 'Show parameter hints', 'triggerParameterHints', 'Ctrl+Shift+Space', 'code signature arguments call'),
+    command('inlineSuggest', 'Suggest code here', 'triggerInlineSuggest', 'Alt+\\', 'code ghost text inline completion autocomplete ai model'),
     command('navigateBack', 'Go back in the editor', 'navigateBack', 'Alt+Left', 'code navigate previous location'),
     command('navigateForward', 'Go forward in the editor', 'navigateForward', 'Alt+Right', 'code navigate next location'),
     fold('fold', 'Fold', 'Ctrl+Shift+[', 'code collapse block region hide'),
@@ -357,6 +361,14 @@ export function buildCommands(a: AppActions): Command[] {
       group: 'View',
       keywords: 'editor semantic highlighting tokens colors types deprecated language server',
       run: () => a.toggleEditorPart('semanticHighlighting'),
+    },
+    {
+      id: 'view.inlineSuggest',
+      title: 'Toggle suggestions as you type',
+      label: () => (a.inlineSuggestOn() ? 'Turn suggestions as you type off' : 'Turn suggestions as you type on'),
+      group: 'View',
+      keywords: 'editor ghost text inline completion autocomplete ai model tab',
+      run: () => a.toggleInlineSuggest(),
     },
     { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },

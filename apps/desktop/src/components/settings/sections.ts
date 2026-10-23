@@ -63,6 +63,7 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'appearance.uiSize', section: 'appearance', label: 'Interface size', keywords: 'text font size zoom' },
   { id: 'appearance.codeFont', section: 'appearance', label: 'Code font', keywords: 'monospace jetbrains consolas' },
   { id: 'appearance.codeSize', section: 'appearance', label: 'Code size', keywords: 'font size' },
+  { id: 'editor.inlineSuggest', section: 'editor', label: 'Suggest code as you type', keywords: 'ghost text inline completion autocomplete ai model tab accept' },
   { id: 'editor.wordWrap', section: 'editor', label: 'Word wrap', keywords: 'long lines soft wrap rows alt z' },
   { id: 'editor.wrapAt', section: 'editor', label: 'Wrap at', keywords: 'window edge column whichever first bounded width' },
   { id: 'editor.wrapColumn', section: 'editor', label: 'Wrap column', keywords: 'width characters ruler' },

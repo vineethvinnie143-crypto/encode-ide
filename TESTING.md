@@ -351,6 +351,19 @@ none inside it):
 - A `.css` file outside that folder gets no Tailwind suggestions or marks.
 - A `.svelte` file offers Svelte's server; after it, errors, completion and hovers work in its script and markup.
 
+Suggestions as you type (most useful to hear about: a suggestion that repeats what is already there, shows up where
+it should not, or a secret you find in **Help → Diagnostics** or your provider's log):
+
+- With a model of your own connected, open a `.ts` or `.lua` file and pause after `return ` or on an empty line inside a
+  function. A faded suggestion appears at the cursor, and on an empty line it can run over a few lines. **Tab** takes
+  it (one **Ctrl+Z** takes it back), **Ctrl+Right** takes one word, **Esc** puts it away and **Alt+\\** asks at once.
+- The sparkle button in the status line says where the suggestions come from; it shows *Paused* or *Stopped* when the
+  model cannot answer, and opens **Settings → Editor**.
+- With only the free models connected, **Auto** keeps them off so the agent keeps its daily requests; **On** uses them.
+  Give the **Inline suggestions** role a fast model of its own in **Settings → Models** for the best results.
+- Nothing is asked in a `.env` or `secrets.json` file, in a file your folder's rules keep from the agent, while the list
+  of suggestions is open, or with two cursors.
+
 FiveM resources (most useful to hear about: a red mark on code that runs fine in FiveM, a native or runtime function
 the editor does not know, or a hover that says something wrong):
 
@@ -572,6 +585,9 @@ Updating means installing the next build over the last one: everything above sta
   Vue files, which have no server in eNCode yet. A Lua server
   that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- Suggestions as you type: one suggestion at a time (no choosing between several), none for a selection, and none that
+  change text before the cursor. Credentials are found by their shape, so a short password with a plain name in an
+  ordinary file can still go to the model's provider with the code around it.
 - In right-to-left text the arrow keys move through the characters in stored order, so the cursor can jump across a
   word; identifiers in a right-to-left script stay in stored order. A screen reader reads the text, not the hint
   labels or the problem marks beside it.
