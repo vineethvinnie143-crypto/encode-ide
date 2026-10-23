@@ -55,6 +55,8 @@ function config(searchProvider: SearchProviderId): HostConfig {
     maxSteps: 30,
     maxGoalRounds: 8,
     computer: false,
+    languageServers: false,
+    errorGate: 'auto',
     model: 'none',
     router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
     providers: {},

@@ -20,8 +20,11 @@ import TitleBar from './components/shell/TitleBar'
 import Toasts from './components/Toasts'
 import { api } from './api'
 import { useKeymap } from './commands/useKeymap'
+import { startLanguageSync } from './editor/language'
+import { clearMarks, setMarks } from './editor/marks'
 import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
+import { useCode } from './stores/code'
 import { useEditor } from './stores/editor'
 import { useGit } from './stores/git'
 import { usePanels } from './stores/panels'
@@ -99,6 +102,22 @@ export default function App() {
   // Opening a folder gives it to the empty session that has no project yet, so that session is listed under it.
   useEffect(() => {
     if (workspaceRoot) void useSessions.getState().adoptProject()
+  }, [workspaceRoot])
+
+  // The language servers follow the editor's text, and what they find marks it. A folder's marks go with the folder.
+  useEffect(() => {
+    const stopSync = startLanguageSync(api.code)
+    const offMarks = api.code.onMarks(setMarks)
+    const offCode = api.code.onChanged(() => void useCode.getState().refresh())
+    return () => {
+      stopSync()
+      offMarks()
+      offCode()
+    }
+  }, [])
+  useEffect(() => {
+    clearMarks()
+    void useCode.getState().refresh()
   }, [workspaceRoot])
 
   useEffect(() => {

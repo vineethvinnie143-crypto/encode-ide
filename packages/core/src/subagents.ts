@@ -81,7 +81,8 @@ export interface SubagentDefinition extends SubagentType {
 /**
  * What a subagent never gets: it must not start more agents, or touch what only the main agent owns. The Computer
  * tool is one of those: up to four subagents run side by side, and there is one mouse. Monitor, ScheduleWakeup and
- * SendMessage report back through notices only the main agent reads.
+ * SendMessage report back through notices only the main agent reads. A subagent works where the main agent works, so
+ * it does not enter or leave worktrees either.
  */
 export const SUBAGENT_EXCLUDED: readonly string[] = [
   'Task',
@@ -96,6 +97,8 @@ export const SUBAGENT_EXCLUDED: readonly string[] = [
   'TodoWrite',
   'attempt_completion',
   'Computer',
+  'EnterWorktree',
+  'ExitWorktree',
 ]
 
 /** The most steps a subagent takes before it must report. */
@@ -452,10 +455,10 @@ export interface SubagentsOptions {
   /** The main agent's surface: approvals, questions, usage and file changes go through it. */
   parent: Surface
   /** The main agent's services; a subagent gets its own shell and a copy of what was read. */
-  services: Omit<LoopServices, 'shell' | 'files' | 'subagents' | 'goals' | 'skills' | 'background'> & Pick<LoopServices, 'skills'>
+  services: Omit<LoopServices, 'shell' | 'files' | 'subagents' | 'goals' | 'skills' | 'background' | 'worktrees'> & Pick<LoopServices, 'skills'>
   files: FileStateTracker
-  /** A shell of the subagent's own, so working directories do not mix. */
-  createShell: () => AgentShell & { dispose?(): Promise<void> }
+  /** A shell of the subagent's own, so working directories do not mix, starting where the main agent works. */
+  createShell: () => (AgentShell & { dispose?(): Promise<void> }) | Promise<AgentShell & { dispose?(): Promise<void> }>
   approvedHosts: Set<string>
   assessor: ShellCommandAssessor
   rules?: RuleJudge
@@ -589,7 +592,7 @@ export function createSubagents(options: SubagentsOptions): Subagents {
     signal: AbortSignal,
   ): Promise<SubagentResult> {
     const conversation = pool.conversation(info.id)
-    const shell = options.createShell()
+    const shell = await options.createShell()
     const system = [...options.system, { text: [SUBAGENT_PROMPT, definition.prompt].filter(Boolean).join('\n\n') }]
     let files = pool.trackers.get(info.id)
     if (!files) pool.trackers.set(info.id, (files = cloneTracker(options.files)))

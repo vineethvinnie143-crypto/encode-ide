@@ -17,6 +17,7 @@ import {
   createDesktopBroker,
   createWebAccess,
   type AgentShellOptions,
+  type CodeIntelligence,
   type DesktopBackend,
   type DesktopBroker,
   type DesktopOptions,
@@ -38,6 +39,7 @@ import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
 import type { AgentSource } from './subagents'
 import type { AgentSettings, TurnEnd } from './types'
+import type { WorktreeGit } from './worktrees'
 import type {
   AgentMode,
   AgentEvent,
@@ -82,6 +84,8 @@ export interface SessionScope {
   external?: ExternalToolSource
   /** Options for this session's shells, asked for each time one is made, merged over the host's. */
   shell?: () => Omit<AgentShellOptions, 'root'>
+  /** The folder's language servers while they may run (trusted, turned on); read when a turn starts. */
+  code?: () => CodeIntelligence | undefined
   /** The session closed: let go of what was held for it. */
   release?: () => Promise<void>
 }
@@ -107,6 +111,8 @@ export interface HostOptions {
    * folder. `notice` puts a line in the session's conversation (a hook that failed, a store that could not be read).
    */
   scope?(request: { sessionId: string; root: string; notice(text: string): void }): SessionScope | Promise<SessionScope>
+  /** The git work behind the agent's worktrees, for every folder; without it the agent has no EnterWorktree. */
+  worktrees?: WorktreeGit
   web?: WebAccess
   /** Options for the agent's shells: sandboxing, variables to keep. */
   shell?: Omit<AgentShellOptions, 'root'>
@@ -221,6 +227,8 @@ export class AgentHost {
       ...(scope?.release ? { release: scope.release } : {}),
       ...(scope?.checkpoints ? { checkpoints: scope.checkpoints } : {}),
       ...(scope?.external ? { external: scope.external } : {}),
+      ...(scope?.code ? { code: scope.code } : {}),
+      ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
       skills: createSkills(() => this.skillSources(root)),

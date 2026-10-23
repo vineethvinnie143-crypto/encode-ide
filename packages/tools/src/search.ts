@@ -11,6 +11,7 @@ import { displayPath, realPathOf, resolveInputPath, toPosix } from './paths'
 import { decodeText, looksLikeText, MAX_TEXT_FILE_BYTES, plural, SNIFF_BYTES, type DecodedText } from './text'
 import type { Tool, ToolContext, ToolOutcome } from './types'
 import { walk, type WalkEntry } from './walk'
+import { WORKTREES_DIR } from './worktree'
 
 const GLOB_LIMIT = 100
 const GREP_DEFAULT_LIMIT = 250
@@ -29,13 +30,28 @@ function caseInsensitiveFs(ctx: ToolContext): boolean {
   return ctx.platform === 'win32' || ctx.platform === 'darwin'
 }
 
+/** Where the agent works: the root, or a worktree it entered. */
+function workdir(ctx: ToolContext): string {
+  return ctx.cwd ?? ctx.root
+}
+
+/**
+ * Leaves out the project's worktrees (`.encode-worktrees`) when a search walks into them from the project: each is
+ * a whole copy of the project. A search from inside one, or in it by path, starts below this folder.
+ */
+function notWorktrees(ctx: ToolContext): (entry: WalkEntry) => boolean {
+  const folder = path.join(ctx.root, WORKTREES_DIR)
+  const same = caseInsensitiveFs(ctx) ? (a: string, b: string) => a.toLowerCase() === b.toLowerCase() : (a: string, b: string) => a === b
+  return (entry) => !entry.isDirectory || !same(entry.absolute, folder)
+}
+
 function searchRoot(input: { path?: unknown }, ctx: ToolContext): string {
   const raw = typeof input.path === 'string' ? input.path.trim() : ''
-  return raw ? resolveInputPath(raw, ctx) : ctx.root
+  return raw ? resolveInputPath(raw, { root: workdir(ctx), home: ctx.home, platform: ctx.platform }) : workdir(ctx)
 }
 
 function shownPath(file: string, ctx: ToolContext): string {
-  return displayPath(file, ctx)
+  return displayPath(file, { root: workdir(ctx), platform: ctx.platform })
 }
 
 async function newestFirst(entries: WalkEntry[], signal: AbortSignal): Promise<WalkEntry[]> {
@@ -102,7 +118,7 @@ export const globTool: Tool<GlobInput> = {
   },
   describe(input, ctx) {
     const dir = searchRoot(input, ctx)
-    return { title: `Find ${input.pattern}${dir === ctx.root ? '' : ` in ${shownPath(dir, ctx)}`}` }
+    return { title: `Find ${input.pattern}${dir === workdir(ctx) ? '' : ` in ${shownPath(dir, ctx)}`}` }
   },
   async run(input, ctx) {
     let dir = searchRoot(input, ctx)
@@ -118,11 +134,12 @@ export const globTool: Tool<GlobInput> = {
     const { base, rest } = globBase(pattern)
     const start = base ? path.join(dir, base) : dir
     const matcher = globToRegExp(rest, { caseInsensitive: caseInsensitiveFs(ctx) })
+    const kept = notWorktrees(ctx)
     const result = await walk({
       dir: start,
-      ignoreRoot: ctx.root,
+      ignoreRoot: workdir(ctx),
       caseInsensitive: caseInsensitiveFs(ctx),
-      include: (entry) => entry.isDirectory || matcher.test(entry.relative),
+      include: (entry) => kept(entry) && (entry.isDirectory || matcher.test(entry.relative)),
       limit: WALK_LIMIT,
       signal: ctx.signal,
     })
@@ -390,7 +407,7 @@ export const grepTool: Tool<GrepInput> = {
   },
   describe(input, ctx) {
     const target = searchRoot(input, ctx)
-    return { title: `Search for ${input.pattern}${target === ctx.root ? '' : ` in ${shownPath(target, ctx)}`}` }
+    return { title: `Search for ${input.pattern}${target === workdir(ctx) ? '' : ` in ${shownPath(target, ctx)}`}` }
   },
   async run(input, ctx) {
     const target = searchRoot(input, ctx)
@@ -414,11 +431,12 @@ export const grepTool: Tool<GrepInput> = {
     if (stats.isFile()) {
       candidates = [{ absolute: target, relative: path.basename(target), isDirectory: false, isSymlink: false }]
     } else {
+      const kept = notWorktrees(ctx)
       const result = await walk({
         dir: target,
-        ignoreRoot: ctx.root,
+        ignoreRoot: workdir(ctx),
         caseInsensitive: insensitive,
-        include: (entry) => entry.isDirectory || ((!byGlob || byGlob(entry.relative)) && (!byType || byType(entry.relative))),
+        include: (entry) => kept(entry) && (entry.isDirectory || ((!byGlob || byGlob(entry.relative)) && (!byType || byType(entry.relative)))),
         limit: WALK_LIMIT,
         signal: ctx.signal,
       })

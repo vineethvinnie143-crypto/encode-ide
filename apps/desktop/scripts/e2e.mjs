@@ -161,12 +161,22 @@ const smoke = spawnSync(process.execPath, [path.resolve(root, 'scripts', script)
   stdio: 'inherit',
   timeout: 15 * 60_000,
 })
+const failed = Boolean(smoke.error) || smoke.status !== 0
+// eNCode's own log has the whole of a failure the screen shows in one plain line; it goes with the profile.
+const appLog = failed ? (() => {
+  try {
+    return fs.readFileSync(path.join(profile, 'logs', 'eNCode.log'), 'utf8').split('\n').filter(Boolean).slice(-40).join('\n')
+  } catch {
+    return ''
+  }
+})() : ''
 cleanUp()
 
-if (smoke.error || smoke.status !== 0) {
+if (failed) {
   // The log is long where the desktop bus is missing (Linux CI); what it says about that is not what failed.
   const tail = fs.readFileSync(path.join(shotsDir, 'electron.log'), 'utf8').split('\n').filter((line) => !/dbus|^gio:/.test(line)).slice(-60).join('\n')
   console.error(`[e2e] electron.log, last lines:\n${tail}`)
+  if (appLog) console.error(`[e2e] eNCode.log, last lines:\n${appLog}`)
   fail(`FAILED: ${smoke.error ? smoke.error.message : `exit code ${smoke.status}`}. Screenshots and electron.log are in ${shotsDir}`)
 }
 console.log('[e2e] PASS')

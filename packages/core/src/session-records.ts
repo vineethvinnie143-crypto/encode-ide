@@ -13,6 +13,7 @@
  *   meta        the session's project, pin, archive and unread marks; the latest value of each field wins
  *   agent       a subagent: its type, task and how it stands; the latest record of an id wins
  *   wakeup      the wake-up the agent asked for, or null; the latest wins
+ *   worktree    the git worktree the agent works in (EnterWorktree), or null; the latest wins
  *   truncate    drops every record after `after` (rewind)
  *
  * A subagent's messages are message records with its id as `agentId`, and its compactions carry the id too, so that
@@ -24,7 +25,7 @@
  * keeps both.
  */
 import type { AssistantMessage, SystemPart, ToolDefinition, Usage, UserMessage } from '@encode/providers'
-import type { AgentMode } from '@encode/tools'
+import type { AgentMode, WorktreeInfo } from '@encode/tools'
 import type { ConversationEntry, PlanRequest, SessionGoal, SessionSummary, TodoItem } from './ui'
 
 export const SESSION_FORMAT = 1
@@ -147,6 +148,11 @@ export interface WakeupRecord extends RecordBase {
   wakeup: Wakeup | null
 }
 
+export interface WorktreeRecord extends RecordBase {
+  type: 'worktree'
+  worktree: WorktreeInfo | null
+}
+
 export interface TruncateRecord extends RecordBase {
   type: 'truncate'
   /** The last record kept. */
@@ -166,6 +172,7 @@ export type SessionRecord =
   | MetaRecord
   | AgentRecord
   | WakeupRecord
+  | WorktreeRecord
   | TruncateRecord
 
 type WithoutBase<T> = T extends unknown ? Omit<T, 'id' | 'at'> & Partial<Pick<RecordBase, 'id' | 'at'>> : never
@@ -198,6 +205,7 @@ export interface SessionSnapshot {
   /** The subagents, as their latest records have them, oldest first. */
   agents: SubagentInfo[]
   wakeup: Wakeup | null
+  worktree: WorktreeInfo | null
   /** The id of the last live record. */
   lastRecordId: string
   updatedAt: number

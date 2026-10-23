@@ -1,4 +1,4 @@
-import type { AboutInfo, Settings } from '../../shared/types'
+import type { AboutInfo, LanguageServersReport, Settings } from '../../shared/types'
 import { buildLine } from '../../shared/about'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
 import { searchProviderInfo } from '../../shared/search'
@@ -29,6 +29,8 @@ export interface DiagnosticsInput {
   /** Counts only; what the conversations say never goes into a report. */
   sessions: { total: number; archived: number } | null
   workspaceOpen: boolean
+  /** The open folder's language servers, with the last lines of those that stopped or failed; null with no folder open. */
+  languageServers: (LanguageServersReport & { logs?: Record<string, string[]> }) | null
   /** The names (never the values) of the ENCODE_* variables the process was started with. */
   environment: string[]
   /** The end of the log files, newest last. */
@@ -99,6 +101,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
         .join(', ') || 'as shipped',
     ],
     ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
+    ['Language servers', `${settings.languageServers ? 'on' : 'off'}, errors before finishing ${settings.errorGate}`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],
     ['API keys', keys],
@@ -122,6 +125,16 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Process', agentHost ? `${agentHost.running ? 'running' : 'not running'}, ${agentHost.failures} stops in a row, ${agentHost.working} sessions working` : 'unknown'],
     ['Sessions', sessions ? `${sessions.total} (${sessions.archived} archived)` : 'unknown'],
   ])
+
+  const code = input.languageServers
+  if (code) {
+    out.push('', 'Language servers in the open folder', `  ${code.state}${code.reason ? `: ${code.reason}` : ''}`)
+    for (const server of code.servers) {
+      const about = [server.state, server.working ? 'working' : '', server.documents ? `${server.documents} ${server.documents === 1 ? 'file' : 'files'} open` : '', server.command ?? '', server.state !== 'running' ? (server.detail ?? '') : ''].filter(Boolean)
+      out.push(`  ${server.label}: ${about.join(', ')}`)
+      for (const line of code.logs?.[server.id] ?? []) out.push(`    | ${line}`)
+    }
+  }
 
   out.push('', `Log: the last ${input.logLines.length} lines from ${input.logDir}`, '')
   out.push(...input.logLines.map((line) => `  ${line}`))

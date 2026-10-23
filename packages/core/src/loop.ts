@@ -55,6 +55,8 @@ import {
   type ToolOutcome,
   type ToolRegistry,
   type WebAccess,
+  type Worktrees,
+  type CodeIntelligence,
 } from '@encode/tools'
 import { alwaysAllowFor, decideApproval, grantKey, hostOf, type ApprovalDecision, type RuleJudge } from './approval'
 import {
@@ -78,6 +80,7 @@ import {
   type CompactionPlan,
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
+import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { describeError, detailsOf, plainError } from './problems'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { withoutScreensFrom } from './screens'
@@ -123,6 +126,12 @@ export interface LoopServices {
   desktop?: DesktopServices
   beforeWrite?: ToolContext['beforeWrite']
   summarize?: ToolContext['summarize']
+  /** Where relative paths and searches start, asked at each call: the root, or the worktree the agent works in. */
+  cwd?: () => string
+  /** EnterWorktree and ExitWorktree; the main agent's only. */
+  worktrees?: Worktrees
+  /** The folder's language servers: LSP and LSPEdit, and the errors after every edit. */
+  code?: CodeIntelligence
 }
 
 export interface LoopOptions {
@@ -170,6 +179,7 @@ interface Prepared {
   input: Record<string, unknown>
   entry: ConversationEntry
   parallel: boolean
+  access: ToolAccess
 }
 
 interface StepState {
@@ -290,6 +300,8 @@ export class AgentLoop {
   private contextKey = ''
   private readonly inflight = new Set<ConversationEntry>()
   private readonly approvedApps: Set<string>
+  /** Errors after every edit, and the gate at the end of a turn; only where language servers run. */
+  private readonly edits: EditDiagnostics | undefined
   /** Whether the model that answered last reads images; unknown until the first request. */
   private vision: boolean | undefined
   /** Whether it reads PDFs as documents. */
@@ -297,6 +309,8 @@ export class AgentLoop {
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
+    const s = o.services
+    this.edits = s.code ? new EditDiagnostics(s.code, (file) => relativeToRoot(s.root, file, s.platform)) : undefined
   }
 
   private get base(): Omit<HookEvent, 'mode'> {
@@ -342,6 +356,7 @@ export class AgentLoop {
     const maxSteps = clamp(Math.floor(o.maxSteps ?? o.settings().maxSteps) || 30, 1, 100)
     let lengthRetries = 0
     let stopRounds = 0
+    this.edits?.startTurn()
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -365,6 +380,13 @@ export class AgentLoop {
           continue
         }
         if (await steered()) continue
+        // Errors the turn's changes left go back to the agent before it may finish.
+        const left = mode === 'code' ? await this.edits?.gate(o.settings().errorGate ?? 'auto', signal) : null
+        if (left) {
+          o.surface.settle(o.surface.entry({ kind: 'notice', text: 'The language servers still report errors in the files the agent changed, so it goes on to fix them.' }))
+          await o.conversation.add(userText(reminder(left)), { turnId: turn.turnId })
+          continue
+        }
         const reply = messageText(message)
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
@@ -380,6 +402,8 @@ export class AgentLoop {
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
+        const found = await this.edits?.collect(STEP_WAIT_MS, signal)
+        if (found) state.context.push(found)
       } finally {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
         const content: UserBlock[] = calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN))
@@ -830,7 +854,7 @@ export class AgentLoop {
     // Allowing an application covers the rest of the session, also when a hook did the allowing.
     if (access.type === 'desktop' && verdict.kind === 'ask') this.approvedApps.add(access.app)
 
-    return { block, tool, input, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent' }
+    return { block, tool, input, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent', access }
   }
 
   /** The fixed checks, then the Reviewer, for one command. Nothing here ever allows more than the checks do. */
@@ -899,6 +923,8 @@ export class AgentLoop {
     o.surface.status('running-tool')
     const progress = this.progressFor(entry)
     const ctx = this.contextFor(block, input, entry, turn, progress.push)
+    const { access } = prepared
+    const existed = access.type === 'write' && this.edits ? await this.edits.before(access.paths) : undefined
 
     let outcome: ToolOutcome
     try {
@@ -934,6 +960,10 @@ export class AgentLoop {
       ...(found ? { warnings: found.lines } : {}),
     })
     for (const file of outcome.changed ?? []) o.surface.fileChanged(relativeToRoot(o.services.root, file, o.services.platform))
+    if (this.edits) {
+      if (outcome.changed?.length) await this.edits.after(outcome.changed, existed ?? new Set())
+      else if (outcome.ok && block.name === 'Read' && access.type === 'read') this.edits.read(access.paths)
+    }
     if (outcome.stop) {
       state.stop = outcome.stop.summary
       if (block.name === 'attempt_completion') o.surface.settle(o.surface.entry({ kind: 'assistant', text: outcome.stop.summary }))
@@ -1026,6 +1056,9 @@ export class AgentLoop {
       readsDocuments: () => this.documents === true,
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
+      ...(s.cwd ? { cwd: s.cwd() } : {}),
+      ...(s.worktrees ? { worktrees: s.worktrees } : {}),
+      ...(s.code ? { code: s.code } : {}),
       ...(progress ? { progress } : {}),
     }
   }

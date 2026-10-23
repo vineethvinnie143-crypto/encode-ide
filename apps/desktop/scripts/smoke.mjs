@@ -18,7 +18,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFileSync, execSync, spawn } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { connect, sleep } from './cdp.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -644,6 +644,7 @@ async function runProviderPhase() {
   await runAutoReviewChecks()
   await runRewindChecks()
   await runMcpChecks()
+  await runLanguageServerChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -1376,6 +1377,164 @@ async function runMcpChecks() {
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   await evaluate('window.eNCode.agent.reset()')
   console.log('[smoke] mcp servers: ok')
+}
+
+/** Opens a file of the folder through Quick Open, and waits until the editor shows `text` from it. */
+async function quickOpen(relative, text) {
+  const name = relative.split('/').pop()
+  const deadline = Date.now() + 15000
+  for (;;) {
+    await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }))")
+    await waitFor("!!document.querySelector('.quickopen')", 8000, 'quick open')
+    await waitFor("!document.querySelector('.quickopen .spin')", 8000, 'file index')
+    await typeInto('.quickopen-input', name)
+    await sleep(400)
+    const picked = await evaluate(`(() => {
+      const item = [...document.querySelectorAll('.quickopen-item')].find((node) => node.textContent.includes(${JSON.stringify(relative)}))
+      if (!item) return false
+      item.click()
+      return true
+    })()`)
+    if (picked) break
+    // A file written a moment ago may not be in the index yet.
+    await pressKey('Escape')
+    if (Date.now() > deadline) throw new Error(`Quick Open does not find ${relative}`)
+    await sleep(500)
+  }
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes(${JSON.stringify(text)})`, 15000, `${relative} open`)
+}
+
+/** What the editor shows of the open file's problems: its marks, the footer's counts and word on its server. */
+const EDITOR_MARKS = `(() => ({
+  // Marks are drawn as boxes over the text; boxes not in use are hidden, not removed.
+  errors: [...document.querySelectorAll('.enc-squiggle-error')].filter((box) => box.style.display !== 'none').length,
+  warnings: [...document.querySelectorAll('.enc-squiggle-warning')].filter((box) => box.style.display !== 'none').length,
+  gutter: document.querySelectorAll('.enc-gutter-num.enc-gutter-error').length,
+  counts: document.querySelector('.editor-footer-count')?.getAttribute('title') ?? '',
+  server: document.querySelector('.editor-footer .editor-footer-button')?.textContent ?? '',
+}))()`
+
+/**
+ * Language servers. A test server stands in for typescript-language-server, put in the project's node_modules/.bin
+ * the way npm installs one, so it may start only once the folder is trusted. The editor marks what it reports as the
+ * text changes, the footer counts it, a mark tells its message when pointed at, and Settings > Language servers and
+ * the diagnostics report say the server runs. The agent hears what its edit broke, and the error gate sends it back
+ * to fix the error before it may finish.
+ */
+async function runLanguageServerChecks() {
+  console.log('[smoke] --- language servers ---')
+  const modules = path.join(demoPath, 'node_modules')
+  const bin = path.join(modules, '.bin')
+  const serverDir = path.join(modules, 'fake-ts-server')
+  const marker = path.join(serverDir, 'marker.log')
+  await fs.mkdir(bin, { recursive: true })
+  await fs.mkdir(serverDir, { recursive: true })
+  // The package's script: the smoke's server, told where to note what it is given.
+  const script = pathToFileURL(path.join(root, 'scripts', 'fake-language-server.mjs')).href
+  await fs.writeFile(path.join(serverDir, 'cli.mjs'), `process.argv.push(${JSON.stringify(`--marker=${marker}`)})\nawait import(${JSON.stringify(script)})\n`)
+  if (process.platform === 'win32') {
+    // What npm writes: eNCode reads the script out of it and starts that with Node, never through cmd.exe.
+    await fs.writeFile(path.join(bin, 'typescript-language-server.cmd'), '@ECHO off\r\nnode "%~dp0\\..\\fake-ts-server\\cli.mjs" %*\r\n')
+  } else {
+    const shim = path.join(bin, 'typescript-language-server')
+    await fs.writeFile(shim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$(dirname "$0")/../fake-ts-server/cli.mjs" "$@"\n`)
+    await fs.chmod(shim, 0o755)
+  }
+  const marks = 'export const marks = 1\nconst broken = ERROR\n// WARN: tidy this up\n'
+  await evaluate(`window.eNCode.workspace.write('src/lsp-marks.ts', ${JSON.stringify(marks)})`)
+  const markerLines = async () => (await fs.readFile(marker, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+
+  const wasTrusted = (await evaluate('window.eNCode.permissions.report()')).trusted
+  if (wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+
+  // Not trusted: the file opens without marks, the footer says why, and the project's server is not started.
+  await quickOpen('src/lsp-marks.ts', 'const broken = ERROR')
+  await waitFor(`${EDITOR_MARKS}.server.includes('folder not trusted')`, 8000, 'the footer says the folder is not trusted')
+  await sleep(600)
+  const untrusted = await evaluate(EDITOR_MARKS)
+  if (untrusted.errors || (await markerLines()).length) throw new Error(`A server ran in a folder that is not trusted: ${JSON.stringify(untrusted)}`)
+
+  // Trusted: the open file gets its server at once, the server found in the project.
+  const trust = await evaluate("window.eNCode.permissions.act({ type: 'trust' })")
+  if (!trust.ok) throw new Error(`Trusting the folder failed: ${JSON.stringify(trust)}`)
+  await waitFor(`(() => { const now = ${EDITOR_MARKS}; return now.errors === 1 && now.warnings === 1 && now.gutter === 1 })()`, 20000, 'the marks of the language server').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(EDITOR_MARKS))}, server: ${(await markerLines()).join(', ')}`)
+  })
+  await waitFor(`${EDITOR_MARKS}.counts.startsWith('1 error and 1 warning')`, 8000, 'the footer counts the problems')
+  const shown = await evaluate(EDITOR_MARKS)
+  console.log('[smoke] editor marks:', JSON.stringify(shown))
+  if (shown.server !== 'TypeScript and JavaScript') throw new Error(`The footer should name the running server: ${JSON.stringify(shown.server)}`)
+  if (!(await markerLines()).includes('open lsp-marks.ts')) throw new Error(`The server was not given the open file: ${(await markerLines()).join(', ')}`)
+
+  // Pointing at a mark tells what it is.
+  const spot = await evaluate(`(() => {
+    const rect = [...document.querySelectorAll('.enc-squiggle-error')].find((box) => box.style.display !== 'none')?.getBoundingClientRect()
+    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
+  })()`)
+  if (!spot) throw new Error('No error mark to point at')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y })
+  await waitFor("!!document.querySelector('.mark-card .mark-card-message')", 6000, 'the card of the mark')
+  const card = await evaluate("document.querySelector('.mark-card')?.textContent ?? ''")
+  if (!card.includes('Something is wrong here') || !card.includes('fake-ts(E1)')) throw new Error(`The card should say the message and where it is from: ${JSON.stringify(card)}`)
+  await screenshot('20-editor-marks.png')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await waitFor("!document.querySelector('.mark-card')", 6000, 'the card goes when the pointer leaves')
+
+  // Typing: the marks follow the unsaved text, and undo takes them back.
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: ' ERROR' })
+  await waitFor(`${EDITOR_MARKS}.errors === 2`, 10000, 'a mark for the error typed')
+  if (!(await evaluate(EDITOR_MARKS)).counts.startsWith('2 errors')) throw new Error('The footer does not count the error typed')
+  await pressKey('z', { ctrl: true })
+  await waitFor(`${EDITOR_MARKS}.errors === 1 && !document.querySelector('.editor-tab.is-dirty')`, 10000, 'the marks after undo')
+
+  // Settings > Language servers: the server runs, found in the project, with the open file.
+  await openSettings('Language servers')
+  await waitFor(`/^Running/.test(document.querySelector('.lsp-server[data-server="typescript"] .lsp-server-state')?.textContent ?? '')`, 8000, 'the server runs in Settings')
+  const row = await evaluate(`(() => {
+    const row = document.querySelector('.lsp-server[data-server="typescript"]')
+    return { state: row?.querySelector('.lsp-server-state')?.textContent ?? '', detail: row?.querySelector('.lsp-server-detail')?.textContent ?? '', title: document.querySelector('.lsp-state-title')?.textContent ?? '', first: document.querySelector('.lsp-server')?.dataset.server ?? '' }
+  })()`)
+  console.log('[smoke] language servers screen:', JSON.stringify(row))
+  if (!row.state.includes('1 file') || !/the project/.test(row.detail) || row.first !== 'typescript' || !/1 server running/.test(row.title)) throw new Error(`Settings > Language servers does not say how the server stands: ${JSON.stringify(row)}`)
+  await screenshot('ui-dark-settings-language-servers.png')
+  await closeSettings()
+
+  // The agent: told what its edit broke, sent back once when it wants to finish, and it fixes the file.
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:lsp-gate] Add a gate module.')
+  await driveAgent('20-lsp-gate')
+  const said = await notices()
+  if (!said.some((text) => /still report errors in the files the agent changed/.test(text))) throw new Error(`No notice that the agent was sent back: ${JSON.stringify(said)}`)
+  const written = await fs.readFile(path.join(demoPath, 'src', 'lsp-gate.ts'), 'utf8')
+  if (written.includes('ERROR')) throw new Error('The agent finished with the error in place')
+  const last = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const told = last.messages.map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? ''))).join('\n')
+  for (const words of ['The language servers found errors after your changes:\nsrc/lsp-gate.ts: 1 error', 'Before you finish: your changes this turn left errors', 'The language servers checked your changes again:\nsrc/lsp-gate.ts: the errors reported before are fixed.']) {
+    if (!told.includes(words)) throw new Error(`The model was not told: ${JSON.stringify(words)}`)
+  }
+  await screenshot('20-lsp-gate.png')
+
+  // The diagnostics report says how the servers stand, with their last log lines.
+  const file = process.env.ENCODE_DIAGNOSTICS_FILE
+  if (file) {
+    await evaluate('window.eNCode.app.exportDiagnostics()')
+    const report = await fs.readFile(file, 'utf8')
+    if (!/Language servers in the open folder\n {2}on\n {2}TypeScript and JavaScript: running/.test(report)) throw new Error(`The diagnostics report does not say how the servers stand:\n${report.slice(report.indexOf('Language servers in'), report.indexOf('Language servers in') + 400)}`)
+    // The About check makes the report again: it starts from no file.
+    await fs.rm(file, { force: true })
+  }
+
+  // Tidy up: the tab closes, the folder's trust goes back to how it was, and the server stops with it.
+  await click('.editor-tab.is-active .tab-close')
+  if (!wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  if (!wasTrusted) await until(async () => (await markerLines()).includes('exit'), 10000, 'the server to stop once the folder is not trusted')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-marks.ts').catch(() => null)")
+  await evaluate("window.eNCode.workspace.delete('src/lsp-gate.ts').catch(() => null)")
+  await fs.rm(modules, { recursive: true, force: true })
+  await evaluate('window.eNCode.agent.reset()')
+  console.log('[smoke] language servers: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

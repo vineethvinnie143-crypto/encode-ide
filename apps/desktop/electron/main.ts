@@ -213,6 +213,15 @@ if (!gotLock) {
       onAlert: (alert) => send('models:alert', alert),
       onMcp: () => send('mcp:changed', undefined),
       onSandbox: () => send('sandbox:changed', undefined),
+      onCode: () => send('code:changed', undefined),
+      // The host names files by their real paths; the editor knows them by their paths in the open folder.
+      onDiagnostics: (root, file, diagnostics) => {
+        const real = workspace.rootRealPath
+        if (!real || path.relative(real, root) !== '') return
+        const relative = path.relative(real, file)
+        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return
+        send('code:marks', { path: relative.split(path.sep).join('/'), diagnostics })
+      },
     })
     const configureAgent = () => {
       const current = settings.get()
@@ -264,6 +273,8 @@ if (!gotLock) {
 
     const diagnostics = async (): Promise<string> => {
       const sessions = await agentHost.client.sessions().catch(() => null)
+      const root = workspace.current?.root
+      const languageServers = root ? await agentHost.codeReport(root, { logs: 15 }).catch(() => null) : null
       const cpus = os.cpus()
       const primary = screen.getPrimaryDisplay().id
       return diagnosticsReport({
@@ -281,6 +292,7 @@ if (!gotLock) {
         agentHost: agentHost.health(),
         sessions: sessions ? { total: sessions.length, archived: sessions.filter((session) => session.archived).length } : null,
         workspaceOpen: workspace.current !== null,
+        languageServers,
         environment: Object.keys(process.env).filter((name) => name.startsWith('ENCODE_')).sort(),
         logLines: logs.tail(400),
         logDir: logs.dir,

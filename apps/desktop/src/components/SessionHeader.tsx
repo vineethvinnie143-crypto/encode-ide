@@ -14,7 +14,7 @@ import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
 import { IconButton } from '../ui/Button'
 import { cx } from '../ui/cx'
-import { Activity, ChevronDown, ExternalLink, GitBranch, MoreHorizontal, PanelRight, ShieldCheck, Sparkles, ScrollText } from '../ui/icons'
+import { Activity, ChevronDown, ExternalLink, GitBranch, GitFork, MoreHorizontal, PanelRight, ShieldCheck, Sparkles, ScrollText } from '../ui/icons'
 import { Menu, type MenuEntry } from '../ui/Menu'
 import { Spinner } from '../ui/Spinner'
 import { editTotals, isCommandTool, isSubagentTool } from './Chat/turns'
@@ -150,6 +150,12 @@ export default function SessionHeader() {
           <span className="ui-chip is-mono" title={`Branch ${branch}`}>
             <GitBranch size={12} />
             {branch}
+          </span>
+        )}
+        {session?.worktree && (
+          <span className="ui-chip is-mono tone-accent" title={`The agent works in the worktree .encode-worktrees/${session.worktree}, on a branch of its own, apart from your checkout`}>
+            <GitFork size={12} />
+            {session.worktree}
           </span>
         )}
         {live && (

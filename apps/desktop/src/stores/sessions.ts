@@ -217,6 +217,17 @@ export const useSessions = create<SessionsStore>((set, get) => {
       if (event.type === 'title') {
         set((state) => ({ sessions: state.sessions.map((session) => (session.id === id ? { ...session, title: event.title } : session)) }))
       }
+      // The agent entered or left a worktree: the header says where it works.
+      if (event.type === 'worktree') {
+        const name = event.worktree?.name
+        set((state) => ({
+          sessions: state.sessions.map((session) => {
+            if (session.id !== id || session.worktree === name) return session
+            const { worktree: _left, ...rest } = session
+            return name ? { ...rest, worktree: name } : rest
+          }),
+        }))
+      }
       // Messages handed to the request: those it took leave the list, and what it left goes to the front of the queue.
       useChat.getState().followSteers(event)
       // The agent is free again: the next message you queued goes out.

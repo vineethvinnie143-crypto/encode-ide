@@ -5,3 +5,63 @@
   position: absolute;
   inset: 0;
 }
+
+/* What a language server found under the pointer: its message, who said it, and nothing else. */
+.mark-card {
+  position: fixed;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  box-shadow: var(--shadow-pop);
+  user-select: text;
+  animation: ui-fade var(--dur-2) var(--ease-out);
+}
+.mark-card-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.mark-card-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mark-card-item.is-error .mark-card-icon {
+  color: var(--danger);
+}
+.mark-card-item.is-warning .mark-card-icon {
+  color: var(--warning);
+}
+.mark-card-item.is-info .mark-card-icon,
+.mark-card-item.is-hint .mark-card-icon {
+  color: var(--accent);
+}
+.mark-card-text {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.mark-card-message {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mark-card-source {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}

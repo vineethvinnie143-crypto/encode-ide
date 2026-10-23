@@ -1,0 +1,20 @@
+{
+  "name": "@encode/lsp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's language server client: the LSP wire format, one connection per server shared by the editor and the agent, documents kept in step, diagnostics, lookups and edits.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/fake-server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

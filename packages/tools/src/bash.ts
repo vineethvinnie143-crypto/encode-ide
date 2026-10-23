@@ -40,7 +40,7 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
   const lines = [
     `Runs a command in ${shellName} and returns its output.`,
     '',
-    '- Every command starts a fresh shell in the current working directory. A change of directory carries over to the next command; variables and other shell state do not. A command that leaves the workspace has its directory reset to the workspace root.',
+    '- Every command starts a fresh shell in the current working directory. A change of directory carries over to the next command; variables and other shell state do not. A command that leaves the workspace has its directory reset to the workspace root, or to the worktree you work in.',
     '- Quote paths that contain spaces.',
     '- Use the dedicated tools instead of shell commands for their jobs: Glob to find files, Grep to search contents, Read to view a file, Edit and Write to change files.',
     '- Commands cannot be interactive: there is no terminal and stdin is closed. Pass flags such as --yes, and never open an editor or a pager (use git commit -m).',

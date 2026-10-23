@@ -5,6 +5,7 @@
  * breaks the other stops the build at this file.
  */
 import type * as Core from '@encode/core'
+import type * as Tools from '@encode/tools'
 import type * as Workspace from '@encode/workspace'
 import type * as Ui from '../../shared/types'
 
@@ -34,6 +35,9 @@ export type HostToRenderer = [
   Expect<Same<Core.CheckpointInfo, Ui.CheckpointInfo>>,
   Expect<Same<Core.RewindPlan, Ui.RewindPlan>>,
   Expect<Same<Core.RewindOutcome, Ui.RewindOutcome>>,
+  Expect<Same<Workspace.LanguageServersReport, Ui.LanguageServersReport>>,
+  Expect<Same<Workspace.LanguageServerInfo, Ui.LanguageServerInfo>>,
+  Expect<Same<Tools.CodeDiagnostic, Ui.CodeDiagnostic>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -47,4 +51,5 @@ export type RendererToHost = [
   Expect<Same<Workspace.McpAction, Ui.McpAction>>,
   Expect<Same<Workspace.SandboxAction, Ui.SandboxAction>>,
   Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
+  Expect<Same<Core.ErrorGate, Ui.ErrorGate>>,
 ]

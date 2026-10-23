@@ -13,6 +13,7 @@ export type SettingsSection =
   | 'permissions'
   | 'mcp'
   | 'sandbox'
+  | 'code'
   | 'archived'
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'

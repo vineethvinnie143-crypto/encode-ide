@@ -259,14 +259,45 @@ describe('workspace trust', () => {
     try {
       assert.equal(await readText(file), '{"ok":true}')
       assert.equal(spy.mock.callCount(), 3)
-      // The third failure in a row is reported rather than hidden; a permanent error is not tried again.
-      failures.push('EBUSY', 'EBUSY', 'EBUSY')
+      // The fifth failure in a row is reported rather than hidden; a permanent error is not tried again.
+      failures.push('EBUSY', 'EBUSY', 'EBUSY', 'EBUSY', 'EBUSY')
       await assert.rejects(() => readText(file), /EBUSY/)
-      assert.equal(spy.mock.callCount(), 6)
+      assert.equal(spy.mock.callCount(), 8)
       failures.length = 0
       failures.push('EISDIR')
       await assert.rejects(() => readText(file), /EISDIR/)
-      assert.equal(spy.mock.callCount(), 7)
+      assert.equal(spy.mock.callCount(), 9)
+    } finally {
+      spy.mock.restore()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('renames over a file again while it is held open for a moment, and gives up on the rest', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'encode-rename-'))
+    const file = path.join(dir, 'trust.json')
+    const real = fs.rename.bind(fs)
+    const failures: string[] = ['EPERM', 'EACCES']
+    const spy = mock.method(fs, 'rename', (async (from: string, to: string) => {
+      const code = failures.shift()
+      if (code) throw Object.assign(new Error(`${code}: rename`), { code })
+      return real(from, to)
+    }) as unknown as typeof fs.rename)
+    try {
+      await writeAtomic(file, 'one\n')
+      assert.equal(await readText(file), 'one\n')
+      assert.equal(spy.mock.callCount(), 3)
+      // A target that stays locked is reported, and the temporary file does not stay behind.
+      failures.push(...Array.from({ length: 10 }, () => 'EBUSY'))
+      await assert.rejects(() => writeAtomic(file, 'two\n'), /EBUSY/)
+      assert.equal(await readText(file), 'one\n')
+      assert.deepEqual(await fs.readdir(dir), ['trust.json'])
+      // A permanent error is not tried again.
+      failures.length = 0
+      failures.push('EXDEV')
+      const before = spy.mock.callCount()
+      await assert.rejects(() => writeAtomic(file, 'three\n'), /EXDEV/)
+      assert.equal(spy.mock.callCount(), before + 1)
     } finally {
       spy.mock.restore()
       await fs.rm(dir, { recursive: true, force: true })

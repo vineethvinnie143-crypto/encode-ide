@@ -61,7 +61,8 @@ say so.
 | [0069](0069-the-agent-asks-before-planning-hooks-hear-what-it-waits-for-and-pdfs-are-read-by-encodes-own-reader.md) | The agent asks before planning, hooks hear what it waits for, notebooks change by cell, and PDFs are read by eNCode's own reader | Accepted, builds on 0031, 0042, 0059, 0062 and 0066 |
 | [0070](0070-a-problem-is-said-in-a-sentence-with-what-can-be-done-and-what-the-provider-said-is-folded-under-it.md) | A problem is said in a sentence with what can be done, and what the provider said is folded under it | Accepted, builds on 0052 and 0068 |
 | [0071](0071-work-goes-on-in-the-background-and-what-it-reports-reaches-the-agent-between-steps-or-in-a-turn-of-its-own.md) | Work goes on in the background, and what it reports reaches the agent between steps or in a turn of its own | Accepted, builds on 0031, 0042, 0062 and 0070 |
-| [0072](0072-language-intelligence-comes-from-real-language-servers-that-encode-talks-to-through-its-own-client.md) | Language intelligence comes from real language servers that eNCode talks to through its own client | Accepted, refines 0003 |
+| [0072](0072-language-intelligence-comes-from-real-language-servers-that-encode-talks-to-through-its-own-client.md) | Language intelligence comes from real language servers that eNCode talks to through its own client | Accepted, refines 0003; where servers run is settled by 0073 |
+| [0073](0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md) | Worktrees are made by eNCode with hooks off, and language servers run in trusted folders for the editor and the agent | Accepted, refines 0072 |
 
 ## Template
 

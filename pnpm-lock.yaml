@@ -29,6 +29,9 @@ importers:
       '@encode/git':
         specifier: workspace:*
         version: link:../../packages/git
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../../packages/lsp
       '@encode/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions
@@ -284,6 +287,18 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/lsp:
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/mcp:
     dependencies:
       '@encode/config':
@@ -390,6 +405,9 @@ importers:
 
   packages/tools:
     dependencies:
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions
@@ -424,6 +442,9 @@ importers:
       '@encode/hooks':
         specifier: workspace:*
         version: link:../hooks
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
       '@encode/mcp':
         specifier: workspace:*
         version: link:../mcp

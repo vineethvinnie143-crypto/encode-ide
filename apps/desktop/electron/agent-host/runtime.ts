@@ -26,9 +26,10 @@ import {
   type ModelRole,
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
-import { SearchError, createSearchProvider, createWebAccess, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
+import { createWorktreeGit } from '@encode/git'
+import { SearchError, createSearchProvider, createWebAccess, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Sandbox } from '@encode/sandbox'
-import { Workspaces } from '@encode/workspace'
+import { Workspaces, type LanguageServerOptions } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
 import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
@@ -51,6 +52,8 @@ export interface HostRuntimeOptions {
   stateIntervalMs?: number
   /** The web search providers; a test points them at a server of its own. */
   search?: { fetch?: ProviderOptions['fetch']; endpoints?: Partial<Record<SearchProviderId, string>> }
+  /** For tests: which language servers there are, and how they are found and started. */
+  languageServers?: Pick<LanguageServerOptions, 'catalog' | 'discover' | 'spawn' | 'idleMs'>
 }
 
 export interface HostRuntime {
@@ -64,6 +67,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   maxSteps: config.maxSteps,
   maxGoalRounds: config.maxGoalRounds,
   computer: config.computer,
+  errorGate: config.errorGate,
 })
 
 const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, maxOutputTokens: 8_192 }
@@ -255,6 +259,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   function apply(next: HostConfig): void {
     const previous = config
     config = next
+    // Turned off, the servers stop now; turned on, the files the editor shows get theirs.
+    if (previous && previous.languageServers !== next.languageServers) void workspaces?.syncLanguageServers()
     if (!router) return
     const parsed = parseRouterConfig(next.router)
     problems = parsed.problems
@@ -323,6 +329,25 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       ...(init.checkpointsDir ? { checkpoints: { dir: init.checkpointsDir } } : {}),
       // Hooks are told where the conversation is written, as Claude Code's are.
       transcriptPath: (sessionId) => path.join(init.dir, `${sessionId}.jsonl`),
+      // One set of language servers per folder, for the agent and the editor; read at every start, so Settings applies at once.
+      languageServers: {
+        ...options.languageServers,
+        enabled: () => config?.languageServers ?? true,
+        onDiagnostics: (root, file, diagnostics) => {
+          try {
+            peer.notify('diagnostics', { root, file, diagnostics })
+          } catch (error) {
+            log(`could not pass on what a language server found: ${describe(error)}`)
+          }
+        },
+        onChange: (root) => {
+          try {
+            peer.notify('code', { root })
+          } catch (error) {
+            log(`could not pass on a change of the language servers: ${describe(error)}`)
+          }
+        },
+      },
     })
     const created = new AgentHost({
       dir: init.dir,
@@ -334,6 +359,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       onJobs: (jobs) => peer.notify('jobs', jobs),
       warn: (message) => peer.notify('warn', message),
       scope: workspaces.scope,
+      // git by absolute path, looked up at each use: a bare `git` could be a git.exe in the project on Windows.
+      worktrees: createWorktreeGit({ git: () => searchPath('git', process.env) }),
       web: createWebAccess({ searchProvider }),
       ...options.hostOptions,
     })
@@ -351,6 +378,16 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   })
 
   peer.handle('configure', (next: HostConfig) => apply(next))
+
+  // What the editor shows: the servers see its text, saved or not. In order, since each is a notification.
+  peer.on('document', ({ root, ...change }) => {
+    workspaces?.editorDocument(root, change).catch((error) => log(`could not pass a file of the editor to its language server: ${describe(error)}`))
+  })
+
+  peer.handle('codeReport', async ({ root, logs }) => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    return workspaces.languageServersReport(root, logs ? { logs } : {})
+  })
 
   peer.handle('modelStatus', async () => {
     // The lists are read when a request needs them; the page asks for them so it has something to show.

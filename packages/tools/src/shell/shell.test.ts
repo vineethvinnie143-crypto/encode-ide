@@ -89,6 +89,24 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     assert.equal(shell.state().cwd, root)
   })
 
+  it('comes back to the worktree it was put in, not to the root, until another base is set', async () => {
+    const { root, shell } = await shellIn({ '.encode-worktrees/fix/file.txt': 'x', 'sub/file.txt': 'y' })
+    const worktree = path.join(root, '.encode-worktrees', 'fix')
+    assert.equal(await shell.setCwd(worktree, { base: true }), true)
+    await shell.run('cd ../../sub', { signal: signal() })
+    assert.equal(await fs.realpath(shell.state().cwd), path.join(root, 'sub'), 'the rest of the project is still inside the workspace')
+    const outside = await shell.run('cd /', { signal: signal() })
+    assert.equal(outside.notice, `Shell cwd was reset to ${worktree}`)
+    assert.equal(shell.state().cwd, worktree)
+    // A plain move changes the directory, not where a command is put back.
+    await shell.setCwd(path.join(root, 'sub'))
+    assert.equal((await shell.run('cd /', { signal: signal() })).notice, `Shell cwd was reset to ${worktree}`)
+    await fs.rm(worktree, { recursive: true, force: true })
+    assert.equal((await shell.run('true', { signal: signal() })).notice, `Shell cwd was reset to ${root}`, 'a base that is gone gives way to the root')
+    await shell.setCwd(root, { base: true })
+    assert.equal(await shell.setCwd(path.dirname(root)), false)
+  })
+
   it('does not pass credentials to commands', async () => {
     const { shell } = await shellIn()
     const result = await shell.run('echo "key=[$OPENAI_API_KEY]"', { signal: signal() })

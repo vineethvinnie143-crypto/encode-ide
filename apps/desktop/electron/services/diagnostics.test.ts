@@ -41,6 +41,8 @@ const settings: Settings = {
   followUp: 'queue',
   sendKey: 'ctrl-enter',
   keepAwake: true,
+  languageServers: true,
+  errorGate: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,
@@ -67,6 +69,7 @@ function input(overrides: Partial<DiagnosticsInput> = {}): DiagnosticsInput {
     agentHost: { running: true, failures: 0, working: 1 },
     sessions: { total: 12, archived: 3 },
     workspaceOpen: true,
+    languageServers: null,
     environment: ['ENCODE_DEVTOOLS'],
     logLines: ['2026-10-22T06:29:59.000Z INFO  [agent-host] started', '2026-10-22T06:30:00.000Z ERROR something failed'],
     logDir: 'C:\\Users\\ana\\AppData\\Roaming\\eNCode\\logs',
@@ -105,6 +108,26 @@ describe('diagnostics report', () => {
     assert.match(text, /Notices +finished background, needs you always, taskbar still/)
     assert.match(text, /Keeps awake +while an agent works/)
     assert.ok(!text.includes('Documents'), 'a folder path is the person\'s own')
+  })
+
+  it('says how the open folder\'s language servers stand, with the last words of one that failed', () => {
+    const text = diagnosticsReport(
+      input({
+        languageServers: {
+          state: 'on',
+          servers: [
+            { id: 'typescript', label: 'TypeScript and JavaScript', state: 'running', documents: 2, command: 'typescript-language-server (node_modules/.bin)', install: '', files: ['.ts'] },
+            { id: 'rust', label: 'Rust', state: 'failed', detail: 'rust-analyzer exited with code 1.', documents: 0, install: '', files: ['.rs'] },
+            { id: 'go', label: 'Go', state: 'missing', detail: 'No language server for Go is installed (gopls).', documents: 0, install: '', files: ['.go'] },
+          ],
+          logs: { rust: ['error: could not read C:\\Users\\ana\\proj\\Cargo.toml'] },
+        },
+      }),
+    )
+    assert.match(text, /Language servers +on, errors before finishing auto/)
+    assert.match(text, /^Language servers in the open folder\n {2}on\n {2}TypeScript and JavaScript: running, 2 files open, typescript-language-server \(node_modules\/\.bin\)$/m)
+    assert.match(text, /^ {2}Rust: failed, rust-analyzer exited with code 1\.\n {4}\| error: could not read ~\\proj\\Cargo\.toml$/m)
+    assert.match(text, /^ {2}Go: missing, No language server for Go is installed \(gopls\)\.$/m)
   })
 
   it('lists each model with whether a key is stored, and marks the one in use', () => {

@@ -303,6 +303,42 @@ a notice that did not show (and whether Windows' Focus assist was on), and the c
 What is most useful to hear: a background turn you did not expect, one that repeated itself, or a card that stayed
 after the work was gone.
 
+## Language servers
+
+The editor marks errors as you type, and the agent checks its own edits, through the language servers installed on
+your computer. eNCode carries none of them. Install the ones for the languages you use, for example:
+
+- TypeScript and JavaScript: `npm install -g typescript-language-server typescript`
+- Python: `npm install -g pyright` (or `basedpyright`)
+- Lua: lua-language-server, from its releases page, on the PATH
+
+**Settings → Language servers** lists every language eNCode knows, how its server stands in the open folder, where it
+was found, and the command that installs a missing one. A server you just installed is found within half a minute. A project's own copy (in its `node_modules\.bin`) is used first.
+
+- Servers run only in a folder you trust (Settings → Permissions), because a server can run code the project names.
+  Open a TypeScript file in a folder you have not trusted: the footer under the editor says so, and nothing runs.
+  Trust the folder: the marks should appear within a few seconds, without reopening the file.
+- Type a mistake: a wavy line appears under it a moment later, the line number turns red, and the footer counts the
+  errors and warnings. Point at the line to read the message and where it is from. Undo: the mark goes.
+- Ask the agent for a change in a typed project. If its edit breaks something, it is told at once; if it tries to
+  finish with errors it made, it is sent back to fix them and the chat says so. **Settings → Language servers → Send
+  the agent back to fix errors** chooses once (the default), up to three times, or never.
+- Ask it "where is X used?" or "rename X to Y everywhere": it should use the language server (LSP and LSPEdit in the
+  work log) and get every place, not a text search's guess. A rename lists every file it changed, and under a policy that asks before
+  edits the card lists them before anything changes.
+- Turn **Use language servers** off: the marks go and every server stops.
+
+What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
+language that is not found although it is installed, and the agent finishing with errors it made.
+
+## Worktrees
+
+In a git repository you can ask the agent to work apart from your checkout: "do this in a worktree". It makes one at
+`.encode-worktrees\<name>` on a branch `encode/<name>`, the session header shows it, and its commands and edits happen
+there. "Leave the worktree" keeps it; "remove the worktree" deletes it, and refuses while it holds changes not
+committed or commits no other branch has, unless you tell it to discard them (which asks first). The folder does not
+show in the file list, search or your own `git status`.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
@@ -337,6 +373,7 @@ text: read it before you send it. **Help → Show log files** opens the folder t
 | Sessions | `%APPDATA%\eNCode\sessions\` |
 | Logs | `%APPDATA%\eNCode\logs\` |
 | Your instructions, skills and agents | `%USERPROFILE%\.encode\` |
+| The agent's worktrees of a project | `.encode-worktrees\` in the project |
 | The files chats make | `Documents\eNCode\`, or the folder chosen in Settings → General |
 | The sandbox's helper, its temp and cache folders, and the folders it prepared | `%APPDATA%\eNCode\sandbox\` |
 
@@ -361,3 +398,5 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
+- Language servers: the editor shows their errors and warnings; completion, hover, go to definition and rename in the
+  editor itself, and installing a server with one click, come with the next build.

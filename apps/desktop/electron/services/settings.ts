@@ -6,7 +6,7 @@ import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance
 import { cleanKeybindings } from '../../shared/keybindings'
 import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
-import type { AgentMode, ApprovalPolicy, FollowUp, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
+import type { AgentMode, ApprovalPolicy, ErrorGate, FollowUp, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -49,6 +49,8 @@ function defaults(): StoredSettings {
     followUp: 'queue',
     sendKey: 'enter',
     keepAwake: true,
+    languageServers: true,
+    errorGate: 'auto',
     notifyDone: 'background',
     notifyNeeds: 'background',
     flashTaskbar: true,
@@ -74,6 +76,7 @@ function normalizePolicy(value: unknown, fallback: ApprovalPolicy): ApprovalPoli
 const isFollowUp = (value: unknown): value is FollowUp => value === 'queue' || value === 'steer'
 const isSendKey = (value: unknown): value is SendKey => value === 'enter' || value === 'ctrl-enter'
 const isNotifyWhen = (value: unknown): value is NotifyWhen => value === 'never' || value === 'background' || value === 'always'
+const isErrorGate = (value: unknown): value is ErrorGate => value === 'auto' || value === 'on' || value === 'off'
 
 /** The longest folder path kept for chats; Windows' own limit for most programs is 260 characters. */
 const MAX_FOLDER_LENGTH = 1024
@@ -248,6 +251,8 @@ export class SettingsService {
       followUp: isFollowUp(input.followUp) ? input.followUp : base.followUp,
       sendKey: isSendKey(input.sendKey) ? input.sendKey : base.sendKey,
       keepAwake: typeof input.keepAwake === 'boolean' ? input.keepAwake : base.keepAwake,
+      languageServers: typeof input.languageServers === 'boolean' ? input.languageServers : base.languageServers,
+      errorGate: isErrorGate(input.errorGate) ? input.errorGate : base.errorGate,
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
       flashTaskbar: typeof input.flashTaskbar === 'boolean' ? input.flashTaskbar : base.flashTaskbar,
@@ -291,6 +296,8 @@ export class SettingsService {
       followUp: this.data.followUp,
       sendKey: this.data.sendKey,
       keepAwake: this.data.keepAwake,
+      languageServers: this.data.languageServers,
+      errorGate: this.data.errorGate,
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
       flashTaskbar: this.data.flashTaskbar,
@@ -371,6 +378,8 @@ export class SettingsService {
     if (isFollowUp(patch.followUp)) next.followUp = patch.followUp
     if (isSendKey(patch.sendKey)) next.sendKey = patch.sendKey
     if (typeof patch.keepAwake === 'boolean') next.keepAwake = patch.keepAwake
+    if (typeof patch.languageServers === 'boolean') next.languageServers = patch.languageServers
+    if (isErrorGate(patch.errorGate)) next.errorGate = patch.errorGate
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds
     if (typeof patch.flashTaskbar === 'boolean') next.flashTaskbar = patch.flashTaskbar

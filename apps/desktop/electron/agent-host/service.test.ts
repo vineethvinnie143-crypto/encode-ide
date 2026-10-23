@@ -13,6 +13,8 @@ const config: HostConfig = {
   maxSteps: 30,
   maxGoalRounds: 8,
   computer: false,
+  languageServers: false,
+  errorGate: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},
@@ -184,6 +186,33 @@ describe('the agent host service', () => {
     await assert.rejects(raw.request('searchKey', { provider: 'brave', baseUrl: 'https://elsewhere.example' }), { code: 'invalid-params' })
     await assert.rejects(raw.request('searchKey', {}), { code: 'invalid-params' })
     assert.deepEqual(f.searchKeysAsked, ['brave', 'exa'])
+  })
+
+  it('shows the host the files the editor has open, again after a restart, and only those of the open folder', async () => {
+    const f = await fixture()
+    const seen: string[] = []
+    const watch = async () => {
+      const started = f.service.start()
+      f.processes.at(-1)!.runtime.peer.on('document', (event) => seen.push(`${event.kind} ${event.root === f.workspace ? 'here' : event.root} ${event.path}${'text' in event ? ` ${event.text}${event.dirty ? '*' : ''}` : ''}`))
+      await started
+    }
+    f.service.document({ kind: 'open', root: f.workspace, path: 'a.ts', text: 'one', dirty: false })
+    await watch()
+    f.service.document({ kind: 'change', root: f.workspace, path: 'b.ts', text: 'never opened', dirty: true })
+    f.service.document({ kind: 'change', root: f.workspace, path: 'a.ts', text: 'two', dirty: true })
+    await until(() => seen.length === 2)
+    assert.deepEqual(seen.splice(0), ['open here a.ts one', 'change here a.ts two*'])
+
+    f.processes.at(-1)!.exit()
+    await until(() => f.processes.at(-1)!.killed)
+    await watch()
+    await until(() => seen.length === 1)
+    assert.deepEqual(seen.splice(0), ['open here a.ts two*'], 'a host that starts again is shown what the editor holds')
+
+    f.service.document({ kind: 'open', root: '/elsewhere', path: 'c.ts', text: 'three', dirty: false })
+    f.service.closeDocuments()
+    await until(() => seen.length === 3)
+    assert.deepEqual(seen, ['close here a.ts', 'open /elsewhere c.ts three', 'close /elsewhere c.ts'])
   })
 
   it('shuts the host down in order', async () => {

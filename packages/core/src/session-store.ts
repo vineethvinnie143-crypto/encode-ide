@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import type { WorktreeInfo } from '@encode/tools'
 import { previewOf, type ConversationEntry, type PlanRequest, type SessionGoal, type SessionSummary, type TodoItem } from './ui'
 import {
   SESSION_FORMAT,
@@ -48,6 +49,7 @@ interface Derived {
   plan: PlanRequest | null
   agents: Map<string, SubagentInfo>
   wakeup: Wakeup | null
+  worktree: WorktreeInfo | null
   updatedAt: number
 }
 
@@ -63,6 +65,7 @@ function start(header: SessionHeader): Derived {
     plan: null,
     agents: new Map(),
     wakeup: null,
+    worktree: null,
     updatedAt: header.at,
   }
 }
@@ -103,6 +106,9 @@ function apply(state: Derived, record: SessionRecord): void {
       return
     case 'wakeup':
       state.wakeup = record.wakeup
+      return
+    case 'worktree':
+      state.worktree = record.worktree
       return
     case 'meta':
       // Marking a session changes where it sits, not when it was last worked on.
@@ -187,6 +193,7 @@ class FileSessionLog implements SessionLog {
       plan: state.plan,
       agents: [...state.agents.values()].map((agent) => ({ ...agent })),
       wakeup: state.wakeup ? { ...state.wakeup } : null,
+      worktree: state.worktree ? { ...state.worktree } : null,
       lastRecordId: this.live[this.live.length - 1].id,
       updatedAt: state.updatedAt,
     }
@@ -303,6 +310,7 @@ function indexOf(derived: Derived): IndexEntry {
     preview: previewOf([...derived.entries.values()]),
     entryCount: derived.entries.size,
     ...(derived.wakeup ? { wakeAt: derived.wakeup.at } : {}),
+    ...(derived.worktree ? { worktree: derived.worktree.name } : {}),
   }
 }
 

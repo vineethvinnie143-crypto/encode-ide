@@ -23,6 +23,21 @@ interface Entry {
   host: DocHost | null
 }
 
+/** Told when a document opens, changes, is saved or closes, so the language servers can follow the editor's text. */
+export interface DocWatcher {
+  opened(path: string, state: EditorState, dirty: boolean): void
+  /** The text changed, or the file was written or read again (`dirty` false). */
+  changed(path: string, state: EditorState, dirty: boolean): void
+  closed(path: string): void
+}
+
+let watcher: DocWatcher | null = null
+
+/** Sets the one watcher of the documents (null: none). */
+export function watchDocs(next: DocWatcher | null): void {
+  watcher = next
+}
+
 /**
  * The open documents, outside the UI store: an edit changes a document on
  * every keystroke, and nothing that only lists tabs should render for it.
@@ -56,6 +71,7 @@ export function openDoc(path: string, content: string): EditorState {
     lineSeparator: eol,
   })
   docs.set(path, { state, saved: doc, savedPoint: state.history.point, scroll: null, host: null })
+  watcher?.opened(path, state, false)
   return state
 }
 
@@ -74,7 +90,7 @@ export function docState(path: string): EditorState | undefined {
 }
 
 export function closeDoc(path: string): void {
-  docs.delete(path)
+  if (docs.delete(path)) watcher?.closed(path)
 }
 
 /** A file or folder was renamed: its open documents follow it, and take the language of their new names. */
@@ -84,6 +100,7 @@ export function renameDocs(from: string, to: string): void {
     const next = to + path.slice(from.length)
     docs.delete(path)
     docs.set(next, entry)
+    watcher?.closed(path)
     const current = entry.host?.state ?? entry.state
     const language = languageForPath(next)
     if (language.id !== current.config.language.id) {
@@ -91,11 +108,12 @@ export function renameDocs(from: string, to: string): void {
       entry.state = tr.state
       entry.host?.dispatch(tr)
     }
+    watcher?.opened(next, entry.host?.state ?? entry.state, differs(entry))
   }
 }
 
 export function closeDocsUnder(prefix: string): void {
-  for (const path of [...docs.keys()]) if (path === prefix || path.startsWith(`${prefix}/`)) docs.delete(path)
+  for (const path of [...docs.keys()]) if (path === prefix || path.startsWith(`${prefix}/`)) closeDoc(path)
 }
 
 export function eolFor(path: string): Eol {
@@ -111,8 +129,11 @@ export function eolFor(path: string): Eol {
 export function recordState(path: string, state: EditorState): boolean {
   const entry = docs.get(path)
   if (!entry) return false
+  const changed = entry.state.doc !== state.doc
   entry.state = state
-  return differs(entry)
+  const dirty = differs(entry)
+  if (changed) watcher?.changed(path, state, dirty)
+  return dirty
 }
 
 function differs(entry: Entry): boolean {
@@ -154,6 +175,7 @@ export function markSaved(path: string, snapshot: Snapshot): void {
   if (!entry) return
   entry.saved = snapshot.doc
   entry.savedPoint = snapshot.point
+  watcher?.changed(path, entry.host?.state ?? entry.state, differs(entry))
 }
 
 export function saveScroll(path: string, scroll: Scroll): void {
@@ -187,11 +209,13 @@ export function applyExternal(path: string, content: string): boolean {
     const current = host?.state ?? entry.state
     entry.saved = current.doc
     entry.savedPoint = current.history.point
+    watcher?.changed(path, current, false)
     return false
   }
   entry.state = tr.state
   entry.saved = tr.state.doc
   entry.savedPoint = tr.state.history.point
   host?.dispatch(tr)
+  watcher?.changed(path, tr.state, false)
   return true
 }
