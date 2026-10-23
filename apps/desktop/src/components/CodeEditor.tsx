@@ -18,6 +18,8 @@ import { goBack, goForward, goToLocation, withOpenText, type Place } from '../ed
 import { EditorOutline } from '../editor/assist/outline'
 import { EditorRefactor } from '../editor/assist/refactor'
 import { attach, docState, foldsOf, indentLabel, recordState, saveFolds, saveScroll, scrollOf } from '../editor/docs'
+import { sharedHighlighting } from '../editor/highlighting'
+import { tooLargeForServers } from '../editor/language'
 import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
@@ -313,7 +315,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     const feature = FEATURE[kind]
     if (found === null) {
       if (!useCode.getState().report) await useCode.getState().refresh()
-      notify(noAnswerReason(useCode.getState().report, shown, feature.feature))
+      notify(noAnswerReason(useCode.getState().report, shown, feature.feature, tooLargeForServers(shown)))
       return
     }
     if (!found.length) {
@@ -347,7 +349,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     if (viewRef.current !== target || pathRef.current !== shown) return
     if (found === null) {
       if (!useCode.getState().report) await useCode.getState().refresh()
-      notify(noAnswerReason(useCode.getState().report, shown, 'the call hierarchy'))
+      notify(noAnswerReason(useCode.getState().report, shown, 'the call hierarchy', tooLargeForServers(shown)))
       return
     }
     if (!found.items.length) {
@@ -437,7 +439,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       current.setState(state, scrollOf(path!) ?? undefined)
     } else {
       const routed = Object.fromEntries(Object.keys(commandsRef.current).map((name) => [name, (target: EditorView) => commandsRef.current[name](target)]))
-      current = new EditorView({ state, parent: host, ariaLabel: 'Code editor', bindings: BINDINGS, commands: routed, ...viewOptions() })
+      current = new EditorView({ state, parent: host, ariaLabel: 'Code editor', bindings: BINDINGS, commands: routed, highlighting: sharedHighlighting(), ...viewOptions() })
       const created = current
       viewRef.current = created
       setView(created)

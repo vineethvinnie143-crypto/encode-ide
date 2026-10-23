@@ -193,7 +193,7 @@ async function open(path: string, reveal: Reveal): Promise<void> {
     return
   }
   try {
-    const file = await api.workspace.read(path)
+    const file = await api.workspace.readForEditor(path)
     if (file.binary) {
       useUi.getState().notify('error', `${path} is a binary file and cannot be opened as text.`)
       return
@@ -219,7 +219,7 @@ async function open(path: string, reveal: Reveal): Promise<void> {
 async function confirmOverwrite(tab: Tab): Promise<boolean> {
   let content: string
   try {
-    const file = await api.workspace.read(tab.path)
+    const file = await api.workspace.readForEditor(tab.path)
     if (!file.binary && matchesSaved(tab.path, file.content)) return true
     content = file.binary ? '' : file.content
   } catch {

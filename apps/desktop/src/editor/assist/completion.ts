@@ -25,8 +25,10 @@ export class Since {
     readonly doc: Text,
   ) {}
 
-  /** A change made after the question. */
+  /** A change made after the question, to the text as the changes before it left it: every change must be added. */
   add(changes: ChangeSet): void {
+    const length = this.changes ? this.changes.newLength : this.doc.length
+    if (changes.length !== length) throw new RangeError(`A change to a text of ${changes.length} characters, where the changes followed so far leave ${length}: one was missed`)
     this.changes = this.changes ? this.changes.compose(changes) : changes
   }
 

@@ -266,6 +266,7 @@ export function registerIpc(deps: IpcDeps): void {
     return agent.codeReport(root).catch((error) => Promise.reject(hostFailure(error)))
   })
   handle('workspace:read', (rel: string) => workspace.read(String(rel)))
+  handle('workspace:read-for-editor', (rel: string) => workspace.readForEditor(String(rel)))
   handle('workspace:write', (rel: string, content: string) => workspace.write(String(rel), String(content)))
   handle('workspace:create-file', (parent: string, name: string) => workspace.createFile(String(parent ?? ''), String(name)))
   handle('workspace:create-dir', (parent: string, name: string) => workspace.createDir(String(parent ?? ''), String(name)))

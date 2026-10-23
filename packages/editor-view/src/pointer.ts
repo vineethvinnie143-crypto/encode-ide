@@ -151,8 +151,7 @@ export class PointerHandler {
 
   private columnAt(clientX: number): number {
     const { charWidth, paddingX } = this.view.metrics
-    const left = this.view.content.getBoundingClientRect().left
-    return Math.max(0, Math.round((clientX - left - paddingX) / charWidth))
+    return Math.max(0, Math.round((this.view.docXAt(clientX) - paddingX) / charWidth))
   }
 
   /** Updates the selection for the pointer at client coordinates. */

@@ -392,6 +392,12 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
   used, a parameter, a property, an enum member, and a deprecated function struck through. A line you are typing on
   keeps the lexer's colours until the server answers. **View → Turn semantic colours off** goes back to the lexer's
   colours alone. Files over 50,000 lines keep the lexer's colours.
+- **Large files**: files up to 256 MB open in the editor (a log, a data dump, a generated bundle). Scrolling, jumping
+  with the scroll bar, typing, Find and saving stay quick; colours fill in from the top within seconds, done on
+  another thread, and a far part of the file shows a best guess first. Over 8 MB a file is not given to the language
+  servers: the footer says **file too large**, and hover, suggestions and Go to definition have nothing for it.
+  A **minified file** with one very long line can be read, typed in and scrolled to the end of that line; only the
+  first 10,000 characters of a line are coloured.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
@@ -404,7 +410,9 @@ plainly has, and a call hierarchy that lists the wrong callers. For folding: a b
 will not open, a cursor stuck inside a folded block, folds lost when you switch files, pinned lines that show the
 wrong block, brackets in the wrong colour, and a minimap that is out of step with the text. For hints and semantic
 colours: a hint in the wrong place or left behind after you edit, a click or the cursor landing on the wrong side of
-one, and colours that flicker, lag or stay wrong after the server has answered.
+one, and colours that flicker, lag or stay wrong after the server has answered. For large files: anything that feels
+slow (say which file size and what you did), colours that stay wrong once they have filled in, and the cursor or a
+click landing in the wrong place in a very long line.
 
 ## Worktrees
 
@@ -476,3 +484,5 @@ Updating means installing the next build over the last one: everything above sta
 - Language servers: installing a server with one click is not in the editor yet; it comes with the next builds.
   Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- The editor does not wrap long lines yet (it comes with the next builds). A file over 256 MB does not open; a 100 MB
+  file takes about half a gigabyte of memory while open.

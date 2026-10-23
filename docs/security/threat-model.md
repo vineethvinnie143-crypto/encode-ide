@@ -1311,3 +1311,47 @@ the file's own text.
 - The end-to-end run, with a test server that gives hints and tokens: a type and the parameters' names show among
   the text without changing it, a deprecated function is struck through where it is declared and called, a call
   typed gets its hints once typing pauses, and the View menu hides and shows both.
+
+## Large files (Editor and language intelligence 5)
+
+Written with the pull request that makes large files and very long lines quick in the editor
+([0079](../adr/0079-large-files-are-coloured-on-another-thread-counted-from-indexed-points-and-held-to-measured-limits.md)).
+The new paths are a worker that tokenizes the editor's text, a read for the editor that takes files up to 256 MB, and
+the column index kept for long lines. A file is content from anywhere (a download, a dependency, the agent's output),
+so a file crafted to stall or crash the editor is the main concern.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| L1 | A malformed or stale answer from the highlighting worker corrupts the editor's colours or state | The page takes an answer only for the batch it has out, with one state per line, a table of strings and bracket depths of the right length, and only up to where an edit since then reached; anything else is ignored and the batch asked again. | Mitigated |
+| L2 | A message to the worker that is not a batch makes it do unbounded work | The worker takes a batch of at most 65,536 lines, all strings, a known language and brackets as pairs of strings, and answers anything else with nothing; each line is cut at 10,000 characters before it is sent. | Mitigated |
+| L3 | A file that makes the tokenizer hang or throw (a pathological line) stalls colouring or the page | Tokenizing runs in the worker, not on the page's thread; a batch that takes over 20 s, an error or an unreadable message stops the worker, and each editor colours its file in idle time on its own; a line that throws is shown plain. | Mitigated |
+| L4 | A compromised renderer uses the larger editor read to read outside the folder, or to exhaust memory | The editor read goes through the same checks as every read (resolved inside the folder, the real path checked, directories refused) with a 256 MB cap checked before and after reading; every other read keeps its 12 MB cap. | Mitigated |
+| L5 | A large file loads the language servers (memory, CPU, a large message to a server process) | Files over 8 MB are never given to a server: the renderer does not send them and the main process closes the document instead of passing one on; the footer says so. | Mitigated |
+| L6 | A file crafted to make each keystroke slow (one huge line, lines with no plain characters, many tabs) | Columns are counted from indexed points about 1,024 characters apart and the index is carried across edits; a line with no place for a point is counted from its start (correct, slower). Colours stop at 10,000 characters of a line, and the measured limits are tested in CI for a 100 MB file and a 10 MB line. | Mitigated |
+| L7 | Text drawn in the wrong place in a very wide line misleads the person about what the file holds | The scaled width keeps offsets in the page small and every x goes through one conversion; tests check that both ends of a 10 MB line are drawn, that a click lands where it was made, and that columns from the index equal counting one character at a time (property tests through edits). | Mitigated |
+| L8 | Memory held after a large file is closed | The column index keeps the two lines used last and is let go when an editor closes; the worker holds no text between batches. | Mitigated |
+
+### Residual risks
+
+- **A 256 MB file is a lot of memory.** A 100 MB file takes about 550 MB of the page's memory while open; several
+  open at once can exhaust it, which ends the window's page; that is logged, and eNCode must be started again (a
+  page that offers to reload itself is for the hardening step).
+- **Colours of a far line can be a guess for a few seconds** after a large file opens or an edit near its top; a
+  comment or string that spans the file is shown as code there until the worker reaches it.
+- **A line typed in costs a copy of the line**: about 30 ms per keystroke in a 50 MB line.
+
+### Verification
+
+- The editor tests compare batches read on another thread, through edits made while one is out, with reading every
+  line on the page's thread (a property test over five languages); check that a large file is read with no
+  tokenizing on the page's thread, that a far line is drawn from a guess, that malformed and stale answers are
+  ignored, and that a worker that fails or hangs is stopped and every batch out answered with nothing.
+- The column tests compare runs, indexed points and carried indexes with counting one character at a time (property
+  tests through tabs, accents, surrogate pairs and edits), and time a line of millions of characters.
+- The browser tests hold a 100 MB file and a 10 MB line to the limits in ADR 0079, check colours against a fresh read,
+  show a far line's guess turning into its true colours and back after an edit above it, colour a file without the
+  worker once it fails, and scroll, click and select at both ends of a line wider than the browser's limit.
+- The end-to-end run opens a 100 MB file in the app, checks that the worker started and the footer says the file is
+  too large for the servers, and times the end of the file, its colours, typing, find, save and a change on disk.

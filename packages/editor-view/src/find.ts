@@ -18,6 +18,8 @@ import type { EditorView } from './view'
 const COUNT_LIMIT = 10_000
 /** Matches drawn per screenful. */
 const DRAW_LIMIT = 1500
+/** Lines counted through between looks at the clock, so a search that finds little in a large file lets the page draw. */
+const COUNT_WINDOW = 20_000
 const SOURCE = 'find'
 
 const ICONS = {
@@ -276,13 +278,19 @@ export class FindController {
       let total = 0
       let before = 0
       let deadline = performance.now() + 8
-      for (const match of searchMatches(doc, search)) {
-        if (match.from === match.to) continue
-        if (match.from < main.from || (match.from === main.from && match.to < main.to)) before++
-        total++
-        if (total >= COUNT_LIMIT) {
-          self.overLimit = true
-          break
+      count: for (const [from, to] of countWindows(doc, search)) {
+        for (const match of searchMatches(doc, search, from, to)) {
+          if (match.from === match.to) continue
+          if (match.from < main.from || (match.from === main.from && match.to < main.to)) before++
+          total++
+          if (total >= COUNT_LIMIT) {
+            self.overLimit = true
+            break count
+          }
+          if (performance.now() > deadline) {
+            yield
+            deadline = performance.now() + 8
+          }
         }
         if (performance.now() > deadline) {
           yield
@@ -443,5 +451,16 @@ export class FindController {
   destroy(): void {
     this.cancelCount()
     this.widget?.root.remove()
+  }
+}
+
+/** The stretches a count goes through, whole lines each; a search that can span lines reads the document at once. */
+function* countWindows(doc: Text, search: CompiledSearch): Generator<[number, number]> {
+  if (search.multiline) {
+    yield [0, doc.length]
+    return
+  }
+  for (let first = 1; first <= doc.lineCount; first += COUNT_WINDOW) {
+    yield [doc.line(first).from, doc.line(Math.min(doc.lineCount, first + COUNT_WINDOW - 1)).to]
   }
 }

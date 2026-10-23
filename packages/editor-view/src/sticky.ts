@@ -64,7 +64,7 @@ export class StickyController {
     this.dom.style.height = `${Math.max(0, lines.length * lineHeight + this.push)}px`
     while (this.rows.length < lines.length) this.rows.push(this.makeRow())
     while (this.rows.length > lines.length) this.rows.pop()!.dom.remove()
-    const scrollLeft = view.scroller.scrollLeft
+    const scrollLeft = view.scrollLeftInDoc
     lines.forEach((entry, index) => {
       const row = this.rows[index]
       row.line = entry.line

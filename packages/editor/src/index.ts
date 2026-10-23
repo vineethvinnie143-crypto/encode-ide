@@ -2,7 +2,20 @@ export { EditorState, Transaction, redo, undo, type EditorConfig, type EditorSta
 export { EditorSelection, SelectionRange } from './selection'
 export { History, GROUP_DELAY_MS, type HistoryGroup } from './history'
 export { T, TOKEN_NAMES, TokenBuilder, plainText, type Language, type LineTokens, type TokenName, type Tokenizer } from './language'
-export { Highlighter, MAX_TOKENIZED_LINE, sliceTokens, type HighlightedLine, type LineBrackets } from './highlight'
+export {
+  Highlighter,
+  MAX_BATCH_CHARS,
+  MAX_BATCH_LINES,
+  MAX_TOKENIZED_LINE,
+  sliceTokens,
+  tokenizeBatch,
+  type HighlightBatch,
+  type HighlightResult,
+  type HighlightService,
+  type HighlightedLine,
+  type LineBrackets,
+} from './highlight'
+export { BATCH_TIMEOUT_MS, connectHighlighting, serveHighlighting, type HighlightConnection, type HighlightPort, type HighlightWorkerPort } from './highlight-worker'
 export {
   MAX_FOLD_RANGES,
   allFoldRanges,
@@ -51,8 +64,10 @@ export { detectIndent, type IndentStyle } from './indent'
 export { languageById, languageByName, languageForContent, languageForPath, languages, plain, type LanguageEntry } from './languages'
 export {
   CharClass,
+  carryColumnIndexes,
   charClass,
   columnAt,
+  forgetColumnIndexes,
   indentWidth,
   indexAtColumn,
   leadingWhitespace,

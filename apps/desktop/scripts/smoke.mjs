@@ -1498,16 +1498,30 @@ async function runLanguageServerChecks() {
   await runEditorSymbolChecks(markerLines)
   await runEditorStructureChecks(markerLines)
   await runEditorHintsChecks(markerLines)
+  await runLargeFileChecks()
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
   await waitFor(`/^Running/.test(document.querySelector('.lsp-server[data-server="typescript"] .lsp-server-state')?.textContent ?? '')`, 8000, 'the server runs in Settings')
+  // The count is read when the screen opens and when the window gets focus; a file let go a moment ago may still be in it.
+  await until(
+    async () => {
+      await evaluate("window.dispatchEvent(new Event('focus'))")
+      await sleep(250)
+      return (await evaluate(`document.querySelector('.lsp-server[data-server="typescript"] .lsp-server-state')?.textContent ?? ''`)).includes('1 file')
+    },
+    10000,
+    'the server counting the one file open',
+  ).catch(() => null)
   const row = await evaluate(`(() => {
     const row = document.querySelector('.lsp-server[data-server="typescript"]')
     return { state: row?.querySelector('.lsp-server-state')?.textContent ?? '', detail: row?.querySelector('.lsp-server-detail')?.textContent ?? '', title: document.querySelector('.lsp-state-title')?.textContent ?? '', first: document.querySelector('.lsp-server')?.dataset.server ?? '' }
   })()`)
   console.log('[smoke] language servers screen:', JSON.stringify(row))
-  if (!row.state.includes('1 file') || !/the project/.test(row.detail) || row.first !== 'typescript' || !/1 server running/.test(row.title)) throw new Error(`Settings > Language servers does not say how the server stands: ${JSON.stringify(row)}`)
+  if (!row.state.includes('1 file') || !/the project/.test(row.detail) || row.first !== 'typescript' || !/1 server running/.test(row.title)) {
+    const tabs = await evaluate(`[...document.querySelectorAll('.editor-tab .tab-label')].map((node) => node.textContent)`)
+    throw new Error(`Settings > Language servers does not say how the server stands: ${JSON.stringify({ ...row, tabs, server: (await markerLines()).slice(-12) })}`)
+  }
   await screenshot('ui-dark-settings-language-servers.png')
   await closeSettings()
 
@@ -1736,12 +1750,22 @@ async function runEditorAssistChecks(markerLines) {
   await waitFor(`${RENDERED_LINES}[0] === "import { greet } from './greet'" && ${RENDERED_LINES}.includes('greet')`, 8000, 'the import the item brings').catch(async (error) => {
     throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
   })
+  // An item taken while the server is still filling it in, and typed after at once: its import still comes, above,
+  // with the typing where it was.
+  await pressKey('Enter')
+  await send('Input.insertText', { text: 'farew' })
+  await waitFor(`${SUGGESTIONS}?.selected === 'farewell'`, 8000, 'the item filled in slowly')
+  await pressKey('Enter')
+  await send('Input.insertText', { text: ' // bye' })
+  await waitFor(`${RENDERED_LINES}[0] === "import { farewell } from './farewell'" && ${RENDERED_LINES}[1] === "import { greet } from './greet'" && ${RENDERED_LINES}.includes('farewell // bye')`, 8000, 'the import that came after the typing').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
 
   // Tidy up: kept, closed, and the server lets the file go.
   await pressKey('s', { ctrl: true })
   await waitFor("!document.querySelector('.editor-tab.is-dirty')", 8000, 'the file saved')
   const typed = await fs.readFile(path.join(demoPath, 'src', 'lsp-assist.ts'), 'utf8')
-  for (const line of ["import { greet } from './greet'", 'scaleBy(2,', 'console.log(42)', 'greet']) {
+  for (const line of ["import { farewell } from './farewell'", "import { greet } from './greet'", 'scaleBy(2,', 'console.log(42)', 'greet', 'farewell // bye']) {
     if (!typed.split('\n').some((text) => text.startsWith(line))) throw new Error(`The file does not have "${line}":\n${typed}`)
   }
   await click('.editor-tab.is-active .tab-close')
@@ -2440,6 +2464,132 @@ async function runEditorHintsChecks(markerLines) {
   await until(async () => (await markerLines()).includes('close lsp-hints.ts'), 10000, 'the server to let the file go')
   await evaluate("window.eNCode.workspace.delete('src/lsp-hints.ts').catch(() => null)")
   console.log('[smoke] editor hints: ok')
+}
+
+/** The most each step with a 100 MB file may take in the app, in milliseconds, on the slowest machine it runs on. */
+const LARGE_LIMITS = { open: 15000, end: 4000, colours: 90000, type: 4000, find: 6000, save: 20000, reload: 30000 }
+
+/**
+ * A 100 MB file in the app: opened from Quick Open, read through by the highlighting worker (a comment opened on its
+ * first line and closed on its last makes every line between a comment, which a guess from the lines above cannot
+ * know), shown at its end, typed in, searched, saved, and taken in again when it changes on disk, each in its limit.
+ */
+async function runLargeFileChecks() {
+  console.log('[smoke] --- large file ---')
+  const first = '/* A large file: this comment opens here and closes on the last line, so every line between is part of it.'
+  const last = "*/ export const last = 'the end of the large file'"
+  const lines = [first]
+  let size = first.length + 1
+  let blocks = 0
+  for (; size < 100 * 1024 * 1024; blocks++) {
+    const n = blocks
+    for (const line of [
+      `export function handler${n}(input, options = {}) {`,
+      `  const value = input.items.map((item) => item.price * 1.2) // tax ${n}`,
+      `  if (!options.quiet) console.log(\`handled \${value.length} items\`, '${n}')`,
+      `  return { id: ${n}, total: value.reduce((a, b) => a + b, 0), name: "item-${n}" }`,
+      '}',
+    ]) {
+      lines.push(line)
+      size += line.length + 1
+    }
+  }
+  lines.push(last)
+  const folder = path.join(demoPath, 'large')
+  const file = path.join(folder, 'big-file.js')
+  await fs.mkdir(folder, { recursive: true })
+  await fs.writeFile(file, lines.join('\n'))
+  const bytes = (await fs.stat(file)).size
+
+  // The workers the page starts, as DevTools reports them.
+  const workers = []
+  const onMessage = (event) => {
+    const message = JSON.parse(event.data)
+    if (message.method === 'Target.attachedToTarget' && message.params?.targetInfo?.type === 'worker') workers.push(message.params.targetInfo.url)
+  }
+  ws.addEventListener('message', onMessage)
+  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true })
+
+  const measures = {}
+  const within = (name, started) => {
+    const ms = Date.now() - started
+    measures[name] = ms
+    if (ms > LARGE_LIMITS[name]) throw new Error(`${name} took ${ms} ms with a ${Math.round(bytes / 1024 / 1024)} MB file; the limit is ${LARGE_LIMITS[name]} ms`)
+  }
+  const TEXT_LINES = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-lines .enc-line')]`
+  try {
+    const opened = Date.now()
+    await quickOpen('large/big-file.js', first)
+    within('open', opened)
+    await until(() => workers.some((url) => /highlight\.worker/.test(url)), 10000, 'the highlighting worker started').catch((error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(workers)}`)
+    })
+    // The language servers are not given a file this large, and the footer says so.
+    await waitFor("[...document.querySelectorAll('.editor-footer-label')].some((node) => node.textContent.endsWith(': file too large'))", 10000, 'the footer saying the file is too large for the servers')
+
+    await focusEditor()
+    let started = Date.now()
+    await pressKey('End', { ctrl: true })
+    await waitFor(`${RENDERED_LINES}.includes(${JSON.stringify(last)})`, LARGE_LIMITS.end + 2000, 'the end of the large file')
+    within('end', started)
+    // Near the end the lines are drawn as the comment they are in once the worker has read every line above them.
+    await waitFor(
+      `(() => {
+        const lines = ${TEXT_LINES}.filter((line) => line.textContent.startsWith('export function handler'))
+        return lines.length > 0 && lines.every((line) => !!line.querySelector('.tok-comment') && !line.querySelector('.tok-keyword'))
+      })()`,
+      LARGE_LIMITS.colours,
+      'the lines near the end coloured as the comment they are in',
+    )
+    within('colours', opened)
+    await screenshot('27-large-file.png')
+
+    started = Date.now()
+    await send('Input.insertText', { text: ' // typed at the end' })
+    await waitFor(`!!document.querySelector('.editor-tab.is-dirty') && ${RENDERED_LINES}.some((line) => line.endsWith('// typed at the end'))`, LARGE_LIMITS.type + 2000, 'the typing shown')
+    within('type', started)
+
+    await pressKey('Home', { ctrl: true })
+    await waitFor(`${RENDERED_LINES}.includes(${JSON.stringify(first)})`, 4000, 'back at the top')
+    await pressKey('f', { ctrl: true })
+    await waitFor("!!document.querySelector('.enc-find')", 6000, 'find widget')
+    const target = `export function handler${blocks - 1}(input, options = {}) {`
+    started = Date.now()
+    await send('Input.insertText', { text: `handler${blocks - 1}(` })
+    await waitFor(`${RENDERED_LINES}.includes(${JSON.stringify(target)})`, LARGE_LIMITS.find + 2000, 'the match near the end shown')
+    within('find', started)
+    await pressKey('Escape')
+    await waitFor("!document.querySelector('.enc-find')", 4000, 'find widget closed')
+
+    await focusEditor()
+    started = Date.now()
+    await pressKey('s', { ctrl: true })
+    await waitFor("!document.querySelector('.editor-tab.is-dirty')", LARGE_LIMITS.save + 2000, 'the large file saved')
+    within('save', started)
+    const saved = (await fs.stat(file)).size
+    if (saved !== bytes + ' // typed at the end'.length) throw new Error(`The saved file has ${saved} bytes, not ${bytes + ' // typed at the end'.length}`)
+
+    // Changed on disk by another program: the editor takes the new text in.
+    started = Date.now()
+    await fs.appendFile(file, '\n// added on disk')
+    await focusEditor()
+    await until(
+      async () => {
+        await pressKey('End', { ctrl: true })
+        return (await evaluate(RENDERED_LINES)).includes('// added on disk')
+      },
+      LARGE_LIMITS.reload + 2000,
+      'the change on disk taken in',
+    )
+    within('reload', started)
+    if (await evaluate("!!document.querySelector('.editor-tab.is-dirty')")) throw new Error('The large file shows unsaved changes after it was read again')
+  } finally {
+    await send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true }).catch(() => null)
+    ws.removeEventListener('message', onMessage)
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'big-file.js')?.querySelector('.tab-close')?.click()`).catch(() => null)
+    await fs.rm(folder, { recursive: true, force: true })
+  }
+  console.log(`[smoke] large file (${Math.round(bytes / 1024 / 1024)} MB, ${lines.length} lines):`, JSON.stringify(measures))
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

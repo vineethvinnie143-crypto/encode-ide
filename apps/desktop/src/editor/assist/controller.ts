@@ -81,6 +81,17 @@ interface PendingCompletion {
   explicit: boolean
 }
 
+/** A taken item the server had not filled in yet, whose edits elsewhere (an import) go in once its answer comes. */
+interface LateEdits {
+  /** The changes since its list was asked for: the item's own text, and what was typed after it. */
+  since: Since
+  list: number
+  id: number
+  /** How many edits elsewhere the item had when taken, which went in with it. */
+  had: number
+  until: number
+}
+
 /** The text typed by the last transaction just before the cursor: one character, or what an input method committed. */
 function typedText(tr: Transaction): string | null {
   if (tr.origin !== 'input.type' || !tr.docChanged) return null
@@ -113,8 +124,8 @@ export class EditorAssist {
   private token = 0
   private quickTimer: number | undefined
   private resolveTimer: number | undefined
-  private readonly resolving = new Set<string>()
-  private late: { since: Since; list: number; id: number; had: number; until: number } | null = null
+  private readonly resolving = new Map<string, Promise<CompletionEntry | null>>()
+  private late: LateEdits | null = null
 
   private signature: { help: SignatureHelp; active: number } | null = null
   private signatureToken = 0
@@ -435,22 +446,31 @@ export class EditorAssist {
     }, 50)
   }
 
-  private async resolve(session: CompletionSession, id: number): Promise<CompletionEntry | null> {
+  /**
+   * The item as the server fills it in. Asked once however often it is wanted while the answer is on its way: an item
+   * taken while the list's own question about it is still out waits for that answer, and its import still comes.
+   */
+  private resolve(session: CompletionSession, id: number): Promise<CompletionEntry | null> {
     const path = this.path
+    if (!path) return Promise.resolve(null)
     const key = `${session.list}:${id}`
-    if (!path || this.resolving.has(key)) return null
-    this.resolving.add(key)
-    try {
-      const resolved = await askServers({ kind: 'resolve', path, list: session.list, id })
-      if (!resolved) return null
-      if (this.session === session) {
-        session.entries = session.entries.map((item) => (item.id === id ? { ...resolved, resolved: true } : item))
-        this.publish()
+    const asked = this.resolving.get(key)
+    if (asked) return asked
+    const answer = (async () => {
+      try {
+        const resolved = await askServers({ kind: 'resolve', path, list: session.list, id })
+        if (!resolved) return null
+        if (this.session === session) {
+          session.entries = session.entries.map((item) => (item.id === id ? { ...resolved, resolved: true } : item))
+          this.publish()
+        }
+        return { ...resolved, resolved: true }
+      } finally {
+        this.resolving.delete(key)
       }
-      return { ...resolved, resolved: true }
-    } finally {
-      this.resolving.delete(key)
-    }
+    })()
+    this.resolving.set(key, answer)
+    return answer
   }
 
   private insert(entry: CompletionEntry, session: CompletionSession, mode: 'insert' | 'replace'): void {
@@ -461,6 +481,10 @@ export class EditorAssist {
     const plan = planCompletion(state, entry, session.since, session.start, mode)
     const cursor = state.selection.main.head
     const indent = indentAt(state, cursor)
+    // An item the server had not filled in yet may still bring an import: it goes in when the answer comes. It is
+    // followed from before the item's own text goes in, so the places the answer names are mapped past that text too.
+    const late: LateEdits | null = entry.resolved ? null : { since: session.since, list: session.list, id: entry.id, had: entry.additionalEdits?.length ?? 0, until: Date.now() + LATE_EDITS_MS }
+    this.late = late
     if (plan.snippet) {
       const snippet = parseSnippet(plan.text, { indent, indentUnit: state.config.indentUnit, variable: (name) => snippetVariable(name, state, path, plan.ranges[0]) })
       view.snippet.insert(snippet, plan.ranges, { changes: plan.changes, origin: 'input.complete' })
@@ -476,19 +500,14 @@ export class EditorAssist {
         isolateHistory: true,
       })
     }
-    // An item the server had not filled in yet may still bring an import: it goes in when the answer comes.
-    if (!entry.resolved) {
-      this.late = { since: session.since, list: session.list, id: entry.id, had: entry.additionalEdits?.length ?? 0, until: Date.now() + LATE_EDITS_MS }
-      void this.lateEdits(session, entry)
-    }
+    if (late) void this.lateEdits(session, entry, late)
     if (entry.then === 'suggest') queueMicrotask(() => void this.requestCompletion(1, undefined, false))
     else if (entry.then === 'parameterHints') queueMicrotask(() => void this.requestSignature(1, undefined))
   }
 
-  private async lateEdits(session: CompletionSession, entry: CompletionEntry): Promise<void> {
-    const late = this.late
+  private async lateEdits(session: CompletionSession, entry: CompletionEntry, late: LateEdits): Promise<void> {
     const resolved = await this.resolve(session, entry.id)
-    if (!late || this.late !== late || !resolved) return
+    if (this.late !== late || !resolved) return
     this.late = null
     if (Date.now() > late.until || (resolved.additionalEdits?.length ?? 0) <= late.had) return
     // Only the edits elsewhere: the item's own text is in already, around the cursor.

@@ -41,7 +41,7 @@ async function refreshOpenTab(path: string): Promise<void> {
   const tab = editor.tabs.find((item) => item.path === path)
   if (!tab || tab.dirty) return
   try {
-    const file = await api.workspace.read(path)
+    const file = await api.workspace.readForEditor(path)
     if (!file.binary) editor.applyExternalContent(path, file.content)
   } catch {
     /* file may have been deleted */

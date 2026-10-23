@@ -5,6 +5,7 @@ import { DecorationSet, EditorView } from '@encode/editor-view'
 import type { EditorLocation } from '@shared/types'
 import { api } from '../../api'
 import { docState } from '../../editor/docs'
+import { sharedHighlighting } from '../../editor/highlighting'
 import { positionOf } from '../../editor/marks'
 import { useEditorLayout } from '../../stores/editor-layout'
 import { cx } from '../../ui/cx'
@@ -107,6 +108,7 @@ export function PeekPreview({ location, also }: { location: EditorLocation | und
       highlightActiveLine: false,
       folding: false,
       bracketColors: useEditorLayout.getState().bracketColors,
+      highlighting: sharedHighlighting(),
     })
     viewRef.current = view
     return () => {

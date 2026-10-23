@@ -196,6 +196,20 @@ export class Text {
     return true
   }
 
+  /** True when the document holds exactly `text` (lines split on "\n"), read in place rather than made a document. */
+  eqString(text: string): boolean {
+    if (text.length !== this.length) return false
+    let pos = 0
+    for (const leaf of this.leaves) {
+      for (const line of leaf.lines) {
+        if (!text.startsWith(line, pos)) return false
+        pos += line.length
+        if (pos < text.length && text.charCodeAt(pos++) !== 10) return false
+      }
+    }
+    return pos === text.length
+  }
+
   /** Replaces 0-based lines [start, end) with `lines`. */
   private replaceLines(start: number, end: number, lines: string[]): Text {
     let lo = lastAtOrBefore(this.leafLine, start)

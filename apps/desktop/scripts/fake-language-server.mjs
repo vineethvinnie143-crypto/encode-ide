@@ -139,10 +139,15 @@ function completion({ textDocument, position }) {
   items.push({ label: 'log', kind: 15, detail: 'console.log(value)', insertTextFormat: 2, insertText: 'console.log(${1:value})$0', filterText: 'log' })
   // Filled in only when asked: its documentation and the import it needs.
   items.push({ label: 'greet', kind: 3, labelDetails: { description: './greet' }, data: { item: 'greet' } })
+  // Filled in slowly: taken, and typed after, before its import comes.
+  items.push({ label: 'farewell', kind: 3, labelDetails: { description: './farewell' }, data: { item: 'farewell' } })
   return { isIncomplete: false, items }
 }
 
 function resolveItem(item) {
+  if (item.data?.item === 'farewell') {
+    return { ...item, detail: 'function farewell(): string', additionalTextEdits: [{ range: range(0, 0, 0), newText: "import { farewell } from './farewell'\n" }] }
+  }
   if (item.data?.item !== 'greet') return item
   return {
     ...item,
@@ -630,6 +635,7 @@ function handle(message) {
     case 'textDocument/completion':
       return reply(id, completion(params))
     case 'completionItem/resolve':
+      if (params.data?.item === 'farewell') return void setTimeout(() => reply(id, resolveItem(params)), 800)
       return reply(id, resolveItem(params))
     case 'textDocument/signatureHelp':
       return reply(id, signatureHelp(params))
