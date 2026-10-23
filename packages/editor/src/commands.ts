@@ -679,6 +679,8 @@ export interface ClipboardText {
   text: string
   /** Copied from cursors without a selection: whole lines, which paste above the cursor's line. */
   linewise: boolean
+  /** Copied from more than one cursor: what each gave, so pasting with as many cursors gives each its own again. */
+  pieces?: string[]
 }
 
 /** What Ctrl+C puts on the clipboard: the selections, or the cursors' lines when nothing is selected. */
@@ -692,15 +694,10 @@ export function copyText(state: EditorState): ClipboardText {
       if (line.number !== previous) lines.push(`${line.text}\n`)
       previous = line.number
     }
-    return { text: lines.join(''), linewise: true }
+    return { text: lines.join(''), linewise: true, ...(lines.length > 1 ? { pieces: lines } : {}) }
   }
-  return {
-    text: ranges
-      .filter((range) => !range.empty)
-      .map((range) => state.sliceDoc(range.from, range.to))
-      .join('\n'),
-    linewise: false,
-  }
+  const pieces = ranges.filter((range) => !range.empty).map((range) => state.sliceDoc(range.from, range.to))
+  return { text: pieces.join('\n'), linewise: false, ...(pieces.length > 1 ? { pieces } : {}) }
 }
 
 /** Ctrl+X: the clipboard text, and the transaction that removes it. */
@@ -718,12 +715,25 @@ export function cutText(state: EditorState): { clipboard: ClipboardText; transac
 /**
  * Ctrl+V. Line breaks are normalised; text with one line per cursor is
  * spread over the cursors; whole lines copied without a selection go above
- * each cursor's line.
+ * each cursor's line. `pieces`, what each cursor of a copy gave (as
+ * `copyText` says), go one to a cursor when there are as many cursors, even
+ * when a piece has lines of its own.
  */
-export function paste(state: EditorState, text: string, linewise = false): Transaction | null {
+export function paste(state: EditorState, text: string, linewise = false, pieces?: readonly string[]): Transaction | null {
   if (!editable(state)) return null
   const normalized = text.replace(/\r\n?/g, '\n')
   const ranges = state.selection.ranges
+  if (pieces && pieces.length > 1 && pieces.length === ranges.length) {
+    const own = pieces.map((piece) => piece.replace(/\r\n?/g, '\n'))
+    const { changes, selection } = changeByRange(state, (range, index) => {
+      if (linewise && range.empty) {
+        const line = state.doc.lineAt(range.head)
+        return { changes: { from: line.from, insert: own[index] }, range: SelectionRange.cursor(range.head + own[index].length) }
+      }
+      return { changes: { from: range.from, to: range.to, insert: own[index] }, range: SelectionRange.cursor(range.from + own[index].length) }
+    })
+    return state.update({ changes, selection, origin: 'input.paste', scrollIntoView: true })
+  }
   if (linewise && ranges.every((range) => range.empty)) {
     const { changes, selection } = changeByRange(state, (range) => {
       const line = state.doc.lineAt(range.head)

@@ -32,7 +32,7 @@ export interface AppActions {
   editorCommand(name: string): void
   /**
    * Which of the editor's parts are on: the breadcrumbs, the outline, folding, sticky scroll, bracket colours, the
-   * minimap, inlay hints, semantic colours, word wrap and its indent, and every space shown.
+   * minimap, inlay hints, semantic colours, word wrap and its indent, every space shown, and Tab moving the focus.
    */
   editorLayout(): Record<EditorPart, boolean>
   toggleEditorPart(part: EditorPart): void
@@ -340,6 +340,15 @@ export function buildCommands(a: AppActions): Command[] {
       group: 'View',
       keywords: 'editor types parameter names hints inline annotations language server',
       run: () => a.toggleEditorPart('inlayHints'),
+    },
+    {
+      id: 'view.tabMovesFocus',
+      title: 'Toggle Tab moves the focus',
+      label: () => (a.editorLayout().tabMovesFocus ? 'Make Tab indent again' : 'Make Tab move the focus'),
+      group: 'View',
+      keys: ['Ctrl+M'],
+      keywords: 'editor accessibility keyboard tab key trap indent focus screen reader',
+      run: () => a.toggleEditorPart('tabMovesFocus'),
     },
     {
       id: 'view.semanticHighlighting',

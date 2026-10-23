@@ -406,6 +406,24 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
 - **Spaces and tabs**: select some text and its spaces show as faint dots and its tabs as lines. **View → Show
   whitespace** shows every one in the file until you turn it off; **Settings → Editor** picks which show the rest of
   the time (none, at line edges and in runs, in the selection, at line ends, or all). The text itself is unchanged.
+- **Typing in other languages**: with a Chinese, Japanese or Korean input method (or Windows dictation, Win+H), what
+  you are composing shows underlined right where it will go, pushing the text after it along, at every cursor if you
+  have several; Enter or a click commits it as one edit.
+- **Copy and paste with several cursors**: select three words with Ctrl+D and copy; put three cursors somewhere else
+  (Ctrl+Alt+Down) and paste: each gets its own word back. **Ctrl+Insert**, **Shift+Insert** and **Shift+Delete** copy,
+  paste and cut. A file with Windows line endings (the footer says CRLF) copies with them.
+- **Display scaling**: at 125%, 150% or 175% scaling the lines are evenly spaced and crisp; moving the window to a
+  screen with another scale, or changing **Settings → Appearance → Code size**, measures the text again.
+- **Screen readers**: with Narrator (Ctrl+Win+Enter) or NVDA running, the editor reads the line, word or character
+  the cursor moves over and what you select, and says when a block folds or opens, how many cursors you have, and the
+  problem **F8** goes to. **Settings → Editor → Screen reader mode** is Auto (on while a screen reader runs), On or Off.
+  **Ctrl+M** makes Tab leave the editor instead of indenting (and back); it is in the View menu too. In a Windows
+  contrast theme (Windows Settings → Accessibility → Contrast themes) the selection, the cursor and search matches show
+  in the theme's colours.
+- **Right-to-left text**: Hebrew or Arabic in a string or a comment shows letter by letter in stored order, on
+  purpose, so code cannot be disguised. **Settings → Editor → Read right-to-left text in its own order** makes it
+  read right to left inside strings, comments and text or Markdown files; the code around it stays as it is, and the
+  cursor, clicks and selections follow what is drawn.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
@@ -422,7 +440,9 @@ one, and colours that flicker, lag or stay wrong after the server has answered. 
 slow (say which file size and what you did), colours that stay wrong once they have filled in, and the cursor or a
 click landing in the wrong place in a very long line. For word wrap: a row that breaks in a strange place or runs
 past the edge, the cursor drawn at the wrong end of a row, arrows or Home and End going somewhere unexpected, and the
-text jumping when you resize the window or turn wrapping on.
+text jumping when you resize the window or turn wrapping on. For typing and accessibility: an input method's window
+opening far from the text, a composition lost or typed twice, a screen reader that says nothing or the wrong line, and
+right-to-left text where the cursor or a click lands somewhere other than where it looks.
 
 ## Worktrees
 
@@ -494,6 +514,9 @@ Updating means installing the next build over the last one: everything above sta
 - Language servers: installing a server with one click is not in the editor yet; it comes with the next builds.
   Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- In right-to-left text the arrow keys move through the characters in stored order, so the cursor can jump across a
+  word; identifiers in a right-to-left script stay in stored order. A screen reader reads the text, not the hint
+  labels or the problem marks beside it.
 - Word wrap is one setting for every file. Inlay hints are not counted when a row is wrapped, so a row with hints can
   run a little past the edge; a column selection (Shift+Alt+drag) still goes by whole lines. A file over 256 MB does not
   open; a 100 MB file takes about half a gigabyte of memory while open.

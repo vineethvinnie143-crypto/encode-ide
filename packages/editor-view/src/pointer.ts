@@ -52,6 +52,8 @@ export class PointerHandler {
     // Keep the focus in the textarea and the browser from starting its own selection or drag.
     event.preventDefault()
     view.focus()
+    // A click ends a composition with what was composed, where it was composed.
+    view.input.commitComposition()
     const state = view.state
     const target = event.target as Element
     // The marker after a folded line, and the chevrons in the gutter's last column, fold and unfold.

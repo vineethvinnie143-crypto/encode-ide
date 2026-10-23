@@ -11,5 +11,6 @@ import { structure } from './scenarios/structure.mjs'
 import { hints } from './scenarios/hints.mjs'
 import { large } from './scenarios/large.mjs'
 import { wrap } from './scenarios/wrap.mjs'
+import { input } from './scenarios/input.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large, ...wrap]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large, ...wrap, ...input]

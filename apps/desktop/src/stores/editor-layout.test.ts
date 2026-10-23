@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { OUTLINE_MAX, OUTLINE_MIN, WRAP_COLUMN_MAX, WRAP_COLUMN_MIN, normalizeLayout, textOptions } from './editor-layout'
+import { OUTLINE_MAX, OUTLINE_MIN, WRAP_COLUMN_MAX, WRAP_COLUMN_MIN, accessOptions, normalizeLayout, textOptions } from './editor-layout'
 
 describe('the editor layout as saved', () => {
   it('gives every field its default when nothing or something else was saved', () => {
@@ -22,6 +22,9 @@ describe('the editor layout as saved', () => {
       outlineWidth: 248,
       outlineSort: 'position',
       outlineFollow: true,
+      screenReader: 'auto',
+      tabMovesFocus: false,
+      bidi: false,
     }
     assert.deepEqual(normalizeLayout(null), defaults)
     assert.deepEqual(normalizeLayout('wide'), defaults)
@@ -44,6 +47,9 @@ describe('the editor layout as saved', () => {
         outlineWidth: 'big',
         outlineSort: 'size',
         outlineFollow: null,
+        screenReader: true,
+        tabMovesFocus: 'yes',
+        bidi: 'rtl',
       }),
       defaults,
     )
@@ -68,6 +74,9 @@ describe('the editor layout as saved', () => {
       outlineWidth: 300.4,
       outlineSort: 'kind',
       outlineFollow: false,
+      screenReader: 'off',
+      tabMovesFocus: true,
+      bidi: true,
     }
     assert.deepEqual(normalizeLayout(saved), {
       breadcrumbs: false,
@@ -87,6 +96,9 @@ describe('the editor layout as saved', () => {
       outlineWidth: 300,
       outlineSort: 'kind',
       outlineFollow: false,
+      screenReader: 'off',
+      tabMovesFocus: true,
+      bidi: true,
     })
     assert.equal(normalizeLayout({ outlineWidth: 10 }).outlineWidth, OUTLINE_MIN)
     assert.equal(normalizeLayout({ outlineWidth: 5000 }).outlineWidth, OUTLINE_MAX)
@@ -113,5 +125,24 @@ describe('what the editor is given for wrapping and spaces', () => {
     assert.equal(textOptions(layout({})).renderWhitespace, 'selection')
     assert.equal(textOptions(layout({ whitespace: 'none', showWhitespace: true })).renderWhitespace, 'all')
     assert.equal(textOptions(layout({ whitespace: 'boundary' })).renderWhitespace, 'boundary')
+  })
+
+  it('keeps right-to-left text in stored order unless reading order is asked for', () => {
+    assert.equal(textOptions(layout({})).bidi, false)
+    assert.equal(textOptions(layout({ bidi: true })).bidi, true)
+  })
+})
+
+describe('what the editor is given for screen readers and the Tab key', () => {
+  it('works with a screen reader when one runs (Auto), always (On) or never (Off)', () => {
+    assert.equal(accessOptions(normalizeLayout({}), false).screenReader, false)
+    assert.equal(accessOptions(normalizeLayout({}), true).screenReader, true)
+    assert.equal(accessOptions(normalizeLayout({ screenReader: 'on' }), false).screenReader, true)
+    assert.equal(accessOptions(normalizeLayout({ screenReader: 'off' }), true).screenReader, false)
+  })
+
+  it('passes Tab moves focus on as it is set', () => {
+    assert.equal(accessOptions(normalizeLayout({}), false).tabMovesFocus, false)
+    assert.equal(accessOptions(normalizeLayout({ tabMovesFocus: true }), false).tabMovesFocus, true)
   })
 })

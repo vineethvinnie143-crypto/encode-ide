@@ -224,6 +224,7 @@ export const defaultBindings: readonly KeyBinding[] = [
   { key: 'Shift-Alt-a', command: 'toggleBlockComment' },
   { key: 'Mod-z', command: 'undo' },
   { key: 'Mod-y', mac: 'Meta-Shift-z', command: 'redo' },
+  { key: 'Ctrl-m', mac: 'Ctrl-Shift-m', command: 'toggleTabMovesFocus' },
   { key: 'Mod-Shift-z', command: 'redo' },
 
   { key: 'Mod-f', command: 'openFind' },

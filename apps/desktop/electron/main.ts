@@ -255,7 +255,11 @@ if (!gotLock) {
 
     win.on('maximize', () => send('window:state', { maximized: true }))
     win.on('unmaximize', () => send('window:state', { maximized: false }))
+    // A screen reader started or stopped: the editor's screen reader mode follows when it is set to Auto.
+    const accessibility = (_event: unknown, active: boolean) => send('app:screen-reader', active)
+    app.on('accessibility-support-changed', accessibility)
     win.on('closed', () => {
+      app.removeListener('accessibility-support-changed', accessibility)
       shell.disposeAll()
       schedules.dispose()
       // The banner is a window too; left up, it would keep eNCode from quitting.

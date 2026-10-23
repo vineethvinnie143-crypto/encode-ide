@@ -26,6 +26,7 @@ import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useCode } from './stores/code'
 import { useEditor } from './stores/editor'
+import { useScreenReaderRunning } from './stores/editor-layout'
 import { useGit } from './stores/git'
 import { usePanels } from './stores/panels'
 import { useSessions } from './stores/sessions'
@@ -154,11 +155,17 @@ export default function App() {
       void useSessions.getState().select(id)
     })
 
+    // Whether a screen reader is running, for the editor's screen reader mode set to Auto.
+    const running = (active: boolean) => useScreenReaderRunning.setState({ running: active })
+    void api.app.screenReader().then(running, () => {})
+    const offReader = api.app.onScreenReader(running)
+
     return () => {
       offAgent()
       offFiles()
       offAlert()
       offOpen()
+      offReader()
       refresh.cancel()
     }
   }, [])

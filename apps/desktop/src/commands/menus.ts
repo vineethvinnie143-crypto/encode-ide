@@ -76,6 +76,7 @@ export const MENUS: readonly MenuSpec[] = [
       'view.whitespace',
       'view.inlayHints',
       'view.semanticHighlighting',
+      'view.tabMovesFocus',
       '-',
       'editor.fold',
       'editor.unfold',

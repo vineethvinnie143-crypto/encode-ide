@@ -103,32 +103,128 @@ export const text = [
     },
   },
   {
-    name: 'IME composition shows in place and commits as one edit',
+    name: 'IME composition is drawn in place, moving the text after it, and commits as one edit',
     async run({ mount, ev, page, assert, text, selection, settle, shot }) {
-      await mount({ text: 'ab', path: 'a.txt' })
-      await page.key('End', { ctrl: false })
-      await ev(() => {
-        window.events = []
-        for (const type of ['compositionstart', 'compositionupdate', 'compositionend']) window.view.textarea.addEventListener(type, () => window.events.push(type))
-      })
+      await mount({ text: 'ab tail', path: 'a.txt' })
+      await page.key('ArrowRight')
+      await page.key('ArrowRight')
+      // Where the text after the caret is drawn, and what the composition looks like.
+      const shown = () =>
+        ev(() => {
+          const line = document.querySelector('.enc-line')
+          const tail = (() => {
+            const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              const at = node.data.indexOf('tail')
+              if (at >= 0) {
+                const range = document.createRange()
+                range.setStart(node, at)
+                range.setEnd(node, at + 1)
+                return range.getBoundingClientRect().left
+              }
+            }
+            return NaN
+          })()
+          const composed = [...document.querySelectorAll('.enc-inlay-compose')].map((el) => ({ label: el.dataset.label, left: el.getBoundingClientRect().left, width: el.getBoundingClientRect().width }))
+          const area = window.view.textarea
+          const caret = document.querySelector('.enc-cursor-main')?.getBoundingClientRect().left ?? NaN
+          return { tail, composed, text: line.textContent, caret, area: { left: area.getBoundingClientRect().left, opacity: getComputedStyle(area).opacity } }
+        })
+      const before = await shown()
       await page.ime(ch(0x306b))
       await settle()
       assert.equal(await ev(() => window.view.input.composing), true)
-      assert.equal(await ev(() => window.view.root.classList.contains('enc-composing')), true)
-      assert.equal(await text(), 'ab', 'the document is untouched while composing')
+      assert.equal(await text(), 'ab tail', 'the document is untouched while composing')
       await page.ime(ch(0x65e5, 0x672c))
       await settle()
+      const during = await shown()
+      assert.equal(during.composed.length, 1)
+      assert.equal(during.composed[0].label, ch(0x65e5, 0x672c))
+      assert.ok(during.tail - before.tail >= during.composed[0].width - 1, `the text after the caret moved along by the composition: ${during.tail - before.tail} px for ${during.composed[0].width}`)
+      assert.equal(during.text, 'ab tail', 'the composition is not text of the line')
+      assert.ok(Math.abs(during.area.left - during.composed[0].left) < 1, 'the textarea the input method writes in lies over the composition')
+      assert.equal(during.area.opacity, '0', 'the textarea itself is not seen')
+      assert.ok(Math.abs(during.caret - (during.composed[0].left + during.composed[0].width)) < 1.5, `the caret is after the composition: ${during.caret}`)
       await shot('ime')
       await page.insertText(ch(0x65e5, 0x672c))
       await settle()
-      assert.equal(await text(), `ab${ch(0x65e5, 0x672c)}`)
+      assert.equal(await text(), `ab${ch(0x65e5, 0x672c)} tail`)
       assert.deepEqual(await selection(), [[4, 4]])
       assert.equal(await ev(() => window.view.input.composing), false)
+      assert.equal(await ev(() => document.querySelectorAll('.enc-inlay-compose').length), 0)
       assert.equal(await ev(() => window.view.textarea.value), '')
       // One undo takes the whole composition back.
       await page.key('z', { ctrl: true })
       await settle()
-      assert.equal(await text(), 'ab')
+      assert.equal(await text(), 'ab tail')
+    },
+  },
+  {
+    name: 'IME composition goes in at every cursor, replaces what is selected, and a click commits it',
+    async run({ mount, ev, page, assert, text, selection, settle }) {
+      await mount({ text: 'one\ntwo\nthree', path: 'a.txt' })
+      // A cursor at the end of each of the first two lines, and a word selected in the third.
+      await ev(() => {
+        const { EditorSelection, SelectionRange } = window.enc
+        window.view.dispatch({ selection: EditorSelection.create([SelectionRange.cursor(3), SelectionRange.cursor(7), new SelectionRange(8, 13)]) })
+        window.view.flush()
+      })
+      const smile = ch(0x1f600)
+      await page.ime(smile)
+      await settle()
+      assert.equal(await text(), 'one\ntwo\n', 'the selection went when composing started')
+      assert.deepEqual(await ev(() => [...document.querySelectorAll('.enc-inlay-compose')].map((el) => el.dataset.label)), [smile, smile, smile])
+      await page.insertText(smile)
+      await settle()
+      assert.equal(await text(), `one${smile}\ntwo${smile}\n${smile}`)
+      assert.deepEqual(await selection(), [
+        [5, 5],
+        [11, 11],
+        [14, 14],
+      ])
+      // A click while composing commits what was composed, where it was composed.
+      await ev(() => window.view.select(0))
+      await page.ime(ch(0x304b))
+      await settle()
+      const end = await ev(() => {
+        const line = [...document.querySelectorAll('.enc-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[2]
+        const box = line.getBoundingClientRect()
+        return { x: box.left + 2, y: box.top + box.height / 2 }
+      })
+      await page.click(end.x, end.y)
+      await settle()
+      assert.equal(await ev(() => window.view.input.composing), false)
+      assert.equal(await text(), `${ch(0x304b)}one${smile}\ntwo${smile}\n${smile}`)
+      assert.equal(await ev(() => document.querySelectorAll('.enc-inlay-compose').length), 0)
+    },
+  },
+  {
+    name: 'IME composition in a wrapped line and in a read-only one',
+    async run({ mount, ev, page, assert, text, settle }) {
+      const long = Array.from({ length: 40 }, (_, index) => `word${index}`).join(' ')
+      await mount({ text: long, path: 'a.txt', config: { wordWrap: 'on' }, width: 420 })
+      await ev(() => window.view.select(200))
+      await page.ime(ch(0x4e2d, 0x6587))
+      await settle()
+      const where = await ev(() => {
+        const composed = document.querySelector('.enc-inlay-compose').getBoundingClientRect()
+        const area = window.view.textarea.getBoundingClientRect()
+        return { composed: { left: composed.left, top: composed.top }, area: { left: area.left, top: area.top }, lineHeight: window.view.metrics.lineHeight }
+      })
+      // On the composition's row: the text's box sits lower in the row by the font's own spacing, which differs by system.
+      assert.ok(Math.abs(where.composed.left - where.area.left) < 1 && Math.abs(where.composed.top - where.area.top) < where.lineHeight / 2, `composition ${JSON.stringify(where)}`)
+      await page.insertText(ch(0x4e2d, 0x6587))
+      await settle()
+      assert.equal((await text()).slice(200, 202), ch(0x4e2d, 0x6587))
+      // A read-only document takes nothing and shows nothing.
+      await mount({ text: 'fixed', path: 'a.txt' })
+      await ev(() => window.view.dispatch({ config: { readOnly: true } }))
+      await page.ime(ch(0x306b))
+      await settle()
+      assert.equal(await ev(() => document.querySelectorAll('.enc-inlay-compose').length), 0)
+      await page.insertText(ch(0x306b))
+      await settle()
+      assert.equal(await text(), 'fixed')
     },
   },
   {
@@ -161,6 +257,70 @@ export const text = [
       await page.key('z', { ctrl: true })
       await settle()
       assert.equal(await text(), 'one\no\nthree')
+    },
+  },
+  {
+    name: 'a copy made with several cursors pastes back one piece to each, and Windows files copy with Windows line breaks',
+    async run({ mount, ev, page, assert, text, settle }) {
+      await mount({ text: 'alpha beta\ngamma delta\nend', path: 'a.txt', lineSeparator: '\r\n' })
+      await ev(() => {
+        window.copied = []
+        document.addEventListener('copy', (event) => window.copied.push(event.clipboardData.getData('text/plain')))
+        document.addEventListener('cut', (event) => window.copied.push(event.clipboardData.getData('text/plain')))
+        const { EditorSelection, SelectionRange } = window.enc
+        // "alpha beta\ngam" and "delta": two selections, one of them over a line break.
+        window.view.dispatch({ selection: EditorSelection.create([new SelectionRange(0, 14), new SelectionRange(17, 22)]) })
+      })
+      await page.command('copy')
+      await settle()
+      assert.deepEqual(await ev(() => window.copied), ['alpha beta\r\ngam\r\ndelta'])
+      // Two cursors at the end take a piece each, the first piece with its line break.
+      await ev(() => {
+        const { EditorSelection, SelectionRange } = window.enc
+        const end = window.view.state.doc.length
+        window.view.dispatch({ changes: { from: end, insert: '\n1 \n2 ' } })
+        const doc = window.view.state.doc
+        window.view.dispatch({ selection: EditorSelection.create([SelectionRange.cursor(doc.line(4).to), SelectionRange.cursor(doc.line(5).to)]) })
+      })
+      await page.command('paste')
+      await settle()
+      assert.equal(await text(), 'alpha beta\ngamma delta\nend\n1 alpha beta\ngam\n2 delta')
+      // With four cursors (neither two pieces nor three lines) the whole text goes in at each.
+      await ev(() => {
+        const { EditorSelection, SelectionRange } = window.enc
+        window.view.dispatch({ selection: EditorSelection.create([0, 2, 5, 10].map((pos) => SelectionRange.cursor(pos))) })
+      })
+      await page.command('paste')
+      await settle()
+      const whole = 'alpha beta\ngam\ndelta'
+      assert.equal((await text()).split(whole).length - 1, 4, 'the whole copy goes in at each of four cursors')
+      await page.key('z', { ctrl: true })
+      await settle()
+      assert.equal(await text(), 'alpha beta\ngamma delta\nend\n1 alpha beta\ngam\n2 delta')
+    },
+  },
+  {
+    name: 'Ctrl+Insert copies, Shift+Delete cuts and Shift+Insert pastes, as Windows keyboards do',
+    async run({ mount, ev, page, assert, text, settle }) {
+      await mount({ text: 'one two', path: 'a.txt' })
+      await ev(() => {
+        window.copied = []
+        document.addEventListener('copy', (event) => window.copied.push(['copy', event.clipboardData.getData('text/plain')]))
+        document.addEventListener('cut', (event) => window.copied.push(['cut', event.clipboardData.getData('text/plain')]))
+        window.view.dispatch({ selection: new window.enc.SelectionRange(0, 3) })
+      })
+      await page.key('Insert', { ctrl: true, keyCode: 45 })
+      await settle()
+      assert.deepEqual(await ev(() => window.copied), [['copy', 'one']])
+      assert.equal(await text(), 'one two')
+      await ev(() => window.view.dispatch({ selection: new window.enc.SelectionRange(4, 7) }))
+      await page.key('Delete', { shift: true, keyCode: 46 })
+      await settle()
+      assert.deepEqual((await ev(() => window.copied)).slice(1), [['cut', 'two']])
+      assert.equal(await text(), 'one ')
+      await page.key('Insert', { shift: true, keyCode: 45 })
+      await settle()
+      assert.equal(await text(), 'one two')
     },
   },
   {

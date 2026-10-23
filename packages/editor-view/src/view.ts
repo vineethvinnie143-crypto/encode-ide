@@ -29,7 +29,7 @@ import { FOLD_COLUMN, FoldController } from './folding'
 import { HeightMap, ScrollScale, sameHidden, type HiddenLines, type Zone } from './heights'
 import { InputHandler } from './input'
 import { Keymap, defaultBindings, isMac, type KeyBinding } from './keymap'
-import { DEPRECATED, fillLine, fillRows, isSimpleText, withBrackets, withSemantic, type DrawnInlay, type InlaySpec, type SemanticSpan } from './line'
+import { DEPRECATED, fillLine, fillRows, hasRtl, isSimpleText, isolatesOf, withBrackets, withSemantic, type DrawnInlay, type InlaySpec, type SemanticSpan } from './line'
 import { LineItems } from './line-items'
 import { MinimapController } from './minimap'
 import { PointerHandler } from './pointer'
@@ -71,6 +71,11 @@ const MAX_DRAWN_ROWS = 240
 const ROW_MARGIN = 60
 /** The breaks of a line drawn in one row. */
 const ONE_ROW: LineWrap = { breaks: [], indent: 0 }
+/** Languages of prose rather than code: with `bidi`, all their text but inline code reads in its own order. */
+const PROSE = new Set(['plaintext', 'markdown'])
+const NO_ISOLATES: [number, number][] = []
+/** A letter: of a left-to-right script, unless `hasRtl` says otherwise. */
+const LETTER = /\p{L}/u
 
 export interface EditorViewConfig {
   state: EditorState
@@ -121,6 +126,21 @@ export interface EditorViewConfig {
    * ('boundary'), those at the end of a line ('trailing'), those in a selection ('selection'), or none. Default 'none'.
    */
   renderWhitespace?: 'none' | 'boundary' | 'selection' | 'trailing' | 'all'
+  /**
+   * Works with a screen reader: the field the keyboard types into holds the lines around the main cursor and the
+   * selection, so the screen reader reads the character, word or line the cursor moves over and what is selected. The
+   * host turns it on when a screen reader is running or the user asks for it. Default false.
+   */
+  screenReader?: boolean
+  /** Tab and Shift+Tab move the focus out of the editor instead of indenting; Ctrl+M turns it on and off. Default false. */
+  tabMovesFocus?: boolean
+  /**
+   * Right-to-left text (Hebrew, Arabic and the like) in strings and comments, and in prose (plain text, Markdown), is
+   * shown in reading order, each string or comment on its own so that it cannot move the code around it. Code stays
+   * in the order it is stored and bidi controls stay markers, so what runs is what shows. Default false: every line in
+   * stored order.
+   */
+  bidi?: boolean
 }
 
 type Options = Required<
@@ -142,6 +162,9 @@ type Options = Required<
     | 'wrapColumn'
     | 'wrapIndent'
     | 'renderWhitespace'
+    | 'screenReader'
+    | 'tabMovesFocus'
+    | 'bidi'
   >
 >
 
@@ -196,6 +219,8 @@ interface LineEl {
   rowTo: number
   /** The stretches its spaces and tabs were marked in, as a key. */
   whitespace: string
+  /** The stretches shown in reading order (`isolatesOf`), as a key; empty when the line is all in stored order. */
+  isolates: string
 }
 
 interface ZoneEntry {
@@ -217,6 +242,48 @@ export interface ViewMetrics {
 }
 
 const SHORT = 0.6
+
+/** Device pixels per CSS pixel: the screen's scale (125% on Windows is 1.25) times the page's zoom. */
+function pixelRatio(): number {
+  return typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1
+}
+
+/**
+ * Editors that check the screen's scale once a second, for a change no media query was told of (Windows' headless
+ * browser with an emulated scale tells none after the first). One timer for all of them, running only while some
+ * editor is open and the page is shown; each check reads one number per editor.
+ */
+const ratioChecks = new Set<() => void>()
+let ratioTimer: ReturnType<typeof setInterval> | null = null
+
+function checkRatios(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  for (const check of ratioChecks) check()
+}
+
+function checkRatioEverySecond(check: () => void): () => void {
+  ratioChecks.add(check)
+  if (!ratioTimer && typeof setInterval === 'function') ratioTimer = setInterval(checkRatios, 1_000)
+  return () => {
+    ratioChecks.delete(check)
+    if (!ratioChecks.size && ratioTimer) {
+      clearInterval(ratioTimer)
+      ratioTimer = null
+    }
+  }
+}
+
+/** The range, a quarter of a thousandth wide, that the resolution media queries see lies in: found by halving. */
+function mediaResolution(): { low: number; high: number } {
+  let low = 0
+  let high = 16
+  for (let step = 0; step < 16; step++) {
+    const middle = (low + high) / 2
+    if (matchMedia(`(min-resolution: ${middle}dppx)`).matches) low = middle
+    else high = middle
+  }
+  return { low, high }
+}
 
 function sameTokens(a: readonly number[] | null, b: readonly number[]): boolean {
   if (a === b) return true
@@ -266,6 +333,10 @@ export class EditorView {
   private disposers: (() => void)[] = []
 
   metrics: ViewMetrics = { charWidth: 8, lineHeight: 20, paddingX: 12, monospace: true }
+  private readonly announcer: HTMLDivElement
+  private announceTimer: ReturnType<typeof setTimeout> | null = null
+  /** The device pixel ratio the metrics were last read at. */
+  private measuredRatio = 0
   private viewport = { width: 0, height: 0 }
   private gutterWidth = 0
   private viewWidth = -1
@@ -331,6 +402,12 @@ export class EditorView {
   private drawWindow = { top: 0, bottom: 0 }
   /** A server's inlay hints, by line, followed through edits until it answers again. */
   private readonly inlays = new LineItems<InlaySpec>((inlay, from, to) => ({ ...inlay, from, to }))
+  /**
+   * What an input method is composing, drawn in place at every cursor until it is committed: by line, the hints of
+   * that line with the composition among them (kept while the line's own hints are the same array, so a line is not
+   * drawn again for nothing).
+   */
+  private composition: { text: string; at: Map<number, number[]>; merged: Map<number, { hints: readonly InlaySpec[] | undefined; all: readonly InlaySpec[] }> } | null = null
 
   constructor(config: EditorViewConfig) {
     this.state = config.state
@@ -351,6 +428,9 @@ export class EditorView {
       wrapColumn: config.wrapColumn ?? 80,
       wrapIndent: config.wrapIndent ?? true,
       renderWhitespace: config.renderWhitespace ?? 'none',
+      screenReader: config.screenReader ?? false,
+      tabMovesFocus: config.tabMovesFocus ?? false,
+      bidi: config.bidi ?? false,
     }
     this.highlighting = config.highlighting ?? null
     this.mac = isMac(config.platform ?? (typeof navigator === 'undefined' ? '' : navigator.platform))
@@ -384,6 +464,10 @@ export class EditorView {
     this.cursorsEl = make('div', 'enc-cursors', this.layer)
     this.textarea = make('textarea', 'enc-input', this.layer)
     this.widgets = make('div', 'enc-widgets', this.root)
+    // What a screen reader says when something happens that the text does not show (a fold, a count of cursors).
+    this.announcer = make('div', 'enc-announce', this.root)
+    this.announcer.setAttribute('aria-live', 'polite')
+    this.announcer.setAttribute('aria-atomic', 'true')
     this.probe = make('div', 'enc-probe', this.root)
     this.probeA = make('span', 'enc-probe-a', make('div', 'enc-probe-row', this.probe))
     this.probeB = make('span', 'enc-probe-b', make('div', 'enc-probe-row', this.probe))
@@ -433,16 +517,19 @@ export class EditorView {
     const probeObserver = new ResizeObserver(() => this.onProbeResize())
     probeObserver.observe(this.probeA)
     probeObserver.observe(this.probeB)
+    probeObserver.observe(this.probeA.parentElement!)
     this.disposers.push(() => probeObserver.disconnect())
     if (typeof document !== 'undefined' && document.fonts) {
       const fonts = () => this.onProbeResize()
       document.fonts.addEventListener('loadingdone', fonts)
       this.disposers.push(() => document.fonts.removeEventListener('loadingdone', fonts))
     }
+    this.disposers.push(this.watchPixelRatio())
 
     if (config.parent) config.parent.append(this.root)
     this.measure()
     this.readViewport()
+    this.input.syncMirror()
     this.scanLongestLine()
     this.scheduleIdleWork()
     this.requestRender()
@@ -539,8 +626,23 @@ export class EditorView {
     if (tr.state.config.tabSize !== before.config.tabSize) this.root.style.setProperty('--enc-tab-size', String(tr.state.config.tabSize))
     if (tr.scrollIntoView) this.pendingReveal = { pos: tr.state.selection.main.head, center: false }
     if (tr.docChanged || tr.selectionChanged) this.restartBlink()
+    // A screen reader reads the new text and selection at once, before the next frame is drawn.
+    if (this.options.screenReader) this.input.syncMirror()
     this.requestRender()
     this.emit('transaction', tr)
+  }
+
+  /**
+   * Has a screen reader say `message`, politely (after what it is saying): for what happens without the text showing
+   * it where the cursor is. The same message twice is said twice.
+   */
+  announce(message: string): void {
+    if (this.announceTimer) clearTimeout(this.announceTimer)
+    this.announcer.textContent = ''
+    this.announceTimer = setTimeout(() => {
+      this.announceTimer = null
+      if (!this.destroyed) this.announcer.textContent = message
+    }, 60)
   }
 
   /** Replaces the whole state (another file in the same editor), optionally restoring a scroll position. */
@@ -669,6 +771,56 @@ export class EditorView {
     return this.inlays.line(n)
   }
 
+  /**
+   * Shows `text` where each cursor is, as an input method composes it, moving the text after it along; null when the
+   * composition ends. The document does not change until the composed text is committed.
+   */
+  setComposition(text: string | null): void {
+    if (!text || this.state.config.readOnly) {
+      if (!this.composition) return
+      this.composition = null
+    } else {
+      const at = new Map<number, number[]>()
+      const doc = this.state.doc
+      for (const range of this.state.selection.ranges) {
+        const line = doc.lineAt(range.head)
+        const list = at.get(line.number) ?? []
+        if (!list.includes(range.head - line.from)) list.push(range.head - line.from)
+        at.set(line.number, list.sort((a, b) => a - b))
+      }
+      this.composition = { text, at, merged: new Map() }
+    }
+    this.requestRender()
+  }
+
+  /** Where the composition at the main cursor starts, in the layers; null when none is drawn there. */
+  compositionCoords(): { x: number; y: number } | null {
+    if (!this.composition) return null
+    const { head, assoc } = this.state.selection.main
+    const line = this.state.doc.lineAt(head)
+    const el = this.lineEls.get(line.number)
+    const drawn = el?.drawnInlays.find((inlay) => inlay.compose && inlay.col === head - line.from)
+    if (!el || !drawn) return null
+    return { x: drawn.el.getBoundingClientRect().left - el.dom.getBoundingClientRect().left, y: this.layerCoords(head, assoc).y }
+  }
+
+  /** The hints drawn in line `n`: the language server's (none in a line drawn in part), and a composition at each cursor in it. */
+  private hintsOf(n: number, long: boolean): readonly InlaySpec[] | undefined {
+    const hints = long ? undefined : this.inlays.line(n)
+    const composing = this.composition
+    const offsets = composing?.at.get(n)
+    if (!composing || !offsets) return hints
+    const known = composing.merged.get(n)
+    if (known && known.hints === hints) return known.all
+    const all: InlaySpec[] = [...(hints ?? [])]
+    for (const offset of offsets) all.push({ from: offset, to: offset, label: composing.text, kind: 'compose' })
+    // At the same column a composition comes before a server's hint: the textarea the input method writes in is put
+    // at the first hint the caret is drawn before.
+    all.sort((a, b) => a.from - b.from || (a.kind === 'compose' ? 0 : 1) - (b.kind === 'compose' ? 0 : 1))
+    composing.merged.set(n, { hints, all })
+    return all
+  }
+
   /** Runs a command by name; false when it does not exist or did not apply. */
   runCommand(name: string): boolean {
     const command = this.commands[name]
@@ -686,7 +838,9 @@ export class EditorView {
     if ((options.wordWrap ?? this.options.wordWrap) !== this.options.wordWrap || (options.wrapColumn ?? this.options.wrapColumn) !== this.options.wrapColumn || (options.wrapIndent ?? this.options.wrapIndent) !== this.options.wrapIndent) {
       this.holdAnchor()
     }
+    const reader = options.screenReader !== undefined && options.screenReader !== this.options.screenReader
     Object.assign(this.options, options)
+    if (reader) this.input.syncMirror()
     if (brackets) {
       this.highlighter.setBrackets(this.options.bracketColors ? this.state.config.language.brackets : null)
       this.tokenCache.clear()
@@ -835,14 +989,20 @@ export class EditorView {
 
   // ----------------------------------------------------------------- measuring
 
-  /** Reads the font metrics from the probe. True when they changed. */
+  /**
+   * Reads the font metrics from the probe. True when they changed. A line is a whole number of device pixels high, so
+   * at 125% or 150% every line starts on a pixel: the text stays sharp and evenly spaced, and selections meet without
+   * a seam.
+   */
   private measure(): boolean {
     const a = this.probeA.getBoundingClientRect()
     const b = this.probeB.getBoundingClientRect()
     const row = this.probeA.parentElement!.getBoundingClientRect()
     if (!a.width || !row.height) return false
     const charWidth = a.width / PROBE_CHARS
-    const lineHeight = row.height
+    const ratio = pixelRatio()
+    this.measuredRatio = ratio
+    const lineHeight = Math.max(1, Math.round(row.height * ratio)) / ratio
     const monospace = Math.abs(a.width - b.width) < 0.5
     const padding = parseFloat(getComputedStyle(this.root).getPropertyValue('--enc-editor-padding-x'))
     const paddingX = Number.isFinite(padding) ? padding : 12
@@ -858,13 +1018,63 @@ export class EditorView {
     return true
   }
 
+  /**
+   * Measures again when the device pixel ratio changes: the window moved to a screen with another scale, the scale
+   * changed, or the page was zoomed. The minimap and the line heights follow. The query is made around the resolution
+   * media queries see, which need not equal `devicePixelRatio` to the last digit, so it always matches when made and
+   * is told of the next change; the page's ratio can follow the media's some frames late, so after a change it is read
+   * each frame for a second. Rendering checks it too, and so does a check once a second shared by all editors, for
+   * the browsers that tell no query at all. Returns what stops watching.
+   */
+  private watchPixelRatio(): () => void {
+    const stopChecking = checkRatioEverySecond(() => {
+      // Only a shown editor: a hidden one has nothing to measure, and is measured once it is shown.
+      if (!this.destroyed && this.viewport.width > 0 && this.root.isConnected && pixelRatio() !== this.measuredRatio) {
+        this.onProbeResize()
+        this.requestRender()
+      }
+    })
+    if (typeof matchMedia !== 'function') return stopChecking
+    let query: MediaQueryList | null = null
+    let frame = 0
+    const watch = (): void => {
+      const { low, high } = mediaResolution()
+      query = matchMedia(`(min-resolution: ${low}dppx) and (max-resolution: ${high}dppx)`)
+      query.addEventListener('change', told, { once: true })
+    }
+    const follow = (frames: number): void => {
+      frame = 0
+      if (this.destroyed) return
+      if (pixelRatio() !== this.measuredRatio) {
+        this.onProbeResize()
+        this.requestRender()
+      } else if (frames > 0) frame = requestAnimationFrame(() => follow(frames - 1))
+    }
+    const told = (): void => {
+      if (this.destroyed) return
+      cancelAnimationFrame(frame)
+      watch()
+      follow(60)
+    }
+    watch()
+    return () => {
+      stopChecking()
+      query?.removeEventListener('change', told)
+      cancelAnimationFrame(frame)
+    }
+  }
+
   private onProbeResize(): void {
     if (this.destroyed || !this.measure()) return
-    // Everything depends on the metrics: positions, widths, the lines' own widths.
+    this.dropLines()
+    this.flush()
+  }
+
+  /** Everything depends on the metrics: positions, widths, the lines' own widths. Drawn again from nothing. */
+  private dropLines(): void {
     for (const el of this.lineEls.values()) this.release(el)
     this.lineEls.clear()
     this.rendered = { first: 0, last: -1 }
-    this.flush()
   }
 
   private readViewport(): void {
@@ -1144,6 +1354,8 @@ export class EditorView {
     this.readViewport()
     const { height: viewportHeight, width: viewportWidth } = this.viewport
     if (!viewportHeight || !viewportWidth || !this.root.isConnected) return
+    // The screen's scale changed and nothing told the view yet: the metrics are read again first.
+    if (pixelRatio() !== this.measuredRatio && this.measure()) this.dropLines()
     const { lineHeight, charWidth } = this.metrics
     const doc = this.state.doc
 
@@ -1346,10 +1558,12 @@ export class EditorView {
           to = Math.min(info.text.length, indexAtColumn(info.text, lastCol, tabSize))
         }
       }
-      // A long line is drawn in part, and with no hints.
-      const inlays = long ? undefined : this.inlays.line(number)
+      // A long line is drawn in part, and with no hints but a composition.
+      const inlays = this.hintsOf(number, long)
       const marks = whitespace === 'none' ? null : this.whitespaceIn(info, whitespace, from, to)
       const marked = marks ? marks.join(';') : ''
+      const isolates = this.options.bidi && !long ? isolatesOf(info.text, highlighted.tokens, PROSE.has(this.state.config.language.id)) : NO_ISOLATES
+      const isolated = isolates.length ? isolates.join(';') : ''
       if (
         el.text !== info.text ||
         !sameTokens(el.tokens, highlighted.tokens) ||
@@ -1360,15 +1574,16 @@ export class EditorView {
         el.wrap !== wrap ||
         el.rowFrom !== rowFrom ||
         el.rowTo !== rowTo ||
-        el.whitespace !== marked
+        el.whitespace !== marked ||
+        el.isolates !== isolated
       ) {
         if (wrap && rows > 1) {
-          el.drawnInlays = fillRows(el.dom, info.text, highlighted.tokens, wrap, rowFrom, rowTo, inlays, marks)
+          el.drawnInlays = fillRows(el.dom, info.text, highlighted.tokens, wrap, rowFrom, rowTo, inlays, marks, isolates)
           el.dom.style.height = `${(rowTo - rowFrom) * lineHeight}px`
         } else {
           // What comes before the drawn piece, less what lies left of the layers' edge.
           const lead = from > 0 || this.originX > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth - this.originX) : undefined
-          el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays, marks)
+          el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays, marks, isolates)
           if (el.dom.style.height) el.dom.style.height = ''
         }
         el.text = info.text
@@ -1381,6 +1596,7 @@ export class EditorView {
         el.rowFrom = rowFrom
         el.rowTo = rowTo
         el.whitespace = marked
+        el.isolates = isolated
         // A line with hints is as wide as the browser draws it.
         el.simple = this.metrics.monospace && !inlays && (long || isSimpleText(info.text))
         // While lines wrap, the scrollable width does not follow the text.
@@ -1396,7 +1612,9 @@ export class EditorView {
     }
     // Lines of text with wide or combining characters and markers are as wide as the browser made them; read all of them after the last write.
     for (const el of unmeasured) {
-      let x = this.domX(el, el.to)
+      // With right-to-left text in reading order the line's end is not its right edge.
+      const bidi = el.isolates ? this.domRects(el, el.from, el.to) : null
+      let x = bidi?.length ? bidi[bidi.length - 1][1] : this.domX(el, el.to)
       // A hint after the last character takes room the caret does not reach.
       const lastInlay = el.drawnInlays[el.drawnInlays.length - 1]
       if (x !== null && lastInlay?.col === el.to) x = Math.max(x, lastInlay.el.getBoundingClientRect().right - el.dom.getBoundingClientRect().left)
@@ -1513,7 +1731,7 @@ export class EditorView {
     const number = document.createElement('div')
     number.className = 'enc-gutter-num'
     this.gutterLayer.append(number)
-    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true, inlays: undefined, drawnInlays: [], wrap: null, rowFrom: 0, rowTo: 0, whitespace: '' }
+    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true, inlays: undefined, drawnInlays: [], wrap: null, rowFrom: 0, rowTo: 0, whitespace: '', isolates: '' }
   }
 
   private release(el: LineEl): void {
@@ -1681,10 +1899,28 @@ export class EditorView {
         const lastRow = Math.min(rowOf(wrap, end, -1), Math.ceil((this.drawWindow.bottom - lineTop) / lineHeight))
         // A row the selection runs on from reaches the edge the rows wrap at.
         const edge = paddingX + this.wrapping.spec.width * charWidth - this.originX
+        const el = this.lineEls.get(number)
+        const bidi = el?.isolates && el.text === line.text && el.wrap === wrap ? el : null
         for (let row = Math.max(0, firstRow); row <= lastRow && drawn < limit; row++) {
           const rowTo = rowEnd(wrap, row, line.text.length)
           const a = Math.max(start, rowStart(wrap, row))
           const b = Math.min(end, rowTo)
+          // Right-to-left text in reading order: the parts of the range where they are drawn.
+          const parts = bidi && b > a && row >= bidi.rowFrom && row < bidi.rowTo ? this.domRects(bidi, a, b, row) : null
+          if (parts) {
+            const top = lineTop + row * lineHeight - this.origin
+            for (const [left, right] of parts) {
+              if (drawn >= limit) break
+              pool.rect(className, left, top, right - left, lineHeight)
+              drawn++
+            }
+            const last = row === wrap.breaks.length
+            if (selection && (last ? to > line.to : to > line.from + rowTo)) {
+              const right = parts.length ? parts[parts.length - 1][1] : this.xInRow(line, wrap, row, b)
+              pool.rect(className, right, top, last ? charWidth * SHORT : Math.max(0, edge - right), lineHeight)
+            }
+            continue
+          }
           const left = this.xInRow(line, wrap, row, a)
           let right = b === a ? left : this.xInRow(line, wrap, row, b)
           const last = row === wrap.breaks.length
@@ -1693,6 +1929,23 @@ export class EditorView {
           if (right <= left) continue
           pool.rect(className, left, lineTop + row * lineHeight - this.origin, right - left, lineHeight)
           drawn++
+        }
+        continue
+      }
+      const el = this.lineEls.get(number)
+      const parts = el?.isolates && el.text === line.text && end > start ? this.domRects(el, start, end) : null
+      if (parts) {
+        // Right-to-left text in reading order: the parts of the range where they are drawn, then the line break.
+        const top = this.heights.top(number) - this.origin
+        for (const [left, right] of parts) {
+          if (drawn >= limit) break
+          pool.rect(className, left, top, right - left, lineHeight)
+          drawn++
+        }
+        if (selection && to > line.to) {
+          const ends = this.domRects(el!, el!.from, el!.to)
+          const right = ends?.length ? ends[ends.length - 1][1] : parts[parts.length - 1][1]
+          pool.rect(className, right, top, charWidth * SHORT, lineHeight)
         }
         continue
       }
@@ -1833,7 +2086,17 @@ export class EditorView {
     let last: Text | null = null
     for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
       const end = position + node.data.length
-      if (offset < end) return this.measureAt(el, node, offset - position)
+      if (offset < end) {
+        // After right-to-left text the caret stays at its end, its left edge, so typing on reads on leftwards.
+        if (el.isolates && offset > position) {
+          const after = this.rtlEnd(el, node, offset - position - 1)
+          if (after !== null) return after
+        } else if (el.isolates && last?.data.length) {
+          const after = this.rtlEnd(el, last, last.data.length - 1)
+          if (after !== null) return after
+        }
+        return this.measureAt(el, node, offset - position)
+      }
       position = end
       last = node
     }
@@ -1853,14 +2116,93 @@ export class EditorView {
     }
     const length = node.data.length
     if (length === 0) return node.parentElement?.getBoundingClientRect().left! - base
+    // In a run of right-to-left text a character starts at its right edge and ends at its left.
     if (index < length) {
       range.setStart(node, index)
       range.setEnd(node, index + 1)
-      return range.getBoundingClientRect().left - base
+      const box = range.getBoundingClientRect()
+      return (el.isolates && this.rightToLeft(node, index, box) ? box.right : box.left) - base
     }
     range.setStart(node, index - 1)
     range.setEnd(node, index)
-    return range.getBoundingClientRect().right - base
+    const box = range.getBoundingClientRect()
+    return (el.isolates && this.rightToLeft(node, index - 1, box) ? box.left : box.right) - base
+  }
+
+  /** The left edge of the character at `index` of a drawn text node when it is laid out right to left: where it ends. */
+  private rtlEnd(el: LineEl, node: Text, index: number): number | null {
+    if (node.parentElement?.className.startsWith('enc-ctrl')) return null
+    const range = (this.range ??= document.createRange())
+    range.setStart(node, index)
+    range.setEnd(node, index + 1)
+    const box = range.getBoundingClientRect()
+    return this.rightToLeft(node, index, box) ? box.left - el.dom.getBoundingClientRect().left : null
+  }
+
+  /**
+   * Whether the character at `index` of a drawn text node is laid out right to left: only inside a stretch shown in
+   * reading order, where a right-to-left letter is, a left-to-right one is not, and a digit, space or mark goes the way
+   * the character beside it was drawn.
+   */
+  private rightToLeft(node: Text, index: number, box: DOMRect): boolean {
+    if (!node.parentElement?.closest('.enc-bidi')) return false
+    const char = String.fromCodePoint(node.data.codePointAt(index) ?? 32)
+    if (hasRtl(char)) return true
+    if (LETTER.test(char)) return false
+    const near = index + 1 < node.data.length ? index + 1 : index - 1
+    if (near < 0) return false
+    const range = this.range!
+    range.setStart(node, near)
+    range.setEnd(node, near + 1)
+    const other = range.getBoundingClientRect()
+    return near > index ? other.left < box.left - 0.5 : other.left > box.left + 0.5
+  }
+
+  /** The text node and the index in it of `offset` in a drawn line (in row `row` when it wraps); null when it is not drawn. */
+  private domPoint(el: LineEl, offset: number, row?: number): { node: Text; index: number } | null {
+    if (offset < el.from || offset > el.to) return null
+    let host: Node = el.dom
+    let position = el.from
+    if (row !== undefined && el.wrap?.breaks.length) {
+      const rowEl = el.dom.children[row - el.rowFrom]
+      if (!rowEl) return null
+      host = rowEl
+      position = rowStart(el.wrap, row)
+      if (offset < position || offset > rowEnd(el.wrap, row, el.text.length)) return null
+    }
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+    let last: Text | null = null
+    for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+      const end = position + node.data.length
+      if (offset < end) return { node, index: offset - position }
+      position = end
+      last = node
+    }
+    return last ? { node: last, index: last.data.length } : null
+  }
+
+  /**
+   * The stretches `from`..`to` of a drawn line takes on screen (in row `row` when it wraps), left to right, as x
+   * relative to the line element: more than one where right-to-left text is shown in reading order. Null when that
+   * part is not drawn.
+   */
+  private domRects(el: LineEl, from: number, to: number, row?: number): [number, number][] | null {
+    const start = this.domPoint(el, from, row)
+    const end = this.domPoint(el, to, row)
+    if (!start || !end) return null
+    const range = document.createRange()
+    range.setStart(start.node, start.index)
+    range.setEnd(end.node, end.index)
+    const base = el.dom.getBoundingClientRect().left
+    const boxes = [...range.getClientRects()].filter((box) => box.width > 0).map((box): [number, number] => [box.left - base, box.right - base])
+    boxes.sort((a, b) => a[0] - b[0])
+    const out: [number, number][] = []
+    for (const box of boxes) {
+      const last = out[out.length - 1]
+      if (last && box[0] <= last[1] + 0.5) last[1] = Math.max(last[1], box[1])
+      else out.push(box)
+    }
+    return out
   }
 
   /** The offset in `line` nearest to x (measured as in `xOf`); in a wrapped line, in its first row. */
@@ -1899,6 +2241,23 @@ export class EditorView {
         const box = inlay.el.getBoundingClientRect()
         if (x >= box.left - base && x < box.right - base) return inlay.col
       }
+    }
+    if (el.isolates && to - from <= 4000) {
+      // Right-to-left text in reading order: positions do not grow with x, so every boundary is measured; past the
+      // text's ends are its ends.
+      const drawn = this.domRects(el, from, to, row)
+      if (drawn?.length && x >= drawn[drawn.length - 1][1]) return to
+      if (drawn?.length && x <= drawn[0][0]) return from
+      let best = from
+      let distance = Infinity
+      for (let offset = from; offset <= to; offset = offset < to ? nextCluster(text, offset) : to + 1) {
+        const at = this.domX(el, offset, row)
+        if (at !== null && Math.abs(at - x) < distance) {
+          distance = Math.abs(at - x)
+          best = offset
+        }
+      }
+      return best
     }
     let low = from
     let high = to
@@ -2173,6 +2532,7 @@ export class EditorView {
       else clearTimeout(work)
     }
     this.blink?.cancel()
+    if (this.announceTimer) clearTimeout(this.announceTimer)
     this.find.destroy()
     this.review.destroy()
     this.pointer.destroy()

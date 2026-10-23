@@ -20,6 +20,7 @@ const LAYOUT = {
   wordWrap: false,
   wrapIndent: true,
   showWhitespace: false,
+  tabMovesFocus: false,
 }
 /** Actions that do nothing, and answer the questions about state with "no". */
 function actions(patch: Partial<AppActions> = {}): AppActions {
@@ -237,6 +238,16 @@ describe('menus', () => {
     const live = registryWith({ toggleEditorPart: (part) => void toggled.push(part) })
     for (const id of ['view.wordWrap', 'view.whitespace']) void live.run(id)
     assert.deepEqual(toggled, ['wordWrap', 'showWhitespace'])
+  })
+
+  it('make Tab move the focus with Ctrl+M, and indent again', () => {
+    const off = registryWith({})
+    assert.equal(off.titleOf('view.tabMovesFocus'), 'Make Tab move the focus')
+    assert.equal(off.shortcut('view.tabMovesFocus'), 'Ctrl+M')
+    assert.equal(registryWith({ editorLayout: () => ({ ...LAYOUT, tabMovesFocus: true }) }).titleOf('view.tabMovesFocus'), 'Make Tab indent again')
+    const toggled: string[] = []
+    void registryWith({ toggleEditorPart: (part) => void toggled.push(part) }).run('view.tabMovesFocus')
+    assert.deepEqual(toggled, ['tabMovesFocus'])
   })
 
   it('turn folding, sticky scroll, bracket colours and the minimap on and off, and fold only while folding is on', () => {

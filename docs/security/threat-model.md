@@ -1392,3 +1392,41 @@ wrapping slow, and text drawn in a way that misleads about what the file holds.
   million characters, each way of showing spaces, and 100 MB wrapped at 40 columns within its limits.
 - The end-to-end run turns wrapping on with Alt+Z and from Settings > Editor, checks End by row in the footer, and
   shows and hides spaces and tabs.
+
+## Windows input, screen readers and right-to-left text (Editor and language intelligence 6)
+
+Written with the pull request that composes input in place, copies by cursor, keeps lines on device pixels, adds a
+screen reader mode and contrast-theme colours, and shows right-to-left text in reading order when asked
+([0081](../adr/0081-input-methods-compose-in-place-screen-readers-read-the-lines-around-the-cursor-and-right-to-left-text-reads-in-its-own-order-only-where-it-cannot-move-code.md)).
+One thing crosses a process boundary: the main process tells the page whether Chromium's accessibility support is on
+(a boolean, both ways read-only for the page). The concerns are the display misleading about what code does, text
+reaching a place it should not, and input that changes the file in a way the person did not mean.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| B1 | Right-to-left reading order used to make code read differently from how it runs ("Trojan Source") | Off by default: every line stays in stored order (0033). On, only strings, comments and prose are reordered, each isolated (`unicode-bidi: isolate`), so nothing inside can move anything outside; the code between them stays in stored order. Bidi control characters never reach the DOM, so nothing inside a stretch can override its letters. A browser test checks the code after a reordered string stays after it and a right-to-left override inside a string stays a marker without effect. | Mitigated |
+| B2 | Inside a reordered string or comment, its own text reads differently from its stored order (the point of the option), which a reviewer might not expect | Only with the setting on, which says what it does; only letters of right-to-left scripts are reordered, by the Unicode algorithm alone (no controls), and the string's quotes and the code stay put. | Accepted |
+| B3 | The screen reader mode's textarea holds document text where something else can read it | The text is already in the page; the textarea is the editor's own focused field, never sent anywhere, holds at most 20,000 characters around the cursor, and is empty again when the mode is off. Other programs can read it only through the accessibility interface Windows gives a screen reader, which can read the drawn text anyway. | Accepted |
+| B4 | A change in the screen reader's textarea is misread and edits the wrong place | The textarea is brought up to date in the same task as every change, so a keystroke is always measured against what it shows; text in the selection's place is typed through the editor's own typing; anything else is applied as the exact difference, never in a read-only editor. Browser tests type, delete, paste, compose and select through it. | Mitigated |
+| B5 | A paste by piece puts text at the wrong cursor | Pieces are used only when the clipboard holds exactly the last copy's text and there are exactly as many cursors; otherwise the paste is as before. Unit and browser tests check both. | Mitigated |
+| B6 | A composition in progress is lost or committed twice | The document does not change until the composition is committed; a click commits it once through the browser's own commit; a read-only editor draws nothing and inserts nothing. Browser tests commit by typing and by a click. | Mitigated |
+| B7 | Saved settings (screen reader mode, Tab moves focus, right-to-left order) are malformed or tampered with | Each field is checked when read back (one of Auto, On, Off; a boolean), and anything else takes its default, which is the safe one (stored order). | Mitigated |
+
+### Residual risks
+
+- **Chromium turns accessibility on for programs other than screen readers** (some password managers and touch
+  keyboards), so Auto can turn the mode on without one; it costs little and Settings can turn it off.
+- **The arrows move in stored order** through right-to-left text, so the caret can jump across a reordered stretch;
+  what it is on is still what is edited.
+
+### Verification
+
+- Unit tests check paste by piece (and line-wise), which stretches of a line are isolated (strings with escapes,
+  comments, prose but inline code, nothing without right-to-left letters), and the saved layout.
+- Browser tests check composition in place, the clipboard keys and pieces, device pixels and font changes, the screen
+  reader mode end to end, the live notices, Ctrl+M and Tab, contrast-theme colours, and right-to-left text off and on.
+- The end-to-end run uses Ctrl+Insert and Shift+Insert, Ctrl+M and Tab, turns the screen reader mode on and reads
+  the editor's field, and turns right-to-left reading order on from Settings > Editor.
+

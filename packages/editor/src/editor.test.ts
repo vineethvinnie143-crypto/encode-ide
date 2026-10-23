@@ -303,6 +303,25 @@ describe('commands', () => {
     assert.equal(show(paste(stateOf('|'), 'a\r\nb')!.state), 'a\nb|')
   })
 
+  it('gives each cursor its own piece of a copy made with as many cursors', () => {
+    const copied = copyText(stateOf('[a\nb] x [c]'))
+    assert.deepEqual(copied, { text: 'a\nb\nc', linewise: false, pieces: ['a\nb', 'c'] })
+    assert.equal(show(paste(stateOf('1| 2|'), copied.text, copied.linewise, copied.pieces)!.state), '1a\nb| 2c|')
+    // With another number of cursors the text goes in as before: a line to each when there are as many lines, else whole.
+    assert.equal(show(paste(stateOf('1| 2| 3|'), copied.text, copied.linewise, copied.pieces)!.state), '1a| 2b| 3c|')
+    assert.equal(show(paste(stateOf('1| 2| 3| 4|'), copied.text, copied.linewise, copied.pieces)!.state), '1a\nb\nc| 2a\nb\nc| 3a\nb\nc| 4a\nb\nc|')
+    assert.equal(show(paste(stateOf('[x] [y]'), copied.text, false, ['p\r\nq', 'r'])!.state), 'p\nq| r|')
+    assert.deepEqual(copyText(stateOf('[a]')), { text: 'a', linewise: false })
+  })
+
+  it('gives each cursor its own line of a whole-line copy made with as many cursors', () => {
+    const copied = copyText(stateOf('o|ne\ntwo\nth|ree'))
+    assert.deepEqual(copied, { text: 'one\nthree\n', linewise: true, pieces: ['one\n', 'three\n'] })
+    assert.equal(show(paste(stateOf('a|\nb|'), copied.text, copied.linewise, copied.pieces)!.state), 'one\na|\nthree\nb|')
+    // Two cursors on one line copy that line once.
+    assert.deepEqual(copyText(stateOf('o|n|e\ntwo')), { text: 'one\n', linewise: true })
+  })
+
   it('refuses to edit a read-only document', () => {
     const state = stateOf('a|', 'typescript', { readOnly: true })
     assert.equal(insertTyped(state, 'x'), null)

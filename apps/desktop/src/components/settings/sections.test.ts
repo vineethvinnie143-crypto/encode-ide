@@ -60,6 +60,16 @@ describe('searching the settings', () => {
     assert.deepEqual(found('trailing'), [['editor', ['editor.whitespace']]])
   })
 
+  it('finds what the editor does for screen readers and the keyboard', () => {
+    assert.deepEqual(found('narrator'), [['editor', ['editor.screenReader']]])
+    assert.deepEqual(found('arabic'), [['editor', ['editor.bidi']]])
+    assert.deepEqual(found('keyboard trap'), [['editor', ['editor.tabMovesFocus']]])
+    assert.deepEqual(found('accessibility'), [
+      ['appearance', ['appearance.contrast']],
+      ['editor', ['editor.screenReader', 'editor.tabMovesFocus']],
+    ])
+  })
+
   it('ignores case and punctuation', () => {
     assert.deepEqual(found('SEND MESSAGES'), [['general', ['general.send']]])
     assert.deepEqual(found('ctrl+enter'), found('Ctrl+Enter'))

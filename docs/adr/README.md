@@ -31,7 +31,7 @@ say so.
 | [0030](0030-the-agent-runs-in-a-host-that-clients-drive.md) | The agent runs in a host that clients drive over a message port | Accepted |
 | [0031](0031-sessions-are-append-only-logs.md) | Sessions are append-only logs | Accepted |
 | [0032](0032-claude-code-tool-contracts-and-reminders.md) | Claude Code's tool contracts, and reminders instead of a changing prompt | Accepted |
-| [0033](0033-the-editor-is-our-own-engine.md) | The editor is our own engine: text model, core and view | Accepted |
+| [0033](0033-the-editor-is-our-own-engine.md) | The editor is our own engine: text model, core and view | Accepted; right-to-left reading order (opt-in) and screen readers refined by 0081 |
 | [0034](0034-documents-live-outside-the-ui-store.md) | Open documents live outside the UI store, and "unsaved" is derived from the text | Accepted |
 | [0035](0035-openrouter-presets-with-server-tools-go-through-the-messages-api.md) | A preset whose server tool chat-completions refuses is asked on the Messages API | Accepted |
 | [0040](0040-permission-rules-are-judged-over-parsed-commands.md) | Permission rules are judged over parsed commands | Accepted |
@@ -70,6 +70,7 @@ say so.
 | [0078](0078-inlay-hints-and-semantic-tokens-are-kept-by-line-beside-the-text-and-follow-edits-until-the-server-answers-again.md) | Inlay hints and semantic tokens are kept by line beside the text, and follow edits until the server answers again | Accepted, builds on 0003, 0072, 0074 and 0077 |
 | [0079](0079-large-files-are-coloured-on-another-thread-counted-from-indexed-points-and-held-to-measured-limits.md) | Large files are coloured on another thread, counted from indexed points, and held to measured limits | Accepted, builds on 0003, 0072, 0074 and 0077 |
 | [0080](0080-long-lines-wrap-into-rows-the-layout-counts-and-spaces-and-tabs-are-marked-without-changing-the-text.md) | Long lines wrap into rows the layout counts, and spaces and tabs are marked without changing the text | Accepted, builds on 0003, 0077 and 0079 |
+| [0081](0081-input-methods-compose-in-place-screen-readers-read-the-lines-around-the-cursor-and-right-to-left-text-reads-in-its-own-order-only-where-it-cannot-move-code.md) | Input methods compose in place, screen readers read the lines around the cursor, and right-to-left text reads in its own order only where it cannot move code | Accepted, builds on 0003 and 0080, refines 0033 |
 
 ## Template
 
