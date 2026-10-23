@@ -21,11 +21,19 @@ export const input = [
           const seen = await ev(() => {
             const view = window.view
             const lines = [...document.querySelectorAll('.enc-line')].slice(0, 20).map((el) => el.getBoundingClientRect().top)
-            return { ratio: devicePixelRatio, lineHeight: view.metrics.lineHeight, measuredAt: view.measuredRatio, lines }
+            // The resolution media queries see, for the message if the text was not measured again.
+            let low = 0
+            let high = 16
+            for (let step = 0; step < 16; step++) {
+              const middle = (low + high) / 2
+              if (matchMedia(`(min-resolution: ${middle}dppx)`).matches) low = middle
+              else high = middle
+            }
+            return { ratio: devicePixelRatio, lineHeight: view.metrics.lineHeight, measuredAt: view.measuredRatio, media: low, lines }
           })
           assert.equal(seen.ratio, scale)
           const device = seen.lineHeight * scale
-          assert.ok(Math.abs(device - Math.round(device)) < 1e-6, `at ${scale} a line is ${device} device pixels (measured at ${seen.measuredAt})`)
+          assert.ok(Math.abs(device - Math.round(device)) < 1e-6, `at ${scale} a line is ${device} device pixels (measured at ${seen.measuredAt}, media queries see ${seen.media.toFixed(4)})`)
           assert.ok(Math.abs(seen.lineHeight - 19) <= 0.5 / scale + 1e-9, `at ${scale} the line height ${seen.lineHeight} stays near 19`)
           // Each line's own top, not a sum of heights: off a pixel by no more than the layout's 1/64 of a CSS pixel.
           for (const top of seen.lines) {

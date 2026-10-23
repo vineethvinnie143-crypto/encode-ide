@@ -248,6 +248,18 @@ function pixelRatio(): number {
   return typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1
 }
 
+/** The range, a quarter of a thousandth wide, that the resolution media queries see lies in: found by halving. */
+function mediaResolution(): { low: number; high: number } {
+  let low = 0
+  let high = 16
+  for (let step = 0; step < 16; step++) {
+    const middle = (low + high) / 2
+    if (matchMedia(`(min-resolution: ${middle}dppx)`).matches) low = middle
+    else high = middle
+  }
+  return { low, high }
+}
+
 function sameTokens(a: readonly number[] | null, b: readonly number[]): boolean {
   if (a === b) return true
   if (!a || a.length !== b.length) return false
@@ -298,7 +310,6 @@ export class EditorView {
   metrics: ViewMetrics = { charWidth: 8, lineHeight: 20, paddingX: 12, monospace: true }
   private readonly announcer: HTMLDivElement
   private announceTimer: ReturnType<typeof setTimeout> | null = null
-  private unwatchPixelRatio: (() => void) | null = null
   /** The device pixel ratio the metrics were last read at. */
   private measuredRatio = 0
   private viewport = { width: 0, height: 0 }
@@ -488,8 +499,7 @@ export class EditorView {
       document.fonts.addEventListener('loadingdone', fonts)
       this.disposers.push(() => document.fonts.removeEventListener('loadingdone', fonts))
     }
-    this.watchPixelRatio()
-    this.disposers.push(() => this.unwatchPixelRatio?.())
+    this.disposers.push(this.watchPixelRatio())
 
     if (config.parent) config.parent.append(this.root)
     this.measure()
@@ -985,27 +995,37 @@ export class EditorView {
 
   /**
    * Measures again when the device pixel ratio changes: the window moved to a screen with another scale, the scale
-   * changed, or the page was zoomed. The minimap and the line heights follow.
+   * changed, or the page was zoomed. The minimap and the line heights follow. The query is made around the resolution
+   * media queries see, which need not equal `devicePixelRatio` to the last digit, so it always matches when made and
+   * is told of the next change; the page's ratio can follow the media's some frames late, so after a change it is read
+   * each frame for a second, and rendering checks it too. Returns what stops watching.
    */
-  private watchPixelRatio(retries = 3): void {
-    if (typeof matchMedia !== 'function') return
-    const query = matchMedia(`(resolution: ${pixelRatio()}dppx)`)
+  private watchPixelRatio(): () => void {
+    if (typeof matchMedia !== 'function') return () => {}
+    let query: MediaQueryList | null = null
     let frame = 0
-    const changed = (again: boolean): void => {
-      query.removeEventListener('change', told)
-      cancelAnimationFrame(frame)
-      if (this.destroyed) return
-      this.watchPixelRatio(again ? retries - 1 : 3)
-      this.onProbeResize()
-      this.requestRender()
+    const watch = (): void => {
+      const { low, high } = mediaResolution()
+      query = matchMedia(`(min-resolution: ${low}dppx) and (max-resolution: ${high}dppx)`)
+      query.addEventListener('change', told, { once: true })
     }
-    const told = (): void => changed(false)
-    query.addEventListener('change', told)
-    // Read as the change is told, the ratio can still be the old one: a query made with it never matches and would
-    // never be told of the next change, so it is made again a frame later (a few times at most).
-    if (!query.matches && retries > 0) frame = requestAnimationFrame(() => changed(true))
-    this.unwatchPixelRatio = () => {
-      query.removeEventListener('change', told)
+    const follow = (frames: number): void => {
+      frame = 0
+      if (this.destroyed) return
+      if (pixelRatio() !== this.measuredRatio) {
+        this.onProbeResize()
+        this.requestRender()
+      } else if (frames > 0) frame = requestAnimationFrame(() => follow(frames - 1))
+    }
+    const told = (): void => {
+      if (this.destroyed) return
+      cancelAnimationFrame(frame)
+      watch()
+      follow(60)
+    }
+    watch()
+    return () => {
+      query?.removeEventListener('change', told)
       cancelAnimationFrame(frame)
     }
   }
