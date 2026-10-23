@@ -12,7 +12,7 @@ import type { FinishReason, ProviderAdapter, StreamInput, TransportEvent, Transp
 import { createMessagesStream } from './anthropic'
 import { classifyStreamError, isTransportError, SERVER_TOOL_REFUSED_CODE, TransportError } from './errors'
 import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type FetchLike } from './http'
-import type { AssistantMessage, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
+import type { AssistantMessage, DocumentBlock, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
 import { readSse } from './sse'
 import { acceptingToolNames } from './tool-names'
 
@@ -25,7 +25,10 @@ export interface OpenAICompatibleOptions {
   now?: () => number
 }
 
-type ChatPart = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } } | { type: 'image_url'; image_url: { url: string } }
+type ChatPart =
+  | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
+  | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'file'; file: { filename: string; file_data: string } }
 
 type ChatMessage =
   | { role: 'system'; content: string | ChatPart[] }
@@ -106,9 +109,16 @@ function userMessages(message: UserMessage, target: TransportTarget, mapId: (id:
       .map((part) => part.text)
       .join('\n')
     const images = block.content.filter((part): part is ImageBlock => part.type === 'image')
-    out.push({ role: 'tool', tool_call_id: mapId(block.toolUseId), content: text || (images.length ? '(The result is the image below.)' : '(no output)') })
-    // Tool messages carry text only, so a result's images travel in the user message after them.
+    const documents = block.content.filter((part): part is DocumentBlock => part.type === 'document')
+    // A model that cannot read the document reads its text, in the tool message where it belongs.
+    const readable = target.capabilities.documents === true ? documents : []
+    const fallback = target.capabilities.documents === true ? [] : documents.map((part) => part.text).filter(Boolean)
+    const body = [text, ...fallback].filter(Boolean).join('\n\n')
+    const attached = readable.length ? '(The result is attached below.)' : images.length ? '(The result is the image below.)' : '(no output)'
+    out.push({ role: 'tool', tool_call_id: mapId(block.toolUseId), content: body || attached })
+    // Tool messages carry text only, so a result's images and documents travel in the user message after them.
     for (const part of images) parts.push(image(part))
+    for (const part of readable) parts.push({ type: 'file', file: { filename: part.name, file_data: `data:${part.mediaType};base64,${part.data}` } })
   }
   for (const block of message.content) {
     if (block.type === 'text' && block.text) parts.push({ type: 'text', text: block.text })

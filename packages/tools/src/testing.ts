@@ -37,6 +37,7 @@ const noWeb: WebAccess = {
 
 const noInteraction: Interaction = {
   ask: async () => unexpected('questions'),
+  enterPlan: async () => unexpected('plan mode'),
   proposePlan: async () => unexpected('plans'),
   setTodos: () => unexpected('todos'),
 }

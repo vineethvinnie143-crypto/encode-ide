@@ -4,6 +4,7 @@ import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import type { CompletionRequest, Message } from '@encode/providers'
 import { tempWorkspace } from '@encode/tools/testing'
+import type { AgentHooks, NotificationEvent } from './hooks'
 import { createSkills } from './skills'
 import { closeHarnesses, sessionHarness, type SessionHarness } from './testing'
 
@@ -508,6 +509,154 @@ describe('approvals and questions', () => {
   })
 })
 
+describe('plan mode the agent asks for', () => {
+  const planFirst = (root: string) => [
+    { calls: [{ name: 'EnterPlanMode', input: { reason: 'Three files change.' } }] },
+    { calls: [{ name: 'Write', input: { file_path: path.join(root, 'a.txt'), content: 'a' } }] },
+    { text: 'Here is my plan.' },
+  ]
+
+  it('asks the user, then holds the agent to reading and tells the window', async () => {
+    const h = await sessionHarness({ scriptFor: planFirst })
+    const running = h.session.start({ text: 'build it', mode: 'code' })
+    const { request } = await until(() => h.of('approval-request')[0])
+    assert.equal(request.tool, 'EnterPlanMode')
+    assert.equal(request.title, 'Plan before changing anything')
+    assert.equal(request.reason, 'Three files change.')
+    assert.equal(request.grantable, true)
+    h.session.resolveApproval(request.id, true)
+    assert.equal((await running).kind, 'done')
+    assert.deepEqual(h.of('mode').map((event) => event.mode), ['plan'])
+    await assert.rejects(fs.stat(path.join(h.root, 'a.txt')))
+    const [, entered, refused] = h.client.requests
+    assert.match(JSON.stringify(entered.payload.messages.at(-1)), /You are in plan mode now/)
+    assert.match(JSON.stringify(refused.payload.messages.at(-1)), /Write is not available in plan mode/)
+    // The tool told the model, so the next request in plan mode does not say it again.
+    await h.session.start({ text: 'and the tests?', mode: 'plan' })
+    assert.doesNotMatch(text(h.client.requests.at(-1)!.payload.messages.at(-1)!), /Mode: plan/)
+  })
+
+  it('goes straight in under Full access, and carries on without a plan when the user says no', async () => {
+    const free = await sessionHarness({ settings: { policy: 'full-access' }, scriptFor: planFirst })
+    assert.equal((await free.session.start({ text: 'build it', mode: 'code' })).kind, 'done')
+    assert.equal(free.of('approval-request').length, 0)
+    assert.deepEqual(free.of('mode').map((event) => event.mode), ['plan'])
+
+    const h = await sessionHarness({ script: [{ calls: [{ name: 'EnterPlanMode', input: {} }] }, { text: 'ok' }] })
+    const running = h.session.start({ text: 'build it', mode: 'code' })
+    const { request } = await until(() => h.of('approval-request')[0])
+    h.session.resolveApproval(request.id, { approved: false, note: 'just do it' })
+    await running
+    assert.equal(h.of('mode').length, 0)
+    const result = JSON.stringify(h.client.requests[1].payload.messages.at(-1))
+    assert.match(result, /go ahead without a plan/)
+    assert.match(result, /They said: just do it/)
+  })
+
+  it('asks once when the user allows it for the session', async () => {
+    const h = await sessionHarness({
+      script: [{ calls: [{ name: 'EnterPlanMode', input: {} }] }, { text: 'ok' }, { calls: [{ name: 'EnterPlanMode', input: {} }] }, { text: 'ok' }],
+    })
+    const first = h.session.start({ text: 'one', mode: 'code' })
+    const { request } = await until(() => h.of('approval-request')[0])
+    h.session.resolveApproval(request.id, { approved: true, remember: 'session' })
+    await first
+    await h.session.start({ text: 'two', mode: 'code' })
+    assert.equal(h.of('approval-request').length, 1)
+    assert.equal(h.of('mode').length, 2)
+  })
+})
+
+describe('hooks that only look', () => {
+  it('tells the Notification hooks what the agent waits for, and that it waits once a turn is over', async () => {
+    const seen: NotificationEvent[] = []
+    const h = await sessionHarness({
+      env: { idleNoticeMs: 20 },
+      hooks: {
+        async notification(event) {
+          seen.push(event)
+        },
+      },
+      scriptFor: (root) => [
+        {
+          calls: [
+            {
+              name: 'AskUserQuestion',
+              input: { questions: [{ question: 'Which database?', header: 'Database', multiSelect: false, options: [{ label: 'SQLite' }, { label: 'Postgres' }] }] },
+            },
+          ],
+        },
+        { calls: [{ name: 'Write', input: { file_path: path.join(root, '.encode', 'note.md'), content: 'x' } }] },
+        { text: 'done' },
+        { calls: [{ name: 'ExitPlanMode', input: { plan: '1. Do it' } }] },
+      ],
+    })
+    const running = h.session.start({ text: 'build', mode: 'code' })
+    h.session.resolveAnswer((await until(() => h.of('ask')[0])).id, 'Postgres')
+    h.session.resolveApproval((await until(() => h.of('approval-request')[0])).request.id, true)
+    await running
+    await until(() => seen.some((event) => event.kind === 'idle_prompt'))
+    await h.session.start({ text: 'plan the next part', mode: 'plan' })
+    await until(() => seen.filter((event) => event.kind === 'idle_prompt').length === 2)
+    assert.deepEqual(seen.map((event) => event.kind), ['question', 'permission_prompt', 'idle_prompt', 'plan_review', 'idle_prompt'])
+    assert.equal(seen[0].message, 'eNCode has a question: Which database?')
+    assert.match(seen[1].message, /^eNCode needs your approval: .*note\.md/)
+    assert.ok(seen.every((event) => event.sessionId === h.session.id && event.title === 'build' && event.agentId === 'main'))
+  })
+
+  it('does not say the agent waits after the user stopped it', async () => {
+    const seen: string[] = []
+    const h = await sessionHarness({
+      env: { idleNoticeMs: 20 },
+      hooks: {
+        async notification(event) {
+          seen.push(event.kind)
+        },
+      },
+      scriptFor: (root) => [{ calls: [{ name: 'Write', input: { file_path: path.join(root, '.encode', 'note.md'), content: 'x' } }] }],
+    })
+    const running = h.session.start({ text: 'write', mode: 'code' })
+    await until(() => h.of('approval-request')[0])
+    h.session.cancel()
+    assert.equal((await running).kind, 'cancelled')
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    assert.deepEqual(seen, ['permission_prompt'])
+  })
+
+  it('ends a started session for the SessionEnd hooks when it is cleared, deleted or closed', async () => {
+    const starts: string[] = []
+    const ends: string[][] = []
+    const hooks: AgentHooks = {
+      async sessionStart(event) {
+        starts.push(event.source)
+      },
+      async sessionEnd(event) {
+        assert.ok(event.signal instanceof AbortSignal)
+        ends.push([event.reason, event.detail])
+      },
+    }
+    const h = await sessionHarness({ hooks, script: [{ text: 'ok' }] })
+    await h.session.start({ text: 'one', mode: 'code' })
+    await h.session.reset()
+    await h.session.start({ text: 'two', mode: 'code' })
+    await h.session.dispose('deleted')
+    await h.session.dispose('quit')
+    assert.deepEqual(starts, ['new', 'clear'])
+    assert.deepEqual(ends, [['clear', 'cleared'], ['other', 'deleted']])
+
+    // A session that never ran a request in this process never started, so nothing ends.
+    const idle = await sessionHarness({ hooks, script: [{ text: 'ok' }] })
+    await idle.session.reset()
+    await idle.session.dispose('quit')
+    assert.equal(ends.length, 2)
+
+    const quitting = await sessionHarness({ hooks, script: [{ text: 'ok' }] })
+    await quitting.session.start({ text: 'one', mode: 'code' })
+    await quitting.session.dispose('quit')
+    assert.deepEqual(ends.at(-1), ['prompt_input_exit', 'quit'])
+  })
+})
+
 describe('what a session keeps', () => {
   it('keeps the task list and the goal across a restart', async () => {
     const h = await sessionHarness({
@@ -772,6 +921,25 @@ describe('subagents', () => {
     h.session.resolveApproval(request.id, true)
     assert.equal((await running).kind, 'done')
     assert.equal(await fs.readFile(path.join(h.root, '.encode', 'sub.md'), 'utf8'), 'y')
+  })
+
+  it('starts a subagent with what the SubagentStart hooks add, before its brief', async () => {
+    const types: string[] = []
+    const h = await sessionHarness({
+      files: { 'a.txt': 'a' },
+      hooks: {
+        async subagentStart(event) {
+          types.push(event.agentType)
+          return { context: 'Only look in src.' }
+        },
+      },
+      script: scripted([{ name: 'Glob', input: { pattern: '*.txt' } }]),
+    })
+    assert.equal((await h.session.start({ text: 'explore', mode: 'code' })).kind, 'done')
+    assert.deepEqual(types, ['Explore'])
+    const first = h.client.requests[1].payload.messages[0]
+    assert.equal(first.content.length, 2)
+    assert.match(text(first), /Only look in src\.[\s\S]*List the files/)
   })
 
   it('offers the agents the user defines', async () => {

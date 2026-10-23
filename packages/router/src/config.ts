@@ -43,6 +43,8 @@ export interface ModelOverride {
   tools?: boolean
   parallelTools?: boolean
   images?: boolean
+  /** Reads PDFs as documents. */
+  documents?: boolean
   /** Emits reasoning, so its first token may come late. */
   reasoning?: boolean
   /** Takes explicit prompt-cache breakpoints. */
@@ -428,7 +430,7 @@ function parseModels(input: unknown, providers: Record<string, ProviderConfig>, 
     if (raw.maxOutputTokens !== undefined) {
       override.maxOutputTokens = clampNumber(raw.maxOutputTokens, 256, 2_000_000, 0, `${path}.maxOutputTokens`, problems) || undefined
     }
-    for (const flag of ['tools', 'parallelTools', 'images', 'reasoning', 'promptCache'] as const) {
+    for (const flag of ['tools', 'parallelTools', 'images', 'documents', 'reasoning', 'promptCache'] as const) {
       // An unreadable flag is left out, not read as false: the catalog's answer stands.
       if (typeof raw[flag] === 'boolean') override[flag] = raw[flag] as boolean
       else if (raw[flag] !== undefined) problems.push({ path: `${path}.${flag}`, message: 'must be true or false' })

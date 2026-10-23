@@ -16,7 +16,10 @@ import type { HookRun, HookRunner } from './runner'
  * eNCode is stricter in one place: a PreToolUse hook that cannot run or
  * times out denies the call, because a guard that broke must not wave calls
  * through. Several answers combine as deny, then ask, then allow. A Stop
- * hook may send the agent back at most three times in a row.
+ * hook may send the agent back at most three times in a row. Notification,
+ * SessionEnd and SubagentStart hooks only look: what they print on stderr
+ * with exit 2 is shown to the person, and a SubagentStart hook may add
+ * context for the subagent.
  *
  * The event and result types mirror @encode/core's AgentHooks, which this
  * object is passed as.
@@ -32,7 +35,7 @@ export interface HookEvent {
 }
 
 export interface SessionStartEvent extends HookEvent {
-  source: 'new' | 'resume' | 'compact'
+  source: 'new' | 'resume' | 'compact' | 'clear'
 }
 
 export interface UserPromptEvent extends HookEvent {
@@ -61,6 +64,29 @@ export interface CompactEvent extends HookEvent {
   instructions?: string
 }
 
+/** What a Notification hook is told about: Claude Code's names, and two of eNCode's own. */
+export type NotificationKind = 'permission_prompt' | 'idle_prompt' | 'question' | 'plan_review'
+
+export interface NotificationEvent extends HookEvent {
+  kind: NotificationKind
+  title: string
+  message: string
+}
+
+/** Claude Code's reasons, so its scripts match; `detail` says which of eNCode's endings it was. */
+export type SessionEndReason = 'clear' | 'prompt_input_exit' | 'other'
+export type SessionEndDetail = 'cleared' | 'quit' | 'deleted' | 'closed'
+
+export interface SessionEndEvent extends HookEvent {
+  reason: SessionEndReason
+  detail: SessionEndDetail
+}
+
+export interface SubagentStartEvent extends HookEvent {
+  /** The subagent's type: general-purpose, Explore, or the name of one of the person's agents. */
+  agentType: string
+}
+
 export interface CommandHooks {
   sessionStart(event: SessionStartEvent): Promise<{ context?: string }>
   userPromptSubmit(event: UserPromptEvent): Promise<{ block?: string; context?: string }>
@@ -68,6 +94,9 @@ export interface CommandHooks {
   postToolUse(event: PostToolEvent): Promise<{ block?: string; context?: string }>
   beforeStop(event: StopEvent): Promise<{ continue?: string }>
   preCompact(event: CompactEvent): Promise<{ instructions?: string }>
+  notification(event: NotificationEvent): Promise<void>
+  sessionEnd(event: SessionEndEvent): Promise<void>
+  subagentStart(event: SubagentStartEvent): Promise<{ context?: string }>
 }
 
 export interface HookHost {
@@ -210,6 +239,10 @@ export function createCommandHooks(groups: readonly HookGroup[], host: HookHost)
 
   const contexts = (answers: Answer[]) => answers.map((answer) => answer.context).filter((text): text is string => Boolean(text))
   const joined = (texts: string[]) => (texts.length ? texts.join('\n\n') : undefined)
+  /** An event that cannot be stopped: a hook's exit 2 is a message for the person, as in Claude Code. */
+  const shown = (event: HookEventName, answers: Answer[]) => {
+    for (const answer of answers) if (answer.block) notice(`The ${event} hook "${answer.command.length > 60 ? `${answer.command.slice(0, 57)}...` : answer.command}" said: ${answer.block.slice(0, 500)}`)
+  }
 
   return {
     async sessionStart(event) {
@@ -280,6 +313,23 @@ export function createCommandHooks(groups: readonly HookGroup[], host: HookHost)
       const answers = await run('PreCompact', event.trigger, event, { trigger: event.trigger, custom_instructions: event.instructions ?? '' })
       const instructions = joined(contexts(answers))
       return instructions ? { instructions } : {}
+    },
+
+    async notification(event) {
+      const answers = await run('Notification', event.kind, event, { message: event.message, title: event.title, notification_type: event.kind })
+      shown('Notification', answers)
+    },
+
+    async sessionEnd(event) {
+      const answers = await run('SessionEnd', event.reason, event, { reason: event.reason, encode_reason: event.detail })
+      shown('SessionEnd', answers)
+    },
+
+    async subagentStart(event) {
+      const answers = await run('SubagentStart', event.agentType, event, { agent_id: event.agentId, agent_type: event.agentType })
+      shown('SubagentStart', answers)
+      const context = joined(contexts(answers))
+      return context ? { context } : {}
     },
   }
 }

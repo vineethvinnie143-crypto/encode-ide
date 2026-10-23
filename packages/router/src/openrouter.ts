@@ -134,6 +134,7 @@ export function parseOpenRouterCatalog(json: unknown): CatalogEntry[] {
         tools,
         parallelTools: tools,
         images: inputs.includes('image'),
+        documents: inputs.includes('file'),
         reasoning: inferReasoning(id, params.has('reasoning') || params.has('include_reasoning')),
         // Explicit cache breakpoints cost a cache write (Anthropic, Gemini); automatic caching only discounts reads.
         promptCache: pricing.input_cache_write !== undefined,

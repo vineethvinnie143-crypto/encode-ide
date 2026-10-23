@@ -4,7 +4,7 @@
  * to the UI and the log; a subagent wires them to its parent.
  */
 import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, UserBlock } from '@encode/providers'
-import type { AgentMode, DiffHunk, PlanVerdict, Question, TodoInput } from '@encode/tools'
+import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry } from './ui'
 
@@ -89,6 +89,8 @@ export interface Surface {
   granted?(grant: string): boolean
   /** One answer to one question. */
   ask(entryId: string, question: Question, signal: AbortSignal): Promise<string>
+  /** Whether the user wants a plan agreed first (EnterPlanMode); `reason` is the agent's, for the user. */
+  enterPlan(entryId: string, reason: string, signal: AbortSignal): Promise<PlanConsent>
   proposePlan(entryId: string, plan: string, signal: AbortSignal): Promise<PlanVerdict>
   setTodos(todos: TodoInput[]): void
 }

@@ -39,7 +39,7 @@ export default function TrajectoryView() {
                 {isTool && <ChevronRight size={12} className={expanded ? 'is-open' : ''} />}
                 <span className={`trajectory-kind kind-${entry.kind}`}>{label}</span>
                 <span className="trajectory-preview">
-                  {entry.text || (entry.tool ? String(entry.tool.input.file_path ?? entry.tool.input.path ?? entry.tool.input.command ?? '') : '')}
+                  {entry.text || (entry.tool ? String(entry.tool.input.file_path ?? entry.tool.input.notebook_path ?? entry.tool.input.path ?? entry.tool.input.command ?? '') : '')}
                 </span>
               </button>
               {expanded && entry.tool && (

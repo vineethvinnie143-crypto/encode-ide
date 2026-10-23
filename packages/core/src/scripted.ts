@@ -36,6 +36,8 @@ export interface ScriptedOptions {
   maxOutputTokens?: number
   /** Whether the model reads images. Absent: the client cannot tell. */
   images?: boolean
+  /** Whether it reads PDFs as documents. */
+  documents?: boolean
   /** Pause between streamed chunks, ms. */
   delayMs?: number
 }
@@ -84,6 +86,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
         contextWindow: options.contextWindow ?? 200_000,
         maxOutputTokens: options.maxOutputTokens ?? 8_192,
         ...(options.images !== undefined ? { images: options.images } : {}),
+        ...(options.documents !== undefined ? { documents: options.documents } : {}),
       }
     },
     async complete(request): Promise<CompletionOutcome> {

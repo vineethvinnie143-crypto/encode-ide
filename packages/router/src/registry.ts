@@ -50,6 +50,7 @@ export interface LearnedFacts {
   contextWindow?: number
   tools?: false
   images?: false
+  documents?: false
   /** The provider billed a request to this model although it was listed as free. */
   free?: false
 }
@@ -112,6 +113,7 @@ function applyOverride(info: ModelInfo, override: ModelOverride | undefined): Mo
       images: override.images ?? info.capabilities.images,
       reasoning: override.reasoning ?? info.capabilities.reasoning,
       promptCache: override.promptCache ?? info.capabilities.promptCache,
+      documents: override.documents ?? info.capabilities.documents,
     },
     editFormat: override.editFormat ?? info.editFormat,
   }
@@ -127,6 +129,7 @@ function applyLearned(info: ModelInfo, learned: LearnedFacts | undefined): Model
       tools: learned.tools === false ? false : info.capabilities.tools,
       parallelTools: learned.tools === false ? false : info.capabilities.parallelTools,
       images: learned.images === false ? false : info.capabilities.images,
+      documents: learned.documents === false ? false : info.capabilities.documents,
     },
     free: learned.free === false ? false : info.free,
   }
@@ -199,6 +202,7 @@ export class ModelRegistry {
     }
     if (facts.tools === false) current.tools = false
     if (facts.images === false) current.images = false
+    if (facts.documents === false) current.documents = false
     if (facts.free === false) current.free = false
     this.learned.set(key, current)
   }

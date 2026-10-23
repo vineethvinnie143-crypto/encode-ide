@@ -46,6 +46,24 @@ export interface ImageBlock {
   transient?: true
 }
 
+/**
+ * A document the model reads as it is, pages and all: a PDF of the pages Read chose for what they show (a
+ * figure, a chart, a scan). Only tool results carry one. A model that cannot read documents is sent `text`
+ * instead, and the stored log keeps only `text`.
+ */
+export interface DocumentBlock {
+  type: 'document'
+  mediaType: 'application/pdf'
+  /** Base64, without a data: prefix. */
+  data: string
+  /** A file name for providers that want one. */
+  name: string
+  /** How many pages it holds, for estimating its size in tokens. */
+  pages: number
+  /** What the document says, as text: what a model that cannot read the document gets. */
+  text: string
+}
+
 export interface ThinkingBlock {
   type: 'thinking'
   text: string
@@ -75,7 +93,7 @@ export interface ToolUseBlock {
   invalid?: InvalidToolInput
 }
 
-export type ToolResultContent = TextBlock | ImageBlock
+export type ToolResultContent = TextBlock | ImageBlock | DocumentBlock
 
 export interface ToolResultBlock {
   type: 'tool-result'

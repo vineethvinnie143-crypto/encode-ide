@@ -31,6 +31,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   Write: { label: 'Wrote', icon: Pencil },
   Edit: { label: 'Edited', icon: Pencil },
   MultiEdit: { label: 'Edited', icon: Pencil },
+  NotebookEdit: { label: 'Edited', icon: Pencil },
   Glob: { label: 'Listed', icon: ListTree },
   Grep: { label: 'Searched', icon: Search },
   Bash: { label: 'Ran', icon: SquareTerminal },
@@ -42,6 +43,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
   AskUserQuestion: { label: 'Asked', icon: MessageCircleQuestion },
   Computer: { label: 'Used the computer', icon: Monitor },
   TodoWrite: { label: 'Updated tasks', icon: ListTree },
+  EnterPlanMode: { label: 'Planning first', icon: ListTree },
   ExitPlanMode: { label: 'Proposed a plan', icon: ListTree },
   Skill: { label: 'Skill', icon: FileText },
   CreateGoal: { label: 'Goal', icon: CheckCircle2 },
@@ -100,6 +102,7 @@ function detailOf(entry: ConversationEntry): string {
     case 'Write':
     case 'Edit':
     case 'MultiEdit':
+    case 'NotebookEdit':
     case 'read':
     case 'read_file':
     case 'write':
@@ -144,6 +147,8 @@ function detailOf(entry: ConversationEntry): string {
       return String(input.prompt ?? '').split('\n', 1)[0]
     case 'Skill':
       return String(input.skill ?? '')
+    case 'EnterPlanMode':
+      return String(input.reason ?? '')
     default:
       return ''
   }

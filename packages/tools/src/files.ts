@@ -13,9 +13,11 @@ import type { ImageBlock, ImageMediaType, TextBlock } from '@encode/providers'
 import { buildDiff } from './diff'
 import { applyEdit, applyEdits, changedRegion, type EditSpec } from './edit'
 import { stateOf, staleness } from './file-state'
+import { NOTEBOOK_MAX_BYTES, renderNotebook } from './notebook'
+import { PDF_MAX_BYTES, PDF_MAX_PAGES, readPdfFile } from './pdf-read'
 import { displayPath, realPathOf, resolveInputPath } from './paths'
 import { decodeText, encodeText, lineEndingOf, MAX_TEXT_FILE_BYTES, numberLines, plural, splitLines, UnencodableTextError, type TextEncodingName } from './text'
-import type { FileStateTracker, Tool, ToolContext, ToolOutcome } from './types'
+import type { DiffHunk, FileStateTracker, Tool, ToolContext, ToolOutcome } from './types'
 
 export const READ_DEFAULT_LIMIT = 2000
 /** What one Read puts in the conversation: about 25,000 tokens. Longer ranges are cut to fit. */
@@ -103,18 +105,18 @@ function unencodable(file: string, error: UnencodableTextError, ctx: ToolContext
   )
 }
 
-interface Loaded {
+export interface Loaded {
   bytes: Buffer
   text: string
   encoding: TextEncodingName
 }
 
 /** The file's bytes and text, `null` when it does not exist, or a failure to report. */
-async function loadForWrite(file: string, ctx: ToolContext): Promise<Loaded | null | ToolOutcome> {
+export async function loadForWrite(file: string, ctx: ToolContext, maxBytes = MAX_TEXT_FILE_BYTES): Promise<Loaded | null | ToolOutcome> {
   const stats = await statOf(file)
   if (!stats) return null
   if (stats.isDirectory()) return fail(`${shown(file, ctx)} is a directory, not a file.`)
-  if (stats.size > MAX_TEXT_FILE_BYTES) return tooBig(file, stats.size, ctx, false)
+  if (stats.size > maxBytes) return tooBig(file, stats.size, ctx, false)
   const bytes = await fs.readFile(file)
   const freshness = await staleness(ctx.files, file, bytes)
   if (freshness.kind === 'unread') return fail(`${shown(file, ctx)} has not been read in this session. Read it first, then try again.`)
@@ -137,6 +139,12 @@ export async function writeFileBytes(ctx: ToolContext, file: string, bytes: Buff
   await fs.mkdir(path.dirname(file), { recursive: true })
   await fs.writeFile(file, bytes)
   ctx.files.set(file, stateOf(bytes, await fs.stat(file), false))
+}
+
+/** A notebook's new text, written in its own encoding; NotebookEdit has kept its layout and line endings. */
+export async function writeNotebook(ctx: ToolContext, file: string, loaded: Loaded, text: string, summary: string, diff: DiffHunk[]): Promise<ToolOutcome> {
+  await writeFileBytes(ctx, file, encodeText(text, loaded.encoding), loaded.bytes)
+  return { ok: true, content: summary, display: { diff }, changed: [file] }
 }
 
 /** New text in the file's own conventions: CRLF when the file uses it, and its encoding. */
@@ -164,33 +172,7 @@ interface ReadInput extends Record<string, unknown> {
   file_path: string
   offset?: number
   limit?: number
-}
-
-function renderNotebook(text: string): string | undefined {
-  let notebook: { cells?: { cell_type?: string; id?: string; source?: string | string[]; outputs?: Record<string, unknown>[] }[] }
-  try {
-    notebook = JSON.parse(text)
-  } catch {
-    return undefined
-  }
-  if (!Array.isArray(notebook.cells)) return undefined
-  const join = (value: unknown) => (Array.isArray(value) ? value.join('') : typeof value === 'string' ? value : '')
-  return notebook.cells
-    .map((cell, index) => {
-      const outputs = (cell.outputs ?? [])
-        .map((output) => {
-          if (output.output_type === 'stream') return join(output.text)
-          if (output.output_type === 'error') return `${String(output.ename)}: ${String(output.evalue)}`
-          const data = output.data as Record<string, unknown> | undefined
-          if (data?.['text/plain']) return join(data['text/plain'])
-          return data && Object.keys(data).some((type) => type.startsWith('image/')) ? '[image output]' : ''
-        })
-        .filter(Boolean)
-        .join('\n')
-      const id = cell.id ? ` id="${cell.id}"` : ''
-      return `<cell index="${index}"${id} type="${cell.cell_type ?? 'code'}">\n${join(cell.source)}\n</cell>${outputs ? `\n<outputs index="${index}">\n${outputs}\n</outputs>` : ''}`
-    })
-    .join('\n\n')
+  pages?: string
 }
 
 export const readTool: Tool<ReadInput> = {
@@ -203,7 +185,8 @@ export const readTool: Tool<ReadInput> = {
       `- Reads up to ${READ_DEFAULT_LIMIT} lines from the start. For long files, pass offset (the 1-based line to start at) and limit (how many lines).`,
       '- Output is numbered like `cat -n`: spaces, the line number, a tab, then the line. The prefix is not part of the file; leave it out when you copy text into Edit.',
       '- Lines longer than 2000 characters are cut short.',
-      '- PNG, JPEG, GIF and WebP images are returned as images you can see. Jupyter notebooks (.ipynb) are shown cell by cell with their outputs.',
+      '- PNG, JPEG, GIF and WebP images are returned as images you can see. Jupyter notebooks (.ipynb) are shown cell by cell with their outputs; for them offset is the index of the first cell and limit counts cells.',
+      `- PDFs: at most ${PDF_MAX_PAGES} pages a call; pass pages for a long one. A first read shows the outline with page numbers.`,
       '- A file must be read in this session before Write or Edit can change it.',
       '- Read several files at once by calling Read more than once in the same reply.',
       '- Read reads files, not directories; use Glob, or ls through Bash, to list a directory.',
@@ -214,6 +197,7 @@ export const readTool: Tool<ReadInput> = {
         file_path: pathSchema,
         offset: { type: 'integer', minimum: 0, description: 'The 1-based line number to start reading at.' },
         limit: { type: 'integer', minimum: 1, description: 'How many lines to read.' },
+        pages: { type: 'string', description: 'PDF only: the pages to read, such as "3", "1-5" or "1,3,5-7".' },
       },
       required: ['file_path'],
       additionalProperties: false,
@@ -246,19 +230,28 @@ export const readTool: Tool<ReadInput> = {
       return { ok: true, content: blocks, display: { output: `Image, ${Math.max(1, Math.round(bytes.length / 1024))} KB` } }
     }
     if (extension === '.pdf') {
-      return fail(`${shown(file, ctx)} is a PDF, which Read cannot show yet. If a converter such as pdftotext is installed, run it through Bash.`)
+      if (stats.size > PDF_MAX_BYTES) return fail(`${shown(file, ctx)} is ${megabytes(stats.size)}; PDFs over ${PDF_MAX_BYTES / 1024 / 1024} MB cannot be read.`)
+      const bytes = await fs.readFile(file)
+      ctx.files.set(file, stateOf(bytes, stats, false))
+      return readPdfFile(file, shown(file, ctx), new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), input.pages, ctx)
     }
-    if (stats.size > MAX_TEXT_FILE_BYTES) return tooBig(file, stats.size, ctx, true)
+    if (input.pages !== undefined) return fail(`pages is for PDFs; ${shown(file, ctx)} is not one. Use offset and limit to read part of it.`)
+    if (stats.size > (extension === '.ipynb' ? NOTEBOOK_MAX_BYTES : MAX_TEXT_FILE_BYTES)) return tooBig(file, stats.size, ctx, true)
 
     const bytes = await fs.readFile(file)
     const decoded = decodeText(bytes)
     if (!decoded) return fail(`${shown(file, ctx)} is a binary file (${plural(bytes.length, 'byte')}); it cannot be shown as text.`)
 
     if (extension === '.ipynb') {
-      const rendered = renderNotebook(decoded.text)
-      if (rendered !== undefined) {
+      const notebook = renderNotebook(decoded.text, { offset: input.offset, limit: input.limit, maxChars: READ_MAX_CHARS })
+      if (notebook !== undefined) {
+        // NotebookEdit changes one cell at a time, so having seen some of the cells is enough to change them.
         ctx.files.set(file, stateOf(bytes, stats, false))
-        return { ok: true, content: rendered || `${shown(file, ctx)} has no cells.` }
+        if (!notebook.total) return { ok: true, content: `${shown(file, ctx)} has no cells.` }
+        if (notebook.from >= notebook.total) return fail(`${shown(file, ctx)} has ${plural(notebook.total, 'cell')}, so offset ${input.offset} is past its last cell.`)
+        const partial = notebook.from > 0 || notebook.to < notebook.total
+        const note = partial ? `\n\n(Cells ${notebook.from}-${notebook.to - 1} of ${notebook.total}. Pass offset, the index of a cell, and limit to read others.)` : ''
+        return { ok: true, content: notebook.text + note, display: { output: `${plural(notebook.to - notebook.from, 'cell')}${partial ? ` of ${notebook.total}` : ''}` } }
       }
     }
 
@@ -344,9 +337,9 @@ interface WriteInput extends Record<string, unknown> {
   content: string
 }
 
-async function currentText(file: string): Promise<string> {
+export async function currentText(file: string, maxBytes = MAX_TEXT_FILE_BYTES): Promise<string> {
   try {
-    if ((await fs.stat(file)).size > MAX_TEXT_FILE_BYTES) return ''
+    if ((await fs.stat(file)).size > maxBytes) return ''
     const decoded = decodeText(await fs.readFile(file))
     return decoded?.text ?? ''
   } catch {
@@ -470,6 +463,10 @@ function finishedEdit(file: string, name: string, loaded: Loaded, outcome: { tex
   }
 }
 
+const isNotebook = (file: unknown) => typeof file === 'string' && path.extname(file).toLowerCase() === '.ipynb'
+/** Read shows a notebook's cells, not its JSON, so text copied from it would never match the file. */
+const NOTEBOOK_NOTE = 'this is a Jupyter notebook; change its cells with NotebookEdit.'
+
 const editProperties = {
   old_string: { type: 'string', description: 'The exact text to replace.' },
   new_string: { type: 'string', description: 'The text to put in its place; it must differ from old_string.' },
@@ -499,6 +496,7 @@ export const editTool: Tool<EditInput> = {
   kind: 'write',
   readOnly: false,
   check(input) {
+    if (isNotebook(input.file_path)) return NOTEBOOK_NOTE
     return input.old_string === input.new_string ? 'old_string and new_string are identical, so there is nothing to change.' : undefined
   },
   async access(input, ctx) {
@@ -546,6 +544,7 @@ export const multiEditTool: Tool<MultiEditInput> = {
   kind: 'write',
   readOnly: false,
   check(input) {
+    if (isNotebook(input.file_path)) return NOTEBOOK_NOTE
     const same = input.edits.findIndex((edit) => edit.old_string === edit.new_string)
     if (same !== -1) return `edits[${same}] has identical old_string and new_string.`
     if (input.edits.length > 1 && input.edits.some((edit) => !edit.old_string)) return 'only a single edit may have an empty old_string.'

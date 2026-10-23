@@ -32,6 +32,7 @@ import {
   type FileStateTracker,
   type Goals,
   type ManagedShell,
+  type PlanConsent,
   type PlanVerdict,
   type Question,
   type ShellCommandAssessor,
@@ -46,12 +47,13 @@ import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
 import type { RuleJudge } from './approval'
-import type { AgentHooks } from './hooks'
+import type { AgentHooks, NotificationKind, SessionEndEvent } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
+import { withoutDocuments } from './documents'
 import { pruneScreens, withoutScreens } from './screens'
 import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
 import { DEFAULT_TITLE, newRecordId } from './session-store'
@@ -93,6 +95,14 @@ const STEER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
 const JOB_PREVIEW_CHARS = 4_000
 const NAMING_TIMEOUT_MS = 20_000
 const CANCELLED = '(cancelled)'
+/** How long after a turn ends with nobody answering the Notification hooks hear that the agent waits (as in Claude Code). */
+const IDLE_NOTICE_MS = 60_000
+/** How long SessionEnd hooks may hold up the end of a session; quitting waits least. */
+const SESSION_END_MS = { quit: 5_000, other: 15_000 } as const
+
+/** Why a session ends, in eNCode's words; SessionEnd hooks get Claude Code's reason beside it. */
+export type SessionEnding = SessionEndEvent['detail']
+const END_REASONS: Record<SessionEnding, SessionEndEvent['reason']> = { cleared: 'clear', quit: 'prompt_input_exit', deleted: 'other', closed: 'other' }
 
 /** Everything a session needs from the program around it. */
 export interface SessionEnv {
@@ -149,6 +159,8 @@ export interface SessionEnv {
   warn?(message: string): void
   /** Name a session with one small call to the utility model once its first turn is over. Default true. */
   nameSessions?: boolean
+  /** How long after a turn ends with no answer the Notification hooks hear that the agent waits, in ms. Default a minute. */
+  idleNoticeMs?: number
   /** Whether Auto review has a Reviewer to ask; without one, it asks the person as Workspace Write does. Default true. */
   autoReview?: boolean
 }
@@ -192,7 +204,7 @@ function settled(entry: ConversationEntry): ConversationEntry {
 
 function subjectOf(entry: ConversationEntry): string {
   const input = entry.tool?.input ?? {}
-  const value = ['file_path', 'path', 'command', 'pattern', 'url', 'query', 'description', 'skill']
+  const value = ['file_path', 'notebook_path', 'path', 'command', 'pattern', 'url', 'query', 'description', 'skill']
     .map((key) => input[key])
     .find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0)
   return value ? value.replace(/\s+/g, ' ').slice(0, 160) : ''
@@ -256,7 +268,12 @@ export class AgentSession {
   private todoList: TodoItem[] = []
   private planState: PlanRequest | null = null
   private turn: TurnState = {}
+  /** The sessionStart hooks ran in this process: a sessionEnd is owed. */
   private started = false
+  /** Where the next sessionStart says it comes from, after a reset. */
+  private startSource: 'clear' | undefined
+  /** Tells the Notification hooks the agent waits, a while after a turn ended. */
+  private idleTimer: NodeJS.Timeout | undefined
   private controller: AbortController | undefined
   /** Messages sent to steer the turn that runs, oldest first, until the loop takes them in between two steps. */
   private steers: { id: string; text: string }[] = []
@@ -464,10 +481,10 @@ export class AgentSession {
   private readonly conversation: Conversation = {
     messages: () => this.messages,
     add: async (message, meta) => {
-      // The log keeps no screenshots, and the conversation keeps the newest one only (screens.ts).
+      // The log keeps no screenshots or attached PDF pages, and the conversation keeps the newest screenshot only (screens.ts, documents.ts).
       const record = (await this.write({
         type: 'message',
-        message: withoutScreens(message),
+        message: withoutDocuments(withoutScreens(message)),
         turnId: meta.turnId,
         agentId: 'main',
         ...(meta.usage ? { usage: meta.usage } : {}),
@@ -480,7 +497,7 @@ export class AgentSession {
       this.messages.forEach((message, index) => known.set(message, this.records[index]))
       const at = Date.now()
       const records: MessageRecord[] = messages.map(
-        (message) => known.get(message) ?? { type: 'message', id: newRecordId(), at, message: withoutScreens(message), turnId: rewrite.turnId, agentId: 'main' },
+        (message) => known.get(message) ?? { type: 'message', id: newRecordId(), at, message: withoutDocuments(withoutScreens(message)), turnId: rewrite.turnId, agentId: 'main' },
       )
       const record: Omit<CompactionRecord, 'id' | 'at'> = { type: 'compaction', trigger: rewrite.trigger, summary: rewrite.summary, removed: rewrite.removed, messages: records }
       await this.write(record)
@@ -548,9 +565,11 @@ export class AgentSession {
     approve: (prompt, signal) => this.requestApproval(prompt, signal),
     granted: (grant) => this.grants.has(grant),
     ask: (entryId, question, signal) => this.gate(() => this.requestAnswer(entryId, question, signal)),
+    enterPlan: (entryId, reason, signal) => this.askToPlan(entryId, reason, signal),
     proposePlan: async (_entryId, plan, signal) => {
       if (this.env.reviewPlan) return this.env.reviewPlan(plan, signal)
       this.setPlan({ id: randomUUID(), plan })
+      this.notifyHooks('plan_review', 'eNCode has a plan for you to review.')
       return { approved: false, deferred: true }
     },
     setTodos: (inputs: TodoInput[]) =>
@@ -588,7 +607,75 @@ export class AgentSession {
       signal.addEventListener('abort', onAbort, { once: true })
       this.setStatus('awaiting-approval')
       this.send({ type: 'approval-request', request: structuredClone(request) })
+      this.notifyHooks('permission_prompt', `eNCode needs your approval: ${prompt.title}`)
     })
+  }
+
+  /**
+   * EnterPlanMode. Plan mode only holds the agent back, so a policy that asks nothing (Full access, Auto review) lets it
+   * in; otherwise the person decides, and may allow it for the rest of the session.
+   */
+  private async askToPlan(entryId: string, reason: string, signal: AbortSignal): Promise<PlanConsent> {
+    const policy = this.env.settings().policy
+    const answer =
+      policy === 'full-access' || policy === 'auto-review'
+        ? { approved: true }
+        : await this.requestApproval(
+            {
+              entryId,
+              tool: 'EnterPlanMode',
+              title: 'Plan before changing anything',
+              detail: 'In plan mode the agent only reads and searches. It shows you a plan, and nothing changes until you approve it.',
+              ...(reason ? { reason } : {}),
+              input: { reason },
+              grant: 'EnterPlanMode',
+            },
+            signal,
+          )
+    if (!answer.approved || signal.aborted) return { approved: false, ...(answer.note ? { note: answer.note } : {}) }
+    // The tool's result tells the model; the next request in plan mode needs no reminder of it.
+    this.turn.mode = 'plan'
+    this.send({ type: 'mode', mode: 'plan' })
+    return { approved: true }
+  }
+
+  /** Tells the Notification hooks what the agent waits for. They only look, so nothing waits for them. */
+  private notifyHooks(kind: NotificationKind, message: string): void {
+    const notification = this.env.hooks.notification
+    if (!notification || !this.env.root || this.disposed) return
+    const event = { sessionId: this.id, agentId: 'main', root: this.env.root, mode: this.turn.mode ?? 'code', kind, title: this.titleValue, message }
+    notification.call(this.env.hooks, event).catch((error) => {
+      if (!this.disposed) this.notice(`The notification hook failed: ${errorMessage(error)}`)
+    })
+  }
+
+  private stopIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
+  }
+
+  /** A turn ended and the person has the next move: if a minute passes without one, the Notification hooks hear it. */
+  private startIdleTimer(): void {
+    this.stopIdleTimer()
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined
+      if (!this.controller) this.notifyHooks('idle_prompt', 'eNCode is waiting for your input.')
+    }, this.env.idleNoticeMs ?? IDLE_NOTICE_MS)
+    this.idleTimer.unref?.()
+  }
+
+  /** The SessionEnd hooks, owed once the session has started in this process; bounded, so a slow script cannot hold the session. */
+  private async endHooks(detail: SessionEnding): Promise<void> {
+    if (!this.started) return
+    this.started = false
+    const sessionEnd = this.env.hooks.sessionEnd
+    if (!sessionEnd || !this.env.root) return
+    const signal = AbortSignal.timeout(detail === 'quit' ? SESSION_END_MS.quit : SESSION_END_MS.other)
+    try {
+      await sessionEnd.call(this.env.hooks, { sessionId: this.id, agentId: 'main', root: this.env.root, mode: this.turn.mode ?? 'code', reason: END_REASONS[detail], detail, signal })
+    } catch (error) {
+      if (!this.disposed) this.notice(`The sessionEnd hook failed: ${errorMessage(error)}`)
+    }
   }
 
   private requestAnswer(entryId: string, question: Question, signal: AbortSignal): Promise<string> {
@@ -608,6 +695,7 @@ export class AgentSession {
       signal.addEventListener('abort', onAbort, { once: true })
       this.setStatus('awaiting-user')
       this.send({ type: 'ask', ...request })
+      this.notifyHooks('question', `eNCode has a question: ${question.question}`)
     })
   }
 
@@ -883,7 +971,9 @@ export class AgentSession {
     if (!this.started) {
       this.started = true
       try {
-        const started = await env.hooks.sessionStart?.({ ...hookEvent, source: first ? 'new' : 'resume' })
+        const source = this.startSource ?? (first ? 'new' : 'resume')
+        this.startSource = undefined
+        const started = await env.hooks.sessionStart?.({ ...hookEvent, source })
         if (started?.context) add(reminder(started.context))
       } catch (error) {
         this.notice(`The sessionStart hook failed: ${errorMessage(error)}`)
@@ -996,6 +1086,7 @@ export class AgentSession {
     if (!text) throw new Error('Type a request first.')
     const controller = new AbortController()
     this.controller = controller
+    this.stopIdleTimer()
     const run = this.runTurn(input, text, controller)
     this.current = run.catch(() => undefined)
     try {
@@ -1059,6 +1150,7 @@ export class AgentSession {
   }
 
   private conclude(end: TurnEnd): void {
+    if (end.kind !== 'cancelled') this.startIdleTimer()
     switch (end.kind) {
       case 'done':
         this.setStatus('done')
@@ -1152,6 +1244,12 @@ export class AgentSession {
   async reset(): Promise<void> {
     this.cancel()
     await this.idle()
+    this.stopIdleTimer()
+    // As in Claude Code: the cleared session ends, and the next request starts it again from "clear".
+    if (this.started) {
+      await this.endHooks('cleared')
+      this.startSource = 'clear'
+    }
     await this.flush()
     const { header } = this.log.snapshot()
     const keep = { title: this.titleValue, goal: this.goalState, todos: this.todoList, plan: this.planState }
@@ -1334,16 +1432,18 @@ export class AgentSession {
     return this.naming
   }
 
-  /** Stops the session and closes its log. Everyone who asks waits for the same close. */
-  dispose(): Promise<void> {
-    this.disposing ??= this.shutdown()
+  /** Stops the session and closes its log. Everyone who asks waits for the same close; the first says why it ends. */
+  dispose(ending: SessionEnding = 'closed'): Promise<void> {
+    this.disposing ??= this.shutdown(ending)
     return this.disposing
   }
 
-  private async shutdown(): Promise<void> {
+  private async shutdown(ending: SessionEnding): Promise<void> {
     this.cancel()
     this.namingController.abort()
+    this.stopIdleTimer()
     await this.idle()
+    await this.endHooks(ending)
     this.disposed = true
     await this.flush().catch(() => undefined)
     await this.jobsManager.dispose().catch(() => undefined)

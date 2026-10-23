@@ -178,6 +178,9 @@ export const faults = {
   noTools(): Script {
     return [fail('unsupported', 'HTTP 404: No endpoints found that support tool use.', { status: 404, feature: 'tools' })]
   },
+  noDocuments(): Script {
+    return [fail('unsupported', 'HTTP 400: This model does not support PDF input.', { status: 400, feature: 'documents' })]
+  },
   invalidRequest(): Script {
     return [fail('invalid-request', 'HTTP 400: temperature is invalid', { status: 400 })]
   },

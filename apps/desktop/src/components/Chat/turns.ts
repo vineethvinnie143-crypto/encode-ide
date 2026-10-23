@@ -17,6 +17,7 @@ const KINDS: Record<string, StepKind> = {
   Write: 'edit',
   Edit: 'edit',
   MultiEdit: 'edit',
+  NotebookEdit: 'edit',
   Bash: 'shell',
   BashOutput: 'shell',
   KillShell: 'shell',
@@ -55,9 +56,9 @@ export const isCommandTool = (toolName: string): boolean => COMMAND_TOOLS.has(to
 /** Tools that start a subagent. */
 export const isSubagentTool = (toolName: string): boolean => toolName === 'Task' || toolName === 'task'
 
-/** The file a tool call works on: Claude Code's tools call it `file_path`, earlier builds' `path`. */
+/** The file a tool call works on: Claude Code's tools call it `file_path` (`notebook_path` for NotebookEdit), earlier builds' `path`. */
 export function toolPath(input: Record<string, unknown>): string | undefined {
-  const value = input.file_path ?? input.path
+  const value = input.file_path ?? input.notebook_path ?? input.path
   return value === undefined || value === null ? undefined : String(value)
 }
 

@@ -10,25 +10,29 @@
  *   }
  *
  * The matcher is a regular expression over the whole tool name (or, for
- * SessionStart and PreCompact, over the source or trigger); empty or `*`
- * matches everything. Entries that are not valid are skipped with a problem,
- * so one typo does not disable the other hooks.
+ * SessionStart, SessionEnd, PreCompact, Notification and SubagentStart, over
+ * the source, the reason, the trigger, the kind of notice or the agent type);
+ * empty or `*` matches everything. Entries that are not valid are skipped with
+ * a problem, so one typo does not disable the other hooks.
  */
 
 export const HOOK_EVENTS = [
   'PreToolUse',
   'PostToolUse',
   'UserPromptSubmit',
+  'Notification',
   'Stop',
+  'SubagentStart',
   'SubagentStop',
   'SessionStart',
+  'SessionEnd',
   'PreCompact',
 ] as const
 
 export type HookEventName = (typeof HOOK_EVENTS)[number]
 
 /** Events whose matcher means something; for the others it is ignored. */
-const MATCHED_EVENTS = new Set<HookEventName>(['PreToolUse', 'PostToolUse', 'SessionStart', 'PreCompact'])
+const MATCHED_EVENTS = new Set<HookEventName>(['PreToolUse', 'PostToolUse', 'Notification', 'SubagentStart', 'SessionStart', 'SessionEnd', 'PreCompact'])
 
 export interface CommandHook {
   command: string

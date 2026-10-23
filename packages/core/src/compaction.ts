@@ -23,7 +23,7 @@
  * thinking blocks after the first changed message are dropped: providers that
  * bind a thinking block to the conversation that minted it would reject them.
  */
-import type { AssistantBlock, AssistantMessage, Message, ModelRequest, ToolResultBlock, ToolUseBlock, UserBlock, UserMessage } from '@encode/providers'
+import type { AssistantBlock, AssistantMessage, DocumentBlock, Message, ModelRequest, ToolResultBlock, ToolUseBlock, UserBlock, UserMessage } from '@encode/providers'
 import { textBlock, userText } from '@encode/providers'
 import { OUTSIDE_NOTES_OPEN } from './external'
 import { INVOKED_SKILL_OPEN, MENTIONED_FILES_OPEN } from './mentions'
@@ -44,6 +44,8 @@ export const RECENT_STEPS = 4
 export const CHARS_PER_TOKEN = 3.5
 /** What an image costs, whatever its size. */
 export const IMAGE_TOKENS = 1600
+/** A PDF page a model reads as a document: its text and an image of it. */
+export const DOCUMENT_PAGE_TOKENS = 1800
 export const MAX_SUMMARY_CHARS = 12_000
 
 export const NOT_RUN = 'Not run: the run ended before this call (it was stopped, or the task was already complete).'
@@ -66,7 +68,7 @@ export function textTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-function blockChars(block: UserBlock | AssistantBlock): number {
+function blockChars(block: UserBlock | AssistantBlock | DocumentBlock): number {
   switch (block.type) {
     case 'text':
     case 'thinking':
@@ -75,6 +77,8 @@ function blockChars(block: UserBlock | AssistantBlock): number {
       return Math.ceil(block.data.length / 4)
     case 'image':
       return IMAGE_TOKENS * CHARS_PER_TOKEN
+    case 'document':
+      return block.pages * DOCUMENT_PAGE_TOKENS * CHARS_PER_TOKEN
     case 'tool-use':
       return block.name.length + JSON.stringify(block.input).length + CALL_OVERHEAD
     case 'tool-result':
@@ -342,6 +346,10 @@ function elideResult(block: ToolResultBlock, limit: number): ToolResultBlock {
       changed = true
       return textBlock(IMAGE_ELIDED)
     }
+    if (part.type === 'document') {
+      changed = true
+      return textBlock(part.text)
+    }
     if (part.text.length > limit) {
       changed = true
       return textBlock(shorten(part.text, limit))
@@ -529,7 +537,7 @@ export function summaryRequest(plan: CompactionPlan, maxChars: number, instructi
   }
 }
 
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit'])
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 
 function lastItems(items: readonly string[], max: number): string[] {
   return items.length > max ? [`(${items.length - max} earlier not listed)`, ...items.slice(-max)] : [...items]
@@ -577,7 +585,7 @@ export function digest(messages: readonly Message[]): string {
     for (const call of toolUsesOf(message)) {
       callNames.set(call.id, call.name)
       const input = call.input
-      if (WRITE_TOOLS.has(call.name) && typeof input.file_path === 'string') changed.add(input.file_path)
+      if (WRITE_TOOLS.has(call.name) && typeof (input.file_path ?? input.notebook_path) === 'string') changed.add(String(input.file_path ?? input.notebook_path))
       else if (call.name === 'Bash' && typeof input.command === 'string') commands.push(oneLine(input.command, 160))
       else if (call.name === 'WebFetch' && typeof input.url === 'string') fetched.add(input.url)
       else other.set(call.name, (other.get(call.name) ?? 0) + 1)

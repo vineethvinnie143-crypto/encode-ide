@@ -306,6 +306,8 @@ export type AgentEventBody =
   | { type: 'goal'; goal: SessionGoal | null }
   | { type: 'todos'; todos: TodoItem[] }
   | { type: 'plan'; plan: PlanRequest | null }
+  /** The agent changed the session's mode itself (EnterPlanMode): the message box should follow. */
+  | { type: 'mode'; mode: AgentMode }
   | { type: 'file-changed'; path: string }
   | { type: 'done'; summary: string }
   | { type: 'error'; message: string }

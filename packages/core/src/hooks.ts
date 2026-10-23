@@ -26,7 +26,7 @@ export interface HookEvent {
 }
 
 export interface SessionStartEvent extends HookEvent {
-  source: 'new' | 'resume' | 'compact'
+  source: 'new' | 'resume' | 'compact' | 'clear'
 }
 
 export interface UserPromptEvent extends HookEvent {
@@ -58,6 +58,28 @@ export interface CompactEvent extends HookEvent {
   trigger: 'auto' | 'manual'
   /** What the user asked the summary to keep, for a manual compaction. */
   instructions?: string
+}
+
+/** What the agent is waiting for, as Claude Code names it for a Notification hook (question and plan_review are eNCode's). */
+export type NotificationKind = 'permission_prompt' | 'idle_prompt' | 'question' | 'plan_review'
+
+export interface NotificationEvent extends HookEvent {
+  kind: NotificationKind
+  /** The session's name. */
+  title: string
+  /** What eNCode would say about it: "eNCode needs your approval to use Bash". */
+  message: string
+}
+
+export interface SessionEndEvent extends HookEvent {
+  /** Claude Code's reason: clear, prompt_input_exit (eNCode quit) or other. */
+  reason: 'clear' | 'prompt_input_exit' | 'other'
+  /** Which of eNCode's endings it was. */
+  detail: 'cleared' | 'quit' | 'deleted' | 'closed'
+}
+
+export interface SubagentStartEvent extends HookEvent {
+  agentType: string
 }
 
 export interface ContextResult {
@@ -100,6 +122,12 @@ export interface AgentHooks {
   postToolUse?(event: PostToolEvent): Promise<PostToolResult | void>
   beforeStop?(event: StopEvent): Promise<StopResult | void>
   preCompact?(event: CompactEvent): Promise<CompactResult | void>
+  /** The agent waits for the person. Nothing it returns changes anything. */
+  notification?(event: NotificationEvent): Promise<void>
+  /** The session ends: cleared, closed, deleted, or eNCode quits. Only after a sessionStart. */
+  sessionEnd?(event: SessionEndEvent): Promise<void>
+  /** A subagent is about to start; the context goes into its first message. */
+  subagentStart?(event: SubagentStartEvent): Promise<ContextResult | void>
 }
 
 /** Runs several hook sets as one, in order. */
@@ -165,6 +193,17 @@ export function combineHooks(...sets: (AgentHooks | undefined)[]): AgentHooks {
         if (result?.instructions?.trim()) parts.push(result.instructions.trim())
       }
       return parts.length ? { instructions: parts.join('\n\n') } : {}
+    },
+    async notification(event) {
+      for (const set of all) await set.notification?.(event)
+    },
+    async sessionEnd(event) {
+      for (const set of all) await set.sessionEnd?.(event)
+    },
+    async subagentStart(event) {
+      const results: (ContextResult | void)[] = []
+      for (const set of all) results.push(await set.subagentStart?.(event))
+      return joinContext(results)
     },
   }
 }

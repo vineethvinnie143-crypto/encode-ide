@@ -61,7 +61,7 @@ describe('OpenRouter catalog', () => {
       family: 'qwen',
       contextWindow: 262_144,
       maxOutputTokens: 65_536,
-      capabilities: { tools: true, parallelTools: true, images: true, reasoning: true, promptCache: false },
+      capabilities: { tools: true, parallelTools: true, images: true, documents: false, reasoning: true, promptCache: false },
       editFormat: 'replace',
       price: { input: 0, output: 0 },
       free: true,
@@ -69,6 +69,13 @@ describe('OpenRouter catalog', () => {
       expiresAt: Date.parse('2026-11-30T00:00:00Z'),
       roles: undefined,
     })
+  })
+
+  it('marks a model that takes files as one that reads PDFs as documents', () => {
+    const entry = (inputs: string[]) => ({ id: 'vendor/model', context_length: 100_000, architecture: { input_modalities: inputs }, pricing: { prompt: '0.000001', completion: '0.000002' }, supported_parameters: ['tools'] })
+    const [reads, plain] = parseOpenRouterCatalog({ data: [entry(['text', 'image', 'file']), { ...entry(['text', 'image']), id: 'vendor/other' }] })
+    assert.equal(reads.capabilities.documents, true)
+    assert.equal(plain.capabilities.documents, false)
   })
 
   it('prices per million tokens, and calls a model free only when its id says so and it costs nothing', () => {
