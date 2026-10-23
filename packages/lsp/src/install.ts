@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { ArchiveRefused, readTar, readZip, writeFiles, type ArchiveFile } from './archive'
-import type { ServerSpec } from './catalog'
+import type { Installable, ServerSpec } from './catalog'
 import type { LaunchPlan } from './discover'
 import { NPM_LOCKS } from './npm-locks'
 
@@ -76,6 +76,18 @@ export type ServerInstall =
       launch?(dir: string, context: LaunchContext): Omit<LaunchPlan, 'found'> | { missing: string }
     }
   | {
+      /**
+       * Not a server: packages from npm (pinned as the npm servers are) that `build` turns into files a server reads,
+       * such as FiveM's natives as Lua definitions (ADR 0084). Nothing from them is run.
+       */
+      kind: 'library'
+      lock: string | NpmLock
+      /** Writes what the server reads into the install folder, from the packages unpacked under its `node_modules`. */
+      build(dir: string): void
+      /** What `build` writes, for people: "Lua definitions of FiveM's natives". */
+      produces: string
+    }
+  | {
       kind: 'toolchain'
       program: string
       /** `{dir}` is the folder it installs into. */
@@ -118,6 +130,8 @@ export interface InstallContext extends LaunchContext {
 export interface InstallPlan {
   id: string
   label: string
+  /** What is installed, for a title: "YAML's language server", "FiveM's natives for Lua". */
+  what: string
   version: string
   /** What happens, in a few plain sentences, for the person to read before saying yes. */
   steps: string[]
@@ -236,14 +250,19 @@ async function githubRelease(context: InstallContext, repo: string): Promise<Git
 
 // ------------------------------------------------------------------------------------------------------------ planning
 
+/** "YAML's language server", or what a library says it is. */
+export function installName(spec: Installable): string {
+  return spec.what ?? `${spec.label}'s language server`
+}
+
 /** How a server would be installed here: the plan for the person to read, or why it cannot be. */
-export async function planInstall(spec: ServerSpec, context: InstallContext): Promise<InstallPlan | { unavailable: string }> {
+export async function planInstall(spec: Installable, context: InstallContext): Promise<InstallPlan | { unavailable: string }> {
   const install = spec.installer
-  if (!install) return { unavailable: `eNCode cannot install ${spec.label}'s server itself. To get one: ${spec.install}.` }
+  if (!install) return { unavailable: `eNCode cannot install ${installName(spec)} itself. To get one: ${spec.install}.` }
   const base = path.join(context.toolsDir, spec.id)
-  if (install.kind === 'npm') {
+  if (install.kind === 'npm' || install.kind === 'library') {
     const lock = lockOf(install)
-    if (!lock) return { unavailable: `eNCode has no list of what ${spec.label}'s server needs.` }
+    if (!lock) return { unavailable: `eNCode has no list of what ${installName(spec)} needs.` }
     const files = npmFiles(lock, context)
     const bytes = files.reduce((sum, file) => sum + file.size, 0)
     const names = Object.entries(lock.packages).map(([name, version]) => `${name} ${version}`)
@@ -251,12 +270,15 @@ export async function planInstall(spec: ServerSpec, context: InstallContext): Pr
     return {
       id: spec.id,
       label: spec.label,
+      what: installName(spec),
       version,
       bytes,
       dir: path.join(base, version),
       steps: [
         `Downloads ${names.join(' and ')} from the npm registry: ${files.length} ${files.length === 1 ? 'package' : 'packages'}, ${megabytes(bytes)}, each checked against the hash eNCode was built with.`,
-        'Runs no install scripts, and runs on eNCode\'s own copy of Node.js, so Node.js need not be installed.',
+        install.kind === 'library'
+          ? `Writes ${install.produces} from them. Nothing in them is run.`
+          : 'Runs no install scripts, and runs on eNCode\'s own copy of Node.js, so Node.js need not be installed.',
         "Keeps it in eNCode's own folder, named below. Nothing else on this computer changes.",
       ],
     }
@@ -268,6 +290,7 @@ export async function planInstall(spec: ServerSpec, context: InstallContext): Pr
     return {
       id: spec.id,
       label: spec.label,
+      what: installName(spec),
       version: resolved.version,
       ...(resolved.size ? { bytes: resolved.size } : {}),
       dir: path.join(base, resolved.version),
@@ -279,12 +302,13 @@ export async function planInstall(spec: ServerSpec, context: InstallContext): Pr
     }
   }
   const program = context.which(install.program)
-  if (!program) return { unavailable: `Installing ${spec.label}'s server needs ${install.needs} (${install.program} was not found on the PATH). To get one: ${spec.install}.` }
+  if (!program) return { unavailable: `Installing ${installName(spec)} needs ${install.needs} (${install.program} was not found on the PATH). To get one: ${spec.install}.` }
   const dir = path.join(base, install.version)
   const args = install.args.map((arg) => fill(arg, { dir }))
   return {
     id: spec.id,
     label: spec.label,
+    what: installName(spec),
     version: install.version,
     dir,
     steps: [
@@ -294,7 +318,7 @@ export async function planInstall(spec: ServerSpec, context: InstallContext): Pr
   }
 }
 
-function lockOf(install: Extract<ServerInstall, { kind: 'npm' }>): NpmLock | undefined {
+function lockOf(install: { lock: string | NpmLock }): NpmLock | undefined {
   return typeof install.lock === 'string' ? NPM_LOCKS[install.lock] : install.lock
 }
 
@@ -320,9 +344,9 @@ interface ResolvedDownload {
   asset: DownloadAsset
 }
 
-async function resolveDownload(spec: ServerSpec, install: Extract<ServerInstall, { kind: 'download' }>, context: InstallContext): Promise<ResolvedDownload> {
+async function resolveDownload(spec: Installable, install: Extract<ServerInstall, { kind: 'download' }>, context: InstallContext): Promise<ResolvedDownload> {
   const asset = install.assets[platformKey(context.platform, context.arch)]
-  if (!asset) fail(`${install.from} has no build of ${spec.label}'s server for this computer (${context.platform}, ${context.arch}).`)
+  if (!asset) fail(`${install.from} has no build of ${installName(spec)} for this computer (${context.platform}, ${context.arch}).`)
   if ('github' in install.release) {
     const release = await githubRelease(context, install.release.github)
     const name = fill(asset.name, { version: release.version })
@@ -340,16 +364,23 @@ async function resolveDownload(spec: ServerSpec, install: Extract<ServerInstall,
 // ---------------------------------------------------------------------------------------------------------- installing
 
 /** Installs the server; resolves with the folder it is in. Throws `InstallFailed` with a reason for people. */
-export async function installServer(spec: ServerSpec, context: InstallContext): Promise<string> {
+export async function installServer(spec: Installable, context: InstallContext): Promise<string> {
   const install = spec.installer
-  if (!install) fail(`eNCode cannot install ${spec.label}'s server itself.`)
+  if (!install) fail(`eNCode cannot install ${installName(spec)} itself.`)
   const base = path.join(context.toolsDir, spec.id)
   fs.mkdirSync(base, { recursive: true })
   const partial = path.join(base, `.partial-${randomBytes(6).toString('hex')}`)
   try {
     let version: string
     if (install.kind === 'npm') version = await installNpm(spec, install, context, partial)
-    else if (install.kind === 'download') version = await installDownload(spec, install, context, partial)
+    else if (install.kind === 'library') {
+      version = await installNpm(spec, install, context, partial)
+      try {
+        install.build(partial)
+      } catch (error) {
+        fail(`eNCode could not write ${install.produces}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else if (install.kind === 'download') version = await installDownload(spec, install, context, partial)
     else version = await installToolchain(spec, install, context, partial)
     if (install.kind === 'toolchain' && !install.bin) return ''
     fs.writeFileSync(path.join(partial, MARKER), `${JSON.stringify({ id: spec.id, version, kind: install.kind, at: new Date().toISOString() })}\n`)
@@ -391,9 +422,9 @@ function safeReaddir(dir: string): string[] {
   }
 }
 
-async function installNpm(spec: ServerSpec, install: Extract<ServerInstall, { kind: 'npm' }>, context: InstallContext, partial: string): Promise<string> {
+async function installNpm(spec: Installable, install: { lock: string | NpmLock; script?: string }, context: InstallContext, partial: string): Promise<string> {
   const lock = lockOf(install)
-  if (!lock) fail(`eNCode has no list of what ${spec.label}'s server needs.`)
+  if (!lock) fail(`eNCode has no list of what ${installName(spec)} needs.`)
   const files = npmFiles(lock, context)
   const total = files.reduce((sum, file) => sum + file.size, 0)
   let done = 0
@@ -414,11 +445,11 @@ async function installNpm(spec: ServerSpec, install: Extract<ServerInstall, { ki
     }
   }
   writeFiles(unpacked, partial)
-  if (!fs.existsSync(path.join(partial, ...install.script.split('/')))) fail(`${install.script} is not in what was downloaded.`)
+  if (install.script && !fs.existsSync(path.join(partial, ...install.script.split('/')))) fail(`${install.script} is not in what was downloaded.`)
   return Object.values(lock.packages).join('+')
 }
 
-async function installDownload(spec: ServerSpec, install: Extract<ServerInstall, { kind: 'download' }>, context: InstallContext, partial: string): Promise<string> {
+async function installDownload(spec: Installable, install: Extract<ServerInstall, { kind: 'download' }>, context: InstallContext, partial: string): Promise<string> {
   const resolved = await resolveDownload(spec, install, context)
   let done = 0
   const data = await download(context, resolved.url, MAX_DOWNLOAD, (bytes) => {
@@ -443,9 +474,9 @@ function withoutTopFolder(files: ArchiveFile[], bin: string): ArchiveFile[] {
   return files.map((file) => ({ ...file, path: file.path.slice(top.length + 1) }))
 }
 
-async function installToolchain(spec: ServerSpec, install: Extract<ServerInstall, { kind: 'toolchain' }>, context: InstallContext, partial: string): Promise<string> {
+async function installToolchain(spec: Installable, install: Extract<ServerInstall, { kind: 'toolchain' }>, context: InstallContext, partial: string): Promise<string> {
   const program = context.which(install.program)
-  if (!program) fail(`Installing ${spec.label}'s server needs ${install.needs}: ${install.program} was not found on the PATH.`)
+  if (!program) fail(`Installing ${installName(spec)} needs ${install.needs}: ${install.program} was not found on the PATH.`)
   fs.mkdirSync(partial)
   const values = { dir: partial }
   const env = { ...context.env, ...Object.fromEntries(Object.entries(install.env ?? {}).map(([key, value]) => [key, fill(value, values)])) }
@@ -473,7 +504,7 @@ function runProgram(program: string, args: string[], options: { env: Record<stri
 // ----------------------------------------------------------------------------------------------------------- launching
 
 /** The folder eNCode installed the server in, and its version, or null. The newest complete one wins. */
-export function installedDir(spec: ServerSpec, toolsDir: string): { dir: string; version: string } | null {
+export function installedDir(spec: Pick<Installable, 'id'>, toolsDir: string): { dir: string; version: string } | null {
   const base = path.join(toolsDir, spec.id)
   let best: { dir: string; version: string; at: number } | null = null
   for (const entry of safeReaddir(base)) {
@@ -494,7 +525,7 @@ export function installedDir(spec: ServerSpec, toolsDir: string): { dir: string;
 /** How to start a server eNCode installed, or null when it has not installed it. */
 export function installedLaunch(spec: ServerSpec, toolsDir: string, context: LaunchContext): LaunchPlan | { missing: string } | null {
   const install = spec.installer
-  if (!install || (install.kind === 'toolchain' && !install.bin)) return null
+  if (!install || install.kind === 'library' || (install.kind === 'toolchain' && !install.bin)) return null
   const found = installedDir(spec, toolsDir)
   if (!found) return null
   const command = spec.candidates[0]?.command ?? spec.id
@@ -516,7 +547,7 @@ export function installedLaunch(spec: ServerSpec, toolsDir: string, context: Lau
 }
 
 /** Removes what eNCode installed for the server. */
-export function removeInstall(spec: ServerSpec, toolsDir: string): void {
+export function removeInstall(spec: Pick<Installable, 'id'>, toolsDir: string): void {
   const base = path.join(toolsDir, spec.id)
   for (const entry of safeReaddir(base)) fs.rmSync(path.join(base, entry), { recursive: true, force: true })
 }

@@ -46,6 +46,13 @@ export const NPM_LOCKS: Record<string, NpmLock> = {
       {"path":"node_modules/zod","version":"3.25.76","url":"https://registry.npmjs.org/zod/-/zod-3.25.76.tgz","integrity":"sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==","size":583600},
     ],
   },
+  fivem: {
+    packages: {"@citizenfx/client":"2.0.37850-1","@citizenfx/server":"2.0.37850-1"},
+    files: [
+      {"path":"node_modules/@citizenfx/client","version":"2.0.37850-1","url":"https://registry.npmjs.org/@citizenfx/client/-/client-2.0.37850-1.tgz","integrity":"sha512-ZqICuN0ZtBhaRg2eKFZ91alQupKPjNan0Eyuk7H/J4ubeZbmZxMIbEw+cIlJu6CIqc+dZaC/fq9LyAp2v7wc/g==","size":508245},
+      {"path":"node_modules/@citizenfx/server","version":"2.0.37850-1","url":"https://registry.npmjs.org/@citizenfx/server/-/server-2.0.37850-1.tgz","integrity":"sha512-PCRDaOdbz9fH3S2KEa8jFFyhnMq7VCuIMl4URkaBb/VJpVE3QQKESWR5ekkffZdTsZDYxOvEG3f4V96BoauT5g==","size":44953},
+    ],
+  },
   python: {
     packages: {"pyright":"1.1.414"},
     files: [

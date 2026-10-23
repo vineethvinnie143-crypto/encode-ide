@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, installedDir, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -32,6 +32,8 @@ export interface LanguageServerOptions {
   spawn?(plan: LaunchPlan, cwd: string, env: Record<string, string>): Promise<ServerProcess>
   idleMs?: number
   catalog?: readonly ServerSpec[]
+  /** Libraries eNCode installs for the servers (ADR 0084); default `LANGUAGE_LIBRARIES`. */
+  libraries?: readonly LibrarySpec[]
   /** eNCode's tools folder, where it installs servers when asked (ADR 0083), and what runs the ones from npm. */
   tools?: ServerTools
 }
@@ -72,6 +74,20 @@ export interface LanguageServerInfo {
   /** An install is running: bytes so far, of about this many. */
   installing?: { done: number; total: number }
   /** The last install failed, and why. */
+  installError?: string
+  /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
+  libraries?: LanguageLibraryInfo[]
+}
+
+/** A library eNCode installs for a server to read, as the Settings screen lists it under the server. */
+export interface LanguageLibraryInfo {
+  id: string
+  /** "FiveM natives". */
+  label: string
+  /** "FiveM's natives for Lua". */
+  what: string
+  installed?: string
+  installing?: { done: number; total: number }
   installError?: string
 }
 
@@ -319,12 +335,33 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
       return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}) })
     },
     spawn: (plan, cwd) => (options.spawn ?? start)(plan, cwd, environment()),
+    ...(options.tools ? { tools: { dir: options.tools.dir, cacheDir: options.tools.cacheDir } } : {}),
     readText,
     exists: (file) => existsSync(file),
     ...(options.idleMs ? { idleMs: options.idleMs } : {}),
     ...(options.onDiagnostics ? { onDiagnostics: (file: string, items: CodeDiagnostic[]) => options.onDiagnostics?.(config.root, file, items) } : {}),
     ...(options.onChange ? { onChange: () => options.onChange?.(config.root) } : {}),
   })
+}
+
+/** The libraries of a server the folder wants (by its markers) or that are installed, when eNCode installs them. */
+function libraryViews(server: string, markers: string[], options: Pick<LanguageServerOptions, 'tools' | 'libraries'>, installs?: (id: string) => InstallState | undefined): { libraries?: LanguageLibraryInfo[] } {
+  if (!options.tools) return {}
+  const libraries: LanguageLibraryInfo[] = []
+  for (const spec of options.libraries ?? LANGUAGE_LIBRARIES) {
+    if (spec.server !== server) continue
+    const installed = installedDir(spec, options.tools.dir)
+    const install = installs?.(spec.id)
+    if (!installed && !install && !spec.markers.some((marker) => markers.includes(marker))) continue
+    libraries.push({
+      id: spec.id,
+      label: spec.label,
+      what: spec.what,
+      ...(installed ? { installed: installed.version } : {}),
+      ...(install && 'error' in install ? { installError: install.error } : install ? { installing: install } : {}),
+    })
+  }
+  return libraries.length ? { libraries } : {}
 }
 
 /** What an install of a server is doing now, for the report. */
@@ -336,7 +373,7 @@ export type InstallState = { done: number; total: number } | { error: string }
  */
 export function languageServersReport(
   servers: LanguageServers,
-  options: Pick<LanguageServerOptions, 'enabled' | 'catalog' | 'tools'>,
+  options: Pick<LanguageServerOptions, 'enabled' | 'catalog' | 'tools' | 'libraries'>,
   trusted: boolean,
   logs = 0,
   extra: { languages?: FolderLanguages; installs?: (id: string) => InstallState | undefined } = {},
@@ -355,9 +392,10 @@ export function languageServersReport(
       install: spec?.install ?? '',
       files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [],
       ...(use ? { used: { files: use.files, markers: use.markers } } : {}),
-      ...(spec?.installer && options.tools ? { installer: spec.installer.kind } : {}),
+      ...(spec?.installer && spec.installer.kind !== 'library' && options.tools ? { installer: spec.installer.kind } : {}),
       ...(installed ? { installed: installed.version } : {}),
       ...(install && 'error' in install ? { installError: install.error } : install ? { installing: install } : {}),
+      ...libraryViews(view.id, use?.markers ?? [], options, extra.installs),
     }
   })
   // The languages the folder uses first, most files first; the rest as the catalog lists them.

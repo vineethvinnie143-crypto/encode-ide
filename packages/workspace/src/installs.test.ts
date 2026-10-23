@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import type { NpmLock, ServerSpec } from '@encode/lsp'
+import type { LibrarySpec, NpmLock, ServerSpec } from '@encode/lsp'
 import { makeTar } from '@encode/lsp/test-archives'
 import { tempWorkspace } from '@encode/tools/testing'
 import { ServerInstalls } from './installs'
@@ -176,6 +176,83 @@ describe('a folder\'s report with installs', () => {
       assert.notEqual(after.servers[0]!.state, 'missing', 'found in eNCode\'s tools folder without waiting')
       assert.deepEqual(await workspaces.removeServer('fake'), { ok: true, dir: '' })
       assert.equal((await workspaces.languageServersReport(root)).servers[0]!.state, 'missing')
+    } finally {
+      await workspaces.close()
+    }
+  })
+
+  it('lists a library under its server where the folder wants it, and its server starts again to read it', async () => {
+    const root = await tempWorkspace({ 'res/fxmanifest.lua': '', 'res/client.fk': '' })
+    const home = await tempWorkspace()
+    const tools = await tempWorkspace()
+    const tarball = makeTar([{ name: 'package/package.json', data: '{"name":"fake-defs"}' }, { name: 'package/defs.d.ts', data: 'declare function A(): void;' }], true)
+    const lock: NpmLock = {
+      packages: { 'fake-defs': '2.0.0' },
+      files: [{ path: 'node_modules/fake-defs', version: '2.0.0', url: 'https://registry.npmjs.org/fake-defs/-/fake-defs-2.0.0.tgz', integrity: `sha512-${createHash('sha512').update(tarball).digest('base64')}`, size: tarball.length }],
+    }
+    const spec: ServerSpec = { id: 'fake', label: 'Fake', extensions: { '.fk': 'fake' }, markers: ['fxmanifest.lua'], candidates: [{ command: 'fake-ls', args: [] }], install: 'install fake-ls' }
+    const library: LibrarySpec = {
+      id: 'fake-defs',
+      label: 'Fake definitions',
+      what: "Fake's definitions",
+      server: 'fake',
+      markers: ['fxmanifest.lua'],
+      install: 'by hand',
+      installer: {
+        kind: 'library',
+        lock,
+        produces: 'definitions',
+        build: (dir) => {
+          fs.writeFileSync(path.join(dir, 'defs.lua'), fs.readFileSync(path.join(dir, 'node_modules', 'fake-defs', 'defs.d.ts')))
+          fs.rmSync(path.join(dir, 'node_modules'), { recursive: true })
+        },
+      },
+    }
+    const fetchImpl = (async () => new Response(new Uint8Array(tarball), { status: 200 })) as typeof fetch
+    const rediscovered: [string, boolean][] = []
+    const unit = new ServerInstalls({
+      tools: { dir: tools, cacheDir: path.join(tools, '.cache'), node: { file: process.execPath }, fetch: fetchImpl },
+      platform: process.platform,
+      catalog: [spec],
+      libraries: [library],
+      rediscover: async (id, how) => {
+        rediscovered.push([id, Boolean(how.stop)])
+      },
+    })
+    const plan = await unit.plan('fake-defs', root)
+    assert.ok('what' in plan && plan.what === "Fake's definitions", JSON.stringify(plan))
+    const done = await unit.install('fake-defs', root)
+    assert.ok(done.ok, JSON.stringify(done))
+    assert.deepEqual(fs.readdirSync(done.dir).sort(), ['defs.lua', 'encode-install.json'])
+    assert.deepEqual(rediscovered, [
+      ['fake', true],
+      ['fake', false],
+    ])
+    assert.deepEqual(await unit.remove('fake-defs'), { ok: true, dir: '' })
+    assert.deepEqual(rediscovered.slice(2), [
+      ['fake', true],
+      ['fake', true],
+      ['fake', false],
+    ])
+
+    const workspaces = new Workspaces({
+      home,
+      env: {},
+      languageServers: { enabled: () => true, env: { PATH: home }, catalog: [spec], libraries: [library], tools: { dir: tools, cacheDir: path.join(tools, '.cache'), node: { file: process.execPath }, fetch: fetchImpl } },
+    })
+    try {
+      await workspaces.act(root, { type: 'trust' })
+      const before = await workspaces.languageServersReport(root)
+      assert.deepEqual(before.servers[0]!.libraries, [{ id: 'fake-defs', label: 'Fake definitions', what: "Fake's definitions" }])
+      assert.equal(before.servers[0]!.installer, undefined, 'the server itself is not one eNCode installs')
+      assert.ok((await workspaces.installServer(root, 'fake-defs')).ok)
+      assert.deepEqual((await workspaces.languageServersReport(root)).servers[0]!.libraries, [{ id: 'fake-defs', label: 'Fake definitions', what: "Fake's definitions", installed: '2.0.0' }])
+      // A folder that does not want it lists it only while it is installed.
+      const other = await tempWorkspace({ 'a.fk': '' })
+      await workspaces.act(other, { type: 'trust' })
+      assert.equal((await workspaces.languageServersReport(other)).servers[0]!.libraries?.length, 1)
+      assert.deepEqual(await workspaces.removeServer('fake-defs'), { ok: true, dir: '' })
+      assert.equal((await workspaces.languageServersReport(other)).servers[0]!.libraries, undefined)
     } finally {
       await workspaces.close()
     }

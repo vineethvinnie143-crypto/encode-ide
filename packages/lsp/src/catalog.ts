@@ -7,12 +7,49 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { FIVEM_NATIVES, prepareLua } from './fivem'
 import type { LaunchContext, ServerInstall } from './install'
 
 export interface ServerCandidate {
   /** The program's name, without `.exe` or `.cmd`. */
   command: string
   args: string[]
+}
+
+/** Something eNCode installs with one click: a language server, or a library a server reads (ADR 0084). */
+export interface Installable {
+  id: string
+  label: string
+  /** How to get it by hand, for the message that says eNCode cannot. */
+  install: string
+  installer?: ServerInstall
+  /** What it is, for a title, when it is not a server: "FiveM's natives for Lua". */
+  what?: string
+}
+
+/** What a server is told for one folder, worked out each time it starts (FiveM's resources, ADR 0084). */
+export interface Prepared {
+  /** Laid over the spec's `settings`: objects merge, anything else replaces. */
+  settings?: Record<string, unknown>
+  /** Added after the program's own arguments. */
+  args?: string[]
+}
+
+export interface PrepareContext {
+  root: string
+  platform: NodeJS.Platform
+  /** eNCode's tools folder and its cache folder, when the program has them. */
+  tools?: { dir: string; cacheDir: string }
+}
+
+/** A library eNCode installs for a server to read, such as FiveM's natives for the Lua server. */
+export interface LibrarySpec extends Installable {
+  what: string
+  /** The server that reads it, by id. */
+  server: string
+  /** File names that show a folder wants it, lower case. */
+  markers: string[]
+  installer: Extract<ServerInstall, { kind: 'library' }>
 }
 
 export interface ServerSpec {
@@ -35,6 +72,8 @@ export interface ServerSpec {
   markers?: string[]
   /** How eNCode installs it with one click, when it can. */
   installer?: ServerInstall
+  /** What the folder adds to its settings and arguments, as it starts; null for nothing. Bounded and synchronous. */
+  prepare?(context: PrepareContext): Prepared | null
 }
 
 const ts = { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' }
@@ -194,8 +233,9 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
       },
       args: [],
     },
-    // FiveM's resources run Lua 5.4 with CfxLua's additions; its natives are globals the server cannot know.
-    settings: { Lua: { runtime: { version: 'Lua 5.4' }, telemetry: { enable: false }, workspace: { checkThirdParty: false }, hint: { enable: true }, semantic: { enable: true } } },
+    settings: { Lua: { telemetry: { enable: false }, workspace: { checkThirdParty: false }, hint: { enable: true }, semantic: { enable: true } } },
+    // FiveM's resources run CfxLua (Lua 5.4 with additions), with the runtime's globals and the natives.
+    prepare: prepareLua,
   },
   {
     id: 'java',
@@ -241,6 +281,9 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     settings: { yaml: { validate: true, hover: true, completion: true, schemaStore: { enable: false } } },
   },
 ]
+
+/** Libraries eNCode installs for the servers above. */
+export const LANGUAGE_LIBRARIES: readonly LibrarySpec[] = [FIVEM_NATIVES]
 
 /** The server that covers a file, and the file's language id, or null when none does. */
 export function serverFor(file: string, catalog: readonly ServerSpec[] = LANGUAGE_SERVERS): { spec: ServerSpec; languageId: string } | null {

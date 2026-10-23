@@ -2,6 +2,7 @@ import { create } from '../store'
 import type { LanguageServersReport, ServerInstallResult } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
+import { installName, installTarget } from '../panels/code'
 import { useUi } from './ui'
 
 interface CodeStore {
@@ -28,9 +29,6 @@ interface CodeStore {
   remove(id: string): Promise<void>
 }
 
-function labelOf(id: string): string {
-  return useCode.getState().report?.servers.find((server) => server.id === id)?.label ?? id
-}
 
 const DECLINED_KEY = 'encode.code.declinedInstalls'
 
@@ -66,7 +64,8 @@ export const useCode = create<CodeStore>((set, get) => ({
   },
 
   install: async (id) => {
-    const label = labelOf(id)
+    const target = installTarget(get().report, id)
+    const name = installName(get().report, id)
     let result: ServerInstallResult
     try {
       result = await api.code.install(id)
@@ -75,17 +74,21 @@ export const useCode = create<CodeStore>((set, get) => ({
     }
     void get().refresh()
     const notify = useUi.getState().notify
-    if (result.ok) notify('success', `${label}'s language server is installed. It starts when a file of its language is opened.`)
-    else if (get().installFor !== id) notify('error', `${label}'s language server was not installed. ${result.reason}`)
+    if (result.ok) notify('success', target?.kind === 'library' ? `Installed ${name}. ${target.server.label}'s server starts again to read them.` : `${name} is installed. It starts when a file of its language is opened.`)
+    else if (get().installFor !== id) notify('error', `Could not install ${name}. ${result.reason}`)
     return result
   },
 
   remove: async (id) => {
-    const label = labelOf(id)
+    const target = installTarget(get().report, id)
+    const name = installName(get().report, id)
     const ui = useUi.getState()
     const yes = await ui.askConfirm({
-      title: `Remove ${label}'s language server?`,
-      body: `eNCode deletes the copy it installed. ${label} files lose errors as you type until a server is installed again; one on the PATH or in the project is still found.`,
+      title: `Remove ${name}?`,
+      body:
+        target?.kind === 'library'
+          ? `eNCode deletes what it installed. ${target.server.label}'s server starts again without them, and hovers, completion and checks no longer know them.`
+          : `eNCode deletes the copy it installed. ${target?.item.label ?? id} files lose errors as you type until a server is installed again; one on the PATH or in the project is still found.`,
       confirmLabel: 'Remove',
       danger: true,
     })
@@ -97,7 +100,7 @@ export const useCode = create<CodeStore>((set, get) => ({
       result = { ok: false, reason: errorText(error) }
     }
     void get().refresh()
-    if (result.ok) ui.notify('success', `${label}'s language server is removed.`)
+    if (result.ok) ui.notify('success', `Removed ${name}.`)
     else ui.notify('error', result.reason)
   },
 

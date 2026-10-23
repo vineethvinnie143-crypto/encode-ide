@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { LanguageServerInfo, LanguageServersReport } from '@shared/types'
-import { filesLabel, footerStatus, headline, installOffer, installPercent, noAnswerReason, serverForPath, sizeLabel, sortedServers, stateLabel } from './code'
+import { filesLabel, footerStatus, headline, installName, installOffer, installPercent, installTarget, noAnswerReason, serverForPath, sizeLabel, sortedServers, stateLabel } from './code'
 
 const server = (patch: Partial<LanguageServerInfo> & Pick<LanguageServerInfo, 'id'>): LanguageServerInfo => ({ label: patch.id, state: 'stopped', documents: 0, install: `install ${patch.id}`, files: [], ...patch })
 
@@ -81,6 +81,26 @@ describe('installing a language server with one click', () => {
     assert.equal(installOffer(report({ state: 'untrusted', servers: [missing] }), 'src/App.tsx', []), null)
     assert.equal(installOffer(report({ servers: [missing] }), 'notes.md', []), null)
     assert.equal(installOffer(null, 'a.ts', []), null)
+  })
+
+  it("offers what the folder wants the server to read once the server is there, such as FiveM's natives", () => {
+    const natives = { id: 'fivem-natives', label: 'FiveM natives', what: "FiveM's natives for Lua" }
+    const lua = server({ id: 'lua', label: 'Lua', files: ['.lua'], libraries: [natives] })
+    assert.deepEqual(installOffer(report({ servers: [lua] }), 'client/main.lua', []), {
+      id: 'fivem-natives',
+      label: 'FiveM natives',
+      text: "FiveM's natives for Lua are not installed. Install them so hovers, completion and checks know each one.",
+    })
+    // The server first, when it is missing too.
+    assert.equal(installOffer(report({ servers: [{ ...lua, state: 'missing', installer: 'download' }] }), 'client/main.lua', [])?.id, 'lua')
+    assert.equal(installOffer(report({ servers: [lua] }), 'client/main.lua', ['fivem-natives']), null)
+    assert.equal(installOffer(report({ servers: [{ ...lua, libraries: [{ ...natives, installed: '2.0' }] }] }), 'client/main.lua', []), null)
+    assert.equal(installOffer(report({ servers: [{ ...lua, libraries: [{ ...natives, installing: { done: 0, total: 1 } }] }] }), 'client/main.lua', []), null)
+    assert.deepEqual(installTarget(report({ servers: [lua] }), 'fivem-natives'), { kind: 'library', item: natives, server: lua })
+    assert.equal(installTarget(report({ servers: [lua] }), 'lua')?.kind, 'server')
+    assert.equal(installTarget(report({ servers: [lua] }), 'nope'), null)
+    assert.equal(installName(report({ servers: [lua] }), 'fivem-natives'), "FiveM's natives for Lua")
+    assert.equal(installName(report({ servers: [lua] }), 'lua'), "Lua's language server")
   })
 
   it('shows the progress of an install, and the size to download', () => {

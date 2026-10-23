@@ -1517,3 +1517,43 @@ the person not knowing what is about to happen.
   runs however often it is asked, and a stopped one is not reported as a failure.
 - Desktop tests check the editor's offer, progress and labels. The packaged-program check in CI runs the built
   program as Node.js over stdin and stdout.
+
+## FiveM's Lua (Editor and language intelligence 8b)
+
+Written with the pull request that makes the Lua server read FiveM's resources
+([0084](../adr/0084-fivem-lua-is-read-through-encodes-own-plugin-runtime-definitions-and-natives-written-from-cfx-re-typings.md)).
+What is new: a plugin eNCode writes runs inside lua-language-server, the server is told to trust it, and definitions are
+written from packages downloaded from npm. The concerns are a plugin other than eNCode's being loaded, text from a
+download becoming code the server runs, and the walk for resources reaching too far.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| L1 | A plugin a project names (`.luarc.json`) is loaded because eNCode told the server to trust plugins | eNCode does not set `trustByClient`; it lists only its own plugin's path in the server's `trusted` file, in eNCode's cache folder (`--logpath`). The server asks before loading any other, and eNCode's client gives no answer, which is no. | Mitigated |
+| L2 | eNCode's plugin file is changed on disk and then trusted | The plugin and definitions are written to eNCode's cache folder in the profile, not a project; each start compares them with the copies eNCode carries and writes them again if they differ, and the `trusted` file is rewritten to hold only that path. The agent's sandbox keeping the profile off limits is part of the hardening step. | Mitigated, with hardening to come |
+| L3 | Text from the natives' typings becomes Lua the server runs | The typings are read as text, never run. Every word from them is written in a `---` comment with control characters and line separators removed; names and parameters must be plain identifiers and not Lua keywords; a declaration that does not read as one is skipped. A test with hostile docs and names checks that every line written is a comment or a plain declaration. The definitions are `---@meta` files, which the server reads and never runs. | Mitigated |
+| L4 | The natives' packages are swapped on the way or at the registry | Pinned by version and sha512 in `npm-locks.ts` and installed as the npm servers are (I1, I3 to I7): checked before unpacking, unpacked by eNCode, no scripts run. | Mitigated |
+| L5 | The plugin runs code from the file it reads, or reads other files | It works on the text the server gives it: it scans characters, computes hashes and returns a list of changes; it calls nothing in the file, loads no module and opens no file. A failure in it falls back to the text as it is. | Mitigated |
+| L6 | Finding resources walks too far or follows a link out | The walk stops at 5,000 folders and 4 levels, skips `node_modules`, `.git`, `stream` and build folders, does not follow links, and runs only when the Lua server starts in a trusted folder. Imported resources are looked for only by name, in at most four folders above and their `[category]` folders, and are read by the server as libraries (not checked, not run). | Mitigated |
+
+### Residual risks
+
+- **The plugin runs inside lua-language-server** with the server's rights, as every plugin does; it is eNCode's own code
+  and is reviewed as such.
+- **Libraries outside the folder** (an imported resource beside it) are read by the server, so their definitions can
+  shape completion and hovers in the folder; they are the person's own server files.
+
+### Verification
+
+- Unit tests parse sample typings (types, optional parameters, keywords, tuples, aliases, links and pictures), write
+  both sides with notes and overloads, split large sets, refuse hostile docs and names, and install the natives from a
+  fake registry with the typings removed after.
+- Unit tests find resources and imports (bracketed categories, a folder inside a resource, skipped folders), prepare the
+  Lua server's settings and arguments with and without the natives, write the plugin and `trusted` file again after
+  they were changed, and keep the Lua files and their module the same.
+- With a real lua-language-server 3.19.0 (`ENCODE_LUALS`), a resource with every CfxLua addition, the runtime and the
+  natives has exactly the two problems put in it. Run by hand; CI has no Lua server.
+- Workspace tests list the natives under the Lua server where the folder wants them, install and remove them, and
+  restart the server; desktop tests check the editor's offer; the end-to-end run checks Settings and the dialog.
+

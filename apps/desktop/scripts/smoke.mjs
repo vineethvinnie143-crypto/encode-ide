@@ -1607,6 +1607,26 @@ async function runInstallOfferChecks() {
   }
   await click('.editor-tab.is-active .tab-close')
   await evaluate("window.eNCode.workspace.delete('lsp-offer.yaml').catch(() => null)")
+
+  // A folder of FiveM resources: Settings offers FiveM's natives under the Lua server, from Cfx.re's pinned packages.
+  await evaluate(`window.eNCode.workspace.write('fxmanifest.lua', ${JSON.stringify("fx_version 'cerulean'\ngame 'gta5'\n")})`)
+  await openSettings('Language servers')
+  const nativesButton = `[...document.querySelectorAll('.lsp-library[data-library="fivem-natives"] .btn')].some((node) => node.textContent.includes('Install'))`
+  await waitFor(nativesButton, 10000, 'Install… for FiveM natives under the Lua server')
+  if (!(await click('.lsp-library[data-library="fivem-natives"] .btn', 'Install'))) throw new Error('no Install for the FiveM natives')
+  await waitFor("document.querySelectorAll('.install-server-steps li').length === 3", 15000, 'the natives install dialog to say what it would do')
+  const natives = await evaluate(`(() => ({
+    title: document.querySelector('.install-server-dialog .ui-dialog-title')?.textContent ?? '',
+    steps: [...document.querySelectorAll('.install-server-steps li')].map((node) => node.textContent),
+  }))()`)
+  console.log('[smoke] natives dialog:', JSON.stringify(natives))
+  if (natives.title !== "Install FiveM's natives for Lua" || !/@citizenfx\/client 2\.0\.37850-1 and @citizenfx\/server 2\.0\.37850-1/.test(natives.steps[0] ?? '') || !/Nothing in them is run/.test(natives.steps[1] ?? '')) {
+    throw new Error(`The natives install dialog does not say what it would do: ${JSON.stringify(natives)}`)
+  }
+  if (!(await click('.install-server-dialog .btn', 'Cancel'))) throw new Error('no Cancel in the natives install dialog')
+  await waitFor("!document.querySelector('.install-server-dialog')", 4000, 'the natives install dialog to close')
+  await closeSettings()
+  await evaluate("window.eNCode.workspace.delete('fxmanifest.lua').catch(() => null)")
   console.log('[smoke] language server installs: ok')
 }
 

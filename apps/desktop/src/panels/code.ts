@@ -2,7 +2,7 @@
  * The words of the language servers' screen and of the editor's footer, from the folder's report. Pure, so they are
  * unit tested.
  */
-import type { LanguageServerInfo, LanguageServersReport } from '@shared/types'
+import type { LanguageLibraryInfo, LanguageServerInfo, LanguageServersReport } from '@shared/types'
 
 export type Tone = 'quiet' | 'busy' | 'success' | 'warning' | 'danger'
 
@@ -65,8 +65,36 @@ export function headline(report: LanguageServersReport): { title: string; detail
 export function installOffer(report: LanguageServersReport | null, path: string | null, declined: readonly string[]): { id: string; label: string; text: string } | null {
   if (!report || !path || report.state !== 'on') return null
   const server = serverForPath(report, path)
-  if (!server || server.state !== 'missing' || !server.installer || server.installing || declined.includes(server.id)) return null
-  return { id: server.id, label: server.label, text: `No language server for ${server.label} files. Install one for errors as you type, completions and go to definition.` }
+  if (!server || server.installing) return null
+  if (server.state === 'missing') {
+    if (!server.installer || declined.includes(server.id)) return null
+    return { id: server.id, label: server.label, text: `No language server for ${server.label} files. Install one for errors as you type, completions and go to definition.` }
+  }
+  // The server is there: what it reads that the folder wants, such as FiveM's natives in a folder of resources.
+  const library = server.libraries?.find((item) => !item.installed && !item.installing && !declined.includes(item.id))
+  if (!library) return null
+  return { id: library.id, label: library.label, text: `${library.what} are not installed. Install them so hovers, completion and checks know each one.` }
+}
+
+/** What an install is for, by id: a server, or a library under its server. */
+export function installTarget(
+  report: LanguageServersReport | null,
+  id: string | null,
+): { kind: 'server'; item: LanguageServerInfo } | { kind: 'library'; item: LanguageLibraryInfo; server: LanguageServerInfo } | null {
+  if (!report || !id) return null
+  for (const server of report.servers) {
+    if (server.id === id) return { kind: 'server', item: server }
+    const library = server.libraries?.find((item) => item.id === id)
+    if (library) return { kind: 'library', item: library, server }
+  }
+  return null
+}
+
+/** "YAML's language server", "FiveM's natives for Lua": what an install is, for a title or a message. */
+export function installName(report: LanguageServersReport | null, id: string): string {
+  const target = installTarget(report, id)
+  if (!target) return id
+  return target.kind === 'library' ? target.item.what : `${target.item.label}'s language server`
 }
 
 /** "4.2 MB", "860 KB". */
@@ -75,7 +103,7 @@ export function sizeLabel(bytes: number): string {
 }
 
 /** An install's progress as a whole percentage, or null while its size is not known. */
-export function installPercent(server: LanguageServerInfo): number | null {
+export function installPercent(server: { installing?: { done: number; total: number } }): number | null {
   const progress = server.installing
   if (!progress || progress.total <= 0) return null
   return Math.min(100, Math.floor((progress.done / progress.total) * 100))

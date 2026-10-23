@@ -650,6 +650,20 @@ export interface LanguageServerInfo {
   installing?: { done: number; total: number }
   /** The last install failed, and why. */
   installError?: string
+  /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
+  libraries?: LanguageLibraryInfo[]
+}
+
+/** A library eNCode installs for a server to read, listed under the server. */
+export interface LanguageLibraryInfo {
+  id: string
+  /** "FiveM natives". */
+  label: string
+  /** "FiveM's natives for Lua". */
+  what: string
+  installed?: string
+  installing?: { done: number; total: number }
+  installError?: string
 }
 
 export interface LanguageServersReport {
@@ -665,6 +679,8 @@ export interface LanguageServersReport {
 export interface ServerInstallPlan {
   id: string
   label: string
+  /** What is installed, for a title: "YAML's language server", "FiveM's natives for Lua". */
+  what: string
   version: string
   steps: string[]
   /** About how much is downloaded, when known. */

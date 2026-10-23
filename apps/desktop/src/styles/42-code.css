@@ -368,3 +368,21 @@
   color: var(--text-3);
   font-size: var(--fs-12);
 }
+/* What eNCode installs for a server to read, set in under it. */
+.lsp-library {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 0 2px 12px;
+  border-left: 2px solid var(--border-subtle);
+}
+.lsp-library-name {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+.lsp-library .lsp-server-files {
+  font-family: inherit;
+  font-size: var(--fs-12);
+}

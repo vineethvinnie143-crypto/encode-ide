@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { ErrorGate, LanguageServerInfo, Settings } from '@shared/types'
+import type { ErrorGate, LanguageLibraryInfo, LanguageServerInfo, Settings } from '@shared/types'
 import { api } from '../../api'
 import { filesLabel, headline, installPercent, sortedServers, stateLabel } from '../../panels/code'
 import { useCode } from '../../stores/code'
@@ -24,6 +24,51 @@ function usedLabel(server: LanguageServerInfo, partial: boolean): string | null 
   if (!used || (used.files === 0 && !used.markers.length)) return null
   const files = used.files ? `${used.files}${partial ? '+' : ''} ${used.files === 1 ? 'file' : 'files'} here` : 'a project here'
   return used.markers.length ? `${files} · ${used.markers.slice(0, 2).join(', ')}` : files
+}
+
+/** What eNCode installs for a server to read (FiveM's natives for Lua), under the server. */
+function LibraryRow({ library, canInstall }: { library: LanguageLibraryInfo; canInstall: boolean }) {
+  const percent = installPercent(library)
+  const state = library.installing
+    ? { label: percent === null ? 'Installing' : `Installing, ${percent}%`, tone: 'busy' }
+    : library.installed
+      ? { label: 'Installed', tone: 'success' }
+      : { label: 'Not installed', tone: 'quiet' }
+  return (
+    <div className="lsp-library" data-library={library.id}>
+      <div className="lsp-server-head">
+        <span className="lsp-library-name">{library.label}</span>
+        <span className="lsp-server-files">{library.what}</span>
+        <span className={cx('lsp-server-state', `is-${state.tone}`)}>{state.label}</span>
+      </div>
+      {library.installing && (
+        <div className="lsp-server-progress">
+          <div className={percent === null ? 'install-server-bar is-unknown' : 'install-server-bar'} role="progressbar" aria-label={`Installing ${library.what}`} aria-valuemin={0} aria-valuemax={100} {...(percent === null ? {} : { 'aria-valuenow': percent })}>
+            <span style={percent === null ? undefined : { width: `${percent}%` }} />
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => void api.code.cancelInstall(library.id)}>
+            Stop
+          </Button>
+        </div>
+      )}
+      {!library.installed && !library.installing && library.installError && <div className="lsp-server-detail is-danger">{library.installError}</div>}
+      {!library.installed && !library.installing && canInstall && (
+        <div className="lsp-server-actions">
+          <Button size="sm" icon={<Download size={13} />} onClick={() => useCode.getState().offerInstall(library.id)}>
+            {library.installError ? 'Try again…' : 'Install…'}
+          </Button>
+        </div>
+      )}
+      {library.installed && !library.installing && (
+        <div className="lsp-server-actions">
+          <span className="lsp-server-owned">Installed by eNCode, {library.installed}</span>
+          <Button size="sm" variant="ghost" icon={<Trash2 size={12} />} onClick={() => void useCode.getState().remove(library.id)}>
+            Remove
+          </Button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo; partial: boolean; canInstall: boolean }) {
@@ -88,6 +133,9 @@ function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo
           </Button>
         </div>
       )}
+      {server.libraries?.map((library) => (
+        <LibraryRow key={library.id} library={library} canInstall={canInstall} />
+      ))}
     </div>
   )
 }

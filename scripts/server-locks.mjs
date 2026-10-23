@@ -4,7 +4,8 @@
  * installer downloads exactly these and checks each against its hash; it never asks npm to resolve anything, never
  * runs a package's scripts, and needs no Node.js on the computer.
  *
- *   node scripts/server-locks.mjs
+ *   node scripts/server-locks.mjs            (every one)
+ *   node scripts/server-locks.mjs fivem      (only those named; the others are kept as they are)
  *
  * Run it when a version below changes, read the diff, and keep the file in git.
  */
@@ -24,6 +25,20 @@ const SERVERS = {
   python: { pyright: '1.1.414' },
   bash: { 'bash-language-server': '5.8.1' },
   yaml: { 'yaml-language-server': '2.0.0' },
+  // Not a server: Cfx.re's own typings of FiveM's natives, which eNCode turns into Lua definitions (ADR 0084).
+  fivem: { '@citizenfx/client': '2.0.37850-1', '@citizenfx/server': '2.0.37850-1' },
+}
+
+const only = process.argv.slice(2)
+for (const id of only) if (!SERVERS[id]) throw new Error(`No server ${id} in this script`)
+
+/** The locks in the file now, to keep those not asked for. */
+function current() {
+  if (!fs.existsSync(out)) return {}
+  const text = fs.readFileSync(out, 'utf8')
+  const start = text.indexOf('= {')
+  if (start < 0) throw new Error(`${out} is not as this script writes it`)
+  return new Function(`return (${text.slice(start + 2)})`)()
 }
 
 const REGISTRY = 'https://registry.npmjs.org/'
@@ -38,8 +53,9 @@ async function size(url, integrity) {
   return data.length
 }
 
-const locks = {}
+const locks = only.length ? current() : {}
 for (const [id, wanted] of Object.entries(SERVERS)) {
+  if (only.length && !only.includes(id)) continue
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `encode-lock-${id}-`))
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `encode-${id}`, version: '0.0.0', private: true, dependencies: wanted }))
   execFileSync(npm, ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', '--registry', REGISTRY], { cwd: dir, stdio: 'inherit', shell: process.platform === 'win32' })

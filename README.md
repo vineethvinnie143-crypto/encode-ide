@@ -105,7 +105,9 @@ primary platform; the code stays cross-platform.
   controls, zero-width and hidden characters) are drawn as labelled markers, and right-to-left text reads in its own
   order only inside strings, comments and prose, when you ask for it. eNCode sees which languages a folder uses and
   installs their servers with one click when you ask: from pinned sources, checked and unpacked by eNCode itself, with
-  no npm or Node.js needed. In a folder you trust, the language servers (typescript-language-server, pyright,
+  no npm or Node.js needed. FiveM resources read as FiveM runs them: CfxLua's syntax, the runtime, the manifest's
+  directives and, once installed, every native with its parameters and notes, written from Cfx.re's own typings. In a
+  folder you trust, the language servers (typescript-language-server, pyright,
   rust-analyzer, gopls, clangd, lua-language-server, Eclipse JDT LS and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and

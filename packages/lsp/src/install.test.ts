@@ -178,7 +178,7 @@ describe('installing a download', () => {
 
   it('says when there is no build for this computer', async () => {
     const plan = await planInstall(spec('e'), context(fakeFetch(routes('e', `sha256:${sha256(zip)}`)), { platform: 'linux', arch: 'riscv64' }))
-    assert.match((plan as { unavailable: string }).unavailable, /no build of Tool's server for this computer \(linux, riscv64\)/)
+    assert.match((plan as { unavailable: string }).unavailable, /no build of Tool's language server for this computer \(linux, riscv64\)/)
   })
 
   it('checks a pinned download against the sha256 eNCode carries', async () => {

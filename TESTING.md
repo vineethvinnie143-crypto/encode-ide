@@ -329,6 +329,21 @@ dialog that does not say clearly what will happen):
 - With no network, Install says why it failed and **Try again** retries.
 - For Go, C# or Rust without the toolchain, the dialog says what is needed instead of an Install button.
 
+FiveM resources (most useful to hear about: a red mark on code that runs fine in FiveM, a native or runtime function
+the editor does not know, or a hover that says something wrong):
+
+- Open a folder with a `fxmanifest.lua` (a single resource, or your server's `resources` folder), trust it, and install
+  the Lua server. CfxLua's additions are read without errors: backtick hashes (`` `adder` ``), `a?.b`, `local a, b in t`,
+  `{ .a, .b }`, `/* */` comments and `+=`. `CreateThread`, `Wait`, events, `exports`, `GlobalState`, `vector3` and
+  `json` are known, with hovers. In `fxmanifest.lua`, the directives complete with their notes, and a key of your own is
+  not marked.
+- Under Lua in **Settings → Language servers**, **FiveM natives** has **Install…** (the editor offers it too, above a
+  Lua file). The dialog names Cfx.re's two `@citizenfx` packages and about 0.5 MB. Once installed, the Lua server starts
+  again, and natives such as `GetEntityCoords` show their parameters, what they give back and their notes, say whether
+  they are client or server only, and mark a call with too few arguments.
+- A resource that imports from another (`shared_script '@ox_lib/init.lua'`) knows `lib` when `ox_lib` is beside it or in
+  a `[category]` folder above it, without opening the whole server.
+
 - Servers run only in a folder you trust (Settings → Permissions), because a server can run code the project names.
   Open a TypeScript file in a folder you have not trusted: the footer under the editor says so, and nothing runs.
   Trust the folder: the marks should appear within a few seconds, without reopening the file.
@@ -531,8 +546,8 @@ Updating means installing the next build over the last one: everything above sta
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
 - Language servers: a server eNCode installed is not updated by itself; a newer one comes with a newer eNCode and is
-  installed when you click Install again. FiveM's natives, JSON, CSS, HTML, Tailwind and Svelte come with the next
-  builds. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
+  installed when you click Install again. JSON, CSS, HTML, Tailwind and Svelte come with the next builds. A Lua server
+  that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
 - In right-to-left text the arrow keys move through the characters in stored order, so the cursor can jump across a
   word; identifiers in a right-to-left script stay in stored order. A screen reader reads the text, not the hint

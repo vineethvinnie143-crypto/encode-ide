@@ -1,9 +1,10 @@
 /**
  * Language servers eNCode installs when the person asks (ADR 0083): one install at a time per server, its progress
  * for the Settings screen, and what to tell the folders' hubs once a server is there or gone. Servers go in eNCode's
- * own tools folder, shared by every folder; what may run is still decided per folder (trusted folders only).
+ * own tools folder, shared by every folder; what may run is still decided per folder (trusted folders only). A library
+ * a server reads (FiveM's natives, ADR 0084) is installed the same way, and its server starts again to read it.
  */
-import { InstallFailed, installServer, LANGUAGE_SERVERS, planInstall, removeInstall, type InstallContext, type InstallPlan, type ServerSpec } from '@encode/lsp'
+import { InstallFailed, installServer, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, planInstall, removeInstall, type Installable, type InstallContext, type InstallPlan, type LibrarySpec, type ServerSpec } from '@encode/lsp'
 import { agentEnvironment } from '@encode/tools'
 import { launchContext, type InstallState, type ServerTools } from './code'
 
@@ -11,6 +12,7 @@ export interface ServerInstallsOptions {
   tools: ServerTools
   platform: NodeJS.Platform
   catalog?: readonly ServerSpec[]
+  libraries?: readonly LibrarySpec[]
   /** What installers start from, before secrets are taken out. */
   env?: Record<string, string | undefined>
   /** A server was installed or removed: the folders look for it again (stopping it first, when it is to be removed). */
@@ -28,8 +30,16 @@ export class ServerInstalls {
 
   constructor(private readonly options: ServerInstallsOptions) {}
 
-  private spec(id: string): ServerSpec | undefined {
-    return (this.options.catalog ?? LANGUAGE_SERVERS).find((spec) => spec.id === id)
+  private spec(id: string): ServerSpec | LibrarySpec | undefined {
+    return (this.options.catalog ?? LANGUAGE_SERVERS).find((spec) => spec.id === id) ?? (this.options.libraries ?? LANGUAGE_LIBRARIES).find((spec) => spec.id === id)
+  }
+
+  /** The folders' servers look again; for a library, its server starts again, so that it reads the library. */
+  private async rediscover(spec: Installable, how: { stop?: boolean }): Promise<void> {
+    const library = 'server' in spec && typeof spec.server === 'string' ? spec.server : null
+    if (!library) return this.options.rediscover(spec.id, how)
+    await this.options.rediscover(library, { stop: true })
+    if (!how.stop) await this.options.rediscover(library, {})
   }
 
   private context(root: string, extra: Partial<InstallContext> = {}): InstallContext {
@@ -80,7 +90,7 @@ export class ServerInstalls {
             },
           }),
         )
-        await this.options.rediscover(id, {})
+        await this.rediscover(spec, {})
         return { ok: true, dir }
       } catch (error) {
         // Stopped by the person: nothing to report as a failure.
@@ -108,7 +118,7 @@ export class ServerInstalls {
     const spec = this.spec(id)
     if (!spec) return { ok: false, reason: 'eNCode does not know that language server.' }
     if (this.running.has(id)) return { ok: false, reason: 'It is being installed.' }
-    await this.options.rediscover(id, { stop: true })
+    await this.rediscover(spec, { stop: true })
     try {
       removeInstall(spec, this.options.tools.dir)
       return { ok: true, dir: '' }
@@ -116,7 +126,7 @@ export class ServerInstalls {
       return { ok: false, reason: `eNCode could not remove all of it: ${error instanceof Error ? error.message : String(error)}` }
     } finally {
       this.errors.delete(id)
-      await this.options.rediscover(id, {})
+      await this.rediscover(spec, {})
       this.options.onChange?.()
     }
   }

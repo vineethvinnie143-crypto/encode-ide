@@ -1,7 +1,9 @@
 export { ArchiveRefused, readTar, readZip, safeEntryPath, writeFiles, type ArchiveFile, type ArchiveLimits } from './archive'
-export { LANGUAGE_SERVERS, serverFor, type ServerCandidate, type ServerSpec } from './catalog'
+export { LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, serverFor, type Installable, type LibrarySpec, type PrepareContext, type Prepared, type ServerCandidate, type ServerSpec } from './catalog'
+export { CFX_SYMBOLS, FIVEM_NATIVES, findResources, importedResources, manifestImports, prepareLua, serverPath, writeCfxSupport, type CfxSupport, type FiveMFolder } from './fivem'
+export { luaType, nativesLibrary, parseNatives, type LibraryFile, type Native, type NativeParam } from './fivem/natives'
 export { detectLanguages, type DetectOptions, type FolderLanguages, type LanguageUse } from './detect'
-export { installedDir, installedLaunch, InstallFailed, installServer, planInstall, platformKey, removeInstall, type DownloadAsset, type InstallContext, type InstallPlan, type LaunchContext, type NpmFile, type NpmLock, type ServerInstall } from './install'
+export { installedDir, installedLaunch, InstallFailed, installName, installServer, planInstall, platformKey, removeInstall, type DownloadAsset, type InstallContext, type InstallPlan, type LaunchContext, type NpmFile, type NpmLock, type ServerInstall } from './install'
 export { fromChildProcess, LanguageClient, type ClientOptions, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
 export { toEntry, type CompletionEntry, type CompletionResult, type EditorHighlight, type HighlightKind } from './completion'
 export { discover, shimScript, type DiscoverOptions, type LaunchPlan } from './discover'
@@ -9,6 +11,7 @@ export { applyTextEdits, EditConflict } from './edits'
 export {
   EditRefused,
   LanguageServers,
+  mergeSettings,
   toCodeDiagnostic,
   type ActionInfo,
   type CodeDiagnostic,

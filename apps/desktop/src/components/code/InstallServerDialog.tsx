@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ServerInstallPlan } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
-import { installPercent, sizeLabel } from '../../panels/code'
+import { installName, installPercent, installTarget, sizeLabel } from '../../panels/code'
 import { useCode } from '../../stores/code'
 import { Button } from '../../ui/Button'
 import { Dialog } from '../../ui/Dialog'
@@ -16,7 +16,10 @@ type Plan = ServerInstallPlan | { unavailable: string }
  */
 export function InstallServerDialog() {
   const id = useCode((state) => state.installFor)
-  const server = useCode((state) => state.report?.servers.find((item) => item.id === id) ?? null)
+  // The report, not the target: a selector that builds an object each time renders without end.
+  const report = useCode((state) => state.report)
+  const target = installTarget(report, id)
+  const server = target?.item ?? null
   const [plan, setPlan] = useState<Plan | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [asked, setAsked] = useState(false)
@@ -48,7 +51,8 @@ export function InstallServerDialog() {
     else setFailed(result.reason)
   }
 
-  const label = plan && 'label' in plan ? plan.label : (server?.label ?? 'Language server')
+  const title = plan && 'what' in plan ? plan.what : id ? installName(report, id) : 'Language server'
+  const library = target?.kind === 'library'
   const percent = server ? installPercent(server) : null
   const progress = server?.installing
 
@@ -56,7 +60,7 @@ export function InstallServerDialog() {
     <Dialog
       open={id !== null}
       onClose={close}
-      title={`Install ${label}'s language server`}
+      title={`Install ${title}`}
       width={500}
       className="install-server-dialog"
       footer={
@@ -89,8 +93,9 @@ export function InstallServerDialog() {
       ) : (
         <div className="install-server-body">
           <p className="install-server-lead">
-            The editor marks errors as you type, completes code and goes to definitions with it, and the agent hears what its edits broke. It runs only in folders
-            you trust.
+            {library
+              ? `${target.server.label}'s server reads them: hovers show each one's parameters, what it gives back and its notes, completion lists them, and calls with the wrong arguments are marked. The agent sees the same.`
+              : 'The editor marks errors as you type, completes code and goes to definitions with it, and the agent hears what its edits broke. It runs only in folders you trust.'}
           </p>
           <ol className="install-server-steps">
             {plan.steps.map((step) => (
@@ -120,7 +125,7 @@ export function InstallServerDialog() {
               <div
                 className={percent === null ? 'install-server-bar is-unknown' : 'install-server-bar'}
                 role="progressbar"
-                aria-label={`Installing ${label}'s language server`}
+                aria-label={`Installing ${title}`}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 {...(percent === null ? {} : { 'aria-valuenow': percent })}

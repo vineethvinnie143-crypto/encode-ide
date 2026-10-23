@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { checkpointDir, CheckpointService, nodeCheckpointFs, pruneStore, type CheckpointFs } from '@encode/checkpoints'
 import { workspaceKey } from '@encode/config'
@@ -119,7 +120,7 @@ export class Workspaces {
   /** Servers eNCode installs when asked, for every folder; none without a tools folder. */
   readonly installs: ServerInstalls | undefined
   /** The languages each folder uses, read again after a minute. */
-  private readonly languages = new Map<string, { at: number; found: Promise<FolderLanguages> }>()
+  private readonly languages = new Map<string, { at: number; stamp: number; found: Promise<FolderLanguages> }>()
   /** The editor's changes and questions, by the folder path it gives. */
   private readonly lanes = new Map<string, { pending: Promise<void>; asking: Map<string, AbortController> }>()
   private readonly realRoots = new Map<string, string>()
@@ -146,6 +147,7 @@ export class Workspaces {
           tools: servers.tools,
           platform: this.platform,
           ...(servers.catalog ? { catalog: servers.catalog } : {}),
+          ...(servers.libraries ? { libraries: servers.libraries } : {}),
           ...(servers.env ? { env: servers.env } : {}),
           rediscover: async (id, how) => {
             await Promise.all([...this.code.values()].map((hub) => hub.rediscover(id, how).catch(() => undefined)))
@@ -232,13 +234,17 @@ export class Workspaces {
     return languageServersReport(this.languageServers(config.root)!, settings, snapshot.folder.trusted, options.logs ?? 0, { languages, ...(installs ? { installs: (id: string) => installs.state(id) } : {}) })
   }
 
-  /** The languages a folder uses, by its files: read once a minute at most. */
-  private folderLanguages(root: string): Promise<FolderLanguages> {
+  /**
+   * The languages a folder uses, by its files: read once a minute at most, or again at once when a file was added to
+   * or removed from the folder's top (a new package.json or fxmanifest.lua), which changes its time.
+   */
+  private async folderLanguages(root: string): Promise<FolderLanguages> {
     const key = workspaceKey(root, this.platform === 'win32')
+    const stamp = await stat(root).then((stats) => stats.mtimeMs).catch(() => 0)
     const known = this.languages.get(key)
-    if (known && Date.now() - known.at < 60_000) return known.found
+    if (known && known.stamp === stamp && Date.now() - known.at < 60_000) return known.found
     const found = detectLanguages(root, this.options.languageServers?.catalog ? { catalog: this.options.languageServers.catalog } : {}).catch(() => ({ used: [], partial: true }))
-    this.languages.set(key, { at: Date.now(), found })
+    this.languages.set(key, { at: Date.now(), stamp, found })
     return found
   }
 
