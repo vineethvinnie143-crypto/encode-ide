@@ -113,4 +113,41 @@ describe('a folder\'s language servers', () => {
     assert.deepEqual(s.published.at(-1), [real, path.join(real, 'a.fk'), 0])
     await s.workspaces.close()
   })
+
+  it('answer the editor for its text as it is now, and never for a file outside the folder', async () => {
+    const s = await setup()
+    try {
+      await s.workspaces.act(s.root, { type: 'trust' })
+      const real = await realPathOf(s.root)
+      await s.workspaces.editorDocument(s.root, { kind: 'open', path: 'a.fk', text: 'function add\n', dirty: false })
+      // Not awaited: the question after it still sees the new text.
+      void s.workspaces.editorDocument(s.root, { kind: 'change', path: 'a.fk', text: 'function add\nfunction sub\nsub', dirty: true })
+      const completion = await s.workspaces.editorAsk(s.root, { kind: 'complete', path: 'a.fk', line: 2, character: 3, triggerKind: 1 })
+      assert.deepEqual(
+        completion?.items.slice(0, 2).map((item) => item.label),
+        ['add', 'sub'],
+      )
+      // A place comes with the text of its line as the file on disk has it (the editor puts in its own for open files).
+      await writeFile(path.join(real, 'a.fk'), 'function add\r\n  function sub  \r\nsub')
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'definition', path: 'a.fk', line: 2, character: 1 }), [
+        { path: 'a.fk', file: path.join(real, 'a.fk'), line: 1, character: 9, endLine: 1, endCharacter: 12, preview: '  function sub' },
+      ])
+      assert.equal((await s.workspaces.editorAsk(s.root, { kind: 'triggers', path: 'a.fk' }))?.completion.includes('.'), true)
+
+      // A newer question of the same kind cancels the older one; other kinds are left alone.
+      const [older, newer, hover] = await Promise.all([
+        s.workspaces.editorAsk(s.root, { kind: 'complete', path: 'a.fk', line: 2, character: 3, triggerKind: 1 }),
+        s.workspaces.editorAsk(s.root, { kind: 'complete', path: 'a.fk', line: 2, character: 3, triggerKind: 1 }),
+        s.workspaces.editorAsk(s.root, { kind: 'hover', path: 'a.fk', line: 2, character: 1 }),
+      ])
+      assert.equal(older, null)
+      assert.ok(newer && newer.items.length > 0)
+      assert.equal(hover?.markdown, '**sub**')
+
+      assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'hover', path: '../outside.fk', line: 0, character: 0 }), null)
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'highlights', path: '../outside.fk', line: 0, character: 0 }), [])
+    } finally {
+      await s.workspaces.close()
+    }
+  })
 })

@@ -88,3 +88,28 @@ export function footerStatus(report: LanguageServersReport | null, path: string 
       return { text: name, tone: 'quiet', title: server.detail ?? `${name} starts when it is needed.` }
   }
 }
+
+/**
+ * Why the servers gave no answer to something the person asked of a file ("go to definition"), as a sentence with
+ * what to do about it.
+ */
+export function noAnswerReason(report: LanguageServersReport | null, path: string, feature: string): string {
+  const server = report ? serverForPath(report, path) : null
+  if (!report || !server) return `No language server covers ${path.split('/').pop() ?? path}, so ${feature} is not available for it.`
+  const name = server.label
+  if (report.state === 'off') return `Language servers are off. Turn them on in Settings to use ${feature}.`
+  if (report.state === 'untrusted') return `Language servers run only in folders you trust. Trust this folder to use ${feature}.`
+  switch (server.state) {
+    case 'missing':
+      return `${name} is not installed. Install it to use ${feature}: ${server.install}`
+    case 'failed':
+      return `${name} failed. Settings > Language servers shows what it said.`
+    case 'starting':
+      return `${name} is still starting. Try again in a moment.`
+    case 'running':
+      return `${name} does not offer ${feature}.`
+    case 'stopped':
+    case 'off':
+      return `${name} did not answer. Try again.`
+  }
+}

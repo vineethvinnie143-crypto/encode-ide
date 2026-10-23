@@ -38,6 +38,8 @@ export type HostToRenderer = [
   Expect<Same<Workspace.LanguageServersReport, Ui.LanguageServersReport>>,
   Expect<Same<Workspace.LanguageServerInfo, Ui.LanguageServerInfo>>,
   Expect<Same<Tools.CodeDiagnostic, Ui.CodeDiagnostic>>,
+  Expect<Same<Workspace.EditorAsks, Ui.EditorAsks>>,
+  Expect<Same<Workspace.EditorAnswer, Ui.EditorAnswer>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -52,4 +54,5 @@ export type RendererToHost = [
   Expect<Same<Workspace.SandboxAction, Ui.SandboxAction>>,
   Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
   Expect<Same<Core.ErrorGate, Ui.ErrorGate>>,
+  Expect<Same<Workspace.EditorAsk, Ui.EditorAsk>>,
 ]

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { EditorSelection } from '@encode/editor'
 import { applyExternal, closeDoc, closeDocsUnder, markSaved, openDoc, recordState, renameDocs, snapshotForSave } from './docs'
-import { MAX_DOCUMENT_CHARS, startLanguageSync } from './language'
+import { MAX_DOCUMENT_CHARS, flushLanguageSync, startLanguageSync } from './language'
 
 /** The servers as the editor's side sees them, and a clock moved by hand. */
 function setup() {
@@ -48,6 +48,20 @@ const type = (path: string, text: string) => {
 }
 
 describe('the language servers follow the editor', () => {
+  it('get the text waiting for a pause at once when a question is about to be asked', () => {
+    const { sent, timers } = current
+    openDoc('src/q.ts', 'a')
+    sent.splice(0)
+    type('src/q.ts', 'ab')
+    assert.equal(timers.length, 1)
+    flushLanguageSync('src/q.ts')
+    assert.deepEqual(sent.splice(0), ['change src/q.ts "ab"*'])
+    assert.equal(timers.length, 0, 'the timer is gone with it')
+    flushLanguageSync('src/q.ts')
+    flushLanguageSync('src/other.ts')
+    assert.deepEqual(sent, [], 'nothing waits, nothing goes')
+  })
+
   it('get a file when it opens, typing after a pause, and nothing for a move of the cursor', () => {
     const { sent, timers, tick } = current
     const state = openDoc('src/a.ts', 'let a = 1\r\n')

@@ -29,6 +29,8 @@ export {
   type WordChange,
 } from './review'
 export { reload, reloadChanges } from './reload'
+export { parseSnippet, type Snippet, type SnippetOptions, type SnippetRange, type SnippetStop } from './snippet'
+export { fuzzyMatch, type FuzzyMatch } from './fuzzy'
 export { detectIndent, type IndentStyle } from './indent'
 export { languageById, languageByName, languageForContent, languageForPath, languages, plain, type LanguageEntry } from './languages'
 export {

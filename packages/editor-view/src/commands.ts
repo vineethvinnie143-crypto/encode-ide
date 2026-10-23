@@ -106,6 +106,10 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   selectAllMatches: (view) => view.find.selectAllMatches(),
   closeFind: (view) => view.find.close(),
 
+  nextSnippetStop: (view) => view.snippet.next(),
+  previousSnippetStop: (view) => view.snippet.previous(),
+  exitSnippet: (view) => view.snippet.exit(),
+
   reviewNextChange: (view) => view.review.next(),
   reviewPreviousChange: (view) => view.review.previous(),
   reviewAcceptAll: (view) => (view.review.acceptAll(), view.review.active),

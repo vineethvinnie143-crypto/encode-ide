@@ -79,7 +79,17 @@ describe('Keymap', () => {
   })
 
   it('tries several commands bound to one key in order', () => {
-    assert.deepEqual(windows.lookup(key({ key: 'Escape', code: 'Escape' })), ['closeFind', 'collapseSelection'])
+    assert.deepEqual(windows.lookup(key({ key: 'Escape', code: 'Escape' })), ['closeFind', 'exitSnippet', 'collapseSelection'])
+    // A snippet being filled in takes Tab and Shift+Tab first; without one they indent.
+    assert.deepEqual(windows.lookup(key({ key: 'Tab', code: 'Tab' })), ['nextSnippetStop', 'insertTab'])
+    assert.deepEqual(windows.lookup(key({ key: 'Tab', code: 'Tab', shiftKey: true })), ['previousSnippetStop', 'indentLess'])
+  })
+
+  it("puts an editor's own bindings before the built-in ones", () => {
+    const own = new Keymap([{ key: 'Escape', command: 'closePeek' }, { key: 'F12', command: 'goToDefinition' }, { key: 'Ctrl-Space', command: 'triggerSuggest' }, ...defaultBindings], false)
+    assert.deepEqual(own.lookup(key({ key: 'Escape', code: 'Escape' })), ['closePeek', 'closeFind', 'exitSnippet', 'collapseSelection'])
+    assert.deepEqual(own.lookup(key({ key: 'F12', code: 'F12' })), ['goToDefinition'])
+    assert.deepEqual(own.lookup(key({ key: ' ', code: 'Space', ctrlKey: true })), ['triggerSuggest'])
   })
 
   it('uses the macOS variant of a binding', () => {
@@ -96,8 +106,13 @@ describe('Keymap', () => {
         const id = parseCombo(isMacPlatform && binding.mac ? binding.mac : binding.key, isMacPlatform)
         byCombo.set(id, (byCombo.get(id) ?? new Set()).add(binding.command))
       }
+      const chains: Record<string, string[]> = {
+        Escape: ['closeFind', 'exitSnippet', 'collapseSelection'],
+        Tab: ['nextSnippetStop', 'insertTab'],
+        'Shift-Tab': ['previousSnippetStop', 'indentLess'],
+      }
       for (const [id, commands] of byCombo) {
-        if (id === 'Escape') assert.deepEqual([...commands], ['closeFind', 'collapseSelection'])
+        if (chains[id]) assert.deepEqual([...commands], chains[id])
         else assert.equal(commands.size, 1, `${id} is bound to ${[...commands].join(' and ')}`)
       }
     }

@@ -44,7 +44,12 @@ function isTableSeparator(line: string): boolean {
  * block...). A streamed answer grows at its end, so the blocks before the last stay the same from one piece to
  * the next, and a page that keeps them as they are (Chat/Markdown.tsx) redraws only the end.
  */
-export function renderMarkdownBlocks(source: string): string[] {
+export interface MarkdownOptions {
+  /** Draws a fenced code block itself (its text and fence language as written), instead of the block with a Copy button. */
+  codeBlock?: (code: string, language: string) => string
+}
+
+export function renderMarkdownBlocks(source: string, options: MarkdownOptions = {}): string[] {
   const lines = source.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
   let index = 0
@@ -63,6 +68,10 @@ export function renderMarkdownBlocks(source: string): string[] {
         index++
       }
       index++ // consume closing fence
+      if (options.codeBlock) {
+        html.push(options.codeBlock(body.join('\n'), language))
+        continue
+      }
       const className = language ? ` class="language-${escapeHtml(language)}"` : ''
       // A header with the language and a Copy button; the page wires the button up (see Chat/Markdown.tsx).
       html.push(
@@ -165,6 +174,8 @@ export function renderMarkdownBlocks(source: string): string[] {
   return html
 }
 
-export function renderMarkdown(source: string): string {
-  return renderMarkdownBlocks(source).join('')
+export function renderMarkdown(source: string, options: MarkdownOptions = {}): string {
+  return renderMarkdownBlocks(source, options).join('')
 }
+
+export { escapeHtml }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { LanguageServerInfo, LanguageServersReport } from '@shared/types'
-import { filesLabel, footerStatus, headline, serverForPath, sortedServers, stateLabel } from './code'
+import { filesLabel, footerStatus, headline, noAnswerReason, serverForPath, sortedServers, stateLabel } from './code'
 
 const server = (patch: Partial<LanguageServerInfo> & Pick<LanguageServerInfo, 'id'>): LanguageServerInfo => ({ label: patch.id, state: 'stopped', documents: 0, install: `install ${patch.id}`, files: [], ...patch })
 
@@ -46,5 +46,16 @@ describe('the language servers on screen', () => {
     assert.equal(footerStatus(report({ state: 'untrusted' }), 'a.ts')?.tone, 'warning')
     assert.equal(footerStatus(report({ state: 'off' }), 'a.ts')?.text, 'Language servers off')
     assert.equal(footerStatus(report({ servers: [{ ...ts, state: 'failed', detail: 'It crashed.' }] }), 'a.ts')?.title, 'It crashed.')
+  })
+
+  it('say why a question to the servers had no answer, and what to do about it', () => {
+    const feature = 'go to definition'
+    assert.equal(noAnswerReason(report(), 'notes.md', feature), 'No language server covers notes.md, so go to definition is not available for it.')
+    assert.equal(noAnswerReason(null, 'src/a.ts', feature), 'No language server covers a.ts, so go to definition is not available for it.')
+    assert.equal(noAnswerReason(report({ state: 'off' }), 'a.ts', feature), 'Language servers are off. Turn them on in Settings to use go to definition.')
+    assert.match(noAnswerReason(report({ state: 'untrusted' }), 'a.ts', feature), /Trust this folder/)
+    assert.equal(noAnswerReason(report({ servers: [{ ...ts, state: 'missing' }] }), 'a.ts', feature), 'TypeScript and JavaScript is not installed. Install it to use go to definition: install typescript')
+    assert.equal(noAnswerReason(report({ servers: [{ ...ts, state: 'running' }] }), 'a.ts', feature), 'TypeScript and JavaScript does not offer go to definition.')
+    assert.match(noAnswerReason(report({ servers: [{ ...ts, state: 'starting' }] }), 'a.ts', feature), /still starting/)
   })
 })

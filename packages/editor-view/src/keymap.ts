@@ -210,7 +210,9 @@ export const defaultBindings: readonly KeyBinding[] = [
   { key: 'Mod-Backspace', mac: 'Alt-Backspace', command: 'deleteWordBackward' },
   { key: 'Mod-Delete', mac: 'Alt-Delete', command: 'deleteWordForward' },
   { key: 'Mod-Shift-k', command: 'deleteLine' },
+  { key: 'Tab', command: 'nextSnippetStop' },
   { key: 'Tab', command: 'insertTab' },
+  { key: 'Shift-Tab', command: 'previousSnippetStop' },
   { key: 'Shift-Tab', command: 'indentLess' },
   { key: 'Mod-]', command: 'indentMore' },
   { key: 'Mod-[', command: 'indentLess' },
@@ -227,5 +229,6 @@ export const defaultBindings: readonly KeyBinding[] = [
   { key: 'Alt-Enter', command: 'selectAllMatches' },
   { key: 'Mod-g', mac: 'Ctrl-g', command: 'gotoLine' },
   { key: 'Escape', command: 'closeFind' },
+  { key: 'Escape', command: 'exitSnippet' },
   { key: 'Escape', command: 'collapseSelection' },
 ]

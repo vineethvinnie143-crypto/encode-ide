@@ -63,6 +63,7 @@ say so.
 | [0071](0071-work-goes-on-in-the-background-and-what-it-reports-reaches-the-agent-between-steps-or-in-a-turn-of-its-own.md) | Work goes on in the background, and what it reports reaches the agent between steps or in a turn of its own | Accepted, builds on 0031, 0042, 0062 and 0070 |
 | [0072](0072-language-intelligence-comes-from-real-language-servers-that-encode-talks-to-through-its-own-client.md) | Language intelligence comes from real language servers that eNCode talks to through its own client | Accepted, refines 0003; where servers run is settled by 0073 |
 | [0073](0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md) | Worktrees are made by eNCode with hooks off, and language servers run in trusted folders for the editor and the agent | Accepted, refines 0072 |
+| [0074](0074-the-editor-asks-the-language-servers-through-checked-questions-and-draws-their-answers-with-its-own-widgets.md) | The editor asks the language servers through checked questions, and draws their answers with its own widgets | Accepted, builds on 0072 and 0073 |
 
 ## Template
 

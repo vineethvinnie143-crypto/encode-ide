@@ -1,0 +1,530 @@
+/* ============================================================
+   What the language servers add to the editor: the suggestion
+   list (rows of 24 px that components/code/Assist.tsx counts on),
+   the signature card, the server's words on the hover card, and
+   the peek between the lines (components/code/Peek.tsx).
+   ============================================================ */
+
+.suggest-widget,
+.signature-card,
+.mark-card,
+.peek {
+  /* The editor's token colours (.tok-* read these), for code in docs and signatures. */
+  --e-tok-comment: var(--enc-tok-comment);
+  --e-tok-string: var(--enc-tok-string);
+  --e-tok-number: var(--enc-tok-number);
+  --e-tok-keyword: var(--enc-tok-keyword);
+  --e-tok-type: var(--enc-tok-type);
+  --e-tok-function: var(--enc-tok-function);
+  --e-tok-punct: var(--enc-tok-punct);
+  --e-tok-operator: var(--enc-tok-operator);
+  --e-tok-tag: var(--enc-tok-tag);
+  --e-tok-attr: var(--enc-tok-attr);
+  --e-tok-value: var(--enc-tok-value);
+  --e-tok-key: var(--enc-tok-key);
+  --e-tok-bool: var(--enc-tok-bool);
+  --e-tok-heading: var(--enc-tok-heading);
+  --e-tok-emphasis: var(--enc-tok-emphasis);
+  --e-tok-strong: var(--enc-tok-strong);
+  --e-tok-variable: var(--enc-tok-variable);
+  --e-tok-link: var(--enc-tok-link);
+  --e-tok-meta: var(--enc-tok-meta);
+  --e-tok-regexp: var(--enc-tok-regexp);
+  --e-tok-escape: var(--enc-tok-escape);
+  --e-tok-property: var(--enc-tok-property);
+  --e-tok-constant: var(--enc-tok-constant);
+  --e-tok-inserted: var(--enc-tok-inserted);
+  --e-tok-deleted: var(--enc-tok-deleted);
+  --e-tok-code: var(--enc-tok-code);
+}
+
+/* ---------------------------------------------------- suggestions */
+
+/* Sized by its list; the details hang beside it (or under it) without moving it from the word. */
+.suggest-widget {
+  position: fixed;
+  z-index: 420;
+  animation: ui-fade var(--dur-1) var(--ease-out);
+}
+.sw-list-box,
+.sw-details {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+}
+.sw-list-box {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+}
+.sw-list {
+  position: relative;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.sw-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 6px;
+  color: var(--text-2);
+  font: var(--fs-12) / 24px var(--font-mono);
+  cursor: default;
+  white-space: nowrap;
+}
+.sw-row:hover:not(.is-selected) {
+  background: var(--hover);
+}
+.sw-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text-1);
+}
+.sw-kind {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font: 600 10px / 16px var(--font-mono);
+  text-align: center;
+  color: var(--sw-tone);
+  background: color-mix(in srgb, var(--sw-tone) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sw-tone) 22%, transparent);
+}
+.sw-kind.is-fn {
+  --sw-tone: var(--syn-type);
+}
+.sw-kind.is-var {
+  --sw-tone: var(--syn-fn);
+}
+.sw-kind.is-type {
+  --sw-tone: var(--syn-number);
+}
+.sw-kind.is-const {
+  --sw-tone: var(--syn-keyword);
+}
+.sw-kind.is-mod {
+  --sw-tone: var(--syn-string);
+}
+.sw-kind.is-snip {
+  --sw-tone: var(--accent);
+}
+.sw-kind.is-plain {
+  --sw-tone: var(--text-3);
+}
+.sw-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+}
+.sw-label b {
+  font-weight: 600;
+  color: var(--accent);
+}
+.sw-label-detail {
+  margin-left: 2px;
+  color: var(--text-3);
+}
+.sw-description {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font: var(--fs-11) / 24px var(--font-ui, inherit);
+}
+.sw-row.is-deprecated .sw-label {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 70%, transparent);
+  opacity: 0.7;
+}
+.sw-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.sw-details {
+  position: absolute;
+  top: 0;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: 288px;
+  overflow: auto;
+  padding: 8px 10px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  user-select: text;
+}
+.suggest-widget.details-right .sw-details {
+  left: calc(100% + 4px);
+}
+.suggest-widget.details-left .sw-details {
+  right: calc(100% + 4px);
+}
+.suggest-widget.details-below .sw-details {
+  top: calc(100% + 4px);
+  left: 0;
+}
+.suggest-widget.details-above .sw-details {
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+}
+.sw-details-empty {
+  color: var(--text-3);
+}
+/* Read out by screen readers as the selection moves; not on screen. */
+.sw-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------- the call's parameters */
+
+.signature-card {
+  position: fixed;
+  z-index: 420;
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  animation: ui-fade var(--dur-1) var(--ease-out);
+}
+.sig-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.sig-label {
+  min-width: 0;
+  font: var(--fs-12) / 18px var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.sig-active {
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: inset 0 -1.5px 0 var(--accent);
+}
+.sig-cycle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  color: var(--text-3);
+  font: var(--fs-11) / 18px var(--font-mono);
+}
+.sig-step {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.sig-step:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.sig-docs {
+  max-height: 160px;
+  overflow: auto;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+  user-select: text;
+}
+.sig-param-doc {
+  margin-bottom: 6px;
+  color: var(--text-1);
+}
+
+/* ---------------------------------------------------- what a server wrote for people */
+
+.markup {
+  overflow-wrap: anywhere;
+}
+.markup p,
+.markup ul,
+.markup ol {
+  margin: 0 0 6px;
+}
+.markup ul,
+.markup ol {
+  padding-left: 18px;
+}
+.markup > :last-child,
+.markup p:last-child {
+  margin-bottom: 0;
+}
+.markup code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-1) 7%, transparent);
+  font: 0.95em var(--font-mono);
+}
+.markup a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.markup a:hover {
+  text-decoration: underline;
+}
+.markup hr {
+  margin: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.markup-code {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-1) 4%, transparent);
+  font: var(--fs-12) / 18px var(--font-mono);
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.markup-code code {
+  padding: 0;
+  background: none;
+  font: inherit;
+}
+.markup-plain {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.mark-card.has-docs {
+  max-height: 360px;
+}
+.mark-card-docs {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.mark-card-item + .mark-card-docs {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ---------------------------------------------------- the peek between the lines */
+
+.peek-zone {
+  box-sizing: border-box;
+  padding: 4px 0;
+  container-type: inline-size;
+}
+.peek {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: var(--fs-12) / 18px var(--font-ui, inherit);
+  cursor: default;
+}
+.peek-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.peek-title {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.peek-count {
+  color: var(--text-3);
+}
+.peek-close {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.peek-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+/* In a narrow editor the list goes over the file, where it keeps its width. */
+@container (max-width: 560px) {
+  .peek-body {
+    flex-direction: column;
+  }
+  .peek-list {
+    order: -1;
+    flex: 0 0 auto;
+    max-height: 96px;
+    min-width: 0;
+    max-width: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .peek-preview {
+    flex: 1 1 auto;
+    border-right: none;
+  }
+}
+.peek-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.peek-preview {
+  position: relative;
+  flex: 1 1 60%;
+  min-width: 0;
+  border-right: 1px solid var(--border-subtle);
+}
+.peek-preview-editor {
+  position: absolute;
+  inset: 0;
+}
+.peek-preview-missing {
+  padding: 14px 16px;
+  color: var(--text-3);
+}
+.peek-list {
+  flex: 0 0 40%;
+  max-width: 440px;
+  min-width: 220px;
+  overflow: auto;
+  padding: 4px 0;
+  outline: none;
+  scrollbar-width: thin;
+}
+.peek-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.peek-file:hover {
+  background: var(--hover);
+}
+.peek-file-name {
+  color: var(--text-1);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.peek-group.is-outside .peek-file-name {
+  color: var(--text-3);
+}
+.peek-file-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.peek-file-count {
+  flex: none;
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+  color: var(--text-2);
+  font: var(--fs-11) / 16px var(--font-mono);
+  text-align: center;
+}
+.peek-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 22px;
+  padding: 0 10px 0 26px;
+  color: var(--text-2);
+  font: var(--fs-12) / 22px var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.peek-row:hover:not(.is-selected) {
+  background: var(--hover);
+}
+.peek-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text-1);
+}
+.peek-list:focus-visible .peek-row.is-selected {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.peek-row-line {
+  flex: none;
+  min-width: 26px;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  text-align: right;
+}
+.peek-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.peek-line-text b {
+  border-radius: 2px;
+  background: var(--enc-editor-match-bg, color-mix(in srgb, var(--warning) 22%, transparent));
+  color: var(--text-1);
+  font-weight: 600;
+}
+.peek-line-text.is-empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggest-widget,
+  .signature-card {
+    animation: none;
+  }
+}

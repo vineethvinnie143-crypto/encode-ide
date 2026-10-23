@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type CodeDiagnostic, type LaunchPlan, type ServerProcess, type ServerSpec, type ServerState } from '@encode/lsp'
+import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorHighlight, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -57,6 +57,70 @@ export interface LanguageServersReport {
   /** Why they do not run, in words. */
   reason?: string
   servers: LanguageServerInfo[]
+}
+
+interface At {
+  /** The file's path in the folder ("src/a.ts"). */
+  path: string
+  /** Zero-based, as the servers count. */
+  line: number
+  /** Zero-based, in UTF-16 code units: a JavaScript string index. */
+  character: number
+}
+
+/** A place a server pointed to: in the folder by its path, or outside it (a library) by its whole path. */
+export interface EditorLocation {
+  /** The path in the folder, or null for a file outside it. */
+  path: string | null
+  file: string
+  line: number
+  character: number
+  endLine: number
+  endCharacter: number
+  /** The text of its first line (its end trimmed, at most 300 characters), for a list of places; only for a file in the folder. */
+  preview?: string
+}
+
+/** What the editor asks the servers, by kind, with what each answers. */
+export interface EditorAsks {
+  complete: { params: At & { triggerKind: 1 | 2 | 3; triggerCharacter?: string }; result: CompletionResult | null }
+  resolve: { params: { path: string; list: number; id: number }; result: CompletionEntry | null }
+  signature: { params: At & { triggerKind: 1 | 2 | 3; triggerCharacter?: string; isRetrigger: boolean; active?: SignatureHelp }; result: SignatureHelp | null }
+  hover: { params: At; result: { markdown: string; range?: Range } | null }
+  highlights: { params: At; result: EditorHighlight[] }
+  definition: { params: At; result: EditorLocation[] | null }
+  typeDefinition: { params: At; result: EditorLocation[] | null }
+  implementation: { params: At; result: EditorLocation[] | null }
+  references: { params: At; result: EditorLocation[] | null }
+  triggers: { params: { path: string }; result: EditorTriggers | null }
+}
+
+export type EditorAsk = { [K in keyof EditorAsks]: { kind: K } & EditorAsks[K]['params'] }[keyof EditorAsks]
+export type EditorAnswer<K extends keyof EditorAsks = keyof EditorAsks> = EditorAsks[K]['result']
+
+/** The most files a list of places reads for its previews, and the most characters a preview keeps. */
+const PREVIEW_FILES = 100
+const PREVIEW_CHARS = 300
+
+/**
+ * The places with the text of their first line, read from disk (the editor puts in its own text for the files it
+ * has open). Only files in the folder are read, and only so many of them; a file that cannot be read has none.
+ */
+export async function withPreviews(locations: EditorLocation[]): Promise<EditorLocation[]> {
+  const files = [...new Set(locations.filter((item) => item.path !== null).map((item) => item.file))].slice(0, PREVIEW_FILES)
+  const lines = new Map<string, string[]>()
+  await Promise.all(
+    files.map(async (file) => {
+      const text = await readText(file)
+      if (text !== null) lines.set(file, text.split(/\r\n?|\n/))
+    }),
+  )
+  return locations.map((item) => {
+    const text = item.path === null ? undefined : lines.get(item.file)?.[item.line]
+    if (text === undefined) return item
+    const line = text.trimEnd()
+    return { ...item, preview: line.length > PREVIEW_CHARS ? line.slice(0, PREVIEW_CHARS) : line }
+  })
 }
 
 /** What the editor tells the servers of a file it shows, by its path in the folder ("src/a.ts"). */

@@ -63,6 +63,15 @@ export interface ClientOptions {
   initializeTimeoutMs?: number
 }
 
+/** What typing a character asks of a server, by its own say. */
+export interface EditorTriggers {
+  completion: string[]
+  /** Characters that accept the selected completion and are then typed (`.` after a name). */
+  commit: string[]
+  signature: string[]
+  signatureRetrigger: string[]
+}
+
 export interface OpenDocument {
   file: string
   uri: string
@@ -110,6 +119,27 @@ function clientCapabilities(): object {
       publishDiagnostics: { relatedInformation: false, versionSupport: true, codeDescriptionSupport: false, dataSupport: false },
       diagnostic: { dynamicRegistration: true, relatedDocumentSupport: false },
       hover: { contentFormat: ['markdown', 'plaintext'] },
+      completion: {
+        completionItem: {
+          snippetSupport: true,
+          commitCharactersSupport: true,
+          documentationFormat: ['markdown', 'plaintext'],
+          deprecatedSupport: true,
+          preselectSupport: true,
+          tagSupport: { valueSet: [1] },
+          insertReplaceSupport: true,
+          labelDetailsSupport: true,
+          resolveSupport: { properties: ['documentation', 'detail', 'additionalTextEdits'] },
+        },
+        completionItemKind: { valueSet: Array.from({ length: 25 }, (_, index) => index + 1) },
+        contextSupport: true,
+        completionList: { itemDefaults: ['commitCharacters', 'editRange', 'insertTextFormat', 'data'] },
+      },
+      signatureHelp: {
+        signatureInformation: { documentationFormat: ['markdown', 'plaintext'], parameterInformation: { labelOffsetSupport: true }, activeParameterSupport: true },
+        contextSupport: true,
+      },
+      documentHighlight: {},
       definition: { linkSupport: true },
       typeDefinition: { linkSupport: true },
       implementation: { linkSupport: true },
@@ -219,9 +249,31 @@ export class LanguageClient {
     return [...this.logLines]
   }
 
-  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'codeAction' | 'pullDiagnostics'): boolean {
+  /** The characters after which the server offers completions or signature help without being asked. */
+  triggers(): EditorTriggers {
+    const chars = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length >= 1 && item.length <= 2).slice(0, 40) : [])
+    const c = this.capabilitiesValue
+    const completion = has(c.completionProvider) ? c.completionProvider : undefined
+    const signature = has(c.signatureHelpProvider) ? c.signatureHelpProvider : undefined
+    return {
+      completion: chars(completion?.triggerCharacters),
+      commit: chars(completion?.allCommitCharacters),
+      signature: chars(signature?.triggerCharacters),
+      signatureRetrigger: chars(signature?.retriggerCharacters),
+    }
+  }
+
+  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'codeAction' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight'): boolean {
     const c = this.capabilitiesValue
     switch (feature) {
+      case 'completion':
+        return has(c.completionProvider)
+      case 'completionResolve':
+        return has(c.completionProvider) && c.completionProvider?.resolveProvider === true
+      case 'signatureHelp':
+        return has(c.signatureHelpProvider)
+      case 'documentHighlight':
+        return has(c.documentHighlightProvider)
       case 'hover':
         return has(c.hoverProvider)
       case 'definition':

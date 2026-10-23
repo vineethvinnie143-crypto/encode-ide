@@ -10,7 +10,7 @@ export interface Command {
   title: string
   /** A title that depends on state, such as Pin or Unpin; menus show it instead of `title`. */
   label?: () => string
-  /** The menu it belongs to: File, Edit, View, Session or Help. */
+  /** The menu it belongs to: File, Edit, View, Go, Session or Help. */
   group: string
   /** Bound shortcuts. The first is the one menus and tooltips show. */
   keys?: string[]

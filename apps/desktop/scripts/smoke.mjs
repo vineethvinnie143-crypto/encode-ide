@@ -127,12 +127,14 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, ArrowUp: 38, ArrowDown: 40 }
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F12: 123 }
+/** Keys whose `key` is not their name. */
+const KEY_VALUES = { Space: ' ' }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
 async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
   const common = {
-    key,
+    key: KEY_VALUES[key] ?? key,
     code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
     modifiers: (alt ? 1 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0),
     windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
@@ -1489,6 +1491,8 @@ async function runLanguageServerChecks() {
   await pressKey('z', { ctrl: true })
   await waitFor(`${EDITOR_MARKS}.errors === 1 && !document.querySelector('.editor-tab.is-dirty')`, 10000, 'the marks after undo')
 
+  await runEditorAssistChecks(markerLines)
+
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
   await waitFor(`/^Running/.test(document.querySelector('.lsp-server[data-server="typescript"] .lsp-server-state')?.textContent ?? '')`, 8000, 'the server runs in Settings')
@@ -1535,6 +1539,209 @@ async function runLanguageServerChecks() {
   await fs.rm(modules, { recursive: true, force: true })
   await evaluate('window.eNCode.agent.reset()')
   console.log('[smoke] language servers: ok')
+}
+
+/** The middle of the first `word` on the editor's drawn line that holds `lineText`, on screen. */
+async function wordSpot(lineText, word) {
+  const spot = await evaluate(`(() => {
+    const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => !node.closest('.enc-zone') && node.textContent.includes(${JSON.stringify(lineText)}))
+    const at = line ? line.textContent.indexOf(${JSON.stringify(word)}) : -1
+    if (at < 0) return null
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+    let offset = 0
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const length = node.textContent.length
+      if (at < offset + length) {
+        const range = document.createRange()
+        range.setStart(node, at - offset)
+        range.setEnd(node, Math.min(length, at - offset + ${word.length}))
+        const rect = range.getBoundingClientRect()
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      }
+      offset += length
+    }
+    return null
+  })()`)
+  if (!spot) throw new Error(`"${word}" is not on screen in "${lineText}": ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  return spot
+}
+
+/** A click of the mouse's main button; `command` holds Ctrl (Cmd on macOS) down. */
+async function clickAt(spot, { command = false } = {}) {
+  const modifiers = command ? (process.platform === 'darwin' ? 4 : 2) : 0
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y, modifiers })
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: spot.x, y: spot.y, button: 'left', clickCount: 1, modifiers })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: spot.x, y: spot.y, button: 'left', clickCount: 1, modifiers })
+}
+
+/** Waits for the footer to put the cursor on `line` (and `column`, when given). */
+async function cursorAt(line, column, label) {
+  const want = column === undefined ? `Ln ${line},` : `Ln ${line}, Col ${column}`
+  await waitFor(`(document.querySelector('.editor-footer-side')?.textContent ?? '').includes(${JSON.stringify(want)})`, 8000, label).catch(async (error) => {
+    throw new Error(`${error.message}: the footer says ${JSON.stringify(await evaluate("document.querySelector('.editor-footer-side')?.textContent ?? ''"))}`)
+  })
+}
+
+/** The suggestion list as shown: its rows' labels (without their details), the selected one and the details pane's text. */
+const SUGGESTIONS = `(() => {
+  const widget = document.querySelector('.suggest-widget')
+  if (!widget) return null
+  const labelOf = (row) => {
+    const label = row?.querySelector('.sw-label')
+    const text = label?.textContent ?? ''
+    const detail = label?.querySelector('.sw-label-detail')?.textContent ?? ''
+    return detail && text.endsWith(detail) ? text.slice(0, -detail.length) : text
+  }
+  return {
+    labels: [...widget.querySelectorAll('.sw-row')].map(labelOf),
+    selected: labelOf(widget.querySelector('.sw-row.is-selected')),
+    details: widget.querySelector('.sw-details')?.textContent ?? '',
+  }
+})()`
+
+/**
+ * What the language servers add to typing and moving about, against the test server: the symbol's documentation on
+ * hover, its other places marked, F12 and Ctrl+click to its definition with Back and Forward, Shift+F12's peek of
+ * its references, suggestions as a word is typed with Enter to take one, the parameters of a call as it is typed,
+ * a snippet from Ctrl+Space with its stops, and an item that brings its import once taken.
+ */
+async function runEditorAssistChecks(markerLines) {
+  console.log('[smoke] --- editor assist ---')
+  const source = 'export function scaleBy(value: number, factor: number): number {\n  return value * factor\n}\n\nexport const scaled = scaleBy(2, 3)\n'
+  await evaluate(`window.eNCode.workspace.write('src/lsp-assist.ts', ${JSON.stringify(source)})`)
+  await quickOpen('src/lsp-assist.ts', 'export const scaled = scaleBy(2, 3)')
+  await until(async () => (await markerLines()).includes('open lsp-assist.ts'), 10000, 'the server to be given the file')
+  const call = 'export const scaled = scaleBy(2, 3)'
+
+  // Hover: what the server says of the symbol, its code drawn as code.
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  const usage = await wordSpot(call, 'scaleBy')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: usage.x, y: usage.y })
+  await waitFor("(document.querySelector('.mark-card .mark-card-docs')?.textContent ?? '').includes('function scaleBy(value: number, factor: number): number')", 8000, 'the documentation on hover')
+  const hoverDocs = await evaluate("({ code: !!document.querySelector('.mark-card .mark-card-docs pre'), text: document.querySelector('.mark-card .mark-card-docs')?.textContent ?? '' })")
+  if (!hoverDocs.code || !hoverDocs.text.includes('Defined on line 1.')) throw new Error(`The hover does not show the server's answer as written: ${JSON.stringify(hoverDocs)}`)
+  await screenshot('21-editor-hover.png')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await waitFor("!document.querySelector('.mark-card')", 6000, 'the hover goes when the pointer leaves')
+
+  // The cursor on the symbol marks its other places in the file.
+  await clickAt(usage)
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(5, undefined, 'the cursor on the call')
+  const symbolMarks = "[...document.querySelectorAll('.code-editor .enc-mark-symbol')].filter((box) => box.style.display !== 'none' && !box.closest('.enc-zone')).length"
+  await waitFor(`${symbolMarks} === 2`, 8000, 'the places of the symbol marked').catch(async (error) => {
+    throw new Error(`${error.message}: ${await evaluate(symbolMarks)} marked`)
+  })
+
+  // F12 to the definition, Back and Forward.
+  await pressKey('F12')
+  await cursorAt(1, 17, 'F12 goes to the definition')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(5, undefined, 'Alt+Left goes back to the call')
+  await pressKey('ArrowRight', { alt: true })
+  await cursorAt(1, 17, 'Alt+Right goes forward to the definition')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(5, undefined, 'and back again')
+
+  // Ctrl+click goes to the definition too.
+  await clickAt(await wordSpot(call, 'scaleBy'), { command: true })
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(1, 17, 'Ctrl+click goes to the definition')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(5, undefined, 'back from the definition Ctrl+click went to')
+
+  // Shift+F12: the references in a peek under the line, the file shown beside the list; Esc closes it.
+  await pressKey('F12', { shift: true })
+  await waitFor("document.querySelectorAll('.peek .peek-row').length === 2 && document.activeElement?.classList.contains('peek-list')", 8000, 'the peek of the references, with the keys')
+  const peekMarked = "[...document.querySelectorAll('.peek-preview .enc-mark-peek')].filter((box) => box.style.display !== 'none').length"
+  await waitFor(`${peekMarked} === 1`, 6000, 'the place marked in the preview')
+  const peek = await evaluate(`(() => ({
+    title: document.querySelector('.peek-title')?.textContent ?? '',
+    count: document.querySelector('.peek-count')?.textContent ?? '',
+    rows: [...document.querySelectorAll('.peek-row')].map((row) => row.textContent),
+  }))()`)
+  console.log('[smoke] peek:', JSON.stringify(peek))
+  if (peek.title !== 'References' || peek.count !== '2 places' || !peek.rows[0].startsWith('1') || !peek.rows[0].includes('scaleBy') || !peek.rows[1].startsWith('5')) {
+    throw new Error(`The peek does not show the references: ${JSON.stringify(peek)}`)
+  }
+  await screenshot('21-editor-peek.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.peek')", 6000, 'Esc closes the peek')
+  await cursorAt(5, undefined, 'the cursor stays where it was')
+  // Enter on a place goes there.
+  await pressKey('F12', { shift: true })
+  await waitFor("!!document.querySelector('.peek .peek-row.is-selected') && document.activeElement?.classList.contains('peek-list')", 8000, 'the peek again')
+  await pressKey('Enter')
+  await waitFor("!document.querySelector('.peek')", 6000, 'Enter closes the peek')
+  await cursorAt(1, 17, 'Enter goes to the place')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(5, undefined, 'back from the place')
+
+  // Suggestions as a word is typed; Enter takes the selected one.
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: 'scaleB' })
+  await waitFor(`${SUGGESTIONS}?.selected === 'scaleBy'`, 8000, 'the suggestions as a word is typed').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(SUGGESTIONS))}`)
+  })
+  await screenshot('21-editor-suggest.png')
+  await pressKey('Enter')
+  await waitFor(`!document.querySelector('.suggest-widget') && ${RENDERED_LINES}.includes('scaleBy')`, 6000, 'Enter takes the suggestion')
+
+  // The parameters of the call, the one being typed set apart.
+  await send('Input.insertText', { text: '(' })
+  await waitFor("document.querySelector('.signature-card .sig-active')?.textContent === 'value: number'", 8000, 'the parameters of the call')
+  await send('Input.insertText', { text: '2,' })
+  await waitFor("document.querySelector('.signature-card .sig-active')?.textContent === 'factor: number'", 8000, 'the next parameter after a comma')
+  await screenshot('21-editor-signature.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.signature-card')", 6000, 'Esc closes the parameters')
+
+  // Ctrl+Space, then a snippet: its placeholder selected to type over, Tab to where it ends.
+  await pressKey('End')
+  await pressKey('Enter')
+  await pressKey('Space', { ctrl: true })
+  await waitFor(`(${SUGGESTIONS}?.labels.length ?? 0) > 3`, 8000, 'Ctrl+Space lists the suggestions')
+  await send('Input.insertText', { text: 'lo' })
+  await waitFor(`${SUGGESTIONS}?.selected === 'log'`, 8000, 'the snippet in the list').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(SUGGESTIONS))}`)
+  })
+  await pressKey('Enter')
+  await waitFor(`${RENDERED_LINES}.includes('console.log(value)')`, 6000, 'the snippet inserted')
+  await send('Input.insertText', { text: '42' })
+  await waitFor(`${RENDERED_LINES}.includes('console.log(42)')`, 6000, 'typing replaces the placeholder')
+  await sleep(300)
+  await pressKey('Tab')
+  await cursorAt(7, 16, 'Tab goes to where the snippet ends')
+
+  // An item the server fills in when it is chosen: its documentation in the details, its import once taken.
+  await pressKey('Enter')
+  await send('Input.insertText', { text: 'gree' })
+  await waitFor(`${SUGGESTIONS}?.selected === 'greet'`, 8000, 'the item to fill in')
+  await pressKey('Space', { ctrl: true })
+  await waitFor(`(${SUGGESTIONS}?.details ?? '').includes('Says hello to someone')`, 8000, 'the details of the item').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(SUGGESTIONS))}`)
+  })
+  await screenshot('21-editor-suggest-details.png')
+  // The details stay open for the next list until asked again; the smoke leaves them as they were.
+  await pressKey('Space', { ctrl: true })
+  await waitFor(`${SUGGESTIONS} !== null && !document.querySelector('.sw-details')`, 6000, 'the details closed again')
+  await pressKey('Enter')
+  await waitFor(`${RENDERED_LINES}[0] === "import { greet } from './greet'" && ${RENDERED_LINES}.includes('greet')`, 8000, 'the import the item brings').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
+
+  // Tidy up: kept, closed, and the server lets the file go.
+  await pressKey('s', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 8000, 'the file saved')
+  const typed = await fs.readFile(path.join(demoPath, 'src', 'lsp-assist.ts'), 'utf8')
+  for (const line of ["import { greet } from './greet'", 'scaleBy(2,', 'console.log(42)', 'greet']) {
+    if (!typed.split('\n').some((text) => text.startsWith(line))) throw new Error(`The file does not have "${line}":\n${typed}`)
+  }
+  await click('.editor-tab.is-active .tab-close')
+  await until(async () => (await markerLines()).includes('close lsp-assist.ts'), 10000, 'the server to let the file go')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-assist.ts').catch(() => null)")
+  console.log('[smoke] editor assist: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */
@@ -3155,7 +3362,9 @@ async function runShellChecks() {
   await sleep(400)
   await screenshot('ui-dark-menu.png')
   await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))")
-  await waitFor(menuOpen('Session'), 4000, 'ArrowRight opens the next menu')
+  await waitFor(menuOpen('Go'), 4000, 'ArrowRight opens the next menu')
+  const goItems = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
+  if (!goItems.includes('Go to definition') || !goItems.includes('Go back in the editor')) throw new Error(`Go menu is missing items: ${goItems}`)
   await evaluate("document.querySelector('.ui-menu').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))")
   await waitFor("!document.querySelector('.ui-menu')", 4000, 'Escape closes the menu')
 

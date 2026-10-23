@@ -118,6 +118,9 @@ const capabilities = {
   renameProvider: { prepareProvider: true },
   codeActionProvider: { resolveProvider: true },
   executeCommandProvider: { commands: ['fake.fixAll'] },
+  completionProvider: { triggerCharacters: ['.'], allCommitCharacters: [';'], resolveProvider: true },
+  signatureHelpProvider: { triggerCharacters: ['('], retriggerCharacters: [','] },
+  documentHighlightProvider: true,
 }
 if (mode === 'pull') capabilities.diagnosticProvider = { interFileDependencies: false, workspaceDiagnostics: false }
 if (mode === 'bare') for (const key of Object.keys(capabilities)) if (key !== 'textDocumentSync') delete capabilities[key]
@@ -272,6 +275,58 @@ async function handle(message) {
       out.push({ title: 'Add a note at the top', kind: 'refactor', data: { uri } })
       out.push({ title: 'Not now', kind: 'refactor', disabled: { reason: 'It is Tuesday' } })
       out.push({ title: 'Run a bare command', command: 'fake.fixAll', arguments: [uri] })
+      return reply(id, out)
+    }
+    case 'textDocument/completion': {
+      const doc = docs.get(params.textDocument.uri)
+      if (!doc) return reply(id, null)
+      const line = doc.text.split(/\r?\n/)[params.position.line] || ''
+      let start = params.position.character
+      while (start > 0 && /\w/.test(line[start - 1])) start--
+      let end = params.position.character
+      while (end < line.length && /\w/.test(line[end])) end++
+      const at = (character) => ({ line: params.position.line, character })
+      if (params.context && params.context.triggerCharacter === '.') {
+        return reply(id, [
+          { label: 'length', kind: 10, detail: 'number', textEdit: { range: { start: at(start), end: at(params.position.character) }, newText: 'length' } },
+          { label: 'push', kind: 2, detail: '(item) => number', insertText: 'push($1)', insertTextFormat: 2 },
+        ])
+      }
+      const names = []
+      for (const [uri, other] of texts()) for (const fn of functions(uri, other.text)) if (!names.includes(fn.name)) names.push(fn.name)
+      const items = names.map((name) => ({ label: name, kind: 3, labelDetails: { detail: '()' }, insertText: name + '($1)', insertTextFormat: 2, sortText: '1' + name }))
+      items.push({ label: 'function', kind: 14, sortText: '2function' })
+      items.push({ label: 'helper', kind: 3, labelDetails: { description: './helpers' }, sortText: '3helper', data: { name: 'helper' } })
+      items.push({ label: 'oldThing', kind: 6, tags: [1], sortText: '4oldThing' })
+      return reply(id, { isIncomplete: mode === 'incomplete', itemDefaults: { editRange: { insert: { start: at(start), end: at(params.position.character) }, replace: { start: at(start), end: at(end) } }, commitCharacters: ['('] }, items })
+    }
+    case 'completionItem/resolve': {
+      const item = Object.assign({}, params, { documentation: { kind: 'markdown', value: '**' + params.label + '** does a thing.' } })
+      if (params.data && params.data.name === 'helper') item.additionalTextEdits = [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'import helper\n' }]
+      return reply(id, item)
+    }
+    case 'textDocument/signatureHelp': {
+      const doc = docs.get(params.textDocument.uri)
+      const line = doc ? doc.text.split(/\r?\n/)[params.position.line] || '' : ''
+      const before = line.slice(0, params.position.character)
+      const open = before.lastIndexOf('(')
+      if (open < 0) return reply(id, null)
+      const name = (/(\w+)\s*$/.exec(before.slice(0, open)) || [])[1]
+      if (!name) return reply(id, null)
+      const label = name + '(a: number, b: string)'
+      const commas = (before.slice(open + 1).match(/,/g) || []).length
+      return reply(id, { signatures: [{ label, documentation: 'Calls ' + name + '.', parameters: [{ label: [name.length + 1, name.length + 10], documentation: 'the first' }, { label: 'b: string' }] }], activeSignature: 0, activeParameter: Math.min(commas, 1) })
+    }
+    case 'textDocument/documentHighlight': {
+      const doc = docs.get(params.textDocument.uri)
+      const found = doc && wordAt(doc.text, params.position)
+      if (!found) return reply(id, [])
+      const out = []
+      doc.text.split(/\r?\n/).forEach((line, index) => {
+        const re = new RegExp('\\b' + found.word + '\\b', 'g')
+        let match
+        while ((match = re.exec(line))) out.push({ range: { start: { line: index, character: match.index }, end: { line: index, character: match.index + found.word.length } }, kind: line.slice(0, match.index).endsWith('function ') ? 3 : 2 })
+      })
       return reply(id, out)
     }
     case 'codeAction/resolve':
