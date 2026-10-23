@@ -40,6 +40,13 @@
   --e-scrollbar: var(--enc-editor-scrollbar, rgba(150, 160, 180, 0.28));
   --e-scrollbar-hover: var(--enc-editor-scrollbar-hover, rgba(150, 160, 180, 0.5));
   --e-radius: var(--enc-editor-radius, 8px);
+  --e-bracket-1: var(--enc-editor-bracket-1, #f0c674);
+  --e-bracket-2: var(--enc-editor-bracket-2, #c4a1ff);
+  --e-bracket-3: var(--enc-editor-bracket-3, #7fb0ff);
+  --e-bracket-stray: var(--enc-editor-bracket-stray, var(--e-error));
+  --e-sticky-shadow: var(--enc-editor-sticky-shadow, 0 4px 6px -4px rgba(0, 0, 0, 0.55));
+  --e-minimap-slider: var(--enc-editor-minimap-slider, rgba(150, 160, 180, 0.12));
+  --e-minimap-slider-hover: var(--enc-editor-minimap-slider-hover, rgba(150, 160, 180, 0.22));
   --e-ui-font: var(--enc-editor-ui-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
 
   --e-tok-comment: var(--enc-tok-comment, #6b7385);
@@ -191,6 +198,81 @@
   background: var(--e-tok-deleted);
 }
 
+/* Folding: chevrons in the gutter's last column, shown while the pointer is over the gutter or the block is folded */
+
+.enc-folding .enc-gutter-num {
+  padding-right: 28px;
+}
+.enc-folding .enc-gutter-inserted::after,
+.enc-folding .enc-gutter-modified::after {
+  right: 19px;
+}
+.enc-folding .enc-gutter-deleted::after {
+  right: 17px;
+}
+.enc-fold-open::before,
+.enc-fold-closed::before {
+  content: '';
+  position: absolute;
+  right: 2px;
+  top: 0;
+  width: 12px;
+  height: 100%;
+  background: var(--e-gutter-active-fg);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='black' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='black' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px 12px no-repeat;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  cursor: pointer;
+}
+.enc-fold-closed::before {
+  transform: rotate(-90deg);
+  opacity: 0.9;
+}
+.enc-gutter:hover .enc-fold-open::before {
+  opacity: 0.75;
+}
+.enc-fold-open:hover::before,
+.enc-fold-closed:hover::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .enc-fold-open::before,
+  .enc-fold-closed::before {
+    transition: none;
+  }
+}
+.enc-folds {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0;
+}
+/* After a folded block's first line: what is hidden, and a click opens it. */
+.enc-fold-pill {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--e-fg) 9%, transparent);
+  color: var(--e-gutter-active-fg);
+  cursor: pointer;
+}
+.enc-fold-pill::after {
+  content: '\22EF';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 11px / 1 var(--e-ui-font);
+  letter-spacing: 0.04em;
+}
+.enc-fold-pill:hover {
+  background: color-mix(in srgb, var(--e-fg) 16%, transparent);
+  color: var(--e-fg);
+}
+
 /* Content layers */
 
 .enc-content {
@@ -259,6 +341,7 @@
 }
 
 .enc-mark-find {
+  --enc-overview: var(--e-match-active);
   background: var(--e-match);
   border-radius: 2px;
 }
@@ -306,9 +389,11 @@
   background: color-mix(in srgb, var(--e-match) 30%, transparent);
 }
 .enc-line-inserted {
+  --enc-overview: var(--e-tok-inserted);
   background: var(--e-inserted-line);
 }
 .enc-line-deleted {
+  --enc-overview: var(--e-tok-deleted);
   background: var(--e-deleted-line);
 }
 .enc-mark-inserted {
@@ -328,9 +413,11 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.4 Q1.5 0.1 3 1.4 T6 2.4' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x left bottom / 6px 3px;
 }
 .enc-squiggle-error {
+  --enc-overview: var(--e-error);
   background: var(--e-error);
 }
 .enc-squiggle-warning {
+  --enc-overview: var(--e-warning);
   background: var(--e-warning);
 }
 .enc-squiggle-info {
@@ -501,6 +588,122 @@
 }
 .tok-code {
   color: var(--e-tok-code);
+}
+
+/* Brackets coloured by how deeply they nest; a closer with nothing open stands out */
+
+.enc-bracket-1 {
+  color: var(--e-bracket-1);
+}
+.enc-bracket-2 {
+  color: var(--e-bracket-2);
+}
+.enc-bracket-3 {
+  color: var(--e-bracket-3);
+}
+.enc-bracket-stray {
+  color: var(--e-bracket-stray);
+  text-decoration: underline wavy var(--e-bracket-stray);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* Sticky scroll: the first lines of the blocks the top of the view is in */
+
+.enc-sticky {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 7;
+  overflow: hidden;
+  background: var(--e-bg);
+  box-shadow: var(--e-sticky-shadow);
+}
+.enc-sticky[hidden] {
+  display: none;
+}
+.enc-sticky-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  height: var(--enc-line-h);
+  background: var(--e-bg);
+  cursor: pointer;
+}
+.enc-sticky-row:hover {
+  background: color-mix(in srgb, var(--e-fg) 5%, var(--e-bg));
+}
+.enc-sticky-num {
+  flex: none;
+  box-sizing: border-box;
+  padding-right: 12px;
+  text-align: right;
+  line-height: var(--enc-line-h);
+  color: var(--e-gutter-fg);
+  font-variant-numeric: tabular-nums;
+  background: var(--e-gutter-bg);
+}
+.enc-folding .enc-sticky-num {
+  padding-right: 28px;
+}
+.enc-sticky-clip {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.enc-sticky-text {
+  box-sizing: border-box;
+  height: var(--enc-line-h);
+  line-height: var(--enc-line-h);
+  padding-left: var(--enc-pad-x, 12px);
+  white-space: pre;
+  tab-size: var(--enc-tab-size, 4);
+  -moz-tab-size: var(--enc-tab-size, 4);
+  font-variant-ligatures: none;
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+/* The minimap: the document in small beside the text, with a slider over the part in view */
+
+.enc-minimap {
+  position: absolute;
+  top: 0;
+  z-index: 6;
+  background: var(--e-bg);
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--e-fg) 6%, transparent);
+  cursor: default;
+}
+.enc-minimap[hidden] {
+  display: none;
+}
+.enc-minimap-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.enc-minimap-slider {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--e-minimap-slider);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.enc-minimap:hover .enc-minimap-slider,
+.enc-minimap-dragging .enc-minimap-slider {
+  opacity: 1;
+}
+.enc-minimap-slider:hover,
+.enc-minimap-dragging .enc-minimap-slider {
+  background: var(--e-minimap-slider-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .enc-minimap-slider {
+    transition: none;
+  }
 }
 
 /* Zones: blocks between lines, used for the removed lines of a review hunk */

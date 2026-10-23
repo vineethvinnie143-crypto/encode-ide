@@ -163,15 +163,23 @@ function wordAfter(state: EditorState, pos: number): number {
   return line.from + wordEndAfter(line.text, pos - line.from, state.language.wordChars)
 }
 
+/**
+ * The line `lines` lines from `line` (negative: up). The view passes one that steps over folded lines; the plain one
+ * counts every line. Past either end it may return a line outside the document.
+ */
+export type LineStep = (line: number, lines: number) => number
+
+const countLines: LineStep = (line, lines) => line + lines
+
 /** `lines` up (negative) or down, aiming for the range's goal column. Past either end lands on the document's edge. */
-function vertical(state: EditorState, range: SelectionRange, lines: number, extend: boolean): SelectionRange {
+function vertical(state: EditorState, range: SelectionRange, lines: number, extend: boolean, step: LineStep = countLines): SelectionRange {
   const { doc } = state
   const tabSize = state.config.tabSize
   const collapse = !extend && !range.empty
   const start = collapse ? (lines < 0 ? range.from : range.to) : range.head
   const line = doc.lineAt(start)
   const goal = !collapse && range.goalColumn !== undefined ? range.goalColumn : columnAt(line.text, start - line.from, tabSize)
-  const target = line.number + lines
+  const target = step(line.number, lines)
   if (target < 1) return SelectionRange.cursor(0, goal)
   if (target > doc.lineCount) return SelectionRange.cursor(doc.length, goal)
   const next = doc.line(target)
@@ -202,8 +210,13 @@ export const cursorLineDown: Command = (state) => moveBy(state, false, (range) =
 export const selectLineDown: Command = (state) => moveBy(state, true, (range) => vertical(state, range, 1, true))
 
 /** Page motion; the view knows how many lines a page holds. */
-export function cursorPage(lines: number, extend = false): Command {
-  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend))
+export function cursorPage(lines: number, extend = false, step?: LineStep): Command {
+  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend, step))
+}
+
+/** Up (negative) or down by `lines`, counted with `step`: the view's version of the arrow keys, which skips folds. */
+export function cursorVertical(lines: number, extend: boolean, step?: LineStep): Command {
+  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend, step))
 }
 
 /** Home: to the first non-blank character, or to the line start when already there. */
@@ -286,14 +299,14 @@ export const jumpToBracket: Command = (state) => {
 
 // ---------------------------------------------------------------- multiple cursors
 
-function addCursorVertically(state: EditorState, lines: -1 | 1): Transaction | null {
+function addCursorVertically(state: EditorState, lines: -1 | 1, step: LineStep = countLines): Transaction | null {
   const { doc } = state
   const tabSize = state.config.tabSize
   const ranges = state.selection.ranges.slice()
   let main = state.selection.mainIndex
   for (const [index, range] of state.selection.ranges.entries()) {
     const line = doc.lineAt(range.head)
-    const target = line.number + lines
+    const target = step(line.number, lines)
     if (target < 1 || target > doc.lineCount) continue
     const goal = range.goalColumn ?? columnAt(line.text, range.head - line.from, tabSize)
     const next = doc.line(target)
@@ -305,6 +318,11 @@ function addCursorVertically(state: EditorState, lines: -1 | 1): Transaction | n
 
 export const addCursorAbove: Command = (state) => addCursorVertically(state, -1)
 export const addCursorBelow: Command = (state) => addCursorVertically(state, 1)
+
+/** A cursor added on the line above (-1) or below, counted with `step` so a folded block is stepped over. */
+export function addCursorVertical(direction: -1 | 1, step?: LineStep): Command {
+  return (state) => addCursorVertically(state, direction, step)
+}
 
 /** Adds a cursor at `pos` (Alt+click), or removes the one already there. */
 export function toggleCursorAt(state: EditorState, pos: number): Transaction | null {

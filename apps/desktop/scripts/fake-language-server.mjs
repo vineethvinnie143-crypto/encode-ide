@@ -15,7 +15,7 @@
  *
  * And it knows the shape of the code as one does: a file's classes, their methods, its functions, interfaces and
  * top-level constants as a tree; the folder's, searched by name; and the calls between the functions and methods of
- * the folder's src, both ways.
+ * the folder's src, both ways. And how a file folds: its brace blocks, block comments and runs of imports.
  *
  *   node scripts/fake-language-server.mjs --stdio [--marker=file]
  *
@@ -457,6 +457,40 @@ function outgoingCalls({ item }) {
 }
 
 /** The folder's symbols whose names hold the query's letters in order, as a flat list. */
+/**
+ * How a file folds, as a real server says it: each brace block ending on its closing brace (with where on that line,
+ * as a server that folds by characters does), each block comment over more than one line, and each run of imports.
+ */
+function foldingRanges(text) {
+  const out = []
+  const open = []
+  let comment = -1
+  let imports = -1
+  const lines = text.split(/\r?\n/)
+  lines.forEach((line, index) => {
+    if (/^import\b/.test(line)) {
+      if (imports < 0) imports = index
+    } else if (imports >= 0) {
+      if (index - 1 > imports) out.push({ startLine: imports, endLine: index - 1, kind: 'imports' })
+      imports = -1
+    }
+    if (comment < 0 && line.includes('/*') && !line.includes('*/')) comment = index
+    else if (comment >= 0 && line.includes('*/')) {
+      if (index > comment) out.push({ startLine: comment, endLine: index, kind: 'comment' })
+      comment = -1
+    }
+    for (let at = 0; at < line.length; at++) {
+      if (line[at] === '{') open.push(index)
+      else if (line[at] === '}' && open.length) {
+        const start = open.pop()
+        if (index > start) out.push({ startLine: start, endLine: index, endCharacter: at + 1 })
+      }
+    }
+  })
+  if (imports >= 0 && lines.length - 1 > imports) out.push({ startLine: imports, endLine: lines.length - 1, kind: 'imports' })
+  return out
+}
+
 function workspaceSymbols({ query }) {
   const q = String(query ?? '').toLowerCase()
   const spells = (name) => {
@@ -509,6 +543,7 @@ function handle(message) {
           documentSymbolProvider: true,
           workspaceSymbolProvider: true,
           callHierarchyProvider: true,
+          foldingRangeProvider: true,
         },
         serverInfo: { name: 'fake-ts', version: '1' },
       })
@@ -565,6 +600,8 @@ function handle(message) {
       return reply(id, formatOnType(params))
     case 'textDocument/documentSymbol':
       return reply(id, symbolsOf(docs.get(params.textDocument.uri)?.text ?? ''))
+    case 'textDocument/foldingRange':
+      return reply(id, foldingRanges(docs.get(params.textDocument.uri)?.text ?? ''))
     case 'workspace/symbol':
       return reply(id, workspaceSymbols(params))
     case 'textDocument/prepareCallHierarchy':

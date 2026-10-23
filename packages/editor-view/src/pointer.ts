@@ -1,4 +1,5 @@
 import { EditorSelection, SelectionRange, indexAtColumn, lineRangeAt, toggleCursorAt, wordRangeAt } from '@encode/editor'
+import { FOLD_COLUMN } from './folding'
 import type { EditorView } from './view'
 
 type Mode = 'char' | 'word' | 'line' | 'column'
@@ -52,7 +53,24 @@ export class PointerHandler {
     event.preventDefault()
     view.focus()
     const state = view.state
-    const inGutter = !!(event.target as Element).closest('.enc-gutter')
+    const target = event.target as Element
+    // The marker after a folded line, and the chevrons in the gutter's last column, fold and unfold.
+    const pill = target.closest<HTMLElement>('.enc-fold-pill')
+    if (pill) {
+      view.folding.unfold(Number(pill.dataset.line))
+      return
+    }
+    const inGutter = !!target.closest('.enc-gutter')
+    if (inGutter && view.options.folding && event.clientX >= view.gutterRight() - FOLD_COLUMN && !event.shiftKey) {
+      const line = view.lineAtClientY(event.clientY)
+      if (view.folding.isFolded(line) || view.folding.startsAt(line)) {
+        if (event.altKey) {
+          if (view.folding.isFolded(line)) view.folding.unfoldRecursively(line)
+          else view.folding.foldRecursively(line)
+        } else view.folding.toggle(line)
+        return
+      }
+    }
     const pos = inGutter ? state.doc.line(view.lineAtClientY(event.clientY)).from : view.posAtCoords(event.clientX, event.clientY)
     const clicks = ((Math.max(1, event.detail) - 1) % 3) + 1
     const command = view.mac ? event.metaKey : event.ctrlKey
@@ -173,6 +191,8 @@ export class PointerHandler {
     const [first, last] = drag.line <= line ? [drag.line, line] : [line, drag.line]
     const ranges: SelectionRange[] = []
     for (let number = first; number <= last; number++) {
+      // A column selection passes over folded lines.
+      if (this.view.isLineHidden(number)) continue
       const info = state.doc.line(number)
       const anchor = info.from + indexAtColumn(info.text, drag.column, tabSize)
       const head = info.from + indexAtColumn(info.text, column, tabSize)

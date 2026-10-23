@@ -806,6 +806,14 @@ export interface EditorSymbol {
   children?: EditorSymbol[]
 }
 
+/** A block a server says can fold: 0-based lines, `endCharacter` where on its last line it ends. */
+export interface EditorFoldRange {
+  startLine: number
+  endLine: number
+  endCharacter?: number
+  kind?: 'comment' | 'imports' | 'region'
+}
+
 /** A symbol found by name across the folder; only the folder's own files are listed. */
 export interface EditorSymbolMatch {
   name: string
@@ -862,6 +870,8 @@ export interface EditorAsks {
   formatOnType: { params: EditorAt & { ch: string; tabSize: number; insertSpaces: boolean }; result: CodeTextEdit[] | null }
   /** The file's outline, as a tree. */
   symbols: { params: { path: string }; result: EditorSymbol[] | null }
+  /** The blocks the file folds by, as its server sees them (0-based lines); null when no server folds it. */
+  folding: { params: { path: string }; result: EditorFoldRange[] | null }
   /** Symbols by name across the folder; `path` is the file shown ('' for none), whose server starts if it is not running. */
   workspaceSymbols: { params: { path: string; query: string }; result: EditorSymbolMatch[] | null }
   /** The functions at a position a call hierarchy starts from, numbered in a new hierarchy. */

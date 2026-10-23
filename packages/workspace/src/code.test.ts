@@ -172,6 +172,11 @@ describe('a folder\'s language servers', () => {
       assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'workspaceSymbols', path: '../outside.fk', query: 'help' }), null)
       assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'symbols', path: '../outside.fk' }), null)
 
+      // How a file folds, as its server sees it.
+      await s.workspaces.editorDocument(s.root, { kind: 'change', path: 'b.fk', text: 'function helper {\n  body\n}\n', dirty: true })
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'folding', path: 'b.fk' }), [{ startLine: 0, endLine: 2, endCharacter: 1 }])
+      assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'folding', path: '../outside.fk' }), null)
+
       // A call hierarchy: the function with its line, then who calls it, each with the lines of the calls.
       const prepared = await s.workspaces.editorAsk(s.root, { kind: 'callHierarchy', path: 'a.fk', line: 0, character: 10 })
       assert.deepEqual(prepared?.items, [{ id: 0, name: 'add', kind: 'function', at: { path: 'a.fk', file: path.join(real, 'a.fk'), line: 0, character: 9, endLine: 0, endCharacter: 12, preview: 'an ERROR' } }])

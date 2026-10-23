@@ -45,6 +45,14 @@
   --enc-editor-scrollbar: color-mix(in srgb, var(--text-3) 30%, transparent);
   --enc-editor-scrollbar-hover: color-mix(in srgb, var(--text-3) 50%, transparent);
   --enc-editor-radius: var(--r-8);
+  /* Brackets by depth, from the syntax colours so both themes keep them apart; a bracket with no partner is an error. */
+  --enc-editor-bracket-1: var(--syn-number);
+  --enc-editor-bracket-2: var(--syn-keyword);
+  --enc-editor-bracket-3: var(--syn-fn);
+  --enc-editor-bracket-stray: var(--danger);
+  --enc-editor-sticky-shadow: 0 4px 6px -4px rgba(0, 0, 0, 0.55);
+  --enc-editor-minimap-slider: color-mix(in srgb, var(--text-3) 12%, transparent);
+  --enc-editor-minimap-slider-hover: color-mix(in srgb, var(--text-3) 22%, transparent);
 
   /* Syntax; plain text is --enc-editor-fg */
   --enc-tok-comment: var(--syn-comment);
@@ -104,6 +112,9 @@
 }
 
 :root[data-theme='light'] {
+  --enc-editor-sticky-shadow: 0 4px 6px -4px rgba(15, 20, 30, 0.18);
+  --enc-editor-minimap-slider: color-mix(in srgb, var(--text-3) 14%, transparent);
+  --enc-editor-minimap-slider-hover: color-mix(in srgb, var(--text-3) 26%, transparent);
   --enc-term-ansi-0: #1f2430;
   --enc-term-ansi-1: #c62828;
   --enc-term-ansi-2: #1a7f4b;

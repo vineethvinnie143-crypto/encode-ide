@@ -1222,3 +1222,49 @@ The new paths are four questions the renderer asks (`code:ask`: `symbols`, `work
   a symbol, Esc puts the cursor back and Enter goes with Back returning, Ctrl+Alt+T finds a function in a file not
   open, `:12:5` goes to a line and column, and Shift+Alt+H lists a function's callers, goes to a call, and shows what
   another calls with a level opened from the keys.
+
+## Folding, sticky scroll, bracket colours and the minimap (Editor and language intelligence 4a)
+
+Written with the pull request that adds folding, sticky scroll, brackets coloured by depth and the minimap to the
+editor
+([0077](../adr/0077-the-editor-folds-by-the-servers-ranges-or-the-indentation-and-pins-colours-and-maps-the-text-from-what-it-already-reads.md)).
+The new paths are one question the renderer asks (`code:ask` `folding`), the servers' answers to it, and the fold
+state the renderer keeps per open file. Sticky scroll, bracket colours and the minimap read only what the editor
+already holds (the text, its tokens and its decorations) and add no path across a process.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| F1 | A compromised renderer asks the folding question for a file outside the folder | The main process rebuilds the question from a file the folder holds and nothing else; any other field is dropped, and the host resolves the file inside the folder's root again. | Mitigated |
+| F2 | A server's answer is malformed or hostile (wrong types, negative or huge lines, ranges that end above where they start, unknown kinds) | The host reads it field by field: two whole line numbers from 0 to 100,000,000, the second below the first, a column only when it is one, a kind only when it is `comment`, `imports` or `region`; anything else is skipped. The renderer keeps ranges inside the document and one per first line. | Mitigated |
+| F3 | A server floods the editor with ranges, or a file has so many blocks that reading them stalls typing | At most 5,000 ranges are read from an answer and 10,000 found from a file's text. A line's own block is read only from the lines after it, as its chevron comes on screen; the whole file is read only to fold everything, a level or a kind. | Mitigated |
+| F4 | Asking for ranges on every pause loads a server or the computer for nothing | Asked when a file is shown, 400 ms after typing pauses and when a late server marks the file, never while folding is off; an answer for older text is dropped and asked again. | Mitigated |
+| F5 | Folding hides code from the person: a change the agent makes, or a problem, inside a folded block goes unseen | A folded block shows a `⋯` and a closed chevron; an edit that reaches inside a fold opens it, as do a cursor, a search result and Go to line; the Problems panel, F8 and the Review tab still list and lead to what is inside. Folding never edits the file. | Mitigated |
+| F6 | Fold state kept for a file folds the wrong lines once the file changed while not shown | Kept folds are tied to the text they were made in; a change made while the file was not shown moves them with the text and opens those it reached into, and folds kept for any other text are let go. | Mitigated |
+| F7 | The minimap or the pinned lines draw text as markup | Pinned lines are drawn as text nodes from the editor's tokens; the minimap draws pixels on a canvas from token kinds. Neither reads HTML from a file or a server. | Mitigated |
+
+### Residual risks
+
+- **A server can say a block is where it is not.** The editor folds what the server says; a wrong range hides the
+  wrong lines until it is opened. Typing inside, a search or the cursor opens it.
+- **Fold state lives only while the file is open.** It is not kept across closing the file or the app.
+
+### Verification
+
+- The editor tests find blocks by indentation and regions (one pass agreeing with the line-at-a-time reading), turn a
+  server's ranges into the editor's, move folds and ranges through edits, look ranges up by line and depth, and keep
+  bracket depths through any run of edits exactly as a fresh read (a property test). The height map tests lay
+  hidden lines out at no height and step over them.
+- The lsp tests read a server's folding ranges field by field and cap them, and ask the server for them; the
+  workspace tests answer the editor for a file of the folder and refuse one outside it; the main process tests take
+  the folding question by its path alone. The renderer tests keep folds per file through changes made while it was
+  not shown, keep the saved layout in bounds, and name the View menu's toggles and the fold commands.
+- The browser tests fold from the keys, the chevron and the marker, step the arrows over a fold, open a fold for an
+  edit or search inside it, pin the blocks the top of the view is in, colour brackets, and draw and scroll the
+  minimap.
+- The end-to-end run, with a test server that answers folding ranges: the imports fold by the server's range, a
+  block folds from the keys with the cursor stepping out, the folds come back when the file is shown again, sticky
+  scroll pins a class and its method and a click on one goes there, brackets are coloured by depth and can be turned
+  off, the minimap scrolls the text when clicked and hides and shows, and folding turned off opens everything and
+  turned on again folds by the server's ranges.

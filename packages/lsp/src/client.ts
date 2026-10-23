@@ -148,6 +148,8 @@ function clientCapabilities(): object {
       references: {},
       documentSymbol: { hierarchicalDocumentSymbolSupport: true, symbolKind: { valueSet: Array.from({ length: 26 }, (_, index) => index + 1) } },
       callHierarchy: {},
+      // Whole lines: the editor folds lines, so a server leaves a closing bracket's line out of the block itself.
+      foldingRange: { lineFoldingOnly: true, rangeLimit: 5000, foldingRangeKind: { valueSet: ['comment', 'imports', 'region'] } },
       rename: { prepareSupport: true },
       formatting: {},
       rangeFormatting: {},
@@ -270,7 +272,7 @@ export class LanguageClient {
     }
   }
 
-  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'prepareRename' | 'codeAction' | 'codeActionResolve' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight' | 'formatting' | 'rangeFormatting' | 'onTypeFormatting'): boolean {
+  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'foldingRange' | 'rename' | 'prepareRename' | 'codeAction' | 'codeActionResolve' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight' | 'formatting' | 'rangeFormatting' | 'onTypeFormatting'): boolean {
     const c = this.capabilitiesValue
     switch (feature) {
       case 'completion':
@@ -297,6 +299,8 @@ export class LanguageClient {
         return has(c.workspaceSymbolProvider)
       case 'callHierarchy':
         return has(c.callHierarchyProvider)
+      case 'foldingRange':
+        return has(c.foldingRangeProvider)
       case 'rename':
         return has(c.renameProvider)
       case 'prepareRename':

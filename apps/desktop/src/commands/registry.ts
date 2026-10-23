@@ -18,6 +18,8 @@ export interface Command {
   hint?: string
   /** Leave it out of menus and lists (one of a numbered family, for example). */
   hidden?: boolean
+  /** False leaves it out of the menu bar while the palette and the shortcut list still have it (Fold level 3). */
+  menu?: boolean
   /** More words the command palette finds it by. */
   keywords?: string
   /** False leaves it out of the command palette, where it means nothing (Copy, or the palette itself). */

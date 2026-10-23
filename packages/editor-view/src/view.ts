@@ -19,14 +19,17 @@ import type { ChangeSet, Line } from '@encode/text'
 import { viewCommands, type ViewCommand } from './commands'
 import type { DecorationSource, LineSpec, MarkSpec } from './decorations'
 import { FindController } from './find'
-import { HeightMap, ScrollScale, type Zone } from './heights'
+import { FOLD_COLUMN, FoldController } from './folding'
+import { HeightMap, ScrollScale, sameHidden, type HiddenLines, type Zone } from './heights'
 import { InputHandler } from './input'
 import { Keymap, defaultBindings, isMac, type KeyBinding } from './keymap'
-import { fillLine, isSimpleText } from './line'
+import { fillLine, isSimpleText, withBrackets } from './line'
+import { MinimapController } from './minimap'
 import { PointerHandler } from './pointer'
 import { RectPool } from './rects'
 import { ReviewController } from './review-view'
 import { SnippetController } from './snippet'
+import { StickyController } from './sticky'
 
 /** Lines longer than this are drawn in part: the piece around the viewport. */
 export const LONG_LINE = 4000
@@ -60,9 +63,33 @@ export interface EditorViewConfig {
   commands?: Readonly<Record<string, ViewCommand>>
   /** Overrides platform detection, for tests: "MacIntel", "Win32". */
   platform?: string
+  /** Blocks fold, with chevrons in the gutter. Default true. */
+  folding?: boolean
+  /** The first lines of the blocks the top of the view is in stay pinned above the text. Default false. */
+  stickyScroll?: boolean
+  /** Brackets are coloured by how deeply they nest. Default false. */
+  bracketColors?: boolean
+  /** A small picture of the document beside the text, with a slider for the part in view. Default false. */
+  minimap?: boolean
 }
 
-type Options = Required<Pick<EditorViewConfig, 'lineNumbers' | 'indentGuides' | 'highlightActiveLine' | 'scrollBeyondEnd' | 'cursorStyle' | 'cursorBlink' | 'ligatures' | 'ariaLabel'>>
+type Options = Required<
+  Pick<
+    EditorViewConfig,
+    | 'lineNumbers'
+    | 'indentGuides'
+    | 'highlightActiveLine'
+    | 'scrollBeyondEnd'
+    | 'cursorStyle'
+    | 'cursorBlink'
+    | 'ligatures'
+    | 'ariaLabel'
+    | 'folding'
+    | 'stickyScroll'
+    | 'bracketColors'
+    | 'minimap'
+  >
+>
 
 export interface ViewZone {
   /** Lines above the zone (0: before the first line). The view keeps the zone attached to that line through edits. */
@@ -90,6 +117,8 @@ export interface ViewEvents {
   request: (name: string) => void
   /** Ctrl/Cmd+click at `pos`. */
   navigate: (event: { pos: number; modifiers: { shift: boolean; alt: boolean } }) => void
+  /** Blocks were folded or unfolded: a host keeps `folding.folded` to fold them again when the file comes back. */
+  folds: () => void
 }
 
 interface LineEl {
@@ -159,6 +188,7 @@ export class EditorView {
   private readonly marksPool: RectPool
   private readonly selectionPool: RectPool
   private readonly cursorPool: RectPool
+  private readonly foldPool: RectPool
 
   private highlighter: Highlighter
   private heights: HeightMap
@@ -200,6 +230,13 @@ export class EditorView {
   readonly find: FindController
   readonly review: ReviewController
   readonly snippet: SnippetController
+  readonly folding: FoldController
+  readonly sticky: StickyController
+  readonly minimap: MinimapController
+  /** Goes up whenever a decoration source is set or follows an edit, so the minimap knows to draw again. */
+  decorationsVersion = 0
+  private minimapWidth = 0
+  private tokenCache = new Map<number, { base: readonly number[]; brackets: readonly number[]; tokens: readonly number[] }>()
 
   constructor(config: EditorViewConfig) {
     this.state = config.state
@@ -212,6 +249,10 @@ export class EditorView {
       cursorBlink: config.cursorBlink ?? true,
       ligatures: config.ligatures ?? false,
       ariaLabel: config.ariaLabel ?? 'Editor',
+      folding: config.folding ?? true,
+      stickyScroll: config.stickyScroll ?? false,
+      bracketColors: config.bracketColors ?? false,
+      minimap: config.minimap ?? false,
     }
     this.mac = isMac(config.platform ?? (typeof navigator === 'undefined' ? '' : navigator.platform))
     this.bindings = [...(config.bindings ?? []), ...defaultBindings]
@@ -239,6 +280,7 @@ export class EditorView {
     const marks = make('div', 'enc-marks', this.layer)
     const selection = make('div', 'enc-selection', this.layer)
     this.linesEl = make('div', 'enc-lines', this.layer)
+    const folds = make('div', 'enc-folds', this.layer)
     this.zonesEl = make('div', 'enc-zones', this.layer)
     this.cursorsEl = make('div', 'enc-cursors', this.layer)
     this.textarea = make('textarea', 'enc-input', this.layer)
@@ -252,6 +294,7 @@ export class EditorView {
     this.marksPool = new RectPool(marks, 'enc-rect')
     this.selectionPool = new RectPool(selection, 'enc-rect enc-selection-rect')
     this.cursorPool = new RectPool(this.cursorsEl, 'enc-cursor')
+    this.foldPool = new RectPool(folds, 'enc-fold-pill')
 
     this.root.dataset.encEditor = ''
     this.scroller.tabIndex = -1
@@ -265,6 +308,7 @@ export class EditorView {
     this.root.classList.toggle('enc-ligatures', this.options.ligatures)
     this.root.classList.toggle('enc-readonly', this.state.config.readOnly)
     this.root.classList.toggle('enc-no-numbers', !this.options.lineNumbers)
+    this.root.classList.toggle('enc-folding', this.options.folding)
     this.root.style.setProperty('--enc-tab-size', String(this.state.config.tabSize))
 
     this.input = new InputHandler(this)
@@ -272,6 +316,9 @@ export class EditorView {
     this.find = new FindController(this)
     this.review = new ReviewController(this)
     this.snippet = new SnippetController(this)
+    this.folding = new FoldController(this)
+    this.sticky = new StickyController(this)
+    this.minimap = new MinimapController(this)
 
     this.listen(this.scroller, 'scroll', () => this.onScroll(), { passive: true })
     this.listen(this.scroller, 'wheel', (event) => this.onWheel(event), { passive: false })
@@ -348,10 +395,15 @@ export class EditorView {
     this.state = tr.state
     if (tr.docChanged) {
       this.highlighter.update(tr.changes, tr.state.doc)
+      this.folding.documentChanged(tr.changes, before.doc, tr.state.doc)
       this.mapAfterChange(tr.changes)
     }
+    // A cursor that reached into a folded block (a search, an undo, Go to line) opens it.
+    if (tr.docChanged || tr.selectionChanged) for (const range of tr.state.selection.ranges) this.folding.reveal(range.head)
     if (tr.state.config.language !== before.config.language) {
       this.highlighter.setTokenizer(tr.state.config.language.tokenizer)
+      this.highlighter.setBrackets(this.options.bracketColors ? tr.state.config.language.brackets : null)
+      this.tokenCache.clear()
     }
     if (tr.state.config.readOnly !== before.config.readOnly) this.root.classList.toggle('enc-readonly', tr.state.config.readOnly)
     if (tr.state.config.tabSize !== before.config.tabSize) this.root.style.setProperty('--enc-tab-size', String(tr.state.config.tabSize))
@@ -379,6 +431,9 @@ export class EditorView {
     this.find.stateReplaced()
     this.review.stateReplaced()
     this.snippet.stateReplaced()
+    this.folding.stateReplaced()
+    this.sticky.stateReplaced()
+    this.tokenCache.clear()
     this.pendingReveal = null
     this.pendingScroll = scroll ?? null
     if (!scroll) {
@@ -396,7 +451,26 @@ export class EditorView {
   private createHighlighter(): Highlighter {
     const highlighter = new Highlighter(this.state.config.language.tokenizer, this.state.doc)
     highlighter.onError = (error) => console.warn('Tokenizer failed on a line; it is shown as plain text.', error)
+    if (this.options?.bracketColors) highlighter.setBrackets(this.state.config.language.brackets)
     return highlighter
+  }
+
+  /**
+   * The tokens line `n` is drawn with: the highlighter's, with each bracket coloured by depth when that is on. Shared
+   * by the text, the pinned lines and the minimap.
+   * @internal
+   */
+  lineTokens(n: number): { tokens: readonly number[]; exact: boolean } {
+    const highlighted = this.highlighter.line(n)
+    if (!this.options.bracketColors) return highlighted
+    const { brackets, exact } = this.highlighter.brackets(n)
+    if (!brackets.length) return { tokens: highlighted.tokens, exact: highlighted.exact && exact }
+    const cached = this.tokenCache.get(n)
+    if (cached && cached.base === highlighted.tokens && cached.brackets === brackets) return { tokens: cached.tokens, exact: highlighted.exact && exact }
+    const tokens = withBrackets(highlighted.tokens, brackets, this.state.doc.line(n).text.length)
+    if (this.tokenCache.size >= 4000) this.tokenCache.clear()
+    this.tokenCache.set(n, { base: highlighted.tokens, brackets, tokens })
+    return { tokens, exact: highlighted.exact && exact }
   }
 
   /** Runs a command by name; false when it does not exist or did not apply. */
@@ -410,9 +484,17 @@ export class EditorView {
   }
 
   setOptions(options: Partial<Options>): void {
+    if (options.folding === false && this.options.folding) this.folding.unfoldAll()
+    const brackets = options.bracketColors !== undefined && options.bracketColors !== this.options.bracketColors
     Object.assign(this.options, options)
+    if (brackets) {
+      this.highlighter.setBrackets(this.options.bracketColors ? this.state.config.language.brackets : null)
+      this.tokenCache.clear()
+      this.scheduleIdleWork()
+    }
     this.root.classList.toggle('enc-ligatures', this.options.ligatures)
     this.root.classList.toggle('enc-no-numbers', !this.options.lineNumbers)
+    this.root.classList.toggle('enc-folding', this.options.folding)
     this.restartBlink()
     this.requestRender()
   }
@@ -423,7 +505,18 @@ export class EditorView {
   setSource(key: string, source: DecorationSource | null): void {
     if (source) this.sources.set(key, source)
     else this.sources.delete(key)
+    this.decorationsVersion++
     this.requestRender()
+  }
+
+  /** The line backgrounds every source paints in lines `from`..`to`. @internal */
+  collectLines(from: number, to: number, out: LineSpec[]): void {
+    for (const source of this.sources.values()) source.lines?.(this.state.doc, from, to, out)
+  }
+
+  /** The marks every source has between offsets `from` and `to`. @internal */
+  collectMarks(from: number, to: number, out: MarkSpec[]): void {
+    for (const source of this.sources.values()) source.marks?.(this.state.doc, from, to, out)
   }
 
   /** Replaces the zones of `owner`: blocks of height between lines, such as the removed lines of a review hunk. */
@@ -451,6 +544,7 @@ export class EditorView {
 
   private mapAfterChange(changes: ChangeSet): void {
     const doc = this.state.doc
+    this.decorationsVersion++
     for (const [key, source] of [...this.sources]) {
       if (!source.map) continue
       const mapped = source.map(changes, doc)
@@ -563,6 +657,10 @@ export class EditorView {
     if (vertical && this.scale.scaled) this.placeLayers()
     if (sideways) this.placeFixedZones()
     if (!this.coversViewport() || (scrollLeft !== 0 && this.hasLongLines())) this.render()
+    else {
+      this.sticky.update()
+      this.minimap.update(this.minimapWidth)
+    }
     this.emit('viewport')
   }
 
@@ -613,8 +711,10 @@ export class EditorView {
     const doc = this.state.doc
 
     // Layout: heights, the scroll scale, the gutter and the scrollable size.
+    const hidden = this.hiddenLines()
+    const isHidden = (line: number) => hidden.some((range) => range.from <= line && line <= range.to)
     const zoneList: Zone[] = this.zones
-      .slice()
+      .filter((entry) => !hidden.length || !isHidden(entry.after))
       .sort((a, b) => a.after - b.after)
       .map((entry) => ({ id: entry.id, after: entry.after, height: entry.zone.height }))
     const padBottom = this.options.scrollBeyondEnd ? Math.max(0, viewportHeight - lineHeight * 2) : 0
@@ -622,14 +722,18 @@ export class EditorView {
       this.heights.lineHeight !== lineHeight ||
       this.heights.lineCount !== doc.lineCount ||
       this.heights.padBottom !== padBottom ||
-      !sameZones(this.heights.zoneList, zoneList)
+      !sameZones(this.heights.zoneList, zoneList) ||
+      !sameHidden(this.heights.hidden, hidden)
     ) {
-      this.heights = new HeightMap(lineHeight, doc.lineCount, zoneList, padBottom)
+      this.heights = new HeightMap(lineHeight, doc.lineCount, zoneList, padBottom, hidden)
     }
     this.scale = new ScrollScale(this.heights.totalHeight, viewportHeight)
     const digits = Math.max(3, String(doc.lineCount).length)
-    const gutterWidth = this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12
-    const textWidth = this.metrics.paddingX * 2 + this.maxCols * charWidth
+    const foldColumn = this.options.folding ? FOLD_COLUMN : 0
+    const gutterWidth = (this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12) + foldColumn
+    this.minimapWidth = this.minimap.widthFor(viewportWidth, gutterWidth)
+    // The minimap sits over the right of the text area: the longest line can scroll clear of it.
+    const textWidth = this.metrics.paddingX * 2 + this.maxCols * charWidth + this.minimapWidth
     const contentWidth = Math.min(MAX_CONTENT_WIDTH, Math.max(viewportWidth - gutterWidth, Math.ceil(textWidth)))
     if (gutterWidth !== this.gutterWidth) {
       this.gutterWidth = gutterWidth
@@ -671,6 +775,18 @@ export class EditorView {
     this.rendered = { first, last }
     this.drawLayers(first, last)
     this.input.positionTextarea()
+    this.sticky.update()
+    this.minimap.update(this.minimapWidth)
+  }
+
+  /** The lines folded away, as the heights should lay them out. */
+  private hiddenLines(): readonly HiddenLines[] {
+    return this.options.folding ? this.folding.hidden() : []
+  }
+
+  /** Whether line `n` is folded away in the current layout. */
+  isLineHidden(n: number): boolean {
+    return this.heights.isHidden(n)
   }
 
   /** Puts the layers where the scroll position needs them (they move with it only when the height is scaled). */
@@ -687,9 +803,10 @@ export class EditorView {
     const doc = this.state.doc
     const { charWidth } = this.metrics
     const tabSize = this.state.config.tabSize
-    // Release what scrolled out of range.
+    const heights = this.heights
+    // Release what scrolled out of range or was folded away.
     for (const [number, el] of this.lineEls) {
-      if (number < first || number > last) {
+      if (number < first || number > last || heights.isHidden(number)) {
         this.release(el)
         this.lineEls.delete(number)
       }
@@ -697,9 +814,9 @@ export class EditorView {
     const active = this.activeLines()
     let widest = this.maxCols
     const unmeasured: LineEl[] = []
-    for (let number = first; number <= last; number++) {
+    for (let number = heights.nextVisible(first); number <= last; number = heights.nextVisible(number + 1)) {
       const info = doc.line(number)
-      const highlighted = this.highlighter.line(number)
+      const highlighted = this.lineTokens(number)
       let el = this.lineEls.get(number)
       if (!el) {
         el = this.acquire()
@@ -755,9 +872,11 @@ export class EditorView {
     for (const source of this.sources.values()) source.gutter?.(doc, first, last, gutterSpecs)
     const gutterClasses = new Map<number, string>()
     for (const spec of gutterSpecs) gutterClasses.set(spec.line, `${gutterClasses.get(spec.line) ?? ''} ${spec.className}`)
+    const folding = this.options.folding
     for (const [number, el] of this.lineEls) {
       if (!el.number) continue
-      const name = `enc-gutter-num${active.has(number) ? ' enc-active' : ''}${gutterClasses.get(number) ?? ''}`
+      const fold = !folding ? '' : this.folding.isFolded(number) ? ' enc-fold-closed' : this.folding.startsAt(number) ? ' enc-fold-open' : ''
+      const name = `enc-gutter-num${active.has(number) ? ' enc-active' : ''}${fold}${gutterClasses.get(number) ?? ''}`
       if (el.number.className !== name) el.number.className = name
     }
     if (widest > this.maxCols) this.growWidth(widest)
@@ -766,7 +885,10 @@ export class EditorView {
   /** Makes the scrollable area wide enough for `cols` columns. */
   private growWidth(cols: number): void {
     this.maxCols = cols
-    const width = Math.min(MAX_CONTENT_WIDTH, Math.max(this.viewport.width - this.gutterWidth, Math.ceil(this.metrics.paddingX * 2 + cols * this.metrics.charWidth)))
+    const width = Math.min(
+      MAX_CONTENT_WIDTH,
+      Math.max(this.viewport.width - this.gutterWidth, Math.ceil(this.metrics.paddingX * 2 + cols * this.metrics.charWidth + this.minimapWidth)),
+    )
     if (width !== this.contentWidth) {
       this.contentWidth = width
       this.sizer.style.width = `${this.gutterWidth + width}px`
@@ -829,7 +951,7 @@ export class EditorView {
     for (const zone of this.attachedZones) {
       if (!zone.fixed) continue
       zone.dom.style.left = `${this.scroller.scrollLeft}px`
-      zone.dom.style.width = `${Math.max(0, this.scroller.clientWidth - this.gutterWidth)}px`
+      zone.dom.style.width = `${Math.max(0, this.scroller.clientWidth - this.gutterWidth - this.minimapWidth)}px`
     }
   }
 
@@ -856,15 +978,31 @@ export class EditorView {
         if (range.empty || doc.lineAt(range.from).number === doc.lineAt(range.to).number) lines.add(doc.lineAt(range.head).number)
       }
       for (const number of lines) {
-        if (number < first || number > last) continue
+        if (number < first || number > last || this.heights.isHidden(number)) continue
         this.backgrounds.rect('enc-line-active', 0, this.heights.top(number) - this.origin, fullWidth, lineHeight)
       }
     }
     if (this.options.indentGuides) this.drawGuides(first, last)
     const lineSpecs: LineSpec[] = []
     for (const source of this.sources.values()) source.lines?.(doc, first, last, lineSpecs)
-    for (const spec of lineSpecs) this.backgrounds.rect(spec.className, 0, this.heights.top(spec.line) - this.origin, fullWidth, lineHeight)
+    for (const spec of lineSpecs) {
+      if (this.heights.isHidden(spec.line)) continue
+      this.backgrounds.rect(spec.className, 0, this.heights.top(spec.line) - this.origin, fullWidth, lineHeight)
+    }
     this.backgrounds.end()
+
+    // A folded block's first line ends with a marker that opens it.
+    this.foldPool.begin()
+    if (this.options.folding) {
+      for (const range of this.heights.hidden) {
+        const header = range.from - 1
+        if (header < first || header > last || header < 1) continue
+        const line = doc.line(header)
+        const el = this.foldPool.rect('', this.xOf(line, line.text.length) + charWidth * 0.6, this.heights.top(header) - this.origin + 3, charWidth * 3, lineHeight - 6)
+        el.dataset.line = String(header)
+      }
+    }
+    this.foldPool.end()
 
     // Marks behind the text.
     this.marksPool.begin()
@@ -895,7 +1033,7 @@ export class EditorView {
     if (this.focused || this.input.composing) {
       selection.ranges.forEach((range, index) => {
         const line = doc.lineAt(range.head)
-        if (line.number < first || line.number > last) return
+        if (line.number < first || line.number > last || this.heights.isHidden(line.number)) return
         const x = this.xOf(line, range.head - line.from)
         const top = this.heights.top(line.number) - this.origin
         const main = index === selection.mainIndex ? ' enc-cursor-main' : ''
@@ -913,8 +1051,9 @@ export class EditorView {
     const { lineHeight, charWidth } = this.metrics
     const startLine = Math.max(first, doc.lineAt(from).number)
     const endLine = Math.min(last, doc.lineAt(to).number)
+    const heights = this.heights
     let drawn = 0
-    for (let number = startLine; number <= endLine && drawn < limit; number++) {
+    for (let number = heights.nextVisible(startLine); number <= endLine && drawn < limit; number = heights.nextVisible(number + 1)) {
       const line = doc.line(number)
       const start = Math.max(from, line.from) - line.from
       const end = Math.min(to, line.to) - line.from
@@ -946,7 +1085,7 @@ export class EditorView {
       }
       return known
     }
-    for (let number = first; number <= last; number++) {
+    for (let number = this.heights.nextVisible(first); number <= last; number = this.heights.nextVisible(number + 1)) {
       let width = indentOf(number)
       if (width < 0) {
         // A blank line carries the guides common to the code around it.
@@ -1076,6 +1215,11 @@ export class EditorView {
     return line.from + this.offsetAtX(line, x)
   }
 
+  /** The client x of the gutter's right edge. */
+  gutterRight(): number {
+    return this.gutter.getBoundingClientRect().right
+  }
+
   /** The line (1-based) at a client y. */
   lineAtClientY(clientY: number): number {
     const scrollerRect = this.scroller.getBoundingClientRect()
@@ -1110,10 +1254,55 @@ export class EditorView {
     return Math.max(1, Math.floor(this.viewport.height / this.metrics.lineHeight))
   }
 
+  /** The layout of the lines, zones and folds as last drawn. @internal */
+  get heightMap(): HeightMap {
+    return this.heights
+  }
+
+  /** The document offset (in layout pixels) at the top of the view. */
+  get scrollTopInDoc(): number {
+    return this.scale.toDoc(this.scroller.scrollTop)
+  }
+
+  get viewportHeight(): number {
+    return this.viewport.height
+  }
+
+  /** The gutter's width in pixels. */
+  get gutterWidthPx(): number {
+    return this.gutterWidth
+  }
+
+  /** The width of the text that shows, between the gutter and the minimap. */
+  get textAreaWidth(): number {
+    return Math.max(0, this.scroller.clientWidth - this.gutterWidth - this.minimapWidth)
+  }
+
+  /** How far the highlighter has read with known states: the minimap draws again as it goes. @internal */
+  get highlightFrontier(): number {
+    return this.highlighter.frontier
+  }
+
+  /** The line that shows at layout offset `y`. */
+  lineAtDocY(y: number): number {
+    return this.heights.lineAt(y)
+  }
+
+  /** The top of line `n` in layout pixels. */
+  lineTop(n: number): number {
+    return this.heights.top(n)
+  }
+
+  /** Scrolls so layout offset `y` is at the top of the view. */
+  scrollToDocY(y: number): void {
+    this.scroller.scrollTop = Math.max(0, this.scale.toScroll(y))
+  }
+
   // ----------------------------------------------------------------- scrolling
 
-  /** Scrolls so `pos` is on screen; `center` puts it in the middle when it was not visible. */
+  /** Scrolls so `pos` is on screen, opening a folded block it is in; `center` puts it in the middle when it was not visible. */
   scrollToPos(pos: number, center = false): void {
+    this.folding.reveal(pos)
     this.pendingReveal = { pos, center }
     this.requestRender()
   }
@@ -1139,10 +1328,12 @@ export class EditorView {
     const height = this.viewport.height
     const lineTop = this.heights.top(line.number)
     const marginY = Math.min(lineHeight * 3, Math.max(0, (height - lineHeight) / 2))
+    // Lines pinned at the top cover the text under them: a line revealed upward stops below them.
+    const pinned = Math.min(this.sticky.height, Math.max(0, height / 3))
     let target = view
-    if (request.center && (lineTop < view || lineTop + lineHeight > view + height)) {
+    if (request.center && (lineTop < view + pinned || lineTop + lineHeight > view + height)) {
       target = lineTop - (height - lineHeight) / 2
-    } else if (lineTop - marginY < view) target = lineTop - marginY
+    } else if (lineTop - marginY - pinned < view) target = lineTop - marginY - pinned
     else if (lineTop + lineHeight + marginY > view + height) target = lineTop + lineHeight + marginY - height
     if (target !== view) this.scroller.scrollTop = Math.max(0, this.scale.toScroll(target))
 
@@ -1150,7 +1341,7 @@ export class EditorView {
     const cols = columnAt(line.text, line.text.length, this.state.config.tabSize)
     if (cols > this.maxCols) this.growWidth(cols)
     const x = this.metrics.paddingX + columnAt(line.text, pos - line.from, this.state.config.tabSize) * charWidth
-    const visible = this.viewport.width - this.gutterWidth
+    const visible = this.viewport.width - this.gutterWidth - this.minimapWidth
     const marginX = Math.min(charWidth * 6, visible / 4)
     const left = this.scroller.scrollLeft
     if (x - marginX < left) this.scroller.scrollLeft = Math.max(0, x - marginX)
@@ -1216,6 +1407,8 @@ export class EditorView {
     this.find.destroy()
     this.review.destroy()
     this.pointer.destroy()
+    this.sticky.destroy()
+    this.minimap.destroy()
     for (const dispose of this.disposers.splice(0)) dispose()
     for (const entry of this.zones) this.detachZone(entry.zone)
     this.root.remove()

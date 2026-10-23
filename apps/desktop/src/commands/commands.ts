@@ -4,6 +4,7 @@
  * build them without Electron).
  */
 import type { SessionSummary, ZoomAction } from '@shared/types'
+import type { EditorPart } from '../stores/editor-layout'
 import type { Command } from './registry'
 
 export const GROUPS = ['File', 'Edit', 'View', 'Go', 'Session', 'Help'] as const
@@ -29,9 +30,9 @@ export interface AppActions {
   hasEditor(): boolean
   /** Runs one of the code editor's commands, as its key would. */
   editorCommand(name: string): void
-  /** Which of the editor's breadcrumbs and outline are shown. */
-  editorLayout(): { breadcrumbs: boolean; outline: boolean }
-  toggleEditorPart(part: 'breadcrumbs' | 'outline'): void
+  /** Which of the editor's parts are on: the breadcrumbs, the outline, folding, sticky scroll, bracket colours, the minimap. */
+  editorLayout(): Record<EditorPart, boolean>
+  toggleEditorPart(part: EditorPart): void
   /** The keyboard to the breadcrumbs, shown first if they were hidden. */
   focusBreadcrumbs(): void
   searchInFiles(): void
@@ -126,6 +127,11 @@ function editorCommands(a: AppActions): Command[] {
     enabled: () => a.hasEditor(),
     run: () => a.editorCommand(name),
   })
+  // Folding commands, in the View menu as the editor's own keys: they act only while folding is on.
+  const fold = (name: string, title: string, hint: string | undefined, keywords: string): Command => ({
+    ...command(name, title, name, hint, keywords, 'View'),
+    enabled: () => a.hasEditor() && a.editorLayout().folding,
+  })
   return [
     command('rename', 'Rename symbol', 'renameSymbol', 'F2', 'code refactor rename across files', 'Edit'),
     command('quickFix', 'Quick fix…', 'quickFix', 'Ctrl+.', 'code action lightbulb fix error problem', 'Edit'),
@@ -147,6 +153,22 @@ function editorCommands(a: AppActions): Command[] {
     command('parameterHints', 'Show parameter hints', 'triggerParameterHints', 'Ctrl+Shift+Space', 'code signature arguments call'),
     command('navigateBack', 'Go back in the editor', 'navigateBack', 'Alt+Left', 'code navigate previous location'),
     command('navigateForward', 'Go forward in the editor', 'navigateForward', 'Alt+Right', 'code navigate next location'),
+    fold('fold', 'Fold', 'Ctrl+Shift+[', 'code collapse block region hide'),
+    fold('unfold', 'Unfold', 'Ctrl+Shift+]', 'code expand block region show'),
+    fold('foldAll', 'Fold all', 'Ctrl+Alt+[', 'code collapse every block'),
+    fold('unfoldAll', 'Unfold all', 'Ctrl+Alt+]', 'code expand every block'),
+    ...(
+      [
+        ['toggleFold', 'Toggle fold', 'code collapse expand block'],
+        ['foldRecursively', 'Fold recursively', 'code collapse block and every block in it'],
+        ['unfoldRecursively', 'Unfold recursively', 'code expand block and every block in it'],
+        ['foldAllComments', 'Fold all block comments', 'code collapse comments docs'],
+        ['foldAllRegions', 'Fold all regions', 'code collapse #region markers'],
+        ['unfoldAllRegions', 'Unfold all regions', 'code expand #region markers'],
+        ['foldImports', 'Fold imports', 'code collapse import require using'],
+        ...[1, 2, 3, 4, 5, 6, 7].map((level) => [`foldLevel${level}`, `Fold level ${level}`, `code collapse depth nesting ${level}`]),
+      ] as const
+    ).map(([name, title, keywords]): Command => ({ ...fold(name, title, undefined, keywords), menu: false })),
     {
       id: 'editor.goToSymbol',
       title: 'Go to symbol in file…',
@@ -258,6 +280,38 @@ export function buildCommands(a: AppActions): Command[] {
       group: 'View',
       keywords: 'editor symbols structure tree functions classes',
       run: () => a.toggleEditorPart('outline'),
+    },
+    {
+      id: 'view.folding',
+      title: 'Toggle folding',
+      label: () => (a.editorLayout().folding ? 'Turn folding off' : 'Turn folding on'),
+      group: 'View',
+      keywords: 'editor fold collapse blocks gutter chevrons',
+      run: () => a.toggleEditorPart('folding'),
+    },
+    {
+      id: 'view.stickyScroll',
+      title: 'Toggle sticky scroll',
+      label: () => (a.editorLayout().stickyScroll ? 'Hide sticky scroll' : 'Show sticky scroll'),
+      group: 'View',
+      keywords: 'editor pinned headers scope class function lines top',
+      run: () => a.toggleEditorPart('stickyScroll'),
+    },
+    {
+      id: 'view.bracketColors',
+      title: 'Toggle bracket colours',
+      label: () => (a.editorLayout().bracketColors ? 'Turn bracket colours off' : 'Turn bracket colours on'),
+      group: 'View',
+      keywords: 'editor bracket pair colorization rainbow nesting colors',
+      run: () => a.toggleEditorPart('bracketColors'),
+    },
+    {
+      id: 'view.minimap',
+      title: 'Toggle minimap',
+      label: () => (a.editorLayout().minimap ? 'Hide minimap' : 'Show minimap'),
+      group: 'View',
+      keywords: 'editor overview map scrollbar picture of the file',
+      run: () => a.toggleEditorPart('minimap'),
     },
     { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },

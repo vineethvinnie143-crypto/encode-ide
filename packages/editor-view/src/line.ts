@@ -3,6 +3,56 @@ import { TOKEN_NAMES, T } from '@encode/editor'
 /** The class a token kind is drawn with. */
 export const TOKEN_CLASSES: readonly string[] = TOKEN_NAMES.map((name) => `tok-${name}`)
 
+/**
+ * A token kind as the view draws it carries more than the kind in its low 8 bits: bits 8 to 10 hold a bracket's colour
+ * (1 to 3 by depth, 7 for a closer with no opener).
+ */
+export const KIND_MASK = 0xff
+export const BRACKET_SHIFT = 8
+const BRACKET_STRAY = 7
+/** Bracket colours cycle through this many. */
+export const BRACKET_COLORS = 3
+
+const classes = new Map<number, string>()
+
+/** The classes a drawn token kind gets: its kind's, and its bracket colour's. */
+export function tokenClass(kind: number): string {
+  if (kind <= KIND_MASK) return TOKEN_CLASSES[kind] ?? 'tok-plain'
+  let name = classes.get(kind)
+  if (name === undefined) {
+    const base = TOKEN_CLASSES[kind & KIND_MASK] ?? 'tok-plain'
+    const bracket = (kind >> BRACKET_SHIFT) & 7
+    name = bracket ? `${base} enc-bracket-${bracket === BRACKET_STRAY ? 'stray' : bracket}` : base
+    classes.set(kind, name)
+  }
+  return name
+}
+
+/** A line's tokens with each bracket made a token of its own carrying its colour, from the highlighter's [offset, depth] pairs. */
+export function withBrackets(tokens: readonly number[], brackets: readonly number[], length: number): readonly number[] {
+  if (!brackets.length) return tokens
+  const source = !tokens.length || tokens[0] > 0 ? [0, T.plain, ...tokens] : tokens
+  const out: number[] = []
+  let next = 0
+  for (let index = 0; index < source.length; index += 2) {
+    const kind = source[index + 1]
+    const end = index + 2 < source.length ? source[index + 2] : length
+    let at = source[index]
+    while (next < brackets.length && brackets[next] < end) {
+      const offset = brackets[next]
+      const depth = brackets[next + 1]
+      next += 2
+      if (offset < at) continue
+      if (offset > at) out.push(at, kind)
+      const colour = depth < 0 ? BRACKET_STRAY : (depth % BRACKET_COLORS) + 1
+      out.push(offset, (kind & KIND_MASK) | (colour << BRACKET_SHIFT))
+      at = offset + 1
+    }
+    if (at < end) out.push(at, kind)
+  }
+  return out
+}
+
 /** A regular expression character class from inclusive code point pairs, so the source holds no hidden characters. */
 function characterClass(...pairs: number[]): string {
   let body = ''
@@ -127,7 +177,7 @@ export function fillLine(
       nodes.push(document.createTextNode(piece))
     } else {
       const span = document.createElement('span')
-      const name = TOKEN_CLASSES[kind] ?? 'tok-plain'
+      const name = tokenClass(kind)
       span.className = marked ? `${name} enc-zone-mark` : name
       span.textContent = piece
       nodes.push(span)

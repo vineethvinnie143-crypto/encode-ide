@@ -10,11 +10,12 @@ import { setActiveEditor } from '../editor/active'
 import { askServers, forgetTriggers, lspAt } from '../editor/assist/ask'
 import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
+import { EditorFolding } from '../editor/assist/folding'
 import { markupHtml } from '../editor/assist/markup'
 import { goBack, goForward, goToLocation, withOpenText, type Place } from '../editor/assist/navigation'
 import { EditorOutline } from '../editor/assist/outline'
 import { EditorRefactor } from '../editor/assist/refactor'
-import { attach, docState, indentLabel, recordState, saveScroll, scrollOf } from '../editor/docs'
+import { attach, docState, foldsOf, indentLabel, recordState, saveFolds, saveScroll, scrollOf } from '../editor/docs'
 import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
@@ -60,6 +61,17 @@ function parseLocation(text: string, state: EditorState): number | null {
 const outlineWanted = (): boolean => {
   const layout = useEditorLayout.getState()
   return layout.breadcrumbs || layout.outline || useUi.getState().quickOpenOpen
+}
+
+/** What the editor's text shows, as the View menu set it. */
+const viewOptions = () => {
+  const { folding, stickyScroll, bracketColors, minimap } = useEditorLayout.getState()
+  return { folding, stickyScroll, bracketColors, minimap }
+}
+
+/** The blocks folded in the file a view shows, kept to fold them again when the file is shown next. */
+function keepFolds(view: EditorView, shown: string): void {
+  saveFolds(shown, view.state.doc, view.folding.folded)
 }
 
 /** The keys to the editor after a jump, unless a dialog opened meanwhile (Go to file, the palette): it keeps them. */
@@ -172,6 +184,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const assistRef = useRef<EditorAssist | null>(null)
   const refactorRef = useRef<EditorRefactor | null>(null)
   const outlineRef = useRef<EditorOutline | null>(null)
+  const foldingRef = useRef<EditorFolding | null>(null)
   /** The problem F8 went to, whose message shows once the editor is there. */
   const problemCard = useRef<{ path: string; line: number; character: number } | null>(null)
   const pathRef = useRef<string | null>(null)
@@ -211,6 +224,22 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     return () => stops.forEach((stop) => stop())
   }, [])
 
+  // Folding, sticky scroll, bracket colours or the minimap turned on or off; folding back on asks the server again.
+  useEffect(
+    () =>
+      useEditorLayout.subscribe(() => {
+        const current = viewRef.current
+        if (!current) return
+        const next = viewOptions()
+        const was = current.options
+        if (next.folding === was.folding && next.stickyScroll === was.stickyScroll && next.bracketColors === was.bracketColors && next.minimap === was.minimap) return
+        const foldingOn = next.folding && !was.folding
+        current.setOptions(next)
+        if (foldingOn) foldingRef.current?.wake()
+      }),
+    [],
+  )
+
   // A server started or stopped: what typing asks of it may have changed.
   useEffect(
     () =>
@@ -223,7 +252,12 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
 
   useEffect(
     () => () => {
-      if (pathRef.current) attach(pathRef.current, null)
+      if (pathRef.current) {
+        if (viewRef.current) keepFolds(viewRef.current, pathRef.current)
+        attach(pathRef.current, null)
+      }
+      foldingRef.current?.dispose()
+      foldingRef.current = null
       assistRef.current?.dispose()
       assistRef.current = null
       refactorRef.current?.dispose()
@@ -359,7 +393,10 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     const host = hostRef.current
     if (!host) return
     const previous = pathRef.current
-    if (previous) attach(previous, null)
+    if (previous) {
+      if (viewRef.current) keepFolds(viewRef.current, previous)
+      attach(previous, null)
+    }
     const state = path ? docState(path) : undefined
     pathRef.current = state ? path : null
     let current = viewRef.current
@@ -372,13 +409,14 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       assistRef.current?.show(null)
       refactorRef.current?.show(null)
       outlineRef.current?.show(null)
+      foldingRef.current?.show(null)
       return
     }
     if (current) {
       current.setState(state, scrollOf(path!) ?? undefined)
     } else {
       const routed = Object.fromEntries(Object.keys(commandsRef.current).map((name) => [name, (target: EditorView) => commandsRef.current[name](target)]))
-      current = new EditorView({ state, parent: host, ariaLabel: 'Code editor', bindings: BINDINGS, commands: routed })
+      current = new EditorView({ state, parent: host, ariaLabel: 'Code editor', bindings: BINDINGS, commands: routed, ...viewOptions() })
       const created = current
       viewRef.current = created
       setView(created)
@@ -386,6 +424,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       assistRef.current = new EditorAssist(created, { formatOnType: () => useSettings.getState().settings?.formatOnType === true })
       refactorRef.current = new EditorRefactor(created)
       outlineRef.current = new EditorOutline(created, outlineWanted)
+      foldingRef.current = new EditorFolding(created, () => useEditorLayout.getState().folding)
       const scroll = scrollOf(path!)
       if (scroll) created.setState(state, scroll)
       created.on('transaction', (tr) => {
@@ -398,6 +437,10 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
         // Hidden, the scroll position reads as zero.
         const shown = pathRef.current
         if (shown && created.root.clientHeight > 0) saveScroll(shown, created.saveScroll())
+      })
+      created.on('folds', () => {
+        const shown = pathRef.current
+        if (shown) keepFolds(created, shown)
       })
       created.on('contextmenu', ({ x, y }) => setMenu({ x, y }))
       created.on('request', (name) => {
@@ -417,9 +460,13 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       })
     }
     attach(path!, current)
+    // What was folded when the file was last shown is folded again, before the scroll it was left at is applied.
+    const folds = foldsOf(path!)
+    if (folds.length) current.folding.restore(folds)
     assistRef.current?.show(path)
     refactorRef.current?.show(path)
     outlineRef.current?.show(path)
+    foldingRef.current?.show(path)
     showMarks(current, path)
     reportCursor(state)
     reportInfo(state)

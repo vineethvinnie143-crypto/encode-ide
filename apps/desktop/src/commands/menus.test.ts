@@ -8,9 +8,10 @@ import { MENUS, menuEntries } from './menus'
 import { CommandRegistry } from './registry'
 
 const none = () => undefined
+const LAYOUT = { breadcrumbs: true, outline: false, folding: true, stickyScroll: true, bracketColors: true, minimap: true }
 /** Actions that do nothing, and answer the questions about state with "no". */
 function actions(patch: Partial<AppActions> = {}): AppActions {
-  const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, editorLayout: () => ({ breadcrumbs: true, outline: false }), ...patch }
+  const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, editorLayout: () => LAYOUT, ...patch }
   return new Proxy(base as AppActions, { get: (target, name) => (name in target ? target[name as keyof AppActions] : none) })
 }
 function registryWith(patch: Partial<AppActions> = {}): CommandRegistry {
@@ -154,7 +155,7 @@ describe('menus', () => {
   it('list every command that is not hidden', () => {
     const listed = new Set(MENUS.flatMap((menu) => menu.items))
     for (const command of registry.all()) {
-      if (!command.hidden) assert.ok(listed.has(command.id), `${command.id} is in no menu`)
+      if (!command.hidden && command.menu !== false) assert.ok(listed.has(command.id), `${command.id} is in no menu`)
     }
   })
 
@@ -181,10 +182,10 @@ describe('menus', () => {
   })
 
   it('say Show or Hide for the breadcrumbs and the outline, and open Go to file on symbols', () => {
-    const shown = registryWith({ editorLayout: () => ({ breadcrumbs: true, outline: false }) })
+    const shown = registryWith({ editorLayout: () => LAYOUT })
     assert.equal(shown.titleOf('view.breadcrumbs'), 'Hide breadcrumbs')
     assert.equal(shown.titleOf('view.outline'), 'Show outline')
-    const hidden = registryWith({ editorLayout: () => ({ breadcrumbs: false, outline: true }) })
+    const hidden = registryWith({ editorLayout: () => ({ ...LAYOUT, breadcrumbs: false, outline: true }) })
     assert.equal(hidden.titleOf('view.breadcrumbs'), 'Show breadcrumbs')
     assert.equal(hidden.titleOf('view.outline'), 'Hide outline')
     const asked: (string | undefined)[] = []
@@ -197,6 +198,35 @@ describe('menus', () => {
     assert.equal(live.shortcut('editor.goToFolderSymbol'), 'Ctrl+Alt+T')
     assert.equal(live.shortcut('editor.focusBreadcrumbs'), 'Ctrl+Shift+.')
     assert.equal(live.shortcut('editor.callHierarchy'), 'Shift+Alt+H')
+  })
+
+  it('turn folding, sticky scroll, bracket colours and the minimap on and off, and fold only while folding is on', () => {
+    const on = registryWith({ hasEditor: () => true })
+    assert.equal(on.titleOf('view.folding'), 'Turn folding off')
+    assert.equal(on.titleOf('view.stickyScroll'), 'Hide sticky scroll')
+    assert.equal(on.titleOf('view.bracketColors'), 'Turn bracket colours off')
+    assert.equal(on.titleOf('view.minimap'), 'Hide minimap')
+    const off = registryWith({ hasEditor: () => true, editorLayout: () => ({ ...LAYOUT, folding: false, stickyScroll: false, bracketColors: false, minimap: false }) })
+    assert.equal(off.titleOf('view.folding'), 'Turn folding on')
+    assert.equal(off.titleOf('view.stickyScroll'), 'Show sticky scroll')
+    assert.equal(off.titleOf('view.bracketColors'), 'Turn bracket colours on')
+    assert.equal(off.titleOf('view.minimap'), 'Show minimap')
+    const toggled: string[] = []
+    const ran: string[] = []
+    const live = registryWith({ hasEditor: () => true, toggleEditorPart: (part) => void toggled.push(part), editorCommand: (name) => void ran.push(name) })
+    for (const id of ['view.folding', 'view.stickyScroll', 'view.bracketColors', 'view.minimap']) void live.run(id)
+    assert.deepEqual(toggled, ['folding', 'stickyScroll', 'bracketColors', 'minimap'])
+    for (const id of ['editor.fold', 'editor.foldLevel2', 'editor.foldImports']) void live.run(id)
+    assert.deepEqual(ran, ['fold', 'foldLevel2', 'foldImports'])
+    // The editor's own keys: shown, and left to the editor, which takes them only while folding is on.
+    assert.equal(live.shortcut('editor.fold'), 'Ctrl+Shift+[')
+    assert.equal(live.shortcut('editor.unfoldAll'), 'Ctrl+Alt+]')
+    assert.equal(live.isEnabled('editor.fold'), true)
+    assert.equal(off.isEnabled('editor.fold'), false)
+    assert.equal(off.isEnabled('editor.foldLevel3'), false)
+    const listed = new Set(MENUS.flatMap((menu) => menu.items))
+    assert.equal(listed.has('editor.foldLevel3'), false, 'the levels are in the palette, not the menu bar')
+    assert.equal(live.get('editor.foldLevel3')?.hidden, undefined)
   })
 
   it('run the command when chosen', () => {

@@ -281,6 +281,8 @@ export class Workspaces {
           return (await servers.formatOnType(file, a.line, a.character, a.ch, { tabSize: a.tabSize, insertSpaces: a.insertSpaces }, signal)) as EditorAnswer<K>
         case 'symbols':
           return (await servers.editorSymbols(file, signal)) as EditorAnswer<K>
+        case 'folding':
+          return (await servers.editorFoldingRanges(file, signal)) as EditorAnswer<K>
         case 'workspaceSymbols': {
           const hits = await servers.editorWorkspaceSymbols(a.query, a.path ? file : undefined, signal)
           if (!hits) return null as EditorAnswer<K>

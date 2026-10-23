@@ -1,4 +1,4 @@
-import { EditorState, detectIndent, languageForPath, reload, type Transaction } from '@encode/editor'
+import { EditorState, detectIndent, languageForPath, mapFolded, reload, type FoldRange, type Transaction } from '@encode/editor'
 import { ChangeSet, Text, type ChangeSpec } from '@encode/text'
 import type { CodeTextEdit } from '@shared/types'
 
@@ -21,6 +21,8 @@ interface Entry {
   saved: Text
   savedPoint: number
   scroll: Scroll | null
+  /** The blocks folded when the document was last shown, for the text they were folded in. */
+  folds: { doc: Text; ranges: FoldRange[] } | null
   host: DocHost | null
 }
 
@@ -71,7 +73,7 @@ export function openDoc(path: string, content: string): EditorState {
     tabSize: indent.tabSize,
     lineSeparator: eol,
   })
-  docs.set(path, { state, saved: doc, savedPoint: state.history.point, scroll: null, host: null })
+  docs.set(path, { state, saved: doc, savedPoint: state.history.point, scroll: null, folds: null, host: null })
   watcher?.opened(path, state, false)
   return state
 }
@@ -193,6 +195,31 @@ export function scrollOf(path: string): Scroll | null {
   return docs.get(path)?.scroll ?? null
 }
 
+/** Keeps the blocks folded in `doc`, the document's text as its view leaves it, to fold them again when it is shown. */
+export function saveFolds(path: string, doc: Text, ranges: readonly FoldRange[]): void {
+  const entry = docs.get(path)
+  if (entry) entry.folds = ranges.length ? { doc, ranges: ranges.map(({ start, end }) => ({ start, end })) } : null
+}
+
+/** The blocks to fold again as the document is shown: none when its text changed in a way they could not follow. */
+export function foldsOf(path: string): readonly FoldRange[] {
+  const entry = docs.get(path)
+  if (!entry?.folds) return []
+  const doc = (entry.host?.state ?? entry.state).doc
+  return entry.folds.doc === doc ? entry.folds.ranges : []
+}
+
+/** A change made while no view showed the document: the folds kept for it move with the text. */
+function followFolds(entry: Entry, tr: Transaction): void {
+  if (entry.host || !entry.folds || !tr.docChanged) return
+  if (entry.folds.doc !== tr.startState.doc) {
+    entry.folds = null
+    return
+  }
+  const ranges = mapFolded(entry.folds.ranges, tr.changes, tr.startState.doc, tr.state.doc)
+  entry.folds = ranges.length ? { doc: tr.state.doc, ranges } : null
+}
+
 /** The view that shows `path` right now: external changes to it go through the view, so its cursor and scroll position stay. */
 export function attach(path: string, host: DocHost | null): void {
   const entry = docs.get(path)
@@ -218,6 +245,7 @@ export function applyExternal(path: string, content: string): boolean {
     watcher?.changed(path, current, false)
     return false
   }
+  followFolds(entry, tr)
   entry.state = tr.state
   entry.saved = tr.state.doc
   entry.savedPoint = tr.state.history.point
@@ -290,6 +318,7 @@ export function revertServerEdits(edit: ServerEdit, options: { saved?: boolean }
 
 /** The document takes a transaction made outside its view: saved first when the disk has its text, then shown. */
 function settle(path: string, entry: Entry, tr: Transaction, saved: boolean): void {
+  followFolds(entry, tr)
   entry.state = tr.state
   if (saved) {
     entry.saved = tr.state.doc
