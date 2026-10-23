@@ -506,7 +506,9 @@ describe('deferred tools', () => {
     const h = await loopHarness({ extraTools: outsideTools('github', GITHUB.slice(0, 2), 100), script: [{ text: 'ok' }] })
     await h.run('hi')
     assert.ok(sent(h, 0).includes('mcp__github__create_issue'))
-    assert.ok(!sent(h, 0).includes('ToolSearch'))
+    // ToolSearch is there for the built-in tools that always wait for it, and lists none of the outside ones.
+    const search = h.client.requests[0].payload.tools.find((tool) => tool.name === 'ToolSearch')
+    assert.ok(search && !search.description.includes('mcp__github'))
   })
 
   it('loads again from the messages after the conversation was rebuilt, and drops what a rewind cut', async () => {

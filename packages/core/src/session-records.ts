@@ -11,7 +11,12 @@
  *   compaction  the model-facing messages from here on start over with these
  *   title, goal, todos, plan   the latest record wins
  *   meta        the session's project, pin, archive and unread marks; the latest value of each field wins
+ *   agent       a subagent: its type, task and how it stands; the latest record of an id wins
+ *   wakeup      the wake-up the agent asked for, or null; the latest wins
  *   truncate    drops every record after `after` (rewind)
+ *
+ * A subagent's messages are message records with its id as `agentId`, and its compactions carry the id too, so that
+ * it can go on from where it stopped (SendMessage), also after a restart. They never enter the main conversation.
  *
  * A user prompt's message id, its UI entry id and the turn id are the same
  * string, so a client can rewind from the entry it shows. The entry record
@@ -19,6 +24,7 @@
  * keeps both.
  */
 import type { AssistantMessage, SystemPart, ToolDefinition, Usage, UserMessage } from '@encode/providers'
+import type { AgentMode } from '@encode/tools'
 import type { ConversationEntry, PlanRequest, SessionGoal, SessionSummary, TodoItem } from './ui'
 
 export const SESSION_FORMAT = 1
@@ -65,6 +71,8 @@ export interface EntryRecord extends RecordBase {
 
 export interface CompactionRecord extends RecordBase {
   type: 'compaction'
+  /** A subagent's: its conversation starts over with these, and the main one is untouched. */
+  agentId?: string
   trigger: 'auto' | 'manual'
   /** The summary's text, for display. */
   summary: string
@@ -102,6 +110,43 @@ export interface MetaRecord extends RecordBase {
   unread?: boolean
 }
 
+/** A subagent of the session, as its latest record has it. */
+export interface SubagentInfo {
+  id: string
+  type: string
+  description: string
+  /** `interrupted`: it was running when eNCode closed; SendMessage takes it on from where it stopped. */
+  status: 'running' | 'done' | 'failed' | 'stopped' | 'interrupted'
+  /** It ran in the background, so the main agent hears how it ended through a notice. */
+  background: boolean
+  mode: AgentMode
+  startedAt: number
+  endedAt?: number
+  /** How it ended, kept until the main agent has been told. */
+  report?: string
+  ok?: boolean
+  /** The main agent has read how it ended. */
+  told?: boolean
+}
+
+export interface AgentRecord extends RecordBase {
+  type: 'agent'
+  agent: SubagentInfo
+}
+
+/** What ScheduleWakeup asked for. */
+export interface Wakeup {
+  /** Epoch ms. */
+  at: number
+  reason: string
+  prompt: string
+}
+
+export interface WakeupRecord extends RecordBase {
+  type: 'wakeup'
+  wakeup: Wakeup | null
+}
+
 export interface TruncateRecord extends RecordBase {
   type: 'truncate'
   /** The last record kept. */
@@ -119,6 +164,8 @@ export type SessionRecord =
   | TodosRecord
   | PlanRecord
   | MetaRecord
+  | AgentRecord
+  | WakeupRecord
   | TruncateRecord
 
 type WithoutBase<T> = T extends unknown ? Omit<T, 'id' | 'at'> & Partial<Pick<RecordBase, 'id' | 'at'>> : never
@@ -148,6 +195,9 @@ export interface SessionSnapshot {
   goal: SessionGoal | null
   todos: TodoItem[]
   plan: PlanRequest | null
+  /** The subagents, as their latest records have them, oldest first. */
+  agents: SubagentInfo[]
+  wakeup: Wakeup | null
   /** The id of the last live record. */
   lastRecordId: string
   updatedAt: number
@@ -156,6 +206,8 @@ export interface SessionSnapshot {
 export interface SessionLog {
   readonly id: string
   snapshot(): SessionSnapshot
+  /** A subagent's conversation, after its own compactions; empty for an id the log does not know. */
+  agentMessages(agentId: string): Message[]
   /** Appends a record and returns it as stored. */
   append(record: NewRecord): Promise<SessionRecord>
   /** Drops every record after `recordId` (it stays). */
