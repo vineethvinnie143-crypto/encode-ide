@@ -299,6 +299,8 @@ export class EditorView {
   private readonly announcer: HTMLDivElement
   private announceTimer: ReturnType<typeof setTimeout> | null = null
   private unwatchPixelRatio: (() => void) | null = null
+  /** The device pixel ratio the metrics were last read at. */
+  private measuredRatio = 0
   private viewport = { width: 0, height: 0 }
   private gutterWidth = 0
   private viewWidth = -1
@@ -964,6 +966,7 @@ export class EditorView {
     if (!a.width || !row.height) return false
     const charWidth = a.width / PROBE_CHARS
     const ratio = pixelRatio()
+    this.measuredRatio = ratio
     const lineHeight = Math.max(1, Math.round(row.height * ratio)) / ratio
     const monospace = Math.abs(a.width - b.width) < 0.5
     const padding = parseFloat(getComputedStyle(this.root).getPropertyValue('--enc-editor-padding-x'))
@@ -984,27 +987,40 @@ export class EditorView {
    * Measures again when the device pixel ratio changes: the window moved to a screen with another scale, the scale
    * changed, or the page was zoomed. The minimap and the line heights follow.
    */
-  private watchPixelRatio(): void {
+  private watchPixelRatio(retries = 3): void {
     if (typeof matchMedia !== 'function') return
     const query = matchMedia(`(resolution: ${pixelRatio()}dppx)`)
-    const changed = (): void => {
-      query.removeEventListener('change', changed)
+    let frame = 0
+    const changed = (again: boolean): void => {
+      query.removeEventListener('change', told)
+      cancelAnimationFrame(frame)
       if (this.destroyed) return
-      this.watchPixelRatio()
+      this.watchPixelRatio(again ? retries - 1 : 3)
       this.onProbeResize()
       this.requestRender()
     }
-    query.addEventListener('change', changed)
-    this.unwatchPixelRatio = () => query.removeEventListener('change', changed)
+    const told = (): void => changed(false)
+    query.addEventListener('change', told)
+    // Read as the change is told, the ratio can still be the old one: a query made with it never matches and would
+    // never be told of the next change, so it is made again a frame later (a few times at most).
+    if (!query.matches && retries > 0) frame = requestAnimationFrame(() => changed(true))
+    this.unwatchPixelRatio = () => {
+      query.removeEventListener('change', told)
+      cancelAnimationFrame(frame)
+    }
   }
 
   private onProbeResize(): void {
     if (this.destroyed || !this.measure()) return
-    // Everything depends on the metrics: positions, widths, the lines' own widths.
+    this.dropLines()
+    this.flush()
+  }
+
+  /** Everything depends on the metrics: positions, widths, the lines' own widths. Drawn again from nothing. */
+  private dropLines(): void {
     for (const el of this.lineEls.values()) this.release(el)
     this.lineEls.clear()
     this.rendered = { first: 0, last: -1 }
-    this.flush()
   }
 
   private readViewport(): void {
@@ -1284,6 +1300,8 @@ export class EditorView {
     this.readViewport()
     const { height: viewportHeight, width: viewportWidth } = this.viewport
     if (!viewportHeight || !viewportWidth || !this.root.isConnected) return
+    // The screen's scale changed and nothing told the view yet: the metrics are read again first.
+    if (pixelRatio() !== this.measuredRatio && this.measure()) this.dropLines()
     const { lineHeight, charWidth } = this.metrics
     const doc = this.state.doc
 

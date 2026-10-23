@@ -209,9 +209,10 @@ export const text = [
       const where = await ev(() => {
         const composed = document.querySelector('.enc-inlay-compose').getBoundingClientRect()
         const area = window.view.textarea.getBoundingClientRect()
-        return { composed: { left: composed.left, top: composed.top }, area: { left: area.left, top: area.top } }
+        return { composed: { left: composed.left, top: composed.top }, area: { left: area.left, top: area.top }, lineHeight: window.view.metrics.lineHeight }
       })
-      assert.ok(Math.abs(where.composed.left - where.area.left) < 1 && Math.abs(where.composed.top - where.area.top) < 2, `composition ${JSON.stringify(where)}`)
+      // On the composition's row: the text's box sits lower in the row by the font's own spacing, which differs by system.
+      assert.ok(Math.abs(where.composed.left - where.area.left) < 1 && Math.abs(where.composed.top - where.area.top) < where.lineHeight / 2, `composition ${JSON.stringify(where)}`)
       await page.insertText(ch(0x4e2d, 0x6587))
       await settle()
       assert.equal((await text()).slice(200, 202), ch(0x4e2d, 0x6587))
