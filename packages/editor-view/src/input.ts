@@ -71,6 +71,8 @@ export class InputHandler {
     view.listen(textarea, 'copy', (event) => this.copy(event))
     view.listen(textarea, 'cut', (event) => this.cut(event))
     view.listen(textarea, 'paste', (event) => this.paste(event))
+    // A click or a drag in the editor disarms Escape, as any other key does: Tab after it indents again.
+    view.listen(view.root, 'mousedown', () => (this.escaped = false))
     view.listen(view.root, 'dragover', (event) => this.dragOver(event))
     view.listen(view.root, 'drop', (event) => this.drop(event))
     const selected = (): void => this.textareaSelected()
@@ -176,11 +178,20 @@ export class InputHandler {
         return
       }
     }
+    // Tab and Shift+Tab are the editor's even when they change nothing (Shift+Tab on a line with no indent), so the
+    // focus never jumps out on its own; Escape first, or Ctrl+M, is the way out. A read-only editor lets them go.
+    if (event.key === 'Tab' && plain && !tabFocus && !this.view.state.config.readOnly) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
   }
 
   private input(event: InputEvent): void {
-    if (this.composing || event.isComposing) {
-      if (this.composing) this.showComposition()
+    // Composed text with no compositionstart before it (the focus came back to the editor while an input method was
+    // open): the composition is taken up from here, so it is drawn and committed like any other.
+    if (event.isComposing && !this.composing) this.compositionStart()
+    if (this.composing) {
+      this.showComposition()
       return
     }
     const mirror = this.mirror

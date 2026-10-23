@@ -127,7 +127,7 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
+const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
@@ -1500,6 +1500,7 @@ async function runLanguageServerChecks() {
   await runEditorHintsChecks(markerLines)
   await runWrapChecks()
   await runInputChecks()
+  await runRandomEditChecks()
   await runLargeFileChecks()
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
@@ -1526,6 +1527,7 @@ async function runLanguageServerChecks() {
   }
   await screenshot('ui-dark-settings-language-servers.png')
   await closeSettings()
+  await runInstallOfferChecks()
 
   // The agent: told what its edit broke, sent back once when it wants to finish, and it fixes the file.
   await evaluate('window.eNCode.agent.reset()')
@@ -1563,29 +1565,118 @@ async function runLanguageServerChecks() {
   console.log('[smoke] language servers: ok')
 }
 
+/**
+ * One-click installs (ADR 0083), offline: a YAML file whose server is missing gets the offer above it, Install… opens
+ * the dialog with what would be downloaded (read through the main and agent processes from eNCode's own list), Cancel
+ * closes it without installing, and Not now hides the offer for YAML on this computer. Settings offers Install… too.
+ */
+async function runInstallOfferChecks() {
+  console.log('[smoke] --- language server installs ---')
+  await evaluate("window.eNCode.workspace.write('lsp-offer.yaml', 'name: demo\\n')")
+  await quickOpen('lsp-offer.yaml', 'name: demo')
+  const footerText = "document.querySelector('.editor-footer .editor-footer-button')?.textContent ?? ''"
+  await waitFor(`(${footerText}).startsWith('YAML')`, 10000, 'the footer to name the YAML server')
+  const footer = await evaluate(footerText)
+  if (footer !== 'YAML: not installed') {
+    console.log(`[smoke] a YAML server is already on this computer (${footer}); the offer is not shown`)
+  } else {
+    await waitFor("!!document.querySelector('.editor-offer')", 8000, 'the offer to install the YAML server')
+    if (!(await click('.editor-offer .btn', 'Install'))) throw new Error('no Install button on the offer')
+    await waitFor("document.querySelectorAll('.install-server-steps li').length === 3", 15000, 'the install dialog to say what it would do')
+    const dialog = await evaluate(`(() => ({
+      title: document.querySelector('.install-server-dialog .ui-dialog-title')?.textContent ?? '',
+      steps: [...document.querySelectorAll('.install-server-steps li')].map((node) => node.textContent),
+      facts: document.querySelector('.install-server-facts')?.textContent ?? '',
+    }))()`)
+    console.log('[smoke] install dialog:', JSON.stringify(dialog))
+    if (!/yaml-language-server 2\.0\.0/.test(dialog.steps[0] ?? '') || !/hash eNCode was built with/.test(dialog.steps[0] ?? '') || !/tools/.test(dialog.facts)) {
+      throw new Error(`The install dialog does not say what it would do: ${JSON.stringify(dialog)}`)
+    }
+    await screenshot('ui-dark-install-server.png')
+    if (!(await click('.install-server-dialog .btn', 'Cancel'))) throw new Error('no Cancel in the install dialog')
+    await waitFor("!document.querySelector('.install-server-dialog')", 4000, 'the install dialog to close')
+    // Settings offers it as well, for the files this folder has.
+    await openSettings('Language servers')
+    await waitFor(`[...document.querySelectorAll('.lsp-server[data-server="yaml"] .btn')].some((node) => node.textContent.includes('Install'))`, 8000, 'Install… for YAML in Settings')
+    await closeSettings()
+    if (!(await click('.editor-offer .btn', 'Not now'))) throw new Error('no Not now on the offer')
+    await waitFor("!document.querySelector('.editor-offer')", 4000, 'the offer to go after Not now')
+    const kept = await evaluate("localStorage.getItem('encode.code.declinedInstalls')")
+    if (!kept?.includes('"yaml"')) throw new Error(`Not now was not kept: ${kept}`)
+    await evaluate("localStorage.removeItem('encode.code.declinedInstalls')")
+  }
+  await click('.editor-tab.is-active .tab-close')
+  await evaluate("window.eNCode.workspace.delete('lsp-offer.yaml').catch(() => null)")
+
+  // A folder of FiveM resources: Settings offers FiveM's natives under the Lua server, from Cfx.re's pinned packages.
+  await evaluate(`window.eNCode.workspace.write('fxmanifest.lua', ${JSON.stringify("fx_version 'cerulean'\ngame 'gta5'\n")})`)
+  await openSettings('Language servers')
+  const nativesButton = `[...document.querySelectorAll('.lsp-library[data-library="fivem-natives"] .btn')].some((node) => node.textContent.includes('Install'))`
+  await waitFor(nativesButton, 10000, 'Install… for FiveM natives under the Lua server')
+  if (!(await click('.lsp-library[data-library="fivem-natives"] .btn', 'Install'))) throw new Error('no Install for the FiveM natives')
+  await waitFor("document.querySelectorAll('.install-server-steps li').length === 3", 15000, 'the natives install dialog to say what it would do')
+  const natives = await evaluate(`(() => ({
+    title: document.querySelector('.install-server-dialog .ui-dialog-title')?.textContent ?? '',
+    steps: [...document.querySelectorAll('.install-server-steps li')].map((node) => node.textContent),
+  }))()`)
+  console.log('[smoke] natives dialog:', JSON.stringify(natives))
+  if (natives.title !== "Install FiveM's natives for Lua" || !/@citizenfx\/client 2\.0\.37850-1 and @citizenfx\/server 2\.0\.37850-1/.test(natives.steps[0] ?? '') || !/Nothing in them is run/.test(natives.steps[1] ?? '')) {
+    throw new Error(`The natives install dialog does not say what it would do: ${JSON.stringify(natives)}`)
+  }
+  if (!(await click('.install-server-dialog .btn', 'Cancel'))) throw new Error('no Cancel in the natives install dialog')
+  await waitFor("!document.querySelector('.install-server-dialog')", 4000, 'the natives install dialog to close')
+  await closeSettings()
+  await evaluate("window.eNCode.workspace.delete('fxmanifest.lua').catch(() => null)")
+  console.log('[smoke] language server installs: ok')
+}
+
 /** The middle of the first `word` on the editor's drawn line that holds `lineText`, on screen. */
 async function wordSpot(lineText, word) {
-  const spot = await evaluate(`(() => {
-    const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => !node.closest('.enc-zone') && node.textContent.includes(${JSON.stringify(lineText)}))
-    const at = line ? line.textContent.indexOf(${JSON.stringify(word)}) : -1
-    if (at < 0) return null
-    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
-    let offset = 0
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const length = node.textContent.length
-      if (at < offset + length) {
-        const range = document.createRange()
-        range.setStart(node, at - offset)
-        range.setEnd(node, Math.min(length, at - offset + ${word.length}))
-        const rect = range.getBoundingClientRect()
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  // Where the word is once the view has settled, and only if a click there reaches its line: right after a jump the
+  // view may still scroll, or a peek or a bar may be going away, and a click on a spot that moves goes elsewhere.
+  const found = await evaluate(`(async () => {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    const measure = () => {
+      const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => !node.closest('.enc-zone') && node.textContent.includes(${JSON.stringify(lineText)}))
+      const at = line ? line.textContent.indexOf(${JSON.stringify(word)}) : -1
+      if (at < 0) return null
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+      let offset = 0
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.textContent.length
+        if (at < offset + length) {
+          const range = document.createRange()
+          range.setStart(node, at - offset)
+          range.setEnd(node, Math.min(length, at - offset + ${word.length}))
+          const rect = range.getBoundingClientRect()
+          return { line, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        }
+        offset += length
       }
-      offset += length
+      return null
     }
-    return null
+    let last = null
+    let hit = ''
+    const started = performance.now()
+    while (performance.now() - started < 4000) {
+      const spot = measure()
+      if (spot) {
+        const over = document.elementFromPoint(spot.x, spot.y)
+        hit = over ? over.className || over.tagName : 'nothing'
+        const steady = last && Math.abs(last.x - spot.x) < 0.5 && Math.abs(last.y - spot.y) < 0.5
+        // What the editor's own pointer handling leaves alone (a peek, a widget, a button) does not count.
+        const reaches = !!over?.closest('.code-editor') && !over.closest('.enc-zone, .enc-widgets, button, input, textarea')
+        if (steady && reaches) return { x: spot.x, y: spot.y }
+      }
+      last = spot
+      await frame()
+      await frame()
+    }
+    return { missing: !last, hit }
   })()`)
-  if (!spot) throw new Error(`"${word}" is not on screen in "${lineText}": ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
-  return spot
+  if (!found || found.missing) throw new Error(`"${word}" is not on screen in "${lineText}": ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  if (found.hit !== undefined) throw new Error(`"${word}" in "${lineText}" cannot be clicked: ${found.hit} is over it`)
+  return found
 }
 
 /** A click of the mouse's main button; `command` holds Ctrl (Cmd on macOS) down. */
@@ -2180,7 +2271,9 @@ async function runEditorSymbolChecks(markerLines) {
   await pressKey('h', { shift: true, alt: true })
   const callsAre = (title, rows, label) =>
     waitFor(`(() => { const now = ${CALLS}; return now.title === ${JSON.stringify(title)} && JSON.stringify(now.rows) === ${JSON.stringify(JSON.stringify(rows))} })()`, 10000, label).catch(async (error) => {
-      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CALLS))}`)
+      // Where the cursor and the keys were, what the editor said, and what the server was asked: a miss names its cause.
+      const around = await evaluate(`({ footer: document.querySelector('.editor-footer-side')?.textContent ?? '', focus: document.activeElement?.className ?? '', notices: [...document.querySelectorAll('.toast, .editor-message, [role=status]')].map((node) => node.textContent).filter(Boolean).slice(-3) })`)
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CALLS))} ${JSON.stringify(around)}; the server last heard: ${JSON.stringify((await markerLines()).slice(-6))}`)
     })
   await callsAre('Callers of area', ['area@1', 'describe@2', 'report@2'], 'the callers of area')
   await waitFor("document.activeElement?.classList.contains('calls-list')", 4000, 'the call hierarchy has the keys')
@@ -2198,6 +2291,7 @@ async function runEditorSymbolChecks(markerLines) {
   // And the other way: what report calls, a level further opened with Right.
   await clickAt(await wordSpot('export function report(', 'report'))
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(11, undefined, 'the cursor on report')
   await pressKey('h', { shift: true, alt: true })
   await callsAre('Callers of report', ['report@1', 'printAll@2'], 'the callers of report, in a file not open')
   await click('.calls-peek .calls-switch-item', 'Calls')
@@ -2623,6 +2717,121 @@ async function runInputChecks() {
     await evaluate("window.eNCode.workspace.delete('src/input.ts').catch(() => null)").catch(() => null)
   }
   console.log('[smoke] Windows input, screen readers and right-to-left text: ok')
+}
+
+/**
+ * Random editing in the app, seeded (ENCODE_SMOKE_SEED for another run): keys, typing in several scripts, line moves,
+ * undo and redo, saves along the way, in a Lua file with Windows line endings. After it the file on disk is what the
+ * editor shows, with Windows line endings throughout; then everything is undone, saved, and the file is byte for byte
+ * what it was before the first key.
+ */
+async function runRandomEditChecks() {
+  console.log('[smoke] --- random editing, saved and undone ---')
+  const seed = Number(process.env.ENCODE_SMOKE_SEED) || 0x5eed
+  let state = seed >>> 0
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = Math.imul(state ^ (state >>> 15), state | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const pick = (list) => list[Math.floor(random() * list.length)]
+  const u = (...codes) => String.fromCodePoint(...codes)
+  const family = [0x1f468, 0x1f469, 0x1f467].map((code) => u(code)).join(u(0x200d))
+  const original = [
+    '-- A resource script, edited at random by the smoke',
+    'local Config = { speed = 1.5, name = "caf' + u(0xe9) + '" }',
+    '',
+    'local function greet(player)',
+    '\tlocal text = "hello " .. player',
+    '\tif #text > 3 then',
+    `\t\treturn "${u(0x6f22, 0x5b57)} ${family} ${u(0x1f600)}"`,
+    '\tend',
+    '\treturn text',
+    'end',
+    '',
+    'RegisterNetEvent("demo:greet", function(id)',
+    '  print(greet(id))',
+    'end)',
+    '',
+  ].join('\r\n')
+  const relative = 'scripts/random-edit.lua'
+  const file = path.join(demoPath, relative)
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, original)
+  const EDITOR = "document.querySelector('.code-editor > .enc-editor')"
+  const SHOWN = `[...${EDITOR}.querySelectorAll('.enc-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map((line) => line.textContent)`
+  const DIRTY = "!!document.querySelector('.editor-tab.is-dirty')"
+  const KEYS = [
+    ['ArrowLeft'], ['ArrowRight'], ['ArrowUp'], ['ArrowDown'], ['Home'], ['End'], ['ArrowRight', { shift: true }], ['ArrowLeft', { shift: true }],
+    ['ArrowDown', { shift: true }], ['End', { shift: true }], ['ArrowRight', { ctrl: true }], ['Backspace'], ['Delete'], ['Backspace', { ctrl: true }],
+    ['Enter'], ['Tab'], ['Tab', { shift: true }], ['z', { ctrl: true }], ['y', { ctrl: true }], ['ArrowUp', { alt: true }], ['ArrowDown', { alt: true }],
+    ['ArrowDown', { alt: true, shift: true }], ['d', { ctrl: true }], ['Home', { ctrl: true }], ['End', { ctrl: true }],
+  ]
+  const WORDS = ['local ', 'value', ' = ', '(', ')', '{', '"', 'end', u(0xe9), u(0x5e9, 0x5dc, 0x5d5, 0x5dd), u(0x306b, 0x307b), u(0x1f600), ' -- note']
+  const done = []
+  try {
+    await quickOpen(relative, 'local function greet(player)')
+    await focusEditor()
+    const steps = Number(process.env.ENCODE_SMOKE_EDIT_STEPS) || 160
+    for (let step = 1; step <= steps; step++) {
+      const roll = random()
+      if (step % 50 === 0) {
+        done.push('save')
+        await pressKey('s', { ctrl: true })
+        await waitFor(`!${DIRTY}`, 8000, `the save at step ${step}`)
+      } else if (roll < 0.62) {
+        const [key, options] = pick(KEYS)
+        // Enter only now and then, so the file stays short enough to be on screen whole.
+        if (key === 'Enter' && random() < 0.6) continue
+        done.push(`${key}${options ? JSON.stringify(options) : ''}`)
+        await pressKey(key, options)
+      } else {
+        const text = pick(WORDS)
+        done.push(JSON.stringify(text))
+        await send('Input.insertText', { text })
+      }
+      if (step % 20 === 0 && !(await evaluate(`document.activeElement === ${EDITOR}.querySelector('.enc-input')`))) {
+        throw new Error(`The editor lost the focus by step ${step}`)
+      }
+    }
+    // Saved: the file holds what the editor shows, every line ending a Windows one.
+    await pressKey('s', { ctrl: true })
+    await waitFor(`!${DIRTY}`, 8000, 'the random edits saved')
+    await pressKey('Home', { ctrl: true })
+    await sleep(200)
+    const saved = await fs.readFile(file, 'utf8')
+    if (/(^|[^\r])\n/.test(saved) || /\r(?!\n)/.test(saved)) throw new Error('The saved file mixes line endings')
+    const shown = await evaluate(SHOWN)
+    if (JSON.stringify(saved.split('\r\n')) !== JSON.stringify(shown)) {
+      throw new Error(`The saved file is not what the editor shows:\n${JSON.stringify(saved.split('\r\n'))}\n${JSON.stringify(shown)}`)
+    }
+    // Everything undone, across the saves: the editor shows the file as it was, and once saved it is that file again.
+    let last = ''
+    let same = 0
+    for (let presses = 0; presses < 600 && same < 4; presses++) {
+      await pressKey('z', { ctrl: true })
+      await sleep(20)
+      const now = JSON.stringify(await evaluate(SHOWN))
+      same = now === last ? same + 1 : 0
+      last = now
+    }
+    if (last !== JSON.stringify(original.split('\r\n'))) throw new Error(`Undoing everything does not give the file back:\n${last}`)
+    if (await evaluate(DIRTY)) {
+      await pressKey('s', { ctrl: true })
+      await waitFor(`!${DIRTY}`, 8000, 'the undone file saved')
+    }
+    const back = await fs.readFile(file)
+    if (!back.equals(Buffer.from(original, 'utf8'))) throw new Error(`The file saved after undoing everything is not the file it was (${back.length} bytes, not ${Buffer.byteLength(original)})`)
+    await screenshot('32-editor-random-edits.png')
+  } catch (error) {
+    error.message += `\n  seed ${seed}; steps: ${done.slice(-40).join(' ')}`
+    throw error
+  } finally {
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'random-edit.lua')?.querySelector('.tab-close')?.click()`).catch(() => null)
+    await fs.rm(file, { force: true }).catch(() => null)
+  }
+  console.log(`[smoke] random editing, saved and undone: ok (seed ${seed}, ${done.length} steps)`)
 }
 
 /** The most each step with a 100 MB file may take in the app, in milliseconds, on the slowest machine it runs on. */
@@ -3667,10 +3876,12 @@ async function runSettingsPageChecks() {
   await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sessions again')
 
   // Ctrl+Alt+O starts a chat: the chats folder opens as the work folder, the sidebar says Chats, and the chat is listed
-  // under Chats.
+  // under Chats. The session open until then belongs to no project, so it is a chat too, listed under Chats and open
+  // while the new one is made: the new one is the one open once the open session is another.
+  const before = await evaluate("localStorage.getItem('eNCode.activeSession')")
   await key({ key: 'o', code: 'KeyO', ctrlKey: true, altKey: true })
   await waitFor(`document.querySelector('.proj-name')?.textContent === 'Chats' && document.querySelector('.proj-switch')?.title === ${JSON.stringify(chatsFolder)}`, 15000, 'Ctrl+Alt+O opens the chats folder')
-  await waitFor("!!document.querySelector('.session-sidebar section[aria-label=\"Chats\"] .sb-row.is-active')", 6000, 'the new chat is listed under Chats, open')
+  await waitFor(`localStorage.getItem('eNCode.activeSession') !== ${JSON.stringify(before)} && (document.querySelector('.session-sidebar section[aria-label="Chats"] .sb-row.is-active .title')?.textContent ?? ${JSON.stringify(firstSession)}) !== ${JSON.stringify(firstSession)}`, 6000, 'the new chat is listed under Chats, open')
   const chatId = await evaluate("localStorage.getItem('eNCode.activeSession')")
   const projects = await evaluate("[...document.querySelectorAll('.session-sidebar section[aria-label=\"Projects\"] .sb-project > .sb-row')].map((node) => node.title)")
   if (projects.some((root) => folderKey(root) === folderKey(chatsFolder))) throw new Error('the chats folder is listed as a project')
@@ -3707,7 +3918,9 @@ async function runSettingsPageChecks() {
   // The notice names the chat and says it finished, in eNCode's words only.
   if (noticesKept) {
     const done = () => windowsNotices().then((list) => list.find((notice) => notice.kind === 'done' && notice.sessionId === chatId))
-    await until(async () => Boolean(await done()), 10000, 'a notice that the chat finished')
+    await until(async () => Boolean(await done()), 10000, 'a notice that the chat finished').catch(async (error) => {
+      throw new Error(`${error.message} (chat ${chatId}; the notices: ${JSON.stringify(await windowsNotices())})`)
+    })
     const notice = await done()
     if (notice.title !== chatTitle || notice.body !== 'Finished.') throw new Error(`the notice reads ${JSON.stringify(notice)}`)
     if (JSON.stringify(await windowsNotices()).includes('offline demo')) throw new Error('a notice holds what the agent wrote')

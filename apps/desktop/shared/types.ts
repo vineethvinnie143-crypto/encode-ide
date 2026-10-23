@@ -640,6 +640,30 @@ export interface LanguageServerInfo {
   install: string
   /** What it covers: ".ts", ".tsx", "CMakeLists.txt". */
   files: string[]
+  /** How many of the folder's files it covers, and the files that mark a project of its kind. */
+  used?: { files: number; markers: string[] }
+  /** eNCode can install it with one click, this way. */
+  installer?: 'npm' | 'download' | 'toolchain'
+  /** eNCode installed it, at this version. */
+  installed?: string
+  /** An install is running: bytes so far, of about this many. */
+  installing?: { done: number; total: number }
+  /** The last install failed, and why. */
+  installError?: string
+  /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
+  libraries?: LanguageLibraryInfo[]
+}
+
+/** A library eNCode installs for a server to read, listed under the server. */
+export interface LanguageLibraryInfo {
+  id: string
+  /** "FiveM natives". */
+  label: string
+  /** "FiveM's natives for Lua". */
+  what: string
+  installed?: string
+  installing?: { done: number; total: number }
+  installError?: string
 }
 
 export interface LanguageServersReport {
@@ -647,7 +671,25 @@ export interface LanguageServersReport {
   state: 'on' | 'off' | 'untrusted'
   reason?: string
   servers: LanguageServerInfo[]
+  /** The folder was not read to the end for the languages it uses. */
+  partial?: boolean
 }
+
+/** What installing a language server would do (ADR 0083), for the person to read before saying yes. */
+export interface ServerInstallPlan {
+  id: string
+  label: string
+  /** What is installed, for a title: "YAML's language server", "FiveM's natives for Lua". */
+  what: string
+  version: string
+  steps: string[]
+  /** About how much is downloaded, when known. */
+  bytes?: number
+  /** Where it is kept. */
+  dir: string
+}
+
+export type ServerInstallResult = { ok: true; dir: string } | { ok: false; reason: string }
 
 /** A problem a language server found, zero-based, in UTF-16 units as the editor counts. */
 export interface CodeDiagnostic {
@@ -1455,6 +1497,14 @@ export interface EncodeApi {
   code: {
     /** The open folder's language servers and how they stand; null when no folder is open. */
     report(): Promise<LanguageServersReport | null>
+    /** What installing a server would do, for the person to read before saying yes. */
+    installPlan(id: string): Promise<ServerInstallPlan | { unavailable: string }>
+    /** Installs a server the person said yes to; resolves once it is installed or failed. Progress comes in reports. */
+    install(id: string): Promise<ServerInstallResult>
+    /** Stops an install that runs; it ends as failed, with nothing left behind. */
+    cancelInstall(id: string): Promise<void>
+    /** Removes a server eNCode installed. */
+    uninstall(id: string): Promise<ServerInstallResult>
     /**
      * The editor shows a file of the open folder, by its path in the tree, with the text it holds (`dirty`: not saved).
      * Its server starts if it may, and its problems arrive through `onMarks`.

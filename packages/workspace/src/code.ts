@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -32,6 +32,22 @@ export interface LanguageServerOptions {
   spawn?(plan: LaunchPlan, cwd: string, env: Record<string, string>): Promise<ServerProcess>
   idleMs?: number
   catalog?: readonly ServerSpec[]
+  /** Libraries eNCode installs for the servers (ADR 0084); default `LANGUAGE_LIBRARIES`. */
+  libraries?: readonly LibrarySpec[]
+  /** eNCode's tools folder, where it installs servers when asked (ADR 0083), and what runs the ones from npm. */
+  tools?: ServerTools
+}
+
+export interface ServerTools {
+  /** `<tools>`: one folder per server. */
+  dir: string
+  /** A folder for the servers' own caches (the Java server's index). */
+  cacheDir: string
+  /** eNCode's own Node.js: the program, and what makes it run as Node. */
+  node: { file: string; env?: Record<string, string> }
+  arch?: string
+  /** For tests. */
+  fetch?: typeof fetch
 }
 
 /** A language server as the Settings screen lists it. */
@@ -49,6 +65,30 @@ export interface LanguageServerInfo {
   install: string
   /** What it covers: ".ts", ".tsx", "CMakeLists.txt". */
   files: string[]
+  /** How many of the folder's files it covers, and the files that mark a project of its kind. */
+  used?: { files: number; markers: string[] }
+  /** eNCode can install it with one click, this way. */
+  installer?: 'npm' | 'download' | 'toolchain'
+  /** eNCode installed it, at this version. */
+  installed?: string
+  /** An install is running: bytes so far, of about this many. */
+  installing?: { done: number; total: number }
+  /** The last install failed, and why. */
+  installError?: string
+  /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
+  libraries?: LanguageLibraryInfo[]
+}
+
+/** A library eNCode installs for a server to read, as the Settings screen lists it under the server. */
+export interface LanguageLibraryInfo {
+  id: string
+  /** "FiveM natives". */
+  label: string
+  /** "FiveM's natives for Lua". */
+  what: string
+  installed?: string
+  installing?: { done: number; total: number }
+  installError?: string
 }
 
 export interface LanguageServersReport {
@@ -57,6 +97,8 @@ export interface LanguageServersReport {
   /** Why they do not run, in words. */
   reason?: string
   servers: LanguageServerInfo[]
+  /** The folder was not read to the end for the languages it uses. */
+  partial?: boolean
 }
 
 interface At {
@@ -257,13 +299,19 @@ async function readText(file: string): Promise<string | null> {
 }
 
 async function start(plan: LaunchPlan, cwd: string, env: Record<string, string>): Promise<ServerProcess> {
-  const child = spawn(plan.file, plan.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false })
+  // eNCode's own Node.js runs an npm-installed server through the plan's environment; nothing else adds to it.
+  const child = spawn(plan.file, plan.args, { cwd, env: { ...env, ...plan.env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false })
   // A program that cannot be started says so through `error`; wait for it to start or fail.
   await new Promise<void>((resolve, reject) => {
     child.once('spawn', () => resolve())
     child.once('error', (error) => reject(new Error(`${plan.command} could not be started: ${error.message}`)))
   })
   return fromChildProcess(child)
+}
+
+/** What starting a server from eNCode's tools folder needs to know. */
+export function launchContext(tools: ServerTools, root: string, platform: NodeJS.Platform, env: Record<string, string>): LaunchContext {
+  return { platform, arch: tools.arch ?? process.arch, node: tools.node, which: (name) => searchPath(name, env, platform), cacheDir: tools.cacheDir, root, env }
 }
 
 export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.Platform, options: LanguageServerOptions): LanguageServers {
@@ -278,9 +326,16 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
       if (!config.current().folder.trusted) return { ok: false, reason: FOLDER_NOT_TRUSTED }
       return { ok: true }
     },
-    // Only reached once the folder is trusted: its own node_modules/.bin is looked in first.
-    discover: (spec) => options.discover?.(spec, config.root) ?? discover(spec, config.root, { platform, projectBins: true, which: (name) => searchPath(name, environment(), platform) }),
+    // Only reached once the folder is trusted: its own node_modules/.bin is looked in first, eNCode's tools last.
+    discover: (spec) => {
+      if (options.discover) return options.discover(spec, config.root)
+      const env = environment()
+      const which = (name: string) => searchPath(name, env, platform)
+      const tools = options.tools ? { dir: options.tools.dir, context: launchContext(options.tools, config.root, platform, env) } : undefined
+      return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}) })
+    },
     spawn: (plan, cwd) => (options.spawn ?? start)(plan, cwd, environment()),
+    ...(options.tools ? { tools: { dir: options.tools.dir, cacheDir: options.tools.cacheDir } } : {}),
     readText,
     exists: (file) => existsSync(file),
     ...(options.idleMs ? { idleMs: options.idleMs } : {}),
@@ -289,16 +344,69 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
   })
 }
 
-/** How a folder's servers stand, for the Settings screen; with `logs`, the last lines of the ones that stopped or failed. */
-export function languageServersReport(servers: LanguageServers, options: Pick<LanguageServerOptions, 'enabled' | 'catalog'>, trusted: boolean, logs = 0): LanguageServersReport & { logs?: Record<string, string[]> } {
+/** The libraries of a server the folder wants (by its markers) or that are installed, when eNCode installs them. */
+function libraryViews(server: string, markers: string[], options: Pick<LanguageServerOptions, 'tools' | 'libraries'>, installs?: (id: string) => InstallState | undefined): { libraries?: LanguageLibraryInfo[] } {
+  if (!options.tools) return {}
+  const libraries: LanguageLibraryInfo[] = []
+  for (const spec of options.libraries ?? LANGUAGE_LIBRARIES) {
+    if (spec.server !== server) continue
+    const installed = installedDir(spec, options.tools.dir)
+    const install = installs?.(spec.id)
+    if (!installed && !install && !spec.markers.some((marker) => markers.includes(marker))) continue
+    libraries.push({
+      id: spec.id,
+      label: spec.label,
+      what: spec.what,
+      ...(installed ? { installed: installed.version } : {}),
+      ...(install && 'error' in install ? { installError: install.error } : install ? { installing: install } : {}),
+    })
+  }
+  return libraries.length ? { libraries } : {}
+}
+
+/** What an install of a server is doing now, for the report. */
+export type InstallState = { done: number; total: number } | { error: string }
+
+/**
+ * How a folder's servers stand, for the Settings screen; with `logs`, the last lines of the ones that stopped or
+ * failed. With the folder's languages, each server says how many of its files it covers; the ones it uses come first.
+ */
+export function languageServersReport(
+  servers: LanguageServers,
+  options: Pick<LanguageServerOptions, 'enabled' | 'catalog' | 'tools' | 'libraries'>,
+  trusted: boolean,
+  logs = 0,
+  extra: { languages?: FolderLanguages; installs?: (id: string) => InstallState | undefined } = {},
+): LanguageServersReport & { logs?: Record<string, string[]> } {
   const catalog = options.catalog ?? LANGUAGE_SERVERS
   const specs = new Map(catalog.map((spec) => [spec.id, spec]))
   const state = !options.enabled() ? 'off' : !trusted ? 'untrusted' : 'on'
+  const used = new Map((extra.languages?.used ?? []).map((item) => [item.id, item]))
   const views = servers.status().map((view): LanguageServerInfo => {
     const spec = specs.get(view.id)
-    return { ...view, install: spec?.install ?? '', files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [] }
+    const use = used.get(view.id)
+    const installed = spec && options.tools ? installedDir(spec, options.tools.dir) : null
+    const install = extra.installs?.(view.id)
+    return {
+      ...view,
+      install: spec?.install ?? '',
+      files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [],
+      ...(use ? { used: { files: use.files, markers: use.markers } } : {}),
+      ...(spec?.installer && spec.installer.kind !== 'library' && options.tools ? { installer: spec.installer.kind } : {}),
+      ...(installed ? { installed: installed.version } : {}),
+      ...(install && 'error' in install ? { installError: install.error } : install ? { installing: install } : {}),
+      ...libraryViews(view.id, use?.markers ?? [], options, extra.installs),
+    }
   })
-  const report: LanguageServersReport & { logs?: Record<string, string[]> } = { state, ...(state === 'off' ? { reason: SERVERS_OFF } : state === 'untrusted' ? { reason: FOLDER_NOT_TRUSTED } : {}), servers: views }
+  // The languages the folder uses first, most files first; the rest as the catalog lists them.
+  const order = new Map(views.map((view, index) => [view.id, index]))
+  views.sort((a, b) => (b.used?.files ?? 0) - (a.used?.files ?? 0) || order.get(a.id)! - order.get(b.id)!)
+  const report: LanguageServersReport & { logs?: Record<string, string[]> } = {
+    state,
+    ...(state === 'off' ? { reason: SERVERS_OFF } : state === 'untrusted' ? { reason: FOLDER_NOT_TRUSTED } : {}),
+    servers: views,
+    ...(extra.languages?.partial ? { partial: true } : {}),
+  }
   if (logs > 0) {
     const kept: Record<string, string[]> = {}
     for (const view of views) {

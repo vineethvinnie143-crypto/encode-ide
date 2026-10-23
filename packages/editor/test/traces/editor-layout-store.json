@@ -1,0 +1,947 @@
+{
+ "version": 1,
+ "name": "editor-layout-store",
+ "doc": "import { create } from '../store'\nimport type { OutlineSort } from '../editor/symbols'\n\nconst KEY = 'eNCode.editorLayout.v1'\n\n/** How the editor pane is laid out around the text: the breadcrumbs above it, the outline beside it. */\nexport interface EditorLayout {\n  breadcrumbs: boolean\n  outline: boolean\n  /** The outline's width in pixels, as the person dragged it. */\n  outlineWidth: number\n  outlineSort: OutlineSort\n  /** The outline shows the symbol the cursor is in, opening the symbols it is under. */\n  outlineFollow: boolean\n}\n\nexport const OUTLINE_MIN = 180\nexport const OUTLINE_MAX = 480\nconst DEFAULTS: EditorLayout = { breadcrumbs: true, outline: false, outlineWidth: 248, outlineSort: 'position', outlineFollow: true }\n\n/** A saved layout, each field checked; what is missing or wrong takes its default. */\nexport function normalizeLayout(value: unknown): EditorLayout {\n  if (typeof value !== 'object' || value === null) return { ...DEFAULTS }\n  const raw = value as Record<string, unknown>\n  const width = typeof raw.outlineWidth === 'number' && Number.isFinite(raw.outlineWidth) ? Math.round(raw.outlineWidth) : DEFAULTS.outlineWidth\n  return {\n    breadcrumbs: typeof raw.breadcrumbs === 'boolean' ? raw.breadcrumbs : DEFAULTS.breadcrumbs,\n    outline: typeof raw.outline === 'boolean' ? raw.outline : DEFAULTS.outline,\n    outlineWidth: Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, width)),\n    outlineSort: raw.outlineSort === 'name' || raw.outlineSort === 'kind' || raw.outlineSort === 'position' ? raw.outlineSort : DEFAULTS.outlineSort,\n    outlineFollow: typeof raw.outlineFollow === 'boolean' ? raw.outlineFollow : DEFAULTS.outlineFollow,\n  }\n}\n\nfunction load(): EditorLayout {\n  try {\n    return normalizeLayout(JSON.parse(localStorage.getItem(KEY) ?? 'null'))\n  } catch {\n    return { ...DEFAULTS }\n  }\n}\n\ninterface EditorLayoutStore extends EditorLayout {\n  set(patch: Partial<EditorLayout>): void\n}\n\n/**\n * Ctrl+Shift+. asks the breadcrumbs for the keyboard: they open the list of their last part. An ask made while they\n * are hidden is taken up when they show.\n */\nexport const useBreadcrumbsAsk = create<{ asked: number; handled: number }>(() => ({ asked: 0, handled: 0 }))\n\nexport function focusBreadcrumbs(): void {\n  useBreadcrumbsAsk.setState((state) => ({ asked: state.asked + 1 }))\n}\n\nexport const useEditorLayout = create<EditorLayoutStore>((set, get) => ({\n  ...load(),\n  set(patch) {\n    set(patch)\n    const { set: _set, ...layout } = get()\n    try {\n      localStorage.setItem(KEY, JSON.stringify(normalizeLayout(layout)))\n    } catch {\n      /* storage may be unavailable */\n    }\n  },\n}))\n",
+ "language": "typescript",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     226,
+     226
+    ]
+   ],
+   "t": 1741
+  },
+  {
+   "insert": ", what the text shows",
+   "t": 1777
+  },
+  {
+   "select": [
+    [
+     326,
+     326
+    ]
+   ],
+   "t": 2665
+  },
+  {
+   "insert": "  /** Blocks fold, with chevrons",
+   "t": 2729
+  },
+  {
+   "insert": " in the gutter. */\n  folding:",
+   "t": 2783
+  },
+  {
+   "insert": " boolean\n  /** The first lines of",
+   "t": 2911
+  },
+  {
+   "insert": " the blocks the top of the view",
+   "t": 3010
+  },
+  {
+   "insert": " is in stay pinned above the",
+   "t": 3104
+  },
+  {
+   "insert": " text. */\n  stickyScroll: boolean",
+   "t": 3272
+  },
+  {
+   "insert": "\n  /** Brackets are coloured by",
+   "t": 3348
+  },
+  {
+   "insert": " how deeply they nest. */\n  ",
+   "t": 3485
+  },
+  {
+   "insert": "bracketColors: boolean\n  /** A",
+   "t": 3554
+  },
+  {
+   "insert": " small picture of the file beside",
+   "t": 3694
+  },
+  {
+   "insert": " the text. */\n  minimap: boolean\n",
+   "t": 3791
+  },
+  {
+   "select": [
+    [
+     1094,
+     962
+    ]
+   ],
+   "t": 6414
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 6614
+  },
+  {
+   "insert": "/** The parts of the editor a menu",
+   "t": 6718
+  },
+  {
+   "insert": " turns on and off. */\n",
+   "t": 6848
+  },
+  {
+   "insert": "export type EditorPart =",
+   "t": 6931
+  },
+  {
+   "insert": " 'breadcrumbs' | 'outline' |",
+   "t": 7036
+  },
+  {
+   "insert": " 'folding' | 'stickyScroll' |",
+   "t": 7109
+  },
+  {
+   "insert": " 'bracketColors' | 'minimap'\n",
+   "t": 7199
+  },
+  {
+   "insert": "\n",
+   "t": 7265
+  },
+  {
+   "insert": "const DEFAULTS: EditorLayout = {\n  ",
+   "t": 7338
+  },
+  {
+   "insert": "breadcrumbs: true,\n  outline: false,",
+   "t": 7475
+  },
+  {
+   "insert": "\n  folding: true,\n  stickyScroll:",
+   "t": 7589
+  },
+  {
+   "insert": " true,\n  bracketColors: true,\n  ",
+   "t": 7636
+  },
+  {
+   "insert": "minimap: true,\n  outlineWidth: 248,",
+   "t": 7752
+  },
+  {
+   "insert": "\n  outlineSort: 'position',\n  ",
+   "t": 7825
+  },
+  {
+   "insert": "outlineFollow: true,\n",
+   "t": 7992
+  },
+  {
+   "select": [
+    [
+     1771,
+     1771
+    ]
+   ],
+   "t": 10016
+  },
+  {
+   "insert": "  const flag = (name: EditorPart):",
+   "t": 10096
+  },
+  {
+   "insert": " boolean => (typeof raw[name] ===",
+   "t": 10170
+  },
+  {
+   "insert": " 'boolean' ? (raw[name] as boolean) :",
+   "t": 10289
+  },
+  {
+   "insert": " DEFAULTS[name])\n",
+   "t": 10336
+  },
+  {
+   "select": [
+    [
+     2077,
+     1920
+    ]
+   ],
+   "t": 13025
+  },
+  {
+   "cut": true,
+   "t": 13166
+  },
+  {
+   "insert": "flag('breadcrumbs'),\n    outline:",
+   "t": 13264
+  },
+  {
+   "insert": " flag('outline'),\n    folding:",
+   "t": 13441
+  },
+  {
+   "insert": " flag('folding'),\n    ",
+   "t": 13496
+  },
+  {
+   "insert": "stickyScroll:",
+   "t": 13531
+  },
+  {
+   "insert": " flag('stickyScroll'),\n    ",
+   "t": 13649
+  },
+  {
+   "insert": "bracketColors:",
+   "t": 13694
+  },
+  {
+   "insert": " flag('bracketColors'),\n    ",
+   "t": 13853
+  },
+  {
+   "insert": "minimap: flag('minimap')",
+   "t": 14030
+  },
+  {
+   "expect": {
+    "length": 3408,
+    "lines": 95,
+    "hash": "344435e7"
+   },
+   "t": 14530
+  },
+  {
+   "select": [
+    [
+     667,
+     667
+    ]
+   ],
+   "t": 17402
+  },
+  {
+   "paste": "  /** The language server's hints among the text: the types it worked out, the names of the parameters arguments go to. */\n  inlayHints: boolean\n  /** Names coloured as the language server knows them (a type, a parameter, a deprecated function), over the lexer's colours. */\n  semanticHighlighting: boolean\n",
+   "t": 17702
+  },
+  {
+   "select": [
+    [
+     1433,
+     1433
+    ]
+   ],
+   "t": 18497
+  },
+  {
+   "insert": "' | 'inlayHints' |",
+   "t": 18542
+  },
+  {
+   "insert": " 'semanticHighlighting",
+   "t": 18604
+  },
+  {
+   "select": [
+    [
+     1627,
+     1627
+    ]
+   ],
+   "t": 21224
+  },
+  {
+   "insert": "  inlayHints: true,\n  ",
+   "t": 21367
+  },
+  {
+   "insert": "semanticHighlighting: true,\n",
+   "t": 21488
+  },
+  {
+   "select": [
+    [
+     2510,
+     2510
+    ]
+   ],
+   "t": 23409
+  },
+  {
+   "insert": "    inlayHints:",
+   "t": 23585
+  },
+  {
+   "insert": " flag('inlayHints'),\n    ",
+   "t": 23696
+  },
+  {
+   "insert": "semanticHighlighting:",
+   "t": 23820
+  },
+  {
+   "insert": " flag('semanticHighlighti",
+   "t": 23916
+  },
+  {
+   "insert": "ng'),\n",
+   "t": 23998
+  },
+  {
+   "expect": {
+    "length": 3897,
+    "lines": 103,
+    "hash": "521f0960"
+   },
+   "t": 24498
+  },
+  {
+   "select": [
+    [
+     974,
+     974
+    ]
+   ],
+   "t": 26812
+  },
+  {
+   "insert": "  /** Long lines wrap onto",
+   "t": 26934
+  },
+  {
+   "insert": " rows below instead of",
+   "t": 27019
+  },
+  {
+   "insert": " running off to the right",
+   "t": 27111
+  },
+  {
+   "insert": " (Alt+Z). */\n  wordWrap:",
+   "t": 27207
+  },
+  {
+   "insert": " boolean\n  /** Where they",
+   "t": 27293
+  },
+  {
+   "insert": " wrap: at the window's",
+   "t": 27411
+  },
+  {
+   "insert": " edge, at `wrapColumn`, or",
+   "t": 27563
+  },
+  {
+   "insert": " at whichever of the two",
+   "t": 27711
+  },
+  {
+   "insert": " comes first. */\n  wrapAt:",
+   "t": 27748
+  },
+  {
+   "insert": " WrapAt\n  wrapColumn:",
+   "t": 27828
+  },
+  {
+   "insert": " number\n  /** Rows after a",
+   "t": 27970
+  },
+  {
+   "insert": " line's first start as far",
+   "t": 28036
+  },
+  {
+   "insert": " in as the line does. */",
+   "t": 28108
+  },
+  {
+   "insert": "\n  wrapIndent: boolean\n  ",
+   "t": 28227
+  },
+  {
+   "insert": "/** Every space and tab is",
+   "t": 28327
+  },
+  {
+   "insert": " shown (the View menu);",
+   "t": 28366
+  },
+  {
+   "insert": " otherwise those",
+   "t": 28418
+  },
+  {
+   "insert": " `whitespace` names. */\n  ",
+   "t": 28544
+  },
+  {
+   "insert": "showWhitespace: boolean\n  ",
+   "t": 28619
+  },
+  {
+   "insert": "whitespace:",
+   "t": 28702
+  },
+  {
+   "insert": " WhitespaceShown\n",
+   "t": 28750
+  },
+  {
+   "select": [
+    [
+     1693,
+     1693
+    ]
+   ],
+   "t": 29501
+  },
+  {
+   "insert": "\n",
+   "t": 29538
+  },
+  {
+   "insert": "export type WrapAt = 'edge' | 'column'",
+   "t": 29595
+  },
+  {
+   "insert": " | 'bounded'\n",
+   "t": 29670
+  },
+  {
+   "insert": "/** The spaces and tabs shown: none,",
+   "t": 29758
+  },
+  {
+   "insert": " those at a word's edge or in a run,",
+   "t": 29901
+  },
+  {
+   "insert": " those in the selection, those at a",
+   "t": 29982
+  },
+  {
+   "insert": " line's end, or all. */\n",
+   "t": 30049
+  },
+  {
+   "insert": "export type WhitespaceShown = 'none' |",
+   "t": 30162
+  },
+  {
+   "insert": " 'boundary' | 'selection' | 'trailing'",
+   "t": 30309
+  },
+  {
+   "insert": " | 'all'\n",
+   "t": 30451
+  },
+  {
+   "select": [
+    [
+     2024,
+     2024
+    ]
+   ],
+   "t": 32551
+  },
+  {
+   "insert": "export const",
+   "t": 32703
+  },
+  {
+   "insert": " WRAP_COLUMN_MIN =",
+   "t": 32794
+  },
+  {
+   "insert": " 20\n",
+   "t": 32888
+  },
+  {
+   "insert": "export const",
+   "t": 32980
+  },
+  {
+   "insert": " WRAP_COLUMN_MAX =",
+   "t": 33019
+  },
+  {
+   "insert": " 400\n",
+   "t": 33145
+  },
+  {
+   "select": [
+    [
+     2298,
+     2173
+    ]
+   ],
+   "t": 34825
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 35054
+  },
+  {
+   "paste": "\n  | 'breadcrumbs'\n  | 'outline'\n  | 'folding'\n  | 'stickyScroll'\n  | 'bracketColors'\n  | 'minimap'\n  | 'inlayHints'\n  | 'semanticHighlighting'\n  | 'wordWrap'\n  | 'wrapIndent'\n  | 'showWhitespace'\n\nconst WRAP_AT: readonly WrapAt[] = ['edge', 'column', 'bounded']\nconst WHITESPACE: readonly WhitespaceShown[] = ['none', 'boundary', 'selection', 'trailing', 'all']",
+   "t": 35354
+  },
+  {
+   "select": [
+    [
+     2738,
+     2738
+    ]
+   ],
+   "t": 36825
+  },
+  {
+   "insert": "  wordWrap:",
+   "t": 36875
+  },
+  {
+   "insert": " false,\n  ",
+   "t": 37006
+  },
+  {
+   "insert": "wrapAt:",
+   "t": 37107
+  },
+  {
+   "insert": " 'edge',\n  ",
+   "t": 37239
+  },
+  {
+   "insert": "wrapColumn:",
+   "t": 37379
+  },
+  {
+   "insert": " 80,\n  ",
+   "t": 37458
+  },
+  {
+   "insert": "wrapIndent:",
+   "t": 37538
+  },
+  {
+   "insert": " true,\n  ",
+   "t": 37708
+  },
+  {
+   "insert": "showWhitespace:",
+   "t": 37864
+  },
+  {
+   "insert": " false,\n  ",
+   "t": 38037
+  },
+  {
+   "insert": "whitespace:",
+   "t": 38075
+  },
+  {
+   "insert": " 'selection',",
+   "t": 38181
+  },
+  {
+   "insert": "\n",
+   "t": 38270
+  },
+  {
+   "select": [
+    [
+     3356,
+     3356
+    ]
+   ],
+   "t": 39228
+  },
+  {
+   "insert": "  const column = typeof",
+   "t": 39278
+  },
+  {
+   "insert": " raw.wrapColumn === 'number' &&",
+   "t": 39377
+  },
+  {
+   "insert": " Number.isFinite(raw.wrapColumn) ?",
+   "t": 39434
+  },
+  {
+   "insert": " Math.round(raw.wrapColumn) :",
+   "t": 39566
+  },
+  {
+   "insert": " DEFAULTS.wrapColumn\n",
+   "t": 39674
+  },
+  {
+   "select": [
+    [
+     3615,
+     3615
+    ]
+   ],
+   "t": 42233
+  },
+  {
+   "insert": "  const oneOf =",
+   "t": 42346
+  },
+  {
+   "insert": " <T extends",
+   "t": 42438
+  },
+  {
+   "insert": " string>(value:",
+   "t": 42494
+  },
+  {
+   "insert": " unknown,",
+   "t": 42613
+  },
+  {
+   "insert": " allowed:",
+   "t": 42715
+  },
+  {
+   "insert": " readonly T[],",
+   "t": 42862
+  },
+  {
+   "insert": " fallback: T):",
+   "t": 43018
+  },
+  {
+   "insert": " T =>",
+   "t": 43174
+  },
+  {
+   "insert": " (allowed.includes(value",
+   "t": 43327
+  },
+  {
+   "insert": " as T) ? (value",
+   "t": 43441
+  },
+  {
+   "insert": " as T) :",
+   "t": 43540
+  },
+  {
+   "insert": " fallback)\n",
+   "t": 43609
+  },
+  {
+   "select": [
+    [
+     4078,
+     4078
+    ]
+   ],
+   "t": 46249
+  },
+  {
+   "insert": "    wordWrap: flag('wordWrap'),\n    ",
+   "t": 46417
+  },
+  {
+   "insert": "wrapAt: oneOf(raw.wrapAt, WRAP_AT,",
+   "t": 46447
+  },
+  {
+   "insert": " DEFAULTS.wrapAt),\n    wrapColumn:",
+   "t": 46532
+  },
+  {
+   "insert": " clampWrapColumn(column),\n    ",
+   "t": 46603
+  },
+  {
+   "insert": "wrapIndent: flag('wrapIndent'),\n    ",
+   "t": 46687
+  },
+  {
+   "insert": "showWhitespace:",
+   "t": 46824
+  },
+  {
+   "insert": " flag('showWhitespace'),\n    ",
+   "t": 46955
+  },
+  {
+   "insert": "whitespace: oneOf(raw.whitespace,",
+   "t": 47085
+  },
+  {
+   "insert": " WHITESPACE, DEFAULTS.whitespace),\n",
+   "t": 47147
+  },
+  {
+   "select": [
+    [
+     4691,
+     4691
+    ]
+   ],
+   "t": 48266
+  },
+  {
+   "paste": "\n/** A wrap column within what the editor takes. */\nexport function clampWrapColumn(column: number): number {\n  return Math.min(WRAP_COLUMN_MAX, Math.max(WRAP_COLUMN_MIN, Math.round(column)))\n}\n\n/** What the editor's view is given for wrapping and spaces, from the layout. */\nexport function textOptions(layout: EditorLayout): {\n  wordWrap: 'off' | 'on' | 'column' | 'bounded'\n  wrapColumn: number\n  wrapIndent: boolean\n  renderWhitespace: WhitespaceShown\n} {\n  return {\n    wordWrap: !layout.wordWrap ? 'off' : layout.wrapAt === 'edge' ? 'on' : layout.wrapAt,\n    wrapColumn: layout.wrapColumn,\n    wrapIndent: layout.wrapIndent,\n    renderWhitespace: layout.showWhitespace ? 'all' : layout.whitespace,\n  }\n}\n",
+   "t": 48566
+  },
+  {
+   "expect": {
+    "length": 6365,
+    "lines": 167,
+    "hash": "947407e9"
+   },
+   "t": 49066
+  },
+  {
+   "command": "undo",
+   "t": 49466
+  },
+  {
+   "command": "undo",
+   "t": 49866
+  },
+  {
+   "expect": {
+    "length": 5373,
+    "lines": 141,
+    "hash": "9879a86f"
+   },
+   "t": 49876
+  },
+  {
+   "command": "redo",
+   "t": 50276
+  },
+  {
+   "command": "redo",
+   "t": 50676
+  },
+  {
+   "expect": {
+    "length": 6365,
+    "lines": 167,
+    "hash": "947407e9"
+   },
+   "t": 50686
+  },
+  {
+   "changes": [
+    [
+     1691,
+     1691,
+     "  /** The editor works with a screen reader: when one is running (Auto), always, or never. */\n  screenReader: ScreenReaderMode\n  /** Tab and Shift+Tab move the focus out of the editor instead of indenting (Ctrl+M). */\n  tabMovesFocus: boolean\n  /** Right-to-left text in strings, comments and prose reads in its own order; code stays in stored order. */\n  bidi: boolean\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 53598
+  },
+  {
+   "select": [
+    [
+     2331,
+     2331
+    ]
+   ],
+   "t": 56143
+  },
+  {
+   "insert": "export type ScreenReaderMode",
+   "t": 56256
+  },
+  {
+   "insert": " = 'auto' | 'on' | 'off'\n",
+   "t": 56321
+  },
+  {
+   "select": [
+    [
+     2793,
+     2793
+    ]
+   ],
+   "t": 57865
+  },
+  {
+   "insert": "  | 'tabMovesFocus'\n",
+   "t": 57919
+  },
+  {
+   "select": [
+    [
+     2979,
+     2979
+    ]
+   ],
+   "t": 59116
+  },
+  {
+   "insert": "const SCREEN_READER:",
+   "t": 59150
+  },
+  {
+   "insert": " readonly",
+   "t": 59231
+  },
+  {
+   "insert": " ScreenReaderMode[] =",
+   "t": 59318
+  },
+  {
+   "insert": " ['auto', 'on', 'off']\n",
+   "t": 59424
+  },
+  {
+   "select": [
+    [
+     3452,
+     3452
+    ]
+   ],
+   "t": 60533
+  },
+  {
+   "insert": "  screenReader:",
+   "t": 60672
+  },
+  {
+   "insert": " 'auto',\n  ",
+   "t": 60804
+  },
+  {
+   "insert": "tabMovesFocus:",
+   "t": 60946
+  },
+  {
+   "insert": " false,\n  bidi:",
+   "t": 61099
+  },
+  {
+   "insert": " false,\n",
+   "t": 61211
+  },
+  {
+   "select": [
+    [
+     5264,
+     5264
+    ]
+   ],
+   "t": 63492
+  },
+  {
+   "insert": "    screenReader:",
+   "t": 63534
+  },
+  {
+   "insert": " oneOf(raw.screenReader,",
+   "t": 63621
+  },
+  {
+   "insert": " SCREEN_READER,",
+   "t": 63727
+  },
+  {
+   "insert": " DEFAULTS.screenReader),\n    ",
+   "t": 63838
+  },
+  {
+   "insert": "tabMovesFocus:",
+   "t": 63988
+  },
+  {
+   "insert": " flag('tabMovesFocus'),\n    bidi:",
+   "t": 64077
+  },
+  {
+   "insert": " typeof raw.bidi === 'boolean' ?",
+   "t": 64160
+  },
+  {
+   "insert": " raw.bidi : DEFAULTS.bidi,\n",
+   "t": 64285
+  },
+  {
+   "select": [
+    [
+     5715,
+     5704
+    ]
+   ],
+   "t": 66822
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 67032
+  },
+  {
+   "insert": ", spaces and",
+   "t": 67136
+  },
+  {
+   "insert": " right-to-left text",
+   "t": 67224
+  },
+  {
+   "select": [
+    [
+     5937,
+     5937
+    ]
+   ],
+   "t": 69724
+  },
+  {
+   "insert": "  bidi: boolean\n",
+   "t": 69847
+  },
+  {
+   "select": [
+    [
+     6201,
+     6201
+    ]
+   ],
+   "t": 71029
+  },
+  {
+   "insert": "    bidi: layout.bidi,\n",
+   "t": 71172
+  },
+  {
+   "changes": [
+    [
+     6230,
+     6230,
+     "\n/** What the editor's view is given for screen readers and the Tab key, from the layout and whether a screen reader runs. */\nexport function accessOptions(layout: EditorLayout, screenReaderRunning: boolean): { screenReader: boolean; tabMovesFocus: boolean } {\n  return {\n    screenReader: layout.screenReader === 'on' || (layout.screenReader === 'auto' && screenReaderRunning),\n    tabMovesFocus: layout.tabMovesFocus,\n  }\n}\n\n/** Whether Windows has a screen reader using eNCode now, as Electron says; kept up to date from the app's start. */\nexport const useScreenReaderRunning = create<{ running: boolean }>(() => ({ running: false }))\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 73103
+  },
+  {
+   "expect": {
+    "length": 7833,
+    "lines": 195,
+    "hash": "9abaaad9"
+   },
+   "t": 73603
+  }
+ ]
+}

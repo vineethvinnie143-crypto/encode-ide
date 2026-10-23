@@ -6,7 +6,8 @@
  */
 import type { ErrorGate, HostEvents, HostRequests } from '@encode/core'
 import type { CodeDiagnostic } from '@encode/tools'
-import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, LanguageServersReport } from '@encode/workspace'
+import type { InstallPlan } from '@encode/lsp'
+import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
@@ -55,6 +56,9 @@ export interface HostInit {
   checkpointsDir?: string
   /** The sandbox's own folder (its temp folder, and on Windows its helper); without it commands run unconfined. */
   sandboxDir?: string
+  /** Where eNCode installs language servers when asked, and where they keep their caches; without it none is installed. */
+  toolsDir?: string
+  serverCacheDir?: string
 }
 
 /** The result of a test call to one model. */
@@ -99,6 +103,14 @@ export type DesktopHostRequests = HostRequests & {
   codeReview: { params: CodeReviewInput; result: CodeReviewResult }
   /** A folder's language servers, for the Settings screen; with `logs`, the last lines of those that stopped or failed. */
   codeReport: { params: { root: string; logs?: number }; result: LanguageServersReport & { logs?: Record<string, string[]> } }
+  /** What installing a language server would do, for the person to read first. */
+  codeInstallPlan: { params: { root: string; id: string }; result: InstallPlan | { unavailable: string } }
+  /** Installs a language server the person said yes to; answers once it is installed or failed. */
+  codeInstall: { params: { root: string; id: string }; result: InstallResult }
+  /** Stops an install that runs; it ends as failed, with nothing left behind. */
+  codeInstallCancel: { params: { id: string }; result: void }
+  /** Removes a language server eNCode installed. */
+  codeUninstall: { params: { id: string }; result: InstallResult }
   /** A question of the editor's to the servers of a file it shows; answered for the text it sent before it. */
   codeAsk: { params: { root: string; ask: EditorAsk }; result: EditorAnswer }
   /** A rename or a code action of the editor's, its preview, or taking one back; after the editor's earlier changes. */

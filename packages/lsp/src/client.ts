@@ -102,6 +102,9 @@ interface Waiter {
 
 const LOG_LINES = 50
 const SETTLE_MS = 200
+/** How long after a change a server that is asked for diagnostics is asked. */
+const PULL_DELAY_MS = 250
+const REQUEST_TIMEOUT_MS = 15_000
 
 /** The capabilities eNCode says it has, so a server sends what eNCode reads. */
 function clientCapabilities(): object {
@@ -115,12 +118,13 @@ function clientCapabilities(): object {
       didChangeWatchedFiles: { dynamicRegistration: true },
       symbol: { symbolKind: { valueSet: Array.from({ length: 26 }, (_, index) => index + 1) } },
       executeCommand: {},
-      diagnostics: { refreshSupport: false },
+      diagnostics: { refreshSupport: true },
     },
     textDocument: {
       synchronization: { didSave: true, willSave: false, willSaveWaitUntil: false, dynamicRegistration: false },
       publishDiagnostics: { relatedInformation: false, versionSupport: true, codeDescriptionSupport: false, dataSupport: false },
-      diagnostic: { dynamicRegistration: true, relatedDocumentSupport: false },
+      // Static only: a server that would register for pulls later (pyright) sends its diagnostics instead.
+      diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
       hover: { contentFormat: ['markdown', 'plaintext'] },
       completion: {
         completionItem: {
@@ -201,6 +205,11 @@ export class LanguageClient {
   private applying: ((edit: WorkspaceEdit) => Promise<{ applied: boolean; failureReason?: string }>) | null = null
   private stopping = false
   private exitReason: string | null = null
+  /**
+   * Documents shown in the editor. A server that is asked for its diagnostics rather than sending them (pyright, the
+   * Lua and C# servers) is asked again a moment after each change, and for all of them when it says they are stale.
+   */
+  private readonly watched = new Map<string, { timer: ReturnType<typeof setTimeout> | null; asking: boolean; again: boolean }>()
 
   private constructor(private readonly options: ClientOptions) {
     this.name = options.name
@@ -351,13 +360,15 @@ export class LanguageClient {
   }
 
   /** Opens a document, or brings an open one to `text`. Returns its version. */
-  sync(file: string, languageId: string, text: string, options: { saved?: boolean } = {}): number {
+  sync(file: string, languageId: string, text: string, options: { saved?: boolean; watch?: boolean } = {}): number {
     const key = documentKey(file, this.platform)
+    if (options.watch && !this.watched.has(key)) this.watched.set(key, { timer: null, asking: false, again: false })
     const open = this.docs.get(key)
     if (!open) {
       const doc: OpenDocument = { file, uri: pathToUri(file, this.platform), languageId, version: 1, text }
       this.docs.set(key, doc)
       this.connection.notify('textDocument/didOpen', { textDocument: { uri: doc.uri, languageId, version: doc.version, text } })
+      this.askSoon(key)
       return doc.version
     }
     if (open.text !== text) {
@@ -365,6 +376,9 @@ export class LanguageClient {
       open.text = text
       // Sent whole: eNCode knows the text, not the keystrokes, and a whole text cannot drift from the server's copy.
       this.connection.notify('textDocument/didChange', { textDocument: { uri: open.uri, version: open.version }, contentChanges: [{ text }] })
+      this.askSoon(key)
+    } else if (options.watch) {
+      this.askSoon(key)
     }
     if (options.saved && this.wantsSave()) {
       this.connection.notify('textDocument/didSave', { textDocument: { uri: open.uri }, ...(this.saveIncludesText() ? { text } : {}) })
@@ -380,12 +394,61 @@ export class LanguageClient {
     open.version++
     open.text = text
     this.connection.notify('textDocument/didChange', { textDocument: { uri: open.uri, version: open.version }, contentChanges: changes.map((change) => ({ range: change.range, text: change.text })) })
+    this.askSoon(documentKey(file, this.platform))
     return open.version
+  }
+
+  /** Watches an open document from now on (the editor opened what the agent had open). */
+  watch(file: string): void {
+    const key = documentKey(file, this.platform)
+    if (this.watched.has(key) || !this.docs.has(key)) return
+    this.watched.set(key, { timer: null, asking: false, again: false })
+    this.askSoon(key)
+  }
+
+  /** Asks a server that is asked for diagnostics about a watched document, once typing pauses. */
+  private askSoon(key: string): void {
+    const watch = this.watched.get(key)
+    if (!watch || this.exitReason || !this.supports('pullDiagnostics')) return
+    if (watch.timer) clearTimeout(watch.timer)
+    watch.timer = setTimeout(() => {
+      watch.timer = null
+      void this.ask(key)
+    }, PULL_DELAY_MS)
+    watch.timer.unref?.()
+  }
+
+  private async ask(key: string): Promise<void> {
+    const watch = this.watched.get(key)
+    const doc = this.docs.get(key)
+    if (!watch || !doc || this.exitReason) return
+    // One question at a time per document; a change while it is out asks again once it is answered.
+    if (watch.asking) {
+      watch.again = true
+      return
+    }
+    watch.asking = true
+    try {
+      const version = doc.version
+      const report = await this.connection.request<{ kind?: unknown; items?: unknown }>('textDocument/diagnostic', { textDocument: { uri: doc.uri } }, { timeoutMs: REQUEST_TIMEOUT_MS })
+      if (report && report.kind === 'full' && this.docs.get(key) === doc) this.publish(key, doc.file, readDiagnostics(report.items), version)
+    } catch {
+      // The next change asks again.
+    } finally {
+      watch.asking = false
+      if (watch.again && this.watched.get(key) === watch) {
+        watch.again = false
+        void this.ask(key)
+      }
+    }
   }
 
   close(file: string): void {
     const key = documentKey(file, this.platform)
     const open = this.docs.get(key)
+    const watch = this.watched.get(key)
+    if (watch?.timer) clearTimeout(watch.timer)
+    this.watched.delete(key)
     if (!open) return
     this.docs.delete(key)
     this.published.delete(key)
@@ -552,7 +615,11 @@ export class LanguageClient {
       case 'client/registerCapability':
       case 'client/unregisterCapability':
       case 'window/workDoneProgress/create':
+        return null
       case 'workspace/diagnostic/refresh':
+        // What the server said of the documents shown is stale (a file they use changed): ask again.
+        for (const key of this.watched.keys()) this.askSoon(key)
+        return null
       case 'workspace/semanticTokens/refresh':
       case 'workspace/inlayHint/refresh':
       case 'workspace/inlineValue/refresh':

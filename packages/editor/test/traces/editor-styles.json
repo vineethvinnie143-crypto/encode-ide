@@ -1,0 +1,2135 @@
+{
+ "version": 1,
+ "name": "editor-styles",
+ "doc": "/*\n * The editor's structure and its default look. The host themes it by setting\n * the --enc-editor-*, --enc-tok-* and --enc-editor-ui-font-family variables\n * on :root or any ancestor; nothing here is meant to be overridden by\n * selector. The values after each comma are the defaults.\n */\n\n.enc-editor {\n  --e-bg: var(--enc-editor-bg, #14161a);\n  --e-fg: var(--enc-editor-fg, #d7dae0);\n  --e-gutter-bg: var(--enc-editor-gutter-bg, var(--e-bg));\n  --e-gutter-fg: var(--enc-editor-gutter-fg, #4b5160);\n  --e-gutter-active-fg: var(--enc-editor-gutter-active-fg, #9aa3b5);\n  --e-active-line: var(--enc-editor-active-line-bg, rgba(255, 255, 255, 0.035));\n  --e-selection: var(--enc-editor-selection-bg, rgba(88, 129, 255, 0.3));\n  --e-selection-inactive: var(--enc-editor-selection-inactive-bg, rgba(140, 150, 170, 0.18));\n  --e-cursor: var(--enc-editor-cursor, #7fa6ff);\n  --e-match: var(--enc-editor-match-bg, rgba(245, 181, 74, 0.22));\n  --e-match-active: var(--enc-editor-match-active-bg, rgba(245, 181, 74, 0.45));\n  --e-bracket: var(--enc-editor-bracket-match-bg, rgba(127, 166, 255, 0.22));\n  --e-guide: var(--enc-editor-indent-guide, rgba(255, 255, 255, 0.07));\n  --e-whitespace: var(--enc-editor-whitespace, rgba(255, 255, 255, 0.25));\n  --e-error: var(--enc-editor-error, #ff6b6b);\n  --e-warning: var(--enc-editor-warning, #f5b54a);\n  --e-info: var(--enc-editor-info, #6b98ff);\n  --e-inserted: var(--enc-editor-inserted-bg, rgba(60, 203, 127, 0.28));\n  --e-inserted-line: var(--enc-editor-inserted-line-bg, rgba(60, 203, 127, 0.1));\n  --e-deleted: var(--enc-editor-deleted-bg, rgba(255, 107, 107, 0.28));\n  --e-deleted-line: var(--enc-editor-deleted-line-bg, rgba(255, 107, 107, 0.1));\n  --e-widget-bg: var(--enc-editor-widget-bg, #1d2027);\n  --e-widget-fg: var(--enc-editor-widget-fg, #d7dae0);\n  --e-widget-border: var(--enc-editor-widget-border, rgba(255, 255, 255, 0.1));\n  --e-widget-shadow: var(--enc-editor-widget-shadow, 0 8px 28px rgba(0, 0, 0, 0.45));\n  --e-accent: var(--enc-editor-accent, #4f7cff);\n  --e-accent-fg: var(--enc-editor-accent-fg, #ffffff);\n  --e-scrollbar: var(--enc-editor-scrollbar, rgba(150, 160, 180, 0.28));\n  --e-scrollbar-hover: var(--enc-editor-scrollbar-hover, rgba(150, 160, 180, 0.5));\n  --e-radius: var(--enc-editor-radius, 8px);\n  --e-ui-font: var(--enc-editor-ui-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);\n\n  --e-tok-comment: var(--enc-tok-comment, #6b7385);\n  --e-tok-string: var(--enc-tok-string, #8fd19e);\n  --e-tok-number: var(--enc-tok-number, #f0a96a);\n  --e-tok-keyword: var(--enc-tok-keyword, #c4a1ff);\n  --e-tok-type: var(--enc-tok-type, #6fd0e6);\n  --e-tok-function: var(--enc-tok-function, #7fb0ff);\n  --e-tok-punct: var(--enc-tok-punct, #8b93a5);\n  --e-tok-operator: var(--enc-tok-operator, #a6aebf);\n  --e-tok-tag: var(--enc-tok-tag, #ff8b8b);\n  --e-tok-attr: var(--enc-tok-attr, #f0c674);\n  --e-tok-value: var(--enc-tok-value, #8fd19e);\n  --e-tok-key: var(--enc-tok-key, #7fb0ff);\n  --e-tok-bool: var(--enc-tok-bool, #f0a96a);\n  --e-tok-heading: var(--enc-tok-heading, #7fb0ff);\n  --e-tok-emphasis: var(--enc-tok-emphasis, var(--e-fg));\n  --e-tok-strong: var(--enc-tok-strong, var(--e-fg));\n  --e-tok-variable: var(--enc-tok-variable, var(--e-fg));\n  --e-tok-link: var(--enc-tok-link, #7fb0ff);\n  --e-tok-meta: var(--enc-tok-meta, #6fd0e6);\n  --e-tok-regexp: var(--enc-tok-regexp, #f09a9a);\n  --e-tok-escape: var(--enc-tok-escape, #f0c674);\n  --e-tok-property: var(--enc-tok-property, #a8c7ff);\n  --e-tok-constant: var(--enc-tok-constant, #f0a96a);\n  --e-tok-inserted: var(--enc-tok-inserted, #8fd19e);\n  --e-tok-deleted: var(--enc-tok-deleted, #ff8b8b);\n  --e-tok-code: var(--enc-tok-code, #8fd19e);\n\n  position: relative;\n  display: flex;\n  flex-direction: column;\n  width: 100%;\n  height: 100%;\n  min-width: 0;\n  min-height: 0;\n  overflow: hidden;\n  background: var(--e-bg);\n  color: var(--e-fg);\n  font: var(--enc-editor-font-size, 13px) / var(--enc-editor-line-height, 20px)\n    var(--enc-editor-font-family, 'JetBrains Mono', ui-monospace, 'Cascadia Code', Consolas, Menlo, monospace);\n  font-kerning: none;\n  -webkit-user-select: none;\n  user-select: none;\n  contain: layout paint;\n}\n\n.enc-scroller {\n  position: relative;\n  flex: 1 1 auto;\n  min-height: 0;\n  overflow: auto;\n  outline: none;\n  overscroll-behavior: contain;\n  cursor: text;\n}\n\n.enc-scroller::-webkit-scrollbar {\n  width: 14px;\n  height: 14px;\n}\n.enc-scroller::-webkit-scrollbar-track {\n  background: transparent;\n}\n.enc-scroller::-webkit-scrollbar-corner {\n  background: transparent;\n}\n.enc-scroller::-webkit-scrollbar-thumb {\n  background-color: var(--e-scrollbar);\n  background-clip: padding-box;\n  border: 3px solid transparent;\n  border-radius: 8px;\n}\n.enc-scroller::-webkit-scrollbar-thumb:hover {\n  background-color: var(--e-scrollbar-hover);\n}\n\n.enc-sizer {\n  position: relative;\n  display: flex;\n  min-width: 100%;\n}\n\n/* Gutter */\n\n.enc-gutter {\n  position: sticky;\n  left: 0;\n  z-index: 3;\n  flex: none;\n  overflow: hidden;\n  background: var(--e-gutter-bg);\n  cursor: default;\n}\n.enc-no-numbers .enc-gutter-num {\n  display: none;\n}\n.enc-gutter-layer {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 100%;\n}\n.enc-gutter-num {\n  position: absolute;\n  left: 0;\n  width: 100%;\n  box-sizing: border-box;\n  height: var(--enc-line-h);\n  line-height: var(--enc-line-h);\n  padding-right: 12px;\n  text-align: right;\n  color: var(--e-gutter-fg);\n  font-variant-numeric: tabular-nums;\n  white-space: pre;\n}\n.enc-gutter-num.enc-active {\n  color: var(--e-gutter-active-fg);\n}\n.enc-gutter-num.enc-gutter-error {\n  color: var(--e-error);\n}\n.enc-gutter-num.enc-gutter-warning {\n  color: var(--e-warning);\n}\n.enc-gutter-inserted::after,\n.enc-gutter-modified::after,\n.enc-gutter-deleted::after {\n  content: '';\n  position: absolute;\n  right: 3px;\n  top: 0;\n  bottom: 0;\n  width: 3px;\n  border-radius: 1px;\n}\n.enc-gutter-inserted::after {\n  background: var(--e-tok-inserted);\n}\n.enc-gutter-modified::after {\n  background: var(--e-info);\n}\n.enc-gutter-deleted::after {\n  top: 0;\n  bottom: auto;\n  height: 3px;\n  width: 8px;\n  right: 1px;\n  background: var(--e-tok-deleted);\n}\n\n/* Content layers */\n\n.enc-content {\n  position: relative;\n  flex: 1 1 auto;\n  min-width: 0;\n}\n.enc-layer {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 100%;\n  height: 0;\n}\n.enc-bg,\n.enc-marks,\n.enc-selection,\n.enc-lines,\n.enc-zones,\n.enc-cursors {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 100%;\n  height: 0;\n}\n.enc-rect {\n  position: absolute;\n  pointer-events: none;\n  box-sizing: border-box;\n}\n\n.enc-line {\n  position: absolute;\n  left: 0;\n  width: 100%;\n  box-sizing: border-box;\n  height: var(--enc-line-h);\n  line-height: var(--enc-line-h);\n  padding-left: var(--enc-pad-x, 12px);\n  white-space: pre;\n  tab-size: var(--enc-tab-size, 4);\n  -moz-tab-size: var(--enc-tab-size, 4);\n  font-variant-ligatures: none;\n  pointer-events: none;\n  /* Text reads in the order it is stored: nothing in a line can reorder what follows it. */\n  direction: ltr;\n  unicode-bidi: bidi-override;\n}\n.enc-ligatures .enc-line {\n  font-variant-ligatures: contextual;\n}\n\n.enc-line-active {\n  background: var(--e-active-line);\n}\n.enc-selection-rect {\n  background: var(--e-selection-inactive);\n}\n.enc-focused .enc-selection-rect {\n  background: var(--e-selection);\n}\n.enc-guides {\n  background-image: linear-gradient(to right, var(--e-guide) 1px, transparent 1px);\n  background-repeat: repeat-x;\n}\n\n.enc-mark-find {\n  background: var(--e-match);\n  border-radius: 2px;\n}\n.enc-mark-find-active {\n  background: var(--e-match-active);\n  box-shadow: 0 0 0 1px var(--e-match-active);\n}\n.enc-mark-bracket {\n  background: var(--e-bracket);\n  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-cursor) 55%, transparent);\n  border-radius: 2px;\n}\n.enc-line-inserted {\n  background: var(--e-inserted-line);\n}\n.enc-line-deleted {\n  background: var(--e-deleted-line);\n}\n.enc-mark-inserted {\n  background: var(--e-inserted);\n  border-radius: 2px;\n}\n.enc-mark-deleted {\n  background: var(--e-deleted);\n  border-radius: 2px;\n}\n\n.enc-squiggle-error,\n.enc-squiggle-warning,\n.enc-squiggle-info,\n.enc-squiggle-hint {\n  -webkit-mask: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.4 Q1.5 0.1 3 1.4 T6 2.4' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E\") repeat-x left bottom / 6px 3px;\n  mask: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.4 Q1.5 0.1 3 1.4 T6 2.4' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E\") repeat-x left bottom / 6px 3px;\n}\n.enc-squiggle-error {\n  background: var(--e-error);\n}\n.enc-squiggle-warning {\n  background: var(--e-warning);\n}\n.enc-squiggle-info {\n  background: var(--e-info);\n}\n.enc-squiggle-hint {\n  background: var(--e-gutter-fg);\n}\n\n/* Cursors */\n\n.enc-cursors {\n  z-index: 5;\n}\n.enc-cursor {\n  position: absolute;\n  pointer-events: none;\n}\n.enc-cursor-line {\n  background: var(--e-cursor);\n}\n.enc-cursor-block {\n  background: color-mix(in srgb, var(--e-cursor) 60%, transparent);\n}\n.enc-cursor-underline {\n  background: var(--e-cursor);\n}\n\n/* The hidden textarea: invisible, except while an input method composes text in it. */\n\n.enc-input {\n  position: absolute;\n  z-index: 6;\n  left: 0;\n  top: 0;\n  width: 1px;\n  height: var(--enc-line-h);\n  margin: 0;\n  padding: 0;\n  border: 0;\n  outline: none;\n  resize: none;\n  overflow: hidden;\n  background: transparent;\n  color: transparent;\n  caret-color: transparent;\n  opacity: 0;\n  white-space: pre;\n  font: inherit;\n  line-height: var(--enc-line-h);\n  -webkit-user-select: text;\n  user-select: text;\n}\n.enc-composing .enc-input {\n  opacity: 1;\n  min-width: 2px;\n  color: var(--e-fg);\n  background: var(--e-bg);\n  text-decoration: underline;\n  text-underline-offset: 3px;\n}\n\n/* Control and invisible characters, drawn as markers */\n\n.enc-ctrl {\n  font-size: 0;\n}\n.enc-ctrl::before {\n  content: attr(data-label);\n  display: inline-block;\n  box-sizing: border-box;\n  /* Centred in the line whatever the font: the text of the marker's own span has no size. */\n  margin: calc((var(--enc-line-h, 20px) - 14px) / 2) 1px 0;\n  padding: 0 4px;\n  border: 1px solid var(--e-warning);\n  border-radius: 3px;\n  color: var(--e-warning);\n  font: 600 9px / 12px var(--e-ui-font);\n  vertical-align: top;\n  letter-spacing: 0.02em;\n}\n\n/* Token colours */\n\n.tok-comment {\n  color: var(--e-tok-comment);\n}\n.tok-string {\n  color: var(--e-tok-string);\n}\n.tok-number {\n  color: var(--e-tok-number);\n}\n.tok-keyword {\n  color: var(--e-tok-keyword);\n}\n.tok-type {\n  color: var(--e-tok-type);\n}\n.tok-function {\n  color: var(--e-tok-function);\n}\n.tok-punct {\n  color: var(--e-tok-punct);\n}\n.tok-operator {\n  color: var(--e-tok-operator);\n}\n.tok-tag {\n  color: var(--e-tok-tag);\n}\n.tok-attr {\n  color: var(--e-tok-attr);\n}\n.tok-value {\n  color: var(--e-tok-value);\n}\n.tok-key {\n  color: var(--e-tok-key);\n}\n.tok-bool {\n  color: var(--e-tok-bool);\n}\n.tok-heading {\n  color: var(--e-tok-heading);\n  font-weight: 600;\n}\n.tok-emphasis {\n  color: var(--e-tok-emphasis);\n  font-style: italic;\n}\n.tok-strong {\n  color: var(--e-tok-strong);\n  font-weight: 600;\n}\n.tok-variable {\n  color: var(--e-tok-variable);\n}\n.tok-link {\n  color: var(--e-tok-link);\n  text-decoration: underline;\n  text-decoration-thickness: 1px;\n  text-underline-offset: 2px;\n}\n.tok-meta {\n  color: var(--e-tok-meta);\n}\n.tok-regexp {\n  color: var(--e-tok-regexp);\n}\n.tok-escape {\n  color: var(--e-tok-escape);\n}\n.tok-property {\n  color: var(--e-tok-property);\n}\n.tok-constant {\n  color: var(--e-tok-constant);\n}\n.tok-inserted {\n  color: var(--e-tok-inserted);\n}\n.tok-deleted {\n  color: var(--e-tok-deleted);\n}\n.tok-code {\n  color: var(--e-tok-code);\n}\n\n/* Zones: blocks between lines, used for the removed lines of a review hunk */\n\n.enc-zones {\n  z-index: 2;\n}\n.enc-zone {\n  position: absolute;\n  left: 0;\n  width: 100%;\n  overflow: visible;\n}\n.enc-zone-removed {\n  background: var(--e-deleted-line);\n}\n.enc-zone-line {\n  box-sizing: border-box;\n  height: var(--enc-line-h);\n  line-height: var(--enc-line-h);\n  padding-left: var(--enc-pad-x, 12px);\n  white-space: pre;\n  tab-size: var(--enc-tab-size, 4);\n  font-variant-ligatures: none;\n  position: relative;\n  direction: ltr;\n  unicode-bidi: bidi-override;\n}\n.enc-zone-line::before {\n  content: '';\n  position: absolute;\n  left: 0;\n  top: 0;\n  bottom: 0;\n  width: 2px;\n  background: var(--e-tok-deleted);\n  opacity: 0.7;\n}\n.enc-zone-mark {\n  background: var(--e-deleted);\n  border-radius: 2px;\n}\n.enc-zone-pin {\n  position: sticky;\n  left: var(--enc-gutter-w, 0px);\n  width: calc(var(--enc-view-w, 100%) - var(--enc-gutter-w, 0px));\n  height: 0;\n  z-index: 4;\n}\n\n.enc-hunk-actions {\n  position: absolute;\n  right: 18px;\n  display: flex;\n  gap: 2px;\n  padding: 2px;\n  background: var(--e-widget-bg);\n  border: 1px solid var(--e-widget-border);\n  border-radius: var(--e-radius);\n  box-shadow: var(--e-widget-shadow);\n  font: 500 11px / 20px var(--e-ui-font);\n  opacity: 0.92;\n}\n.enc-hunk-actions:hover,\n.enc-hunk-actions:focus-within {\n  opacity: 1;\n}\n.enc-hunk-action {\n  height: 20px;\n  padding: 0 9px;\n  border: 0;\n  border-radius: calc(var(--e-radius) - 3px);\n  background: transparent;\n  color: var(--e-widget-fg);\n  font: inherit;\n  cursor: pointer;\n  user-select: none;\n}\n.enc-hunk-action:hover,\n.enc-hunk-action:focus-visible {\n  background: color-mix(in srgb, var(--e-widget-fg) 12%, transparent);\n  outline: none;\n}\n.enc-hunk-action-keep {\n  color: var(--e-tok-inserted);\n}\n.enc-hunk-action-undo {\n  color: var(--e-tok-deleted);\n}\n\n/* Widgets that stay put while the text scrolls */\n\n.enc-widgets {\n  position: absolute;\n  top: 0;\n  right: 0;\n  left: 0;\n  height: 0;\n  z-index: 8;\n  pointer-events: none;\n}\n\n.enc-find {\n  position: absolute;\n  top: 8px;\n  right: 22px;\n  display: flex;\n  align-items: flex-start;\n  gap: 2px;\n  max-width: calc(100% - 44px);\n  padding: 4px 6px 4px 2px;\n  background: var(--e-widget-bg);\n  color: var(--e-widget-fg);\n  border: 1px solid var(--e-widget-border);\n  border-radius: var(--e-radius);\n  box-shadow: var(--e-widget-shadow);\n  font: 12px / 20px var(--e-ui-font);\n  pointer-events: auto;\n  -webkit-user-select: none;\n  user-select: none;\n}\n.enc-find-expand {\n  display: grid;\n  place-items: center;\n  width: 18px;\n  height: 26px;\n  padding: 0;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  opacity: 0.7;\n  cursor: pointer;\n}\n.enc-find-expand:hover {\n  opacity: 1;\n  background: color-mix(in srgb, var(--e-widget-fg) 10%, transparent);\n}\n.enc-find-expand svg {\n  transition: transform 120ms ease;\n}\n.enc-replace-open .enc-find-expand svg {\n  transform: rotate(90deg);\n}\n.enc-find-body {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.enc-find-row {\n  display: flex;\n  align-items: center;\n  gap: 2px;\n}\n.enc-find-replace-row {\n  display: none;\n}\n.enc-replace-open .enc-find-replace-row {\n  display: flex;\n}\n.enc-find-field {\n  display: flex;\n  align-items: center;\n  width: 240px;\n  height: 26px;\n  padding: 0 2px 0 8px;\n  box-sizing: border-box;\n  border: 1px solid transparent;\n  border-radius: 6px;\n  background: color-mix(in srgb, var(--e-widget-fg) 7%, transparent);\n}\n.enc-find-field:focus-within {\n  border-color: var(--e-accent);\n}\n.enc-find[data-state='error'] .enc-find-row:first-child .enc-find-field {\n  border-color: var(--e-error);\n}\n.enc-find-input {\n  flex: 1 1 auto;\n  min-width: 0;\n  height: 100%;\n  padding: 0;\n  border: 0;\n  outline: none;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  -webkit-user-select: text;\n  user-select: text;\n}\n.enc-find-input::placeholder {\n  color: color-mix(in srgb, var(--e-widget-fg) 45%, transparent);\n}\n.enc-find-option,\n.enc-find-button {\n  display: grid;\n  place-items: center;\n  flex: none;\n  min-width: 22px;\n  height: 22px;\n  padding: 0 4px;\n  border: 0;\n  border-radius: 4px;\n  background: transparent;\n  color: inherit;\n  font: 600 11px / 22px var(--e-ui-font);\n  opacity: 0.75;\n  cursor: pointer;\n}\n.enc-find-button {\n  width: 24px;\n  height: 24px;\n}\n.enc-find-option:hover,\n.enc-find-button:hover {\n  opacity: 1;\n  background: color-mix(in srgb, var(--e-widget-fg) 12%, transparent);\n}\n.enc-find-option[aria-pressed='true'] {\n  opacity: 1;\n  background: color-mix(in srgb, var(--e-accent) 28%, transparent);\n  color: var(--e-widget-fg);\n  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-accent) 60%, transparent);\n}\n.enc-find-count {\n  flex: none;\n  min-width: 64px;\n  padding: 0 6px;\n  text-align: center;\n  font-variant-numeric: tabular-nums;\n  color: color-mix(in srgb, var(--e-widget-fg) 70%, transparent);\n  white-space: nowrap;\n}\n.enc-find[data-state='empty'] .enc-find-count,\n.enc-find[data-state='error'] .enc-find-count {\n  color: var(--e-error);\n}\n\n/* Measuring */\n\n.enc-probe {\n  position: absolute;\n  left: -99999px;\n  top: 0;\n  visibility: hidden;\n  pointer-events: none;\n  white-space: pre;\n}\n.enc-probe-row {\n  white-space: pre;\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .enc-find-expand svg {\n    transition: none;\n  }\n}\n",
+ "language": "css",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     9633,
+     9633
+    ]
+   ],
+   "t": 1755
+  },
+  {
+   "insert": "  /* Only the keyboard and the",
+   "t": 1830
+  },
+  {
+   "insert": " input method talk to it; a",
+   "t": 1876
+  },
+  {
+   "insert": " click at the caret must reach",
+   "t": 2002
+  },
+  {
+   "insert": " the text. */\n  pointer-events:",
+   "t": 2154
+  },
+  {
+   "insert": " none;\n",
+   "t": 2246
+  },
+  {
+   "expect": {
+    "length": 17161,
+    "lines": 722,
+    "hash": "948783b7"
+   },
+   "t": 2746
+  },
+  {
+   "select": [
+    [
+     10539,
+     10539
+    ]
+   ],
+   "t": 4519
+  },
+  {
+   "insert": "  font-style: italic;\n",
+   "t": 4551
+  },
+  {
+   "changes": [
+    [
+     15122,
+     15134,
+     "/* 240px, less when the editor is narrow: the rest of the row (expand, count, buttons) takes about 220px of the width. */\n  width: clamp(64px, calc(var(--enc-view-w, 800px) - 220px), 240px)"
+    ]
+   ],
+   "origin": "external",
+   "t": 6246
+  },
+  {
+   "expect": {
+    "length": 17360,
+    "lines": 724,
+    "hash": "adb63fb1"
+   },
+   "t": 6746
+  },
+  {
+   "select": [
+    [
+     1096,
+     1096
+    ]
+   ],
+   "t": 8947
+  },
+  {
+   "insert": "  --e-symbol:",
+   "t": 9009
+  },
+  {
+   "insert": " var(--enc-editor-symbol-",
+   "t": 9127
+  },
+  {
+   "insert": "bg, rgba(150,",
+   "t": 9212
+  },
+  {
+   "insert": " 160, 180,",
+   "t": 9267
+  },
+  {
+   "insert": " 0.16));\n  ",
+   "t": 9359
+  },
+  {
+   "insert": "--e-symbol-write:",
+   "t": 9431
+  },
+  {
+   "insert": " var(--enc-editor-symbol-",
+   "t": 9582
+  },
+  {
+   "insert": "write-bg,",
+   "t": 9699
+  },
+  {
+   "insert": " rgba(127,",
+   "t": 9782
+  },
+  {
+   "insert": " 166, 255,",
+   "t": 9936
+  },
+  {
+   "insert": " 0.2));\n  ",
+   "t": 10088
+  },
+  {
+   "insert": "--e-snippet:",
+   "t": 10147
+  },
+  {
+   "insert": " var(--enc-editor-snippet",
+   "t": 10264
+  },
+  {
+   "insert": "-border,",
+   "t": 10341
+  },
+  {
+   "insert": " rgba(127,",
+   "t": 10478
+  },
+  {
+   "insert": " 166, 255,",
+   "t": 10549
+  },
+  {
+   "insert": " 0.55));\n  ",
+   "t": 10588
+  },
+  {
+   "insert": "--e-link:",
+   "t": 10691
+  },
+  {
+   "insert": " var(--enc-editor-link,",
+   "t": 10775
+  },
+  {
+   "insert": " #7fa6ff);\n",
+   "t": 10852
+  },
+  {
+   "select": [
+    [
+     8036,
+     8036
+    ]
+   ],
+   "t": 13554
+  },
+  {
+   "insert": "}\n",
+   "t": 13697
+  },
+  {
+   "insert": "/* The other places of the",
+   "t": 13833
+  },
+  {
+   "insert": " symbol at the cursor, as the",
+   "t": 13950
+  },
+  {
+   "insert": " language server sees them;",
+   "t": 14079
+  },
+  {
+   "insert": " where it is written to stands",
+   "t": 14128
+  },
+  {
+   "insert": " out. */\n",
+   "t": 14184
+  },
+  {
+   "insert": ".enc-mark-symbol {\n  ",
+   "t": 14281
+  },
+  {
+   "insert": "background: var(--e-symbol);",
+   "t": 14385
+  },
+  {
+   "insert": "\n  border-radius: 2px;\n",
+   "t": 14530
+  },
+  {
+   "insert": "}\n",
+   "t": 14598
+  },
+  {
+   "insert": ".enc-mark-symbol-write {\n  ",
+   "t": 14682
+  },
+  {
+   "insert": "background:",
+   "t": 14839
+  },
+  {
+   "insert": " var(--e-symbol-write);\n  ",
+   "t": 14892
+  },
+  {
+   "insert": "border-radius: 2px;\n",
+   "t": 15017
+  },
+  {
+   "insert": "}\n",
+   "t": 15141
+  },
+  {
+   "insert": "/* A snippet's stops: the one",
+   "t": 15259
+  },
+  {
+   "insert": " being filled in, and the ones",
+   "t": 15312
+  },
+  {
+   "insert": " Tab goes to next. */\n",
+   "t": 15464
+  },
+  {
+   "insert": ".enc-snippet-stop {\n  ",
+   "t": 15539
+  },
+  {
+   "insert": "box-shadow: inset 0 0 0 1px",
+   "t": 15611
+  },
+  {
+   "insert": " color-mix(in srgb,",
+   "t": 15769
+  },
+  {
+   "insert": " var(--e-snippet) 45%,",
+   "t": 15948
+  },
+  {
+   "insert": " transparent);\n  ",
+   "t": 16087
+  },
+  {
+   "insert": "border-radius: 2px;\n",
+   "t": 16185
+  },
+  {
+   "insert": "}\n",
+   "t": 16258
+  },
+  {
+   "insert": ".enc-snippet-active {\n  ",
+   "t": 16353
+  },
+  {
+   "insert": "background: color-mix(in srgb,",
+   "t": 16509
+  },
+  {
+   "insert": " var(--e-snippet) 12%,",
+   "t": 16577
+  },
+  {
+   "insert": " transparent);\n  box-shadow:",
+   "t": 16710
+  },
+  {
+   "insert": " inset 0 0 0 1px",
+   "t": 16767
+  },
+  {
+   "insert": " var(--e-snippet);\n  ",
+   "t": 16806
+  },
+  {
+   "insert": "border-radius: 2px;\n",
+   "t": 16883
+  },
+  {
+   "select": [
+    [
+     8692,
+     8692
+    ]
+   ],
+   "t": 17999
+  },
+  {
+   "insert": "/* Ctrl held over a symbol: it is a link",
+   "t": 18149
+  },
+  {
+   "insert": " to its definition. */\n",
+   "t": 18323
+  },
+  {
+   "insert": ".enc-mark-link {\n  box-shadow: inset 0",
+   "t": 18380
+  },
+  {
+   "insert": " -1px 0 var(--e-link);\n",
+   "t": 18520
+  },
+  {
+   "insert": "}\n",
+   "t": 18561
+  },
+  {
+   "insert": ".enc-editor.enc-linking .enc-content {",
+   "t": 18694
+  },
+  {
+   "insert": "\n  cursor: pointer;\n",
+   "t": 18803
+  },
+  {
+   "insert": "}\n",
+   "t": 18915
+  },
+  {
+   "insert": "/* The place a peek shows, in its",
+   "t": 19080
+  },
+  {
+   "insert": " preview: the symbol, on its line. */\n",
+   "t": 19216
+  },
+  {
+   "insert": ".enc-mark-peek {\n  background:",
+   "t": 19306
+  },
+  {
+   "insert": " var(--e-match);\n  border-radius: 2px;\n",
+   "t": 19404
+  },
+  {
+   "insert": "}\n",
+   "t": 19447
+  },
+  {
+   "insert": ".enc-line-peek {\n  background:",
+   "t": 19503
+  },
+  {
+   "insert": " color-mix(in srgb, var(--e-match) 30%,",
+   "t": 19624
+  },
+  {
+   "insert": " transparent);\n",
+   "t": 19699
+  },
+  {
+   "insert": "}\n",
+   "t": 19847
+  },
+  {
+   "expect": {
+    "length": 18700,
+    "lines": 762,
+    "hash": "a7364b69"
+   },
+   "t": 20347
+  },
+  {
+   "command": "undo",
+   "t": 20747
+  },
+  {
+   "expect": {
+    "length": 18286,
+    "lines": 747,
+    "hash": "d6368018"
+   },
+   "t": 20757
+  },
+  {
+   "command": "redo",
+   "t": 21157
+  },
+  {
+   "expect": {
+    "length": 18700,
+    "lines": 762,
+    "hash": "a7364b69"
+   },
+   "t": 21167
+  },
+  {
+   "select": [
+    [
+     2548,
+     2548
+    ]
+   ],
+   "t": 22870
+  },
+  {
+   "paste": "  --e-bracket-1: var(--enc-editor-bracket-1, #f0c674);\n  --e-bracket-2: var(--enc-editor-bracket-2, #c4a1ff);\n  --e-bracket-3: var(--enc-editor-bracket-3, #7fb0ff);\n  --e-bracket-stray: var(--enc-editor-bracket-stray, var(--e-error));\n  --e-sticky-shadow: var(--enc-editor-sticky-shadow, 0 4px 6px -4px rgba(0, 0, 0, 0.55));\n  --e-minimap-slider: var(--enc-editor-minimap-slider, rgba(150, 160, 180, 0.12));\n  --e-minimap-slider-hover: var(--enc-editor-minimap-slider-hover, rgba(150, 160, 180, 0.22));\n",
+   "t": 23170
+  },
+  {
+   "select": [
+    [
+     6901,
+     6901
+    ]
+   ],
+   "t": 24960
+  },
+  {
+   "paste": "\n/* Folding: chevrons in the gutter's last column, shown while the pointer is over the gutter or the block is folded */\n\n.enc-folding .enc-gutter-num {\n  padding-right: 28px;\n}\n.enc-folding .enc-gutter-inserted::after,\n.enc-folding .enc-gutter-modified::after {\n  right: 19px;\n}\n.enc-folding .enc-gutter-deleted::after {\n  right: 17px;\n}\n.enc-fold-open::before,\n.enc-fold-closed::before {\n  content: '';\n  position: absolute;\n  right: 2px;\n  top: 0;\n  width: 12px;\n  height: 100%;\n  background: var(--e-gutter-active-fg);\n  -webkit-mask: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='black' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\") center / 12px 12px no-repeat;\n  mask: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='black' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\") center / 12px 12px no-repeat;\n  opacity: 0;\n  transition: opacity 120ms ease;\n  cursor: pointer;\n}\n.enc-fold-closed::before {\n  transform: rotate(-90deg);\n  opacity: 0.9;\n}\n.enc-gutter:hover .enc-fold-open::before {\n  opacity: 0.75;\n}\n.enc-fold-open:hover::before,\n.enc-fold-closed:hover::before {\n  opacity: 1;\n}\n@media (prefers-reduced-motion: reduce) {\n  .enc-fold-open::before,\n  .enc-fold-closed::before {\n    transition: none;\n  }\n}\n.enc-folds {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 100%;\n  height: 0;\n}\n/* After a folded block's first line: what is hidden, and a click opens it. */\n.enc-fold-pill {\n  position: absolute;\n  box-sizing: border-box;\n  border-radius: 4px;\n  background: color-mix(in srgb, var(--e-fg) 9%, transparent);\n  color: var(--e-gutter-active-fg);\n  cursor: pointer;\n}\n.enc-fold-pill::after {\n  content: '\\22EF';\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font: 600 11px / 1 var(--e-ui-font);\n  letter-spacing: 0.04em;\n}\n.enc-fold-pill:hover {\n  background: color-mix(in srgb, var(--e-fg) 16%, transparent);\n  color: var(--e-fg);\n}\n",
+   "t": 25260
+  },
+  {
+   "select": [
+    [
+     10381,
+     10381
+    ]
+   ],
+   "t": 25896
+  },
+  {
+   "insert": "  --enc-overview:",
+   "t": 25964
+  },
+  {
+   "insert": " var(--e-match-active);\n",
+   "t": 26094
+  },
+  {
+   "select": [
+    [
+     11835,
+     11835
+    ]
+   ],
+   "t": 28236
+  },
+  {
+   "insert": "  --enc-overview:",
+   "t": 28329
+  },
+  {
+   "insert": " var(--e-tok-inserted);\n",
+   "t": 28438
+  },
+  {
+   "select": [
+    [
+     11936,
+     11936
+    ]
+   ],
+   "t": 30043
+  },
+  {
+   "insert": "  --enc-overview:",
+   "t": 30163
+  },
+  {
+   "insert": " var(--e-tok-deleted);\n",
+   "t": 30294
+  },
+  {
+   "select": [
+    [
+     12747,
+     12747
+    ]
+   ],
+   "t": 31002
+  },
+  {
+   "insert": "  --enc-overview:",
+   "t": 31114
+  },
+  {
+   "insert": " var(--e-error);\n",
+   "t": 31237
+  },
+  {
+   "select": [
+    [
+     12837,
+     12837
+    ]
+   ],
+   "t": 31964
+  },
+  {
+   "insert": "  --enc-overview:",
+   "t": 32052
+  },
+  {
+   "insert": " var(--e-warning);\n",
+   "t": 32148
+  },
+  {
+   "select": [
+    [
+     16062,
+     16062
+    ]
+   ],
+   "t": 33053
+  },
+  {
+   "insert": "\n",
+   "t": 33192
+  },
+  {
+   "insert": "/* Brackets coloured by how",
+   "t": 33338
+  },
+  {
+   "insert": " deeply they nest; a closer",
+   "t": 33429
+  },
+  {
+   "insert": " with nothing open stands",
+   "t": 33531
+  },
+  {
+   "insert": " out */\n",
+   "t": 33678
+  },
+  {
+   "insert": "\n",
+   "t": 33809
+  },
+  {
+   "insert": ".enc-bracket-1 {\n  color:",
+   "t": 33894
+  },
+  {
+   "insert": " var(--e-bracket-1);\n",
+   "t": 34036
+  },
+  {
+   "insert": "}\n",
+   "t": 34117
+  },
+  {
+   "insert": ".enc-bracket-2 {\n  color:",
+   "t": 34261
+  },
+  {
+   "insert": " var(--e-bracket-2);\n",
+   "t": 34400
+  },
+  {
+   "insert": "}\n",
+   "t": 34430
+  },
+  {
+   "insert": ".enc-bracket-3 {\n  color:",
+   "t": 34544
+  },
+  {
+   "insert": " var(--e-bracket-3);\n",
+   "t": 34601
+  },
+  {
+   "insert": "}\n",
+   "t": 34778
+  },
+  {
+   "insert": ".enc-bracket-stray {\n  ",
+   "t": 34883
+  },
+  {
+   "insert": "color:",
+   "t": 34939
+  },
+  {
+   "insert": " var(--e-bracket-stray);\n  ",
+   "t": 35085
+  },
+  {
+   "insert": "text-decoration: underline",
+   "t": 35190
+  },
+  {
+   "insert": " wavy",
+   "t": 35273
+  },
+  {
+   "insert": " var(--e-bracket-stray);\n  ",
+   "t": 35308
+  },
+  {
+   "insert": "text-decoration-thickness:",
+   "t": 35368
+  },
+  {
+   "insert": " 1px;\n  ",
+   "t": 35526
+  },
+  {
+   "insert": "text-underline-offset: 3px;\n",
+   "t": 35580
+  },
+  {
+   "insert": "}\n",
+   "t": 35639
+  },
+  {
+   "insert": "\n",
+   "t": 35713
+  },
+  {
+   "insert": "/* Sticky scroll: the first",
+   "t": 35882
+  },
+  {
+   "insert": " lines of the blocks the top",
+   "t": 36056
+  },
+  {
+   "insert": " of the view is in */\n",
+   "t": 36220
+  },
+  {
+   "insert": "\n",
+   "t": 36319
+  },
+  {
+   "insert": ".enc-sticky {\n  position:",
+   "t": 36472
+  },
+  {
+   "insert": " absolute;\n  top: 0;\n  left:",
+   "t": 36580
+  },
+  {
+   "insert": " 0;\n  z-index: 7;\n  ",
+   "t": 36683
+  },
+  {
+   "insert": "overflow: hidden;\n  ",
+   "t": 36762
+  },
+  {
+   "insert": "background: var(--e-bg);\n  ",
+   "t": 36833
+  },
+  {
+   "insert": "box-shadow:",
+   "t": 36943
+  },
+  {
+   "insert": " var(--e-sticky-shadow);\n",
+   "t": 37009
+  },
+  {
+   "insert": "}\n",
+   "t": 37097
+  },
+  {
+   "insert": ".enc-sticky[hidden] {\n  ",
+   "t": 37149
+  },
+  {
+   "insert": "display: none;\n",
+   "t": 37305
+  },
+  {
+   "insert": "}\n",
+   "t": 37390
+  },
+  {
+   "insert": ".enc-sticky-row {\n  ",
+   "t": 37495
+  },
+  {
+   "insert": "position: absolute;\n  left:",
+   "t": 37600
+  },
+  {
+   "insert": " 0;\n  right: 0;\n  display:",
+   "t": 37752
+  },
+  {
+   "insert": " flex;\n  height:",
+   "t": 37807
+  },
+  {
+   "insert": " var(--enc-line-h);\n  ",
+   "t": 37914
+  },
+  {
+   "insert": "background: var(--e-bg);\n  ",
+   "t": 37971
+  },
+  {
+   "insert": "cursor: pointer;\n",
+   "t": 38146
+  },
+  {
+   "insert": "}\n",
+   "t": 38202
+  },
+  {
+   "insert": ".enc-sticky-row:hover {\n  ",
+   "t": 38277
+  },
+  {
+   "insert": "background: color-mix(in",
+   "t": 38350
+  },
+  {
+   "insert": " srgb, var(--e-fg) 5%,",
+   "t": 38390
+  },
+  {
+   "insert": " var(--e-bg));\n",
+   "t": 38430
+  },
+  {
+   "insert": "}\n",
+   "t": 38465
+  },
+  {
+   "insert": ".enc-sticky-num {\n  flex:",
+   "t": 38607
+  },
+  {
+   "insert": " none;\n  box-sizing:",
+   "t": 38751
+  },
+  {
+   "insert": " border-box;\n  ",
+   "t": 38817
+  },
+  {
+   "insert": "padding-right: 12px;\n  ",
+   "t": 38971
+  },
+  {
+   "insert": "text-align: right;\n  ",
+   "t": 39063
+  },
+  {
+   "insert": "line-height:",
+   "t": 39214
+  },
+  {
+   "insert": " var(--enc-line-h);\n  color:",
+   "t": 39340
+  },
+  {
+   "insert": " var(--e-gutter-fg);\n  ",
+   "t": 39501
+  },
+  {
+   "insert": "font-variant-numeric:",
+   "t": 39579
+  },
+  {
+   "insert": " tabular-nums;\n  background:",
+   "t": 39644
+  },
+  {
+   "insert": " var(--e-gutter-bg);\n",
+   "t": 39674
+  },
+  {
+   "insert": "}\n",
+   "t": 39729
+  },
+  {
+   "insert": ".enc-folding .enc-sticky-num",
+   "t": 39889
+  },
+  {
+   "insert": " {\n  padding-right: 28px;\n",
+   "t": 39992
+  },
+  {
+   "insert": "}\n",
+   "t": 40168
+  },
+  {
+   "insert": ".enc-sticky-clip {\n  ",
+   "t": 40255
+  },
+  {
+   "insert": "position: relative;\n  flex:",
+   "t": 40343
+  },
+  {
+   "insert": " 1 1 auto;\n  min-width: 0;",
+   "t": 40394
+  },
+  {
+   "insert": "\n  overflow: hidden;\n",
+   "t": 40466
+  },
+  {
+   "insert": "}\n",
+   "t": 40533
+  },
+  {
+   "insert": ".enc-sticky-text {\n  ",
+   "t": 40646
+  },
+  {
+   "insert": "box-sizing: border-box;\n  ",
+   "t": 40699
+  },
+  {
+   "insert": "height: var(--enc-line-h);",
+   "t": 40778
+  },
+  {
+   "insert": "\n  line-height:",
+   "t": 40938
+  },
+  {
+   "insert": " var(--enc-line-h);\n  ",
+   "t": 40996
+  },
+  {
+   "insert": "padding-left:",
+   "t": 41055
+  },
+  {
+   "insert": " var(--enc-pad-x, 12px);\n  ",
+   "t": 41118
+  },
+  {
+   "insert": "white-space: pre;\n  ",
+   "t": 41224
+  },
+  {
+   "insert": "tab-size:",
+   "t": 41282
+  },
+  {
+   "insert": " var(--enc-tab-size, 4);\n  ",
+   "t": 41314
+  },
+  {
+   "insert": "-moz-tab-size:",
+   "t": 41368
+  },
+  {
+   "insert": " var(--enc-tab-size, 4);\n  ",
+   "t": 41521
+  },
+  {
+   "insert": "font-variant-ligatures:",
+   "t": 41585
+  },
+  {
+   "insert": " none;\n  direction: ltr;\n  ",
+   "t": 41752
+  },
+  {
+   "insert": "unicode-bidi: bidi-override;",
+   "t": 41839
+  },
+  {
+   "insert": "\n",
+   "t": 41913
+  },
+  {
+   "insert": "}\n",
+   "t": 42048
+  },
+  {
+   "insert": "\n",
+   "t": 42135
+  },
+  {
+   "insert": "/* The minimap: the document",
+   "t": 42291
+  },
+  {
+   "insert": " in small beside the text,",
+   "t": 42355
+  },
+  {
+   "insert": " with a slider over the part",
+   "t": 42496
+  },
+  {
+   "insert": " in view */\n",
+   "t": 42579
+  },
+  {
+   "insert": "\n",
+   "t": 42670
+  },
+  {
+   "insert": ".enc-minimap {\n  position:",
+   "t": 42772
+  },
+  {
+   "insert": " absolute;\n  top: 0;\n  ",
+   "t": 42821
+  },
+  {
+   "insert": "z-index: 6;\n  background:",
+   "t": 42936
+  },
+  {
+   "insert": " var(--e-bg);\n  box-shadow:",
+   "t": 43070
+  },
+  {
+   "insert": " -1px 0 0 color-mix(in srgb,",
+   "t": 43111
+  },
+  {
+   "insert": " var(--e-fg) 6%,",
+   "t": 43280
+  },
+  {
+   "insert": " transparent);\n  cursor:",
+   "t": 43313
+  },
+  {
+   "insert": " default;\n",
+   "t": 43398
+  },
+  {
+   "insert": "}\n",
+   "t": 43471
+  },
+  {
+   "insert": ".enc-minimap[hidden] {\n  ",
+   "t": 43645
+  },
+  {
+   "insert": "display: none;\n",
+   "t": 43687
+  },
+  {
+   "insert": "}\n",
+   "t": 43817
+  },
+  {
+   "insert": ".enc-minimap-canvas {\n  ",
+   "t": 43926
+  },
+  {
+   "insert": "position: absolute;\n  left:",
+   "t": 44090
+  },
+  {
+   "insert": " 0;\n  top: 0;\n",
+   "t": 44132
+  },
+  {
+   "insert": "}\n",
+   "t": 44275
+  },
+  {
+   "insert": ".enc-minimap-slider {\n  ",
+   "t": 44316
+  },
+  {
+   "insert": "position: absolute;\n  left:",
+   "t": 44495
+  },
+  {
+   "insert": " 0;\n  right: 0;\n  ",
+   "t": 44649
+  },
+  {
+   "insert": "background:",
+   "t": 44824
+  },
+  {
+   "insert": " var(--e-minimap-slider);\n  ",
+   "t": 44875
+  },
+  {
+   "insert": "opacity: 0;\n  transition:",
+   "t": 45036
+  },
+  {
+   "insert": " opacity 140ms ease;\n",
+   "t": 45084
+  },
+  {
+   "insert": "}\n",
+   "t": 45233
+  },
+  {
+   "insert": ".enc-minimap:hover",
+   "t": 45300
+  },
+  {
+   "insert": " .enc-minimap-slider,\n",
+   "t": 45416
+  },
+  {
+   "insert": ".enc-minimap-dragging",
+   "t": 45451
+  },
+  {
+   "insert": " .enc-minimap-slider {\n  ",
+   "t": 45579
+  },
+  {
+   "insert": "opacity: 1;\n",
+   "t": 45631
+  },
+  {
+   "insert": "}\n",
+   "t": 45778
+  },
+  {
+   "insert": ".enc-minimap-slider:hover,\n",
+   "t": 45874
+  },
+  {
+   "insert": ".enc-minimap-dragging",
+   "t": 46031
+  },
+  {
+   "insert": " .enc-minimap-slider {\n  ",
+   "t": 46103
+  },
+  {
+   "insert": "background:",
+   "t": 46178
+  },
+  {
+   "insert": " var(--e-minimap-slider-h",
+   "t": 46277
+  },
+  {
+   "insert": "over);\n",
+   "t": 46414
+  },
+  {
+   "insert": "}\n",
+   "t": 46468
+  },
+  {
+   "insert": "@media",
+   "t": 46576
+  },
+  {
+   "insert": " (prefers-reduced-motion:",
+   "t": 46637
+  },
+  {
+   "insert": " reduce) {\n  ",
+   "t": 46673
+  },
+  {
+   "insert": ".enc-minimap-slider {\n    ",
+   "t": 46798
+  },
+  {
+   "insert": "transition: none;\n  }\n",
+   "t": 46881
+  },
+  {
+   "insert": "}\n",
+   "t": 47029
+  },
+  {
+   "expect": {
+    "length": 24068,
+    "lines": 965,
+    "hash": "e866a5b7"
+   },
+   "t": 47529
+  },
+  {
+   "select": [
+    [
+     2956,
+     2956
+    ]
+   ],
+   "t": 50257
+  },
+  {
+   "insert": "  --e-inlay-fg:",
+   "t": 50290
+  },
+  {
+   "insert": " var(--enc-editor-inlay-f",
+   "t": 50353
+  },
+  {
+   "insert": "g, #8a91a1);\n  ",
+   "t": 50399
+  },
+  {
+   "insert": "--e-inlay-bg:",
+   "t": 50575
+  },
+  {
+   "insert": " var(--enc-editor-inlay-b",
+   "t": 50623
+  },
+  {
+   "insert": "g, rgba(150, 160, 180,",
+   "t": 50692
+  },
+  {
+   "insert": " 0.12));\n",
+   "t": 50785
+  },
+  {
+   "select": [
+    [
+     16597,
+     16597
+    ]
+   ],
+   "t": 52980
+  },
+  {
+   "paste": "\n/* A name a language server marked deprecated */\n\n.enc-deprecated {\n  text-decoration: line-through;\n  text-decoration-thickness: 1px;\n}\n\n/* Inlay hints: a type a server worked out, a parameter's name. Drawn among the text from an attribute, so they hold\n   no text of their own and every offset in the line counts as the document does. */\n\n.enc-inlay {\n  user-select: none;\n  pointer-events: auto;\n}\n.enc-inlay::before {\n  content: attr(data-label);\n  display: inline-block;\n  box-sizing: border-box;\n  height: calc(var(--enc-line-h, 20px) - 4px);\n  margin-top: 2px;\n  padding: 0 4px;\n  border-radius: 4px;\n  background: var(--e-inlay-bg);\n  color: var(--e-inlay-fg);\n  font-size: 0.88em;\n  font-style: normal;\n  font-weight: 400;\n  line-height: calc(var(--enc-line-h, 20px) - 4px);\n  vertical-align: top;\n  white-space: pre;\n}\n.enc-inlay-pl::before {\n  margin-left: 0.5ch;\n}\n.enc-inlay-pr::before {\n  margin-right: 0.5ch;\n}\n",
+   "t": 53280
+  },
+  {
+   "expect": {
+    "length": 25119,
+    "lines": 1005,
+    "hash": "7d550cf9"
+   },
+   "t": 53780
+  },
+  {
+   "select": [
+    [
+     9285,
+     9285
+    ]
+   ],
+   "t": 54534
+  },
+  {
+   "insert": "/* A text wider than the scroll range:",
+   "t": 54610
+  },
+  {
+   "insert": " the layers move along it, and what they",
+   "t": 54712
+  },
+  {
+   "insert": " hold past its ends must not widen it. */",
+   "t": 54758
+  },
+  {
+   "insert": "\n",
+   "t": 54930
+  },
+  {
+   "insert": ".enc-wide .enc-content {\n  overflow:",
+   "t": 55026
+  },
+  {
+   "insert": " clip;\n",
+   "t": 55129
+  },
+  {
+   "insert": "}\n",
+   "t": 55253
+  },
+  {
+   "expect": {
+    "length": 25284,
+    "lines": 1009,
+    "hash": "b9243167"
+   },
+   "t": 55753
+  },
+  {
+   "command": "undo",
+   "t": 56153
+  },
+  {
+   "command": "undo",
+   "t": 56553
+  },
+  {
+   "expect": {
+    "length": 24192,
+    "lines": 967,
+    "hash": "974a6895"
+   },
+   "t": 56563
+  },
+  {
+   "command": "redo",
+   "t": 56963
+  },
+  {
+   "command": "redo",
+   "t": 57363
+  },
+  {
+   "expect": {
+    "length": 25284,
+    "lines": 1009,
+    "hash": "b9243167"
+   },
+   "t": 57373
+  },
+  {
+   "changes": [
+    [
+     5230,
+     5230,
+     "  /* The scrollbar's room is kept, so the width rows wrap to does not change as it comes and goes. */\n  scrollbar-gutter: stable;\n}\n/* Rows fit the text area: nothing scrolls sideways. */\n.enc-wrap .enc-scroller {\n  overflow-x: hidden;\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 58952
+  },
+  {
+   "select": [
+    [
+     10561,
+     10561
+    ]
+   ],
+   "t": 61947
+  },
+  {
+   "paste": "/* A row of a wrapped line; the rows after the first are indented from it. */\n.enc-row {\n  height: var(--enc-line-h);\n}\n\n/* Spaces and tabs drawn with a mark: a dot in every space's cell, a line across a tab. */\n.enc-ws-space {\n  background-image: radial-gradient(circle at 50% 50%, var(--e-whitespace) 0 1px, transparent 1.6px);\n  background-size: var(--enc-char-w, 7px) 100%;\n  background-repeat: repeat-x;\n}\n.enc-ws-tab {\n  background-image: linear-gradient(var(--e-whitespace), var(--e-whitespace));\n  background-size: calc(100% - 6px) 1px;\n  background-position: 3px 50%;\n  background-repeat: no-repeat;\n}\n",
+   "t": 62247
+  },
+  {
+   "expect": {
+    "length": 26131,
+    "lines": 1032,
+    "hash": "c9ef0563"
+   },
+   "t": 62747
+  },
+  {
+   "changes": [
+    [
+     10561,
+     10561,
+     "/* With right-to-left text shown in reading order: a string, comment or stretch of prose on its own (isolated), so its\n   text reads right to left inside it and cannot move what is around it. Bidi controls never reach the DOM. */\n.enc-bidi {\n  unicode-bidi: isolate;\n  direction: ltr;\n}\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 65291
+  },
+  {
+   "select": [
+    [
+     15382,
+     15382
+    ]
+   ],
+   "t": 67509
+  },
+  {
+   "insert": "/* While an",
+   "t": 67600
+  },
+  {
+   "insert": " input method",
+   "t": 67637
+  },
+  {
+   "insert": " composes, the",
+   "t": 67712
+  },
+  {
+   "insert": " view draws the",
+   "t": 67770
+  },
+  {
+   "insert": " composition in",
+   "t": 67891
+  },
+  {
+   "insert": " place (an",
+   "t": 68066
+  },
+  {
+   "insert": " `enc-inlay-compose`",
+   "t": 68139
+  },
+  {
+   "insert": " at each cursor,",
+   "t": 68269
+  },
+  {
+   "insert": " the\n   caret",
+   "t": 68436
+  },
+  {
+   "insert": " after it) and",
+   "t": 68560
+  },
+  {
+   "insert": " the textarea",
+   "t": 68707
+  },
+  {
+   "insert": " stays invisible",
+   "t": 68853
+  },
+  {
+   "insert": " over it, as",
+   "t": 69028
+  },
+  {
+   "insert": " wide as it, so",
+   "t": 69153
+  },
+  {
+   "insert": " the input",
+   "t": 69242
+  },
+  {
+   "insert": " method's window",
+   "t": 69378
+  },
+  {
+   "insert": " follows it. */\n",
+   "t": 69416
+  },
+  {
+   "select": [
+    [
+     15663,
+     15649
+    ]
+   ],
+   "t": 71817
+  },
+  {
+   "cut": true,
+   "t": 72015
+  },
+  {
+   "select": [
+    [
+     15774,
+     15667
+    ]
+   ],
+   "t": 72799
+  },
+  {
+   "cut": true,
+   "t": 73030
+  },
+  {
+   "insert": "}\n",
+   "t": 73127
+  },
+  {
+   "insert": "\n",
+   "t": 73269
+  },
+  {
+   "insert": "/* What a screen reader is told; not",
+   "t": 73306
+  },
+  {
+   "insert": " seen. */\n",
+   "t": 73393
+  },
+  {
+   "insert": ".enc-announce {\n  position: absolute;",
+   "t": 73514
+  },
+  {
+   "insert": "\n  width: 1px;\n  height: 1px;\n  ",
+   "t": 73576
+  },
+  {
+   "insert": "overflow: hidden;\n  clip-path:",
+   "t": 73687
+  },
+  {
+   "insert": " inset(50%);\n  white-space: nowrap;",
+   "t": 73724
+  },
+  {
+   "insert": "\n  pointer-events: none",
+   "t": 73779
+  },
+  {
+   "select": [
+    [
+     19050,
+     19050
+    ]
+   ],
+   "t": 75079
+  },
+  {
+   "insert": ".enc-inlay-compose",
+   "t": 75205
+  },
+  {
+   "insert": " {\n  ",
+   "t": 75334
+  },
+  {
+   "insert": "pointer-events:",
+   "t": 75396
+  },
+  {
+   "insert": " none;\n",
+   "t": 75443
+  },
+  {
+   "insert": "}\n",
+   "t": 75558
+  },
+  {
+   "insert": ".enc-inlay-compose::befo",
+   "t": 75723
+  },
+  {
+   "insert": "re {\n  ",
+   "t": 75902
+  },
+  {
+   "insert": "height: auto;",
+   "t": 75975
+  },
+  {
+   "insert": "\n  margin: 0;",
+   "t": 76018
+  },
+  {
+   "insert": "\n  padding:",
+   "t": 76131
+  },
+  {
+   "insert": " 0;\n  ",
+   "t": 76244
+  },
+  {
+   "insert": "border-radius:",
+   "t": 76323
+  },
+  {
+   "insert": " 0;\n  ",
+   "t": 76476
+  },
+  {
+   "insert": "background:",
+   "t": 76513
+  },
+  {
+   "insert": " none;\n  ",
+   "t": 76593
+  },
+  {
+   "insert": "color:",
+   "t": 76712
+  },
+  {
+   "insert": " var(--e-fg);",
+   "t": 76793
+  },
+  {
+   "insert": "\n  font-size:",
+   "t": 76841
+  },
+  {
+   "insert": " inherit;\n  ",
+   "t": 76890
+  },
+  {
+   "insert": "line-height:",
+   "t": 76997
+  },
+  {
+   "insert": " inherit;\n  ",
+   "t": 77075
+  },
+  {
+   "insert": "text-decoration:",
+   "t": 77223
+  },
+  {
+   "insert": " underline;",
+   "t": 77300
+  },
+  {
+   "insert": "\n  ",
+   "t": 77332
+  },
+  {
+   "insert": "text-underline-offset:",
+   "t": 77417
+  },
+  {
+   "insert": " 3px;\n",
+   "t": 77447
+  },
+  {
+   "insert": "}\n",
+   "t": 77617
+  },
+  {
+   "select": [
+    [
+     26935,
+     26935
+    ]
+   ],
+   "t": 79404
+  },
+  {
+   "insert": "/* Boxes of their own, so the",
+   "t": 79447
+  },
+  {
+   "insert": " view hears when the font's size",
+   "t": 79502
+  },
+  {
+   "insert": " or line height changes. */\n",
+   "t": 79536
+  },
+  {
+   "insert": ".enc-probe-a,\n",
+   "t": 79680
+  },
+  {
+   "insert": ".enc-probe-b {\n  display:",
+   "t": 79750
+  },
+  {
+   "insert": " inline-block;\n",
+   "t": 79904
+  },
+  {
+   "insert": "}\n",
+   "t": 80003
+  },
+  {
+   "select": [
+    [
+     27176,
+     27176
+    ]
+   ],
+   "t": 82611
+  },
+  {
+   "insert": "\n",
+   "t": 82762
+  },
+  {
+   "insert": "/* Windows contrast themes.",
+   "t": 82854
+  },
+  {
+   "insert": " The system's colours",
+   "t": 83010
+  },
+  {
+   "insert": " replace the theme's, and",
+   "t": 83176
+  },
+  {
+   "insert": " backgrounds are dropped,",
+   "t": 83285
+  },
+  {
+   "insert": " so what the editor\n   ",
+   "t": 83369
+  },
+  {
+   "insert": "marks with a background",
+   "t": 83478
+  },
+  {
+   "insert": " (the selection, matches,",
+   "t": 83620
+  },
+  {
+   "insert": " the active line, changes)",
+   "t": 83681
+  },
+  {
+   "insert": " is drawn here in system",
+   "t": 83790
+  },
+  {
+   "insert": " colours, as an\n   outline",
+   "t": 83904
+  },
+  {
+   "insert": " where the text over it",
+   "t": 83968
+  },
+  {
+   "insert": " must stay readable. */\n",
+   "t": 84008
+  },
+  {
+   "insert": "@media (forced-colors:",
+   "t": 84095
+  },
+  {
+   "insert": " active) {\n  ",
+   "t": 84209
+  },
+  {
+   "insert": ".enc-selection-rect,\n  ",
+   "t": 84336
+  },
+  {
+   "insert": ".enc-focused",
+   "t": 84473
+  },
+  {
+   "insert": " .enc-selection-rect {\n    ",
+   "t": 84516
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 84562
+  },
+  {
+   "insert": "\n    background:",
+   "t": 84607
+  },
+  {
+   "insert": " color-mix(in srgb,",
+   "t": 84651
+  },
+  {
+   "insert": " Highlight 35%,",
+   "t": 84775
+  },
+  {
+   "insert": " transparent);\n    outline:",
+   "t": 84863
+  },
+  {
+   "insert": " 1px solid Highlight;\n    ",
+   "t": 85025
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }",
+   "t": 85127
+  },
+  {
+   "insert": "\n  .enc-cursor-line,\n  ",
+   "t": 85260
+  },
+  {
+   "insert": ".enc-cursor-underline,\n  ",
+   "t": 85323
+  },
+  {
+   "insert": ".enc-cursor-block {\n    ",
+   "t": 85411
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 85457
+  },
+  {
+   "insert": "\n    background:",
+   "t": 85512
+  },
+  {
+   "insert": " CanvasText;\n  }\n  ",
+   "t": 85676
+  },
+  {
+   "insert": ".enc-cursor-block {\n    ",
+   "t": 85801
+  },
+  {
+   "insert": "background: color-mix(in",
+   "t": 85880
+  },
+  {
+   "insert": " srgb, CanvasText 60%,",
+   "t": 86048
+  },
+  {
+   "insert": " transparent);\n  }\n  ",
+   "t": 86131
+  },
+  {
+   "insert": ".enc-line-active {\n    ",
+   "t": 86190
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 86297
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 86404
+  },
+  {
+   "insert": "box-shadow: inset 0 0 0 1px",
+   "t": 86580
+  },
+  {
+   "insert": " GrayText;\n  }\n  ",
+   "t": 86663
+  },
+  {
+   "insert": ".enc-mark-find,\n  ",
+   "t": 86830
+  },
+  {
+   "insert": ".enc-mark-peek,\n  ",
+   "t": 86886
+  },
+  {
+   "insert": ".enc-mark-symbol,\n  ",
+   "t": 87065
+  },
+  {
+   "insert": ".enc-mark-bracket,\n  ",
+   "t": 87188
+  },
+  {
+   "insert": ".enc-snippet-stop {\n    ",
+   "t": 87236
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 87379
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 87432
+  },
+  {
+   "insert": "box-shadow: none;\n    ",
+   "t": 87596
+  },
+  {
+   "insert": "outline: 1px dashed",
+   "t": 87720
+  },
+  {
+   "insert": " Highlight;\n    ",
+   "t": 87851
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }",
+   "t": 87907
+  },
+  {
+   "insert": "\n  .enc-mark-find-active,",
+   "t": 87981
+  },
+  {
+   "insert": "\n  .enc-mark-symbol-write,",
+   "t": 88089
+  },
+  {
+   "insert": "\n  .enc-snippet-active {",
+   "t": 88126
+  },
+  {
+   "insert": "\n    forced-color-adjust:",
+   "t": 88179
+  },
+  {
+   "insert": " none;\n    background:",
+   "t": 88265
+  },
+  {
+   "insert": " none;\n    box-shadow:",
+   "t": 88368
+  },
+  {
+   "insert": " none;\n    outline: 2px",
+   "t": 88446
+  },
+  {
+   "insert": " solid Highlight;\n    ",
+   "t": 88500
+  },
+  {
+   "insert": "outline-offset: -2px;\n  }",
+   "t": 88579
+  },
+  {
+   "insert": "\n  .enc-mark-link {\n    ",
+   "t": 88703
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 88840
+  },
+  {
+   "insert": "\n    box-shadow: inset 0",
+   "t": 88919
+  },
+  {
+   "insert": " -1px 0 LinkText;\n  }\n  ",
+   "t": 89070
+  },
+  {
+   "insert": ".enc-line-inserted {\n    ",
+   "t": 89106
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 89249
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 89372
+  },
+  {
+   "insert": "box-shadow: inset 3px 0 0",
+   "t": 89411
+  },
+  {
+   "insert": " Highlight;\n  }\n  ",
+   "t": 89549
+  },
+  {
+   "insert": ".enc-line-deleted {\n    ",
+   "t": 89687
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 89793
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 89957
+  },
+  {
+   "insert": "box-shadow: inset 3px 0 0",
+   "t": 89999
+  },
+  {
+   "insert": " GrayText;\n  }\n  ",
+   "t": 90142
+  },
+  {
+   "insert": ".enc-mark-inserted {\n    ",
+   "t": 90305
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 90379
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 90502
+  },
+  {
+   "insert": "outline: 1px solid",
+   "t": 90631
+  },
+  {
+   "insert": " Highlight;\n    ",
+   "t": 90728
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }",
+   "t": 90858
+  },
+  {
+   "insert": "\n  .enc-mark-deleted {\n    ",
+   "t": 90908
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 90945
+  },
+  {
+   "insert": "\n    background: none;\n    ",
+   "t": 91069
+  },
+  {
+   "insert": "outline: 1px dotted",
+   "t": 91201
+  },
+  {
+   "insert": " GrayText;\n    ",
+   "t": 91341
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }",
+   "t": 91511
+  },
+  {
+   "insert": "\n  .enc-squiggle-error,\n  ",
+   "t": 91664
+  },
+  {
+   "insert": ".enc-squiggle-warning {",
+   "t": 91696
+  },
+  {
+   "insert": "\n    forced-color-adjust:",
+   "t": 91849
+  },
+  {
+   "insert": " none;\n    background:",
+   "t": 91898
+  },
+  {
+   "insert": " LinkText;\n  }\n  ",
+   "t": 91981
+  },
+  {
+   "insert": ".enc-squiggle-info,\n  ",
+   "t": 92126
+  },
+  {
+   "insert": ".enc-squiggle-hint {\n    ",
+   "t": 92202
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 92339
+  },
+  {
+   "insert": "\n    background: GrayText;",
+   "t": 92474
+  },
+  {
+   "insert": "\n  }\n  .enc-guides {\n    ",
+   "t": 92525
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 92668
+  },
+  {
+   "insert": "\n    background-image:",
+   "t": 92811
+  },
+  {
+   "insert": " linear-gradient(to right,",
+   "t": 92986
+  },
+  {
+   "insert": " GrayText 1px, transparent",
+   "t": 93116
+  },
+  {
+   "insert": " 1px);\n  }\n  .enc-ws-space",
+   "t": 93177
+  },
+  {
+   "insert": " {\n    forced-color-adjust:",
+   "t": 93344
+  },
+  {
+   "insert": " none;\n    ",
+   "t": 93454
+  },
+  {
+   "insert": "background-image:",
+   "t": 93553
+  },
+  {
+   "insert": " radial-gradient(circle at",
+   "t": 93725
+  },
+  {
+   "insert": " 50% 50%, GrayText 0 1px,",
+   "t": 93871
+  },
+  {
+   "insert": " transparent 1.6px);\n  }\n  ",
+   "t": 93937
+  },
+  {
+   "insert": ".enc-ws-tab {\n    ",
+   "t": 93987
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 94073
+  },
+  {
+   "insert": "\n    background-image:",
+   "t": 94134
+  },
+  {
+   "insert": " linear-gradient(GrayText,",
+   "t": 94207
+  },
+  {
+   "insert": " GrayText);\n  }\n  ",
+   "t": 94385
+  },
+  {
+   "insert": ".enc-ctrl::before,\n  ",
+   "t": 94424
+  },
+  {
+   "insert": ".enc-inlay::before {\n    ",
+   "t": 94560
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 94626
+  },
+  {
+   "insert": "\n    background: Canvas;",
+   "t": 94680
+  },
+  {
+   "insert": "\n    color: GrayText;\n    ",
+   "t": 94734
+  },
+  {
+   "insert": "border: 1px solid GrayText;",
+   "t": 94907
+  },
+  {
+   "insert": "\n  }\n  ",
+   "t": 94970
+  },
+  {
+   "insert": ".enc-inlay-compose::before",
+   "t": 95050
+  },
+  {
+   "insert": " {\n    border: 0;\n    ",
+   "t": 95205
+  },
+  {
+   "insert": "color: CanvasText;\n  }\n  ",
+   "t": 95307
+  },
+  {
+   "insert": ".enc-fold-pill {\n    ",
+   "t": 95449
+  },
+  {
+   "insert": "forced-color-adjust: none;",
+   "t": 95500
+  },
+  {
+   "insert": "\n    background: Canvas;",
+   "t": 95600
+  },
+  {
+   "insert": "\n    color: CanvasText;",
+   "t": 95767
+  },
+  {
+   "insert": "\n    outline: 1px solid",
+   "t": 95937
+  },
+  {
+   "insert": " CanvasText;\n    ",
+   "t": 96083
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }",
+   "t": 96153
+  },
+  {
+   "insert": "\n  .enc-minimap-slider {",
+   "t": 96264
+  },
+  {
+   "insert": "\n    forced-color-adjust:",
+   "t": 96299
+  },
+  {
+   "insert": " none;\n    background:",
+   "t": 96462
+  },
+  {
+   "insert": " none;\n    outline: 1px",
+   "t": 96508
+  },
+  {
+   "insert": " solid CanvasText;\n    ",
+   "t": 96614
+  },
+  {
+   "insert": "outline-offset: -1px;\n  }\n",
+   "t": 96770
+  },
+  {
+   "insert": "}\n",
+   "t": 96905
+  },
+  {
+   "expect": {
+    "length": 30267,
+    "lines": 1185,
+    "hash": "35592893"
+   },
+   "t": 97405
+  }
+ ]
+}

@@ -249,11 +249,18 @@ async function clearNotes(window: WindowInfo, ref: string): Promise<void> {
 
 /** Waits until the fixture has recorded `count` more events than it had, and returns them. */
 async function eventsAfter(fixture: Fixture, before: number, count: number): Promise<string[]> {
-  const state = await eventually(async () => {
-    const now = await fixture.state()
-    return now.events.length >= before + count ? now : undefined
-  }, `${count} more events from "${fixture.title}"`)
-  return state.events.slice(before)
+  // What did arrive, and the few before, say where the input went when the rest does not come.
+  let seen: string[] = []
+  try {
+    const state = await eventually(async () => {
+      const now = await fixture.state()
+      seen = now.events.slice(Math.max(0, before - 4))
+      return now.events.length >= before + count ? now : undefined
+    }, `${count} more events from "${fixture.title}"`)
+    return state.events.slice(before)
+  } catch (error) {
+    throw new assert.AssertionError({ message: `${error instanceof Error ? error.message : String(error)} The last events were ${JSON.stringify(seen)}.` })
+  }
 }
 
 before(

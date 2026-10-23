@@ -139,6 +139,20 @@ describe('tokenizers', () => {
     assert.equal(kindAt('lua', source, '..'), 'operator')
   })
 
+  it("highlight CfxLua's C comments and safe navigation", () => {
+    const source = ['/* a note', '   over lines */ local job = player?.job?.name', 'local grade = jobs?[job]', 'local ok = obj?:isReady()', 'x = 1 /* inline */ + 2'].join('\n')
+    assert.equal(kindAt('lua', source, 'note'), 'comment')
+    assert.equal(kindAt('lua', source, 'over'), 'comment')
+    assert.equal(kindAt('lua', source, '*/'), 'comment')
+    assert.equal(kindAt('lua', source, 'local job'), 'keyword')
+    assert.equal(kindAt('lua', source, '?.job'), 'punct')
+    assert.equal(kindAt('lua', source, 'job?.name', 5), 'property')
+    assert.equal(kindAt('lua', source, '?[job]'), 'punct')
+    assert.equal(kindAt('lua', source, 'isReady'), 'function')
+    assert.equal(kindAt('lua', source, 'inline'), 'comment')
+    assert.equal(kindAt('lua', source, '+ 2'), 'operator')
+  })
+
   it('highlight Python strings, f-strings and decorators', () => {
     const source = ['@app.route("/")', 'def handler(self):', '    """Doc', '    string"""', '    return f"{self.x!r} \\n"', 'match = re.match(x)'].join('\n')
     assert.equal(kindAt('python', source, '@app'), 'meta')

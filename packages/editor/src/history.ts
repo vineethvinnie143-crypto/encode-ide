@@ -24,6 +24,35 @@ export interface HistoryGroup {
 
 let nextId = 1
 
+let clock: () => number = Date.now
+
+/** The time changes are recorded at: now, or while a trace is replayed, the time the trace says. */
+export function historyNow(): number {
+  return clock()
+}
+
+/**
+ * Runs `run` with the history reading the time from `now`, so typing in a replayed trace groups into undo steps
+ * exactly as it did when it was recorded. Synchronous, and the clock is put back however `run` ends.
+ */
+export function withHistoryClock<T>(now: () => number, run: () => T): T {
+  const saved = clock
+  clock = now
+  try {
+    return run()
+  } finally {
+    clock = saved
+  }
+}
+
+/**
+ * For a test that drives a mounted editor over time, as the browser tests' random use does: the history reads the
+ * time from `now` until this is called again with null, so the same steps group into the same undo steps every run.
+ */
+export function setHistoryClock(now: (() => number) | null): void {
+  clock = now ?? Date.now
+}
+
 /** Origins whose consecutive steps merge into one, and what they merge after. */
 function merges(previous: string, next: string): boolean {
   if (next === 'input.type') return previous === 'input.type' || previous === 'input.newline'

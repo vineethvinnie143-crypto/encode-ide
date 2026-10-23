@@ -1,0 +1,655 @@
+{
+ "version": 1,
+ "name": "desktop-package",
+ "doc": "{\n  \"name\": \"@encode/desktop\",\n  \"productName\": \"eNCode\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"description\": \"Forge \u2014 an AI-first desktop code editor with an autonomous coding agent.\",\n  \"author\": \"Forge\",\n  \"license\": \"MIT\",\n  \"main\": \"dist/electron/main.cjs\",\n  \"scripts\": {\n    \"dev\": \"node scripts/dev.mjs\",\n    \"build\": \"node scripts/build.mjs\",\n    \"typecheck\": \"tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit\",\n    \"start\": \"electron .\",\n    \"smoke\": \"node scripts/smoke.mjs\",\n    \"fake-provider\": \"node scripts/fake-provider.mjs\",\n    \"package:dir\": \"electron-builder --win --x64 --dir\",\n    \"dist\": \"node scripts/build.mjs && electron-builder --win --x64\"\n  },\n  \"devDependencies\": {\n    \"@types/node\": \"^26.6.5\",\n    \"@types/react\": \"^19.3.0\",\n    \"@types/react-dom\": \"^19.3.0\",\n    \"@vitejs/plugin-react\": \"^6.1.2\",\n    \"electron\": \"^44.9.2\",\n    \"electron-builder\": \"^26.15.3\",\n    \"esbuild\": \"^0.28.2\",\n    \"lucide-react\": \"^1.60.0\",\n    \"react\": \"^19.3.1\",\n    \"react-dom\": \"^19.3.1\",\n    \"typescript\": \"^7.0.2\",\n    \"vite\": \"^8.3.4\"\n  }\n}\n",
+ "language": "json",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\r\n",
+ "steps": [
+  {
+   "select": [
+    [
+     209,
+     117
+    ]
+   ],
+   "t": 1857
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 2063
+  },
+  {
+   "insert": "eNCode \u2014 an AI-first desktop IDE with an",
+   "t": 2202
+  },
+  {
+   "insert": " autonomous coding agent.\",\n  \"author\":",
+   "t": 2279
+  },
+  {
+   "insert": " \"eNCod",
+   "t": 2429
+  },
+  {
+   "expect": {
+    "length": 1076,
+    "lines": 35,
+    "hash": "75aaa6bd"
+   },
+   "t": 2929
+  },
+  {
+   "select": [
+    [
+     715,
+     715
+    ]
+   ],
+   "t": 3712
+  },
+  {
+   "insert": "    \"@encode/testkit\":",
+   "t": 3871
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 3933
+  },
+  {
+   "expect": {
+    "length": 1114,
+    "lines": 36,
+    "hash": "bbd8d4cb"
+   },
+   "t": 4433
+  },
+  {
+   "select": [
+    [
+     715,
+     715
+    ]
+   ],
+   "t": 5122
+  },
+  {
+   "insert": "    \"@encode/permissions\":",
+   "t": 5221
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 5383
+  },
+  {
+   "expect": {
+    "length": 1156,
+    "lines": 37,
+    "hash": "9fd5b025"
+   },
+   "t": 5883
+  },
+  {
+   "command": "undo",
+   "t": 6283
+  },
+  {
+   "command": "undo",
+   "t": 6683
+  },
+  {
+   "command": "undo",
+   "t": 7083
+  },
+  {
+   "expect": {
+    "length": 990,
+    "lines": 34,
+    "hash": "6d9a7387"
+   },
+   "t": 7093
+  },
+  {
+   "command": "redo",
+   "t": 7493
+  },
+  {
+   "command": "redo",
+   "t": 7893
+  },
+  {
+   "command": "redo",
+   "t": 8293
+  },
+  {
+   "expect": {
+    "length": 1156,
+    "lines": 37,
+    "hash": "9fd5b025"
+   },
+   "t": 8303
+  },
+  {
+   "changes": [
+    [
+     506,
+     506,
+     "    \"e2e\": \"node scripts/e2e.mjs\",\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 9471
+  },
+  {
+   "expect": {
+    "length": 1191,
+    "lines": 38,
+    "hash": "15f699d2"
+   },
+   "t": 9971
+  },
+  {
+   "changes": [
+    [
+     1053,
+     1084,
+     ""
+    ]
+   ],
+   "origin": "external",
+   "t": 11040
+  },
+  {
+   "expect": {
+    "length": 1160,
+    "lines": 37,
+    "hash": "62f16a77"
+   },
+   "t": 11540
+  },
+  {
+   "select": [
+    [
+     125,
+     124
+    ]
+   ],
+   "t": 12243
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 12450
+  },
+  {
+   "insert": "\\u2014",
+   "t": 12611
+  },
+  {
+   "select": [
+    [
+     755,
+     755
+    ]
+   ],
+   "t": 14243
+  },
+  {
+   "insert": "    \"@encode/diff\": \"workspace:*\",",
+   "t": 14276
+  },
+  {
+   "insert": "\n    \"@encode/editor\":",
+   "t": 14361
+  },
+  {
+   "insert": " \"workspace:*\",\n    ",
+   "t": 14523
+  },
+  {
+   "insert": "\"@encode/editor-view\":",
+   "t": 14591
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 14665
+  },
+  {
+   "select": [
+    [
+     949,
+     949
+    ]
+   ],
+   "t": 15995
+  },
+  {
+   "insert": "    \"@encode/text\":",
+   "t": 16152
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 16306
+  },
+  {
+   "expect": {
+    "length": 1314,
+    "lines": 41,
+    "hash": "ca22631b"
+   },
+   "t": 16806
+  },
+  {
+   "command": "undo",
+   "t": 17206
+  },
+  {
+   "command": "undo",
+   "t": 17606
+  },
+  {
+   "expect": {
+    "length": 1165,
+    "lines": 37,
+    "hash": "c6457587"
+   },
+   "t": 17616
+  },
+  {
+   "command": "redo",
+   "t": 18016
+  },
+  {
+   "command": "redo",
+   "t": 18416
+  },
+  {
+   "expect": {
+    "length": 1314,
+    "lines": 41,
+    "hash": "ca22631b"
+   },
+   "t": 18426
+  },
+  {
+   "changes": [
+    [
+     768,
+     851,
+     "core"
+    ]
+   ],
+   "origin": "external",
+   "t": 19613
+  },
+  {
+   "select": [
+    [
+     832,
+     832
+    ]
+   ],
+   "t": 21393
+  },
+  {
+   "insert": "    \"@encode/protocol\":",
+   "t": 21548
+  },
+  {
+   "insert": " \"workspace:*\",\n    ",
+   "t": 21712
+  },
+  {
+   "insert": "\"@encode/providers\":",
+   "t": 21785
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 21833
+  },
+  {
+   "select": [
+    [
+     966,
+     963
+    ]
+   ],
+   "t": 23281
+  },
+  {
+   "cut": true,
+   "t": 23391
+  },
+  {
+   "insert": "ools",
+   "t": 23524
+  },
+  {
+   "expect": {
+    "length": 1315,
+    "lines": 41,
+    "hash": "577aee97"
+   },
+   "t": 24024
+  },
+  {
+   "select": [
+    [
+     790,
+     790
+    ]
+   ],
+   "t": 26800
+  },
+  {
+   "insert": "    \"@encode/diff\":",
+   "t": 26962
+  },
+  {
+   "insert": " \"workspace:*\",\n    ",
+   "t": 27053
+  },
+  {
+   "insert": "\"@encode/editor\":",
+   "t": 27175
+  },
+  {
+   "insert": " \"workspace:*\",\n    ",
+   "t": 27329
+  },
+  {
+   "insert": "\"@encode/editor-view\":",
+   "t": 27408
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 27453
+  },
+  {
+   "changes": [
+    [
+     1063,
+     1063,
+     "    \"@encode/text\": \"workspace:*\",\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 28486
+  },
+  {
+   "expect": {
+    "length": 1464,
+    "lines": 45,
+    "hash": "5f2beb0f"
+   },
+   "t": 28986
+  },
+  {
+   "select": [
+    [
+     546,
+     546
+    ]
+   ],
+   "t": 31499
+  },
+  {
+   "insert": "    \"perf\": \"node",
+   "t": 31641
+  },
+  {
+   "insert": " scripts/e2e.mjs perf.mjs\",\n",
+   "t": 31810
+  },
+  {
+   "expect": {
+    "length": 1509,
+    "lines": 46,
+    "hash": "a56d6e42"
+   },
+   "t": 32310
+  },
+  {
+   "command": "undo",
+   "t": 32710
+  },
+  {
+   "command": "undo",
+   "t": 33110
+  },
+  {
+   "expect": {
+    "length": 1429,
+    "lines": 44,
+    "hash": "0c4adf52"
+   },
+   "t": 33120
+  },
+  {
+   "command": "redo",
+   "t": 33520
+  },
+  {
+   "command": "redo",
+   "t": 33920
+  },
+  {
+   "expect": {
+    "length": 1509,
+    "lines": 46,
+    "hash": "a56d6e42"
+   },
+   "t": 33930
+  },
+  {
+   "select": [
+    [
+     646,
+     646
+    ]
+   ],
+   "t": 35840
+  },
+  {
+   "insert": "    \"package\":",
+   "t": 35974
+  },
+  {
+   "insert": " \"electron-builder --win",
+   "t": 36127
+  },
+  {
+   "insert": " --x64\",\n",
+   "t": 36160
+  },
+  {
+   "expect": {
+    "length": 1556,
+    "lines": 47,
+    "hash": "04568e6c"
+   },
+   "t": 36660
+  },
+  {
+   "select": [
+    [
+     1117,
+     1117
+    ]
+   ],
+   "t": 39331
+  },
+  {
+   "insert": "    \"@encode/router\":",
+   "t": 39381
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 39558
+  },
+  {
+   "expect": {
+    "length": 1593,
+    "lines": 48,
+    "hash": "b1a8a78f"
+   },
+   "t": 40058
+  },
+  {
+   "select": [
+    [
+     1263,
+     1263
+    ]
+   ],
+   "t": 42747
+  },
+  {
+   "insert": "    \"@encode/workspace\":",
+   "t": 42874
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 42943
+  },
+  {
+   "expect": {
+    "length": 1633,
+    "lines": 49,
+    "hash": "e1896e40"
+   },
+   "t": 43443
+  },
+  {
+   "command": "undo",
+   "t": 43843
+  },
+  {
+   "command": "undo",
+   "t": 44243
+  },
+  {
+   "expect": {
+    "length": 1556,
+    "lines": 47,
+    "hash": "04568e6c"
+   },
+   "t": 44253
+  },
+  {
+   "command": "redo",
+   "t": 44653
+  },
+  {
+   "command": "redo",
+   "t": 45053
+  },
+  {
+   "expect": {
+    "length": 1633,
+    "lines": 49,
+    "hash": "e1896e40"
+   },
+   "t": 45063
+  },
+  {
+   "select": [
+    [
+     1154,
+     1154
+    ]
+   ],
+   "t": 47018
+  },
+  {
+   "insert": "    \"@encode/sandbox\":",
+   "t": 47049
+  },
+  {
+   "insert": " \"workspace:*\",\n",
+   "t": 47111
+  },
+  {
+   "expect": {
+    "length": 1671,
+    "lines": 50,
+    "hash": "78bd852b"
+   },
+   "t": 47611
+  },
+  {
+   "select": [
+    [
+     996,
+     996
+    ]
+   ],
+   "t": 49044
+  },
+  {
+   "insert": "    \"@encode/git\": \"workspace:*\",\n",
+   "t": 49106
+  },
+  {
+   "expect": {
+    "length": 1705,
+    "lines": 51,
+    "hash": "96b7b989"
+   },
+   "t": 49606
+  },
+  {
+   "select": [
+    [
+     1030,
+     1030
+    ]
+   ],
+   "t": 50858
+  },
+  {
+   "insert": "    \"@encode/lsp\":",
+   "t": 50953
+  },
+  {
+   "insert": " \"workspace:*\",",
+   "t": 50989
+  },
+  {
+   "insert": "\n",
+   "t": 51135
+  },
+  {
+   "expect": {
+    "length": 1739,
+    "lines": 52,
+    "hash": "b98b4ffe"
+   },
+   "t": 51635
+  },
+  {
+   "command": "undo",
+   "t": 52035
+  },
+  {
+   "expect": {
+    "length": 1705,
+    "lines": 51,
+    "hash": "96b7b989"
+   },
+   "t": 52045
+  },
+  {
+   "command": "redo",
+   "t": 52445
+  },
+  {
+   "expect": {
+    "length": 1739,
+    "lines": 52,
+    "hash": "b98b4ffe"
+   },
+   "t": 52455
+  }
+ ]
+}

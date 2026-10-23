@@ -1430,3 +1430,130 @@ reaching a place it should not, and input that changes the file in a way the per
 - The end-to-end run uses Ctrl+Insert and Shift+Insert, Ctrl+M and Tab, turns the screen reader mode on and reads
   the editor's field, and turns right-to-left reading order on from Settings > Editor.
 
+
+## Property tests, fuzzing and edit traces (Editor and language intelligence 7)
+
+Written with the pull request that makes property checks shrink and run for longer (fuzzing), checks the editor's
+invariants after every step of random commands, replays real edits from git history, and uses the view and the app
+at random ([0082](../adr/0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md)).
+Most of it is tests; what ships is the trace recorder, replayer and scrambler in `@encode/editor` (used by Editor 9's
+"Report editor issue"), a settable history clock, and the fixes the testing found. The concerns are code leaving the
+machine inside a trace, a fix that weakens a display defence, and test hooks that change behaviour in the product.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| F1 | An edit trace carries the code it was recorded on into a bug report | A trace is scrambled before it is shared: every run of letters, digits and underscores is replaced by another of the same length and kinds of character, the same word by the same word, so names, strings, comments, numbers and keys are gone; keywords, punctuation, spaces and line breaks are kept so the edits still fit. A unit test checks the shape is kept and the words are not; every regression trace is also replayed scrambled. | Mitigated |
+| F2 | The traces kept in the repository hold something private | They are made only from eNCode's own files in its own git history (docs, styles, the CI workflow, three source files), which are already in the repository; nothing from a user's project. | Mitigated |
+| F3 | The zero-width joiner drawn as itself inside emoji hides text or reorders code | Only a joiner with a pictograph (with at most one skin tone or variation selector) before it and a pictograph after it is drawn as itself; anywhere else it is a marker, as every other invisible and bidi control character is (0033), and the tag characters used to hide ASCII stay markers. A joiner between pictures only joins their glyphs. Unit tests pin both sides of the rule; `check-sources` still refuses joiners in the repository's own files. | Mitigated |
+| F4 | The editor keeping Tab and Shift+Tab traps the keyboard (WCAG 2.1.2) | Escape then Tab (or Shift+Tab) leaves; Ctrl+M makes Tab move the focus and says so; a read-only editor lets Tab go. Browser and end-to-end tests check each way out. | Mitigated |
+| F5 | The settable history clock changes undo in the product | `setHistoryClock` changes only how typing groups into undo steps, never the text; nothing in the app calls it (the browser tests do), and `withHistoryClock` puts the clock back however it ends. | Accepted |
+| F6 | A parser of untrusted input (shell commands for permissions, provider streams and repaired JSON, MCP streams, language server messages) mishandles input nobody wrote by hand | Each one's properties run under `pnpm fuzz` for minutes on fresh seeds, any failure shrunk to a small input with the seed that replays it, and kept as an example once fixed. | Mitigated |
+
+### Residual risks
+
+- **A scrambled trace still shows the shape of the code**: line lengths, indentation, punctuation, keywords, where the
+  edits were and when. A regular expression typed in Replace is kept as typed, since scrambling it would change what
+  it matches.
+- **Fuzzing is not guided by coverage**, so a bug behind a narrow condition can need more time than a run gives it.
+
+### Verification
+
+- Unit tests check shrinking (to the smallest failing list, string, nested array and number), examples, determinism
+  and the fuzz report; the text store's structure through edits of every size; the editor's invariants through random
+  command sequences in nine languages; pairs of commands that undo each other; search against a plain model; every
+  regression trace replayed, plain and scrambled; the bugs found, pinned.
+- Browser tests use the view at random, plain and with wrapping, right-to-left order, whitespace and the screen
+  reader mode, checking the DOM, the state, the screen reader's field and the focus after every step; Shift+Tab and a
+  scrollbar click keep the focus.
+- The end-to-end run edits a file with Windows line endings at random, saves, checks the file on disk, undoes
+  everything and checks the file is byte for byte what it was.
+
+
+## Installing language servers (Editor and language intelligence 8a)
+
+Written with the pull request that finds the languages a folder uses and installs their servers with one click
+([0083](../adr/0083-a-language-server-is-installed-on-request-from-pinned-sources-unpacked-by-encode-and-run-from-its-own-folder.md)).
+This is the first time eNCode itself downloads programs and runs them. What crosses a boundary: the page asks the main
+process to install, stop or remove a server by its id (nothing else); the agent process downloads from the network,
+unpacks into the tools folder in the profile, and starts what it installed. The concerns are a download that is not
+what it claims, an archive that writes outside its folder, an installer that runs something the project chose, and
+the person not knowing what is about to happen.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| I1 | A downloaded server is swapped on the way or at its source | npm packages are checked against the sha512 pinned when eNCode was built, from the registry's own integrity; JDT LS against a pinned sha256. A mismatch refuses the install and leaves nothing. Only `https`, only six named hosts, redirects followed by hand and each checked against the same list. | Mitigated |
+| I2 | A GitHub release (Lua, clangd) is replaced by its own maintainers' compromised account | The file must match the sha256 GitHub publishes for it, and a release without one is refused; this proves the file is the one the release holds, not that the release is good. | Accepted (residual) |
+| I3 | An archive writes outside its folder (zip slip), through a link, or as a Windows device name | eNCode reads zip and tar itself and refuses the whole archive for an absolute path, a drive letter, `..`, `:`, a reserved device name, a trailing dot or space, control characters, a link or device entry, or two entries differing only in case. Files are written with `wx` into a new folder that must not exist, and each resolved path is checked to stay under it. Unit tests and a property over random trees and random damage check it. | Mitigated |
+| I4 | An archive or response exhausts the disk or memory (zip bomb, endless stream) | At most 400 MB downloaded (the declared length and the bytes counted), 40,000 files and 1 GB unpacked; inflate and gunzip stop at the limit; Zip64 and encrypted entries are refused. | Mitigated |
+| I5 | Installing runs code: an npm package's install scripts, or a project file that steers a toolchain | npm is never run and no package script runs; eNCode unpacks the files itself. Toolchain installers (`go`, `dotnet`, `rustup`) start without a shell, with fixed arguments, the agent's environment without secrets, and the new empty install folder as their working folder, so `go.mod`, `global.json` or `rust-toolchain.toml` in a project cannot change them. | Mitigated |
+| I6 | The page (or something in it) installs or runs a program it chose | The page sends only a server id; what is downloaded, from where, at which version, and how it starts are eNCode's own catalog. An unknown id is refused. Installed servers run only in trusted folders, as found servers do (0073). | Mitigated |
+| I7 | A half-written install is run | The install is built in a `.partial-` folder and renamed into place with its marker only when complete; discovery takes only folders with a valid marker. A failed or stopped install removes its folder. | Mitigated |
+| I8 | Running npm servers on eNCode itself as Node.js widens what eNCode can be used for | `ELECTRON_RUN_AS_NODE` is set only for that server's process and is still stripped from the agent's environment and the commands it runs. The program could already run as Node.js with that variable; nothing new is enabled. | Accepted |
+| I9 | The person installs without knowing what happens | The dialog lists each step, the version, the size and the folder before anything is downloaded; nothing installs without its Install button. The editor's offer can be dismissed for good per server. Remove asks first and deletes only what eNCode installed. | Mitigated |
+| I10 | Reading a big folder to find its languages slows the program or follows a link out | The walk stops at 20,000 entries, 8 levels or 1.5 seconds and says it was cut short, skips `node_modules`, `.git` and build folders, does not follow links, and runs at most once a minute per folder. | Mitigated |
+
+### Residual risks
+
+- **Lua and clangd follow their newest release**, trusted through GitHub's published digest rather than a hash pinned
+  in eNCode, because eNCode's build machine cannot reach GitHub to pin one.
+- **Toolchain installs trust the toolchain** and whatever it is configured to fetch (a Go proxy, a NuGet source) on the
+  person's computer.
+- **A server eNCode installed is a program like any other** once it runs: it has the person's rights in a trusted
+  folder (0073).
+
+### Verification
+
+- Unit tests check archive paths, tar (long names, pax, prefixes, gzip) and zip (stored, deflated, modes) reading, every
+  refusal above, writing into a new folder, and a property over random trees with random damage that must be read
+  back exactly or refused.
+- Unit tests install from npm (hashes, nested packages, packages for another system skipped, Electron as Node.js
+  launch), from a pinned download and a GitHub release (digest required, hosts and redirects checked), and with a
+  toolchain (fixed arguments, its own working folder, its failure said); a refused or stopped install leaves nothing.
+- Workspace tests install a server from a fake registry, see the folder find it at once, and remove it; one install
+  runs however often it is asked, and a stopped one is not reported as a failure.
+- Desktop tests check the editor's offer, progress and labels. The packaged-program check in CI runs the built
+  program as Node.js over stdin and stdout.
+
+## FiveM's Lua (Editor and language intelligence 8b)
+
+Written with the pull request that makes the Lua server read FiveM's resources
+([0084](../adr/0084-fivem-lua-is-read-through-encodes-own-plugin-runtime-definitions-and-natives-written-from-cfx-re-typings.md)).
+What is new: a plugin eNCode writes runs inside lua-language-server, the server is told to trust it, and definitions are
+written from packages downloaded from npm. The concerns are a plugin other than eNCode's being loaded, text from a
+download becoming code the server runs, and the walk for resources reaching too far.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| L1 | A plugin a project names (`.luarc.json`) is loaded because eNCode told the server to trust plugins | eNCode does not set `trustByClient`; it lists only its own plugin's path in the server's `trusted` file, in eNCode's cache folder (`--logpath`). The server asks before loading any other, and eNCode's client gives no answer, which is no. | Mitigated |
+| L2 | eNCode's plugin file is changed on disk and then trusted | The plugin and definitions are written to eNCode's cache folder in the profile, not a project; each start compares them with the copies eNCode carries and writes them again if they differ, and the `trusted` file is rewritten to hold only that path. The agent's sandbox keeping the profile off limits is part of the hardening step. | Mitigated, with hardening to come |
+| L3 | Text from the natives' typings becomes Lua the server runs | The typings are read as text, never run. Every word from them is written in a `---` comment with control characters and line separators removed; names and parameters must be plain identifiers and not Lua keywords; a declaration that does not read as one is skipped. A test with hostile docs and names checks that every line written is a comment or a plain declaration. The definitions are `---@meta` files, which the server reads and never runs. | Mitigated |
+| L4 | The natives' packages are swapped on the way or at the registry | Pinned by version and sha512 in `npm-locks.ts` and installed as the npm servers are (I1, I3 to I7): checked before unpacking, unpacked by eNCode, no scripts run. | Mitigated |
+| L5 | The plugin runs code from the file it reads, or reads other files | It works on the text the server gives it: it scans characters, computes hashes and returns a list of changes; it calls nothing in the file, loads no module and opens no file. A failure in it falls back to the text as it is. | Mitigated |
+| L6 | Finding resources walks too far or follows a link out | The walk stops at 5,000 folders and 4 levels, skips `node_modules`, `.git`, `stream` and build folders, does not follow links, and runs only when the Lua server starts in a trusted folder. Imported resources are looked for only by name, in at most four folders above and their `[category]` folders, and are read by the server as libraries (not checked, not run). | Mitigated |
+
+### Residual risks
+
+- **The plugin runs inside lua-language-server** with the server's rights, as every plugin does; it is eNCode's own code
+  and is reviewed as such.
+- **Libraries outside the folder** (an imported resource beside it) are read by the server, so their definitions can
+  shape completion and hovers in the folder; they are the person's own server files.
+
+### Verification
+
+- Unit tests parse sample typings (types, optional parameters, keywords, tuples, aliases, links and pictures), write
+  both sides with notes and overloads, split large sets, refuse hostile docs and names, and install the natives from a
+  fake registry with the typings removed after.
+- Unit tests find resources and imports (bracketed categories, a folder inside a resource, skipped folders), prepare the
+  Lua server's settings and arguments with and without the natives, write the plugin and `trusted` file again after
+  they were changed, and keep the Lua files and their module the same.
+- With a real lua-language-server 3.19.0 (`ENCODE_LUALS`), a resource with every CfxLua addition, the runtime and the
+  natives has exactly the two problems put in it. Run by hand; CI has no Lua server.
+- Workspace tests list the natives under the Lua server where the folder wants them, install and remove them, and
+  restart the server; desktop tests check the editor's offer; the end-to-end run checks Settings and the dialog.
+

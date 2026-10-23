@@ -7,7 +7,7 @@
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { LANGUAGE_SERVERS, serverFor, type ServerSpec } from './catalog'
+import { LANGUAGE_SERVERS, serverFor, type Prepared, type ServerSpec } from './catalog'
 import { LanguageClient, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
 import { toEntry, type CompletionEntry, type CompletionResult, type EditorHighlight } from './completion'
 import type { LaunchPlan } from './discover'
@@ -161,6 +161,8 @@ export interface HubOptions {
   /** A file's text on disk, or null when it is not a text file eNCode can read. Default: UTF-8 up to 8 MB. */
   readText?(file: string): Promise<string | null>
   exists?(file: string): boolean
+  /** eNCode's tools folder and its cache folder, for what a server's `prepare` writes and reads (ADR 0084). */
+  tools?: { dir: string; cacheDir: string }
   /** A server nobody used for this long stops while no editor has its files open. Default 10 minutes. */
   idleMs?: number
   /** Every publish, for the editor's marks. */
@@ -232,6 +234,22 @@ async function diskText(file: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** `over` laid on `base`: objects merge key by key, anything else (a list, a value) replaces. */
+export function mergeSettings(base: Record<string, unknown> | undefined, over: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!over) return base
+  if (!base) return over
+  const merged: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(over)) {
+    const was = merged[key]
+    merged[key] = isPlainObject(was) && isPlainObject(value) ? mergeSettings(was, value) : value
+  }
+  return merged
 }
 
 /** A line break a server writes takes the file's own, so a file with CRLF lines keeps them and one with LF lines keeps those. */
@@ -349,10 +367,24 @@ export class LanguageServers {
     }
   }
 
+  /** What the folder adds to a server's settings and arguments; a failure there is logged and the server starts plain. */
+  private prepare(spec: ServerSpec): Prepared | null {
+    if (!spec.prepare) return null
+    try {
+      return spec.prepare({ root: this.root, platform: this.platform, ...(this.options.tools ? { tools: this.options.tools } : {}) })
+    } catch (error) {
+      this.options.log?.(`[${spec.id}] could not prepare the folder's settings: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
+  }
+
   private start(server: Server): Promise<LanguageClient> {
     if (server.starting) return server.starting
-    const plan = this.discover(server.spec, true)
-    if ('missing' in plan) return Promise.reject(new Error(plan.missing))
+    const found = this.discover(server.spec, true)
+    if ('missing' in found) return Promise.reject(new Error(found.missing))
+    const prepared = this.prepare(server.spec)
+    const plan = prepared?.args?.length ? { ...found, args: [...found.args, ...prepared.args] } : found
+    const settings = mergeSettings(server.spec.settings, prepared?.settings)
     server.state = 'starting'
     server.command = `${plan.command} (${plan.found})`
     server.detail = undefined
@@ -367,7 +399,7 @@ export class LanguageServers {
         platform: this.platform,
         process: proc,
         ...(server.spec.initializationOptions ? { initializationOptions: server.spec.initializationOptions(this.root, exists) } : {}),
-        ...(server.spec.settings ? { settings: server.spec.settings } : {}),
+        ...(settings ? { settings } : {}),
         // What a client says once it is no longer the server's (stopped, replaced) is not shown.
         onDiagnostics: (file, items) => {
           if (!made || server.client === made) this.mark(server, file, items.map(toCodeDiagnostic))
@@ -468,9 +500,14 @@ export class LanguageServers {
   private syncTo(client: LanguageClient, file: string, languageId: string, text: string, saved = false): void {
     const key = this.key(file)
     const before = client.document(file)
-    if (before && before.text === text && !saved) return
+    // The editor's documents are watched: a server asked for diagnostics is asked after each change.
+    const watch = this.editorDocs.has(key)
+    if (before && before.text === text && !saved) {
+      if (watch) client.watch(file)
+      return
+    }
     this.syncedAt.set(key, client.publishCount(file))
-    client.sync(file, languageId, text, { saved })
+    client.sync(file, languageId, text, { saved, watch })
   }
 
   // ------------------------------------------------------------ documents
@@ -1425,6 +1462,37 @@ export class LanguageServers {
     for (const server of this.servers.values()) if (server.state === 'off') server.state = 'stopped'
     for (const doc of this.editorDocs.values()) if (!this.runningFor(doc.file)) this.bringUp(doc.file)
     if (flipped) this.options.onChange?.()
+  }
+
+  /**
+   * Looks for the servers again, one or all (one was installed or removed): the files the editor shows get the server
+   * that is there now, and one that failed to start may try again at once. With `stop`, a running one is stopped
+   * first, so that what it ran from can be removed.
+   */
+  async rediscover(id?: string, options: { stop?: boolean } = {}): Promise<void> {
+    for (const server of this.servers.values()) {
+      if (id && server.spec.id !== id) continue
+      this.discovered.delete(server.spec.id)
+      if (options.stop && (server.client || server.starting)) {
+        const client = server.client ?? (await server.starting?.catch(() => undefined))
+        server.client = undefined
+        if (client) {
+          for (const doc of client.documents()) this.forgetSync(doc.file)
+          this.unmark(server)
+          await client.stop()
+        }
+        server.state = 'stopped'
+        server.detail = undefined
+      }
+      if (server.state === 'failed' && !server.client) {
+        server.state = 'stopped'
+        server.failedAt = undefined
+        server.crashes = []
+        server.detail = undefined
+      }
+    }
+    if (!options.stop && !this.disposed && this.options.allowed().ok) for (const doc of this.editorDocs.values()) if (!this.runningFor(doc.file)) this.bringUp(doc.file)
+    this.options.onChange?.()
   }
 
   private stopIdle(): void {

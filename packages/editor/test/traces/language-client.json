@@ -1,0 +1,828 @@
+{
+ "version": 1,
+ "name": "language-client",
+ "doc": "/**\n * One running language server: the handshake, the documents it has open and their versions, the diagnostics it\n * published, and the requests it may make of eNCode. A server is asked for no more than it said it can do, and what\n * it asks of eNCode is answered narrowly: settings by section, no message boxes, no documents shown, and no edit\n * applied unless eNCode asked for one (a code action's command).\n */\nimport type { ChildProcess } from 'node:child_process'\nimport type { Readable, Writable } from 'node:stream'\nimport { JSONRPC_ERRORS, JsonRpcConnection, RpcFailure, type RequestOptions } from './jsonrpc'\nimport { TextDocumentSyncKind, type Diagnostic, type Range, type ServerCapabilities, type WorkspaceEdit } from './protocol'\nimport { readDiagnostics, readWorkspaceEdit } from './results'\nimport { documentKey, pathToUri, uriToPath } from './uri'\n\n/** A started server process, as the client needs it. */\nexport interface ServerProcess {\n  stdin: Writable\n  stdout: Readable\n  stderr: Readable | null\n  /** Ends the process at once. */\n  kill(): void\n  /** Resolves once the process has exited. */\n  exited: Promise<{ code: number | null; signal: string | null }>\n}\n\n/** A child process started with three pipes, as a server process. */\nexport function fromChildProcess(child: ChildProcess): ServerProcess {\n  if (!child.stdin || !child.stdout) throw new Error('The language server was started without pipes for its input and output.')\n  const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {\n    if (child.exitCode !== null || child.signalCode !== null) return resolve({ code: child.exitCode, signal: child.signalCode })\n    child.once('exit', (code, signal) => resolve({ code, signal }))\n    // A program that could not be started never exits; it fails.\n    child.once('error', () => resolve({ code: null, signal: null }))\n  })\n  // A write after the server is gone fails on the pipe, not on eNCode.\n  child.stdin.on('error', () => undefined)\n  return {\n    stdin: child.stdin,\n    stdout: child.stdout,\n    stderr: child.stderr,\n    kill: () => {\n      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')\n    },\n    exited,\n  }\n}\n\nexport interface ClientOptions {\n  /** For people: \"typescript-language-server\". */\n  name: string\n  /** The workspace folder, absolute. */\n  root: string\n  platform?: NodeJS.Platform\n  process: ServerProcess\n  initializationOptions?: unknown\n  /** Answers `workspace/configuration`, by section (\"python.analysis\"). */\n  settings?: Record<string, unknown>\n  onDiagnostics?(file: string, diagnostics: Diagnostic[], version: number | undefined): void\n  /** A line the server logged (stderr, window/logMessage); kept for when it fails. */\n  onLog?(line: string): void\n  /** The server ended or broke the protocol without being asked to stop. */\n  onExit?(reason: string): void\n  /** How long the handshake may take: a server can index the project first. Default 60 s. */\n  initializeTimeoutMs?: number\n}\n\nexport interface OpenDocument {\n  file: string\n  uri: string\n  languageId: string\n  version: number\n  text: string\n}\n\n/** What a document's diagnostics were last, and when. */\ninterface Published {\n  items: Diagnostic[]\n  /** The version the server said they are for, when it says. */\n  version?: number\n  /** Counts publishes for the document, so a wait can tell a new one from an old one. */\n  seq: number\n}\n\ninterface Waiter {\n  key: string\n  check(published: Published): boolean\n  resolve(): void\n  /** The server is gone: the wait ends without what it waited for. */\n  cancel(): void\n}\n\nconst LOG_LINES = 50\nconst SETTLE_MS = 200\n\n/** The capabilities eNCode says it has, so a server sends what eNCode reads. */\nfunction clientCapabilities(): object {\n  return {\n    general: { positionEncodings: ['utf-16'] },\n    workspace: {\n      applyEdit: true,\n      workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'], failureHandling: 'abort' },\n      configuration: true,\n      workspaceFolders: true,\n      didChangeWatchedFiles: { dynamicRegistration: true },\n      symbol: { symbolKind: { valueSet: Array.from({ length: 26 }, (_, index) => index + 1) } },\n      executeCommand: {},\n      diagnostics: { refreshSupport: false },\n    },\n    textDocument: {\n      synchronization: { didSave: true, willSave: false, willSaveWaitUntil: false, dynamicRegistration: false },\n      publishDiagnostics: { relatedInformation: false, versionSupport: true, codeDescriptionSupport: false, dataSupport: false },\n      diagnostic: { dynamicRegistration: true, relatedDocumentSupport: false },\n      hover: { contentFormat: ['markdown', 'plaintext'] },\n      definition: { linkSupport: true },\n      typeDefinition: { linkSupport: true },\n      implementation: { linkSupport: true },\n      references: {},\n      documentSymbol: { hierarchicalDocumentSymbolSupport: true, symbolKind: { valueSet: Array.from({ length: 26 }, (_, index) => index + 1) } },\n      callHierarchy: {},\n      rename: { prepareSupport: true },\n      codeAction: {\n        codeActionLiteralSupport: { codeActionKind: { valueSet: ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll'] } },\n        isPreferredSupport: true,\n        disabledSupport: true,\n        dataSupport: true,\n        resolveSupport: { properties: ['edit'] },\n      },\n    },\n    window: { workDoneProgress: true, showMessage: {}, showDocument: { support: false } },\n  }\n}\n\nfunction has(capability: unknown): boolean {\n  return capability === true || (Boolean(capability) && typeof capability === 'object')\n}\n\nexport class LanguageClient {\n  readonly name: string\n  readonly root: string\n  private readonly platform: NodeJS.Platform\n  private readonly connection: JsonRpcConnection\n  private capabilitiesValue: ServerCapabilities = {}\n  private readonly docs = new Map<string, OpenDocument>()\n  private readonly published = new Map<string, Published>()\n  private readonly waiters = new Set<Waiter>()\n  private readonly logLines: string[] = []\n  /** Work the server announced with $/progress and has not ended: indexing, a build check. */\n  private readonly busy = new Set<string>()\n  /** Edits a command eNCode runs may ask for; anything else asking is refused. */\n  private applying: ((edit: WorkspaceEdit) => Promise<{ applied: boolean; failureReason?: string }>) | null = null\n  private stopping = false\n  private exitReason: string | null = null\n\n  private constructor(private readonly options: ClientOptions) {\n    this.name = options.name\n    this.root = options.root\n    this.platform = options.platform ?? process.platform\n    const proc = options.process\n    this.connection = new JsonRpcConnection(proc.stdout, proc.stdin, {\n      onRequest: (method, params) => this.serverRequest(method, params),\n      onNotification: (method, params) => this.serverNotification(method, params),\n      onClose: (reason) => this.ended(reason),\n    })\n    proc.stderr?.setEncoding('utf8')\n    proc.stderr?.on('data', (chunk: string) => {\n      for (const line of chunk.split(/\\r?\\n/)) if (line.trim()) this.log(line)\n    })\n    void proc.exited.then((exit) => this.ended(this.describeExit(exit), true))\n  }\n\n  /** Starts the conversation with a server: initialize, then initialized. Kills the process when the handshake fails. */\n  static async start(options: ClientOptions): Promise<LanguageClient> {\n    const client = new LanguageClient(options)\n    try {\n      const rootUri = pathToUri(options.root, client.platform)\n      const result = await client.connection.request<{ capabilities?: unknown; serverInfo?: unknown }>(\n        'initialize',\n        {\n          processId: process.pid,\n          clientInfo: { name: 'eNCode' },\n          locale: 'en',\n          rootPath: options.root,\n          rootUri,\n          workspaceFolders: [{ uri: rootUri, name: options.root.split(/[\\\\/]/).filter(Boolean).pop() ?? options.root }],\n          capabilities: clientCapabilities(),\n          ...(options.initializationOptions !== undefined ? { initializationOptions: options.initializationOptions } : {}),\n          trace: 'off',\n        },\n        { timeoutMs: options.initializeTimeoutMs ?? 60_000 },\n      )\n      client.capabilitiesValue = result && typeof result.capabilities === 'object' && result.capabilities ? (result.capabilities as ServerCapabilities) : {}\n      client.connection.notify('initialized', {})\n      if (options.settings) client.connection.notify('workspace/didChangeConfiguration', { settings: options.settings })\n      return client\n    } catch (error) {\n      client.stopping = true\n      client.connection.close('The handshake failed.')\n      options.process.kill()\n      const said = client.lastLog()\n      throw new Error(`${options.name} did not start: ${error instanceof Error ? error.message : String(error)}${said ? ` It said: ${said}` : ''}`)\n    }\n  }\n\n  get capabilities(): ServerCapabilities {\n    return this.capabilitiesValue\n  }\n\n  /** Why the server is gone, or null while it runs. */\n  get exited(): string | null {\n    return this.exitReason\n  }\n\n  /** The server is still working through something it announced (indexing, a check). */\n  get working(): boolean {\n    return this.busy.size > 0\n  }\n\n  /** The last lines the server logged. */\n  logs(): string[] {\n    return [...this.logLines]\n  }\n\n  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'codeAction' | 'pullDiagnostics'): boolean {\n    const c = this.capabilitiesValue\n    switch (feature) {\n      case 'hover':\n        return has(c.hoverProvider)\n      case 'definition':\n        return has(c.definitionProvider)\n      case 'typeDefinition':\n        return has(c.typeDefinitionProvider)\n      case 'implementation':\n        return has(c.implementationProvider)\n      case 'references':\n        return has(c.referencesProvider)\n      case 'documentSymbol':\n        return has(c.documentSymbolProvider)\n      case 'workspaceSymbol':\n        return has(c.workspaceSymbolProvider)\n      case 'callHierarchy':\n        return has(c.callHierarchyProvider)\n      case 'rename':\n        return has(c.renameProvider)\n      case 'codeAction':\n        return has(c.codeActionProvider)\n      case 'pullDiagnostics':\n        return has(c.diagnosticProvider)\n    }\n  }\n\n  // ------------------------------------------------------------ documents\n\n  document(file: string): OpenDocument | undefined {\n    return this.docs.get(documentKey(file, this.platform))\n  }\n\n  documents(): OpenDocument[] {\n    return [...this.docs.values()]\n  }\n\n  /** Opens a document, or brings an open one to `text`. Returns its version. */\n  sync(file: string, languageId: string, text: string, options: { saved?: boolean } = {}): number {\n    const key = documentKey(file, this.platform)\n    const open = this.docs.get(key)\n    if (!open) {\n      const doc: OpenDocument = { file, uri: pathToUri(file, this.platform), languageId, version: 1, text }\n      this.docs.set(key, doc)\n      this.connection.notify('textDocument/didOpen', { textDocument: { uri: doc.uri, languageId, version: doc.version, text } })\n      return doc.version\n    }\n    if (open.text !== text) {\n      open.version++\n      open.text = text\n      // Sent whole: eNCode knows the text, not the keystrokes, and a whole text cannot drift from the server's copy.\n      this.connection.notify('textDocument/didChange', { textDocument: { uri: open.uri, version: open.version }, contentChanges: [{ text }] })\n    }\n    if (options.saved && this.wantsSave()) {\n      this.connection.notify('textDocument/didSave', { textDocument: { uri: open.uri }, ...(this.saveIncludesText() ? { text } : {}) })\n    }\n    return open.version\n  }\n\n  /** A change the editor made, as ranges of the document before it; sent as ranges when the server takes them. */\n  edit(file: string, text: string, changes: readonly { range: Range; text: string }[]): number | undefined {\n    const open = this.docs.get(documentKey(file, this.platform))\n    if (!open) return undefined\n    if (this.syncKind() !== TextDocumentSyncKind.Incremental || !changes.length) return this.sync(file, open.languageId, text)\n    open.version++\n    open.text = text\n    this.connection.notify('textDocument/didChange', { textDocument: { uri: open.uri, version: open.version }, contentChanges: changes.map((change) => ({ range: change.range, text: change.text })) })\n    return open.version\n  }\n\n  close(file: string): void {\n    const key = documentKey(file, this.platform)\n    const open = this.docs.get(key)\n    if (!open) return\n    this.docs.delete(key)\n    this.published.delete(key)\n    this.connection.notify('textDocument/didClose', { textDocument: { uri: open.uri } })\n  }\n\n  /** Files eNCode created, changed or deleted on disk, for a server that watches the project. */\n  filesChanged(changes: readonly { file: string; kind: 'created' | 'changed' | 'deleted' }[]): void {\n    if (!changes.length) return\n    const type = { created: 1, changed: 2, deleted: 3 } as const\n    this.connection.notify('workspace/didChangeWatchedFiles', { changes: changes.map((change) => ({ uri: pathToUri(change.file, this.platform), type: type[change.kind] })) })\n  }\n\n  private syncKind(): number {\n    const sync = this.capabilitiesValue.textDocumentSync\n    if (typeof sync === 'number') return sync\n    return typeof sync?.change === 'number' ? sync.change : TextDocumentSyncKind.Full\n  }\n\n  private wantsSave(): boolean {\n    const sync = this.capabilitiesValue.textDocumentSync\n    return typeof sync === 'object' && sync !== null && Boolean(sync.save)\n  }\n\n  private saveIncludesText(): boolean {\n    const sync = this.capabilitiesValue.textDocumentSync\n    return typeof sync === 'object' && sync !== null && typeof sync.save === 'object' && sync.save !== null && sync.save.includeText === true\n  }\n\n  // ------------------------------------------------------------ diagnostics\n\n  /** What the server last published for a document, or undefined when it has published nothing for it. */\n  diagnosticsOf(file: string): { items: Diagnostic[]; version?: number } | undefined {\n    const published = this.published.get(documentKey(file, this.platform))\n    return published ? { items: published.items, ...(published.version !== undefined ? { version: published.version } : {}) } : undefined\n  }\n\n  /**\n   * The diagnostics of an open document at its current version. A server that answers pull requests is asked;\n   * otherwise this waits for the push that follows the last change, and a moment more for a second one (some servers\n   * send their quick checks before their slow ones). `fresh` is false when the time ran out before the server spoke.\n   */\n  async diagnostics(file: string, options: { waitMs: number; signal?: AbortSignal; since?: number }): Promise<{ items: Diagnostic[]; fresh: boolean }> {\n    const key = documentKey(file, this.platform)\n    const doc = this.docs.get(key)\n    if (!doc) return { items: [], fresh: false }\n    if (this.supports('pullDiagnostics')) {\n      try {\n        const report = await this.connection.request<{ kind?: unknown; items?: unknown }>('textDocument/diagnostic', { textDocument: { uri: doc.uri } }, { timeoutMs: Math.max(options.waitMs, 1), ...(options.signal ? { signal: options.signal } : {}) })\n        if (report && report.kind === 'full') {\n          const items = readDiagnostics(report.items)\n          this.publish(key, doc.file, items, doc.version)\n          return { items, fresh: true }\n        }\n        const known = this.published.get(key)\n        if (report && report.kind === 'unchanged' && known) return { items: known.items, fresh: true }\n      } catch (error) {\n        if (error instanceof RpcFailure && error.code === 'cancelled') throw error\n        // A server that cannot answer a pull here may still push.\n      }\n    }\n    const version = doc.version\n    const since = options.since ?? -1\n    const ready = (published: Published) => (published.version !== undefined ? published.version >= version : published.seq > since)\n    const known = this.published.get(key)\n    if (!(known && ready(known))) {\n      const arrived = await this.waitFor(key, ready, options.waitMs, options.signal)\n      if (!arrived) return { items: this.published.get(key)?.items ?? [], fresh: false }\n    }\n    // A second publish for the same text can follow the first closely.\n    const seq = this.published.get(key)!.seq\n    await this.waitFor(key, (published) => published.seq > seq, SETTLE_MS, options.signal)\n    return { items: this.published.get(key)?.items ?? [], fresh: true }\n  }\n\n  /** How many times the server has published for the document; a wait started after a change counts from here. */\n  publishCount(file: string): number {\n    return this.published.get(documentKey(file, this.platform))?.seq ?? 0\n  }\n\n  private waitFor(key: string, check: (published: Published) => boolean, ms: number, signal?: AbortSignal): Promise<boolean> {\n    return new Promise<boolean>((resolve) => {\n      let done = false\n      const finish = (value: boolean) => {\n        if (done) return\n        done = true\n        clearTimeout(timer)\n        this.waiters.delete(waiter)\n        signal?.removeEventListener('abort', onAbort)\n        resolve(value)\n      }\n      const waiter: Waiter = { key, check, resolve: () => finish(true), cancel: () => finish(false) }\n      const onAbort = () => finish(false)\n      const timer = setTimeout(() => finish(false), Math.max(0, ms))\n      if (signal?.aborted || this.exitReason) return finish(false)\n      signal?.addEventListener('abort', onAbort, { once: true })\n      this.waiters.add(waiter)\n    })\n  }\n\n  private publish(key: string, file: string, items: Diagnostic[], version: number | undefined): void {\n    const before = this.published.get(key)\n    const published: Published = { items, seq: (before?.seq ?? 0) + 1, ...(version !== undefined ? { version } : {}) }\n    this.published.set(key, published)\n    for (const waiter of [...this.waiters]) if (waiter.key === key && waiter.check(published)) waiter.resolve()\n    this.options.onDiagnostics?.(file, items, version)\n  }\n\n  // ------------------------------------------------------------ requests\n\n  request<T = unknown>(method: string, params: unknown, options?: RequestOptions): Promise<T> {\n    if (this.exitReason) return Promise.reject(new RpcFailure(this.exitReason, 'closed'))\n    return this.connection.request<T>(method, params, options)\n  }\n\n  /**\n   * Runs a server command (a code action's), letting the server apply the edits it asks for through `apply` while it\n   * runs, and only then.\n   */\n  async executeCommand(command: { command: string; arguments?: unknown[] }, apply: (edit: WorkspaceEdit) => Promise<{ applied: boolean; failureReason?: string }>, options?: RequestOptions): Promise<unknown> {\n    if (this.applying) throw new Error(`${this.name} is already running a command.`)\n    this.applying = apply\n    try {\n      return await this.request('workspace/executeCommand', { command: command.command, ...(command.arguments ? { arguments: command.arguments } : {}) }, options)\n    } finally {\n      this.applying = null\n    }\n  }\n\n  /** Asks the server to stop, then makes sure it has. */\n  async stop(): Promise<void> {\n    if (this.stopping) return\n    this.stopping = true\n    const proc = this.options.process\n    if (!this.exitReason) {\n      try {\n        await this.connection.request('shutdown', null, { timeoutMs: 2_000 })\n        this.connection.notify('exit')\n      } catch {\n        // A server that does not answer is ended below.\n      }\n    }\n    const gone = await Promise.race([proc.exited.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_500))])\n    if (!gone) proc.kill()\n    this.connection.close('The language server was stopped.')\n    this.failWaiters()\n  }\n\n  // ------------------------------------------------------------ what the server asks\n\n  private async serverRequest(method: string, params: unknown): Promise<unknown> {\n    switch (method) {\n      case 'workspace/configuration': {\n        const items = params && typeof params === 'object' && Array.isArray((params as { items?: unknown }).items) ? ((params as { items: unknown[] }).items) : []\n        return items.map((item) => {\n          const section = item && typeof item === 'object' && typeof (item as { section?: unknown }).section === 'string' ? (item as { section: string }).section : ''\n          return section ? (this.settingAt(section) ?? null) : (this.options.settings ?? null)\n        })\n      }\n      case 'workspace/workspaceFolders': {\n        const uri = pathToUri(this.root, this.platform)\n        return [{ uri, name: this.root.split(/[\\\\/]/).filter(Boolean).pop() ?? this.root }]\n      }\n      case 'client/registerCapability':\n      case 'client/unregisterCapability':\n      case 'window/workDoneProgress/create':\n      case 'workspace/diagnostic/refresh':\n      case 'workspace/semanticTokens/refresh':\n      case 'workspace/inlayHint/refresh':\n      case 'workspace/inlineValue/refresh':\n      case 'workspace/codeLens/refresh':\n        return null\n      case 'window/showMessageRequest':\n        // No one is there to choose: the server gets no choice.\n        return null\n      case 'window/showDocument':\n        return { success: false }\n      case 'workspace/applyEdit': {\n        const edit = params && typeof params === 'object' ? readWorkspaceEdit((params as { edit?: unknown }).edit) : null\n        if (!edit) return { applied: false, failureReason: 'The edit could not be read.' }\n        if (!this.applying) return { applied: false, failureReason: 'eNCode applies an edit only for a command it asked to run.' }\n        return this.applying(edit)\n      }\n      default:\n        throw new RpcFailure(`eNCode does not handle ${method}.`, JSONRPC_ERRORS.methodNotFound)\n    }\n  }\n\n  private settingAt(section: string): unknown {\n    const settings = this.options.settings\n    if (!settings) return undefined\n    if (section in settings) return settings[section]\n    let value: unknown = settings\n    for (const part of section.split('.')) {\n      if (!value || typeof value !== 'object' || !(part in (value as object))) return undefined\n      value = (value as Record<string, unknown>)[part]\n    }\n    return value\n  }\n\n  private serverNotification(method: string, params: unknown): void {\n    const record = params && typeof params === 'object' ? (params as Record<string, unknown>) : {}\n    switch (method) {\n      case 'textDocument/publishDiagnostics': {\n        if (typeof record.uri !== 'string') return\n        const file = uriToPath(record.uri, this.platform)\n        if (!file) return\n        const version = typeof record.version === 'number' && Number.isInteger(record.version) ? record.version : undefined\n        this.publish(documentKey(file, this.platform), file, readDiagnostics(record.diagnostics), version)\n        return\n      }\n      case 'window/logMessage':\n      case 'window/showMessage':\n        if (typeof record.message === 'string') this.log(record.message)\n        return\n      case '$/progress': {\n        const token = typeof record.token === 'string' || typeof record.token === 'number' ? String(record.token) : null\n        const value = record.value && typeof record.value === 'object' ? (record.value as { kind?: unknown }) : null\n        if (!token || !value) return\n        if (value.kind === 'begin') this.busy.add(token)\n        else if (value.kind === 'end') this.busy.delete(token)\n        return\n      }\n      default:\n        return\n    }\n  }\n\n  private log(line: string): void {\n    this.logLines.push(line.slice(0, 500))\n    if (this.logLines.length > LOG_LINES) this.logLines.splice(0, this.logLines.length - LOG_LINES)\n    this.options.onLog?.(line)\n  }\n\n  private lastLog(): string {\n    return this.logLines.slice(-3).join(' ').slice(0, 600)\n  }\n\n  private describeExit({ code, signal }: { code: number | null; signal: string | null }): string {\n    return `${this.name} exited${code !== null ? ` with code ${code}` : signal ? ` on ${signal}` : ''}.`\n  }\n\n  private ended(reason: string, fromExit = false): void {\n    if (this.exitReason) return\n    this.exitReason = this.stopping ? 'The language server was stopped.' : reason\n    this.connection.close(this.exitReason)\n    this.failWaiters()\n    if (this.stopping) return\n    const report = (why: string) => {\n      const said = this.lastLog()\n      this.options.onExit?.(`${why}${said ? ` It said: ${said}` : ''}`)\n    }\n    if (fromExit) return report(reason)\n    // The output closes a moment before the process is gone, and its exit code and last words say more.\n    void Promise.race([this.options.process.exited.then((exit) => this.describeExit(exit)), new Promise<null>((resolve) => setTimeout(() => resolve(null), 500).unref?.())]).then((exit) => {\n      if (exit) this.exitReason = exit\n      report(exit ?? reason)\n    })\n  }\n\n  private failWaiters(): void {\n    for (const waiter of [...this.waiters]) waiter.cancel()\n  }\n}\n",
+ "language": "typescript",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     3017,
+     3017
+    ]
+   ],
+   "t": 1740
+  },
+  {
+   "insert": "\n",
+   "t": 1889
+  },
+  {
+   "insert": "/** What typing a character asks of a",
+   "t": 2046
+  },
+  {
+   "insert": " server, by its own say. */\n",
+   "t": 2086
+  },
+  {
+   "insert": "export interface EditorTriggers {\n  ",
+   "t": 2141
+  },
+  {
+   "insert": "completion: string[]\n  /** Characters",
+   "t": 2301
+  },
+  {
+   "insert": " that accept the selected completion",
+   "t": 2384
+  },
+  {
+   "insert": " and are then typed (`.` after a",
+   "t": 2528
+  },
+  {
+   "insert": " name). */\n  commit: string[]\n  ",
+   "t": 2648
+  },
+  {
+   "insert": "signature: string[]\n  ",
+   "t": 2821
+  },
+  {
+   "insert": "signatureRetrigger: string[]\n",
+   "t": 2950
+  },
+  {
+   "insert": "}\n",
+   "t": 3110
+  },
+  {
+   "changes": [
+    [
+     4987,
+     4987,
+     "      completion: {\n        completionItem: {\n          snippetSupport: true,\n          commitCharactersSupport: true,\n          documentationFormat: ['markdown', 'plaintext'],\n          deprecatedSupport: true,\n          preselectSupport: true,\n          tagSupport: { valueSet: [1] },\n          insertReplaceSupport: true,\n          labelDetailsSupport: true,\n          resolveSupport: { properties: ['documentation', 'detail', 'additionalTextEdits'] },\n        },\n        completionItemKind: { valueSet: Array.from({ length: 25 }, (_, index) => index + 1) },\n        contextSupport: true,\n        completionList: { itemDefaults: ['commitCharacters', 'editRange', 'insertTextFormat', 'data'] },\n      },\n      signatureHelp: {\n        signatureInformation: { documentationFormat: ['markdown', 'plaintext'], parameterInformation: { labelOffsetSupport: true }, activeParameterSupport: true },\n        contextSupport: true,\n      },\n      documentHighlight: {},\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 4097
+  },
+  {
+   "select": [
+    [
+     10851,
+     10656
+    ]
+   ],
+   "t": 5025
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 5111
+  },
+  {
+   "insert": "/** The characters after",
+   "t": 5278
+  },
+  {
+   "insert": " which the server offers",
+   "t": 5355
+  },
+  {
+   "insert": " completions or signature",
+   "t": 5496
+  },
+  {
+   "insert": " help without being asked.",
+   "t": 5658
+  },
+  {
+   "insert": " */\n  triggers():",
+   "t": 5747
+  },
+  {
+   "insert": " EditorTriggers {\n    ",
+   "t": 5819
+  },
+  {
+   "insert": "const chars = (value:",
+   "t": 5951
+  },
+  {
+   "insert": " unknown): string[] =>",
+   "t": 6039
+  },
+  {
+   "insert": " (Array.isArray(value) ?",
+   "t": 6181
+  },
+  {
+   "insert": " value.filter((item): item",
+   "t": 6360
+  },
+  {
+   "insert": " is string => typeof item",
+   "t": 6466
+  },
+  {
+   "insert": " === 'string' &&",
+   "t": 6537
+  },
+  {
+   "insert": " item.length >= 1 &&",
+   "t": 6679
+  },
+  {
+   "insert": " item.length <=",
+   "t": 6825
+  },
+  {
+   "insert": " 2).slice(0, 40) : [])",
+   "t": 6924
+  },
+  {
+   "insert": "\n    const c =",
+   "t": 7093
+  },
+  {
+   "insert": " this.capabilitiesValue",
+   "t": 7145
+  },
+  {
+   "insert": "\n    const completion =",
+   "t": 7239
+  },
+  {
+   "insert": " has(c.completionProvider)",
+   "t": 7272
+  },
+  {
+   "insert": " ? c.completionProvider :",
+   "t": 7353
+  },
+  {
+   "insert": " undefined\n    const",
+   "t": 7436
+  },
+  {
+   "insert": " signature =",
+   "t": 7531
+  },
+  {
+   "insert": " has(c.signatureHelpProvi",
+   "t": 7573
+  },
+  {
+   "insert": "der) ?",
+   "t": 7739
+  },
+  {
+   "insert": " c.signatureHelpProvider :",
+   "t": 7816
+  },
+  {
+   "insert": " undefined\n    return {",
+   "t": 7929
+  },
+  {
+   "insert": "\n      completion:",
+   "t": 8062
+  },
+  {
+   "insert": " chars(completion?.trigge",
+   "t": 8126
+  },
+  {
+   "insert": "rCharacters),\n      ",
+   "t": 8182
+  },
+  {
+   "insert": "commit:",
+   "t": 8270
+  },
+  {
+   "insert": " chars(completion?.allCom",
+   "t": 8319
+  },
+  {
+   "insert": "mitCharacters),\n      ",
+   "t": 8415
+  },
+  {
+   "insert": "signature:",
+   "t": 8466
+  },
+  {
+   "insert": " chars(signature?.trigger",
+   "t": 8496
+  },
+  {
+   "insert": "Characters),\n      ",
+   "t": 8619
+  },
+  {
+   "insert": "signatureRetrigger:",
+   "t": 8675
+  },
+  {
+   "insert": " chars(signature?.retrigg",
+   "t": 8734
+  },
+  {
+   "insert": "erCharacters),\n    }\n  }\n",
+   "t": 8900
+  },
+  {
+   "insert": "\n  supports(feature:",
+   "t": 8936
+  },
+  {
+   "insert": " 'hover' | 'definition' |",
+   "t": 9045
+  },
+  {
+   "insert": " 'typeDefinition' |",
+   "t": 9085
+  },
+  {
+   "insert": " 'implementation' |",
+   "t": 9158
+  },
+  {
+   "insert": " 'references' |",
+   "t": 9192
+  },
+  {
+   "insert": " 'documentSymbol' |",
+   "t": 9290
+  },
+  {
+   "insert": " 'workspaceSymbol' |",
+   "t": 9352
+  },
+  {
+   "insert": " 'callHierarchy' |",
+   "t": 9450
+  },
+  {
+   "insert": " 'rename' | 'codeAction' |",
+   "t": 9545
+  },
+  {
+   "insert": " 'pullDiagnostics' |",
+   "t": 9607
+  },
+  {
+   "insert": " 'completion' |",
+   "t": 9715
+  },
+  {
+   "insert": " 'completionResolve' |",
+   "t": 9745
+  },
+  {
+   "insert": " 'signatureHelp' |",
+   "t": 9803
+  },
+  {
+   "insert": " 'documentHighlight",
+   "t": 9851
+  },
+  {
+   "select": [
+    [
+     11797,
+     11797
+    ]
+   ],
+   "t": 10521
+  },
+  {
+   "paste": "      case 'completion':\n        return has(c.completionProvider)\n      case 'completionResolve':\n        return has(c.completionProvider) && c.completionProvider?.resolveProvider === true\n      case 'signatureHelp':\n        return has(c.signatureHelpProvider)\n      case 'documentHighlight':\n        return has(c.documentHighlightProvider)\n",
+   "t": 10821
+  },
+  {
+   "expect": {
+    "length": 27587,
+    "lines": 612,
+    "hash": "4813db68"
+   },
+   "t": 11321
+  },
+  {
+   "select": [
+    [
+     3307,
+     3307
+    ]
+   ],
+   "t": 12686
+  },
+  {
+   "insert": "  /** Characters after which the",
+   "t": 12799
+  },
+  {
+   "insert": " server formats the line as it",
+   "t": 12957
+  },
+  {
+   "insert": " is typed (`}`, `;`, a new",
+   "t": 13062
+  },
+  {
+   "insert": " line). */\n  format: string[]\n",
+   "t": 13229
+  },
+  {
+   "changes": [
+    [
+     6430,
+     6430,
+     "      formatting: {},\n      rangeFormatting: {},\n      onTypeFormatting: {},\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 14943
+  },
+  {
+   "select": [
+    [
+     6655,
+     6655
+    ]
+   ],
+   "t": 16911
+  },
+  {
+   "insert": "e', 'refactor.mov",
+   "t": 16972
+  },
+  {
+   "changes": [
+    [
+     11408,
+     11408,
+     "    const onType = c.documentOnTypeFormattingProvider\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 19152
+  },
+  {
+   "changes": [
+    [
+     11704,
+     11704,
+     "      format: onType && typeof onType === 'object' ? [...new Set(chars([onType.firstTriggerCharacter, ...(Array.isArray(onType.moreTriggerCharacter) ? onType.moreTriggerCharacter : [])]))] : [],\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 21228
+  },
+  {
+   "select": [
+    [
+     12184,
+     12077
+    ]
+   ],
+   "t": 23072
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 23209
+  },
+  {
+   "insert": "prepareRename' |",
+   "t": 23386
+  },
+  {
+   "insert": " 'codeAction' |",
+   "t": 23544
+  },
+  {
+   "insert": " 'codeActionResolve'",
+   "t": 23680
+  },
+  {
+   "insert": " |",
+   "t": 23831
+  },
+  {
+   "insert": " 'pullDiagnostics'",
+   "t": 23987
+  },
+  {
+   "insert": " | 'completion' |",
+   "t": 24063
+  },
+  {
+   "insert": " 'completionResolve'",
+   "t": 24170
+  },
+  {
+   "insert": " | 'signatureHelp'",
+   "t": 24201
+  },
+  {
+   "insert": " |",
+   "t": 24231
+  },
+  {
+   "insert": " 'documentHighlight'",
+   "t": 24374
+  },
+  {
+   "insert": " | 'formatting' |",
+   "t": 24431
+  },
+  {
+   "insert": " 'rangeFormatting'",
+   "t": 24494
+  },
+  {
+   "insert": " |",
+   "t": 24579
+  },
+  {
+   "insert": " 'onTypeFormatting",
+   "t": 24679
+  },
+  {
+   "changes": [
+    [
+     13311,
+     13311,
+     "      case 'prepareRename':\n        return typeof c.renameProvider === 'object' && c.renameProvider?.prepareProvider === true\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 26082
+  },
+  {
+   "changes": [
+    [
+     13503,
+     13503,
+     "      case 'codeActionResolve':\n        return typeof c.codeActionProvider === 'object' && c.codeActionProvider?.resolveProvider === true\n      case 'formatting':\n        return has(c.documentFormattingProvider)\n      case 'rangeFormatting':\n        return has(c.documentRangeFormattingProvider)\n      case 'onTypeFormatting':\n        return typeof c.documentOnTypeFormattingProvider === 'object' && c.documentOnTypeFormattingProvider !== null && typeof c.documentOnTypeFormattingProvider.firstTriggerCharacter === 'string'\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 28862
+  },
+  {
+   "expect": {
+    "length": 28794,
+    "lines": 629,
+    "hash": "13fce990"
+   },
+   "t": 29362
+  },
+  {
+   "select": [
+    [
+     6390,
+     6390
+    ]
+   ],
+   "t": 30888
+  },
+  {
+   "insert": "      // Whole lines: the",
+   "t": 31020
+  },
+  {
+   "insert": " editor folds lines, so a",
+   "t": 31183
+  },
+  {
+   "insert": " server leaves a closing",
+   "t": 31266
+  },
+  {
+   "insert": " bracket's line out of the",
+   "t": 31352
+  },
+  {
+   "insert": " block itself.\n      ",
+   "t": 31386
+  },
+  {
+   "insert": "foldingRange: {",
+   "t": 31527
+  },
+  {
+   "insert": " lineFoldingOnly: true,",
+   "t": 31703
+  },
+  {
+   "insert": " rangeLimit: 5000,",
+   "t": 31873
+  },
+  {
+   "insert": " foldingRangeKind: {",
+   "t": 32013
+  },
+  {
+   "insert": " valueSet: ['comment',",
+   "t": 32045
+  },
+  {
+   "insert": " 'imports', 'region'] } },\n",
+   "t": 32161
+  },
+  {
+   "changes": [
+    [
+     12307,
+     12307,
+     "' | 'foldingRange"
+    ]
+   ],
+   "origin": "external",
+   "t": 32917
+  },
+  {
+   "select": [
+    [
+     13516,
+     13516
+    ]
+   ],
+   "t": 34135
+  },
+  {
+   "insert": "      case",
+   "t": 34230
+  },
+  {
+   "insert": " 'foldingRange':",
+   "t": 34350
+  },
+  {
+   "insert": "\n        return",
+   "t": 34381
+  },
+  {
+   "insert": " has(c.foldingRangeProvid",
+   "t": 34543
+  },
+  {
+   "insert": "er)\n",
+   "t": 34659
+  },
+  {
+   "expect": {
+    "length": 29127,
+    "lines": 633,
+    "hash": "c206057c"
+   },
+   "t": 35159
+  },
+  {
+   "command": "undo",
+   "t": 35559
+  },
+  {
+   "expect": {
+    "length": 29057,
+    "lines": 631,
+    "hash": "6a6bbf25"
+   },
+   "t": 35569
+  },
+  {
+   "command": "redo",
+   "t": 35969
+  },
+  {
+   "expect": {
+    "length": 29127,
+    "lines": 633,
+    "hash": "c206057c"
+   },
+   "t": 35979
+  },
+  {
+   "select": [
+    [
+     808,
+     808
+    ]
+   ],
+   "t": 38629
+  },
+  {
+   "insert": "import { readLegend,",
+   "t": 38772
+  },
+  {
+   "insert": " SEMANTIC_TOKEN_MODIFIERS,",
+   "t": 38914
+  },
+  {
+   "insert": " SEMANTIC_TOKEN_TYPES } from './semantic'",
+   "t": 38986
+  },
+  {
+   "insert": "\n",
+   "t": 39040
+  },
+  {
+   "select": [
+    [
+     6724,
+     6724
+    ]
+   ],
+   "t": 41773
+  },
+  {
+   "insert": "      // Hints are drawn",
+   "t": 41845
+  },
+  {
+   "insert": " from their label alone",
+   "t": 41949
+  },
+  {
+   "insert": " (parts joined); nothing",
+   "t": 42057
+  },
+  {
+   "insert": " is resolved later.\n      ",
+   "t": 42102
+  },
+  {
+   "insert": "inlayHint: {},\n      //",
+   "t": 42248
+  },
+  {
+   "insert": " Whole-file tokens in the",
+   "t": 42298
+  },
+  {
+   "insert": " standard relative format;",
+   "t": 42425
+  },
+  {
+   "insert": " they colour names the",
+   "t": 42494
+  },
+  {
+   "insert": " lexer cannot tell apart",
+   "t": 42567
+  },
+  {
+   "insert": " (a type, a\n      //",
+   "t": 42602
+  },
+  {
+   "insert": " parameter, a deprecated",
+   "t": 42647
+  },
+  {
+   "insert": " function) and leave the",
+   "t": 42798
+  },
+  {
+   "insert": " rest to it.\n      ",
+   "t": 42963
+  },
+  {
+   "insert": "semanticTokens: {\n        ",
+   "t": 43024
+  },
+  {
+   "insert": "requests: { full: true },",
+   "t": 43195
+  },
+  {
+   "insert": "\n        tokenTypes:",
+   "t": 43329
+  },
+  {
+   "insert": " SEMANTIC_TOKEN_TYPES,",
+   "t": 43408
+  },
+  {
+   "insert": "\n        tokenModifiers:",
+   "t": 43494
+  },
+  {
+   "insert": " SEMANTIC_TOKEN_MODIFIERS,",
+   "t": 43546
+  },
+  {
+   "insert": "\n        formats:",
+   "t": 43576
+  },
+  {
+   "insert": " ['relative'],\n        ",
+   "t": 43658
+  },
+  {
+   "insert": "overlappingTokenSupport:",
+   "t": 43697
+  },
+  {
+   "insert": " false,\n        ",
+   "t": 43768
+  },
+  {
+   "insert": "multilineTokenSupport:",
+   "t": 43860
+  },
+  {
+   "insert": " false,\n        ",
+   "t": 44008
+  },
+  {
+   "insert": "serverCancelSupport: true,",
+   "t": 44155
+  },
+  {
+   "insert": "\n        ",
+   "t": 44188
+  },
+  {
+   "insert": "augmentsSyntaxTokens:",
+   "t": 44258
+  },
+  {
+   "insert": " true,\n      },\n",
+   "t": 44427
+  },
+  {
+   "select": [
+    [
+     13049,
+     13049
+    ]
+   ],
+   "t": 46999
+  },
+  {
+   "insert": "' | 'inlayHint' |",
+   "t": 47109
+  },
+  {
+   "insert": " 'semanticTokens",
+   "t": 47283
+  },
+  {
+   "select": [
+    [
+     14344,
+     14344
+    ]
+   ],
+   "t": 48965
+  },
+  {
+   "insert": "      case 'inlayHint':\n        return",
+   "t": 49052
+  },
+  {
+   "insert": " has(c.inlayHintProvider)\n      case",
+   "t": 49157
+  },
+  {
+   "insert": " 'semanticTokens':\n        //",
+   "t": 49305
+  },
+  {
+   "insert": " Whole-file answers, read by a legend",
+   "t": 49400
+  },
+  {
+   "insert": " that can be read.\n        return",
+   "t": 49442
+  },
+  {
+   "insert": " has(c.semanticTokensProvider?.full)",
+   "t": 49591
+  },
+  {
+   "insert": " && readLegend(c.semanticTok",
+   "t": 49667
+  },
+  {
+   "insert": "ensProvider) !== null\n",
+   "t": 49820
+  },
+  {
+   "expect": {
+    "length": 30144,
+    "lines": 653,
+    "hash": "6c60704a"
+   },
+   "t": 50320
+  }
+ ]
+}

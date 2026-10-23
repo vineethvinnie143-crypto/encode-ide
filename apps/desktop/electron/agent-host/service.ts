@@ -10,7 +10,7 @@
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
-import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, LanguageServersReport, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, LanguageServersReport, ServerInstallPlan, ServerInstallResult, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
@@ -58,6 +58,8 @@ export { HOST_STOPPED_MESSAGE }
 
 const REQUEST_TIMEOUT_MS = 60_000
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000
+/** A language server's download or its toolchain's install, on a slow line. */
+const INSTALL_TIMEOUT_MS = 30 * 60_000
 /** A server that starts for the question (the first one in a big project) can take this long to answer. */
 const CODE_ASK_TIMEOUT_MS = 30_000
 const CODE_CHANGE_TIMEOUT_MS = 120_000
@@ -180,6 +182,26 @@ export class AgentHostService {
   /** Changes a switch of the sandbox or checks the machine again; the sandbox as it stands afterwards comes back. */
   async sandboxAct(root: string, action: SandboxAction): Promise<SandboxOutcome> {
     return (await this.ready()).request('sandboxAct', { root, action }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
+  }
+
+  /** What installing a language server would do. */
+  async codeInstallPlan(root: string, id: string): Promise<ServerInstallPlan | { unavailable: string }> {
+    return (await this.ready()).request('codeInstallPlan', { root, id }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Installs a language server the person said yes to. */
+  async codeInstall(root: string, id: string): Promise<ServerInstallResult> {
+    return (await this.ready()).request('codeInstall', { root, id }, { timeoutMs: INSTALL_TIMEOUT_MS })
+  }
+
+  /** Stops an install that runs. */
+  async codeInstallCancel(id: string): Promise<void> {
+    return (await this.ready()).request('codeInstallCancel', { id }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Removes a language server eNCode installed. */
+  async codeUninstall(id: string): Promise<ServerInstallResult> {
+    return (await this.ready()).request('codeUninstall', { id }, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
   /** A folder's language servers, and with `logs` the last lines of those that stopped or failed. */

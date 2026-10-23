@@ -19,10 +19,18 @@ function longBody(s: Scanner, level: number, kind: number): boolean {
   return true
 }
 
+/** Skips a C comment's body (CfxLua); returns true when it closed on this line. */
+function cBody(s: Scanner): boolean {
+  const end = s.text.indexOf('*/', s.pos)
+  s.pos = end < 0 ? s.text.length : end + 2
+  return end >= 0
+}
+
 /**
  * Lua 5.4 with the additions of CfxLua (the FiveM runtime): backtick hash
- * strings and compound assignment. State: "" or an open long comment
- * (`c<level>`), long string (`s<level>`) or a quoted string continued with
+ * strings, C comments, safe navigation (`a?.b`, `a?[k]`, `a?:m()`) and
+ * compound assignment. State: "" or an open long comment (`c<level>`), C
+ * comment (`C`), long string (`s<level>`) or a quoted string continued with
  * a backslash (`q"` / `q'`).
  */
 export const lua: Tokenizer = {
@@ -31,7 +39,11 @@ export const lua: Tokenizer = {
     const s = new Scanner(text)
     let open = ''
     if (state) {
-      if (state[0] === 'q') {
+      if (state === 'C') {
+        const start = s.pos
+        if (!cBody(s)) open = state
+        s.mark(start, T.comment)
+      } else if (state[0] === 'q') {
         if (quotedBody(s, state[1])) open = state
       } else if (!longBody(s, Number(state.slice(1)), state[0] === 'c' ? T.comment : T.string)) open = state
     }
@@ -49,6 +61,19 @@ export const lua: Tokenizer = {
         s.mark(start, T.comment)
         if (long === null) s.rest(T.comment)
         else if (!longBody(s, long.length - 2, T.comment)) open = `c${long.length - 2}`
+        continue
+      }
+      if (s.startsWith('/*')) {
+        s.pos += 2
+        if (!cBody(s)) open = 'C'
+        s.mark(start, T.comment)
+        continue
+      }
+      if (char === '?' && '.[:'.includes(s.peek(1))) {
+        // a?.b and a?:m() name what follows as a field or a method; a?[k] indexes.
+        const next = s.peek(1)
+        s.take(2, T.punct)
+        dot = next === '.' || next === ':'
         continue
       }
       const longString = s.sees(LONG_OPEN) ? s.match(LONG_OPEN) : null

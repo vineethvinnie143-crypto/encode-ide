@@ -14,6 +14,7 @@ import SessionHeader from './components/SessionHeader'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { CommandPalette } from './components/shell/CommandPalette'
 import { AboutDialog, ConfirmDialog } from './components/shell/Dialogs'
+import { InstallServerDialog } from './components/code/InstallServerDialog'
 import IconRail from './components/shell/IconRail'
 import SessionSidebar from './components/shell/SessionSidebar'
 import TitleBar from './components/shell/TitleBar'
@@ -224,6 +225,7 @@ export default function App() {
       <StatusDialog />
       <CommandPalette />
       <AboutDialog />
+      <InstallServerDialog />
       <ConfirmDialog />
       <Toasts />
     </div>

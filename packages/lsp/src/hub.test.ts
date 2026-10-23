@@ -292,6 +292,25 @@ describe('the language servers of a folder', () => {
     await h.servers.dispose()
   })
 
+  it('asks a server that waits to be asked for its diagnostics about the editor\'s files, after each change', async () => {
+    const dir = await project({ 'a.fk': 'ok', 'b.fk': 'ERROR' })
+    const h = hub(dir, { mode: 'pull' })
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'ERROR\nWARN')
+    await until('the marks', () => h.marks(a)?.length === 2)
+    h.servers.editorChange(a, 'ERROR', true)
+    await until('the marks after the change', () => h.marks(a)?.length === 1)
+    h.servers.editorChange(a, 'fine now', true)
+    await until('no marks', () => h.marks(a)?.length === 0)
+    // A file the agent opened first is watched once the editor shows it.
+    const b = path.join(dir, 'b.fk')
+    await h.servers.diagnostics([b], { waitMs: 2_000 })
+    const before = h.published.length
+    h.servers.editorOpen(b, 'ERROR')
+    await until('the marks of the agent\'s file', () => h.published.length > before && h.marks(b)?.length === 1)
+    await h.servers.dispose()
+  })
+
   it('gives the files the editor shows their servers once servers may run again', async () => {
     const dir = await project({ 'a.fk': 'ok' })
     const h = hub(dir)

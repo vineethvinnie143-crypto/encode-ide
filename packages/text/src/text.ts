@@ -61,6 +61,24 @@ function chunk(lines: readonly string[]): Leaf[] {
   return leaves
 }
 
+/**
+ * Like `chunk`, for lines an edit made: a small last leaf (lines typed at the end of a full leaf) shares the lines of
+ * the one before it, half each, so the next lines typed there fit without another split. Otherwise every Enter at the
+ * end of a full leaf would leave a leaf of one line behind it.
+ */
+function chunkEdited(lines: readonly string[]): Leaf[] {
+  const leaves = chunk(lines)
+  const count = leaves.length
+  if (count < 2 || leaves[count - 1].lines.length >= LEAF_MERGE) return leaves
+  const both = leaves[count - 2].lines.concat(leaves[count - 1].lines)
+  const half = both.length >> 1
+  const first = new Leaf(both.slice(0, half))
+  const second = new Leaf(both.slice(half))
+  // Halves that hold too many characters (a long line among them) stay as they were cut.
+  if (first.length + 1 > LEAF_CHARS || second.length + 1 > LEAF_CHARS) return leaves
+  return leaves.slice(0, -2).concat(first, second)
+}
+
 export interface Line {
   /** 1-based line number. */
   readonly number: number
@@ -210,6 +228,38 @@ export class Text {
     return pos === text.length
   }
 
+  /**
+   * What is wrong with how the document is kept, if anything: every leaf holds at least one line, at most LEAF_LINES of
+   * them and at most LEAF_CHARS characters with their line breaks (a longer line alone), its length counts its lines,
+   * and the offsets and line numbers of the leaves add up. Empty when all is well; for tests, fuzzing and a bug report.
+   */
+  checkStructure(): string[] {
+    const problems: string[] = []
+    let offset = 0
+    let line = 0
+    this.leaves.forEach((leaf, index) => {
+      const lines = leaf.lines.length
+      let chars = lines - 1
+      for (const text of leaf.lines) chars += text.length
+      if (!lines) problems.push(`leaf ${index} holds no lines`)
+      if (lines > LEAF_LINES) problems.push(`leaf ${index} holds ${lines} lines, more than ${LEAF_LINES}`)
+      if (lines > 1 && chars + 1 > LEAF_CHARS) problems.push(`leaf ${index} holds ${chars} characters over ${lines} lines, more than ${LEAF_CHARS}`)
+      if (leaf.length !== chars) problems.push(`leaf ${index} counts ${leaf.length} characters but holds ${chars}`)
+      if (this.leafFrom[index] !== offset) problems.push(`leaf ${index} starts at ${this.leafFrom[index]}, not ${offset}`)
+      if (this.leafLine[index] !== line) problems.push(`leaf ${index} starts on line ${this.leafLine[index] + 1}, not ${line + 1}`)
+      offset += leaf.length + 1
+      line += lines
+    })
+    if (this.length !== offset - 1) problems.push(`the document counts ${this.length} characters but holds ${offset - 1}`)
+    if (this.lineCount !== line) problems.push(`the document counts ${this.lineCount} lines but holds ${line}`)
+    return problems
+  }
+
+  /** How many leaves hold the lines: for tests that keep edits from leaving a trail of small ones. */
+  get leafCount(): number {
+    return this.leaves.length
+  }
+
   /** Replaces 0-based lines [start, end) with `lines`. */
   private replaceLines(start: number, end: number, lines: string[]): Text {
     let lo = lastAtOrBefore(this.leafLine, start)
@@ -229,7 +279,7 @@ export class Text {
         lo--
       }
     }
-    return new Text(this.leaves.slice(0, lo).concat(chunk(combined), this.leaves.slice(hi + 1)))
+    return new Text(this.leaves.slice(0, lo).concat(chunkEdited(combined), this.leaves.slice(hi + 1)))
   }
 
   private checkPos(pos: number): void {

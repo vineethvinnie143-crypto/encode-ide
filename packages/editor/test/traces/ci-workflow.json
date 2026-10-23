@@ -1,0 +1,1041 @@
+{
+ "version": 1,
+ "name": "ci-workflow",
+ "doc": "name: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n  workflow_dispatch:\n\n# Read-only token: CI never writes to the repository.\npermissions:\n  contents: read\n\nconcurrency:\n  group: ci-${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: true\n\njobs:\n  windows:\n    name: Windows\n    runs-on: windows-latest\n    timeout-minutes: 45\n    env:\n      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'\n      # The smoke must not depend on a third-party service being up.\n      ENCODE_SMOKE_OFFLINE: '1'\n    steps:\n      # Third-party code is pinned to full commit hashes; the comments name the releases.\n      - name: Check out\n        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2\n        with:\n          persist-credentials: false\n\n      - name: Set up Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0\n        with:\n          node-version-file: .node-version\n\n      - name: Enable pnpm\n        run: corepack enable\n\n      - name: Install dependencies\n        run: pnpm install --frozen-lockfile\n\n      - name: Check sources for hidden characters\n        run: node scripts/check-sources.mjs\n\n      - name: Typecheck\n        run: pnpm typecheck\n\n      - name: Unit tests\n        run: pnpm test\n\n      - name: Build\n        run: pnpm build\n\n      - name: Download Electron\n        run: pnpm --filter @encode/desktop exec install-electron\n\n      - name: End-to-end smoke\n        run: pnpm e2e\n\n      - name: Keep screenshots and the Electron log\n        if: failure()\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: e2e-${{ github.run_attempt }}\n          path: apps/desktop/screenshots\n          if-no-files-found: ignore\n          retention-days: 7\n",
+ "language": "yaml",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     1468,
+     1468
+    ]
+   ],
+   "t": 1754
+  },
+  {
+   "insert": "      # Every run, so a UI change can",
+   "t": 1920
+  },
+  {
+   "insert": " be reviewed by eye in both themes.\n",
+   "t": 1983
+  },
+  {
+   "select": [
+    [
+     1612,
+     1605
+    ]
+   ],
+   "t": 4858
+  },
+  {
+   "cut": true,
+   "t": 5010
+  },
+  {
+   "insert": "always",
+   "t": 5155
+  },
+  {
+   "expect": {
+    "length": 1867,
+    "lines": 71,
+    "hash": "f053f2ac"
+   },
+   "t": 5655
+  },
+  {
+   "select": [
+    [
+     1270,
+     1270
+    ]
+   ],
+   "t": 7382
+  },
+  {
+   "insert": "\n      # The editor view is",
+   "t": 7533
+  },
+  {
+   "insert": " checked in the browser",
+   "t": 7631
+  },
+  {
+   "insert": " Windows already has.\n      -",
+   "t": 7738
+  },
+  {
+   "insert": " name: Editor browser tests",
+   "t": 7780
+  },
+  {
+   "insert": "\n        run: pnpm",
+   "t": 7954
+  },
+  {
+   "insert": " test:browser\n        env:",
+   "t": 8099
+  },
+  {
+   "insert": "\n          ENCODE_SHOTS: ${{",
+   "t": 8239
+  },
+  {
+   "insert": " github.workspace",
+   "t": 8270
+  },
+  {
+   "insert": " }}/packages/editor-view/",
+   "t": 8441
+  },
+  {
+   "insert": "screenshots\n",
+   "t": 8593
+  },
+  {
+   "select": [
+    [
+     2022,
+     2010
+    ]
+   ],
+   "t": 10394
+  },
+  {
+   "cut": true,
+   "t": 10497
+  },
+  {
+   "insert": "|\n            ",
+   "t": 10573
+  },
+  {
+   "insert": "apps/desktop/screenshots",
+   "t": 10659
+  },
+  {
+   "insert": "\n            ",
+   "t": 10822
+  },
+  {
+   "insert": "packages/editor-view",
+   "t": 10932
+  },
+  {
+   "expect": {
+    "length": 2158,
+    "lines": 79,
+    "hash": "2a15ef00"
+   },
+   "t": 11432
+  },
+  {
+   "select": [
+    [
+     1500,
+     1283
+    ]
+   ],
+   "t": 13024
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 13219
+  },
+  {
+   "insert": "gateway's",
+   "t": 13256
+  },
+  {
+   "insert": " Worker in",
+   "t": 13393
+  },
+  {
+   "insert": " workerd",
+   "t": 13483
+  },
+  {
+   "insert": " against",
+   "t": 13641
+  },
+  {
+   "insert": " fake",
+   "t": 13725
+  },
+  {
+   "insert": " OpenRouter",
+   "t": 13795
+  },
+  {
+   "insert": " and GitHub",
+   "t": 13853
+  },
+  {
+   "insert": " servers;",
+   "t": 14019
+  },
+  {
+   "insert": " needs no",
+   "t": 14057
+  },
+  {
+   "insert": " account.",
+   "t": 14226
+  },
+  {
+   "insert": "\n      -",
+   "t": 14375
+  },
+  {
+   "insert": " name:",
+   "t": 14470
+  },
+  {
+   "insert": " Gateway on",
+   "t": 14592
+  },
+  {
+   "insert": " the Workers",
+   "t": 14762
+  },
+  {
+   "insert": " runtime",
+   "t": 14836
+  },
+  {
+   "insert": "\n        ",
+   "t": 14941
+  },
+  {
+   "insert": "run: pnpm",
+   "t": 15008
+  },
+  {
+   "insert": " --filter",
+   "t": 15115
+  },
+  {
+   "insert": " @encode/gateway",
+   "t": 15169
+  },
+  {
+   "insert": " test:worker",
+   "t": 15244
+  },
+  {
+   "select": [
+    [
+     1745,
+     1672
+    ]
+   ],
+   "t": 17739
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 17970
+  },
+  {
+   "select": [
+    [
+     1742,
+     1736
+    ]
+   ],
+   "t": 19371
+  },
+  {
+   "cut": true,
+   "t": 19544
+  },
+  {
+   "insert": "failure",
+   "t": 19696
+  },
+  {
+   "select": [
+    [
+     1981,
+     1910
+    ]
+   ],
+   "t": 22628
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 22717
+  },
+  {
+   "insert": "apps/desktop",
+   "t": 22763
+  },
+  {
+   "expect": {
+    "length": 1999,
+    "lines": 74,
+    "hash": "c05e462e"
+   },
+   "t": 23263
+  },
+  {
+   "command": "undo",
+   "t": 23663
+  },
+  {
+   "expect": {
+    "length": 1987,
+    "lines": 74,
+    "hash": "26a8713b"
+   },
+   "t": 23673
+  },
+  {
+   "command": "redo",
+   "t": 24073
+  },
+  {
+   "expect": {
+    "length": 1999,
+    "lines": 74,
+    "hash": "c05e462e"
+   },
+   "t": 24083
+  },
+  {
+   "select": [
+    [
+     1672,
+     1672
+    ]
+   ],
+   "t": 26037
+  },
+  {
+   "insert": "      # Every",
+   "t": 26103
+  },
+  {
+   "insert": " run, so a UI",
+   "t": 26170
+  },
+  {
+   "insert": " change can be",
+   "t": 26312
+  },
+  {
+   "insert": " reviewed by",
+   "t": 26387
+  },
+  {
+   "insert": " eye in both",
+   "t": 26487
+  },
+  {
+   "insert": " themes.\n",
+   "t": 26619
+  },
+  {
+   "changes": [
+    [
+     1809,
+     1816,
+     "always"
+    ]
+   ],
+   "origin": "external",
+   "t": 27558
+  },
+  {
+   "expect": {
+    "length": 2071,
+    "lines": 75,
+    "hash": "2f2b508b"
+   },
+   "t": 28058
+  },
+  {
+   "select": [
+    [
+     1270,
+     1270
+    ]
+   ],
+   "t": 29766
+  },
+  {
+   "insert": "\n      # The editor view is checked",
+   "t": 29871
+  },
+  {
+   "insert": " in the browser Windows already has.",
+   "t": 29919
+  },
+  {
+   "insert": "\n      - name: Editor browser tests",
+   "t": 29998
+  },
+  {
+   "insert": "\n        run: pnpm test:browser",
+   "t": 30055
+  },
+  {
+   "insert": "\n        env:\n          ",
+   "t": 30173
+  },
+  {
+   "insert": "ENCODE_SHOTS: ${{ github.workspace",
+   "t": 30349
+  },
+  {
+   "insert": " }}/packages/editor-view/screenshots",
+   "t": 30511
+  },
+  {
+   "insert": "\n",
+   "t": 30687
+  },
+  {
+   "select": [
+    [
+     2226,
+     2214
+    ]
+   ],
+   "t": 31656
+  },
+  {
+   "cut": true,
+   "t": 31761
+  },
+  {
+   "insert": "|\n            ",
+   "t": 31840
+  },
+  {
+   "insert": "apps/desktop/screenshots\n            ",
+   "t": 31999
+  },
+  {
+   "insert": "packages/editor-view",
+   "t": 32171
+  },
+  {
+   "expect": {
+    "length": 2362,
+    "lines": 83,
+    "hash": "dd8d0819"
+   },
+   "t": 32671
+  },
+  {
+   "select": [
+    [
+     513,
+     513
+    ]
+   ],
+   "t": 34875
+  },
+  {
+   "insert": "      # What the",
+   "t": 34915
+  },
+  {
+   "insert": " program says about",
+   "t": 34953
+  },
+  {
+   "insert": " itself in About",
+   "t": 35128
+  },
+  {
+   "insert": " and in a",
+   "t": 35169
+  },
+  {
+   "insert": " diagnostics",
+   "t": 35298
+  },
+  {
+   "insert": " report. A pull",
+   "t": 35410
+  },
+  {
+   "insert": " request builds a",
+   "t": 35496
+  },
+  {
+   "insert": " merge\n      #",
+   "t": 35654
+  },
+  {
+   "insert": " commit; the commit",
+   "t": 35833
+  },
+  {
+   "insert": " that matters is",
+   "t": 35968
+  },
+  {
+   "insert": " its head.\n      ",
+   "t": 36014
+  },
+  {
+   "insert": "ENCODE_COMMIT: ${{",
+   "t": 36084
+  },
+  {
+   "insert": " github.event.pull_reques",
+   "t": 36259
+  },
+  {
+   "insert": "t.head.sha ||",
+   "t": 36295
+  },
+  {
+   "insert": " github.sha }}",
+   "t": 36375
+  },
+  {
+   "insert": "\n      ",
+   "t": 36451
+  },
+  {
+   "insert": "ENCODE_CHANNEL:",
+   "t": 36570
+  },
+  {
+   "insert": " tester\n",
+   "t": 36658
+  },
+  {
+   "select": [
+    [
+     2173,
+     2173
+    ]
+   ],
+   "t": 38639
+  },
+  {
+   "paste": "\n      # The programs testers are given, unsigned: an installer and a portable program. Each is started the\n      # way a tester starts it, so a broken package fails here and not on someone's computer.\n      - name: Package\n        run: pnpm --filter @encode/desktop package\n\n      - name: Packaged program starts\n        working-directory: apps/desktop\n        run: node scripts/packaged-smoke.mjs release/win-unpacked/eNCode.exe\n\n      - name: Portable program starts\n        working-directory: apps/desktop\n        run: node scripts/packaged-smoke.mjs (Get-ChildItem release/*-portable.exe).FullName\n\n      - name: Installer installs, starts and uninstalls\n        working-directory: apps/desktop\n        run: node scripts/installer-smoke.mjs\n\n      - name: Name the build\n        id: build\n        run: |\n          $short = $env:ENCODE_COMMIT.Substring(0, 7)\n          Add-Content -Path $env:GITHUB_OUTPUT -Value \"name=eNCode-windows-$short-run${{ github.run_number }}\"\n\n      # Only what reached main, or was started by hand on a branch, is kept to be handed out.\n      - name: Keep the programs\n        if: github.event_name != 'pull_request'\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: ${{ steps.build.outputs.name }}\n          path: |\n            apps/desktop/release/*-setup.exe\n            apps/desktop/release/*-portable.exe\n            TESTING.md\n          if-no-files-found: error\n          retention-days: 30\n",
+   "t": 38939
+  },
+  {
+   "expect": {
+    "length": 4129,
+    "lines": 123,
+    "hash": "76210a01"
+   },
+   "t": 39439
+  },
+  {
+   "command": "undo",
+   "t": 39839
+  },
+  {
+   "expect": {
+    "length": 2632,
+    "lines": 87,
+    "hash": "6b179bcf"
+   },
+   "t": 39849
+  },
+  {
+   "command": "redo",
+   "t": 40249
+  },
+  {
+   "expect": {
+    "length": 4129,
+    "lines": 123,
+    "hash": "76210a01"
+   },
+   "t": 40259
+  },
+  {
+   "select": [
+    [
+     1517,
+     1517
+    ]
+   ],
+   "t": 41617
+  },
+  {
+   "insert": "        env:\n          ",
+   "t": 41764
+  },
+  {
+   "insert": "ENCODE_TEST_DIGEST: ${{",
+   "t": 41901
+  },
+  {
+   "insert": " runner.temp",
+   "t": 42026
+  },
+  {
+   "insert": " }}/digest.txt\n",
+   "t": 42084
+  },
+  {
+   "changes": [
+    [
+     1613,
+     1613,
+     "\n      # Only what failed, a few lines each, so the end of a long log says what went wrong.\n      - name: What failed\n        if: failure()\n        run: if (Test-Path \"$env:RUNNER_TEMP/digest.txt\") { Get-Content \"$env:RUNNER_TEMP/digest.txt\" }\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 42859
+  },
+  {
+   "expect": {
+    "length": 4446,
+    "lines": 130,
+    "hash": "7febd34f"
+   },
+   "t": 43359
+  },
+  {
+   "select": [
+    [
+     133,
+     133
+    ]
+   ],
+   "t": 45719
+  },
+  {
+   "insert": ". The artifact storage",
+   "t": 45892
+  },
+  {
+   "insert": " job below is the one",
+   "t": 46044
+  },
+  {
+   "insert": " exception: it may\n",
+   "t": 46127
+  },
+  {
+   "insert": "# delete old artifacts",
+   "t": 46238
+  },
+  {
+   "insert": " of this repository's",
+   "t": 46289
+  },
+  {
+   "insert": " runs, and nothing",
+   "t": 46443
+  },
+  {
+   "insert": " else",
+   "t": 46620
+  },
+  {
+   "select": [
+    [
+     407,
+     407
+    ]
+   ],
+   "t": 49007
+  },
+  {
+   "insert": "  # A private repository's",
+   "t": 49073
+  },
+  {
+   "insert": " artifact storage is small",
+   "t": 49116
+  },
+  {
+   "insert": " (500 MB on a free",
+   "t": 49282
+  },
+  {
+   "insert": " account), and every run",
+   "t": 49317
+  },
+  {
+   "insert": " adds screenshots,\n  #",
+   "t": 49429
+  },
+  {
+   "insert": " while a build is about",
+   "t": 49507
+  },
+  {
+   "insert": " 200 MB. This keeps the",
+   "t": 49666
+  },
+  {
+   "insert": " newest build and a day of",
+   "t": 49720
+  },
+  {
+   "insert": " screenshots, so a run is",
+   "t": 49839
+  },
+  {
+   "insert": " never refused\n  # for",
+   "t": 49890
+  },
+  {
+   "insert": " space. It never fails the",
+   "t": 49928
+  },
+  {
+   "insert": " run.\n  storage:\n    name:",
+   "t": 50045
+  },
+  {
+   "insert": " Artifact storage\n    ",
+   "t": 50114
+  },
+  {
+   "insert": "runs-on: ubuntu-latest",
+   "t": 50270
+  },
+  {
+   "insert": "\n    timeout-minutes: 5",
+   "t": 50441
+  },
+  {
+   "insert": "\n    continue-on-error:",
+   "t": 50576
+  },
+  {
+   "insert": " true\n    permissions:",
+   "t": 50656
+  },
+  {
+   "insert": "\n      actions: write\n    ",
+   "t": 50714
+  },
+  {
+   "insert": "steps:\n      - name:",
+   "t": 50860
+  },
+  {
+   "insert": " Delete old artifacts,",
+   "t": 50963
+  },
+  {
+   "insert": " keeping the newest build",
+   "t": 51019
+  },
+  {
+   "insert": "\n        env:\n          ",
+   "t": 51073
+  },
+  {
+   "insert": "GH_TOKEN: ${{ github.token",
+   "t": 51216
+  },
+  {
+   "insert": " }}\n          REPO: ${{",
+   "t": 51370
+  },
+  {
+   "insert": " github.repository }}",
+   "t": 51494
+  },
+  {
+   "insert": "\n        run: |\n          ",
+   "t": 51669
+  },
+  {
+   "insert": "set -euo pipefail",
+   "t": 51715
+  },
+  {
+   "insert": "\n          ",
+   "t": 51865
+  },
+  {
+   "insert": "list=\"$RUNNER_TEMP/artif",
+   "t": 51959
+  },
+  {
+   "insert": "acts.tsv\"\n          ",
+   "t": 52098
+  },
+  {
+   "insert": "cutoff=$(date -u -d '24",
+   "t": 52238
+  },
+  {
+   "insert": " hours ago'",
+   "t": 52324
+  },
+  {
+   "insert": " +%Y-%m-%dT%H:%M:%SZ)",
+   "t": 52360
+  },
+  {
+   "insert": "\n          gh api",
+   "t": 52488
+  },
+  {
+   "insert": " --paginate",
+   "t": 52656
+  },
+  {
+   "insert": " \"repos/$REPO/actions/art",
+   "t": 52710
+  },
+  {
+   "insert": "ifacts?per_page=100\" \\",
+   "t": 52820
+  },
+  {
+   "insert": "\n            --jq",
+   "t": 52880
+  },
+  {
+   "insert": " '.artifacts[] |",
+   "t": 52978
+  },
+  {
+   "insert": " select(.expired | not) |",
+   "t": 53105
+  },
+  {
+   "insert": " [.id, .name, .created_at]",
+   "t": 53238
+  },
+  {
+   "insert": " | @tsv' > \"$list\"",
+   "t": 53361
+  },
+  {
+   "insert": "\n          newest=$(awk",
+   "t": 53500
+  },
+  {
+   "insert": " -F'\\t' '$2 ~",
+   "t": 53593
+  },
+  {
+   "insert": " /^eNCode-windows-/ && $3",
+   "t": 53731
+  },
+  {
+   "insert": " > best { best = $3; id =",
+   "t": 53814
+  },
+  {
+   "insert": " $1 } END { print id }'",
+   "t": 53972
+  },
+  {
+   "insert": " \"$list\")\n          while",
+   "t": 54124
+  },
+  {
+   "insert": " IFS=$'\\t' read -r id name",
+   "t": 54211
+  },
+  {
+   "insert": " created; do\n            ",
+   "t": 54333
+  },
+  {
+   "insert": "if [[ $name ==",
+   "t": 54408
+  },
+  {
+   "insert": " eNCode-windows-* ]]; then",
+   "t": 54505
+  },
+  {
+   "insert": "\n              [[ $id ==",
+   "t": 54613
+  },
+  {
+   "insert": " \"$newest\" ]] && continue",
+   "t": 54753
+  },
+  {
+   "insert": "\n            elif [[",
+   "t": 54809
+  },
+  {
+   "insert": " $created > $cutoff ]];",
+   "t": 54898
+  },
+  {
+   "insert": " then\n              ",
+   "t": 55047
+  },
+  {
+   "insert": "continue\n            fi",
+   "t": 55159
+  },
+  {
+   "insert": "\n            gh api -X",
+   "t": 55277
+  },
+  {
+   "insert": " DELETE",
+   "t": 55345
+  },
+  {
+   "insert": " \"repos/$REPO/actions/art",
+   "t": 55494
+  },
+  {
+   "insert": "ifacts/$id\" > /dev/null",
+   "t": 55603
+  },
+  {
+   "insert": "\n            echo \"deleted",
+   "t": 55689
+  },
+  {
+   "insert": " $name ($created)\"",
+   "t": 55738
+  },
+  {
+   "insert": "\n          done < \"$list\"\n",
+   "t": 55833
+  },
+  {
+   "insert": "\n",
+   "t": 55889
+  },
+  {
+   "select": [
+    [
+     5109,
+     5025
+    ]
+   ],
+   "t": 58408
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 58665
+  },
+  {
+   "insert": "A build is handed out from a run",
+   "t": 58746
+  },
+  {
+   "insert": " started by hand (Actions, CI, Run",
+   "t": 58871
+  },
+  {
+   "insert": " workflow). Pushes to main do not",
+   "t": 58954
+  },
+  {
+   "insert": " keep\n      # theirs: two builds of",
+   "t": 59085
+  },
+  {
+   "insert": " about 200 MB fill a private",
+   "t": 59131
+  },
+  {
+   "insert": " repository's artifact storage",
+   "t": 59165
+  },
+  {
+   "select": [
+    [
+     5297,
+     5281
+    ]
+   ],
+   "t": 60614
+  },
+  {
+   "cut": true,
+   "t": 60764
+  },
+  {
+   "insert": "== 'workflow_dispatch",
+   "t": 60862
+  },
+  {
+   "select": [
+    [
+     5651,
+     5649
+    ]
+   ],
+   "t": 63806
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 64043
+  },
+  {
+   "insert": "14",
+   "t": 64183
+  },
+  {
+   "select": [
+    [
+     5724,
+     5724
+    ]
+   ],
+   "t": 66881
+  },
+  {
+   "insert": ". Full storage loses the pictures,",
+   "t": 67018
+  },
+  {
+   "insert": " not the run",
+   "t": 67185
+  },
+  {
+   "select": [
+    [
+     5845,
+     5845
+    ]
+   ],
+   "t": 67993
+  },
+  {
+   "insert": "        continue-on-error: true",
+   "t": 68128
+  },
+  {
+   "insert": "\n",
+   "t": 68244
+  },
+  {
+   "changes": [
+    [
+     6187,
+     6188,
+     "3"
+    ]
+   ],
+   "origin": "external",
+   "t": 71062
+  },
+  {
+   "expect": {
+    "length": 6189,
+    "lines": 165,
+    "hash": "2c98f666"
+   },
+   "t": 71562
+  }
+ ]
+}

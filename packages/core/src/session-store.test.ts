@@ -18,6 +18,21 @@ async function fresh(): Promise<{ store: FileSessionStore; dir: string }> {
   return { store, dir }
 }
 
+/** The index file once `holds` is true of it (or as it is after five seconds): it is written on a timer, later on a busy machine. */
+async function indexWhen<T>(dir: string, holds: (index: T) => boolean): Promise<T> {
+  const deadline = Date.now() + 5000
+  for (;;) {
+    let index: T | null = null
+    try {
+      index = JSON.parse(await fs.readFile(path.join(dir, 'index.json'), 'utf8')) as T
+    } catch {
+      // Not written yet.
+    }
+    if ((index && holds(index)) || Date.now() > deadline) return index as T
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 afterEach(async () => {
   for (const store of stores.splice(0)) await store.dispose()
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true })
@@ -219,8 +234,7 @@ describe('the session store', () => {
     const { store, dir } = await fresh()
     const log = await store.create({ root: '/a' })
     await log.append({ type: 'title', title: 'Renamed' })
-    await new Promise((resolve) => setTimeout(resolve, 60))
-    const index = JSON.parse(await fs.readFile(path.join(dir, 'index.json'), 'utf8')) as { sessions: { title: string }[] }
+    const index = await indexWhen<{ sessions: { title: string }[] }>(dir, (written) => written.sessions[0]?.title === 'Renamed')
     assert.equal(index.sessions[0].title, 'Renamed')
   })
 })
@@ -317,9 +331,8 @@ describe('background work in the log', () => {
     assert.deepEqual(log.snapshot().agents, [info('done', { report: 'R', told: false })])
     assert.deepEqual(log.snapshot().wakeup, { at: 5_000, reason: 'check', prompt: 'P' })
     assert.equal(log.snapshot().updatedAt, touched)
-    await new Promise((resolve) => setTimeout(resolve, 40))
     assert.equal((await store.list())[0].wakeAt, 5_000)
-    const index = JSON.parse(await fs.readFile(path.join(dir, 'index.json'), 'utf8')) as { sessions: { wakeAt?: number }[] }
+    const index = await indexWhen<{ sessions: { wakeAt?: number }[] }>(dir, (written) => written.sessions[0]?.wakeAt === 5_000)
     assert.equal(index.sessions[0].wakeAt, 5_000)
 
     await log.append({ type: 'wakeup', wakeup: null })

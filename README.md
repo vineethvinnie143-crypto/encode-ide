@@ -54,7 +54,7 @@ primary platform; the code stays cross-platform.
   - knowledge: `Skill`, `WebSearch`, `WebFetch`;
   - questions: `AskUserQuestion`;
   - code intelligence: `LSP` (definitions, references, hover, symbols, calls, diagnostics, code actions) and
-    `LSPEdit` (renames across files, code actions), through the language servers installed on your computer;
+    `LSPEdit` (renames across files, code actions), through the language servers on your computer or installed by eNCode;
   - worktrees: `EnterWorktree` and `ExitWorktree` keep the agent's work on a branch of its own, apart from your checkout.
 
   After every edit the agent is told what the language servers say it broke, and a turn that would end with errors it
@@ -103,8 +103,12 @@ primary platform; the code stays cross-platform.
   compose in place at every cursor, a screen reader reads the lines around the cursor, and the editor keeps to
   Windows' scaling and contrast themes. Characters that make text read differently from how it is stored (bidi
   controls, zero-width and hidden characters) are drawn as labelled markers, and right-to-left text reads in its own
-  order only inside strings, comments and prose, when you ask for it. In a folder you trust, the language servers installed on
-  your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
+  order only inside strings, comments and prose, when you ask for it. eNCode sees which languages a folder uses and
+  installs their servers with one click when you ask: from pinned sources, checked and unpacked by eNCode itself, with
+  no npm or Node.js needed. FiveM resources read as FiveM runs them: CfxLua's syntax, the runtime, the manifest's
+  directives and, once installed, every native with its parameters and notes, written from Cfx.re's own typings. In a
+  folder you trust, the language servers (typescript-language-server, pyright,
+  rust-analyzer, gopls, clangd, lua-language-server, Eclipse JDT LS and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and
   Forward. F2 renames across the project with a preview and one Undo for the whole change; Ctrl+. and a lightbulb
@@ -351,14 +355,14 @@ packages/permissions/         shell grammar, command policy, egress and path rul
 packages/protocol/            RPC over any message port, and the JSON Schema checks
 packages/providers/           the model conversation, adapters (OpenAI-compatible, Anthropic), DirectClient
 packages/router/              roles as ordered model lists, health and failover, the free model pool
-packages/testkit/             seeded property testing
+packages/testkit/             seeded property testing that shrinks failures, and fuzzing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web (fetch, and search through DuckDuckGo, Brave Search, Tavily or Exa), and the Computer tool with its Windows helper
 packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers with the changes they make for the editor
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
-scripts/                      repository tooling: test runner, source checks
+scripts/                      repository tooling: test runner, fuzzing, edit traces, source checks
 ```
 
 ## Development
@@ -367,6 +371,8 @@ scripts/                      repository tooling: test runner, source checks
 pnpm typecheck                # every package
 pnpm test                     # unit tests (node:test); pnpm test shell compaction filters by path
 pnpm test:browser             # the editor view in a real Chromium over the DevTools protocol
+pnpm fuzz --seconds 300 editor  # every property check on fresh seeds for that long (all of them without a path)
+pnpm traces                   # the editor's regression traces, made again from git history
 pnpm build                    # renderer with Vite, main and preload with esbuild
 pnpm e2e                      # the full smoke against the built app, in a throwaway sandbox
 pnpm perf                     # how smooth the interface is: frames while a long answer streams, scrolls and a panel is dragged
@@ -378,7 +384,8 @@ covers:
 
 - the editor: what is drawn equals the file, typing, saving and undoing against the file on
   disk, find, quick open, go to line, the context menu, a change from disk that keeps the
-  cursor, and the discard prompts;
+  cursor, and the discard prompts; random editing of a file with Windows line endings, saved and
+  then undone back to the same bytes;
 - the demo agent;
 - the shell, running `node` and `npm`;
 - a streaming provider (`scripts/fake-provider.mjs`) with approvals and diffs, and what the
@@ -410,6 +417,13 @@ Compare runs on one machine: a machine without a GPU is slower than a PC.
 
 `pnpm test:browser` needs a Chromium-based browser (it finds Chrome or Edge, or takes
 `ENCODE_BROWSER`) and writes screenshots to the folder named by `ENCODE_SHOTS`.
+
+Property checks (`@encode/testkit`, [ADR 0082](docs/adr/0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md))
+run 200 cases each on a fresh seed (`ENCODE_PROPERTY_RUNS`, `ENCODE_PROPERTY_SEED`). A failure is made smaller
+before it is reported, with the seed that replays it. `pnpm fuzz` runs them for longer and lists each one's case count
+and failures. The editor's regression suite replays real edits (`packages/editor/test/traces`), and the browser tests'
+random use takes `ENCODE_MONKEY_STEPS` and `ENCODE_MONKEY_SEED`; the end-to-end run's random editing takes
+`ENCODE_SMOKE_SEED`.
 
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not

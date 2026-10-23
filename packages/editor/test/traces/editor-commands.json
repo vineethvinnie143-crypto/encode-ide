@@ -1,0 +1,632 @@
+{
+ "version": 1,
+ "name": "editor-commands",
+ "doc": "import { ChangeSet, type ChangeSpec, type Text } from '@encode/text'\nimport { findMatching, bracketAt } from './brackets'\nimport { compileSearch, searchMatches } from './search'\nimport { EditorSelection, SelectionRange } from './selection'\nimport { mapAutoClosed, type EditorState, type Transaction } from './state'\nimport {\n  CharClass,\n  charClass,\n  columnAt,\n  indentWidth,\n  indexAtColumn,\n  leadingWhitespace,\n  makeIndent,\n  nextCluster,\n  previousCluster,\n  unitWidth,\n  wordAround,\n  wordEndAfter,\n  wordStartBefore,\n} from './text-utils'\n\n/**\n * Editing commands. A command reads a state and describes what a key does\n * to it as a transaction, or returns null when it does not apply (the view\n * then lets the next binding try). Commands never touch the DOM.\n */\nexport type Command = (state: EditorState) => Transaction | null\n\n/** Characters an opening bracket or quote may be typed in front of and still get its partner. */\nconst AUTO_CLOSE_BEFORE = ';:.,=}])>` \\t'\n\n// ---------------------------------------------------------------- helpers\n\n/** What one selection range turns into: its changes, and the range afterwards. */\nexport interface RangeEdit {\n  changes?: ChangeSpec | readonly ChangeSpec[]\n  /** The range afterwards, counted in the document with only this range's changes applied. */\n  range: SelectionRange\n  /** Auto-inserted closing characters, counted the same way. */\n  closers?: readonly number[]\n}\n\n/**\n * Runs `edit` for every selection range and combines the results. Each\n * range's changes and new range are written as if it were alone; the offsets\n * are shifted by what the ranges before it inserted and deleted. Should two\n * ranges' changes interleave, the selection falls back to plain mapping.\n */\nexport function changeByRange(\n  state: EditorState,\n  edit: (range: SelectionRange, index: number) => RangeEdit,\n): { changes: ChangeSet; selection: EditorSelection; closers: number[] } {\n  const length = state.doc.length\n  const specs: ChangeSpec[] = []\n  const ranges: SelectionRange[] = []\n  const closers: number[] = []\n  let delta = 0\n  let reach = 0\n  let ordered = true\n  state.selection.ranges.forEach((range, index) => {\n    const result = edit(range, index)\n    const own = result.changes === undefined ? null : ChangeSet.of(result.changes, length)\n    if (own && !own.empty) {\n      if (own.changes[0].from < reach) ordered = false\n      reach = Math.max(reach, own.changes[own.changes.length - 1].to)\n      specs.push(...own.changes)\n    }\n    const shift = (pos: number) => pos + delta\n    ranges.push(new SelectionRange(shift(result.range.anchor), shift(result.range.head), result.range.goalColumn))\n    for (const pos of result.closers ?? []) closers.push(shift(pos))\n    if (own) delta += own.newLength - length\n  })\n  const changes = ChangeSet.of(specs, length)\n  if (!ordered) {\n    const mapped = state.selection.ranges.map((range) => SelectionRange.cursor(changes.mapPos(range.head, 1)))\n    return { changes, selection: EditorSelection.create(mapped, state.selection.mainIndex), closers: [] }\n  }\n  return { changes, selection: EditorSelection.create(ranges, state.selection.mainIndex), closers }\n}\n\nfunction editable(state: EditorState): boolean {\n  return !state.config.readOnly\n}\n\n/** The character at `pos`: \"\\n\" at a line end, \"\" at the end of the document. */\nfunction charAt(doc: Text, pos: number): string {\n  if (pos < 0 || pos >= doc.length) return ''\n  const line = doc.lineAt(pos)\n  return pos < line.to ? line.text[pos - line.from] : '\\n'\n}\n\nfunction select(state: EditorState, ranges: readonly SelectionRange[], mainIndex = state.selection.mainIndex): Transaction | null {\n  const selection = EditorSelection.create(ranges, mainIndex)\n  if (selection.eq(state.selection) && selection.ranges.every((range, index) => range.goalColumn === state.selection.ranges[index].goalColumn)) {\n    return null\n  }\n  return state.update({ selection, scrollIntoView: true, origin: 'select' })\n}\n\n/** Moves every range with `move`; when extending, only the head moves. */\nfunction moveBy(state: EditorState, extend: boolean, move: (range: SelectionRange) => SelectionRange): Transaction | null {\n  return select(\n    state,\n    state.selection.ranges.map((range) => {\n      const moved = move(range)\n      return extend ? range.extend(moved.head, moved.goalColumn) : moved\n    }),\n  )\n}\n\n/** Line numbers covered by the selection, as merged blocks. A selection ending at a line start leaves that line out. */\ninterface LineBlock {\n  first: number\n  last: number\n  ranges: SelectionRange[]\n}\n\nfunction lineBlocks(state: EditorState): LineBlock[] {\n  const blocks: LineBlock[] = []\n  for (const range of state.selection.ranges) {\n    const first = state.doc.lineAt(range.from).number\n    let last = state.doc.lineAt(range.to).number\n    if (!range.empty && last > first && state.doc.line(last).from === range.to) last--\n    const previous = blocks[blocks.length - 1]\n    if (previous && first <= previous.last + 1) {\n      previous.last = Math.max(previous.last, last)\n      previous.ranges.push(range)\n    } else {\n      blocks.push({ first, last, ranges: [range] })\n    }\n  }\n  return blocks\n}\n\n/** Maps a range through changes, choosing per end whether text inserted right at it goes before (-1) or after (1). */\nfunction mapRange(range: SelectionRange, changes: ChangeSet, assoc: (pos: number) => -1 | 1): SelectionRange {\n  return new SelectionRange(changes.mapPos(range.anchor, assoc(range.anchor)), changes.mapPos(range.head, assoc(range.head)))\n}\n\n// ---------------------------------------------------------------- motion\n\nfunction charBefore(doc: Text, pos: number): number {\n  const line = doc.lineAt(pos)\n  if (pos === line.from) return Math.max(0, pos - 1)\n  return line.from + previousCluster(line.text, pos - line.from)\n}\n\nfunction charAfter(doc: Text, pos: number): number {\n  const line = doc.lineAt(pos)\n  if (pos === line.to) return Math.min(doc.length, pos + 1)\n  return line.from + nextCluster(line.text, pos - line.from)\n}\n\nfunction wordBefore(state: EditorState, pos: number): number {\n  const line = state.doc.lineAt(pos)\n  if (pos === line.from) return Math.max(0, pos - 1)\n  return line.from + wordStartBefore(line.text, pos - line.from, state.language.wordChars)\n}\n\nfunction wordAfter(state: EditorState, pos: number): number {\n  const line = state.doc.lineAt(pos)\n  if (pos === line.to) return Math.min(state.doc.length, pos + 1)\n  return line.from + wordEndAfter(line.text, pos - line.from, state.language.wordChars)\n}\n\n/** `lines` up (negative) or down, aiming for the range's goal column. Past either end lands on the document's edge. */\nfunction vertical(state: EditorState, range: SelectionRange, lines: number, extend: boolean): SelectionRange {\n  const { doc } = state\n  const tabSize = state.config.tabSize\n  const collapse = !extend && !range.empty\n  const start = collapse ? (lines < 0 ? range.from : range.to) : range.head\n  const line = doc.lineAt(start)\n  const goal = !collapse && range.goalColumn !== undefined ? range.goalColumn : columnAt(line.text, start - line.from, tabSize)\n  const target = line.number + lines\n  if (target < 1) return SelectionRange.cursor(0, goal)\n  if (target > doc.lineCount) return SelectionRange.cursor(doc.length, goal)\n  const next = doc.line(target)\n  return SelectionRange.cursor(next.from + indexAtColumn(next.text, goal, tabSize), goal)\n}\n\nexport const cursorCharLeft: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(range.empty ? charBefore(state.doc, range.head) : range.from))\nexport const selectCharLeft: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(charBefore(state.doc, range.head)))\nexport const cursorCharRight: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(range.empty ? charAfter(state.doc, range.head) : range.to))\nexport const selectCharRight: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(charAfter(state.doc, range.head)))\n\nexport const cursorWordLeft: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(wordBefore(state, range.head)))\nexport const selectWordLeft: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(wordBefore(state, range.head)))\nexport const cursorWordRight: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(wordAfter(state, range.head)))\nexport const selectWordRight: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(wordAfter(state, range.head)))\n\nexport const cursorLineUp: Command = (state) => moveBy(state, false, (range) => vertical(state, range, -1, false))\nexport const selectLineUp: Command = (state) => moveBy(state, true, (range) => vertical(state, range, -1, true))\nexport const cursorLineDown: Command = (state) => moveBy(state, false, (range) => vertical(state, range, 1, false))\nexport const selectLineDown: Command = (state) => moveBy(state, true, (range) => vertical(state, range, 1, true))\n\n/** Page motion; the view knows how many lines a page holds. */\nexport function cursorPage(lines: number, extend = false): Command {\n  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend))\n}\n\n/** Home: to the first non-blank character, or to the line start when already there. */\nfunction lineStart(state: EditorState, pos: number): number {\n  const line = state.doc.lineAt(pos)\n  const indent = line.from + leadingWhitespace(line.text).length\n  return pos === indent ? line.from : indent\n}\n\nexport const cursorLineStart: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(lineStart(state, range.head)))\nexport const selectLineStart: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(lineStart(state, range.head)))\nexport const cursorLineEnd: Command = (state) =>\n  moveBy(state, false, (range) => SelectionRange.cursor(state.doc.lineAt(range.head).to))\nexport const selectLineEnd: Command = (state) =>\n  moveBy(state, true, (range) => SelectionRange.cursor(state.doc.lineAt(range.head).to))\n\nexport const cursorDocStart: Command = (state) => select(state, [SelectionRange.cursor(0)], 0)\nexport const selectDocStart: Command = (state) => select(state, [state.selection.main.extend(0)], 0)\nexport const cursorDocEnd: Command = (state) => select(state, [SelectionRange.cursor(state.doc.length)], 0)\nexport const selectDocEnd: Command = (state) => select(state, [state.selection.main.extend(state.doc.length)], 0)\n\nexport const selectAll: Command = (state) => select(state, [new SelectionRange(0, state.doc.length)], 0)\n\n/** Escape: drops the extra cursors, then collapses the selection. */\nexport const collapseSelection: Command = (state) => {\n  const { selection } = state\n  if (selection.ranges.length > 1) return select(state, [selection.main], 0)\n  if (!selection.main.empty) return select(state, [SelectionRange.cursor(selection.main.head)], 0)\n  return null\n}\n\n/** The word at `pos` for a double click: a word, a run of whitespace, or a run of punctuation. */\nexport function wordRangeAt(state: EditorState, pos: number): SelectionRange {\n  const line = state.doc.lineAt(pos)\n  const index = pos - line.from\n  const wordChars = state.language.wordChars\n  const word = wordAround(line.text, index, wordChars)\n  if (word) return new SelectionRange(line.from + word.from, line.from + word.to)\n  if (index >= line.text.length) return SelectionRange.cursor(pos)\n  const kind = charClass(line.text[index], wordChars)\n  let from = index\n  let to = index\n  while (from > 0 && charClass(line.text[from - 1], wordChars) === kind) from--\n  while (to < line.text.length && charClass(line.text[to], wordChars) === kind) to++\n  return new SelectionRange(line.from + from, line.from + to)\n}\n\n/** The whole line at `pos`, with its line break, for a triple click. */\nexport function lineRangeAt(state: EditorState, pos: number): SelectionRange {\n  const line = state.doc.lineAt(pos)\n  const end = line.number < state.doc.lineCount ? line.to + 1 : line.to\n  return new SelectionRange(line.from, end)\n}\n\n/** Ctrl+L: selects the line, or extends a line selection by the next line. */\nexport const selectLine: Command = (state) =>\n  select(\n    state,\n    state.selection.ranges.map((range) => {\n      const start = state.doc.lineAt(range.from).from\n      const endLine = state.doc.lineAt(range.to)\n      const end = endLine.number < state.doc.lineCount ? endLine.to + 1 : endLine.to\n      return new SelectionRange(start, end)\n    }),\n  )\n\n/** Moves to the bracket matching the one next to each cursor. */\nexport const jumpToBracket: Command = (state) => {\n  let moved = false\n  const ranges = state.selection.ranges.map((range) => {\n    const pair = bracketAt(state.doc, range.head, state.language)\n    if (!pair || pair.match < 0) return range\n    moved = true\n    return SelectionRange.cursor(pair.at === range.head ? pair.match : pair.match + 1)\n  })\n  return moved ? select(state, ranges) : null\n}\n\n// ---------------------------------------------------------------- multiple cursors\n\nfunction addCursorVertically(state: EditorState, lines: -1 | 1): Transaction | null {\n  const { doc } = state\n  const tabSize = state.config.tabSize\n  const ranges = state.selection.ranges.slice()\n  let main = state.selection.mainIndex\n  for (const [index, range] of state.selection.ranges.entries()) {\n    const line = doc.lineAt(range.head)\n    const target = line.number + lines\n    if (target < 1 || target > doc.lineCount) continue\n    const goal = range.goalColumn ?? columnAt(line.text, range.head - line.from, tabSize)\n    const next = doc.line(target)\n    ranges.push(SelectionRange.cursor(next.from + indexAtColumn(next.text, goal, tabSize), goal))\n    if (index === state.selection.mainIndex) main = ranges.length - 1\n  }\n  return ranges.length === state.selection.ranges.length ? null : select(state, ranges, main)\n}\n\nexport const addCursorAbove: Command = (state) => addCursorVertically(state, -1)\nexport const addCursorBelow: Command = (state) => addCursorVertically(state, 1)\n\n/** Adds a cursor at `pos` (Alt+click), or removes the one already there. */\nexport function toggleCursorAt(state: EditorState, pos: number): Transaction | null {\n  const { ranges, mainIndex } = state.selection\n  const hit = ranges.findIndex((range) => range.from <= pos && pos <= range.to)\n  if (hit < 0) return select(state, [...ranges, SelectionRange.cursor(pos)], ranges.length)\n  if (ranges.length === 1) return null\n  const rest = ranges.filter((_, index) => index !== hit)\n  let main = mainIndex\n  if (hit === mainIndex) main = rest.length - 1\n  else if (hit < mainIndex) main--\n  return select(state, rest, main)\n}\n\n/** Word ranges around empty cursors; null when no cursor touches a word. */\nfunction wordsAtCursors(state: EditorState): SelectionRange[] | null {\n  let found = false\n  const ranges = state.selection.ranges.map((range) => {\n    if (!range.empty) return range\n    const line = state.doc.lineAt(range.head)\n    const word = wordAround(line.text, range.head - line.from, state.language.wordChars)\n    if (!word) return range\n    found = true\n    return new SelectionRange(line.from + word.from, line.from + word.to)\n  })\n  return found ? ranges : null\n}\n\n/** Ctrl+D: selects the word at the cursor, then adds the next occurrence of the main selection. */\nexport const selectNextOccurrence: Command = (state) => {\n  const { doc, selection } = state\n  const main = selection.main\n  if (main.empty) {\n    const words = wordsAtCursors(state)\n    return words ? select(state, words) : null\n  }\n  const search = compileSearch({ search: doc.sliceString(main.from, main.to), caseSensitive: true })\n  const taken = (from: number, to: number) => selection.ranges.some((range) => range.from === from && range.to === to)\n  const pick = (from: number, to?: number) => {\n    for (const match of searchMatches(doc, search, from, to)) if (!taken(match.from, match.to)) return match\n    return null\n  }\n  const next = pick(main.to) ?? pick(0, main.from)\n  if (!next) return null\n  return select(state, [...selection.ranges, new SelectionRange(next.from, next.to)], selection.ranges.length)\n}\n\n/** Ctrl+Shift+L: a selection on every occurrence of the main selection (or the word at the cursor). */\nexport const selectAllOccurrences: Command = (state) => {\n  let main = state.selection.main\n  if (main.empty) {\n    const line = state.doc.lineAt(main.head)\n    const word = wordAround(line.text, main.head - line.from, state.language.wordChars)\n    if (!word) return null\n    main = new SelectionRange(line.from + word.from, line.from + word.to)\n  }\n  const search = compileSearch({ search: state.doc.sliceString(main.from, main.to), caseSensitive: true })\n  const ranges: SelectionRange[] = []\n  let mainIndex = 0\n  for (const match of searchMatches(state.doc, search)) {\n    if (match.from === main.from) mainIndex = ranges.length\n    ranges.push(new SelectionRange(match.from, match.to))\n  }\n  return ranges.length ? select(state, ranges, mainIndex) : null\n}\n\n// ---------------------------------------------------------------- typing\n\n/** Replaces every selection with `text` and puts the cursors after it. */\nexport function insertText(state: EditorState, text: string, origin = 'input.type'): Transaction | null {\n  if (!editable(state)) return null\n  const { changes, selection } = changeByRange(state, (range) => ({\n    changes: { from: range.from, to: range.to, insert: text },\n    range: SelectionRange.cursor(range.from + text.length),\n  }))\n  return state.update({ changes, selection, origin, scrollIntoView: true })\n}\n\n/** Odd count of unescaped `quote` characters before `index`: the cursor is probably inside a string. */\nfunction insideString(text: string, index: number, quote: string): boolean {\n  let count = 0\n  for (let pos = 0; pos < index; pos++) {\n    if (text[pos] === '\\\\') pos++\n    else if (text[pos] === quote) count++\n  }\n  return count % 2 === 1\n}\n\n/**\n * A typed character, with the conveniences editors have: brackets and\n * quotes close themselves, typing a closer the editor inserted steps over\n * it, a bracket or quote typed over a selection surrounds it, and a closing\n * bracket typed on a blank line lines up with its opening line.\n */\nexport function insertTyped(state: EditorState, text: string): Transaction | null {\n  if (!editable(state) || !text) return null\n  if (Array.from(text).length !== 1) return insertText(state, text, 'input.type')\n  const { doc, language } = state\n  const opener = language.brackets.find(([open]) => open === text)\n  const closer = language.brackets.find(([, close]) => close === text)\n  const quote = language.quotes.includes(text)\n  const typedOver = new Set(state.autoClosed)\n  const consumed = new Set<number>()\n\n  const result = changeByRange(state, (range) => {\n    const head = range.head\n    if (range.empty && (closer || quote) && typedOver.has(head) && charAt(doc, head) === text) {\n      consumed.add(head)\n      return { range: SelectionRange.cursor(head + text.length) }\n    }\n    if (!range.empty && (opener || quote)) {\n      return {\n        changes: [\n          { from: range.from, insert: text },\n          { from: range.to, insert: opener ? opener[1] : text },\n        ],\n        range: new SelectionRange(range.anchor + text.length, range.head + text.length),\n      }\n    }\n    if (range.empty) {\n      const next = charAt(doc, head)\n      const freeAfter = next === '' || next === '\\n' || AUTO_CLOSE_BEFORE.includes(next)\n      if (opener && freeAfter) {\n        return {\n          changes: { from: head, insert: opener[0] + opener[1] },\n          range: SelectionRange.cursor(head + text.length),\n          closers: [head + text.length],\n        }\n      }\n      if (quote && freeAfter) {\n        const line = doc.lineAt(head)\n        const index = head - line.from\n        const previous = index > 0 ? line.text[index - 1] : ' '\n        if (charClass(previous, language.wordChars) !== CharClass.Word && previous !== text && !insideString(line.text, index, text)) {\n          return {\n            changes: { from: head, insert: text + text },\n            range: SelectionRange.cursor(head + text.length),\n            closers: [head + text.length],\n          }\n        }\n      }\n      if (closer) {\n        const line = doc.lineAt(head)\n        const before = line.text.slice(0, head - line.from)\n        if (/^[ \\t]*$/.test(before)) {\n          const open = findMatching(doc, head, closer[0], closer[1], -1)\n          if (open >= 0) {\n            const indent = leadingWhitespace(doc.lineAt(open).text)\n            if (indent !== before) {\n              return {\n                changes: { from: line.from, to: head, insert: indent + text },\n                range: SelectionRange.cursor(line.from + indent.length + text.length),\n              }\n            }\n          }\n        }\n      }\n    }\n    return { changes: { from: range.from, to: range.to, insert: text }, range: SelectionRange.cursor(range.from + text.length) }\n  })\n\n  let changes = result.changes\n  let selection = result.selection\n  let autoClosed = [...mapAutoClosed(state.autoClosed.filter((pos) => !consumed.has(pos)), changes), ...result.closers]\n  const dedent = changes.empty ? null : dedentClosers(state, changes.apply(doc), selection)\n  if (dedent) {\n    changes = changes.compose(dedent)\n    selection = selection.map(dedent)\n    autoClosed = mapAutoClosed(autoClosed, dedent)\n  }\n  return state.update({\n    changes,\n    selection,\n    origin: 'input.type',\n    scrollIntoView: true,\n    autoClosed: autoClosed.sort((a, b) => a - b),\n  })\n}\n\n/**\n * Lines that close a block once typed (Lua's `end`, Python's `else:`, a\n * closing HTML tag) move back to the indentation of the block's opening\n * line. `doc` is the document after typing; null when nothing moves.\n */\nfunction dedentClosers(state: EditorState, doc: Text, selection: EditorSelection): ChangeSet | null {\n  const pattern = state.language.dedentOn\n  if (!pattern) return null\n  const { tabSize, indentUnit } = state.config\n  const unit = unitWidth(indentUnit, tabSize)\n  const specs: ChangeSpec[] = []\n  let previousLine = 0\n  for (const range of selection.ranges) {\n    const line = doc.lineAt(range.head)\n    if (!range.empty || range.head !== line.to || line.number === previousLine || !pattern.test(line.text)) continue\n    previousLine = line.number\n    let above = line.number - 1\n    while (above > 0 && !doc.line(above).text.trim()) above--\n    if (above === 0) continue\n    const opener = doc.line(above).text\n    const openerIndent = indentWidth(leadingWhitespace(opener), tabSize)\n    const opens = Boolean(state.language.indentAfter?.test(opener)) || /[{([]\\s*$/.test(opener)\n    const target = opens ? openerIndent : Math.max(0, openerIndent - unit)\n    const current = leadingWhitespace(line.text)\n    if (indentWidth(current, tabSize) <= target) continue\n    specs.push({ from: line.from, to: line.from + current.length, insert: makeIndent(target, indentUnit, tabSize) })\n  }\n  return specs.length ? ChangeSet.of(specs, doc.length) : null\n}\n\n/** Enter: a new line indented like this one, one level deeper after an opening bracket, and split between a bracket pair. */\nexport const insertNewlineAndIndent: Command = (state) => {\n  if (!editable(state)) return null\n  const { doc, language } = state\n  const unit = state.config.indentUnit\n  const { changes, selection } = changeByRange(state, (range) => {\n    const line = doc.lineAt(range.from)\n    const endLine = range.to <= line.to ? line : doc.lineAt(range.to)\n    const before = line.text.slice(0, range.from - line.from)\n    const after = endLine.text.slice(range.to - endLine.from)\n    const trimmedBefore = before.replace(/[ \\t]+$/, '')\n    const trimmedAfter = after.replace(/^[ \\t]+/, '')\n    const indent = leadingWhitespace(trimmedBefore ? line.text : before)\n    const last = trimmedBefore[trimmedBefore.length - 1]\n    const pair = language.brackets.find(([open]) => open === last)\n    const from = line.from + trimmedBefore.length\n    const to = endLine.to - trimmedAfter.length\n    if (pair && trimmedAfter.startsWith(pair[1])) {\n      const inner = indent + unit\n      return {\n        changes: { from, to, insert: `\\n${inner}\\n${indent}` },\n        range: SelectionRange.cursor(from + 1 + inner.length),\n      }\n    }\n    const deeper = Boolean(pair) || Boolean(language.indentAfter?.test(trimmedBefore))\n    const insert = `\\n${deeper ? indent + unit : indent}`\n    return { changes: { from, to, insert }, range: SelectionRange.cursor(from + insert.length) }\n  })\n  return state.update({ changes, selection, origin: 'input.newline', scrollIntoView: true })\n}\n\n/** Ctrl+Enter: a new line below the current one, keeping its indentation. */\nexport const insertLineAfter: Command = (state) => {\n  if (!editable(state)) return null\n  const { changes, selection } = changeByRange(state, (range) => {\n    const line = state.doc.lineAt(range.head)\n    const indent = leadingWhitespace(line.text)\n    return { changes: { from: line.to, insert: `\\n${indent}` }, range: SelectionRange.cursor(line.to + 1 + indent.length) }\n  })\n  return state.update({ changes, selection, origin: 'input.newline', scrollIntoView: true })\n}\n\n/** Ctrl+Shift+Enter: a new line above the current one. */\nexport const insertLineBefore: Command = (state) => {\n  if (!editable(state)) return null\n  const { changes, selection } = changeByRange(state, (range) => {\n    const line = state.doc.lineAt(range.head)\n    const indent = leadingWhitespace(line.text)\n    return { changes: { from: line.from, insert: `${indent}\\n` }, range: SelectionRange.cursor(line.from + indent.length) }\n  })\n  return state.update({ changes, selection, origin: 'input.newline', scrollIntoView: true })\n}\n\n// ---------------------------------------------------------------- deleting\n\nfunction deleteBy(state: EditorState, target: (range: SelectionRange) => { from: number; to: number }): Transaction | null {\n  if (!editable(state)) return null\n  const { changes, selection } = changeByRange(state, (range) => {\n    const { from, to } = range.empty ? target(range) : range\n    return { changes: { from, to }, range: SelectionRange.cursor(from) }\n  })\n  if (changes.empty) return select(state, selection.ranges)\n  return state.update({ changes, selection, origin: 'input.delete', scrollIntoView: true })\n}\n\n/** Backspace: a character (a whole cluster), an auto-inserted pair, or back to the previous indentation stop. */\nexport const deleteCharBackward: Command = (state) => {\n  const { doc, language } = state\n  const autoClosed = new Set(state.autoClosed)\n  const spaces = state.config.indentUnit !== '\\t'\n  const unit = unitWidth(state.config.indentUnit, state.config.tabSize)\n  return deleteBy(state, ({ head }) => {\n    if (head === 0) return { from: 0, to: 0 }\n    const line = doc.lineAt(head)\n    const index = head - line.from\n    if (index === 0) return { from: head - 1, to: head }\n    const before = line.text[index - 1]\n    const after = line.text[index]\n    if (autoClosed.has(head) && (language.brackets.some(([open, close]) => open === before && close === after) || (before === after && language.quotes.includes(before)))) {\n      return { from: head - 1, to: head + 1 }\n    }\n    if (spaces && before === ' ' && /^ +$/.test(line.text.slice(0, index))) {\n      return { from: head - ((index % unit) || unit), to: head }\n    }\n    return { from: line.from + previousCluster(line.text, index), to: head }\n  })\n}\n\n/** Delete: the next character (a whole cluster), or the line break. */\nexport const deleteCharForward: Command = (state) => deleteBy(state, ({ head }) => ({ from: head, to: charAfter(state.doc, head) }))\n\n/** Ctrl+Backspace. */\nexport const deleteWordBackward: Command = (state) => deleteBy(state, ({ head }) => ({ from: wordBefore(state, head), to: head }))\n\n/** Ctrl+Delete. */\nexport const deleteWordForward: Command = (state) => deleteBy(state, ({ head }) => ({ from: head, to: wordAfter(state, head) }))\n\n/** Ctrl+Shift+K: deletes the selected lines; the cursor keeps its column on the line that takes their place. */\nexport const deleteLine: Command = (state) => {\n  if (!editable(state)) return null\n  const { doc } = state\n  const tabSize = state.config.tabSize\n  const specs: ChangeSpec[] = []\n  const ranges: SelectionRange[] = []\n  let delta = 0\n  for (const block of lineBlocks(state)) {\n    const head = block.ranges[block.ranges.length - 1].head\n    const headLine = doc.lineAt(head)\n    const column = columnAt(headLine.text, head - headLine.from, tabSize)\n    const first = doc.line(block.first)\n    const last = doc.line(block.last)\n    let from: number\n    let to: number\n    let cursor: number\n    if (block.last < doc.lineCount) {\n      const next = doc.line(block.last + 1)\n      from = first.from\n      to = next.from\n      cursor = from + indexAtColumn(next.text, column, tabSize)\n    } else if (block.first > 1) {\n      const previous = doc.line(block.first - 1)\n      from = previous.to\n      to = last.to\n      cursor = previous.from + indexAtColumn(previous.text, column, tabSize)\n    } else {\n      from = 0\n      to = doc.length\n      cursor = 0\n    }\n    specs.push({ from, to })\n    ranges.push(SelectionRange.cursor(cursor + delta))\n    delta -= to - from\n  }\n  const changes = ChangeSet.of(specs, doc.length)\n  if (changes.empty) return null\n  return state.update({ changes, selection: EditorSelection.create(ranges), origin: 'command', scrollIntoView: true })\n}\n\n// ---------------------------------------------------------------- clipboard\n\nexport interface ClipboardText {\n  text: string\n  /** Copied from cursors without a selection: whole lines, which paste above the cursor's line. */\n  linewise: boolean\n}\n\n/** What Ctrl+C puts on the clipboard: the selections, or the cursors' lines when nothing is selected. */\nexport function copyText(state: EditorState): ClipboardText {\n  const ranges = state.selection.ranges\n  if (ranges.every((range) => range.empty)) {\n    const lines: string[] = []\n    let previous = 0\n    for (const range of ranges) {\n      const line = state.doc.lineAt(range.head)\n      if (line.number !== previous) lines.push(`${line.text}\\n`)\n      previous = line.number\n    }\n    return { text: lines.join(''), linewise: true }\n  }\n  return {\n    text: ranges\n      .filter((range) => !range.empty)\n      .map((range) => state.sliceDoc(range.from, range.to))\n      .join('\\n'),\n    linewise: false,\n  }\n}\n\n/** Ctrl+X: the clipboard text, and the transaction that removes it. */\nexport function cutText(state: EditorState): { clipboard: ClipboardText; transaction: Transaction | null } {\n  const clipboard = copyText(state)\n  if (!editable(state)) return { clipboard, transaction: null }\n  if (clipboard.linewise) return { clipboard, transaction: deleteLine(state) }\n  const { changes, selection } = changeByRange(state, (range) => ({\n    changes: { from: range.from, to: range.to },\n    range: SelectionRange.cursor(range.from),\n  }))\n  return { clipboard, transaction: state.update({ changes, selection, origin: 'input.cut', scrollIntoView: true }) }\n}\n\n/**\n * Ctrl+V. Line breaks are normalised; text with one line per cursor is\n * spread over the cursors; whole lines copied without a selection go above\n * each cursor's line.\n */\nexport function paste(state: EditorState, text: string, linewise = false): Transaction | null {\n  if (!editable(state)) return null\n  const normalized = text.replace(/\\r\\n?/g, '\\n')\n  const ranges = state.selection.ranges\n  if (linewise && ranges.every((range) => range.empty)) {\n    const { changes, selection } = changeByRange(state, (range) => {\n      const line = state.doc.lineAt(range.head)\n      return { changes: { from: line.from, insert: normalized }, range: SelectionRange.cursor(range.head + normalized.length) }\n    })\n    return state.update({ changes, selection, origin: 'input.paste', scrollIntoView: true })\n  }\n  let parts = normalized.split('\\n')\n  if (parts.length === ranges.length + 1 && parts[parts.length - 1] === '') parts = parts.slice(0, -1)\n  if (ranges.length > 1 && parts.length === ranges.length) {\n    const { changes, selection } = changeByRange(state, (range, index) => ({\n      changes: { from: range.from, to: range.to, insert: parts[index] },\n      range: SelectionRange.cursor(range.from + parts[index].length),\n    }))\n    return state.update({ changes, selection, origin: 'input.paste', scrollIntoView: true })\n  }\n  return insertText(state, normalized, 'input.paste')\n}\n\n// ---------------------------------------------------------------- indentation\n\nfunction indentLines(state: EditorState, edit: (line: { from: number; text: string }) => ChangeSpec | null): Transaction | null {\n  if (!editable(state)) return null\n  const specs: ChangeSpec[] = []\n  for (const block of lineBlocks(state)) {\n    const skipBlank = block.last > block.first\n    for (let number = block.first; number <= block.last; number++) {\n      const line = state.doc.line(number)\n      if (skipBlank && !line.text.trim()) continue\n      const change = edit(line)\n      if (change) specs.push(change)\n    }\n  }\n  const changes = ChangeSet.of(specs, state.doc.length)\n  if (changes.empty) return null\n  const lineStarts = (pos: number): -1 | 1 => (state.doc.lineAt(pos).from === pos ? -1 : 1)\n  const selection = EditorSelection.create(\n    state.selection.ranges.map((range) => (range.empty ? SelectionRange.cursor(changes.mapPos(range.head, 1)) : mapRange(range, changes, lineStarts))),\n    state.selection.mainIndex,\n  )\n  return state.update({ changes, selection, origin: 'command', scrollIntoView: true })\n}\n\n/** Ctrl+]: one more level of indentation on every selected line. */\nexport const indentMore: Command = (state) => indentLines(state, (line) => ({ from: line.from, insert: state.config.indentUnit }))\n\n/** Ctrl+[ and Shift+Tab: back to the previous indentation stop. */\nexport const indentLess: Command = (state) => {\n  const { tabSize, indentUnit } = state.config\n  const unit = unitWidth(indentUnit, tabSize)\n  return indentLines(state, (line) => {\n    const space = leadingWhitespace(line.text)\n    if (!space) return null\n    const width = indentWidth(space, tabSize)\n    const target = Math.max(0, Math.ceil(width / unit) - 1) * unit\n    let keep = space.length\n    while (keep > 0 && indentWidth(space.slice(0, keep), tabSize) > target) keep--\n    const insert = ' '.repeat(target - indentWidth(space.slice(0, keep), tabSize))\n    return { from: line.from + keep, to: line.from + space.length, insert }\n  })\n}\n\n/** Tab: indents a selection that spans lines, otherwise inserts indentation up to the next stop. */\nexport const insertTab: Command = (state) => {\n  if (!editable(state)) return null\n  const { doc } = state\n  const multiline = state.selection.ranges.some((range) => !range.empty && doc.lineAt(range.from).number !== doc.lineAt(range.to).number)\n  if (multiline) return indentMore(state)\n  const { tabSize, indentUnit } = state.config\n  const { changes, selection } = changeByRange(state, (range) => {\n    let insert = '\\t'\n    if (indentUnit !== '\\t') {\n      const line = doc.lineAt(range.from)\n      const unit = unitWidth(indentUnit, tabSize)\n      insert = ' '.repeat(unit - (columnAt(line.text, range.from - line.from, tabSize) % unit))\n    }\n    return { changes: { from: range.from, to: range.to, insert }, range: SelectionRange.cursor(range.from + insert.length) }\n  })\n  return state.update({ changes, selection, origin: 'input.type', scrollIntoView: true })\n}\n\n/** A fresh indentation string for the configured unit (tabs or spaces). */\nexport function indentString(state: EditorState, columns: number): string {\n  return makeIndent(columns, state.config.indentUnit, state.config.tabSize)\n}\n\n// ---------------------------------------------------------------- comments\n\n/** Ctrl+/: comments or uncomments the selected lines; languages without line comments get a block comment. */\nexport const toggleLineComment: Command = (state) => {\n  if (!editable(state)) return null\n  const { language } = state\n  if (!language.lineComment) return language.blockComment ? toggleBlockCommentLines(state) : null\n  const token = language.lineComment\n  const tabSize = state.config.tabSize\n  const lines = lineBlocks(state).flatMap((block) =>\n    Array.from({ length: block.last - block.first + 1 }, (_, offset) => state.doc.line(block.first + offset)),\n  )\n  const filled = lines.filter((line) => line.text.trim())\n  const targets = filled.length ? filled : lines\n  const commented = filled.length > 0 && filled.every((line) => line.text.slice(leadingWhitespace(line.text).length).startsWith(token))\n  const specs: ChangeSpec[] = []\n  if (commented) {\n    for (const line of filled) {\n      const start = line.from + leadingWhitespace(line.text).length\n      let end = start + token.length\n      if (state.doc.sliceString(end, Math.min(end + 1, line.to)) === ' ') end++\n      specs.push({ from: start, to: end })\n    }\n  } else {\n    const column = Math.min(...targets.map((line) => indentWidth(leadingWhitespace(line.text), tabSize)))\n    for (const line of targets) specs.push({ from: line.from + indexAtColumn(line.text, column, tabSize), insert: `${token} ` })\n  }\n  const changes = ChangeSet.of(specs, state.doc.length)\n  if (changes.empty) return null\n  const selection = EditorSelection.create(\n    state.selection.ranges.map((range) =>\n      range.empty ? SelectionRange.cursor(changes.mapPos(range.head, 1)) : mapRange(range, changes, (pos) => (pos === range.from ? -1 : 1)),\n    ),\n    state.selection.mainIndex,\n  )\n  return state.update({ changes, selection, origin: 'command', scrollIntoView: true })\n}\n\n/** Removes `open`/`close` around `from`\u2013`to` (allowing a space inside each), or null when they are not there. */\nfunction unwrapComment(doc: Text, from: number, to: number, open: string, close: string): ChangeSpec[] | null {\n  const text = doc.sliceString(from, to)\n  const start = text.length - text.trimStart().length\n  const end = text.trimEnd().length\n  const inner = text.slice(start, end)\n  if (inner.length < open.length + close.length || !inner.startsWith(open) || !inner.endsWith(close)) return null\n  const openEnd = from + start + open.length + (inner[open.length] === ' ' ? 1 : 0)\n  const closeStart = from + end - close.length - (inner[inner.length - close.length - 1] === ' ' && inner.length > open.length + close.length + 1 ? 1 : 0)\n  return [\n    { from: from + start, to: Math.min(openEnd, closeStart) },\n    { from: Math.max(openEnd, closeStart), to: from + end },\n  ]\n}\n\nfunction toggleBlockCommentLines(state: EditorState): Transaction | null {\n  const [open, close] = state.language.blockComment!\n  const specs: ChangeSpec[] = []\n  for (const block of lineBlocks(state)) {\n    const first = state.doc.line(block.first)\n    const last = state.doc.line(block.last)\n    const from = first.from + leadingWhitespace(first.text).length\n    const to = last.to\n    if (from === to && block.first === block.last) {\n      specs.push({ from, insert: `${open}  ${close}` })\n      continue\n    }\n    specs.push(...(unwrapComment(state.doc, from, to, open, close) ?? [{ from, insert: `${open} ` }, { from: to, insert: ` ${close}` }]))\n  }\n  const changes = ChangeSet.of(specs, state.doc.length)\n  return changes.empty ? null : state.update({ changes, origin: 'command', scrollIntoView: true })\n}\n\n/** Shift+Alt+A: wraps each selection in a block comment, or unwraps one. */\nexport const toggleBlockComment: Command = (state) => {\n  if (!editable(state)) return null\n  const pair = state.language.blockComment\n  if (!pair) return null\n  const [open, close] = pair\n  const { doc } = state\n  const { changes, selection } = changeByRange(state, (range) => {\n    if (range.empty) {\n      return { changes: { from: range.head, insert: `${open}  ${close}` }, range: SelectionRange.cursor(range.head + open.length + 1) }\n    }\n    // The selection may sit inside the markers (\"/* x */\" with x selected) or include them.\n    const before = doc.sliceString(Math.max(0, range.from - open.length - 1), range.from)\n    const after = doc.sliceString(range.to, Math.min(doc.length, range.to + close.length + 1))\n    const openFrom = before.endsWith(`${open} `) ? range.from - open.length - 1 : before.endsWith(open) ? range.from - open.length : -1\n    const closeTo = after.startsWith(` ${close}`) ? range.to + close.length + 1 : after.startsWith(close) ? range.to + close.length : -1\n    const outside = openFrom >= 0 && closeTo >= 0\n    const unwrap = outside\n      ? [\n          { from: openFrom, to: range.from },\n          { from: range.to, to: closeTo },\n        ]\n      : unwrapComment(doc, range.from, range.to, open, close)\n    if (unwrap) {\n      const removedBefore = unwrap[0].to! - unwrap[0].from\n      const removedInside = outside ? 0 : unwrap[1].to! - unwrap[1].from\n      const start = outside ? openFrom : range.from\n      const end = range.to - removedBefore - removedInside\n      return { changes: unwrap, range: range.head >= range.anchor ? new SelectionRange(start, end) : new SelectionRange(end, start) }\n    }\n    const shift = open.length + 1\n    return {\n      changes: [\n        { from: range.from, insert: `${open} ` },\n        { from: range.to, insert: ` ${close}` },\n      ],\n      range: new SelectionRange(range.anchor + shift, range.head + shift),\n    }\n  })\n  return state.update({ changes, selection, origin: 'command', scrollIntoView: true })\n}\n\n// ---------------------------------------------------------------- line moves\n\nfunction moveLines(state: EditorState, direction: -1 | 1): Transaction | null {\n  if (!editable(state)) return null\n  const { doc } = state\n  const blocks = lineBlocks(state)\n  if (direction < 0 ? blocks[0].first === 1 : blocks[blocks.length - 1].last === doc.lineCount) return null\n  const specs: ChangeSpec[] = []\n  const ranges: SelectionRange[] = []\n  for (const block of blocks) {\n    const first = doc.line(block.first)\n    const last = doc.line(block.last)\n    const text = doc.sliceString(first.from, last.to)\n    if (direction < 0) {\n      const above = doc.line(block.first - 1)\n      specs.push({ from: above.from, to: last.to, insert: `${text}\\n${above.text}` })\n      const shift = -(above.text.length + 1)\n      for (const range of block.ranges) ranges.push(new SelectionRange(range.anchor + shift, range.head + shift, range.goalColumn))\n    } else {\n      const below = doc.line(block.last + 1)\n      specs.push({ from: first.from, to: below.to, insert: `${below.text}\\n${text}` })\n      const shift = below.text.length + 1\n      for (const range of block.ranges) ranges.push(new SelectionRange(range.anchor + shift, range.head + shift, range.goalColumn))\n    }\n  }\n  const changes = ChangeSet.of(specs, doc.length)\n  return state.update({\n    changes,\n    selection: EditorSelection.create(ranges, state.selection.mainIndex),\n    origin: 'command',\n    scrollIntoView: true,\n  })\n}\n\n/** Alt+Up. */\nexport const moveLineUp: Command = (state) => moveLines(state, -1)\n/** Alt+Down. */\nexport const moveLineDown: Command = (state) => moveLines(state, 1)\n\nfunction copyLines(state: EditorState, direction: -1 | 1): Transaction | null {\n  if (!editable(state)) return null\n  const { doc } = state\n  const specs: ChangeSpec[] = []\n  const ranges: SelectionRange[] = []\n  let delta = 0\n  for (const block of lineBlocks(state)) {\n    const first = doc.line(block.first)\n    const last = doc.line(block.last)\n    const text = doc.sliceString(first.from, last.to)\n    // Copying down moves the cursors onto the copy; copying up leaves them on the new upper copy.\n    specs.push(direction > 0 ? { from: last.to, insert: `\\n${text}` } : { from: first.from, insert: `${text}\\n` })\n    const shift = delta + (direction > 0 ? text.length + 1 : 0)\n    for (const range of block.ranges) ranges.push(new SelectionRange(range.anchor + shift, range.head + shift, range.goalColumn))\n    delta += text.length + 1\n  }\n  const changes = ChangeSet.of(specs, doc.length)\n  return state.update({\n    changes,\n    selection: EditorSelection.create(ranges, state.selection.mainIndex),\n    origin: 'command',\n    scrollIntoView: true,\n  })\n}\n\n/** Shift+Alt+Up. */\nexport const copyLineUp: Command = (state) => copyLines(state, -1)\n/** Shift+Alt+Down. */\nexport const copyLineDown: Command = (state) => copyLines(state, 1)\n\nexport { redo, undo } from './state'\n",
+ "language": "typescript",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     6509,
+     6509
+    ]
+   ],
+   "t": 2703
+  },
+  {
+   "paste": "\n/**\n * The line `lines` lines from `line` (negative: up). The view passes one that steps over folded lines; the plain one\n * counts every line. Past either end it may return a line outside the document.\n */\nexport type LineStep = (line: number, lines: number) => number\n\nconst countLines: LineStep = (line, lines) => line + lines\n",
+   "t": 3003
+  },
+  {
+   "select": [
+    [
+     7052,
+     7052
+    ]
+   ],
+   "t": 3639
+  },
+  {
+   "insert": ", step: LineStep =",
+   "t": 3762
+  },
+  {
+   "insert": " countLines",
+   "t": 3825
+  },
+  {
+   "select": [
+    [
+     7480,
+     7461
+    ]
+   ],
+   "t": 6440
+  },
+  {
+   "cut": true,
+   "t": 6592
+  },
+  {
+   "insert": "step(line.number,",
+   "t": 6624
+  },
+  {
+   "insert": " lines)",
+   "t": 6801
+  },
+  {
+   "changes": [
+    [
+     9493,
+     9595,
+     ", step?: LineStep): Command {\n  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend, step))\n}\n\n/** Up (negative) or down by `lines`, counted with `step`: the view's version of the arrow keys, which skips folds. */\nexport function cursorVertical(lines: number, extend: boolean, step?: LineStep): Command {\n  return (state) => moveBy(state, extend, (range) => vertical(state, range, lines, extend, step"
+    ]
+   ],
+   "origin": "external",
+   "t": 8942
+  },
+  {
+   "select": [
+    [
+     13832,
+     13832
+    ]
+   ],
+   "t": 10461
+  },
+  {
+   "insert": ", step: LineStep = countLines",
+   "t": 10536
+  },
+  {
+   "select": [
+    [
+     14180,
+     14161
+    ]
+   ],
+   "t": 12966
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 13051
+  },
+  {
+   "insert": "step(line.number, lines)",
+   "t": 13197
+  },
+  {
+   "select": [
+    [
+     14795,
+     14795
+    ]
+   ],
+   "t": 14071
+  },
+  {
+   "insert": "\n",
+   "t": 14140
+  },
+  {
+   "insert": "/** A cursor added on the",
+   "t": 14194
+  },
+  {
+   "insert": " line above (-1) or below,",
+   "t": 14373
+  },
+  {
+   "insert": " counted with `step` so a",
+   "t": 14410
+  },
+  {
+   "insert": " folded block is stepped",
+   "t": 14488
+  },
+  {
+   "insert": " over. */\n",
+   "t": 14546
+  },
+  {
+   "insert": "export function",
+   "t": 14621
+  },
+  {
+   "insert": " addCursorVertical(direct",
+   "t": 14654
+  },
+  {
+   "insert": "ion: -1 | 1, step?:",
+   "t": 14731
+  },
+  {
+   "insert": " LineStep): Command {\n  ",
+   "t": 14860
+  },
+  {
+   "insert": "return (state) =>",
+   "t": 14951
+  },
+  {
+   "insert": " addCursorVertically(state,",
+   "t": 15126
+  },
+  {
+   "insert": " direction, step)\n",
+   "t": 15158
+  },
+  {
+   "insert": "}\n",
+   "t": 15244
+  },
+  {
+   "expect": {
+    "length": 45287,
+    "lines": 993,
+    "hash": "63797e69"
+   },
+   "t": 15744
+  },
+  {
+   "select": [
+    [
+     4035,
+     3963
+    ]
+   ],
+   "t": 17992
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 18238
+  },
+  {
+   "insert": "\n * Moves every",
+   "t": 18277
+  },
+  {
+   "insert": " range with `move`;",
+   "t": 18313
+  },
+  {
+   "insert": " when extending,",
+   "t": 18473
+  },
+  {
+   "insert": " only the head",
+   "t": 18508
+  },
+  {
+   "insert": " moves. Null when",
+   "t": 18621
+  },
+  {
+   "insert": " nothing moved. The",
+   "t": 18757
+  },
+  {
+   "insert": " view moves by\n *",
+   "t": 18859
+  },
+  {
+   "insert": " wrapped rows",
+   "t": 19031
+  },
+  {
+   "insert": " through this.\n */\n",
+   "t": 19205
+  },
+  {
+   "insert": "export ",
+   "t": 19311
+  },
+  {
+   "select": [
+    [
+     4410,
+     4410
+    ]
+   ],
+   "t": 21289
+  },
+  {
+   "insert": ", moved.assoc",
+   "t": 21410
+  },
+  {
+   "expect": {
+    "length": 45384,
+    "lines": 996,
+    "hash": "48329a84"
+   },
+   "t": 21910
+  },
+  {
+   "select": [
+    [
+     30780,
+     30780
+    ]
+   ],
+   "t": 24054
+  },
+  {
+   "insert": "  /** Copied from more than one",
+   "t": 24163
+  },
+  {
+   "insert": " cursor: what each gave, so",
+   "t": 24320
+  },
+  {
+   "insert": " pasting with as many cursors",
+   "t": 24418
+  },
+  {
+   "insert": " gives each its own again. */",
+   "t": 24475
+  },
+  {
+   "insert": "\n  pieces?: string[]\n",
+   "t": 24613
+  },
+  {
+   "select": [
+    [
+     31457,
+     31457
+    ]
+   ],
+   "t": 26598
+  },
+  {
+   "insert": ", ...(lines.length > 1 ? {",
+   "t": 26758
+  },
+  {
+   "insert": " pieces: lines } : {})",
+   "t": 26897
+  },
+  {
+   "select": [
+    [
+     31680,
+     31514
+    ]
+   ],
+   "t": 29311
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 29471
+  },
+  {
+   "insert": "const pieces =",
+   "t": 29585
+  },
+  {
+   "insert": " ranges.filter((range) =>",
+   "t": 29624
+  },
+  {
+   "insert": " !range.empty).map((range) =>",
+   "t": 29803
+  },
+  {
+   "insert": " state.sliceDoc(range.from,",
+   "t": 29840
+  },
+  {
+   "insert": " range.to))\n  return { text:",
+   "t": 29885
+  },
+  {
+   "insert": " pieces.join('\\n'), linewise:",
+   "t": 29995
+  },
+  {
+   "insert": " false, ...(pieces.length > 1",
+   "t": 30162
+  },
+  {
+   "insert": " ? { pieces } : {})",
+   "t": 30228
+  },
+  {
+   "select": [
+    [
+     32542,
+     32542
+    ]
+   ],
+   "t": 31328
+  },
+  {
+   "insert": ". `pieces`, what each",
+   "t": 31387
+  },
+  {
+   "insert": " cursor of a copy gave",
+   "t": 31546
+  },
+  {
+   "insert": " (as\n * `copyText` says),",
+   "t": 31608
+  },
+  {
+   "insert": " go one to a cursor when",
+   "t": 31749
+  },
+  {
+   "insert": " there are as many",
+   "t": 31905
+  },
+  {
+   "insert": " cursors, even\n * when a",
+   "t": 32033
+  },
+  {
+   "insert": " piece has lines of its",
+   "t": 32181
+  },
+  {
+   "insert": " own",
+   "t": 32274
+  },
+  {
+   "select": [
+    [
+     32781,
+     32781
+    ]
+   ],
+   "t": 35164
+  },
+  {
+   "insert": ", pieces?: readonly string[]",
+   "t": 35277
+  },
+  {
+   "select": [
+    [
+     32959,
+     32959
+    ]
+   ],
+   "t": 37912
+  },
+  {
+   "insert": "  if (pieces &&",
+   "t": 37946
+  },
+  {
+   "insert": " pieces.length > 1",
+   "t": 38093
+  },
+  {
+   "insert": " && pieces.length",
+   "t": 38131
+  },
+  {
+   "insert": " ===",
+   "t": 38205
+  },
+  {
+   "insert": " ranges.length) {",
+   "t": 38333
+  },
+  {
+   "insert": "\n    const own =",
+   "t": 38495
+  },
+  {
+   "insert": " pieces.map((piece)",
+   "t": 38534
+  },
+  {
+   "insert": " =>",
+   "t": 38567
+  },
+  {
+   "insert": " piece.replace(/\\r\\n?/g,",
+   "t": 38657
+  },
+  {
+   "insert": " '\\n'))\n    const",
+   "t": 38703
+  },
+  {
+   "insert": " { changes,",
+   "t": 38758
+  },
+  {
+   "insert": " selection } =",
+   "t": 38853
+  },
+  {
+   "insert": " changeByRange(state,",
+   "t": 38938
+  },
+  {
+   "insert": " (range, index) =>",
+   "t": 39006
+  },
+  {
+   "insert": " {\n      if",
+   "t": 39131
+  },
+  {
+   "insert": " (linewise &&",
+   "t": 39206
+  },
+  {
+   "insert": " range.empty) {",
+   "t": 39291
+  },
+  {
+   "insert": "\n        const",
+   "t": 39359
+  },
+  {
+   "insert": " line =",
+   "t": 39472
+  },
+  {
+   "insert": " state.doc.lineAt(range.h",
+   "t": 39572
+  },
+  {
+   "insert": "ead)\n        ",
+   "t": 39629
+  },
+  {
+   "insert": "return { changes:",
+   "t": 39690
+  },
+  {
+   "insert": " { from:",
+   "t": 39763
+  },
+  {
+   "insert": " line.from,",
+   "t": 39805
+  },
+  {
+   "insert": " insert:",
+   "t": 39955
+  },
+  {
+   "insert": " own[index] },",
+   "t": 40024
+  },
+  {
+   "insert": " range:",
+   "t": 40121
+  },
+  {
+   "insert": " SelectionRange.cursor(ra",
+   "t": 40221
+  },
+  {
+   "insert": "nge.head +",
+   "t": 40381
+  },
+  {
+   "insert": " own[index].length)",
+   "t": 40554
+  },
+  {
+   "insert": " }\n      }\n      ",
+   "t": 40693
+  },
+  {
+   "insert": "return { changes:",
+   "t": 40812
+  },
+  {
+   "insert": " { from:",
+   "t": 40894
+  },
+  {
+   "insert": " range.from, to:",
+   "t": 40972
+  },
+  {
+   "insert": " range.to, insert:",
+   "t": 41036
+  },
+  {
+   "insert": " own[index] },",
+   "t": 41110
+  },
+  {
+   "insert": " range:",
+   "t": 41271
+  },
+  {
+   "insert": " SelectionRange.cursor(ra",
+   "t": 41416
+  },
+  {
+   "insert": "nge.from +",
+   "t": 41533
+  },
+  {
+   "insert": " own[index].length)",
+   "t": 41599
+  },
+  {
+   "insert": " }\n    })\n    ",
+   "t": 41738
+  },
+  {
+   "insert": "return",
+   "t": 41861
+  },
+  {
+   "insert": " state.update({",
+   "t": 42031
+  },
+  {
+   "insert": " changes,",
+   "t": 42135
+  },
+  {
+   "insert": " selection,",
+   "t": 42194
+  },
+  {
+   "insert": " origin:",
+   "t": 42340
+  },
+  {
+   "insert": " 'input.paste',",
+   "t": 42417
+  },
+  {
+   "insert": " scrollIntoView:",
+   "t": 42500
+  },
+  {
+   "insert": " true })\n  }\n",
+   "t": 42575
+  },
+  {
+   "expect": {
+    "length": 46481,
+    "lines": 1006,
+    "hash": "ca8b77a9"
+   },
+   "t": 43075
+  },
+  {
+   "command": "undo",
+   "t": 43475
+  },
+  {
+   "expect": {
+    "length": 45792,
+    "lines": 995,
+    "hash": "c99423ea"
+   },
+   "t": 43485
+  },
+  {
+   "command": "redo",
+   "t": 43885
+  },
+  {
+   "expect": {
+    "length": 46481,
+    "lines": 1006,
+    "hash": "ca8b77a9"
+   },
+   "t": 43895
+  }
+ ]
+}
