@@ -26,6 +26,7 @@ export const SECTIONS: readonly SectionInfo[] = [
   { id: 'permissions', title: 'Permissions', description: 'The rules for this folder and every folder, and which folders are trusted.', keywords: 'rules trust protected folders allow deny ask' },
   { id: 'mcp', title: 'MCP servers', description: 'The tools outside servers give the agent.', keywords: 'mcp tools servers integrations' },
   { id: 'sandbox', title: 'Sandbox', description: 'What the agent’s commands can reach on this computer.', keywords: 'isolation commands network write read' },
+  { id: 'code', title: 'Language servers', description: 'The servers that find errors, definitions and references, for the editor and the agent.', keywords: 'lsp language server errors diagnostics squiggles intellisense definition references rename typescript python rust go clangd lua' },
   { id: 'archived', title: 'Archived sessions', description: 'Sessions you put away. Restore one to see it in the sidebar again.', keywords: 'archive restore unarchive deleted old sessions history', startsCluster: true },
 ]
 
@@ -68,6 +69,9 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'permissions.rules', section: 'permissions', label: 'Permission rules', keywords: 'allow deny ask protected trust' },
   { id: 'mcp.servers', section: 'mcp', label: 'MCP servers', keywords: 'tools servers' },
   { id: 'sandbox.settings', section: 'sandbox', label: 'Sandbox for commands', keywords: 'isolation network' },
+  { id: 'code.enabled', section: 'code', label: 'Use language servers', keywords: 'lsp errors editor marks' },
+  { id: 'code.errorGate', section: 'code', label: 'Send the agent back to fix errors', keywords: 'error gate finish diagnostics' },
+  { id: 'code.servers', section: 'code', label: 'Language servers in this folder', keywords: 'install missing typescript pyright rust-analyzer gopls clangd' },
   { id: 'archived.list', section: 'archived', label: 'Archived sessions', keywords: 'restore delete' },
 ]
 

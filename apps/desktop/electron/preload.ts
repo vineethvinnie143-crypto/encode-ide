@@ -7,6 +7,7 @@ import type {
   AgentStartInput,
   BackgroundJob,
   EncodeApi,
+  FileMarks,
   ModelAlert,
   McpAction,
   PermissionsAction,
@@ -149,6 +150,15 @@ const api: EncodeApi = {
     report: () => invoke('sandbox:report'),
     act: (action: SandboxAction) => invoke('sandbox:act', action),
     onChanged: (callback) => on('sandbox:changed', callback),
+  },
+  code: {
+    report: () => invoke('code:report'),
+    // Nothing to wait for: the servers answer through onMarks.
+    open: (path: string, text: string, dirty: boolean) => void invoke('code:document', 'open', path, text, dirty).catch(() => undefined),
+    change: (path: string, text: string, dirty: boolean) => void invoke('code:document', 'change', path, text, dirty).catch(() => undefined),
+    close: (path: string) => void invoke('code:document', 'close', path).catch(() => undefined),
+    onMarks: (callback) => on<FileMarks>('code:marks', callback),
+    onChanged: (callback) => on('code:changed', callback),
   },
   agent: {
     sessions: () => invoke('agent:sessions'),

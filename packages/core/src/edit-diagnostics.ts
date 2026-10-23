@@ -125,6 +125,7 @@ export class EditDiagnostics {
     const results = await this.code.diagnostics([...this.pending.keys()], { waitMs, signal }).catch(() => [])
     const parts: string[] = []
     let shownFiles = 0
+    let found = false
     for (const result of results) {
       if (!result.ok) {
         this.pending.delete(result.file)
@@ -150,10 +151,12 @@ export class EditDiagnostics {
         if (before) parts.push(`${this.shown(result.file)}: the errors reported before are fixed.`)
         continue
       }
+      found = true
       if (shownFiles++ < SHOWN_FILES) parts.push(this.describe(result.file, state, result.unsaved === true))
     }
     if (!parts.length) return null
-    return `The language servers found errors after your changes:\n${parts.join('\n')}`
+    const head = found ? 'The language servers found errors after your changes:' : 'The language servers checked your changes again:'
+    return `${head}\n${parts.join('\n')}`
   }
 
   private describe(file: string, state: FileState, unsaved: boolean): string {

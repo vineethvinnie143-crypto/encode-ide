@@ -4,10 +4,11 @@ import { dialogOpen } from '../../commands/useKeymap'
 import { useSettings } from '../../stores/settings'
 import { useUi, type SettingsSection } from '../../stores/ui'
 import { cx } from '../../ui/cx'
-import { Archive, ArrowLeft, Bell, Bot, Gear, Keyboard, Layers, Network, Package, Palette, Search, Shield, Sparkles, type Icon } from '../../ui/icons'
+import { Archive, ArrowLeft, Bell, Bot, Code2, Gear, Keyboard, Layers, Network, Package, Palette, Search, Shield, Sparkles, type Icon } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import { keyToMove, moveIndex } from '../../ui/nav'
 import { Spinner } from '../../ui/Spinner'
+import LanguageServersSection from '../code/LanguageServersSection'
 import McpPane from '../mcp/McpPane'
 import RolesSettings from '../models/RolesSettings'
 import PermissionsPane from '../permissions/PermissionsPane'
@@ -32,6 +33,7 @@ const ICONS: Record<SettingsSection, Icon> = {
   permissions: Shield,
   mcp: Network,
   sandbox: Package,
+  code: Code2,
   archived: Archive,
 }
 
@@ -259,6 +261,8 @@ function SectionBody({ section, settings }: { section: SettingsSection; settings
           <SandboxPane />
         </div>
       )
+    case 'code':
+      return <LanguageServersSection settings={settings} />
     case 'archived':
       return <ArchivedSection settings={settings} />
   }

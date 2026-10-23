@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { BackgroundJob } from '@shared/types'
 import { api } from '../../api'
+import { useProblems } from '../../editor/marks'
+import { footerStatus } from '../../panels/code'
+import { useCode } from '../../stores/code'
 import { useEditor } from '../../stores/editor'
 import { usePanels } from '../../stores/panels'
 import { useUi } from '../../stores/ui'
 import type { SidebarView } from '../../stores/ui'
 import { Button } from '../../ui/Button'
-import { Activity, Bot, Clock, Code2, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal } from '../../ui/icons'
+import { cx } from '../../ui/cx'
+import { Activity, AlertTriangle, Bot, Clock, Code2, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal, XCircle } from '../../ui/icons'
 import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
 import { jobText } from '../jobs-text'
@@ -40,6 +44,31 @@ export function FilesPane() {
   )
 }
 
+/** The open file's problems and its language server, in the footer; each opens where more is said. */
+function CodeStatus({ path }: { path: string }) {
+  const count = useProblems((state) => state.counts[path])
+  const report = useCode((state) => state.report)
+  const status = footerStatus(report, path)
+  const openSettings = () => useUi.getState().openSettings('code')
+  return (
+    <span className="editor-footer-group">
+      {count && (count.errors > 0 || count.warnings > 0) && (
+        <span className="editor-footer-count" title={`${count.errors} ${count.errors === 1 ? 'error' : 'errors'} and ${count.warnings} ${count.warnings === 1 ? 'warning' : 'warnings'} in this file. Point at a mark in the text to read it.`}>
+          <XCircle size={12} className="is-error" aria-hidden="true" />
+          <span>{count.errors}</span>
+          <AlertTriangle size={12} className="is-warning" aria-hidden="true" />
+          <span>{count.warnings}</span>
+        </span>
+      )}
+      {status && (
+        <button type="button" className={cx('editor-footer-button', `is-${status.tone}`)} title={status.title} onClick={openSettings}>
+          <span className="editor-footer-label">{status.text}</span>
+        </button>
+      )}
+    </span>
+  )
+}
+
 /** The open files, with the editor's status line. */
 export function EditorPane() {
   const tabs = useEditor((state) => state.tabs)
@@ -60,13 +89,18 @@ export function EditorPane() {
         )}
       </div>
       <div className="editor-footer">
-        <span>{active ? active.language : 'plaintext'}</span>
-        <span>
-          Ln {cursor.line}, Col {cursor.column}
+        <span className="editor-footer-side">
+          <span>{active ? active.language : 'plaintext'}</span>
+          <span>
+            Ln {cursor.line}, Col {cursor.column}
+          </span>
+          {active && <span className="editor-footer-extra">{info.indent}</span>}
+          {active && <span className="editor-footer-extra">{info.eol}</span>}
         </span>
-        {active && <span>{info.indent}</span>}
-        {active && <span>{info.eol}</span>}
-        <span>{active ? (active.dirty ? 'unsaved' : 'saved') : '—'}</span>
+        <span className="editor-footer-side is-end">
+          {active && <CodeStatus path={active.path} />}
+          <span>{active ? (active.dirty ? 'unsaved' : 'saved') : '—'}</span>
+        </span>
       </div>
     </div>
   )

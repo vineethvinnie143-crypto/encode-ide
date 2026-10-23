@@ -29,6 +29,9 @@ importers:
       '@encode/git':
         specifier: workspace:*
         version: link:../../packages/git
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../../packages/lsp
       '@encode/permissions':
         specifier: workspace:*
         version: link:../../packages/permissions

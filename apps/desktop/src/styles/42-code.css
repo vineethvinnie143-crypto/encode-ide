@@ -1,0 +1,187 @@
+/* ============================================================
+   Language servers: the Settings section, and the editor
+   footer's word on the open file's server and its problems
+   ============================================================ */
+
+.lsp-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+}
+.lsp-state.is-success {
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+.lsp-state.is-warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+.lsp-state-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--text-3);
+}
+.lsp-state.is-success .lsp-state-icon {
+  color: var(--success);
+}
+.lsp-state.is-warning .lsp-state-icon {
+  color: var(--warning);
+}
+.lsp-state-text {
+  flex: 1;
+  min-width: 0;
+}
+.lsp-state-title {
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+}
+.lsp-state-detail {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 19px;
+}
+
+.lsp-servers {
+  display: flex;
+  flex-direction: column;
+}
+.lsp-server {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+}
+.lsp-server + .lsp-server {
+  border-top: 1px solid var(--border-subtle);
+}
+.lsp-server-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.lsp-server-name {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.lsp-server-files {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lsp-server-state {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.lsp-server-state.is-success {
+  color: var(--success);
+}
+.lsp-server-state.is-busy {
+  color: var(--accent);
+}
+.lsp-server-state.is-warning {
+  color: var(--warning);
+}
+.lsp-server-state.is-danger {
+  color: var(--danger);
+}
+.lsp-server-detail {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.lsp-server-install {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lsp-server-install code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The footer: the open file's problems and its server, each a button to where more is said. */
+.editor-footer-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.editor-footer-group .editor-footer-count {
+  flex-shrink: 0;
+}
+.editor-footer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 220px;
+  height: 20px;
+  padding: 0 6px;
+  margin: 0 -6px;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.editor-footer-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor-footer-button:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.editor-footer-button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+.editor-footer-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.editor-footer-count .is-error {
+  color: var(--danger);
+}
+.editor-footer-count .is-warning {
+  color: var(--warning);
+  margin-left: 4px;
+}
+.editor-footer-button.is-busy {
+  color: var(--accent);
+}
+.editor-footer-button.is-warning {
+  color: var(--warning);
+}
+.editor-footer-button.is-danger {
+  color: var(--danger);
+}

@@ -63,6 +63,13 @@ function hub(dir: string, options: { mode?: string; extra?: string; idleMs?: num
     forbid(reason: string) {
       allowed = { ok: false, reason }
     },
+    allow() {
+      allowed = { ok: true }
+    },
+    /** What the editor was last told of a file. */
+    marks(file: string): CodeDiagnostic[] | undefined {
+      return published.filter(([name]) => name === file).at(-1)?.[1]
+    },
   }
 }
 
@@ -265,6 +272,57 @@ describe('the language servers of a folder', () => {
     const view = h.servers.status()[0]
     assert.equal(view.state, 'off')
     assert.equal(view.detail, 'Language servers are turned off in Settings.')
+    await h.servers.dispose()
+  })
+
+  it('marks the files the editor shows, and takes the marks back when a file closes or its server stops', async () => {
+    const dir = await project({ 'a.fk': 'ERROR' })
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'ERROR\nWARN')
+    await until('the marks', () => h.marks(a)?.length === 2)
+    h.servers.editorClose(a)
+    assert.deepEqual(h.marks(a), [])
+    h.servers.editorOpen(a, 'ERROR')
+    await until('the marks again', () => h.marks(a)?.length === 1)
+    h.forbid('Language servers are turned off in Settings.')
+    await h.servers.sync()
+    assert.deepEqual(h.marks(a), [])
+    await h.servers.dispose()
+  })
+
+  it('gives the files the editor shows their servers once servers may run again', async () => {
+    const dir = await project({ 'a.fk': 'ok' })
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.forbid('Language servers run only in folders you trust.')
+    h.servers.editorOpen(a, 'ERROR')
+    h.servers.editorChange(a, 'ERROR\nERROR', true)
+    await wait(100)
+    assert.equal(h.spawned.length, 0)
+    assert.equal(h.servers.status()[0].state, 'off')
+    h.allow()
+    await h.servers.sync()
+    await until('the server and its marks', () => h.marks(a)?.length === 2)
+    assert.equal(h.servers.status()[0].state, 'running')
+    assert.equal(h.spawned.length, 1)
+    await h.servers.dispose()
+  })
+
+  it('looks for the servers again once the folder is trusted, since the project\'s own count only then', async () => {
+    const dir = await project({ 'a.fk': 'ERROR' })
+    let projectBins = false
+    const h = hub(dir, { discover: () => (projectBins ? { file: process.execPath, args: [], found: 'the project', command: 'fake-ls' } : { missing: 'No language server for Fake is installed.' }) })
+    const a = path.join(dir, 'a.fk')
+    h.forbid('Language servers run only in folders you trust.')
+    // Read while the folder is not trusted: what was found then is kept for a while.
+    assert.equal(h.servers.status()[0].state, 'off')
+    h.servers.editorOpen(a, 'ERROR')
+    projectBins = true
+    h.allow()
+    await h.servers.sync()
+    await until('the server of the project and its marks', () => h.marks(a)?.length === 1)
+    assert.match(h.servers.status()[0].command ?? '', /the project/)
     await h.servers.dispose()
   })
 

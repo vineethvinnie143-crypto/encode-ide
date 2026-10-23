@@ -87,10 +87,31 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 0 12px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-3);
   font-size: var(--fs-11);
+  white-space: nowrap;
+  container: editor-footer / inline-size;
+}
+/* Where the cursor is on the left; the file's problems, its server and whether it is saved on the right. */
+.editor-footer-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.editor-footer-side.is-end {
+  flex-shrink: 1;
+  justify-content: flex-end;
+}
+/* A narrow editor keeps what matters: indentation and line endings go first. */
+@container editor-footer (max-width: 520px) {
+  .editor-footer-extra {
+    display: none;
+  }
 }
 
 /* ---------- Browser ---------- */

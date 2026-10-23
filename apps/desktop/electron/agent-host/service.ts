@@ -10,8 +10,8 @@
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
-import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
-import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
+import type { CodeDiagnostic, LanguageServersReport, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
 import { HOST_STOPPED_MESSAGE } from '../../shared/problems'
@@ -40,6 +40,10 @@ export interface AgentHostServiceOptions {
   onMcp?(root: string): void
   /** The sandbox was checked, or is preparing a folder: the Sandbox screen should ask again. */
   onSandbox?(): void
+  /** A folder's language server started, stopped or failed. */
+  onCode?(root: string): void
+  /** What a language server says of a file now, by real paths. */
+  onDiagnostics?(root: string, file: string, diagnostics: CodeDiagnostic[]): void
   log?(message: string): void
   /** The pause before the first restart, ms; it doubles with every failure. Default 400. */
   restartDelayMs?: number
@@ -86,6 +90,12 @@ export class AgentHostService {
   private restartTimer: NodeJS.Timeout | undefined
   /** The sessions the host last reported as working, by id. */
   private readonly working = new Set<string>()
+  /**
+   * The files the editor shows, with their text: a host that starts again is shown them, and a change of a file that
+   * was not opened in this folder (one sent before the folder changed) is dropped.
+   */
+  private documents = new Map<string, { text: string; dirty: boolean }>()
+  private documentsRoot: string | null = null
 
   constructor(private readonly o: AgentHostServiceOptions) {
     const caller: HostCaller = {
@@ -169,6 +179,46 @@ export class AgentHostService {
     return (await this.ready()).request('sandboxAct', { root, action }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
   }
 
+  /** A folder's language servers, and with `logs` the last lines of those that stopped or failed. */
+  async codeReport(root: string, options: { logs?: number } = {}): Promise<LanguageServersReport & { logs?: Record<string, string[]> }> {
+    return (await this.ready()).request('codeReport', { root, ...(options.logs ? { logs: options.logs } : {}) }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** The editor opened, changed or closed a file of the folder `root`. */
+  document(event: EditorDocumentEvent): void {
+    if (event.root !== this.documentsRoot) {
+      this.closeDocuments()
+      this.documentsRoot = event.root
+    }
+    if (event.kind === 'close') {
+      if (!this.documents.delete(event.path)) return
+    } else {
+      if (event.kind === 'change' && !this.documents.has(event.path)) return
+      this.documents.set(event.path, { text: event.text, dirty: event.dirty })
+    }
+    this.sendDocument(event)
+  }
+
+  /** The folder closed or changed: its servers are told the editor shows none of its files any more. */
+  closeDocuments(): void {
+    const root = this.documentsRoot
+    const paths = [...this.documents.keys()]
+    this.documents = new Map()
+    this.documentsRoot = null
+    if (root) for (const path of paths) this.sendDocument({ kind: 'close', root, path })
+  }
+
+  private sendDocument(event: EditorDocumentEvent): void {
+    const peer = this.peer
+    // A host that is starting is shown every open file once it is up.
+    if (!peer || peer.closed || this.starting) return
+    try {
+      peer.notify('document', event)
+    } catch (error) {
+      this.log(`could not pass a file of the editor on: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   /** A commit message for the changes given, from the model of the Small tasks role. */
   async draftCommit(input: CommitDraftInput): Promise<string> {
     return (await (await this.ready()).request('draftCommit', input, { timeoutMs: 2 * 60_000 })).message
@@ -226,6 +276,8 @@ export class AgentHostService {
     peer.on('alert', (alert) => this.o.onAlert?.(alert))
     peer.on('mcp', ({ root }) => this.o.onMcp?.(root))
     peer.on('sandbox', () => this.o.onSandbox?.())
+    peer.on('code', ({ root }) => this.o.onCode?.(root))
+    peer.on('diagnostics', ({ root, file, diagnostics }) => this.o.onDiagnostics?.(root, file, diagnostics))
     peer.on('warn', (message) => this.log(message))
     child.onExit(() => this.exited(child, peer))
 
@@ -235,6 +287,8 @@ export class AgentHostService {
         if (this.child !== child) throw new Error('The agent process stopped while it was starting.')
         this.peer = peer
         this.startedAt = Date.now()
+        const root = this.documentsRoot
+        if (root) for (const [path, doc] of this.documents) peer.notify('document', { kind: 'open', root, path, text: doc.text, dirty: doc.dirty })
         return peer
       })
       .catch((error) => {
@@ -313,6 +367,9 @@ const NO_CONFIG: HostConfig = {
   maxSteps: 30,
   maxGoalRounds: 8,
   computer: false,
+  // Nothing starts before the settings arrive.
+  languageServers: false,
+  errorGate: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

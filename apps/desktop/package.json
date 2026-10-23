@@ -26,6 +26,7 @@
     "@encode/editor": "workspace:*",
     "@encode/editor-view": "workspace:*",
     "@encode/git": "workspace:*",
+    "@encode/lsp": "workspace:*",
     "@encode/permissions": "workspace:*",
     "@encode/protocol": "workspace:*",
     "@encode/providers": "workspace:*",

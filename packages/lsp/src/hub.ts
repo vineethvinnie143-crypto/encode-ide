@@ -208,7 +208,11 @@ export class LanguageServers {
   /** How many publishes a document had when it was last brought up to date. */
   private readonly syncedAt = new Map<string, number>()
   private readonly discovered = new Map<string, { result: LaunchPlan | { missing: string }; at: number }>()
+  /** Whether servers could run at the last `sync`. */
+  private wasAllowed: boolean | undefined
   private actions: { file: string; items: CodeAction[]; at: number; server: string } | null = null
+  /** Files with marks in the editor, by server: taken back when the server closes the file or stops. */
+  private readonly marked = new Map<string, Map<string, string>>()
   private readonly idleTimer: NodeJS.Timeout
   private disposed = false
 
@@ -278,21 +282,25 @@ export class LanguageServers {
     server.command = `${plan.command} (${plan.found})`
     server.detail = undefined
     this.options.onChange?.()
+    let made: LanguageClient | undefined
     const starting = (async () => {
       const proc = await this.options.spawn(plan, this.root)
       const exists = this.options.exists ?? (() => false)
-      const client = await LanguageClient.start({
+      made = await LanguageClient.start({
         name: plan.command,
         root: this.root,
         platform: this.platform,
         process: proc,
         ...(server.spec.initializationOptions ? { initializationOptions: server.spec.initializationOptions(this.root, exists) } : {}),
         ...(server.spec.settings ? { settings: server.spec.settings } : {}),
-        onDiagnostics: (file, items) => this.options.onDiagnostics?.(file, items.map(toCodeDiagnostic)),
+        // What a client says once it is no longer the server's (stopped, replaced) is not shown.
+        onDiagnostics: (file, items) => {
+          if (!made || server.client === made) this.mark(server, file, items.map(toCodeDiagnostic))
+        },
         onLog: (line) => this.options.log?.(`[${plan.command}] ${line}`),
         onExit: (reason) => this.crashed(server, reason),
       })
-      return client
+      return made
     })()
     server.starting = starting
     starting.then(
@@ -327,6 +335,7 @@ export class LanguageServers {
     const client = server.client
     server.client = undefined
     if (client) for (const doc of client.documents()) this.forgetSync(doc.file)
+    this.unmark(server)
     const now = Date.now()
     server.crashes = [...server.crashes.filter((at) => now - at < CRASH_WINDOW_MS), now]
     if (server.crashes.length >= CRASHES_ALLOWED) {
@@ -341,6 +350,38 @@ export class LanguageServers {
       if (wanted && !this.disposed) setTimeout(() => void this.start(server).catch(() => undefined), 1_000).unref?.()
     }
     this.options.onChange?.()
+  }
+
+  /** What a server said of a file, for the editor; a file it no longer finds anything in is no longer marked. */
+  private mark(server: Server, file: string, items: CodeDiagnostic[]): void {
+    const key = this.key(file)
+    let files = this.marked.get(server.spec.id)
+    if (items.length) {
+      if (!files) this.marked.set(server.spec.id, (files = new Map()))
+      files.set(key, file)
+    } else {
+      files?.delete(key)
+    }
+    this.options.onDiagnostics?.(file, items)
+  }
+
+  /** The server closed the file, or stopped: its marks are taken back, since nothing keeps them up to date. */
+  private unmark(server: Server, file?: string): void {
+    const files = this.marked.get(server.spec.id)
+    if (!files) return
+    for (const key of file ? [this.key(file)] : [...files.keys()]) {
+      const known = files.get(key)
+      if (known === undefined) continue
+      files.delete(key)
+      this.options.onDiagnostics?.(known, [])
+    }
+  }
+
+  private closeIn(client: LanguageClient, file: string): void {
+    client.close(file)
+    const found = serverFor(file, this.catalog)
+    const server = found ? this.servers.get(found.spec.id) : undefined
+    if (server) this.unmark(server, file)
   }
 
   private forgetSync(file: string): void {
@@ -363,9 +404,7 @@ export class LanguageServers {
   editorOpen(file: string, text: string, dirty = false): void {
     this.editorDocs.set(this.key(file), { file, text, dirty })
     this.agentDocs.delete(this.key(file))
-    void this.clientFor(file).then((got) => {
-      if ('client' in got && this.editorDocs.get(this.key(file))?.text === text) this.syncTo(got.client, file, got.languageId, text)
-    })
+    this.bringUp(file)
   }
 
   editorChange(file: string, text: string, dirty: boolean): void {
@@ -376,6 +415,7 @@ export class LanguageServers {
     doc.dirty = dirty
     const server = this.runningFor(file)
     if (server) this.syncTo(server.client, file, server.languageId, text, !dirty)
+    else this.bringUp(file)
   }
 
   editorClose(file: string): void {
@@ -383,9 +423,19 @@ export class LanguageServers {
     if (!this.editorDocs.delete(key)) return
     const server = this.runningFor(file)
     if (server) {
-      server.client.close(file)
+      this.closeIn(server.client, file)
       this.syncedAt.delete(key)
     }
+  }
+
+  /** Starts the server of a file the editor shows, unless it may not run, and gives it the editor's text. */
+  private bringUp(file: string): void {
+    void this.clientFor(file)
+      .then((got) => {
+        const doc = this.editorDocs.get(this.key(file))
+        if ('client' in got && doc) this.syncTo(got.client, file, got.languageId, doc.text)
+      })
+      .catch(() => undefined)
   }
 
   private runningFor(file: string): { client: LanguageClient; languageId: string } | null {
@@ -409,7 +459,7 @@ export class LanguageServers {
       if (!running) continue
       if (change.kind === 'deleted') {
         if (!this.editorDocs.has(key)) {
-          running.client.close(change.file)
+          this.closeIn(running.client, change.file)
           this.forgetSync(change.file)
         }
         continue
@@ -454,7 +504,7 @@ export class LanguageServers {
       const [key, file] = this.agentDocs.entries().next().value as [string, string]
       this.agentDocs.delete(key)
       this.syncedAt.delete(key)
-      ;(this.runningFor(file)?.client ?? client).close(file)
+      this.closeIn(this.runningFor(file)?.client ?? client, file)
     }
   }
 
@@ -843,8 +893,20 @@ export class LanguageServers {
 
   /** Stops what may no longer run (the folder lost its trust, servers were turned off). */
   async sync(): Promise<void> {
-    if (this.options.allowed().ok) return
-    await this.stopAll('off')
+    const allowed = this.options.allowed().ok
+    const flipped = allowed !== this.wasAllowed
+    this.wasAllowed = allowed
+    // Where a server is found depends on the trust (the project's own node_modules/.bin counts only then): look again.
+    if (flipped) this.discovered.clear()
+    if (!allowed) {
+      // Called before every tool call too: with nothing running and nothing new, there is nothing to say.
+      if (flipped || [...this.servers.values()].some((server) => server.client || server.starting)) await this.stopAll('off')
+      return
+    }
+    // Allowed again (the folder was trusted, servers were turned on): the files the editor shows get their servers.
+    for (const server of this.servers.values()) if (server.state === 'off') server.state = 'stopped'
+    for (const doc of this.editorDocs.values()) if (!this.runningFor(doc.file)) this.bringUp(doc.file)
+    if (flipped) this.options.onChange?.()
   }
 
   private stopIdle(): void {
@@ -859,6 +921,7 @@ export class LanguageServers {
       server.state = 'stopped'
       server.detail = undefined
       for (const doc of client.documents()) this.forgetSync(doc.file)
+      this.unmark(server)
       void client.stop()
       this.options.onChange?.()
     }
@@ -874,6 +937,7 @@ export class LanguageServers {
         for (const doc of client.documents()) this.forgetSync(doc.file)
         stopping.push(client.stop())
       }
+      this.unmark(server)
     }
     await Promise.all(stopping)
     this.options.onChange?.()

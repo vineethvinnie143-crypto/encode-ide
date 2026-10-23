@@ -4,6 +4,7 @@ import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import type { ServerSpec } from '@encode/lsp'
 import { fakeServer, type FakeServer } from '@encode/lsp/testing'
+import { realPathOf } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { FOLDER_NOT_TRUSTED, SERVERS_OFF } from './code'
 import { Workspaces } from './scope'
@@ -24,6 +25,7 @@ async function setup() {
   const root = await tempWorkspace({ 'a.fk': 'an ERROR\n' })
   const home = await tempWorkspace()
   let enabled = true
+  const published: [string, string, number][] = []
   const workspaces = new Workspaces({
     home,
     env: {},
@@ -32,10 +34,11 @@ async function setup() {
       env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, GOPATH: '/go', OPENAI_API_KEY: 'sk-secret', GITHUB_TOKEN: 'ghp-secret' },
       catalog: [spec],
       discover: () => ({ file: process.execPath, args: [fake.script, 'env'], found: 'the test', command: 'fake-ls' }),
+      onDiagnostics: (folder, file, items) => published.push([folder, file, items.length]),
     },
   })
   const scope = await workspaces.scope({ sessionId: 's1', root, notice: () => undefined })
-  return { root, workspaces, scope, turn: (on: boolean) => (enabled = on) }
+  return { root, workspaces, scope, published, turn: (on: boolean) => (enabled = on) }
 }
 
 describe('a folder\'s language servers', () => {
@@ -85,6 +88,29 @@ describe('a folder\'s language servers', () => {
     await writeFile(path.join(s.root, 'a.fk'), 'fine')
     const [refused] = await servers.diagnostics([path.join(s.root, 'a.fk')], { waitMs: 1_000 })
     assert.ok(!refused.ok && refused.reason === FOLDER_NOT_TRUSTED)
+    await s.workspaces.close()
+  })
+
+  it('take the editor\'s files by their paths in the folder, and say how they stand', async () => {
+    const s = await setup()
+    assert.deepEqual(await s.workspaces.languageServersReport(s.root), {
+      state: 'untrusted',
+      reason: FOLDER_NOT_TRUSTED,
+      servers: [{ id: 'fake', label: 'Fake', state: 'off', detail: FOLDER_NOT_TRUSTED, documents: 0, install: 'npm install -g fake-ls', files: ['.fk'] }],
+    })
+    await s.workspaces.editorDocument(s.root, { kind: 'open', path: 'a.fk', text: 'ERROR\nERROR', dirty: true })
+    await s.workspaces.editorDocument(s.root, { kind: 'open', path: '../outside.fk', text: 'ERROR', dirty: false })
+    await s.workspaces.act(s.root, { type: 'trust' })
+    const real = await realPathOf(s.root)
+    const until = Date.now() + 5_000
+    while (!s.published.some(([, , count]) => count === 2) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.deepEqual(s.published.at(-1), [real, path.join(real, 'a.fk'), 2])
+    const report = await s.workspaces.languageServersReport(s.root)
+    assert.equal(report.state, 'on')
+    assert.equal(report.servers[0].state, 'running')
+    assert.equal(report.servers[0].documents, 1, 'the file outside the folder was not opened')
+    await s.workspaces.editorDocument(s.root, { kind: 'close', path: 'a.fk' })
+    assert.deepEqual(s.published.at(-1), [real, path.join(real, 'a.fk'), 0])
     await s.workspaces.close()
   })
 })

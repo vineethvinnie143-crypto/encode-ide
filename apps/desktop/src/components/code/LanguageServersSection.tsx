@@ -1,0 +1,156 @@
+import { useEffect } from 'react'
+import type { ErrorGate, LanguageServerInfo, Settings } from '@shared/types'
+import { api } from '../../api'
+import { filesLabel, headline, sortedServers, stateLabel } from '../../panels/code'
+import { useCode } from '../../stores/code'
+import { useSettings } from '../../stores/settings'
+import { useUi } from '../../stores/ui'
+import { Button } from '../../ui/Button'
+import { cx } from '../../ui/cx'
+import { Code2, Copy, RefreshCw } from '../../ui/icons'
+import { Segmented, type SegmentedOption } from '../../ui/Segmented'
+import { Toggle } from '../../ui/Toggle'
+import { SettingRow, SettingsGroup } from '../settings/Section'
+
+const GATES: SegmentedOption<ErrorGate>[] = [
+  { value: 'auto', label: 'Once' },
+  { value: 'on', label: 'Up to 3 times' },
+  { value: 'off', label: 'Never' },
+]
+
+function ServerRow({ server }: { server: LanguageServerInfo }) {
+  const { label, tone } = stateLabel(server)
+  const copy = () => void navigator.clipboard.writeText(server.install).then(() => useUi.getState().notify('success', 'Install command copied.'))
+  // Where it was found while it runs; why it stopped, failed or is missing otherwise.
+  const detail = server.state === 'running' || server.state === 'starting' ? server.command : server.state === 'missing' ? undefined : server.detail
+  return (
+    <div className="lsp-server" data-server={server.id}>
+      <div className="lsp-server-head">
+        <span className="lsp-server-name">{server.label}</span>
+        <span className="lsp-server-files">{filesLabel(server)}</span>
+        <span className={cx('lsp-server-state', `is-${tone}`)}>
+          {label}
+          {server.state === 'running' && server.documents > 0 ? `, ${server.documents} ${server.documents === 1 ? 'file' : 'files'}` : ''}
+        </span>
+      </div>
+      {detail && <div className="lsp-server-detail">{detail}</div>}
+      {server.state === 'missing' && server.install && (
+        <div className="lsp-server-install">
+          <code>{server.install}</code>
+          <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={copy}>
+            Copy
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Settings > Language servers: whether eNCode starts the servers installed on this computer, what the agent does with
+ * the errors they report, and how each one stands in the open folder, with the command that installs a missing one.
+ */
+export default function LanguageServersSection({ settings }: { settings: Settings }) {
+  const save = useSettings((state) => state.save)
+  const report = useCode((state) => state.report)
+  const error = useCode((state) => state.error)
+  const loading = useCode((state) => state.loading)
+  const refresh = useCode((state) => state.refresh)
+
+  useEffect(() => {
+    void refresh()
+    const onFocus = () => void refresh()
+    window.addEventListener('focus', onFocus)
+    const stop = api.code.onChanged(() => void refresh())
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      stop()
+    }
+  }, [refresh])
+
+  // The setting changes what the report says; read it again once the host has it.
+  useEffect(() => {
+    void refresh()
+  }, [settings.languageServers, refresh])
+
+  const top = report ? headline(report) : null
+
+  return (
+    <>
+      <SettingsGroup
+        title="Language servers"
+        description="Separate programs you install, such as typescript-language-server, pyright, rust-analyzer, gopls, clangd or lua-language-server. eNCode carries none of them."
+      >
+        <SettingRow
+          id="code.enabled"
+          htmlFor="language-servers"
+          label="Use language servers"
+          help="In folders you trust, the editor marks errors as you type, and the agent finds definitions and references exactly, renames across files, and hears what its edits broke."
+        >
+          <Toggle id="language-servers" checked={settings.languageServers} onChange={(languageServers) => void save({ languageServers })} />
+        </SettingRow>
+        <SettingRow
+          id="code.errorGate"
+          label="Send the agent back to fix errors"
+          help="When the agent wants to finish while the servers still report errors in files it changed, it is sent back to fix them. It is always told what each edit broke."
+        >
+          <Segmented label="Send the agent back to fix errors" value={settings.errorGate} options={GATES} onChange={(errorGate) => void save({ errorGate })} />
+        </SettingRow>
+      </SettingsGroup>
+
+      <section className="settings-group" data-setting="code.servers">
+        <h2 className="settings-group-title">In this folder</h2>
+        {!report ? (
+          <div className="info-note">
+            {error ? `eNCode could not read the language servers: ${error}` : 'Open a folder to see which language servers it uses.'}
+            {error && (
+              <div>
+                <Button size="sm" onClick={() => void refresh()}>
+                  Try again
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {top && (
+              <div className={cx('lsp-state', `is-${top.tone}`)} aria-live="polite">
+                <span className="lsp-state-icon" aria-hidden="true">
+                  <Code2 size={18} />
+                </span>
+                <div className="lsp-state-text">
+                  <div className="lsp-state-title">{top.title}</div>
+                  <div className="lsp-state-detail">{top.detail}</div>
+                </div>
+                {top.action === 'trust' && (
+                  <Button size="sm" onClick={() => useUi.getState().openSettings('permissions')}>
+                    Trust in Permissions
+                  </Button>
+                )}
+                {top.action === 'turn-on' && (
+                  <Button size="sm" onClick={() => void save({ languageServers: true })}>
+                    Turn on
+                  </Button>
+                )}
+                {!top.action && (
+                  <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} busy={loading} onClick={() => void refresh()}>
+                    Check again
+                  </Button>
+                )}
+              </div>
+            )}
+            <div className="settings-card lsp-servers">
+              {sortedServers(report).map((server) => (
+                <ServerRow key={server.id} server={server} />
+              ))}
+            </div>
+            <div className="perm-add-help">
+              eNCode looks in the project’s own <code>node_modules/.bin</code> first, then on the PATH. A server you just installed is found within half a minute; a
+              server runs outside the sandbox of the agent’s commands, with the agent’s environment and no API keys.
+            </div>
+          </>
+        )}
+      </section>
+    </>
+  )
+}

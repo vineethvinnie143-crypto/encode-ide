@@ -4,7 +4,9 @@
  * own; the main process answers one, for keys. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
-import type { HostEvents, HostRequests } from '@encode/core'
+import type { ErrorGate, HostEvents, HostRequests } from '@encode/core'
+import type { CodeDiagnostic } from '@encode/tools'
+import type { EditorDocumentChange, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
@@ -32,6 +34,9 @@ export interface HostConfig {
   providers: Record<string, { profile: string; name: string; keyRevision: number | null }>
   /** Who answers the agent's web searches. Its key, if it needs one, is asked for at every search. */
   searchProvider: SearchProviderId
+  /** Language servers start for trusted folders; see Settings.languageServers. */
+  languageServers: boolean
+  errorGate: ErrorGate
 }
 
 export interface HostInit {
@@ -92,13 +97,29 @@ export type DesktopHostRequests = HostRequests & {
   draftCommit: { params: CommitDraftInput; result: { message: string } }
   /** What the model of the Review role finds wrong with a change. */
   codeReview: { params: CodeReviewInput; result: CodeReviewResult }
+  /** A folder's language servers, for the Settings screen; with `logs`, the last lines of those that stopped or failed. */
+  codeReport: { params: { root: string; logs?: number }; result: LanguageServersReport & { logs?: Record<string, string[]> } }
 }
+
+/** A file the editor shows, opened, changed or closed, in a folder named as the main process knows it. */
+export type EditorDocumentEvent = EditorDocumentChange & { root: string }
 
 /**
  * What the host serves. `mcp`: a folder's MCP servers changed what the screen shows (the folder is named as the host knows it).
  * `sandbox`: the sandbox was checked or is preparing a folder, so the Sandbox screen should ask again.
+ * `code`: a folder's language server started, stopped or failed. `diagnostics`: what a server says of a file now, by
+ * real paths; an empty list takes the file's marks away.
  */
-export type DesktopHostApi = { requests: DesktopHostRequests; events: HostEvents & { alert: ModelAlert; mcp: { root: string }; sandbox: { working: string | null } } }
+export type DesktopHostApi = {
+  requests: DesktopHostRequests
+  events: HostEvents & {
+    alert: ModelAlert
+    mcp: { root: string }
+    sandbox: { working: string | null }
+    code: { root: string }
+    diagnostics: { root: string; file: string; diagnostics: CodeDiagnostic[] }
+  }
+}
 
 /** What the main process serves to the host. */
 export type MainApi = {
@@ -114,5 +135,8 @@ export type MainApi = {
      */
     searchKey: { params: { provider: KeyedSearchProviderId }; result: string }
   }
-  events: {}
+  events: {
+    /** What the editor shows, for the language servers: its text goes before it is saved. */
+    document: EditorDocumentEvent
+  }
 }

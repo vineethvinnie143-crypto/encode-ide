@@ -86,7 +86,7 @@ describe('errors after every edit', () => {
     assert.match(lastUser(requests[2]), /The language servers found errors after your changes:\na\.ts: 1 error\n {2}1:11 BAD is not allowed here \[fake X1\]/)
     assert.match(lastUser(requests[3]), /Before you finish: your changes this turn left errors the language servers report:\na\.ts: 1 error\n {2}1:11 BAD is not allowed here/)
     assert.ok(h.surface.notices().some((text) => /still report errors in the files the agent changed/.test(text)))
-    assert.match(lastUser(requests[4]), /a\.ts: the errors reported before are fixed\./)
+    assert.match(lastUser(requests[4]), /The language servers checked your changes again:\na\.ts: the errors reported before are fixed\./)
     assert.equal(requests.length, 5)
   })
 

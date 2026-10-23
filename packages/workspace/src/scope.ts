@@ -6,7 +6,7 @@ import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
 import type { LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
-import { folderLanguageServers, type LanguageServerOptions } from './code'
+import { folderLanguageServers, languageServersReport, type EditorDocumentChange, type LanguageServerOptions, type LanguageServersReport } from './code'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
@@ -143,9 +143,40 @@ export class Workspaces {
     return servers
   }
 
-  /** Stops the servers that may no longer run, in every folder: the setting went off, or a folder lost its trust. */
+  /**
+   * Stops the servers that may no longer run, in every folder (the setting went off, a folder lost its trust), and
+   * starts the ones the editor needs where they may run again.
+   */
   async syncLanguageServers(): Promise<void> {
     await Promise.all([...this.code.values()].map((servers) => servers.sync().catch(() => undefined)))
+  }
+
+  /**
+   * How a folder's language servers stand, for the Settings screen. The folder may be given as any path to it. With
+   * `logs`, the last lines of each server that stopped or failed, for a bug report.
+   */
+  async languageServersReport(root: string, options: { logs?: number } = {}): Promise<LanguageServersReport & { logs?: Record<string, string[]> }> {
+    const settings = this.options.languageServers
+    if (!settings) return { state: 'off', reason: 'This program starts no language servers.', servers: [] }
+    const config = this.config(await realPathOf(root))
+    const snapshot = await config.refresh()
+    return languageServersReport(this.languageServers(config.root)!, settings, snapshot.folder.trusted, options.logs ?? 0)
+  }
+
+  /**
+   * The editor opened, changed or closed a file of a folder (given as any path to it). A path that leaves the folder
+   * is ignored: the editor shows only the folder's own files.
+   */
+  async editorDocument(root: string, change: EditorDocumentChange): Promise<void> {
+    if (!this.options.languageServers) return
+    const config = this.config(await realPathOf(root))
+    const file = path.resolve(config.root, change.path)
+    const relative = path.relative(config.root, file)
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return
+    const servers = this.languageServers(config.root)!
+    if (change.kind === 'close') servers.editorClose(file)
+    else if (change.kind === 'open') servers.editorOpen(file, change.text, change.dirty)
+    else servers.editorChange(file, change.text, change.dirty)
   }
 
   /**

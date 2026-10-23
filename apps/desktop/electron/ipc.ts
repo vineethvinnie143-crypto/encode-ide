@@ -76,6 +76,9 @@ export function approvalAnswerOf(answer: unknown): ApprovalAnswer {
   }
 }
 
+/** The largest file the editor shows a language server, in characters; the servers read no more from the disk. */
+const MAX_DOCUMENT_CHARS = 8 * 1024 * 1024
+
 /** The host going away is not the caller's fault: say what happened, in words the user can act on. */
 function hostFailure(error: unknown): Error {
   return isRpcError(error) && error.code === 'closed' ? new Error(HOST_STOPPED_MESSAGE) : error instanceof Error ? error : new Error(String(error))
@@ -145,6 +148,7 @@ export function registerIpc(deps: IpcDeps): void {
   }
 
   const openWorkspaceAt = async (rootPath: string) => {
+    agent.closeDocuments()
     const opened = await workspace.open(rootPath)
     settings.touchWorkspace(opened.root)
     await tellHostFolder(opened.root)
@@ -195,6 +199,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle('workspace:open-path', (rootPath: string) => openWorkspaceAt(String(rootPath)))
   handle('workspace:get', () => workspace.current)
   handle('workspace:close', async () => {
+    agent.closeDocuments()
     shell.disposeAll()
     await workspace.close()
     settings.setLastWorkspace(null)
@@ -203,6 +208,28 @@ export function registerIpc(deps: IpcDeps): void {
   handle('workspace:recent', () => settings.get().recentWorkspaces)
   handle('workspace:list', (rel: string) => workspace.list(String(rel ?? '')))
   handle('workspace:list-all', () => workspace.listAll())
+  // The editor's files, for the language servers: each path is checked like any other the renderer sends.
+  handle('code:document', (kind: unknown, rel: unknown, text?: unknown, dirty?: unknown) => {
+    const root = workspace.current?.root
+    if (!root || typeof rel !== 'string') return
+    let path: string
+    try {
+      path = workspace.toRelative(workspace.resolve(rel))
+    } catch {
+      return
+    }
+    if (!path) return
+    if (kind === 'close') return agent.document({ kind, root, path })
+    if ((kind !== 'open' && kind !== 'change') || typeof text !== 'string') return
+    // Larger than a server is given: the editor shows it without one.
+    if (text.length > MAX_DOCUMENT_CHARS) return agent.document({ kind: 'close', root, path })
+    agent.document({ kind, root, path, text, dirty: dirty === true })
+  })
+  handle('code:report', () => {
+    const root = workspace.current?.root
+    if (!root) return null
+    return agent.codeReport(root).catch((error) => Promise.reject(hostFailure(error)))
+  })
   handle('workspace:read', (rel: string) => workspace.read(String(rel)))
   handle('workspace:write', (rel: string, content: string) => workspace.write(String(rel), String(content)))
   handle('workspace:create-file', (parent: string, name: string) => workspace.createFile(String(parent ?? ''), String(name)))

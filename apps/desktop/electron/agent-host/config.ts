@@ -26,5 +26,7 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     efforts: cleanEfforts(settings.efforts),
     providers,
     searchProvider: isSearchProviderId(settings.searchProvider) ? settings.searchProvider : DEFAULT_SEARCH_PROVIDER,
+    languageServers: settings.languageServers,
+    errorGate: settings.errorGate,
   }
 }

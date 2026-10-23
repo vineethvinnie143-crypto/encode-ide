@@ -56,6 +56,12 @@ export interface ModelProfile {
 export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | 'auto-review'
 
 /**
+ * Whether the agent may finish a request while the language servers report errors in the files it changed: `auto`
+ * sends it back once to fix them, `on` up to three times, `off` lets it finish and only tells it.
+ */
+export type ErrorGate = 'auto' | 'on' | 'off'
+
+/**
  * Where API keys live: encrypted by the OS keychain on disk, or, when no
  * keychain is usable, only in memory until eNCode quits.
  */
@@ -82,6 +88,13 @@ export interface Settings {
   sendKey: SendKey
   /** Keeps the computer from sleeping while an agent works (not while it waits for you). Default on. */
   keepAwake: boolean
+  /**
+   * Starts the language servers installed on this computer for the files of a trusted folder: the editor marks errors,
+   * and the agent finds definitions and sees what its edits broke. Default on.
+   */
+  languageServers: boolean
+  /** See ErrorGate. Default `auto`. */
+  errorGate: ErrorGate
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */
@@ -608,6 +621,49 @@ export type SandboxAction =
 /** The sandbox as it is after an action, with what happened in words. */
 export type SandboxOutcome = { ok: true; report: SandboxReport; note?: string } | { ok: false; reason: string; report: SandboxReport }
 
+/** A language server as Settings lists it. */
+export interface LanguageServerInfo {
+  id: string
+  label: string
+  state: 'missing' | 'stopped' | 'starting' | 'running' | 'failed' | 'off'
+  /** Where it was found, or why it is missing, off or failed. */
+  detail?: string
+  command?: string
+  /** It is busy (indexing, checking the project). */
+  working?: boolean
+  documents: number
+  /** How to install it. */
+  install: string
+  /** What it covers: ".ts", ".tsx", "CMakeLists.txt". */
+  files: string[]
+}
+
+export interface LanguageServersReport {
+  /** `on`: a server starts when a file needs it. `off`: turned off in Settings. `untrusted`: the folder is not trusted. */
+  state: 'on' | 'off' | 'untrusted'
+  reason?: string
+  servers: LanguageServerInfo[]
+}
+
+/** A problem a language server found, zero-based, in UTF-16 units as the editor counts. */
+export interface CodeDiagnostic {
+  line: number
+  character: number
+  endLine: number
+  endCharacter: number
+  severity: 'error' | 'warning' | 'info' | 'hint'
+  message: string
+  source?: string
+  code?: string
+}
+
+/** What a language server says of one file of the open folder now; an empty list takes its marks away. */
+export interface FileMarks {
+  /** As the file tree names it: "src/a.ts". */
+  path: string
+  diagnostics: CodeDiagnostic[]
+}
+
 /** A request of the person's after which the agent's file tools changed files, for the rewind menu. */
 export interface RewindTurn {
   /** The request's id: the id of its entry in the conversation. */
@@ -1093,6 +1149,21 @@ export interface EncodeApi {
     /** Changes a switch or checks the machine again; answers with the sandbox as it stands. */
     act(action: SandboxAction): Promise<SandboxOutcome>
     /** The sandbox was checked, or a folder is being prepared: ask for the report again. */
+    onChanged(cb: () => void): () => void
+  }
+  code: {
+    /** The open folder's language servers and how they stand; null when no folder is open. */
+    report(): Promise<LanguageServersReport | null>
+    /**
+     * The editor shows a file of the open folder, by its path in the tree, with the text it holds (`dirty`: not saved).
+     * Its server starts if it may, and its problems arrive through `onMarks`.
+     */
+    open(path: string, text: string, dirty: boolean): void
+    change(path: string, text: string, dirty: boolean): void
+    close(path: string): void
+    /** A server's problems in a file, as they change. */
+    onMarks(cb: (marks: FileMarks) => void): () => void
+    /** A server started, stopped or failed: ask for the report again. */
     onChanged(cb: () => void): () => void
   }
 }

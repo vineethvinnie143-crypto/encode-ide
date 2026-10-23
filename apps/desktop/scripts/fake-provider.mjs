@@ -36,6 +36,16 @@ const SCENARIOS = {
       text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
+  // A file written with an error in it: the language server says so after the step, and the error gate sends the agent
+  // back when it wants to finish, so it writes the file again without the error.
+  'lsp-gate': [
+    { text: 'Adding the gate module.', call: { name: 'Write', args: { file_path: 'src/lsp-gate.ts', content: 'export const gate = 1\nconst broken = ERROR\n' } } },
+    {
+      text: 'Done.',
+      gated: { text: 'The language server reports an error in src/lsp-gate.ts; fixing it.', call: { name: 'Write', args: { file_path: 'src/lsp-gate.ts', content: 'export const gate = 1\n' } } },
+    },
+    { text: 'Added src/lsp-gate.ts; the language server reports no errors in it.' },
+  ],
   // The smoke makes this one fail on purpose (see /__fail), then lets it through when the person tries again.
   'retry-check': [{ text: 'Answered after trying again.' }],
   // The agent asks to plan first; the person says to go ahead.
@@ -325,9 +335,26 @@ function chunk(delta, finish = null) {
 const STEERED = 'sent the message below while you were working'
 const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
 
-/** The latest request of the person's: a message sent while the agent worked is part of the request before it. */
+/** What eNCode tells the model within a turn of what the language servers found: the turn goes on. */
+const LANGUAGE_SERVER_NEWS = ['The language servers found errors after your changes', 'The language servers checked your changes again', 'Before you finish: your changes this turn left errors']
+const GATED = 'Before you finish: your changes this turn left errors'
+function isLanguageServerNews(message) {
+  if (message.role !== 'user') return false
+  const text = textOf(message.content)
+  if (!text.includes('<system-reminder>')) return false
+  const rest = text.replace(/<system-reminder>\n([\s\S]*?)\n<\/system-reminder>/g, (all, inner) => (LANGUAGE_SERVER_NEWS.some((start) => inner.startsWith(start)) ? '' : all))
+  return !rest.trim()
+}
+
+/**
+ * The latest request of the person's: a message sent while the agent worked is part of the request before it, and so
+ * is what the language servers said of its changes.
+ */
 function lastUserIndex(messages) {
-  for (let index = messages.length - 1; index >= 0; index--) if (messages[index].role === 'user' && !isSteer(messages[index])) return index
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role === 'user' && !isSteer(message) && !isLanguageServerNews(message)) return index
+  }
   return -1
 }
 
@@ -359,7 +386,10 @@ function stepOf(messages) {
   // Compacting drops the tool results the step count is made of, so a conversation that was compacted is at the end.
   if (script.at(-1)?.overflowUntilCompacted && compacted(messages)) return script.at(-1)
   const done = messages.slice(lastUserIndex(messages) + 1).filter((message) => message.role === 'tool').length
-  return script[Math.min(done, script.length - 1)]
+  const step = script[Math.min(done, script.length - 1)]
+  // Sent back by the error gate: the step it has for that.
+  const last = messages.at(-1)
+  return step.gated && last?.role === 'user' && textOf(last.content).includes(GATED) ? step.gated : step
 }
 
 /** What OpenAI would refuse in a transcript, or null. */

@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LanguageServers, type CodeDiagnostic, type LaunchPlan, type ServerProcess, type ServerSpec } from '@encode/lsp'
+import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type CodeDiagnostic, type LaunchPlan, type ServerProcess, type ServerSpec, type ServerState } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -33,6 +33,37 @@ export interface LanguageServerOptions {
   idleMs?: number
   catalog?: readonly ServerSpec[]
 }
+
+/** A language server as the Settings screen lists it. */
+export interface LanguageServerInfo {
+  id: string
+  label: string
+  state: ServerState
+  /** Where it was found, or why it is missing, off or failed. */
+  detail?: string
+  command?: string
+  /** It is busy (indexing, checking the project). */
+  working?: boolean
+  documents: number
+  /** How to install it. */
+  install: string
+  /** What it covers: ".ts", ".tsx", "CMakeLists.txt". */
+  files: string[]
+}
+
+export interface LanguageServersReport {
+  /** `on`: a server starts when a file needs it. `off`: turned off in Settings. `untrusted`: the folder is not trusted. */
+  state: 'on' | 'off' | 'untrusted'
+  /** Why they do not run, in words. */
+  reason?: string
+  servers: LanguageServerInfo[]
+}
+
+/** What the editor tells the servers of a file it shows, by its path in the folder ("src/a.ts"). */
+export type EditorDocumentChange = { kind: 'open' | 'change'; path: string; text: string; dirty: boolean } | { kind: 'close'; path: string }
+
+/** The most a server is shown of one line of its log in a report. */
+const LOG_LINE_CHARS = 300
 
 export const SERVERS_OFF = 'Language servers are turned off in Settings.'
 export const FOLDER_NOT_TRUSTED = 'Language servers run only in folders you trust, since a server can run code the project names (its plugins, its build scripts). Trust the folder to use them.'
@@ -79,4 +110,26 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
     ...(options.onDiagnostics ? { onDiagnostics: (file: string, items: CodeDiagnostic[]) => options.onDiagnostics?.(config.root, file, items) } : {}),
     ...(options.onChange ? { onChange: () => options.onChange?.(config.root) } : {}),
   })
+}
+
+/** How a folder's servers stand, for the Settings screen; with `logs`, the last lines of the ones that stopped or failed. */
+export function languageServersReport(servers: LanguageServers, options: Pick<LanguageServerOptions, 'enabled' | 'catalog'>, trusted: boolean, logs = 0): LanguageServersReport & { logs?: Record<string, string[]> } {
+  const catalog = options.catalog ?? LANGUAGE_SERVERS
+  const specs = new Map(catalog.map((spec) => [spec.id, spec]))
+  const state = !options.enabled() ? 'off' : !trusted ? 'untrusted' : 'on'
+  const views = servers.status().map((view): LanguageServerInfo => {
+    const spec = specs.get(view.id)
+    return { ...view, install: spec?.install ?? '', files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [] }
+  })
+  const report: LanguageServersReport & { logs?: Record<string, string[]> } = { state, ...(state === 'off' ? { reason: SERVERS_OFF } : state === 'untrusted' ? { reason: FOLDER_NOT_TRUSTED } : {}), servers: views }
+  if (logs > 0) {
+    const kept: Record<string, string[]> = {}
+    for (const view of views) {
+      if (view.state !== 'failed' && !(view.state === 'stopped' && view.detail)) continue
+      const lines = servers.logs(view.id).slice(-logs)
+      if (lines.length) kept[view.id] = lines.map((line) => (line.length > LOG_LINE_CHARS ? `${line.slice(0, LOG_LINE_CHARS)}...` : line))
+    }
+    if (Object.keys(kept).length) report.logs = kept
+  }
+  return report
 }
