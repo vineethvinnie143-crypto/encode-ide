@@ -268,7 +268,11 @@ export class WorkspaceService {
     const abs = this.resolve(rel)
     await this.assertReal(abs)
     if (abs === this.root) throw new Error('Cannot delete the workspace root')
-    await shell.trashItem(abs)
+    // A path that is gone already says so (fs's error is in words); the Recycle Bin's own says "Failed to parse path".
+    await fs.lstat(abs)
+    await shell.trashItem(abs).catch(() => {
+      throw new Error(`Could not move ${this.toRelative(abs)} to the ${process.platform === 'win32' ? 'Recycle Bin' : 'Trash'}.`)
+    })
   }
 
   async reveal(rel: string): Promise<void> {
