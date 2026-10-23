@@ -652,6 +652,8 @@ export interface LanguageServerInfo {
   installError?: string
   /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
   libraries?: LanguageLibraryInfo[]
+  /** It runs beside the server a file has, for the files of its languages, in a folder that uses it (ADR 0086). */
+  companion?: true
 }
 
 /** A library eNCode installs for a server to read, listed under the server. */

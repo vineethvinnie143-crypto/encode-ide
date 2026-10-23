@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -600,5 +601,117 @@ describe('the language servers of a folder', () => {
     assert.equal(results.filter((item) => item.ok).length, 70)
     assert.ok(servers.status()[0].documents <= 64, String(servers.status()[0].documents))
     await servers.dispose()
+  })
+})
+
+describe('a companion beside the main server (ADR 0086)', () => {
+  const side: ServerSpec = {
+    id: 'side',
+    label: 'Side',
+    extensions: {},
+    candidates: [{ command: 'side-ls', args: [] }],
+    install: 'npm install -g side-ls',
+    companion: { languages: ['fake'], uses: (dir, exists) => exists(path.join(dir, 'side.config')) },
+  }
+
+  function pair(dir: string, options: { sideMissing?: boolean } = {}) {
+    const spawned: string[] = []
+    const published: [string, CodeDiagnostic[]][] = []
+    const servers = new LanguageServers({
+      root: dir,
+      catalog: [spec, side],
+      allowed: () => ({ ok: true }),
+      exists: (file) => existsSync(file),
+      discover: (which) =>
+        which.id === 'side' && options.sideMissing ? { missing: 'No language server for Side is installed (side-ls).' } : { file: process.execPath, args: [], found: 'the test', command: which.candidates[0]!.command },
+      spawn: async (plan, cwd) => {
+        spawned.push(plan.command)
+        return fake.start(plan.command === 'side-ls' ? 'companion' : '', { cwd })
+      },
+      onDiagnostics: (file, items) => published.push([file, items]),
+    })
+    const marks = (file: string) => published.filter(([name]) => name === file).at(-1)?.[1] ?? []
+    return { servers, spawned, marks }
+  }
+
+  it('runs beside the main server in a folder that uses it: marks, suggestions and hovers together', async () => {
+    const dir = await project({ 'side.config': '', 'a.fk': 'function go\nERROR CLASS\n' })
+    const a = path.join(dir, 'a.fk')
+    const { servers, spawned, marks } = pair(dir)
+    servers.editorOpen(a, 'function go\nERROR CLASS\n')
+    await until('both servers marked the file', () => marks(a).length === 2)
+    assert.deepEqual(spawned.sort(), ['fake-ls', 'side-ls'])
+    assert.deepEqual(marks(a).map((item) => [item.source, item.severity]).sort(), [['companion', 'warning'], ['fake', 'error']])
+    const side = servers.status().find((view) => view.id === 'side')
+    assert.equal(side?.state, 'running')
+    assert.equal(side?.documents, 1)
+
+    // Its suggestions follow the main server's, numbered after them; its hover follows the main server's.
+    const list = (await servers.completion(a, 0, 11, { triggerKind: 1 }))!
+    assert.equal(list.items.at(-1)?.label, 'bg-red-500')
+    assert.equal(list.items.at(-1)?.id, list.items.length - 1)
+    assert.ok(list.items.some((item) => item.label === 'go'))
+    assert.equal(await servers.resolveCompletion(a, list.list, list.items.length - 1), null)
+    assert.equal((await servers.editorHover(a, 0, 10))?.markdown, '**go**\n\n---\n\n_go_ as a class')
+    assert.equal(await servers.hover(a, 0, 10), '**go**\n\n---\n\n_go_ as a class')
+
+    // A change goes to both, and what each says of it replaces what it said before.
+    servers.editorChange(a, 'function go\nERROR\n', true)
+    await until('the companion took its mark back', () => marks(a).length === 1)
+    assert.equal(marks(a)[0]?.source, 'fake')
+    servers.editorChange(a, 'function go\nCLASS\n', true)
+    await until('only the companion marks the file', () => marks(a).length === 1 && marks(a)[0]?.source === 'companion')
+
+    // Closed in the editor, it is closed in both, and nothing stays marked.
+    servers.editorClose(a)
+    await until('no marks once closed', () => marks(a).length === 0)
+    assert.equal(servers.status().find((view) => view.id === 'side')?.documents, 0)
+    await servers.dispose()
+  })
+
+  it('takes only the files of a project of its kind inside the folder', async () => {
+    const dir = await project({ 'b.fk': 'CLASS\n' })
+    await mkdir(path.join(dir, 'web', 'src'), { recursive: true })
+    await writeFile(path.join(dir, 'web', 'side.config'), '')
+    const inside = path.join(dir, 'web', 'src', 'a.fk')
+    const outside = path.join(dir, 'b.fk')
+    await writeFile(inside, 'CLASS\n')
+    const { servers, spawned, marks } = pair(dir)
+    servers.editorOpen(outside, 'CLASS\n')
+    await wait(300)
+    assert.deepEqual(spawned, ['fake-ls'])
+    assert.deepEqual(marks(outside), [])
+    servers.editorOpen(inside, 'CLASS\n')
+    await until('the companion marked the file in its project', () => marks(inside).length === 1)
+    assert.equal(marks(inside)[0]?.source, 'companion')
+    assert.deepEqual(spawned, ['fake-ls', 'side-ls'])
+    // The file outside its project stays the main server's alone, though the companion now runs.
+    servers.editorChange(outside, 'CLASS here\n', true)
+    await wait(300)
+    assert.deepEqual(marks(outside), [])
+    assert.equal(servers.status().find((view) => view.id === 'side')?.documents, 1)
+    await servers.dispose()
+  })
+
+  it('does not start in a folder that does not use it, nor when it is not installed', async () => {
+    const plain = await project({ 'a.fk': 'ERROR CLASS\n' })
+    const a = path.join(plain, 'a.fk')
+    const first = pair(plain)
+    first.servers.editorOpen(a, 'ERROR CLASS\n')
+    await until('the main server marked the file', () => first.marks(a).length === 1)
+    await wait(200)
+    assert.deepEqual(first.spawned, ['fake-ls'])
+    assert.equal((await first.servers.editorHover(a, 0, 1))?.markdown, '**ERROR**')
+    await first.servers.dispose()
+
+    const used = await project({ 'side.config': '', 'a.fk': 'ERROR CLASS\n' })
+    const b = path.join(used, 'a.fk')
+    const second = pair(used, { sideMissing: true })
+    second.servers.editorOpen(b, 'ERROR CLASS\n')
+    await until('the main server marked the file', () => second.marks(b).length === 1)
+    await wait(200)
+    assert.deepEqual(second.spawned, ['fake-ls'])
+    assert.equal(second.servers.status().find((view) => view.id === 'side')?.state, 'missing')
+    await second.servers.dispose()
   })
 })

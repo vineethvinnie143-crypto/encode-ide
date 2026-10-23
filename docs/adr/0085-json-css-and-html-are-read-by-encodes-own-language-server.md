@@ -89,6 +89,6 @@ repository. Servers that are not VS Code's, such as Tailwind's own, may sit besi
   (what may go inside what) are not checked.
 - **What is not covered**: `style="..."` attributes, scripts in `<script>`, CSS formatting, colour pickers, links,
   rename, and `$schema` addresses on the web.
-- Tailwind's own server and Svelte's server, beside this one, are Editor 8c-2.
+- Tailwind's own server, beside this one, and Svelte's server came next ([0086](0086-a-companion-server-runs-beside-a-files-own-server-tailwind-and-svelte.md)).
 - The packaged app runs the server from inside its archive with Electron as Node, as it runs the agent host's other
   scripts. The packaged smoke covers starting the app, not this server.

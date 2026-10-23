@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { companionFiles, discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -79,6 +79,8 @@ export interface LanguageServerInfo {
   installError?: string
   /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
   libraries?: LanguageLibraryInfo[]
+  /** It runs beside the server a file has, for the files of its languages, in a folder that uses it (ADR 0086). */
+  companion?: true
 }
 
 /** A library eNCode installs for a server to read, as the Settings screen lists it under the server. */
@@ -393,7 +395,8 @@ export function languageServersReport(
     return {
       ...view,
       install: spec?.install ?? '',
-      files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [],
+      files: !spec ? [] : spec.companion ? companionFiles(spec, catalog) : [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})],
+      ...(spec?.companion ? { companion: true as const } : {}),
       ...(use ? { used: { files: use.files, markers: use.markers } } : {}),
       ...(spec?.installer && spec.installer.kind !== 'library' && options.tools ? { installer: spec.installer.kind } : {}),
       ...(installed ? { installed: installed.version } : {}),

@@ -78,18 +78,19 @@ export interface ServerSpec {
   builtin?: { script: string; args: string[] }
   /**
    * A server that runs beside the one a file has, not instead of it (ADR 0086): it is given the files of these
-   * languages, and its marks, suggestions and hovers are added to the main server's. It starts only in a folder that
-   * `uses` says needs it. A companion has no extensions of its own.
+   * languages, and its marks, suggestions and hovers are added to the main server's. It is given a file only when
+   * `uses` says a folder from the file's own up to the open folder is a project of its kind, so it starts only where it
+   * is needed. A companion has no extensions of its own.
    */
-  companion?: { languages: string[]; uses(root: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean }
+  companion?: { languages: string[]; uses(dir: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean }
 }
 
 const TAILWIND_CONFIGS = ['tailwind.config.js', 'tailwind.config.cjs', 'tailwind.config.mjs', 'tailwind.config.ts', 'tailwind.config.cts', 'tailwind.config.mts']
 
 /** A folder with a Tailwind config, or with tailwindcss among its package's dependencies (version 4 needs no config). */
-export function usesTailwind(root: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean {
-  if (TAILWIND_CONFIGS.some((name) => exists(path.join(root, name)))) return true
-  const manifest = read(path.join(root, 'package.json'))
+export function usesTailwind(dir: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean {
+  if (TAILWIND_CONFIGS.some((name) => exists(path.join(dir, name)))) return true
+  const manifest = read(path.join(dir, 'package.json'))
   if (!manifest) return false
   try {
     const parsed = JSON.parse(manifest) as Record<string, Record<string, string> | undefined>
@@ -354,4 +355,17 @@ export function serverFor(file: string, catalog: readonly ServerSpec[] = LANGUAG
     if (byExtension) return { spec, languageId: byExtension }
   }
   return null
+}
+
+/** The extensions and file names whose files a companion is given: those `serverFor` puts in one of its languages. */
+export function companionFiles(spec: ServerSpec, catalog: readonly ServerSpec[] = LANGUAGE_SERVERS): string[] {
+  const languages = spec.companion?.languages
+  if (!languages) return []
+  const takes = (file: string) => {
+    const found = serverFor(file, catalog)
+    return found !== null && languages.includes(found.languageId)
+  }
+  const extensions = new Set(catalog.flatMap((item) => Object.keys(item.extensions)))
+  const fileNames = new Set(catalog.flatMap((item) => Object.keys(item.fileNames ?? {})))
+  return [...[...extensions].filter((extension) => takes(`file${extension}`)), ...[...fileNames].filter((name) => takes(name))]
 }

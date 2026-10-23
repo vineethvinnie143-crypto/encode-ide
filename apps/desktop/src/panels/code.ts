@@ -6,16 +6,22 @@ import type { LanguageLibraryInfo, LanguageServerInfo, LanguageServersReport } f
 
 export type Tone = 'quiet' | 'busy' | 'success' | 'warning' | 'danger'
 
-/** The server that covers a file, as the host picks it: a whole file name first, then the extension. */
-export function serverForPath(report: LanguageServersReport | null, path: string): LanguageServerInfo | null {
-  if (!report) return null
+/** Whether a server covers a file: by its whole name, or by its extension. */
+function covers(server: LanguageServerInfo, path: string): boolean {
   const name = (path.split('/').pop() ?? path).toLowerCase()
   const dot = name.lastIndexOf('.')
   const extension = dot > 0 ? name.slice(dot) : ''
-  for (const server of report.servers) {
-    if (server.files.some((file) => file.toLowerCase() === name || (extension && file === extension))) return server
-  }
-  return null
+  return server.files.some((file) => file.toLowerCase() === name || (extension !== '' && file === extension))
+}
+
+/** The server that covers a file, as the host picks it: a whole file name first, then the extension. */
+export function serverForPath(report: LanguageServersReport | null, path: string): LanguageServerInfo | null {
+  return report?.servers.find((server) => !server.companion && covers(server, path)) ?? null
+}
+
+/** The servers that run beside a file's own in this folder (Tailwind's beside the CSS server). */
+export function companionsForPath(report: LanguageServersReport | null, path: string): LanguageServerInfo[] {
+  return report?.servers.filter((server) => server.companion && server.used && covers(server, path)) ?? []
 }
 
 /** A server's state in a word or two. */
@@ -59,8 +65,9 @@ export function headline(report: LanguageServersReport): { title: string; detail
 }
 
 /**
- * The offer the editor makes for the open file: its server is missing, eNCode can install it, servers may run in the
- * folder, and the person has not said "Not now" to it. Null otherwise.
+ * The offer the editor makes for the open file: its server is missing, or a library its server reads, or a companion
+ * the folder uses; eNCode can install it, servers may run in the folder, and the person has not said "Not now" to it.
+ * Null otherwise.
  */
 export function installOffer(report: LanguageServersReport | null, path: string | null, declined: readonly string[]): { id: string; label: string; text: string } | null {
   if (!report || !path || report.state !== 'on') return null
@@ -72,8 +79,11 @@ export function installOffer(report: LanguageServersReport | null, path: string 
   }
   // The server is there: what it reads that the folder wants, such as FiveM's natives in a folder of resources.
   const library = server.libraries?.find((item) => !item.installed && !item.installing && !declined.includes(item.id))
-  if (!library) return null
-  return { id: library.id, label: library.label, text: `${library.what} are not installed. Install them so hovers, completion and checks know each one.` }
+  if (library) return { id: library.id, label: library.label, text: `${library.what} are not installed. Install them so hovers, completion and checks know each one.` }
+  // And what runs beside it for the folder, such as Tailwind's server in a folder that uses Tailwind.
+  const companion = companionsForPath(report, path).find((item) => item.state === 'missing' && item.installer && !item.installing && !declined.includes(item.id))
+  if (!companion) return null
+  return { id: companion.id, label: companion.label, text: `This folder uses ${companion.label}. Install its language server for its suggestions, hovers and checks in these files.` }
 }
 
 /** What an install is for, by id: a server, or a library under its server. */

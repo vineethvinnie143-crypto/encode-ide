@@ -1,5 +1,5 @@
 export { ArchiveRefused, readTar, readZip, safeEntryPath, writeFiles, type ArchiveFile, type ArchiveLimits } from './archive'
-export { LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, serverFor, type Installable, type LibrarySpec, type PrepareContext, type Prepared, type ServerCandidate, type ServerSpec } from './catalog'
+export { companionFiles, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, serverFor, usesTailwind, type Installable, type LibrarySpec, type PrepareContext, type Prepared, type ServerCandidate, type ServerSpec } from './catalog'
 export { CFX_SYMBOLS, FIVEM_NATIVES, findResources, importedResources, manifestImports, prepareLua, serverPath, writeCfxSupport, type CfxSupport, type FiveMFolder } from './fivem'
 export { luaType, nativesLibrary, parseNatives, type LibraryFile, type Native, type NativeParam } from './fivem/natives'
 export { detectLanguages, type DetectOptions, type FolderLanguages, type LanguageUse } from './detect'

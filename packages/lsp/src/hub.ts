@@ -6,11 +6,11 @@
  * the disk when the agent needs it.
  */
 import fs from 'node:fs/promises'
-import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { LANGUAGE_SERVERS, serverFor, type Prepared, type ServerSpec } from './catalog'
 import { LanguageClient, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
 import { toEntry, type CompletionEntry, type CompletionResult, type EditorHighlight } from './completion'
+import { readSmall } from './detect'
 import type { LaunchPlan } from './discover'
 import { applyTextEdits } from './edits'
 import { RpcFailure } from './jsonrpc'
@@ -181,6 +181,8 @@ const CRASHES_ALLOWED = 3
 const RETRY_AFTER_FAILURE_MS = 5 * 60_000
 const DISCOVERY_TTL_MS = 30_000
 const REQUEST_MS = 15_000
+/** Between the main server's hover and a companion's. */
+const HOVER_BREAK = '\n\n---\n\n'
 /** Symbols found across a folder for the editor: more than a list can show. */
 const MAX_SYMBOL_HITS = 1_000
 /** The functions a call hierarchy starts from, and all it may grow to as it is opened. */
@@ -428,7 +430,7 @@ export class LanguageServers {
         // What the editor has open of its languages is shown to it at once.
         for (const doc of this.editorDocs.values()) {
           const found = serverFor(doc.file, this.catalog)
-          if (found?.spec.id === server.spec.id || (found && server.spec.companion?.languages.includes(found.languageId))) this.syncTo(client, doc.file, found.languageId, doc.text)
+          if (found && (found.spec.id === server.spec.id || this.takes(server.spec, doc.file, found.languageId))) this.syncTo(client, doc.file, found.languageId, doc.text)
         }
       },
       (error: unknown) => {
@@ -456,8 +458,11 @@ export class LanguageServers {
     } else {
       server.state = 'stopped'
       server.detail = reason
-      // The editor still shows its files: start again for them.
-      const wanted = [...this.editorDocs.values()].some((doc) => serverFor(doc.file, this.catalog)?.spec.id === server.spec.id)
+      // The editor still shows its files: start again for them. A companion's are the files of its languages.
+      const wanted = [...this.editorDocs.values()].some((doc) => {
+        const found = serverFor(doc.file, this.catalog)
+        return found !== null && (found.spec.id === server.spec.id || this.takes(server.spec, doc.file, found.languageId))
+      })
       if (wanted && !this.disposed) setTimeout(() => void this.start(server).catch(() => undefined), 1_000).unref?.()
     }
     this.options.onChange?.()
@@ -480,37 +485,52 @@ export class LanguageServers {
     this.options.onDiagnostics?.(file, this.allMarks(key))
   }
 
-  /** Every server's marks for a file, the main server's first. */
+  /** Every server's marks for a file: the main server's and its companions'. */
   private allMarks(key: string): CodeDiagnostic[] {
     return [...this.markItems.values()].flatMap((held) => held.get(key) ?? [])
   }
 
-  /** The companions that take a language in this folder (Tailwind beside the CSS server), checked at most every 30 s. */
-  private companionsFor(languageId: string): Server[] {
-    const out: Server[] = []
-    for (const server of this.servers.values()) {
-      const companion = server.spec.companion
-      if (!companion?.languages.includes(languageId)) continue
-      const known = this.companionUse.get(server.spec.id)
-      let uses = known && Date.now() - known.at < 30_000 ? known.uses : undefined
-      if (uses === undefined) {
-        const exists = this.options.exists ?? (() => false)
+  /** The companions that take a file of this language (Tailwind's server beside the CSS server). */
+  private companionsFor(file: string, languageId: string): Server[] {
+    return [...this.servers.values()].filter((server) => this.takes(server.spec, file, languageId))
+  }
+
+  /**
+   * Whether a companion takes a file: one of its languages, in a project of its kind, which a folder from the file's own
+   * up to the open folder says it is (a FiveM resource's web page under the server's folder has its own Tailwind
+   * config). Each folder is looked at once every 30 s at most.
+   */
+  private takes(spec: ServerSpec, file: string, languageId: string): boolean {
+    const companion = spec.companion
+    if (!companion?.languages.includes(languageId)) return false
+    const exists = this.options.exists ?? (() => false)
+    let dir = path.dirname(file)
+    for (let depth = 0; depth < 32; depth++) {
+      const inside = path.relative(this.root, dir)
+      if (inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) return false
+      const key = `${spec.id}\0${this.key(dir)}`
+      let known = this.companionUse.get(key)
+      if (!known || Date.now() - known.at >= 30_000) {
+        let uses = false
         try {
-          uses = companion.uses(this.root, exists, (file) => (exists(file) ? readSmall(file) : null))
+          uses = companion.uses(dir, exists, (name) => (exists(name) ? readSmall(name) : null))
         } catch {
           uses = false
         }
-        this.companionUse.set(server.spec.id, { at: Date.now(), uses })
+        if (this.companionUse.size >= 1_024) this.companionUse.clear()
+        this.companionUse.set(key, (known = { at: Date.now(), uses }))
       }
-      if (uses) out.push(server)
+      if (known.uses) return true
+      if (inside === '') return false
+      dir = path.dirname(dir)
     }
-    return out
+    return false
   }
 
   /** Gives a file to the companions of its language, starting them when they may run. */
   private companionsSync(file: string, languageId: string, text: string, saved = false): void {
     if (!this.options.allowed().ok) return
-    for (const server of this.companionsFor(languageId)) {
+    for (const server of this.companionsFor(file, languageId)) {
       server.lastUse = Date.now()
       if (server.client && !server.client.exited) {
         this.syncTo(server.client, file, languageId, text, saved)
@@ -578,10 +598,10 @@ export class LanguageServers {
     doc.text = text
     doc.dirty = dirty
     const server = this.runningFor(file)
-    if (server) this.syncTo(server.client, file, server.languageId, text, !dirty)
-    else this.bringUp(file)
-    const found = serverFor(file, this.catalog)
-    if (found) this.companionsSync(file, found.languageId, text, !dirty)
+    // Bringing the server up gives the companions the file too.
+    if (!server) return this.bringUp(file)
+    this.syncTo(server.client, file, server.languageId, text, !dirty)
+    this.companionsSync(file, server.languageId, text, !dirty)
   }
 
   editorClose(file: string): void {
@@ -592,9 +612,9 @@ export class LanguageServers {
       this.closeIn(server.client, file)
       this.syncedAt.delete(key)
     }
-    const found = serverFor(file, this.catalog)
-    for (const companion of found ? this.companionsFor(found.languageId) : []) {
-      if (!companion.client || companion.client.exited) continue
+    // Every companion that has the file is told, whether or not its project still uses it.
+    for (const companion of this.servers.values()) {
+      if (!companion.spec.companion || !companion.client || companion.client.exited || !companion.client.document(file)) continue
       companion.client.close(file)
       this.unmark(companion, file)
     }
@@ -770,17 +790,19 @@ export class LanguageServers {
   }
 
   async hover(file: string, line: number, character: number, signal?: AbortSignal): Promise<string | null> {
-    const main = await this.ask(file, 'hover', 'textDocument/hover', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), (value) => readHover(value), signal)
-    const extra = await this.askCompanions(file, 'textDocument/hover', { position: { line, character } }, signal)
+    const [main, extra] = await Promise.all([
+      this.ask(file, 'hover', 'textDocument/hover', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), (value) => readHover(value), signal),
+      this.askCompanions(file, 'textDocument/hover', { position: { line, character } }, signal),
+    ])
     const parts = [main, ...extra.map((value) => readHover(value))].filter((text): text is string => Boolean(text))
-    return parts.length ? parts.join('\n\n---\n\n') : null
+    return parts.length ? parts.join(HOVER_BREAK) : null
   }
 
   /** What the running companions of a file's language say to a request, each within 1.5 s; a failure is no answer. */
   private async askCompanions(file: string, method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown[]> {
     const found = serverFor(file, this.catalog)
     if (!found || !this.options.allowed().ok) return []
-    const asked = this.companionsFor(found.languageId).flatMap((server) => {
+    const asked = this.companionsFor(file, found.languageId).flatMap((server) => {
       const client = server.client
       const doc = client && !client.exited ? client.document(file) : undefined
       if (!client || !doc) return []
@@ -1085,6 +1107,8 @@ export class LanguageServers {
 
   async completion(file: string, line: number, character: number, context: { triggerKind: 1 | 2 | 3; triggerCharacter?: string }, signal?: AbortSignal): Promise<CompletionResult | null> {
     const list = ++this.completionLists
+    // A companion is asked at the same time, so it adds no wait of its own beyond its 1.5 s.
+    const asked = this.askCompanions(file, 'textDocument/completion', { position: { line, character }, context }, signal)
     const main = await this.editorAsk(
       file,
       'completion',
@@ -1100,7 +1124,7 @@ export class LanguageServers {
       signal,
     )
     // A companion's suggestions (Tailwind's classes) follow the main server's, numbered after them and not resolved.
-    const extra = (await this.askCompanions(file, 'textDocument/completion', { position: { line, character }, context }, signal)).map((value) => readCompletion(value))
+    const extra = (await asked).map((value) => readCompletion(value))
     const items = extra.flatMap((read) => read.items)
     if (!items.length) return main
     const base: CompletionResult = main ?? { list, incomplete: false, items: [] }
@@ -1137,22 +1161,24 @@ export class LanguageServers {
     return (read ?? []).map((item) => ({ range: item.range, kind: kinds[(item.kind ?? 1) as 1 | 2 | 3] }))
   }
 
-  /** The hover of a position for the editor: markdown, and the range it is about. */
-  editorHover(file: string, line: number, character: number, signal?: AbortSignal): Promise<{ markdown: string; range?: Range } | null> {
-    return this.editorAsk(
-      file,
-      'hover',
-      'textDocument/hover',
-      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }),
-      (value) => {
-        const markdown = readHover(value)
-        if (!markdown) return null
-        const range = value && typeof value === 'object' ? readRange((value as { range?: unknown }).range) : null
-        return { markdown, ...(range ? { range } : {}) }
-      },
-      signal,
-      5_000,
-    )
+  /** The hover of a position for the editor: markdown, and the range it is about. A companion's follows the main one. */
+  async editorHover(file: string, line: number, character: number, signal?: AbortSignal): Promise<{ markdown: string; range?: Range } | null> {
+    const read = (value: unknown): { markdown: string; range?: Range } | null => {
+      const markdown = readHover(value)
+      if (!markdown) return null
+      const range = value && typeof value === 'object' ? readRange((value as { range?: unknown }).range) : null
+      return { markdown, ...(range ? { range } : {}) }
+    }
+    const [main, extra] = await Promise.all([
+      this.editorAsk(file, 'hover', 'textDocument/hover', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), read, signal, 5_000),
+      this.askCompanions(file, 'textDocument/hover', { position: { line, character } }, signal),
+    ])
+    const more = extra.map(read).filter((item): item is { markdown: string; range?: Range } => item !== null)
+    if (!more.length) return main
+    const parts = main ? [main, ...more] : more
+    // The range is the main server's, or the first companion's when the main server had nothing to say.
+    const range = parts.find((item) => item.range)?.range
+    return { markdown: parts.map((item) => item.markdown).join(HOVER_BREAK), ...(range ? { range } : {}) }
   }
 
   /** Where a symbol is defined, for the editor: the same as the agent's lookup, without its errors. */
@@ -1663,13 +1689,4 @@ function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
       },
     )
   })
-}
-
-/** A small text file (a package.json), or null. */
-function readSmall(file: string): string | null {
-  try {
-    return statSync(file).size <= 1024 * 1024 ? readFileSync(file, 'utf8') : null
-  } catch {
-    return null
-  }
 }

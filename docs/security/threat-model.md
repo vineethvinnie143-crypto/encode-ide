@@ -1585,3 +1585,47 @@ documents the editor sends it. For JSON it may also read one schema file the doc
 
 - A schema inside the folder is the project's own text. Its descriptions show in hovers as the project wrote them.
 
+## Tailwind and Svelte beside the main servers (Editor and language intelligence 8c-2)
+
+Written with the pull request that lets a server run beside a file's own server, and adds Tailwind's and Svelte's
+servers ([0086](../adr/0086-a-companion-server-runs-beside-a-files-own-server-tailwind-and-svelte.md)).
+
+What is new:
+
+- a second server may be given a file, decided by files the project holds (a Tailwind config, a `package.json`);
+- its answers are joined with the main server's;
+- two more servers from npm can be installed: Svelte's, which carries Microsoft's CSS and HTML services, and Tailwind's,
+  whose package also carries a CSS server built on VS Code's.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| N1 | The project's own files decide that a program starts | A companion starts only in a trusted folder, only for a file open in the editor, and only if the person installed it. The project only chooses whether an installed, trusted server is given its files. | Mitigated (trust is the line, as in L1) |
+| N2 | Looking for a project of its kind reads outside the folder or reads too much | The walk goes from the file's folder up and stops at the open folder. It checks names with `exists` and reads only a `package.json` of up to 1 MB. Each folder is checked once every 30 seconds at most, and at most 1,024 answers are kept. A file the parser cannot read counts as no. | Mitigated |
+| N3 | Tailwind's package runs its `css-language-server` (VS Code's CSS service) instead of its own | The install's script is the package's `bin/tailwindcss-language-server`, fixed in the catalog. A unit test checks the command and the script, and nothing else in the package is ever started. | Mitigated |
+| N4 | The servers run the project's code: Tailwind loads its config and `tailwindcss`; Svelte loads `svelte.config.js` and its preprocessors | As for every server (L1): they start only in trusted folders, with the agent's environment without secrets. | Accepted (what these servers are) |
+| N5 | A companion floods the editor or slows it | Its marks, suggestions and hovers go through the same readers and limits as the main server's (1,000 marks, 5,000 suggestions, hovers cut at 20,000 characters). It is asked at the same time as the main server and given 1.5 seconds; no answer is no answer. A file closed in the editor is closed in every companion that has it. | Mitigated |
+| N6 | A companion's hover carries Markdown that runs or loads something | It goes through the editor's escaping like every server's hover; the rule between the two is eNCode's own. | Mitigated |
+| N7 | Svelte's server brings VS Code's code into eNCode | It is a separate program run as a language server, which ADR 0072 allows, and Vineeth agreed to it in particular. Nothing of it is bundled into eNCode, and it is installed only when asked. | Accepted |
+
+### Residual risks
+
+- A Tailwind config is JavaScript that the server runs, so a trusted project can do in it whatever its own build can.
+
+### Verification
+
+- Hub tests run a main server and a companion over the real wire format:
+  - marks joined and taken back per server;
+  - suggestions numbered after the main server's and not resolved;
+  - hovers joined in the editor and for the agent;
+  - a file closed in both;
+  - only the files of a project inside the folder given to the companion;
+  - no start in a folder that does not use it, or when it is not installed.
+- Detection tests count Tailwind's files for a FiveM resource with a config, or with a `package.json` only, and none
+  for a folder without either.
+- Catalog tests check Tailwind's files, its project test, and that only `tailwindcss-language-server` runs.
+- Desktop tests check the install offer, and that a companion is never taken for a file's server.
+- Checked by hand in the cloud container: both servers were installed from the npm locks through eNCode's installer
+  and run through the hub. Tailwind 4, in a nested web folder, suggested classes and showed a class's CSS. Svelte
+  showed a hover in a `.svelte` file.

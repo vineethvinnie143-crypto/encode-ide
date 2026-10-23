@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { LanguageServerInfo, LanguageServersReport } from '@shared/types'
-import { filesLabel, footerStatus, headline, installName, installOffer, installPercent, installTarget, noAnswerReason, serverForPath, sizeLabel, sortedServers, stateLabel } from './code'
+import { companionsForPath, filesLabel, footerStatus, headline, installName, installOffer, installPercent, installTarget, noAnswerReason, serverForPath, sizeLabel, sortedServers, stateLabel } from './code'
 
 const server = (patch: Partial<LanguageServerInfo> & Pick<LanguageServerInfo, 'id'>): LanguageServerInfo => ({ label: patch.id, state: 'stopped', documents: 0, install: `install ${patch.id}`, files: [], ...patch })
 
@@ -101,6 +101,30 @@ describe('installing a language server with one click', () => {
     assert.equal(installTarget(report({ servers: [lua] }), 'nope'), null)
     assert.equal(installName(report({ servers: [lua] }), 'fivem-natives'), "FiveM's natives for Lua")
     assert.equal(installName(report({ servers: [lua] }), 'lua'), "Lua's language server")
+  })
+
+  it('offers a companion the folder uses once the file\'s own server is there, and never takes it for the file\'s server', () => {
+    const web = server({ id: 'web', label: 'JSON, CSS and HTML', state: 'running', files: ['.css', '.html'] })
+    const tailwind = server({ id: 'tailwind', label: 'Tailwind CSS', state: 'missing', installer: 'npm', companion: true, files: ['.css', '.html', '.tsx'], used: { files: 12, markers: ['tailwind.config.js'] } })
+    // Listed first (it covers the most files), still not the file's server.
+    const both = report({ servers: [tailwind, web, ts] })
+    assert.equal(serverForPath(both, 'web/src/index.css')?.id, 'web')
+    assert.equal(serverForPath(both, 'web/src/App.tsx')?.id, 'typescript')
+    assert.deepEqual(companionsForPath(both, 'web/src/index.css').map((item) => item.id), ['tailwind'])
+    assert.deepEqual(companionsForPath(both, 'server/main.lua'), [])
+    assert.deepEqual(installOffer(both, 'web/src/index.css', []), {
+      id: 'tailwind',
+      label: 'Tailwind CSS',
+      text: 'This folder uses Tailwind CSS. Install its language server for its suggestions, hovers and checks in these files.',
+    })
+    assert.equal(installOffer(both, 'web/src/App.tsx', [])?.id, 'tailwind')
+    // The file's own server first, when it is missing too.
+    assert.equal(installOffer(report({ servers: [tailwind, web, { ...ts, state: 'missing', installer: 'npm' }] }), 'web/src/App.tsx', [])?.id, 'typescript')
+    assert.equal(installOffer(both, 'web/src/index.css', ['tailwind']), null)
+    // Not in a folder that does not use it, nor once it is installed or installing.
+    assert.equal(installOffer(report({ servers: [{ ...tailwind, used: undefined }, web] }), 'web/src/index.css', []), null)
+    assert.equal(installOffer(report({ servers: [{ ...tailwind, state: 'stopped' }, web] }), 'web/src/index.css', []), null)
+    assert.equal(installOffer(report({ servers: [{ ...tailwind, installing: { done: 0, total: 1 } }, web] }), 'web/src/index.css', []), null)
   })
 
   it('shows the progress of an install, and the size to download', () => {

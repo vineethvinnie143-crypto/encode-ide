@@ -45,6 +45,24 @@ describe('which languages a folder uses', () => {
     }
   })
 
+  it('counts a companion\'s files where a project of its kind is anywhere in the folder, and nowhere else', async () => {
+    // A FiveM server folder whose resource has a web page built with Tailwind, by its config or by its package.
+    const configured = tree(['server.cfg', 'resources/[ui]/hud/fxmanifest.lua', 'resources/[ui]/hud/web/tailwind.config.js', 'resources/[ui]/hud/web/src/App.tsx', 'resources/[ui]/hud/web/src/index.css', 'resources/[ui]/hud/web/src/main.ts'])
+    const packaged = tree(['resources/hud/web/src/App.tsx', 'resources/hud/web/src/app.css'])
+    fs.writeFileSync(path.join(packaged, 'resources/hud/web/package.json'), JSON.stringify({ devDependencies: { tailwindcss: '^4.1.0' } }))
+    const plain = tree(['web/src/App.tsx', 'web/src/app.css'])
+    fs.writeFileSync(path.join(plain, 'web/package.json'), JSON.stringify({ dependencies: { react: '^19.0.0' } }))
+    try {
+      const tailwind = async (root: string) => (await detectLanguages(root)).used.find((item) => item.id === 'tailwind')
+      // App.tsx and index.css: main.ts is TypeScript without JSX, which Tailwind is not given.
+      assert.deepEqual(await tailwind(configured), { id: 'tailwind', files: 2, markers: ['tailwind.config.js'] })
+      assert.deepEqual(await tailwind(packaged), { id: 'tailwind', files: 2, markers: [] })
+      assert.equal(await tailwind(plain), undefined)
+    } finally {
+      for (const root of [configured, packaged, plain]) fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('stops after so many entries and says so', async () => {
     const root = tree(Array.from({ length: 40 }, (_, index) => `d${index}/f${index}.go`))
     try {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { check, gen } from '@encode/testkit'
-import { LANGUAGE_SERVERS, serverFor, type ServerSpec } from './catalog'
+import { companionFiles, LANGUAGE_SERVERS, serverFor, usesTailwind, type ServerSpec } from './catalog'
 import { discover, shimScript } from './discover'
 import { applyTextEdits, EditConflict } from './edits'
 import type { TextEdit } from './protocol'
@@ -189,6 +189,27 @@ describe('the servers eNCode knows', () => {
   it('carries no server taken from VS Code', () => {
     const commands = LANGUAGE_SERVERS.flatMap((spec) => spec.candidates.map((candidate) => candidate.command))
     for (const command of commands) assert.doesNotMatch(command, /vscode/i)
+  })
+
+  it('runs Tailwind\'s server beside the main one for the files of its languages, and never its CSS server', () => {
+    const tailwind = LANGUAGE_SERVERS.find((item) => item.id === 'tailwind')!
+    assert.deepEqual(Object.keys(tailwind.extensions), [])
+    assert.deepEqual(companionFiles(tailwind).sort(), ['.css', '.htm', '.html', '.jsx', '.less', '.scss', '.svelte', '.tsx'])
+    assert.equal(serverFor('/p/src/index.css')?.spec.id, 'web')
+    assert.equal(serverFor('/p/src/App.svelte')?.spec.id, 'svelte')
+    // The package also carries css-language-server, built on VS Code's CSS service: only Tailwind's own runs.
+    const runs = [tailwind.installer && 'script' in tailwind.installer ? tailwind.installer.script : '', ...tailwind.candidates.map((candidate) => candidate.command)]
+    for (const name of runs) assert.match(name, /tailwindcss-language-server$/)
+    const files = new Map([
+      ['/a/tailwind.config.ts', ''],
+      ['/b/package.json', JSON.stringify({ devDependencies: { tailwindcss: '^4.1.0' } })],
+      ['/c/package.json', JSON.stringify({ dependencies: { '@tailwindcss/vite': '^4.1.0' } })],
+      ['/d/package.json', JSON.stringify({ dependencies: { react: '^19.0.0' } })],
+      ['/e/package.json', '{ not json'],
+    ])
+    const exists = (file: string) => files.has(file.replace(/\\/g, '/'))
+    const read = (file: string) => files.get(file.replace(/\\/g, '/')) ?? null
+    assert.deepEqual(['/a', '/b', '/c', '/d', '/e', '/f'].map((dir) => usesTailwind(dir, exists, read)), [true, true, true, false, false, false])
   })
 
   it('points TypeScript at the project\'s own compiler when it has one', () => {
