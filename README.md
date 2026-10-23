@@ -14,7 +14,7 @@ primary platform; the code stays cross-platform.
 ## What it does
 
 - **Agent-first workspace.** A title bar with menus and Back and Forward, an icon rail, and a
-  sidebar of sessions grouped by project (pin, archive, mark unread, an Activity view of what
+  sidebar of sessions grouped by project, and chats (pin, archive, mark unread, an Activity view of what
   needs you). Beside them are a conversation with a tool timeline (Chat and Trajectory views),
   a composer with mode, approval-policy and model chips, and a Browse and Workspace panel with
   Files, Editor and Shell.
@@ -28,8 +28,16 @@ primary platform; the code stays cross-platform.
   keys.
 - **Steer it while it works.** A message sent while the agent works reaches it before its next step, with the results
   of the step it came in during (`Ctrl+Enter`, or **Steer now** on a waiting message); `Enter` queues it for after the
-  turn. **Settings → Agent** swaps the two. A steering message goes through your hooks and brings what it mentions,
+  turn. **Settings → General** swaps the two. A steering message goes through your hooks and brings what it mentions,
   like any request.
+- **Chats.** `Ctrl+Alt+O` (**File → New chat**) starts a session that belongs to no project. It works in a folder of
+  its own, `Documents\eNCode` unless you choose another under **Settings → General**, so the files it makes are kept,
+  and its tools follow the same rules as in a project. Chats are listed under **Chats** in the sidebar.
+- **Settings as a page.** `Ctrl+,` opens Settings over the app, which stays as it was under it while the agent keeps
+  working. Search any setting from the page or from `Ctrl+K`, and a change is kept as you make it: no Save. Choose
+  whether `Enter` or `Ctrl+Enter` sends, Windows notices when a request finishes or the agent needs you (they say which
+  session, never what the agent wrote), the taskbar button flashing while it waits for you, and keeping the computer
+  awake while an agent works. **Archived sessions** restores or deletes what you put away.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
   - files: `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
@@ -225,11 +233,12 @@ The main ones as shipped:
 | Action | Shortcut |
 | --- | --- |
 | Command palette: sessions, actions and settings pages | `Ctrl+K` or `Ctrl+Shift+P` |
-| New session | `Ctrl+N` |
+| New session, new chat | `Ctrl+N`, `Ctrl+Alt+O` |
 | Open a folder | `Ctrl+O` |
 | Go to file | `Ctrl+P` |
 | Choose the model, the effort | `Alt+M`, `Ctrl+Shift+M` |
-| Steer the agent now, queue a message (while it works) | `Ctrl+Enter`, `Enter` (swapped in Settings → Agent) |
+| Send a message | `Enter`, or `Ctrl+Enter` if you choose it in Settings → General |
+| Steer the agent now, queue a message (while it works) | `Ctrl+Enter`, `Enter` (swapped in Settings → General) |
 | Find in the session, next and previous match | `Ctrl+F`, then `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) |
 | Plan mode on or off | `Shift+Tab` (in the message box) |
 | Stop the agent | `Esc` twice (in the message box or on the conversation) |

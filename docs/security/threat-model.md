@@ -844,3 +844,51 @@ entry that decides what a key does.
   Reviewer and sees its findings on the lines, ready to send, finds words in a folded work log and steps through the
   matches, and changes a shortcut: refused with the reason, taken, asked before moving, working at once, in the menus
   and after a restart, and put back with Reset all and its Undo.
+
+## The Settings page, chats and Windows notices (UI-6a)
+
+Written with the pull request that turns Settings into a page over the app, keeps each change as it is made, adds
+chats (sessions in a folder of their own) and tells the person through Windows when a request finishes or the agent
+needs them
+([0068](../adr/0068-settings-is-a-page-that-keeps-each-change-as-it-is-made-and-a-chat-is-a-session-in-a-folder-of-its-own.md)).
+The new paths are a folder every chat writes in, text that Windows keeps after eNCode closes, a page that shares the
+window with a waiting approval, and a power request.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| S1 | The window makes chats work in a folder the person did not choose | The chats folder is taken only from the system's folder dialog, shown by the main process. A settings save never carries it, and a path in the settings file must be a whole path of reasonable length on this computer or it is no choice. | Mitigated |
+| S2 | The chats folder gives every chat too much reach: a whole drive, the home folder, or eNCode's own folder, where a write needing no approval could change its settings, keys or sessions | Those are refused from the dialog and read as no choice from the file: a drive or share root, the home folder, and a folder that holds eNCode's profile folder or lies in it. The protected `.encode` and `.git` rules apply in the chats folder as in any project. | Mitigated (residual below) |
+| S3 | A chat's tools run in the last project, or with no folder's rules | A chat's session is made with the chats folder as its root, and the host binds a session with a root to it, whatever folder is open: its scope, permissions, trust and sandbox are the chats folder's. New chat opens that folder first and makes nothing when that is refused (an agent works, an unsaved file is kept). | Mitigated |
+| S4 | A Windows notice shows what the agent wrote, or an error quoting code, paths or keys, and Windows keeps it after eNCode closes | A notice's title is the session's name (one line, at most 80 characters) and its text is one of eNCode's own sentences; a summary passes only when it is eNCode's "Stopped after N steps". Never the model's reply or an error's text. Clicking one only opens the session it names. | Partial (residual below) |
+| S5 | Leaving the Settings page, or a key on it, answers an approval waiting under it | The thread is inert under the page. The approval card ignores Enter and Esc while the page or a dialog is open, the Esc that leaves the page goes to no other listener, and the card ignores an Esc something else used, so an approval that came up while the page was open waits. | Mitigated |
+| S6 | A change kept at once stores a value the main process should refuse, or a fast series of changes ends on an older one | The page saves through the same `settings:save` as before, where every field is checked and only known values are kept. The window applies only the answer to its latest save. A key is stored only with its Save key button. | Mitigated |
+| S7 | Keeping awake holds off sleep for good (a laptop in a bag) | eNCode asks Windows not to suspend (`prevent-app-suspension`, the screen may still turn off) only while an agent thinks or runs a command, never while it waits for the person, and lets go 15 s after the last one stops or when the switch is turned off. | Mitigated |
+| S8 | The test hook that writes notices to a file is a way to write a file | `ENCODE_NOTICES_FILE` is read only when eNCode is not packaged, as `ENCODE_HOME` is. | Mitigated |
+
+### Residual risks
+
+- **Any other folder the person picks for chats gets that reach.** Under Workspace Write every chat can write there
+  without asking, as a project folder can be written.
+- **eNCode's own folder is refused for chats, not yet everywhere.** Opened as a project, it would let the agent write
+  eNCode's settings under Workspace Write; keeping the agent out of it whatever folder is open is part of hardening.
+- **A session's name can hold what the person typed first**, or a name a model gave it, and that is a notice's title.
+- **Sessions from before projects have no folder** and still work in the folder that is open; they are listed under
+  Chats.
+
+### Verification
+
+- The settings tests take the chats folder only from the dialog's path, refuse a relative or malformed path, a drive
+  root, the home folder, eNCode's folder, a folder in it and one that holds it, and read each of those from the file
+  as no choice; they keep the send key and the notice settings only as known values.
+- The attention tests keep the model's text and errors out of notices, hold a finish back while another request
+  starts within 2 s, flash only while the agent waits in the background, and keep the computer awake only while an
+  agent works, with the 15 s grace.
+- The send key, sections, palette and sidebar tests choose the keys that send, find settings by the start of their
+  words, list single settings only for a query, and keep the chats folder out of the projects.
+- The end-to-end run opens the page from the message box where it was left, finds a setting from the page and from the
+  palette and lands on it with the focus, keeps changes without Save, sends with Ctrl+Enter only once it is chosen,
+  sends a test notice, starts a chat with Ctrl+Alt+O in the chats folder, opens the page while the chat's approval comes
+  up, presses Enter and Esc and finds the approval still waiting, reads the finished notice (the chat's name, "Finished.",
+  none of the agent's words), and archives, restores and deletes the chat from the page.

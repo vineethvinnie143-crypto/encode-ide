@@ -57,6 +57,7 @@ say so.
 | [0065](0065-the-turn-view-reads-the-agents-record-and-writes-back-only-over-what-the-person-saw.md) | The Turn view reads the agent's record, and writes back only over what the person saw | Accepted, builds on 0056 and 0064 |
 | [0066](0066-what-a-message-mentions-comes-from-the-core-under-the-tools-rules-and-the-palette-runs-the-menus-actions.md) | What a message mentions comes from the core under the tools' rules, and the palette runs the menus' actions | Accepted, builds on 0055, 0059 and 0062 |
 | [0067](0067-steering-goes-through-what-a-request-goes-through-the-reviewer-reads-the-change-as-data-and-a-shortcut-leaves-typing-alone.md) | Steering goes through what a request goes through, the Reviewer reads the change as data, and a shortcut leaves typing alone | Accepted, builds on 0014, 0017, 0031, 0042, 0052, 0054 and 0064 |
+| [0068](0068-settings-is-a-page-that-keeps-each-change-as-it-is-made-and-a-chat-is-a-session-in-a-folder-of-its-own.md) | Settings is a page that keeps each change as it is made, and a chat is a session in a folder of its own | Accepted, builds on 0052, 0054, 0066 and 0067 |
 
 ## Template
 
