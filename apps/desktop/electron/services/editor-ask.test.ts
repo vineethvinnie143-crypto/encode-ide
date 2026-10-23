@@ -99,6 +99,22 @@ describe('a question of the editor to the language servers', () => {
     for (const value of [{ kind: 'folding', path: '' }, { kind: 'folding', path: '../outside.ts' }, { kind: 'folding' }, { kind: 'folding', path: 5 }]) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value))
   })
 
+  it('takes the questions for a file\'s semantic tokens by its path alone, and for its hints by a few screens of lines', () => {
+    assert.deepEqual(readEditorAsk({ kind: 'semanticTokens', path: 'src\\a.ts', data: [1] }, relative), { kind: 'semanticTokens', path: 'src/a.ts' })
+    assert.deepEqual(readEditorAsk({ kind: 'inlayHints', path: 'src\\a.ts', startLine: 10, endLine: 80, label: 'x' }, relative), { kind: 'inlayHints', path: 'src/a.ts', startLine: 10, endLine: 80 })
+    assert.deepEqual(readEditorAsk({ kind: 'inlayHints', path: 'a.ts', startLine: 4, endLine: 4 }, relative), { kind: 'inlayHints', path: 'a.ts', startLine: 4, endLine: 4 })
+    const refused = [
+      { kind: 'semanticTokens', path: '../outside.ts' },
+      { kind: 'inlayHints', path: '../outside.ts', startLine: 0, endLine: 5 },
+      { kind: 'inlayHints', path: 'a.ts', startLine: 5, endLine: 4 },
+      { kind: 'inlayHints', path: 'a.ts', startLine: 0, endLine: 2_001 },
+      { kind: 'inlayHints', path: 'a.ts', startLine: -1, endLine: 5 },
+      { kind: 'inlayHints', path: 'a.ts', startLine: 0.5, endLine: 5 },
+      { kind: 'inlayHints', path: 'a.ts', startLine: 0 },
+    ]
+    for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value))
+  })
+
   it('takes a change with its file and the open files made the folder\'s own, and refuses anything else', () => {
     assert.deepEqual(readEditorChange({ kind: 'rename', path: 'src\\a.ts', line: 1, character: 2, newName: 'next', preview: false, open: ['src/a.ts', '../outside.ts', 7, 'b.ts'], extra: 1 }, relative), {
       kind: 'rename',

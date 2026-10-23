@@ -17,6 +17,11 @@
  * top-level constants as a tree; the folder's, searched by name; and the calls between the functions and methods of
  * the folder's src, both ways. And how a file folds: its brace blocks, block comments and runs of imports.
  *
+ * And it draws what a real one draws among the text: inlay hints (`: number` after a name a number is put in, and the
+ * names of the parameters of a `function` it has seen before each argument of a call to it), and semantic tokens (the
+ * functions and classes the file declares, wherever they are named; a function whose name starts with `legacy` is
+ * deprecated).
+ *
  *   node scripts/fake-language-server.mjs --stdio [--marker=file]
  *
  * With a marker file, the server appends a line when it starts, one for each document it is given or loses, and one
@@ -491,6 +496,61 @@ function foldingRanges(text) {
   return out
 }
 
+/** The functions a file declares, with their parameters' names. */
+function declaredFunctions(text) {
+  const out = new Map()
+  for (const match of text.matchAll(/\bfunction (\w+)\(([^)]*)\)/g)) {
+    out.set(match[1], match[2].split(',').map((part) => part.trim().split(/[\s:=]/)[0]).filter(Boolean))
+  }
+  return out
+}
+
+/** Inlay hints in the lines of the range: types of names a number is put in, and parameter names before arguments. */
+function inlayHints(text, range) {
+  const out = []
+  const functions = declaredFunctions(text)
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (index < range.start.line || index > range.end.line) return
+    for (const match of line.matchAll(/\b(?:let|const|var) (\w+) = \d/g)) {
+      out.push({ position: { line: index, character: match.index + match[0].length - 4 }, label: ': number', kind: 1, paddingLeft: false })
+    }
+    for (const match of line.matchAll(/\b(\w+)\(([^()]*)\)/g)) {
+      const params = functions.get(match[1])
+      if (!params || /\bfunction\s+$/.test(line.slice(0, match.index))) continue
+      let at = match.index + match[1].length + 1
+      match[2].split(',').forEach((argument, number) => {
+        const lead = argument.length - argument.trimStart().length
+        if (params[number] && argument.trim()) out.push({ position: { line: index, character: at + lead }, label: [{ value: params[number] }, { value: ':' }], kind: 2, paddingRight: true })
+        at += argument.length + 1
+      })
+    }
+  })
+  return out
+}
+
+/** What the semantic tokens below are numbered by. */
+const SEMANTIC_LEGEND = { tokenTypes: ['class', 'function', 'parameter', 'variable'], tokenModifiers: ['declaration', 'deprecated'] }
+
+/** The functions and classes the file declares, wherever they are named, in the protocol's relative form. */
+function semanticTokens(text) {
+  const functions = declaredFunctions(text)
+  const classes = new Set([...text.matchAll(/\bclass (\w+)/g)].map((match) => match[1]))
+  const data = []
+  let lastLine = 0
+  let lastChar = 0
+  text.split(/\r?\n/).forEach((line, index) => {
+    for (const match of line.matchAll(/\w+/g)) {
+      const type = classes.has(match[0]) ? 0 : functions.has(match[0]) ? 1 : -1
+      if (type < 0) continue
+      const deltaLine = index - lastLine
+      data.push(deltaLine, deltaLine ? match.index : match.index - lastChar, match[0].length, type, match[0].startsWith('legacy') ? 2 : 0)
+      lastLine = index
+      lastChar = match.index
+    }
+  })
+  return { data }
+}
+
 function workspaceSymbols({ query }) {
   const q = String(query ?? '').toLowerCase()
   const spells = (name) => {
@@ -544,6 +604,8 @@ function handle(message) {
           workspaceSymbolProvider: true,
           callHierarchyProvider: true,
           foldingRangeProvider: true,
+          inlayHintProvider: true,
+          semanticTokensProvider: { legend: SEMANTIC_LEGEND, full: true },
         },
         serverInfo: { name: 'fake-ts', version: '1' },
       })
@@ -602,6 +664,10 @@ function handle(message) {
       return reply(id, symbolsOf(docs.get(params.textDocument.uri)?.text ?? ''))
     case 'textDocument/foldingRange':
       return reply(id, foldingRanges(docs.get(params.textDocument.uri)?.text ?? ''))
+    case 'textDocument/inlayHint':
+      return reply(id, inlayHints(docs.get(params.textDocument.uri)?.text ?? '', params.range))
+    case 'textDocument/semanticTokens/full':
+      return reply(id, semanticTokens(docs.get(params.textDocument.uri)?.text ?? ''))
     case 'workspace/symbol':
       return reply(id, workspaceSymbols(params))
     case 'textDocument/prepareCallHierarchy':

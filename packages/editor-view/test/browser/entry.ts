@@ -2,7 +2,7 @@
  * The page the browser tests load: the view, the core it sits on and a small
  * harness to mount editors with. Bundled by run.mjs; nothing here ships.
  */
-import { EditorSelection, EditorState, SelectionRange, languageForPath } from '@encode/editor'
+import { EditorSelection, EditorState, SelectionRange, T, languageForPath } from '@encode/editor'
 import { Text } from '@encode/text'
 import { EditorView, type EditorViewConfig } from '../../src/index'
 import '../../src/style.css'
@@ -25,7 +25,7 @@ declare global {
   }
 }
 
-const api = { EditorSelection, EditorState, SelectionRange, Text, EditorView, languageForPath }
+const api = { EditorSelection, EditorState, SelectionRange, T, Text, EditorView, languageForPath }
 window.enc = api
 
 let current: EditorView | null = null

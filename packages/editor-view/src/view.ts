@@ -23,7 +23,8 @@ import { FOLD_COLUMN, FoldController } from './folding'
 import { HeightMap, ScrollScale, sameHidden, type HiddenLines, type Zone } from './heights'
 import { InputHandler } from './input'
 import { Keymap, defaultBindings, isMac, type KeyBinding } from './keymap'
-import { fillLine, isSimpleText, withBrackets } from './line'
+import { DEPRECATED, fillLine, isSimpleText, withBrackets, withSemantic, type DrawnInlay, type InlaySpec, type SemanticSpan } from './line'
+import { LineItems } from './line-items'
 import { MinimapController } from './minimap'
 import { PointerHandler } from './pointer'
 import { RectPool } from './rects'
@@ -38,6 +39,11 @@ const LONG_MARGIN = 800
 /** The widest the scrollable area is made, in pixels. */
 const MAX_CONTENT_WIDTH = 16_000_000
 const PROBE_CHARS = 200
+/** A line draws at most this many hints; a server that sends more for one line is not giving hints. */
+const MAX_INLAYS_PER_LINE = 50
+/** The largest kind a semantic token can be drawn as: a token kind with the flags above it. */
+const KIND_LIMIT = 0xfff
+const NO_BRACKETS: readonly number[] = []
 const GUTTER_PAD_LEFT = 14
 const GUTTER_PAD_RIGHT = 12
 /** Documents up to this many lines are scanned once for their longest line. */
@@ -133,6 +139,9 @@ interface LineEl {
   from: number
   to: number
   exact: boolean
+  /** The hints it was drawn with, and where they were drawn. */
+  inlays: readonly InlaySpec[] | undefined
+  drawnInlays: readonly DrawnInlay[]
 }
 
 interface ZoneEntry {
@@ -236,7 +245,11 @@ export class EditorView {
   /** Goes up whenever a decoration source is set or follows an edit, so the minimap knows to draw again. */
   decorationsVersion = 0
   private minimapWidth = 0
-  private tokenCache = new Map<number, { base: readonly number[]; brackets: readonly number[]; tokens: readonly number[] }>()
+  private tokenCache = new Map<number, { base: readonly number[]; brackets: readonly number[]; semantic: readonly SemanticSpan[] | undefined; tokens: readonly number[] }>()
+  /** A server's semantic tokens, by line, followed through edits until it answers again. */
+  private readonly semantic = new LineItems<SemanticSpan>((span, from, to) => ({ from, to, kind: span.kind }))
+  /** A server's inlay hints, by line, followed through edits until it answers again. */
+  private readonly inlays = new LineItems<InlaySpec>((inlay, from, to) => ({ ...inlay, from, to }))
 
   constructor(config: EditorViewConfig) {
     this.state = config.state
@@ -396,6 +409,8 @@ export class EditorView {
     if (tr.docChanged) {
       this.highlighter.update(tr.changes, tr.state.doc)
       this.folding.documentChanged(tr.changes, before.doc, tr.state.doc)
+      this.semantic.map(tr.changes, before.doc)
+      this.inlays.map(tr.changes, before.doc)
       this.mapAfterChange(tr.changes)
     }
     // A cursor that reached into a folded block (a search, an undo, Go to line) opens it.
@@ -433,6 +448,8 @@ export class EditorView {
     this.snippet.stateReplaced()
     this.folding.stateReplaced()
     this.sticky.stateReplaced()
+    this.semantic.clear()
+    this.inlays.clear()
     this.tokenCache.clear()
     this.pendingReveal = null
     this.pendingScroll = scroll ?? null
@@ -462,15 +479,74 @@ export class EditorView {
    */
   lineTokens(n: number): { tokens: readonly number[]; exact: boolean } {
     const highlighted = this.highlighter.line(n)
-    if (!this.options.bracketColors) return highlighted
-    const { brackets, exact } = this.highlighter.brackets(n)
-    if (!brackets.length) return { tokens: highlighted.tokens, exact: highlighted.exact && exact }
+    const semantic = this.semantic.line(n)
+    if (!this.options.bracketColors && !semantic) return highlighted
+    const { brackets, exact } = this.options.bracketColors ? this.highlighter.brackets(n) : { brackets: NO_BRACKETS, exact: true }
+    if (!brackets.length && !semantic) return { tokens: highlighted.tokens, exact: highlighted.exact && exact }
     const cached = this.tokenCache.get(n)
-    if (cached && cached.base === highlighted.tokens && cached.brackets === brackets) return { tokens: cached.tokens, exact: highlighted.exact && exact }
-    const tokens = withBrackets(highlighted.tokens, brackets, this.state.doc.line(n).text.length)
+    if (cached && cached.base === highlighted.tokens && cached.brackets === brackets && cached.semantic === semantic) return { tokens: cached.tokens, exact: highlighted.exact && exact }
+    const length = this.state.doc.line(n).text.length
+    let tokens = semantic ? withSemantic(highlighted.tokens, semantic, length) : highlighted.tokens
+    if (brackets.length) tokens = withBrackets(tokens, brackets, length)
     if (this.tokenCache.size >= 4000) this.tokenCache.clear()
-    this.tokenCache.set(n, { base: highlighted.tokens, brackets, tokens })
+    this.tokenCache.set(n, { base: highlighted.tokens, brackets, semantic, tokens })
     return { tokens, exact: highlighted.exact && exact }
+  }
+
+  /**
+   * A server's semantic tokens for the document as it is now: 1-based lines, columns in UTF-16 units, and the token
+   * kind each is drawn as. They are drawn over the highlighter's colours and follow edits until they are set again; a
+   * token that is not on its line, or overlaps the one before it, is left out. Null removes them.
+   */
+  setSemanticTokens(tokens: readonly { line: number; from: number; to: number; kind: number; deprecated?: boolean }[] | null): void {
+    const byLine = new Map<number, SemanticSpan[]>()
+    const doc = this.state.doc
+    for (const token of tokens ?? []) {
+      if (!Number.isInteger(token.line) || token.line < 1 || token.line > doc.lineCount) continue
+      const length = doc.line(token.line).text.length
+      const from = Math.max(0, token.from)
+      const to = Math.min(length, token.to)
+      if (!(to > from) || !Number.isInteger(token.kind) || token.kind < 0 || token.kind > KIND_LIMIT) continue
+      let row = byLine.get(token.line)
+      if (!row) byLine.set(token.line, (row = []))
+      if (row.length && row[row.length - 1].to > from) continue
+      row.push({ from, to, kind: token.deprecated ? token.kind | DEPRECATED : token.kind })
+    }
+    this.semantic.set(byLine)
+    this.tokenCache.clear()
+    this.requestRender()
+  }
+
+  /**
+   * A server's inlay hints for the document as it is now: 1-based lines, the column each is drawn before, and its
+   * label. They are drawn among the text but are not part of it (the caret, selections and copies skip them), and
+   * follow edits until they are set again. Null removes them.
+   */
+  setInlayHints(hints: readonly { line: number; col: number; label: string; kind?: 'type' | 'parameter'; paddingLeft?: boolean; paddingRight?: boolean }[] | null): void {
+    const byLine = new Map<number, InlaySpec[]>()
+    const doc = this.state.doc
+    for (const hint of hints ?? []) {
+      if (!Number.isInteger(hint.line) || hint.line < 1 || hint.line > doc.lineCount || !hint.label) continue
+      const text = doc.line(hint.line).text
+      if (!Number.isInteger(hint.col) || hint.col < 0 || hint.col > text.length || text.length > LONG_LINE) continue
+      let row = byLine.get(hint.line)
+      if (!row) byLine.set(hint.line, (row = []))
+      if (row.length >= MAX_INLAYS_PER_LINE) continue
+      row.push({ from: hint.col, to: hint.col, label: hint.label, ...(hint.kind ? { kind: hint.kind } : {}), ...(hint.paddingLeft ? { paddingLeft: true } : {}), ...(hint.paddingRight ? { paddingRight: true } : {}) })
+    }
+    for (const row of byLine.values()) row.sort((a, b) => a.from - b.from)
+    this.inlays.set(byLine)
+    this.requestRender()
+  }
+
+  /** Goes up whenever the semantic tokens change, so what is drawn from the tokens knows to draw again. @internal */
+  get semanticVersion(): number {
+    return this.semantic.version
+  }
+
+  /** The inlay hints of line `n` as they are now (followed through edits). @internal */
+  inlaysOf(n: number): readonly InlaySpec[] | undefined {
+    return this.inlays.line(n)
   }
 
   /** Runs a command by name; false when it does not exist or did not apply. */
@@ -845,15 +921,19 @@ export class EditorView {
           to = Math.min(info.text.length, indexAtColumn(info.text, lastCol, tabSize))
         }
       }
-      if (el.text !== info.text || !sameTokens(el.tokens, highlighted.tokens) || el.from !== from || el.to !== to || el.exact !== highlighted.exact) {
+      // A long line is drawn in part, and with no hints.
+      const inlays = long ? undefined : this.inlays.line(number)
+      if (el.text !== info.text || !sameTokens(el.tokens, highlighted.tokens) || el.from !== from || el.to !== to || el.exact !== highlighted.exact || el.inlays !== inlays) {
         const lead = from > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth) : undefined
-        fillLine(el.dom, info.text, highlighted.tokens, from, to, lead)
+        el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays)
         el.text = info.text
         el.tokens = highlighted.tokens
         el.from = from
         el.to = to
         el.exact = highlighted.exact
-        el.simple = this.metrics.monospace && (long || isSimpleText(info.text))
+        el.inlays = inlays
+        // A line with hints is as wide as the browser draws it.
+        el.simple = this.metrics.monospace && !inlays && (long || isSimpleText(info.text))
         if (el.simple || info.text.length > 2000) widest = Math.max(widest, columnAt(info.text, info.text.length, tabSize))
         else unmeasured.push(el)
       }
@@ -864,7 +944,10 @@ export class EditorView {
     }
     // Lines of text with wide or combining characters and markers are as wide as the browser made them; read all of them after the last write.
     for (const el of unmeasured) {
-      const x = this.domX(el, el.to)
+      let x = this.domX(el, el.to)
+      // A hint after the last character takes room the caret does not reach.
+      const lastInlay = el.drawnInlays[el.drawnInlays.length - 1]
+      if (x !== null && lastInlay?.col === el.to) x = Math.max(x, lastInlay.el.getBoundingClientRect().right - el.dom.getBoundingClientRect().left)
       if (x !== null) widest = Math.max(widest, Math.ceil((x - this.metrics.paddingX) / charWidth))
     }
     // Gutter classes (line number emphasis, review bars) and the active line number.
@@ -916,7 +999,7 @@ export class EditorView {
     const number = document.createElement('div')
     number.className = 'enc-gutter-num'
     this.gutterLayer.append(number)
-    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true }
+    return { dom, number, line: 0, text: '', tokens: null, top: NaN, simple: true, from: 0, to: 0, exact: true, inlays: undefined, drawnInlays: [] }
   }
 
   private release(el: LineEl): void {
@@ -925,6 +1008,8 @@ export class EditorView {
     el.text = '\0'
     el.tokens = null
     el.top = NaN
+    el.inlays = undefined
+    el.drawnInlays = []
     if (this.spare.length < 200) this.spare.push(el)
   }
 
@@ -1138,6 +1223,11 @@ export class EditorView {
   /** x of `offset` measured in the DOM, relative to the line element; null when it cannot be. */
   private domX(el: LineEl, offset: number): number | null {
     if (offset < el.from || offset > el.to) return null
+    // At a type's hint the caret stays with the text before it: the hint's left edge.
+    for (const inlay of el.drawnInlays) {
+      if (inlay.col === offset && inlay.caretBefore) return inlay.el.getBoundingClientRect().left - el.dom.getBoundingClientRect().left
+      if (inlay.col > offset) break
+    }
     const walker = document.createTreeWalker(el.dom, NodeFilter.SHOW_TEXT)
     let position = el.from
     let last: Text | null = null
@@ -1180,6 +1270,14 @@ export class EditorView {
       return indexAtColumn(line.text, Math.max(0, (x - paddingX) / charWidth), tabSize)
     }
     const text = line.text
+    // A point on a hint is its column: the hint is no text to put the caret inside.
+    if (el.drawnInlays.length) {
+      const base = el.dom.getBoundingClientRect().left
+      for (const inlay of el.drawnInlays) {
+        const box = inlay.el.getBoundingClientRect()
+        if (x >= box.left - base && x < box.right - base) return inlay.col
+      }
+    }
     let low = el.from
     let high = el.to
     while (low < high) {

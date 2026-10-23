@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorSymbol, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -134,6 +134,10 @@ export interface EditorAsks {
   symbols: { params: { path: string }; result: EditorSymbol[] | null }
   /** The blocks the file folds by, as its server sees them (0-based lines); null when no server folds it. */
   folding: { params: { path: string }; result: EditorFoldRange[] | null }
+  /** The hints the server draws among lines `startLine` to `endLine` (0-based, both included); null when none draws any. */
+  inlayHints: { params: { path: string; startLine: number; endLine: number }; result: EditorInlayHint[] | null }
+  /** The file's semantic tokens in the editor's kinds; null when no server gives them. */
+  semanticTokens: { params: { path: string }; result: EditorSemanticTokens | null }
   /**
    * Symbols by name across the folder, from every server running in it; `path`, the file shown ('' for none), starts its
    * server when it is not running yet. Null while no running server searches symbols.

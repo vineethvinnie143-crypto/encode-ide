@@ -5,11 +5,12 @@ export const TOKEN_CLASSES: readonly string[] = TOKEN_NAMES.map((name) => `tok-$
 
 /**
  * A token kind as the view draws it carries more than the kind in its low 8 bits: bits 8 to 10 hold a bracket's colour
- * (1 to 3 by depth, 7 for a closer with no opener).
+ * (1 to 3 by depth, 7 for a closer with no opener), and bit 11 says a server marked the name deprecated.
  */
 export const KIND_MASK = 0xff
 export const BRACKET_SHIFT = 8
 const BRACKET_STRAY = 7
+export const DEPRECATED = 1 << 11
 /** Bracket colours cycle through this many. */
 export const BRACKET_COLORS = 3
 
@@ -23,6 +24,7 @@ export function tokenClass(kind: number): string {
     const base = TOKEN_CLASSES[kind & KIND_MASK] ?? 'tok-plain'
     const bracket = (kind >> BRACKET_SHIFT) & 7
     name = bracket ? `${base} enc-bracket-${bracket === BRACKET_STRAY ? 'stray' : bracket}` : base
+    if (kind & DEPRECATED) name += ' enc-deprecated'
     classes.set(kind, name)
   }
   return name
@@ -51,6 +53,88 @@ export function withBrackets(tokens: readonly number[], brackets: readonly numbe
     if (at < end) out.push(at, kind)
   }
   return out
+}
+
+/** A stretch of a line a server named (a type, a parameter): its columns and the kind it is drawn as, flags included. */
+export interface SemanticSpan {
+  readonly from: number
+  readonly to: number
+  readonly kind: number
+}
+
+/**
+ * A line's tokens with the stretches a server named drawn as it says, over the highlighter's own; `spans` are sorted
+ * and apart (one that overlaps the one before is cut to start after it).
+ */
+export function withSemantic(tokens: readonly number[], spans: readonly SemanticSpan[], length: number): readonly number[] {
+  if (!spans.length) return tokens
+  const source = !tokens.length || tokens[0] > 0 ? [0, T.plain, ...tokens] : tokens
+  const out: number[] = []
+  const emit = (at: number, kind: number) => {
+    const count = out.length
+    if (count && out[count - 1] === kind) return
+    if (count && out[count - 2] === at) {
+      // Nothing was drawn with the kind before: replace it, and join this to the token before it when they match.
+      if (count >= 4 && out[count - 3] === kind) out.length = count - 2
+      else out[count - 1] = kind
+      return
+    }
+    out.push(at, kind)
+  }
+  let index = 0
+  let pos = 0
+  // The highlighter's tokens from `pos` to `end`.
+  const syntax = (end: number) => {
+    while (pos < end) {
+      while (index + 2 < source.length && source[index + 2] <= pos) index += 2
+      emit(pos, source[index + 1])
+      pos = Math.min(end, index + 2 < source.length ? source[index + 2] : length)
+    }
+  }
+  for (const span of spans) {
+    const from = Math.max(span.from, pos)
+    const to = Math.min(span.to, length)
+    if (to <= from) continue
+    syntax(from)
+    emit(from, span.kind)
+    pos = to
+  }
+  syntax(length)
+  return out
+}
+
+/** A hint drawn among a line's text without being part of it: a type a server worked out, a parameter's name. */
+export interface InlaySpec {
+  /** The column it is drawn before. */
+  readonly from: number
+  readonly to: number
+  readonly label: string
+  readonly kind?: 'type' | 'parameter'
+  readonly paddingLeft?: boolean
+  readonly paddingRight?: boolean
+}
+
+/** A hint as drawn: its column, its element, and whether the caret at its column is drawn before it (a type's hint). */
+export interface DrawnInlay {
+  readonly col: number
+  readonly el: HTMLElement
+  readonly caretBefore: boolean
+}
+
+/**
+ * The element of a hint. Its label is drawn from an attribute, not held as text, so the line's text nodes still add
+ * up to its text and every offset counts as the document does.
+ */
+function inlayElement(inlay: InlaySpec): HTMLElement {
+  const span = document.createElement('span')
+  let name = 'enc-inlay'
+  if (inlay.kind) name += ` enc-inlay-${inlay.kind}`
+  if (inlay.paddingLeft) name += ' enc-inlay-pl'
+  if (inlay.paddingRight) name += ' enc-inlay-pr'
+  span.className = name
+  span.dataset.label = inlay.label
+  span.setAttribute('aria-hidden', 'true')
+  return span
 }
 
 /** A regular expression character class from inclusive code point pairs, so the source holds no hidden characters. */
@@ -162,8 +246,22 @@ export function fillLine(
   to = text.length,
   lead?: Node,
   highlights?: readonly (readonly [number, number])[],
-): void {
+  inlays?: readonly InlaySpec[],
+): DrawnInlay[] {
   const nodes: Node[] = lead ? [lead] : []
+  const drawn: DrawnInlay[] = []
+  let nextInlay = 0
+  // The hints at or before column `col` that are not drawn yet go in now.
+  const flush = (col: number) => {
+    if (!inlays) return
+    while (nextInlay < inlays.length && inlays[nextInlay].from <= col) {
+      const inlay = inlays[nextInlay++]
+      if (inlay.from < from) continue
+      const el = inlayElement(inlay)
+      nodes.push(el)
+      drawn.push({ col: inlay.from, el, caretBefore: inlay.kind !== 'parameter' })
+    }
+  }
   const add = (piece: string, kind: number, control: boolean, marked: boolean) => {
     if (control) {
       const span = document.createElement('span')
@@ -183,7 +281,9 @@ export function fillLine(
       nodes.push(span)
     }
   }
-  for (const segment of segmentsOf(text, tokens, from, to)) {
+  const segments = segmentsOf(text, tokens, from, to)
+  for (const segment of inlays?.length ? splitAt(segments, inlays) : segments) {
+    flush(segment.start)
     if (!highlights?.length || segment.control) {
       add(segment.text, segment.kind, segment.control, !!highlights?.some(([a, b]) => a <= segment.start && segment.start < b))
       continue
@@ -201,5 +301,30 @@ export function fillLine(
     }
     if (cursor < end) add(text.slice(cursor, end), segment.kind, false, false)
   }
+  flush(to)
   dom.replaceChildren(...nodes)
+  return drawn
+}
+
+/** Segments cut where a hint goes, so that it can go between two of them; a control character's marker is not cut. */
+function splitAt(segments: readonly Segment[], inlays: readonly InlaySpec[]): Segment[] {
+  const out: Segment[] = []
+  let next = 0
+  for (const segment of segments) {
+    const end = segment.start + segment.text.length
+    while (next < inlays.length && inlays[next].from <= segment.start) next++
+    if (segment.control || next >= inlays.length || inlays[next].from >= end) {
+      out.push(segment)
+      continue
+    }
+    let start = segment.start
+    for (; next < inlays.length && inlays[next].from < end; next++) {
+      const at = inlays[next].from
+      if (at <= start) continue
+      out.push({ ...segment, text: segment.text.slice(start - segment.start, at - segment.start), start })
+      start = at
+    }
+    out.push({ ...segment, text: segment.text.slice(start - segment.start), start })
+  }
+  return out
 }

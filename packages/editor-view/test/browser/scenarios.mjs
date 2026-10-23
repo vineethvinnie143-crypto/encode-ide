@@ -8,5 +8,6 @@ import { edit } from './scenarios/edit.mjs'
 import { host } from './scenarios/host.mjs'
 import { fold } from './scenarios/fold.mjs'
 import { structure } from './scenarios/structure.mjs'
+import { hints } from './scenarios/hints.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints]

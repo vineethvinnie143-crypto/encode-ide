@@ -87,5 +87,5 @@ they are the editor's own code (0003): no part comes from another editor. Four q
   only what changed.
 - Every line count the editor uses (heights, the scrollbar, the arrow keys, the minimap) counts folded lines out.
 - Fold state lives while the file is open; closing the file or the app forgets it.
-- Still to come in the next editor steps: inlay hints and semantic tokens, the 100 MB test with highlighting off the
-  main thread, Windows input and accessibility, one-click server install and the fixed editor interface.
+- Still to come in the next editor steps: inlay hints and semantic tokens (0078), the 100 MB test with highlighting
+  off the main thread, Windows input and accessibility, one-click server install and the fixed editor interface.

@@ -9,6 +9,7 @@ import type { Readable, Writable } from 'node:stream'
 import { JSONRPC_ERRORS, JsonRpcConnection, RpcFailure, type RequestOptions } from './jsonrpc'
 import { TextDocumentSyncKind, type Diagnostic, type Range, type ServerCapabilities, type WorkspaceEdit } from './protocol'
 import { readDiagnostics, readWorkspaceEdit } from './results'
+import { readLegend, SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES } from './semantic'
 import { documentKey, pathToUri, uriToPath } from './uri'
 
 /** A started server process, as the client needs it. */
@@ -150,6 +151,20 @@ function clientCapabilities(): object {
       callHierarchy: {},
       // Whole lines: the editor folds lines, so a server leaves a closing bracket's line out of the block itself.
       foldingRange: { lineFoldingOnly: true, rangeLimit: 5000, foldingRangeKind: { valueSet: ['comment', 'imports', 'region'] } },
+      // Hints are drawn from their label alone (parts joined); nothing is resolved later.
+      inlayHint: {},
+      // Whole-file tokens in the standard relative format; they colour names the lexer cannot tell apart (a type, a
+      // parameter, a deprecated function) and leave the rest to it.
+      semanticTokens: {
+        requests: { full: true },
+        tokenTypes: SEMANTIC_TOKEN_TYPES,
+        tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
+        formats: ['relative'],
+        overlappingTokenSupport: false,
+        multilineTokenSupport: false,
+        serverCancelSupport: true,
+        augmentsSyntaxTokens: true,
+      },
       rename: { prepareSupport: true },
       formatting: {},
       rangeFormatting: {},
@@ -272,7 +287,7 @@ export class LanguageClient {
     }
   }
 
-  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'foldingRange' | 'rename' | 'prepareRename' | 'codeAction' | 'codeActionResolve' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight' | 'formatting' | 'rangeFormatting' | 'onTypeFormatting'): boolean {
+  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'foldingRange' | 'inlayHint' | 'semanticTokens' | 'rename' | 'prepareRename' | 'codeAction' | 'codeActionResolve' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight' | 'formatting' | 'rangeFormatting' | 'onTypeFormatting'): boolean {
     const c = this.capabilitiesValue
     switch (feature) {
       case 'completion':
@@ -301,6 +316,11 @@ export class LanguageClient {
         return has(c.callHierarchyProvider)
       case 'foldingRange':
         return has(c.foldingRangeProvider)
+      case 'inlayHint':
+        return has(c.inlayHintProvider)
+      case 'semanticTokens':
+        // Whole-file answers, read by a legend that can be read.
+        return has(c.semanticTokensProvider?.full) && readLegend(c.semanticTokensProvider) !== null
       case 'rename':
         return has(c.renameProvider)
       case 'prepareRename':

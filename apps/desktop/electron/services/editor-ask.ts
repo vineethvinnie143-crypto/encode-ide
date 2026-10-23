@@ -1,7 +1,7 @@
 import type { CodeRange, EditorAsk, EditorChangeRequest, SignatureHelp } from '../../shared/types'
 
 /** The kinds of question the editor asks the language servers. */
-const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType', 'symbols', 'folding', 'workspaceSymbols', 'callHierarchy', 'calls'])
+const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType', 'symbols', 'folding', 'inlayHints', 'semanticTokens', 'workspaceSymbols', 'callHierarchy', 'calls'])
 
 /** Lines and columns past these are not in any file the editor gives a server (8 MB at most). */
 const MAX_LINE = 10_000_000
@@ -19,6 +19,8 @@ const MAX_OPEN = 2_000
 const MAX_QUERY_CHARS = 200
 /** The functions a call hierarchy numbers, at most (the agent host refuses more). */
 const MAX_CALL_ID = 10_000
+/** The most lines one question for inlay hints covers: a few screens, not a file. */
+const MAX_HINT_LINES = 2_000
 
 const isCount = (value: unknown, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max
 const isTriggerKind = (value: unknown): value is 1 | 2 | 3 => value === 1 || value === 2 || value === 3
@@ -66,7 +68,11 @@ export function readEditorAsk(value: unknown, relative: (path: string) => string
   }
   const path = relative(ask.path)
   if (!path) return null
-  if (kind === 'triggers' || kind === 'symbols' || kind === 'folding') return { kind, path }
+  if (kind === 'triggers' || kind === 'symbols' || kind === 'folding' || kind === 'semanticTokens') return { kind, path }
+  if (kind === 'inlayHints') {
+    if (!isCount(ask.startLine, MAX_LINE) || !isCount(ask.endLine, MAX_LINE) || ask.endLine < ask.startLine || ask.endLine - ask.startLine > MAX_HINT_LINES) return null
+    return { kind, path, startLine: ask.startLine, endLine: ask.endLine }
+  }
   if (kind === 'calls') {
     if (!isCount(ask.list, Number.MAX_SAFE_INTEGER) || !isCount(ask.id, MAX_CALL_ID) || (ask.direction !== 'incoming' && ask.direction !== 'outgoing')) return null
     return { kind, path, list: ask.list, id: ask.id, direction: ask.direction }

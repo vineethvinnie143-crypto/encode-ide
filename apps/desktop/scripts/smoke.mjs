@@ -1497,6 +1497,7 @@ async function runLanguageServerChecks() {
   await runEditorChangeChecks(markerLines)
   await runEditorSymbolChecks(markerLines)
   await runEditorStructureChecks(markerLines)
+  await runEditorHintsChecks(markerLines)
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
@@ -2373,6 +2374,72 @@ async function runEditorStructureChecks(markerLines) {
   await evaluate("window.eNCode.workspace.delete('src/lsp-structure.ts').catch(() => null)")
   await evaluate("window.eNCode.workspace.delete('src/lsp-structure-other.ts').catch(() => null)")
   console.log('[smoke] editor structure: ok')
+}
+
+async function runEditorHintsChecks(markerLines) {
+  console.log('[smoke] --- editor hints ---')
+  const source = [
+    'export function add(left: number, right: number) {', // 1
+    '  return left + right', // 2
+    '}', // 3
+    'export function legacySum(a: number, b: number) {', // 4
+    '  return a + b', // 5
+    '}', // 6
+    'const total = 5', // 7
+    'export const sum = add(1, 2) + legacySum(3, total)', // 8
+    '',
+  ].join('\n')
+  await evaluate(`window.eNCode.workspace.write('src/lsp-hints.ts', ${JSON.stringify(source)})`)
+  await quickOpen('src/lsp-hints.ts', 'export function add(left: number, right: number) {')
+  await until(async () => (await markerLines()).includes('open lsp-hints.ts'), 10000, 'the server to be given the file')
+  const INLAYS = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-line')]
+    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+    .flatMap((line) => [...line.querySelectorAll('.enc-inlay')].map((hint) => hint.dataset.label))`
+  const DEPRECATED = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-line .enc-deprecated')].map((node) => node.textContent)`
+  const hintsAre = (want, label) =>
+    until(async () => JSON.stringify(await evaluate(INLAYS)) === JSON.stringify(want), 10000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(INLAYS))}`)
+    })
+  const all = [': number', 'left:', 'right:', 'a:', 'b:']
+
+  // The server's hints among the text: a type it worked out and the parameters' names; none of them is text.
+  await hintsAre(all, 'the server\'s inlay hints')
+  const line8 = await evaluate(`[...document.querySelectorAll('.code-editor > .enc-editor .enc-line')].find((node) => node.textContent.startsWith('export const sum'))?.textContent`)
+  if (line8 !== 'export const sum = add(1, 2) + legacySum(3, total)') throw new Error(`The hints changed the line's text: ${JSON.stringify(line8)}`)
+  // Semantic colours: the deprecated function struck through where it is declared and where it is called.
+  await until(async () => JSON.stringify(await evaluate(DEPRECATED)) === JSON.stringify(['legacySum', 'legacySum']), 10000, 'the deprecated function struck through').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(DEPRECATED))}`)
+  })
+  await screenshot('26-editor-hints.png')
+
+  // A call typed: once typing pauses, its hints come.
+  await clickAt(await wordSpot('const total = 5', '5'))
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: 'add(7, 8)' })
+  await hintsAre([...all, 'left:', 'right:'], 'the hints of a call typed')
+  await pressKey('z', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, 'the typing undone')
+  await hintsAre(all, 'the hints after undo')
+
+  // Turned off and on from the View menu's commands.
+  await focusEditor()
+  await runFromPalette('Hide inlay hints')
+  await hintsAre([], 'inlay hints hidden')
+  await focusEditor()
+  await runFromPalette('Show inlay hints')
+  await hintsAre(all, 'inlay hints shown again')
+  await focusEditor()
+  await runFromPalette('Turn semantic colours off')
+  await until(async () => (await evaluate(DEPRECATED)).length === 0, 6000, 'semantic colours off')
+  await focusEditor()
+  await runFromPalette('Turn semantic colours on')
+  await until(async () => (await evaluate(DEPRECATED)).length === 2, 10000, 'semantic colours on again')
+
+  // Tidy up.
+  await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'lsp-hints.ts')?.querySelector('.tab-close')?.click()`)
+  await until(async () => (await markerLines()).includes('close lsp-hints.ts'), 10000, 'the server to let the file go')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-hints.ts').catch(() => null)")
+  console.log('[smoke] editor hints: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

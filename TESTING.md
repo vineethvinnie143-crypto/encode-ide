@@ -383,6 +383,15 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
   in red. The **minimap** beside the text shows the whole file with errors, search matches and changes marked;
   click or drag it to scroll (it hides when the editor is narrow). Each can be turned off in the **View** menu (Turn
   folding off, Hide sticky scroll, Turn bracket colours off, Hide minimap).
+- **Inlay hints**: with a language server that gives them, small grey labels sit among the text: the type it worked
+  out after a name (`: number`) and the parameter's name before an argument (`count:`). They are not text: the cursor
+  steps over them, a click on one puts the cursor there, and copying leaves them out. They come for the lines on
+  screen and a little either side, and again a moment after you stop typing or scrolling. TypeScript and JavaScript,
+  Rust, Go, C and C++, Lua and basedpyright give them (pyright does not). **View → Hide inlay hints** turns them off.
+- **Semantic colours**: the server colours names by what they are, not only by how they look: a type where it is
+  used, a parameter, a property, an enum member, and a deprecated function struck through. A line you are typing on
+  keeps the lexer's colours until the server answers. **View → Turn semantic colours off** goes back to the lexer's
+  colours alone. Files over 50,000 lines keep the lexer's colours.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
@@ -393,7 +402,9 @@ and formatting that moved your cursor or fought with what you typed. For symbols
 cursor, an outline that misses something or shows it in the wrong place, a folder search that finds nothing a file
 plainly has, and a call hierarchy that lists the wrong callers. For folding: a block that folds the wrong lines or
 will not open, a cursor stuck inside a folded block, folds lost when you switch files, pinned lines that show the
-wrong block, brackets in the wrong colour, and a minimap that is out of step with the text.
+wrong block, brackets in the wrong colour, and a minimap that is out of step with the text. For hints and semantic
+colours: a hint in the wrong place or left behind after you edit, a click or the cursor landing on the wrong side of
+one, and colours that flicker, lag or stay wrong after the server has answered.
 
 ## Worktrees
 
@@ -462,5 +473,6 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: inlay hints, semantic colouring and installing a server with one click are not in the editor
-  yet; they come with the next builds. Folds are kept while a file is open, not after you close it or the app.
+- Language servers: installing a server with one click is not in the editor yet; it comes with the next builds.
+  Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
+  one shows nothing yet, and a part of a label cannot be clicked to go to a type.

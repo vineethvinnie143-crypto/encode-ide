@@ -79,7 +79,7 @@ export class MinimapController {
     this.slider.style.height = `${layout.sliderHeight}px`
 
     const ratio = typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1
-    const key = [width, height, ratio, layout.firstRow, layout.rows, view.state.doc.length, view.state.version, view.state.selection.ranges.map((range) => `${range.anchor}:${range.head}`).join(','), view.decorationsVersion, view.highlightFrontier, this.palette ? 1 : 0, layout.hiddenKey].join('|')
+    const key = [width, height, ratio, layout.firstRow, layout.rows, view.state.doc.length, view.state.version, view.state.selection.ranges.map((range) => `${range.anchor}:${range.head}`).join(','), view.decorationsVersion, view.highlightFrontier, view.semanticVersion, this.palette ? 1 : 0, layout.hiddenKey].join('|')
     if (key === this.drawnKey) return
     this.drawnKey = key
     this.draw(width, height, ratio, layout.firstRow, layout.rows)

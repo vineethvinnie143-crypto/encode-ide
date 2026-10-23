@@ -814,6 +814,24 @@ export interface EditorFoldRange {
   kind?: 'comment' | 'imports' | 'region'
 }
 
+/** A hint a server draws among the text: a type it worked out, or the name of the parameter an argument goes to. 0-based. */
+export interface EditorInlayHint {
+  line: number
+  character: number
+  label: string
+  kind?: 'type' | 'parameter'
+  paddingLeft?: boolean
+  paddingRight?: boolean
+}
+
+/**
+ * A file's semantic tokens, five numbers each: line, character, length (0-based, UTF-16), kind (an index into the
+ * host's list of the editor's token kind names, `SEMANTIC_KINDS` in the renderer) and flags (1: deprecated).
+ */
+export interface EditorSemanticTokens {
+  data: number[]
+}
+
 /** A symbol found by name across the folder; only the folder's own files are listed. */
 export interface EditorSymbolMatch {
   name: string
@@ -872,6 +890,10 @@ export interface EditorAsks {
   symbols: { params: { path: string }; result: EditorSymbol[] | null }
   /** The blocks the file folds by, as its server sees them (0-based lines); null when no server folds it. */
   folding: { params: { path: string }; result: EditorFoldRange[] | null }
+  /** The hints drawn among lines `startLine` to `endLine` (0-based, both included); null when no server draws any. */
+  inlayHints: { params: { path: string; startLine: number; endLine: number }; result: EditorInlayHint[] | null }
+  /** The file's semantic tokens; null when no server gives them. */
+  semanticTokens: { params: { path: string }; result: EditorSemanticTokens | null }
   /** Symbols by name across the folder; `path` is the file shown ('' for none), whose server starts if it is not running. */
   workspaceSymbols: { params: { path: string; query: string }; result: EditorSymbolMatch[] | null }
   /** The functions at a position a call hierarchy starts from, numbered in a new hierarchy. */

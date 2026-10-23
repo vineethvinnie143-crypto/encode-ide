@@ -8,7 +8,7 @@ import { MENUS, menuEntries } from './menus'
 import { CommandRegistry } from './registry'
 
 const none = () => undefined
-const LAYOUT = { breadcrumbs: true, outline: false, folding: true, stickyScroll: true, bracketColors: true, minimap: true }
+const LAYOUT = { breadcrumbs: true, outline: false, folding: true, stickyScroll: true, bracketColors: true, minimap: true, inlayHints: true, semanticHighlighting: true }
 /** Actions that do nothing, and answer the questions about state with "no". */
 function actions(patch: Partial<AppActions> = {}): AppActions {
   const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, editorLayout: () => LAYOUT, ...patch }
@@ -198,6 +198,19 @@ describe('menus', () => {
     assert.equal(live.shortcut('editor.goToFolderSymbol'), 'Ctrl+Alt+T')
     assert.equal(live.shortcut('editor.focusBreadcrumbs'), 'Ctrl+Shift+.')
     assert.equal(live.shortcut('editor.callHierarchy'), 'Shift+Alt+H')
+  })
+
+  it('turn inlay hints and semantic colours on and off', () => {
+    const on = registryWith({ hasEditor: () => true })
+    assert.equal(on.titleOf('view.inlayHints'), 'Hide inlay hints')
+    assert.equal(on.titleOf('view.semanticHighlighting'), 'Turn semantic colours off')
+    const off = registryWith({ hasEditor: () => true, editorLayout: () => ({ ...LAYOUT, inlayHints: false, semanticHighlighting: false }) })
+    assert.equal(off.titleOf('view.inlayHints'), 'Show inlay hints')
+    assert.equal(off.titleOf('view.semanticHighlighting'), 'Turn semantic colours on')
+    const toggled: string[] = []
+    const live = registryWith({ hasEditor: () => true, toggleEditorPart: (part) => void toggled.push(part) })
+    for (const id of ['view.inlayHints', 'view.semanticHighlighting']) void live.run(id)
+    assert.deepEqual(toggled, ['inlayHints', 'semanticHighlighting'])
   })
 
   it('turn folding, sticky scroll, bracket colours and the minimap on and off, and fold only while folding is on', () => {
