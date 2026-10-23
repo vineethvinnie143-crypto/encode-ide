@@ -156,6 +156,10 @@ const api: EncodeApi = {
   },
   code: {
     report: () => invoke('code:report'),
+    installPlan: (id: string) => invoke('code:install-plan', id),
+    install: (id: string) => invoke('code:install', id),
+    cancelInstall: (id: string) => invoke('code:install-cancel', id),
+    uninstall: (id: string) => invoke('code:uninstall', id),
     // Nothing to wait for: the servers answer through onMarks.
     open: (path: string, text: string, dirty: boolean) => void invoke('code:document', 'open', path, text, dirty).catch(() => undefined),
     change: (path: string, text: string, dirty: boolean) => void invoke('code:document', 'change', path, text, dirty).catch(() => undefined),

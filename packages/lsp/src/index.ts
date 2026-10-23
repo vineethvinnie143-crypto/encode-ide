@@ -1,4 +1,7 @@
+export { ArchiveRefused, readTar, readZip, safeEntryPath, writeFiles, type ArchiveFile, type ArchiveLimits } from './archive'
 export { LANGUAGE_SERVERS, serverFor, type ServerCandidate, type ServerSpec } from './catalog'
+export { detectLanguages, type DetectOptions, type FolderLanguages, type LanguageUse } from './detect'
+export { installedDir, installedLaunch, InstallFailed, installServer, planInstall, platformKey, removeInstall, type DownloadAsset, type InstallContext, type InstallPlan, type LaunchContext, type NpmFile, type NpmLock, type ServerInstall } from './install'
 export { fromChildProcess, LanguageClient, type ClientOptions, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
 export { toEntry, type CompletionEntry, type CompletionResult, type EditorHighlight, type HighlightKind } from './completion'
 export { discover, shimScript, type DiscoverOptions, type LaunchPlan } from './discover'

@@ -53,7 +53,7 @@ export interface HostRuntimeOptions {
   /** The web search providers; a test points them at a server of its own. */
   search?: { fetch?: ProviderOptions['fetch']; endpoints?: Partial<Record<SearchProviderId, string>> }
   /** For tests: which language servers there are, and how they are found and started. */
-  languageServers?: Pick<LanguageServerOptions, 'catalog' | 'discover' | 'spawn' | 'idleMs'>
+  languageServers?: Pick<LanguageServerOptions, 'catalog' | 'discover' | 'spawn' | 'idleMs' | 'tools'>
 }
 
 export interface HostRuntime {
@@ -331,6 +331,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       transcriptPath: (sessionId) => path.join(init.dir, `${sessionId}.jsonl`),
       // One set of language servers per folder, for the agent and the editor; read at every start, so Settings applies at once.
       languageServers: {
+        // eNCode's own Node.js runs the servers it installs from npm, so Node.js need not be installed.
+        ...(init.toolsDir ? { tools: { dir: init.toolsDir, cacheDir: init.serverCacheDir ?? path.join(init.toolsDir, '..', 'server-cache'), node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } } } } : {}),
         ...options.languageServers,
         enabled: () => config?.languageServers ?? true,
         onDiagnostics: (root, file, diagnostics) => {
@@ -398,6 +400,25 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   peer.handle('codeReport', async ({ root, logs }) => {
     if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
     return workspaces.languageServersReport(root, logs ? { logs } : {})
+  })
+
+  peer.handle('codeInstallPlan', async ({ root, id }) => {
+    if (!workspaces) return { unavailable: 'The agent is still starting. Try again in a moment.' }
+    return workspaces.planServerInstall(root, String(id))
+  })
+
+  peer.handle('codeInstall', async ({ root, id }) => {
+    if (!workspaces) return { ok: false as const, reason: 'The agent is still starting. Try again in a moment.' }
+    return workspaces.installServer(root, String(id))
+  })
+
+  peer.handle('codeInstallCancel', async ({ id }) => {
+    workspaces?.installs?.cancel(String(id))
+  })
+
+  peer.handle('codeUninstall', async ({ id }) => {
+    if (!workspaces) return { ok: false as const, reason: 'The agent is still starting. Try again in a moment.' }
+    return workspaces.removeServer(String(id))
   })
 
   peer.handle('modelStatus', async () => {

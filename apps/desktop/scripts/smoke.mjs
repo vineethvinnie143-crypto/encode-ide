@@ -1527,6 +1527,7 @@ async function runLanguageServerChecks() {
   }
   await screenshot('ui-dark-settings-language-servers.png')
   await closeSettings()
+  await runInstallOfferChecks()
 
   // The agent: told what its edit broke, sent back once when it wants to finish, and it fixes the file.
   await evaluate('window.eNCode.agent.reset()')
@@ -1562,6 +1563,51 @@ async function runLanguageServerChecks() {
   await fs.rm(modules, { recursive: true, force: true })
   await evaluate('window.eNCode.agent.reset()')
   console.log('[smoke] language servers: ok')
+}
+
+/**
+ * One-click installs (ADR 0083), offline: a YAML file whose server is missing gets the offer above it, Install… opens
+ * the dialog with what would be downloaded (read through the main and agent processes from eNCode's own list), Cancel
+ * closes it without installing, and Not now hides the offer for YAML on this computer. Settings offers Install… too.
+ */
+async function runInstallOfferChecks() {
+  console.log('[smoke] --- language server installs ---')
+  await evaluate("window.eNCode.workspace.write('lsp-offer.yaml', 'name: demo\\n')")
+  await quickOpen('lsp-offer.yaml', 'name: demo')
+  const footerText = "document.querySelector('.editor-footer .editor-footer-button')?.textContent ?? ''"
+  await waitFor(`(${footerText}).startsWith('YAML')`, 10000, 'the footer to name the YAML server')
+  const footer = await evaluate(footerText)
+  if (footer !== 'YAML: not installed') {
+    console.log(`[smoke] a YAML server is already on this computer (${footer}); the offer is not shown`)
+  } else {
+    await waitFor("!!document.querySelector('.editor-offer')", 8000, 'the offer to install the YAML server')
+    if (!(await click('.editor-offer .btn', 'Install'))) throw new Error('no Install button on the offer')
+    await waitFor("document.querySelectorAll('.install-server-steps li').length === 3", 15000, 'the install dialog to say what it would do')
+    const dialog = await evaluate(`(() => ({
+      title: document.querySelector('.install-server-dialog .ui-dialog-title')?.textContent ?? '',
+      steps: [...document.querySelectorAll('.install-server-steps li')].map((node) => node.textContent),
+      facts: document.querySelector('.install-server-facts')?.textContent ?? '',
+    }))()`)
+    console.log('[smoke] install dialog:', JSON.stringify(dialog))
+    if (!/yaml-language-server 2\.0\.0/.test(dialog.steps[0] ?? '') || !/hash eNCode was built with/.test(dialog.steps[0] ?? '') || !/tools/.test(dialog.facts)) {
+      throw new Error(`The install dialog does not say what it would do: ${JSON.stringify(dialog)}`)
+    }
+    await screenshot('ui-dark-install-server.png')
+    if (!(await click('.install-server-dialog .btn', 'Cancel'))) throw new Error('no Cancel in the install dialog')
+    await waitFor("!document.querySelector('.install-server-dialog')", 4000, 'the install dialog to close')
+    // Settings offers it as well, for the files this folder has.
+    await openSettings('Language servers')
+    await waitFor(`[...document.querySelectorAll('.lsp-server[data-server="yaml"] .btn')].some((node) => node.textContent.includes('Install'))`, 8000, 'Install… for YAML in Settings')
+    await closeSettings()
+    if (!(await click('.editor-offer .btn', 'Not now'))) throw new Error('no Not now on the offer')
+    await waitFor("!document.querySelector('.editor-offer')", 4000, 'the offer to go after Not now')
+    const kept = await evaluate("localStorage.getItem('encode.code.declinedInstalls')")
+    if (!kept?.includes('"yaml"')) throw new Error(`Not now was not kept: ${kept}`)
+    await evaluate("localStorage.removeItem('encode.code.declinedInstalls')")
+  }
+  await click('.editor-tab.is-active .tab-close')
+  await evaluate("window.eNCode.workspace.delete('lsp-offer.yaml').catch(() => null)")
+  console.log('[smoke] language server installs: ok')
 }
 
 /** The middle of the first `word` on the editor's drawn line that holds `lineText`, on screen. */

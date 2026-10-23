@@ -265,6 +265,19 @@ export function registerIpc(deps: IpcDeps): void {
     if (!root) return null
     return agent.codeReport(root).catch((error) => Promise.reject(hostFailure(error)))
   })
+  // Only a server's id comes from the page: what is downloaded or run, and from where, is eNCode's own list.
+  handle('code:install-plan', (id: string) => {
+    const root = workspace.current?.root
+    if (!root) return { unavailable: 'Open a folder first.' }
+    return agent.codeInstallPlan(root, String(id)).catch((error) => ({ unavailable: hostFailure(error).message }))
+  })
+  handle('code:install', (id: string) => {
+    const root = workspace.current?.root
+    if (!root) return { ok: false, reason: 'Open a folder first.' }
+    return agent.codeInstall(root, String(id)).catch((error) => ({ ok: false, reason: hostFailure(error).message }))
+  })
+  handle('code:install-cancel', (id: string) => agent.codeInstallCancel(String(id)).catch(() => undefined))
+  handle('code:uninstall', (id: string) => agent.codeUninstall(String(id)).catch((error) => ({ ok: false, reason: hostFailure(error).message })))
   handle('workspace:read', (rel: string) => workspace.read(String(rel)))
   handle('workspace:read-for-editor', (rel: string) => workspace.readForEditor(String(rel)))
   handle('workspace:write', (rel: string, content: string) => workspace.write(String(rel), String(content)))

@@ -4,7 +4,7 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import { EditRefused, type CodeLocation, type EditorCallItem, type EditPlan, type LanguageServers } from '@encode/lsp'
+import { detectLanguages, EditRefused, type CodeLocation, type EditorCallItem, type EditPlan, type FolderLanguages, type InstallPlan, type LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import {
   folderLanguageServers,
@@ -28,6 +28,7 @@ import { applyEditorPlan, ChangeRefused, previewPlan, undoEditorChange, type App
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
 import { workspaceHooks } from './hooks'
+import { ServerInstalls, type InstallResult } from './installs'
 import { McpHub, type McpHubOptions, type McpReport } from './mcp'
 import { actOnMcp, type McpAction, type McpOutcome } from './mcp-actions'
 import { rememberRules } from './remember'
@@ -115,6 +116,10 @@ export class Workspaces {
   private readonly hubs = new Map<string, McpHub>()
   /** A folder's language servers, shared by its sessions and the editor; each server in it stops when unused. */
   private readonly code = new Map<string, LanguageServers>()
+  /** Servers eNCode installs when asked, for every folder; none without a tools folder. */
+  readonly installs: ServerInstalls | undefined
+  /** The languages each folder uses, read again after a minute. */
+  private readonly languages = new Map<string, { at: number; found: Promise<FolderLanguages> }>()
   /** The editor's changes and questions, by the folder path it gives. */
   private readonly lanes = new Map<string, { pending: Promise<void>; asking: Map<string, AbortController> }>()
   private readonly realRoots = new Map<string, string>()
@@ -135,6 +140,21 @@ export class Workspaces {
     this.warn = options.warn
     this.stores = options.checkpoints
     this.options = options
+    const servers = options.languageServers
+    this.installs = servers?.tools
+      ? new ServerInstalls({
+          tools: servers.tools,
+          platform: this.platform,
+          ...(servers.catalog ? { catalog: servers.catalog } : {}),
+          ...(servers.env ? { env: servers.env } : {}),
+          rediscover: async (id, how) => {
+            await Promise.all([...this.code.values()].map((hub) => hub.rediscover(id, how).catch(() => undefined)))
+          },
+          onChange: () => {
+            for (const [, hub] of this.code) servers.onChange?.(hub.root)
+          },
+        })
+      : undefined
   }
 
   /** The picture of a folder, given as a real path; the same object for every session in it. */
@@ -207,7 +227,37 @@ export class Workspaces {
     if (!settings) return { state: 'off', reason: 'This program starts no language servers.', servers: [] }
     const config = this.config(await realPathOf(root))
     const snapshot = await config.refresh()
-    return languageServersReport(this.languageServers(config.root)!, settings, snapshot.folder.trusted, options.logs ?? 0)
+    const languages = await this.folderLanguages(config.root)
+    const installs = this.installs
+    return languageServersReport(this.languageServers(config.root)!, settings, snapshot.folder.trusted, options.logs ?? 0, { languages, ...(installs ? { installs: (id: string) => installs.state(id) } : {}) })
+  }
+
+  /** The languages a folder uses, by its files: read once a minute at most. */
+  private folderLanguages(root: string): Promise<FolderLanguages> {
+    const key = workspaceKey(root, this.platform === 'win32')
+    const known = this.languages.get(key)
+    if (known && Date.now() - known.at < 60_000) return known.found
+    const found = detectLanguages(root, this.options.languageServers?.catalog ? { catalog: this.options.languageServers.catalog } : {}).catch(() => ({ used: [], partial: true }))
+    this.languages.set(key, { at: Date.now(), found })
+    return found
+  }
+
+  /** What installing a server would do, for the person to read before saying yes. */
+  async planServerInstall(root: string, id: string): Promise<InstallPlan | { unavailable: string }> {
+    if (!this.installs) return { unavailable: 'This program does not install language servers.' }
+    return this.installs.plan(id, await realPathOf(root))
+  }
+
+  /** Installs a server the person said yes to; the folders' editors get it at once. */
+  async installServer(root: string, id: string): Promise<InstallResult> {
+    if (!this.installs) return { ok: false, reason: 'This program does not install language servers.' }
+    return this.installs.install(id, await realPathOf(root))
+  }
+
+  /** Removes a server eNCode installed. */
+  async removeServer(id: string): Promise<InstallResult> {
+    if (!this.installs) return { ok: false, reason: 'This program does not install language servers.' }
+    return this.installs.remove(id)
   }
 
   /**

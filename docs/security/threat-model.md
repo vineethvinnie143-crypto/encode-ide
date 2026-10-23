@@ -1469,3 +1469,51 @@ machine inside a trace, a fix that weakens a display defence, and test hooks tha
   scrollbar click keep the focus.
 - The end-to-end run edits a file with Windows line endings at random, saves, checks the file on disk, undoes
   everything and checks the file is byte for byte what it was.
+
+
+## Installing language servers (Editor and language intelligence 8a)
+
+Written with the pull request that finds the languages a folder uses and installs their servers with one click
+([0083](../adr/0083-a-language-server-is-installed-on-request-from-pinned-sources-unpacked-by-encode-and-run-from-its-own-folder.md)).
+This is the first time eNCode itself downloads programs and runs them. What crosses a boundary: the page asks the main
+process to install, stop or remove a server by its id (nothing else); the agent process downloads from the network,
+unpacks into the tools folder in the profile, and starts what it installed. The concerns are a download that is not
+what it claims, an archive that writes outside its folder, an installer that runs something the project chose, and
+the person not knowing what is about to happen.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| I1 | A downloaded server is swapped on the way or at its source | npm packages are checked against the sha512 pinned when eNCode was built, from the registry's own integrity; JDT LS against a pinned sha256. A mismatch refuses the install and leaves nothing. Only `https`, only six named hosts, redirects followed by hand and each checked against the same list. | Mitigated |
+| I2 | A GitHub release (Lua, clangd) is replaced by its own maintainers' compromised account | The file must match the sha256 GitHub publishes for it, and a release without one is refused; this proves the file is the one the release holds, not that the release is good. | Accepted (residual) |
+| I3 | An archive writes outside its folder (zip slip), through a link, or as a Windows device name | eNCode reads zip and tar itself and refuses the whole archive for an absolute path, a drive letter, `..`, `:`, a reserved device name, a trailing dot or space, control characters, a link or device entry, or two entries differing only in case. Files are written with `wx` into a new folder that must not exist, and each resolved path is checked to stay under it. Unit tests and a property over random trees and random damage check it. | Mitigated |
+| I4 | An archive or response exhausts the disk or memory (zip bomb, endless stream) | At most 400 MB downloaded (the declared length and the bytes counted), 40,000 files and 1 GB unpacked; inflate and gunzip stop at the limit; Zip64 and encrypted entries are refused. | Mitigated |
+| I5 | Installing runs code: an npm package's install scripts, or a project file that steers a toolchain | npm is never run and no package script runs; eNCode unpacks the files itself. Toolchain installers (`go`, `dotnet`, `rustup`) start without a shell, with fixed arguments, the agent's environment without secrets, and the new empty install folder as their working folder, so `go.mod`, `global.json` or `rust-toolchain.toml` in a project cannot change them. | Mitigated |
+| I6 | The page (or something in it) installs or runs a program it chose | The page sends only a server id; what is downloaded, from where, at which version, and how it starts are eNCode's own catalog. An unknown id is refused. Installed servers run only in trusted folders, as found servers do (0073). | Mitigated |
+| I7 | A half-written install is run | The install is built in a `.partial-` folder and renamed into place with its marker only when complete; discovery takes only folders with a valid marker. A failed or stopped install removes its folder. | Mitigated |
+| I8 | Running npm servers on eNCode itself as Node.js widens what eNCode can be used for | `ELECTRON_RUN_AS_NODE` is set only for that server's process and is still stripped from the agent's environment and the commands it runs. The program could already run as Node.js with that variable; nothing new is enabled. | Accepted |
+| I9 | The person installs without knowing what happens | The dialog lists each step, the version, the size and the folder before anything is downloaded; nothing installs without its Install button. The editor's offer can be dismissed for good per server. Remove asks first and deletes only what eNCode installed. | Mitigated |
+| I10 | Reading a big folder to find its languages slows the program or follows a link out | The walk stops at 20,000 entries, 8 levels or 1.5 seconds and says it was cut short, skips `node_modules`, `.git` and build folders, does not follow links, and runs at most once a minute per folder. | Mitigated |
+
+### Residual risks
+
+- **Lua and clangd follow their newest release**, trusted through GitHub's published digest rather than a hash pinned
+  in eNCode, because eNCode's build machine cannot reach GitHub to pin one.
+- **Toolchain installs trust the toolchain** and whatever it is configured to fetch (a Go proxy, a NuGet source) on the
+  person's computer.
+- **A server eNCode installed is a program like any other** once it runs: it has the person's rights in a trusted
+  folder (0073).
+
+### Verification
+
+- Unit tests check archive paths, tar (long names, pax, prefixes, gzip) and zip (stored, deflated, modes) reading, every
+  refusal above, writing into a new folder, and a property over random trees with random damage that must be read
+  back exactly or refused.
+- Unit tests install from npm (hashes, nested packages, packages for another system skipped, Electron as Node.js
+  launch), from a pinned download and a GitHub release (digest required, hosts and redirects checked), and with a
+  toolchain (fixed arguments, its own working folder, its failure said); a refused or stopped install leaves nothing.
+- Workspace tests install a server from a fake registry, see the folder find it at once, and remove it; one install
+  runs however often it is asked, and a stopped one is not reported as a failure.
+- Desktop tests check the editor's offer, progress and labels. The packaged-program check in CI runs the built
+  program as Node.js over stdin and stdout.

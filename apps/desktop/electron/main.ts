@@ -195,6 +195,8 @@ if (!gotLock) {
         routerStateFile: path.join(userData, 'eNCode-models.json'),
         checkpointsDir: path.join(userData, 'checkpoints'),
         sandboxDir: path.join(userData, 'sandbox'),
+        toolsDir: path.join(userData, 'tools'),
+        serverCacheDir: path.join(userData, 'server-cache'),
       }),
       // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {

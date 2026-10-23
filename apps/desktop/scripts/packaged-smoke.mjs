@@ -60,6 +60,26 @@ const env = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
 delete env.ELECTRON_RUN_AS_NODE
 delete env.VITE_DEV_SERVER_URL
 
+// Language servers eNCode installs from npm run on the program itself as Node.js (ADR 0083): check the program still can,
+// talking over stdin and stdout as a server does. The portable program is a launcher; the one it unpacks is checked here.
+if (path.basename(exe).toLowerCase() === 'encode.exe' || !isWindows) {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-as-node-'))
+  const script = path.join(scratch, 'echo.cjs')
+  fs.writeFileSync(script, "process.stdin.once('data', (chunk) => { process.stdout.write(JSON.stringify({ node: process.versions.node, got: String(chunk).trim() })); process.exit(0) })\n")
+  const ran = spawnSync(exe, [script], { env: { ...env, ELECTRON_RUN_AS_NODE: '1' }, input: 'ping\n', encoding: 'utf8', timeout: 30000, windowsHide: true })
+  fs.rmSync(scratch, { recursive: true, force: true })
+  let answer = null
+  try {
+    answer = JSON.parse(ran.stdout)
+  } catch {
+    // Reported below.
+  }
+  if (!answer || answer.got !== 'ping' || !/^\d+\.\d+\.\d+$/.test(answer.node)) {
+    fail(`the program does not run as Node.js, which installed language servers need (exit ${ran.status}, ${JSON.stringify(`${ran.stdout ?? ''}${ran.stderr ?? ''}`).slice(0, 400)})`)
+  }
+  console.log(`[packaged] runs as Node.js ${answer.node}`)
+}
+
 const app = spawn(command, args, { env, stdio: ['ignore', log, log], detached: !isWindows })
 let exited = false
 app.on('exit', () => {

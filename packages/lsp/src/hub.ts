@@ -468,9 +468,14 @@ export class LanguageServers {
   private syncTo(client: LanguageClient, file: string, languageId: string, text: string, saved = false): void {
     const key = this.key(file)
     const before = client.document(file)
-    if (before && before.text === text && !saved) return
+    // The editor's documents are watched: a server asked for diagnostics is asked after each change.
+    const watch = this.editorDocs.has(key)
+    if (before && before.text === text && !saved) {
+      if (watch) client.watch(file)
+      return
+    }
     this.syncedAt.set(key, client.publishCount(file))
-    client.sync(file, languageId, text, { saved })
+    client.sync(file, languageId, text, { saved, watch })
   }
 
   // ------------------------------------------------------------ documents
@@ -1425,6 +1430,37 @@ export class LanguageServers {
     for (const server of this.servers.values()) if (server.state === 'off') server.state = 'stopped'
     for (const doc of this.editorDocs.values()) if (!this.runningFor(doc.file)) this.bringUp(doc.file)
     if (flipped) this.options.onChange?.()
+  }
+
+  /**
+   * Looks for the servers again, one or all (one was installed or removed): the files the editor shows get the server
+   * that is there now, and one that failed to start may try again at once. With `stop`, a running one is stopped
+   * first, so that what it ran from can be removed.
+   */
+  async rediscover(id?: string, options: { stop?: boolean } = {}): Promise<void> {
+    for (const server of this.servers.values()) {
+      if (id && server.spec.id !== id) continue
+      this.discovered.delete(server.spec.id)
+      if (options.stop && (server.client || server.starting)) {
+        const client = server.client ?? (await server.starting?.catch(() => undefined))
+        server.client = undefined
+        if (client) {
+          for (const doc of client.documents()) this.forgetSync(doc.file)
+          this.unmark(server)
+          await client.stop()
+        }
+        server.state = 'stopped'
+        server.detail = undefined
+      }
+      if (server.state === 'failed' && !server.client) {
+        server.state = 'stopped'
+        server.failedAt = undefined
+        server.crashes = []
+        server.detail = undefined
+      }
+    }
+    if (!options.stop && !this.disposed && this.options.allowed().ok) for (const doc of this.editorDocs.values()) if (!this.runningFor(doc.file)) this.bringUp(doc.file)
+    this.options.onChange?.()
   }
 
   private stopIdle(): void {

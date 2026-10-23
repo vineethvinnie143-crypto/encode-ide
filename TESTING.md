@@ -305,15 +305,29 @@ after the work was gone.
 
 ## Language servers
 
-The editor marks errors as you type, and the agent checks its own edits, through the language servers installed on
-your computer. eNCode carries none of them. Install the ones for the languages you use, for example:
+The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries
+none of them, but installs one with a click when you ask: TypeScript and JavaScript, Python (pyright), Bash and YAML
+need nothing else (no Node.js); Java needs Java 21 or newer; Lua and C/C++ come from their newest release; Go, C# and
+Rust use their own toolchain (`go`, `dotnet`, `rustup`), which must be installed. You can still install a server
+yourself; one on the PATH or in the project wins over eNCode's.
 
-- TypeScript and JavaScript: `npm install -g typescript-language-server typescript`
-- Python: `npm install -g pyright` (or `basedpyright`)
-- Lua: lua-language-server, from its releases page, on the PATH
+**Settings → Language servers** lists every language eNCode knows, the ones this folder uses first (with how many of its
+files each covers), how each server stands, where it was found, and the command that installs a missing one. A server you just installed yourself is found within half a minute. A project's own copy (in its `node_modules\.bin`) is used first.
 
-**Settings → Language servers** lists every language eNCode knows, how its server stands in the open folder, where it
-was found, and the command that installs a missing one. A server you just installed is found within half a minute. A project's own copy (in its `node_modules\.bin`) is used first.
+One-click installs (most useful to hear about: a download that fails, a server that installs but does not start, or a
+dialog that does not say clearly what will happen):
+
+- Trust a folder with TypeScript or Python files and open one. If its server is missing, a bar above the file offers
+  **Install…** and **Not now**. Install… opens a dialog that lists what will be downloaded, the version, the size and
+  where it goes. Click **Install**: a progress bar, then the dialog closes, a toast says it is installed, and the marks
+  appear without reopening the file.
+- Close the dialog while it installs: it carries on, Settings shows its progress with **Stop**, and a toast says how it
+  ended. Click **Stop**: it ends without an error and leaves nothing behind.
+- **Not now** hides the bar for that language on this computer; the footer's "not installed" still opens the install.
+- In Settings, a server eNCode installed says "Installed by eNCode" with its version and **Remove**, which asks first.
+  After Remove the server stops and the file shows "not installed" again.
+- With no network, Install says why it failed and **Try again** retries.
+- For Go, C# or Rust without the toolchain, the dialog says what is needed instead of an Install button.
 
 - Servers run only in a folder you trust (Settings → Permissions), because a server can run code the project names.
   Open a TypeScript file in a folder you have not trusted: the footer under the editor says so, and nothing runs.
@@ -516,8 +530,9 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: installing a server with one click is not in the editor yet; it comes with the next builds.
-  Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
+- Language servers: a server eNCode installed is not updated by itself; a newer one comes with a newer eNCode and is
+  installed when you click Install again. FiveM's natives, JSON, CSS, HTML, Tailwind and Svelte come with the next
+  builds. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
 - In right-to-left text the arrow keys move through the characters in stored order, so the cursor can jump across a
   word; identifiers in a right-to-left script stay in stored order. A screen reader reads the text, not the hint

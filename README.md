@@ -54,7 +54,7 @@ primary platform; the code stays cross-platform.
   - knowledge: `Skill`, `WebSearch`, `WebFetch`;
   - questions: `AskUserQuestion`;
   - code intelligence: `LSP` (definitions, references, hover, symbols, calls, diagnostics, code actions) and
-    `LSPEdit` (renames across files, code actions), through the language servers installed on your computer;
+    `LSPEdit` (renames across files, code actions), through the language servers on your computer or installed by eNCode;
   - worktrees: `EnterWorktree` and `ExitWorktree` keep the agent's work on a branch of its own, apart from your checkout.
 
   After every edit the agent is told what the language servers say it broke, and a turn that would end with errors it
@@ -103,8 +103,10 @@ primary platform; the code stays cross-platform.
   compose in place at every cursor, a screen reader reads the lines around the cursor, and the editor keeps to
   Windows' scaling and contrast themes. Characters that make text read differently from how it is stored (bidi
   controls, zero-width and hidden characters) are drawn as labelled markers, and right-to-left text reads in its own
-  order only inside strings, comments and prose, when you ask for it. In a folder you trust, the language servers installed on
-  your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
+  order only inside strings, comments and prose, when you ask for it. eNCode sees which languages a folder uses and
+  installs their servers with one click when you ask: from pinned sources, checked and unpacked by eNCode itself, with
+  no npm or Node.js needed. In a folder you trust, the language servers (typescript-language-server, pyright,
+  rust-analyzer, gopls, clangd, lua-language-server, Eclipse JDT LS and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and
   Forward. F2 renames across the project with a preview and one Undo for the whole change; Ctrl+. and a lightbulb

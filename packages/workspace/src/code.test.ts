@@ -96,7 +96,7 @@ describe('a folder\'s language servers', () => {
     assert.deepEqual(await s.workspaces.languageServersReport(s.root), {
       state: 'untrusted',
       reason: FOLDER_NOT_TRUSTED,
-      servers: [{ id: 'fake', label: 'Fake', state: 'off', detail: FOLDER_NOT_TRUSTED, documents: 0, install: 'npm install -g fake-ls', files: ['.fk'] }],
+      servers: [{ id: 'fake', label: 'Fake', state: 'off', detail: FOLDER_NOT_TRUSTED, documents: 0, install: 'npm install -g fake-ls', files: ['.fk'], used: { files: 1, markers: [] } }],
     })
     await s.workspaces.editorDocument(s.root, { kind: 'open', path: 'a.fk', text: 'ERROR\nERROR', dirty: true })
     await s.workspaces.editorDocument(s.root, { kind: 'open', path: '../outside.fk', text: 'ERROR', dirty: false })

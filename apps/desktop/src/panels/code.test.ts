@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { LanguageServerInfo, LanguageServersReport } from '@shared/types'
-import { filesLabel, footerStatus, headline, noAnswerReason, serverForPath, sortedServers, stateLabel } from './code'
+import { filesLabel, footerStatus, headline, installOffer, installPercent, noAnswerReason, serverForPath, sizeLabel, sortedServers, stateLabel } from './code'
 
 const server = (patch: Partial<LanguageServerInfo> & Pick<LanguageServerInfo, 'id'>): LanguageServerInfo => ({ label: patch.id, state: 'stopped', documents: 0, install: `install ${patch.id}`, files: [], ...patch })
 
@@ -61,5 +61,47 @@ describe('the language servers on screen', () => {
     assert.equal(noAnswerReason(report({ servers: [{ ...ts, state: 'missing' }] }), 'a.ts', feature), 'TypeScript and JavaScript is not installed. Install it to use go to definition: install typescript')
     assert.equal(noAnswerReason(report({ servers: [{ ...ts, state: 'running' }] }), 'a.ts', feature), 'TypeScript and JavaScript does not offer go to definition.')
     assert.match(noAnswerReason(report({ servers: [{ ...ts, state: 'starting' }] }), 'a.ts', feature), /still starting/)
+    assert.equal(noAnswerReason(report({ servers: [{ ...ts, state: 'missing', installer: 'npm' }] }), 'a.ts', feature), 'TypeScript and JavaScript is not installed. Install it from Settings > Language servers to use go to definition.')
+  })
+})
+
+describe('installing a language server with one click', () => {
+  const missing = { ...ts, state: 'missing' as const, installer: 'npm' as const }
+
+  it('offers it above a file whose server is missing, only when eNCode can install it, servers may run and the person did not say not now', () => {
+    assert.deepEqual(installOffer(report({ servers: [missing] }), 'src/App.tsx', []), {
+      id: 'typescript',
+      label: 'TypeScript and JavaScript',
+      text: 'No language server for TypeScript and JavaScript files. Install one for errors as you type, completions and go to definition.',
+    })
+    assert.equal(installOffer(report({ servers: [missing] }), 'src/App.tsx', ['typescript']), null)
+    assert.equal(installOffer(report({ servers: [{ ...missing, installer: undefined }] }), 'src/App.tsx', []), null)
+    assert.equal(installOffer(report({ servers: [{ ...missing, installing: { done: 1, total: 2 } }] }), 'src/App.tsx', []), null)
+    assert.equal(installOffer(report({ servers: [{ ...missing, state: 'stopped' }] }), 'src/App.tsx', []), null)
+    assert.equal(installOffer(report({ state: 'untrusted', servers: [missing] }), 'src/App.tsx', []), null)
+    assert.equal(installOffer(report({ servers: [missing] }), 'notes.md', []), null)
+    assert.equal(installOffer(null, 'a.ts', []), null)
+  })
+
+  it('shows the progress of an install, and the size to download', () => {
+    assert.equal(installPercent({ ...missing, installing: { done: 512, total: 2048 } }), 25)
+    assert.equal(installPercent({ ...missing, installing: { done: 3000, total: 2048 } }), 100)
+    assert.equal(installPercent({ ...missing, installing: { done: 512, total: 0 } }), null)
+    assert.equal(installPercent(missing), null)
+    assert.deepEqual(stateLabel({ ...missing, installing: { done: 1, total: 4 } }), { label: 'Installing, 25%', tone: 'busy' })
+    assert.deepEqual(stateLabel({ ...missing, installing: { done: 0, total: 0 } }), { label: 'Installing', tone: 'busy' })
+    assert.equal(footerStatus(report({ servers: [{ ...missing, installing: { done: 0, total: 0 } }] }), 'a.ts')?.text, 'TypeScript and JavaScript: installing')
+    assert.equal(footerStatus(report({ servers: [missing] }), 'a.ts')?.title, 'Click to install it, to see errors as you type.')
+    assert.equal(sizeLabel(4.25 * 1048576), '4.3 MB')
+    assert.equal(sizeLabel(860 * 1024), '860 KB')
+    assert.equal(sizeLabel(10), '1 KB')
+  })
+
+  it('lists a missing server the folder uses with the ready ones, before those it does not use', () => {
+    const python = server({ id: 'python', state: 'missing' })
+    const lua = server({ id: 'lua', state: 'missing', used: { files: 3, markers: ['fxmanifest.lua'] } })
+    const go = server({ id: 'go', state: 'missing', installing: { done: 0, total: 0 } })
+    const order = sortedServers(report({ servers: [python, lua, { ...ts, state: 'stopped' }, go] }))
+    assert.deepEqual(order.map((item) => item.id), ['lua', 'typescript', 'go', 'python'])
   })
 })

@@ -3,7 +3,7 @@ import type { BackgroundJob } from '@shared/types'
 import { api } from '../../api'
 import { tooLargeForServers } from '../../editor/language'
 import { useProblems } from '../../editor/marks'
-import { footerStatus } from '../../panels/code'
+import { footerStatus, installOffer, serverForPath } from '../../panels/code'
 import { useCode } from '../../stores/code'
 import { useEditor } from '../../stores/editor'
 import { usePanels } from '../../stores/panels'
@@ -11,7 +11,7 @@ import { useUi } from '../../stores/ui'
 import type { SidebarView } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Activity, AlertTriangle, Bot, Clock, Code2, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal, XCircle } from '../../ui/icons'
+import { Activity, AlertTriangle, Bot, Clock, Code2, Download, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal, XCircle } from '../../ui/icons'
 import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
 import { jobText } from '../jobs-text'
@@ -53,7 +53,10 @@ function CodeStatus({ path }: { path: string }) {
   const count = useProblems((state) => state.counts[path])
   const report = useCode((state) => state.report)
   const status = footerStatus(report, path, tooLargeForServers(path))
-  const openSettings = () => useUi.getState().openSettings('code')
+  // A missing server eNCode can install opens the install; anything else opens Settings, where more is said.
+  const server = serverForPath(report, path)
+  const open = () =>
+    report?.state === 'on' && server?.state === 'missing' && server.installer && !server.installing ? useCode.getState().offerInstall(server.id) : useUi.getState().openSettings('code')
   return (
     <span className="editor-footer-group">
       {count && (count.errors > 0 || count.warnings > 0) && (
@@ -70,11 +73,33 @@ function CodeStatus({ path }: { path: string }) {
         </button>
       )}
       {status && (
-        <button type="button" className={cx('editor-footer-button', `is-${status.tone}`)} title={status.title} onClick={openSettings}>
+        <button type="button" className={cx('editor-footer-button', `is-${status.tone}`)} title={status.title} onClick={open}>
           <span className="editor-footer-label">{status.text}</span>
         </button>
       )}
     </span>
+  )
+}
+
+/** Above the open file: its language server is missing and eNCode can install it. "Not now" stops the offer for that server. */
+function InstallOfferBar({ path }: { path: string }) {
+  const report = useCode((state) => state.report)
+  const declined = useCode((state) => state.declined)
+  const offer = installOffer(report, path, declined)
+  if (!offer) return null
+  return (
+    <div className="editor-offer" role="region" aria-label="Language server">
+      <Download size={14} className="editor-offer-icon" aria-hidden="true" />
+      <span className="editor-offer-text" title={offer.text}>
+        {offer.text}
+      </span>
+      <Button size="sm" variant="primary" onClick={() => useCode.getState().offerInstall(offer.id)}>
+        Install…
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => useCode.getState().decline(offer.id)}>
+        Not now
+      </Button>
+    </div>
   )
 }
 
@@ -91,6 +116,7 @@ export function EditorPane() {
     <div className="editor-pane">
       <EditorTabs />
       {active && breadcrumbs && <Breadcrumbs path={active.path} />}
+      {active && <InstallOfferBar path={active.path} />}
       <div className="editor-body">
         <div className="editor-host">
           <CodeEditor tab={active} />

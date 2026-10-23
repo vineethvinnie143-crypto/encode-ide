@@ -1,13 +1,13 @@
 import { useEffect } from 'react'
 import type { ErrorGate, LanguageServerInfo, Settings } from '@shared/types'
 import { api } from '../../api'
-import { filesLabel, headline, sortedServers, stateLabel } from '../../panels/code'
+import { filesLabel, headline, installPercent, sortedServers, stateLabel } from '../../panels/code'
 import { useCode } from '../../stores/code'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Code2, Copy, RefreshCw } from '../../ui/icons'
+import { Code2, Copy, Download, RefreshCw, Trash2 } from '../../ui/icons'
 import { Segmented, type SegmentedOption } from '../../ui/Segmented'
 import { Toggle } from '../../ui/Toggle'
 import { SettingRow, SettingsGroup } from '../settings/Section'
@@ -18,27 +18,73 @@ const GATES: SegmentedOption<ErrorGate>[] = [
   { value: 'off', label: 'Never' },
 ]
 
-function ServerRow({ server }: { server: LanguageServerInfo }) {
+/** "Used by 42 files here · tsconfig.json": why this server matters in the open folder. */
+function usedLabel(server: LanguageServerInfo, partial: boolean): string | null {
+  const used = server.used
+  if (!used || (used.files === 0 && !used.markers.length)) return null
+  const files = used.files ? `${used.files}${partial ? '+' : ''} ${used.files === 1 ? 'file' : 'files'} here` : 'a project here'
+  return used.markers.length ? `${files} · ${used.markers.slice(0, 2).join(', ')}` : files
+}
+
+function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo; partial: boolean; canInstall: boolean }) {
   const { label, tone } = stateLabel(server)
   const copy = () => void navigator.clipboard.writeText(server.install).then(() => useUi.getState().notify('success', 'Install command copied.'))
   // Where it was found while it runs; why it stopped, failed or is missing otherwise.
   const detail = server.state === 'running' || server.state === 'starting' ? server.command : server.state === 'missing' ? undefined : server.detail
+  const used = usedLabel(server, partial)
+  const percent = installPercent(server)
+  const missing = server.state === 'missing' && !server.installing
   return (
     <div className="lsp-server" data-server={server.id}>
       <div className="lsp-server-head">
         <span className="lsp-server-name">{server.label}</span>
         <span className="lsp-server-files">{filesLabel(server)}</span>
+        {used && <span className="lsp-server-used">{used}</span>}
         <span className={cx('lsp-server-state', `is-${tone}`)}>
           {label}
           {server.state === 'running' && server.documents > 0 ? `, ${server.documents} ${server.documents === 1 ? 'file' : 'files'}` : ''}
         </span>
       </div>
       {detail && <div className="lsp-server-detail">{detail}</div>}
-      {server.state === 'missing' && server.install && (
+      {server.installing && (
+        <div className="lsp-server-progress">
+          <div className={percent === null ? 'install-server-bar is-unknown' : 'install-server-bar'} role="progressbar" aria-label={`Installing ${server.label}'s server`} aria-valuemin={0} aria-valuemax={100} {...(percent === null ? {} : { 'aria-valuenow': percent })}>
+            <span style={percent === null ? undefined : { width: `${percent}%` }} />
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => void api.code.cancelInstall(server.id)}>
+            Stop
+          </Button>
+        </div>
+      )}
+      {missing && server.installError && <div className="lsp-server-detail is-danger">{server.installError}</div>}
+      {missing && server.installer && canInstall && (
+        <div className="lsp-server-actions">
+          <Button size="sm" icon={<Download size={13} />} onClick={() => useCode.getState().offerInstall(server.id)}>
+            {server.installError ? 'Try again…' : 'Install…'}
+          </Button>
+          {server.install && (
+            <span className="lsp-server-or" title={server.install}>
+              or install it yourself
+              <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={copy}>
+                Copy command
+              </Button>
+            </span>
+          )}
+        </div>
+      )}
+      {missing && (!server.installer || !canInstall) && server.install && (
         <div className="lsp-server-install">
           <code>{server.install}</code>
           <Button size="sm" variant="ghost" icon={<Copy size={12} />} onClick={copy}>
             Copy
+          </Button>
+        </div>
+      )}
+      {server.installed && !server.installing && (
+        <div className="lsp-server-actions">
+          <span className="lsp-server-owned">Installed by eNCode, {server.installed}</span>
+          <Button size="sm" variant="ghost" icon={<Trash2 size={12} />} onClick={() => void useCode.getState().remove(server.id)}>
+            Remove
           </Button>
         </div>
       )}
@@ -79,7 +125,7 @@ export default function LanguageServersSection({ settings }: { settings: Setting
     <>
       <SettingsGroup
         title="Language servers"
-        description="Separate programs you install, such as typescript-language-server, pyright, rust-analyzer, gopls, clangd or lua-language-server. eNCode carries none of them."
+        description="Separate programs, such as typescript-language-server, pyright, rust-analyzer, gopls, clangd or lua-language-server. eNCode carries none of them, and installs one only when you click Install."
       >
         <SettingRow
           id="code.enabled"
@@ -157,12 +203,13 @@ export default function LanguageServersSection({ settings }: { settings: Setting
             )}
             <div className="settings-card lsp-servers">
               {sortedServers(report).map((server) => (
-                <ServerRow key={server.id} server={server} />
+                <ServerRow key={server.id} server={server} partial={Boolean(report.partial)} canInstall={report.state === 'on'} />
               ))}
             </div>
             <div className="perm-add-help">
-              eNCode looks in the project’s own <code>node_modules/.bin</code> first, then on the PATH. A server you just installed is found within half a minute; a
-              server runs outside the sandbox of the agent’s commands, with the agent’s environment and no API keys.
+              eNCode looks in the project’s own <code>node_modules/.bin</code> first, then on the PATH, then in what it installed itself. A server you just
+              installed is found within half a minute; a server runs outside the sandbox of the agent’s commands, with the agent’s environment and no API keys.
+              One-click installs come from fixed addresses at pinned versions and are checked before they are unpacked.
             </div>
           </>
         )}

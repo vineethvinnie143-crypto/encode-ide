@@ -72,6 +72,7 @@ say so.
 | [0080](0080-long-lines-wrap-into-rows-the-layout-counts-and-spaces-and-tabs-are-marked-without-changing-the-text.md) | Long lines wrap into rows the layout counts, and spaces and tabs are marked without changing the text | Accepted, builds on 0003, 0077 and 0079 |
 | [0081](0081-input-methods-compose-in-place-screen-readers-read-the-lines-around-the-cursor-and-right-to-left-text-reads-in-its-own-order-only-where-it-cannot-move-code.md) | Input methods compose in place, screen readers read the lines around the cursor, and right-to-left text reads in its own order only where it cannot move code | Accepted, builds on 0003 and 0080, refines 0033 |
 | [0082](0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md) | The editor is held to its invariants by shrinking properties, timed fuzzing, real edits replayed, and random use of the browser and the app | Accepted, builds on 0033, 0079 and 0081 |
+| [0083](0083-a-language-server-is-installed-on-request-from-pinned-sources-unpacked-by-encode-and-run-from-its-own-folder.md) | A language server is installed on request, from pinned sources, unpacked by eNCode, and run from its own folder | Accepted, builds on 0072 and 0073 |
 
 ## Template
 

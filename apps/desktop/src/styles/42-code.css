@@ -202,3 +202,169 @@
 .editor-footer-button.is-danger {
   color: var(--danger);
 }
+
+/* One-click installs (ADR 0083): the editor's offer, the dialog, and the Settings rows. */
+.editor-offer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.editor-offer-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.editor-offer-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-server-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+}
+.install-server-unavailable,
+.install-server-lead {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 20px;
+}
+.install-server-steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.install-server-steps li + li {
+  margin-top: 4px;
+}
+.install-server-facts {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  font-size: var(--fs-12);
+}
+.install-server-facts > div {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.install-server-facts dt {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--text-3);
+}
+.install-server-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.install-server-facts .is-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.install-server-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.install-server-progress-text {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.install-server-bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--surface-3, var(--surface-2));
+}
+.install-server-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 200ms ease-out;
+}
+.install-server-bar.is-unknown > span {
+  width: 30%;
+  animation: install-server-sweep 1.2s ease-in-out infinite;
+}
+@keyframes install-server-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-server-bar.is-unknown > span {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+  .install-server-bar > span {
+    transition: none;
+  }
+}
+.install-server-failed {
+  margin: 12px 0 0;
+  color: var(--danger);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.lsp-server-used {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.lsp-server-detail.is-danger {
+  color: var(--danger);
+}
+.lsp-server-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lsp-server-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lsp-server-or {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.lsp-server-owned {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
