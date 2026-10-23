@@ -1,19 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { EditorSelection, SelectionRange } from '@encode/editor'
 import type { CodeRange, EditorSymbolMatch } from '@shared/types'
 import { File, Hash, ListTree, Loader2, Search } from '../ui/icons'
 import { api } from '../api'
-import { activeEditor, hasActiveEditor } from '../editor/active'
-import { askServers } from '../editor/assist/ask'
-import { goToPlace } from '../editor/assist/navigation'
-import { useOutline } from '../editor/assist/outline'
-import { positionOf } from '../editor/marks'
-import { findSymbols } from '../editor/symbols'
+import { askServers, fileText, findSymbols, focusEditor, goToPlace, isShowing, keepView, putBackView, showRange, useOutline, type KeptView } from '../editor/surface'
+import { SymbolIcon } from '../editor/surface-view'
 import { quickOpenMode, rankFolderSymbols, type LineAsk } from '../palette/quick-open'
 import { useEditor } from '../stores/editor'
 import { usePanels } from '../stores/panels'
 import { useUi } from '../stores/ui'
-import { SymbolIcon } from './code/SymbolIcon'
 
 function fuzzyScore(query: string, target: string): number {
   if (!query) return 1
@@ -56,18 +50,8 @@ interface Item {
   preview?(): void
 }
 
-/** The cursor and scroll before a preview moved them, put back when the person closes without choosing. */
-interface Origin {
-  path: string
-  selection: EditorSelection
-  scroll: { top: number; left: number }
-}
-
-/** The editor showing `path`, when it is on screen. */
-function editorFor(path: string | null) {
-  const view = activeEditor()
-  return view && path && hasActiveEditor() && useEditor.getState().activePath === path ? view : null
-}
+/** Whether the editor on screen shows `path`, as the active tab. */
+const shows = (path: string | null): path is string => path !== null && useEditor.getState().activePath === path && isShowing(path)
 
 /** A point of a file as the servers count, from a line and column as people count them. */
 const pointAt = (at: LineAsk): CodeRange => {
@@ -77,10 +61,10 @@ const pointAt = (at: LineAsk): CodeRange => {
 
 /** Where a line ask lands in the file the editor shows, its numbers kept inside the file. */
 function lineRange(path: string, at: LineAsk): CodeRange {
-  const doc = editorFor(path)?.state.doc
-  if (!doc) return pointAt(at)
-  const line = Math.min(at.line, doc.lineCount)
-  const point = { line: line - 1, character: Math.min(Math.max(0, (at.column ?? 1) - 1), doc.line(line).to - doc.line(line).from) }
+  const text = shows(path) ? fileText(path) : null
+  if (!text) return pointAt(at)
+  const line = Math.min(at.line, text.lines)
+  const point = { line: line - 1, character: Math.min(Math.max(0, (at.column ?? 1) - 1), text.line(line).length) }
   return { start: point, end: point }
 }
 
@@ -101,11 +85,12 @@ export default function QuickOpen() {
   const [index, setIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const origin = useRef<Origin | null>(null)
+  // The cursor and scroll before a preview moved them, put back when the person closes without choosing.
+  const origin = useRef<KeptView | null>(null)
   const chosen = useRef(false)
 
   // The file shown in the editor is what @ and : act on; with the editor not on screen there is none.
-  const shownPath = editorFor(activePath) ? activePath : null
+  const shownPath = shows(activePath) ? activePath : null
   const outlineSymbols = useOutline((state) => (state.path === shownPath ? state.symbols : null))
   const outlineStatus = useOutline((state) => (state.path === shownPath ? state.status : 'idle'))
 
@@ -158,26 +143,16 @@ export default function QuickOpen() {
 
   /** The editor shows a range of its file, selected, without taking the keys from the list. */
   const previewRange = (path: string, range: CodeRange) => {
-    const view = editorFor(path)
-    if (!view) return
-    if (!origin.current) origin.current = { path, selection: view.state.selection, scroll: view.saveScroll() }
-    const { doc } = view.state
-    const from = positionOf(doc, range.start.line, range.start.character)
-    const to = Math.max(from, positionOf(doc, range.end.line, range.end.character))
-    view.dispatch({ selection: EditorSelection.create([new SelectionRange(to, from)]), origin: 'select' })
-    view.scrollToPos(from, true)
+    if (!shows(path)) return
+    origin.current ??= keepView(path)
+    showRange(path, range)
   }
 
   /** What a preview moved goes back. */
   const restore = () => {
     const kept = origin.current
     origin.current = null
-    const view = kept ? editorFor(kept.path) : null
-    if (!kept || !view) return
-    view.dispatch({ selection: kept.selection, origin: 'select' })
-    view.flush()
-    view.scroller.scrollTop = kept.scroll.top
-    view.scroller.scrollLeft = kept.scroll.left
+    if (kept && shows(kept.path)) putBackView(kept)
   }
 
   // Closed without a choice: the cursor goes back to where it was, with the keys.
@@ -186,7 +161,7 @@ export default function QuickOpen() {
       if (chosen.current || !origin.current) return
       const path = origin.current.path
       restore()
-      editorFor(path)?.focus()
+      if (shows(path)) focusEditor(path)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -275,7 +250,7 @@ export default function QuickOpen() {
     }
     // A line of the file shown.
     if (!shownPath) return { items: [], message: 'Open a file in the editor to go to a line.', loading: false }
-    const lines = editorFor(shownPath)?.state.doc.lineCount ?? 0
+    const lines = (shows(shownPath) ? fileText(shownPath)?.lines : 0) ?? 0
     if (!mode.at) return { items: [], message: `Type a line number from 1 to ${lines}, or line:column.`, loading: false }
     const range = lineRange(shownPath, mode.at)
     return {

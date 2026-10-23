@@ -1,6 +1,7 @@
+import '../testing/bridge'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { languageForPath } from '@encode/editor'
+import { lineColoursFor } from '../editor/surface'
 import type { ReviewFile, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
 import { commentsMessage, scopePhrase } from './comments'
 import { HunkTokens, segmentsOf, tokenizeHunk } from './highlight'
@@ -159,18 +160,18 @@ describe('the review as rows', () => {
 
 describe('colours and changed words', () => {
   it('reads removed lines on the old side and added ones on the new side', () => {
-    const tokenizer = languageForPath('a.ts').tokenizer
+    const colours = lineColoursFor('a.ts')
     const lines = [ctx('/* open', 1, 1), del('still comment */ const a = 1', 2), add('const b = 2', 2), ctx('let c = 3', 3, 3)]
-    const tokens = tokenizeHunk(tokenizer, hunk('h', lines))
+    const tokens = tokenizeHunk(colours, hunk('h', lines))
     const first = (index: number) => segmentsOf(lines[index].text, tokens[index], undefined)[0]
     assert.equal(first(1).className, 'tok-comment', 'the old side is still in the comment')
     assert.equal(first(2).className, 'tok-comment', 'so is the new side, which kept the opening line')
   })
 
   it('splits a line into runs of one colour, marks the changed words, and cuts a very long line', () => {
-    const tokenizer = languageForPath('a.ts').tokenizer
+    const colours = lineColoursFor('a.ts')
     const line = add('const total = price * amount', 1, [[22, 28]])
-    const [tokens] = tokenizeHunk(tokenizer, hunk('h', [line]))
+    const [tokens] = tokenizeHunk(colours, hunk('h', [line]))
     const segments = segmentsOf(line.text, tokens, line.words)
     assert.equal(segments.map((segment) => segment.text).join(''), line.text)
     assert.deepEqual(segments.filter((segment) => segment.changed).map((segment) => segment.text), ['amount'])

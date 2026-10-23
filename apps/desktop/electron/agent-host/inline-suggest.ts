@@ -5,10 +5,12 @@
  * show faded, which the person takes with Tab or not at all: it is cut to what fits at the cursor, and refused when it
  * holds characters that would draw differently from what they are.
  */
-import path from 'node:path'
 import { estimateTokens } from '@encode/core'
-import { messageText, redactSecrets, textBlock, type ClientEvent, type ModelClient, type ModelRequest } from '@encode/providers'
+import { messageText, textBlock, type ClientEvent, type ModelClient, type ModelRequest } from '@encode/providers'
 import type { InlineSuggestAnswer, InlineSuggestRequest } from '../../shared/types'
+import { REDACTED, isSecretFile, redactForSuggestion } from '../secret-text'
+
+export { REDACTED, isSecretFile, redactForSuggestion } from '../secret-text'
 
 export type InlineSuggestInput = Omit<InlineSuggestRequest, 'id'>
 
@@ -30,51 +32,6 @@ const LINE_OUTPUT_TOKENS = 96
 const STICKY = 'editor-inline'
 
 // ------------------------------------------------------------------ what is never sent
-
-/** Files that are a secret or hold them, by name. A sample of one (`.env.example`) holds none. */
-const SECRET_NAMES = new Set(['.env', '.npmrc', '.pypirc', '.netrc', '_netrc', '.git-credentials', 'credentials', 'credentials.json', 'secrets.json', 'secrets.yml', 'secrets.yaml', '.htpasswd', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'])
-const SECRET_EXTENSIONS = new Set(['.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.kdbx', '.tfvars'])
-const SAMPLE = /\.(?:example|sample|template|dist)$/i
-
-/** Whether a file, by its path in the folder, is one whose text is never sent for a suggestion. */
-export function isSecretFile(relative: string): boolean {
-  const name = path.posix.basename(relative.replace(/\\/g, '/')).toLowerCase()
-  if (SAMPLE.test(name)) return false
-  if (SECRET_NAMES.has(name) || name.startsWith('.env.')) return true
-  return SECRET_EXTENSIONS.has(path.posix.extname(name))
-}
-
-/** Settings files written as `name value` lines, FiveM's server.cfg among them. */
-const CONFIG_FILES = /\.(?:cfg|conf|ini|properties)$/i
-/** A line of one that sets something named like a credential: `sv_licenseKey ...`, `set mysql_connection_string ...`, `rcon_password ...`. */
-const CONFIG_SECRET = /^([^\S\n]*(?:set[rs]?[^\S\n]+)?)(\S*(?:key|pass|secret|token|licen[cs]e|connection|webhook|auth|credential)\S*)([^\S\n]+)(\S.*)$/gim
-/** An assignment of a value to a name like a credential that the general patterns miss, in code or in data. */
-const NAMED_SECRET = /\b((?:\w*[_-])?(?:licen[cs]e[_-]?key|webhook(?:[_-]?url)?|connection[_-]?string|client[_-]?secret|private[_-]?key|passwd|pwd)["']?\s*[:=]\s*)(["']?)[^\s"',;)}]{6,}/gi
-const PRIVATE_KEY = /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----[\s\S]*?(?:-----END \1PRIVATE KEY-----|$)/g
-const URL_USER = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi
-const DISCORD_WEBHOOK = /\bhttps?:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/[\w/-]+/gi
-const CFX_KEY = /\bcfxk_[A-Za-z0-9_]{10,}/g
-/** A long run of letters and digits in both cases, with several digits: almost always a key or a token; a hash, a hex id or a long name is not. */
-const OPAQUE = /[A-Za-z0-9_-]{32,}/g
-export const REDACTED = '[redacted]'
-
-function looksOpaque(run: string): boolean {
-  if (/^[0-9a-f-]+$/i.test(run)) return false
-  const digits = run.replace(/[^0-9]/g, '').length
-  return /[a-z]/.test(run) && /[A-Z]/.test(run) && (digits >= 4 || (digits >= 2 && run.length >= 40))
-}
-
-/** `text` with credentials replaced, for a file at `relative`: key shapes, assignments to names like a credential, private keys and the like. */
-export function redactForSuggestion(text: string, relative: string): string {
-  let out = text.replace(PRIVATE_KEY, REDACTED)
-  out = out.replace(URL_USER, `$1${REDACTED}@`)
-  out = out.replace(DISCORD_WEBHOOK, `https://discord.com/api/webhooks/${REDACTED}`)
-  out = out.replace(CFX_KEY, REDACTED)
-  out = out.replace(NAMED_SECRET, `$1$2${REDACTED}`)
-  if (CONFIG_FILES.test(relative)) out = out.replace(CONFIG_SECRET, (_line, lead: string, name: string, gap: string) => `${lead}${name}${gap}"${REDACTED}"`)
-  out = redactSecrets(out)
-  return out.replace(OPAQUE, (run) => (looksOpaque(run) ? REDACTED : run))
-}
 
 /**
  * What may be sent for a request: null when the file itself may not be; otherwise its text with credentials taken

@@ -20,6 +20,7 @@ import { goBack, goForward, goToLocation, withOpenText, type Place } from '../ed
 import { EditorOutline } from '../editor/assist/outline'
 import { EditorRefactor } from '../editor/assist/refactor'
 import { attach, docState, foldsOf, indentLabel, recordState, saveFolds, saveScroll, scrollOf } from '../editor/docs'
+import { recordEdit } from '../editor/recording'
 import { sharedHighlighting } from '../editor/highlighting'
 import { tooLargeForServers } from '../editor/language'
 import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
@@ -491,6 +492,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       created.on('transaction', (tr) => {
         const shown = pathRef.current
         if (!shown) return
+        recordEdit(shown, tr)
         useEditor.getState().setDirty(shown, recordState(shown, tr.state))
         if (tr.docChanged || tr.selectionChanged) reportCursor(tr.state)
       })
@@ -777,6 +779,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       { id: 'goto', label: 'Go to line…', shortcut: 'Ctrl+G', onSelect: run('gotoLine') },
       { kind: 'separator', id: 'edit' },
       { id: 'comment', label: 'Toggle line comment', shortcut: 'Ctrl+/', disabled: !editable, onSelect: run('toggleLineComment') },
+      { kind: 'separator', id: 'comment' },
+      { id: 'report-issue', label: 'Report editor issue…', disabled: !pathRef.current, onSelect: () => pathRef.current && useUi.getState().setEditorIssueFor(pathRef.current) },
     ]
   }
 

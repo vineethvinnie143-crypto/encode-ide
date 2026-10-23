@@ -1,6 +1,7 @@
 import { EditorState, detectIndent, languageForPath, mapFolded, reload, type FoldRange, type Transaction } from '@encode/editor'
 import { ChangeSet, Text, type ChangeSpec } from '@encode/text'
 import type { CodeTextEdit } from '@shared/types'
+import { moveRecording, recordEdit, startRecording, stopRecording } from './recording'
 
 export type Eol = '\n' | '\r\n'
 
@@ -74,6 +75,7 @@ export function openDoc(path: string, content: string): EditorState {
     lineSeparator: eol,
   })
   docs.set(path, { state, saved: doc, savedPoint: state.history.point, scroll: null, folds: null, host: null })
+  startRecording(path, state)
   watcher?.opened(path, state, false)
   return state
 }
@@ -98,6 +100,7 @@ export function docState(path: string): EditorState | undefined {
 }
 
 export function closeDoc(path: string): void {
+  stopRecording(path)
   if (docs.delete(path)) watcher?.closed(path)
 }
 
@@ -108,12 +111,15 @@ export function renameDocs(from: string, to: string): void {
     const next = to + path.slice(from.length)
     docs.delete(path)
     docs.set(next, entry)
+    moveRecording(path, next)
     watcher?.closed(path)
     const current = entry.host?.state ?? entry.state
     const language = languageForPath(next)
     if (language.id !== current.config.language.id) {
       const tr = current.update({ config: { language } })
       entry.state = tr.state
+      // A new language starts the trace again: a trace keeps one.
+      recordEdit(next, tr)
       entry.host?.dispatch(tr)
     }
     watcher?.opened(next, entry.host?.state ?? entry.state, differs(entry))
@@ -226,6 +232,9 @@ export function attach(path: string, host: DocHost | null): void {
   if (entry) entry.host = host
 }
 
+/** The view showing `path`, if one does. */
+export const hostOf = (path: string): DocHost | null => docs.get(path)?.host ?? null
+
 /**
  * The file changed on disk (the agent wrote it, another program did). The
  * open document takes the new text as a small change: the cursor stays, and
@@ -251,7 +260,9 @@ export function applyExternal(path: string, content: string): boolean {
   entry.state = tr.state
   entry.saved = tr.state.doc
   entry.savedPoint = tr.state.history.point
-  host?.dispatch(tr)
+  // Through the view, the view's own transactions are recorded (see CodeEditor).
+  if (host) host.dispatch(tr)
+  else recordEdit(path, tr)
   watcher?.changed(path, tr.state, false)
   return true
 }
@@ -326,7 +337,8 @@ function settle(path: string, entry: Entry, tr: Transaction, saved: boolean): vo
     entry.saved = tr.state.doc
     entry.savedPoint = tr.state.history.point
   }
-  entry.host?.dispatch(tr)
+  if (entry.host) entry.host.dispatch(tr)
+  else recordEdit(path, tr)
   watcher?.changed(path, tr.state, differs(entry))
 }
 

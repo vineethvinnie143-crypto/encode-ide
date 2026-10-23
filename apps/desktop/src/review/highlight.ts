@@ -4,8 +4,8 @@
  * state, so a removed line is coloured as the old file read and an added one as the new file reads. A string or
  * comment that opened above the hunk is not known; whole-file context makes it exact.
  */
-import { MAX_TOKENIZED_LINE, TOKEN_NAMES, languageForPath, type Tokenizer } from '@encode/editor'
 import type { ReviewHunk } from '@shared/types'
+import { lineColoursFor, tokenClass, type LineColours } from '../editor/surface'
 
 /** Characters of one line drawn; a minified bundle's line stops here with an ellipsis. */
 export const DISPLAY_LIMIT = 2_000
@@ -18,34 +18,25 @@ export interface Segment {
   changed: boolean
 }
 
-function tokenize(tokenizer: Tokenizer, text: string, state: string): { tokens: readonly number[]; state: string } {
-  try {
-    return tokenizer.line(text.length > MAX_TOKENIZED_LINE ? text.slice(0, MAX_TOKENIZED_LINE) : text, state)
-  } catch {
-    // A tokenizer that fails on a line leaves it plain, as the editor does.
-    return { tokens: text ? [0, 0] : [], state }
-  }
-}
-
 /** Each line's tokens ([start, kind, ...]), in the order of the hunk's lines. */
-export function tokenizeHunk(tokenizer: Tokenizer, hunk: ReviewHunk): Array<readonly number[]> {
+export function tokenizeHunk(colours: LineColours, hunk: ReviewHunk): Array<readonly number[]> {
   const out: Array<readonly number[]> = new Array(hunk.lines.length)
-  let oldState = tokenizer.start
-  let newState = tokenizer.start
+  let oldState = colours.start
+  let newState = colours.start
   hunk.lines.forEach((line, index) => {
     if (line.kind === 'del') {
-      const result = tokenize(tokenizer, line.text, oldState)
+      const result = colours.line(line.text, oldState)
       out[index] = result.tokens
       oldState = result.state
     } else if (line.kind === 'add') {
-      const result = tokenize(tokenizer, line.text, newState)
+      const result = colours.line(line.text, newState)
       out[index] = result.tokens
       newState = result.state
     } else {
-      const result = tokenize(tokenizer, line.text, newState)
+      const result = colours.line(line.text, newState)
       out[index] = result.tokens
       // A kept line is on both sides; the old side moves on from its own state.
-      oldState = oldState === newState ? result.state : tokenize(tokenizer, line.text, oldState).state
+      oldState = oldState === newState ? result.state : colours.line(line.text, oldState).state
       newState = result.state
     }
   })
@@ -60,7 +51,7 @@ export class HunkTokens {
     const key = `${path}\u0000${hunk.id}`
     let tokens = this.cache.get(key)
     if (!tokens) {
-      tokens = tokenizeHunk(languageForPath(path).tokenizer, hunk)
+      tokens = tokenizeHunk(lineColoursFor(path), hunk)
       // Hunks of earlier reviews are let go of in bulk; a review rarely has this many.
       if (this.cache.size > 4_000) this.cache.clear()
       this.cache.set(key, tokens)
@@ -98,9 +89,8 @@ export function segmentsOf(text: string, tokens: readonly number[] | undefined, 
     const from = points[index]
     const to = points[index + 1]
     while (kindAt < kinds.length && kinds[kindAt][0] <= from) kind = kinds[kindAt++][1]
-    const name = TOKEN_NAMES[kind] ?? 'plain'
     const changed = marks.some(([start, end]) => start <= from && to <= end)
-    const piece = { text: text.slice(from, to), className: name === 'plain' ? '' : `tok-${name}`, changed }
+    const piece = { text: text.slice(from, to), className: tokenClass(kind), changed }
     const last = segments[segments.length - 1]
     if (last && last.className === piece.className && last.changed === piece.changed) last.text += piece.text
     else segments.push(piece)

@@ -77,6 +77,7 @@ say so.
 | [0085](0085-json-css-and-html-are-read-by-encodes-own-language-server.md) | JSON, CSS and HTML are read by eNCode's own language server | Accepted, builds on 0072 and 0083 |
 | [0086](0086-a-companion-server-runs-beside-a-files-own-server-tailwind-and-svelte.md) | A companion server runs beside a file's own server; Tailwind and Svelte | Accepted, builds on 0072, 0083 and 0085 |
 | [0087](0087-the-editor-suggests-code-as-you-type-from-the-inline-suggestions-role-drawn-as-ghost-text-and-sent-without-secrets.md) | The editor suggests code as you type, from the Inline suggestions role, drawn as ghost text and sent without secrets | Accepted, builds on 0052, 0060, 0062 and 0079 |
+| [0088](0088-report-editor-issue-replays-what-was-recorded-and-the-app-reaches-the-editor-through-a-fixed-interface.md) | Report editor issue replays what was recorded, and the app reaches the editor through a fixed interface | Accepted, builds on 0051, 0075, 0082 and 0087 |
 
 ## Template
 

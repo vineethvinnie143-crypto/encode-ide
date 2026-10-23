@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import type { FindingPriority, ReviewFile, ReviewHunk, ReviewLine, ReviewSnapshot } from '@shared/types'
-// The token colours (.tok-*) the lines are drawn with are the editor's.
-import '@encode/editor-view/style.css'
+// The token colours (.tok-*) the lines are drawn with are the editor's; its stylesheet comes with editor/surface-view.
 import { DISPLAY_LIMIT, HunkTokens, segmentsOf } from '../../review/highlight'
 import { columnsOf, expandTabs, wrappedLines } from '../../review/measure'
 import { inFolder } from '../../review/paths'

@@ -116,6 +116,9 @@ export interface AppActions {
   showAbout(): void
   feedback(): void
   saveDiagnostics(): void
+  /** Opens Report editor issue for the file the editor shows; false when it shows none. */
+  canReportEditorIssue(): boolean
+  reportEditorIssue(): void
   showLogs(): void
 }
 
@@ -457,6 +460,14 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'help.shortcuts', title: 'Keyboard shortcuts', group: 'Help', keys: ['Ctrl+/'], run: () => a.showShortcuts() },
     { id: 'help.feedback', title: 'Send feedback…', group: 'Help', run: () => a.feedback() },
     { id: 'help.diagnostics', title: 'Save diagnostics…', group: 'Help', run: () => a.saveDiagnostics() },
+    {
+      id: 'help.editorIssue',
+      title: 'Report editor issue…',
+      group: 'Help',
+      keywords: 'bug editor trace replay report problem typing cursor wrong',
+      enabled: () => a.canReportEditorIssue(),
+      run: () => a.reportEditorIssue(),
+    },
     { id: 'help.logs', title: 'Show log files', group: 'Help', run: () => a.showLogs() },
     { id: 'help.about', title: 'About eNCode', group: 'Help', run: () => a.showAbout() },
   ]

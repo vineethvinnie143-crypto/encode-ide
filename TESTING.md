@@ -547,6 +547,21 @@ ends with the last 400 lines of the log. It has no API keys, no file contents an
 shown as `~`. A log line can still name a file or folder when something went wrong with it, and the file is plain
 text: read it before you send it. **Help → Show log files** opens the folder the logs are in.
 
+When the editor itself does something wrong (the cursor lands in the wrong place, Undo leaves the wrong text, a paste
+or an indent goes wrong, text shows up that you did not type), report it from the file it happened in, before you close
+it:
+
+1. **Help → Report editor issue…** (also in the palette, and on a right-click in the editor).
+2. The dialog replays what happened in the file since you opened it and says whether it found a problem. Write what
+   you did and what you expected, and **Save report…**.
+3. Send that file with a screenshot if the screen looked wrong.
+
+eNCode keeps a record of each open file's edits and cursor moves in memory, and nothing else: not what you scrolled,
+folded or saw. It goes nowhere unless you save a report. **Replace the words of the file** is on by default: every word
+becomes another of the same shape, so the report shows the shape of your code and not what it says. Keep the words
+only for a file you would share as it is; eNCode refuses to keep them in a file named like `.env`, or in one that holds
+something shaped like a key or a password. The report never holds the file's path, only its extension.
+
 ## Where things are
 
 | What | Where |
@@ -585,6 +600,9 @@ Updating means installing the next build over the last one: everything above sta
   Vue files, which have no server in eNCode yet. A Lua server
   that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- Report editor issue records a file only while it is open, and only a file under 2 million characters; after a long
+  session it holds the newest steps. A problem only of drawing (a line drawn in the wrong place, a cursor that blinks
+  where it should not) replays as "No problem found", so say what you saw and add a screenshot.
 - Suggestions as you type: one suggestion at a time (no choosing between several), none for a selection, and none that
   change text before the cursor. Credentials are found by their shape, so a short password with a plain name in an
   ordinary file can still go to the model's provider with the code around it.
