@@ -30,6 +30,7 @@ interface State {
   activated: number
   focused: boolean
   dialogOpen: boolean
+  menuOpen: boolean
   minimized: boolean
   box: number[]
   canvas: number[]
@@ -433,8 +434,11 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     await desktop.act(actOf(window, [clickPoint(look.capture, centre, 'right')]), SIGNAL)
     events = await eventsAfter(a, before, 2)
     assert.ok(events[0].startsWith('down ') && events[0].endsWith(' right'))
-    // The menu is open now; it belongs to the window, so keys reach it.
+    // The menu opens a moment after the button comes up; it belongs to the window, so keys reach it. Escape sent before
+    // it shows is lost, and a menu left open takes the next test's wheel.
+    await a.until((now) => now.menuOpen, 'the menu to open')
     await desktop.act(actOf(window, [keys({ modifiers: [], key: 'escape' })]), SIGNAL)
+    await a.until((now) => !now.menuOpen, 'the menu to close')
   })
 
   it('scrolls the way it is told, a notch at a time, up and down and sideways', async () => {
@@ -442,7 +446,10 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     const look = await desktop.look(lookOf(window, { image: false, outline: 'none' }), SIGNAL)
     const state = await a.state()
     const centre: Point = [state.canvas[0] + 60, state.canvas[1] + 60]
+    assert.equal(state.menuOpen, false, 'no menu is open to take the wheel')
+    // The click gives the canvas the focus; the wheel is sent once the canvas has seen it.
     await desktop.act(actOf(window, [clickPoint(look.capture, centre)]), SIGNAL)
+    await eventsAfter(a, state.events.length, 2)
     const deltas = async (step: Step, kind: 'wheel' | 'hwheel', count: number) => {
       const before = (await a.state()).events.length
       await desktop.act(actOf(window, [step]), SIGNAL)

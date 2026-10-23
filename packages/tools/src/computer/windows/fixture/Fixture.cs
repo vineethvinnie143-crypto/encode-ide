@@ -117,6 +117,7 @@ namespace Encode.Fixture
         private int activated;
         private int counter;
         private bool dialogOpen;
+        private bool menuOpen;
         private string lastPolled = "";
         private int soonPending;
 
@@ -197,6 +198,9 @@ namespace Encode.Fixture
             ContextMenuStrip menu = new ContextMenuStrip();
             ToolStripItem action = menu.Items.Add("Canvas action");
             action.Click += delegate { Log("menu Canvas action"); };
+            // The menu opens a moment after the button comes up: a test waits for it before it presses a key to close it.
+            menu.Opened += delegate { menuOpen = true; Write(); };
+            menu.Closed += delegate { menuOpen = false; Write(); };
             canvas.ContextMenuStrip = menu;
 
             Controls.AddRange(new Control[] { notesLabel, notes, secretLabel, secret, subjectLabel, subject, add, openDialog, remember, color, items, status, canvas });
@@ -374,6 +378,7 @@ namespace Encode.Fixture
             sb.Append(",\"activated\":").Append(activated.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"focused\":").Append(ContainsFocus ? "true" : "false");
             sb.Append(",\"dialogOpen\":").Append(dialogOpen ? "true" : "false");
+            sb.Append(",\"menuOpen\":").Append(menuOpen ? "true" : "false");
             sb.Append(",\"minimized\":").Append(WindowState == FormWindowState.Minimized ? "true" : "false");
             sb.Append(",\"box\":").Append(Rect(Bounds));
             sb.Append(",\"canvas\":").Append(Rect(canvas.RectangleToScreen(canvas.ClientRectangle)));
