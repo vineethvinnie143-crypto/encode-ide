@@ -41,13 +41,18 @@ const BINARY_EXTENSIONS = new Set([
   '.db', '.sqlite', '.sqlite3', '.pack', '.idx', '.lockb',
 ])
 
+/** The largest file read for anything but the editor: a peek, a file attached to a message. */
 const MAX_READ_BYTES = 12 * 1024 * 1024
+/** The largest file the editor opens. */
+export const MAX_OPEN_BYTES = 256 * 1024 * 1024
 const WATCH_IGNORE = /(^|[\\/])(\.git|node_modules)([\\/]|$)/
 
 function isBinaryBuffer(buf: Buffer): boolean {
   const sample = buf.subarray(0, 8192)
   return sample.includes(0)
 }
+
+const megabytes = (bytes: number) => (bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)
 
 function decodeUtf8(buf: Buffer): string {
   try {
@@ -195,14 +200,25 @@ export class WorkspaceService {
   }
 
   async read(rel: string): Promise<ReadFileResult> {
+    return this.readUpTo(rel, MAX_READ_BYTES)
+  }
+
+  /** A file for the editor, which opens larger ones than anything else reads. */
+  async readForEditor(rel: string): Promise<ReadFileResult> {
+    return this.readUpTo(rel, MAX_OPEN_BYTES)
+  }
+
+  private async readUpTo(rel: string, maxBytes: number): Promise<ReadFileResult> {
     const abs = this.resolve(rel)
     await this.assertReal(abs)
     const stat = await fs.stat(abs)
     if (stat.isDirectory()) throw new Error('Path is a directory')
-    if (stat.size > MAX_READ_BYTES) {
-      throw new Error(`File is too large to open (${(stat.size / 1024 / 1024).toFixed(1)} MB)`)
+    if (stat.size > maxBytes) {
+      throw new Error(`File is too large to open (${megabytes(stat.size)} MB; the limit here is ${megabytes(maxBytes)} MB)`)
     }
     const buf = await fs.readFile(abs)
+    // The file grew between the two looks: what was read is still held to the limit.
+    if (buf.length > maxBytes) throw new Error(`File is too large to open (${megabytes(buf.length)} MB; the limit here is ${megabytes(maxBytes)} MB)`)
     const binary = isBinaryBuffer(buf)
     const content = binary ? '' : decodeUtf8(buf)
     return {

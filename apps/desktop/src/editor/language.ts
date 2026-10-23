@@ -1,10 +1,15 @@
 import type { EditorState } from '@encode/editor'
-import { watchDocs } from './docs'
+import { docState, watchDocs } from './docs'
 
 /** A pause in typing before the servers get the new text: each change they get, they check the file again. */
 export const SEND_AFTER_MS = 250
 /** The largest document the servers are given, in characters; they read no more of a file from the disk either. */
 export const MAX_DOCUMENT_CHARS = 8 * 1024 * 1024
+
+/** Whether the document open at `path` is larger than the servers are given. */
+export function tooLargeForServers(path: string): boolean {
+  return (docState(path)?.doc.length ?? 0) > MAX_DOCUMENT_CHARS
+}
 
 /** Where the documents go: the open folder's language servers, through the main process. */
 export interface DocumentSink {

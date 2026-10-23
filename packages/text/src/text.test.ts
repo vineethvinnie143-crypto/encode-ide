@@ -47,6 +47,20 @@ describe('Text', () => {
     assert.throws(() => text.lineAt(1.5), RangeError)
   })
 
+  it('compares with a string in place, as the string would read as a document', async () => {
+    const piece = gen.oneOf('', 'a', 'b', '\n', 'ab\n', '\r', '😀')
+    const source = gen.map(gen.array(piece, 0, 40), (parts) => parts.join(''))
+    await check(gen.tuple(source, source), ([a, b]) => {
+      assert.equal(Text.of(a).eqString(b), a === b)
+      assert.equal(Text.of(a).eqString(a), true)
+    })
+    const big = Text.of(Array.from({ length: 3000 }, (_, index) => `line ${index}`))
+    const text = big.toString()
+    assert.ok(big.eqString(text))
+    assert.ok(!big.eqString(`${text.slice(0, -1)}X`))
+    assert.ok(!big.eqString(text.replace('line 2000\n', 'line 2000 ')))
+  })
+
   it('rejects ranges outside the document', () => {
     const text = Text.of('abc')
     assert.throws(() => text.replace(2, 1, 'x'), RangeError)

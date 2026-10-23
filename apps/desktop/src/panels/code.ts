@@ -66,14 +66,18 @@ export function sortedServers(report: LanguageServersReport): LanguageServerInfo
   return report.servers.map((server, index) => ({ server, index })).sort((a, b) => rank[a.server.state] - rank[b.server.state] || a.index - b.index).map(({ server }) => server)
 }
 
-/** What the editor's footer says of the open file's server, or null when no server covers the file. */
-export function footerStatus(report: LanguageServersReport | null, path: string | null): { text: string; tone: Tone; title: string } | null {
+/**
+ * What the editor's footer says of the open file's server, or null when no server covers the file. `tooLarge`: the
+ * file is larger than the servers are given.
+ */
+export function footerStatus(report: LanguageServersReport | null, path: string | null, tooLarge = false): { text: string; tone: Tone; title: string } | null {
   if (!report || !path) return null
   const server = serverForPath(report, path)
   if (!server) return null
   const name = server.label
   if (report.state === 'off') return { text: 'Language servers off', tone: 'quiet', title: 'Turn them on in Settings to see errors as you type.' }
   if (report.state === 'untrusted') return { text: `${name}: folder not trusted`, tone: 'warning', title: 'Language servers run only in folders you trust. Open Settings to trust this one.' }
+  if (tooLarge) return { text: `${name}: file too large`, tone: 'quiet', title: `Files over 8 MB are not given to language servers, so ${name} does not check this one. Editing, colours and search still work.` }
   switch (server.state) {
     case 'running':
       return server.working ? { text: `${name}: checking`, tone: 'busy', title: `${name} is reading the project.` } : { text: name, tone: 'success', title: `${name} checks this file as you type.` }
@@ -93,12 +97,13 @@ export function footerStatus(report: LanguageServersReport | null, path: string 
  * Why the servers gave no answer to something the person asked of a file ("go to definition"), as a sentence with
  * what to do about it.
  */
-export function noAnswerReason(report: LanguageServersReport | null, path: string, feature: string): string {
+export function noAnswerReason(report: LanguageServersReport | null, path: string, feature: string, tooLarge = false): string {
   const server = report ? serverForPath(report, path) : null
   if (!report || !server) return `No language server covers ${path.split('/').pop() ?? path}, so ${feature} is not available for it.`
   const name = server.label
   if (report.state === 'off') return `Language servers are off. Turn them on in Settings to use ${feature}.`
   if (report.state === 'untrusted') return `Language servers run only in folders you trust. Trust this folder to use ${feature}.`
+  if (tooLarge) return `${path.split('/').pop() ?? path} is over 8 MB, more than language servers are given, so ${feature} is not available for it.`
   switch (server.state) {
     case 'missing':
       return `${name} is not installed. Install it to use ${feature}: ${server.install}`

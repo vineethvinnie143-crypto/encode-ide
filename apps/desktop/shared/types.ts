@@ -1291,7 +1291,10 @@ export interface EncodeApi {
     recent(): Promise<string[]>
     list(path: string): Promise<FileEntry[]>
     listAllFiles(): Promise<{ files: string[]; truncated: boolean }>
+    /** A file up to 12 MB, for anything but the editor. */
     read(path: string): Promise<ReadFileResult>
+    /** A file for the editor, up to 256 MB. */
+    readForEditor(path: string): Promise<ReadFileResult>
     write(path: string, content: string): Promise<{ size: number }>
     createFile(parent: string, name: string): Promise<FileEntry>
     createDir(parent: string, name: string): Promise<FileEntry>

@@ -6,13 +6,19 @@ import {
   T,
   Transaction,
   bracketAt,
+  carryColumnIndexes,
   columnAt,
+  forgetColumnIndexes,
   indentWidth,
   indexAtColumn,
+  languageById,
   leadingWhitespace,
   nextCluster,
   previousCluster,
   unitWidth,
+  MAX_BATCH_LINES,
+  type HighlightResult,
+  type HighlightService,
   type TransactionSpec,
 } from '@encode/editor'
 import type { ChangeSet, Line } from '@encode/text'
@@ -36,8 +42,16 @@ import { StickyController } from './sticky'
 export const LONG_LINE = 4000
 /** Characters kept on either side of the viewport in a long line. */
 const LONG_MARGIN = 800
-/** The widest the scrollable area is made, in pixels. */
+/** The widest the scrollable area is made, in pixels; a wider text is scrolled through a scaled range, as a tall one is. */
 const MAX_CONTENT_WIDTH = 16_000_000
+/**
+ * In a text wider than that, the layers are drawn from a left edge (`originX`) on this grid at least this far left of
+ * the view, so that the pixel offsets in the DOM stay small.
+ */
+const ORIGIN_STEP_X = 1_000_000
+const ORIGIN_MARGIN_X = 100_000
+/** The furthest a line's text is shifted left of its box to bring a far part of the line into view. */
+const MAX_SHIFT = 30_000_000
 const PROBE_CHARS = 200
 /** A line draws at most this many hints; a server that sends more for one line is not giving hints. */
 const MAX_INLAYS_PER_LINE = 50
@@ -48,6 +62,8 @@ const GUTTER_PAD_LEFT = 14
 const GUTTER_PAD_RIGHT = 12
 /** Documents up to this many lines are scanned once for their longest line. */
 const SCAN_LIMIT = 50_000
+/** Lines in the first batch for the highlighting thread, and after each edit. */
+const FIRST_BATCH = 256
 
 export interface EditorViewConfig {
   state: EditorState
@@ -77,6 +93,12 @@ export interface EditorViewConfig {
   bracketColors?: boolean
   /** A small picture of the document beside the text, with a slider for the part in view. Default false. */
   minimap?: boolean
+  /**
+   * Tokenizes the document on another thread (a worker), so reading a large file through costs the page next to
+   * nothing; the view still tokenizes the lines it draws near what is known. Without it, or once it fails, the view
+   * tokenizes ahead in idle time.
+   */
+  highlighting?: HighlightService | null
 }
 
 type Options = Required<
@@ -219,6 +241,11 @@ export class EditorView {
   private maxCols = 0
   private origin = 0
   private layerTop = 0
+  /** Sideways: document pixels per scroll pixel, the document x at the view's left edge, and where the layers start. */
+  private hscale = new ScrollScale(0, 0, MAX_CONTENT_WIDTH)
+  private docLeft = 0
+  private originX = 0
+  private layerLeft = 0
   private rendered: { first: number; last: number } = { first: 0, last: -1 }
   private frame = 0
   private pendingReveal: { pos: number; center: boolean } | null = null
@@ -227,6 +254,13 @@ export class EditorView {
   private bracketCache: { version: number; head: number; pair: [number, number] | null } | null = null
   private blink: Animation | null = null
   private idleWork = 0
+  private readonly highlighting: HighlightService | null
+  /** A batch is out on the highlighting thread. */
+  private remoteBusy = false
+  /** The highlighting thread failed: the view tokenizes ahead itself from now on. */
+  private remoteFailed = false
+  /** Lines in the next batch: few after an edit, which usually settles within a line or two, more as reading goes on. */
+  private batchLines = FIRST_BATCH
   private destroyed = false
   private focused = false
   private lastScroll = { top: -1, left: -1 }
@@ -267,6 +301,7 @@ export class EditorView {
       bracketColors: config.bracketColors ?? false,
       minimap: config.minimap ?? false,
     }
+    this.highlighting = config.highlighting ?? null
     this.mac = isMac(config.platform ?? (typeof navigator === 'undefined' ? '' : navigator.platform))
     this.bindings = [...(config.bindings ?? []), ...defaultBindings]
     this.keymap = new Keymap(this.bindings, this.mac)
@@ -407,11 +442,15 @@ export class EditorView {
     const before = this.state
     this.state = tr.state
     if (tr.docChanged) {
+      carryColumnIndexes(tr.changes, before.doc, tr.state.doc)
       this.highlighter.update(tr.changes, tr.state.doc)
       this.folding.documentChanged(tr.changes, before.doc, tr.state.doc)
       this.semantic.map(tr.changes, before.doc)
       this.inlays.map(tr.changes, before.doc)
       this.mapAfterChange(tr.changes)
+      // The states below the edit may have changed (an opened comment): reading on starts again from it.
+      this.batchLines = FIRST_BATCH
+      this.scheduleIdleWork()
     }
     // A cursor that reached into a folded block (a search, an undo, Go to line) opens it.
     if (tr.docChanged || tr.selectionChanged) for (const range of tr.state.selection.ranges) this.folding.reveal(range.head)
@@ -419,6 +458,7 @@ export class EditorView {
       this.highlighter.setTokenizer(tr.state.config.language.tokenizer)
       this.highlighter.setBrackets(this.options.bracketColors ? tr.state.config.language.brackets : null)
       this.tokenCache.clear()
+      this.scheduleIdleWork()
     }
     if (tr.state.config.readOnly !== before.config.readOnly) this.root.classList.toggle('enc-readonly', tr.state.config.readOnly)
     if (tr.state.config.tabSize !== before.config.tabSize) this.root.style.setProperty('--enc-tab-size', String(tr.state.config.tabSize))
@@ -432,6 +472,7 @@ export class EditorView {
   setState(state: EditorState, scroll?: { top: number; left: number }): void {
     this.state = state
     this.highlighter = this.createHighlighter()
+    this.batchLines = FIRST_BATCH
     this.root.classList.toggle('enc-readonly', state.config.readOnly)
     this.sources.clear()
     for (const zone of [...this.attachedZones]) this.detachZone(zone)
@@ -656,6 +697,7 @@ export class EditorView {
   }
 
   private scheduleIdleWork(): void {
+    if (this.remoteUsable()) return this.pumpRemote()
     if (this.idleWork || this.destroyed || this.highlighter.done) return
     const run = (deadline?: IdleDeadline) => {
       this.idleWork = 0
@@ -671,6 +713,41 @@ export class EditorView {
       typeof requestIdleCallback === 'function'
         ? requestIdleCallback(run, { timeout: 500 })
         : (setTimeout(run, 16) as unknown as number)
+  }
+
+  /** The highlighting thread can read this document: it is alive and knows the language by its id. */
+  private remoteUsable(): boolean {
+    if (!this.highlighting || this.remoteFailed) return false
+    const language = this.state.config.language
+    return languageById(language.id)?.tokenizer === language.tokenizer
+  }
+
+  /** Sends the next batch to the highlighting thread, one at a time, and stores what comes back. */
+  private pumpRemote(): void {
+    if (this.remoteBusy || this.destroyed || this.highlighter.done) return
+    const highlighter = this.highlighter
+    const batch = highlighter.nextBatch(this.state.config.language.id, this.batchLines)
+    if (!batch) return
+    this.remoteBusy = true
+    void this.highlighting!.run(batch).then(
+      (result) => this.batchDone(highlighter, result),
+      () => this.batchDone(highlighter, null),
+    )
+  }
+
+  private batchDone(highlighter: Highlighter, result: HighlightResult | null): void {
+    this.remoteBusy = false
+    if (this.destroyed) return
+    if (highlighter === this.highlighter) {
+      if (!result) {
+        highlighter.dropBatch()
+        this.remoteFailed = true
+      } else if (highlighter.acceptBatch(result)) {
+        this.batchLines = Math.min(MAX_BATCH_LINES, this.batchLines * 4)
+        if (this.rendered.last >= this.rendered.first && [...this.lineEls.values()].some((el) => !el.exact)) this.requestRender()
+      }
+    }
+    this.scheduleIdleWork()
   }
 
   // ----------------------------------------------------------------- measuring
@@ -732,7 +809,7 @@ export class EditorView {
     this.lastScroll = { top: scrollTop, left: scrollLeft }
     if (vertical && this.scale.scaled) this.placeLayers()
     if (sideways) this.placeFixedZones()
-    if (!this.coversViewport() || (scrollLeft !== 0 && this.hasLongLines())) this.render()
+    if (!this.coversViewport() || (scrollLeft !== 0 && this.hasLongLines()) || (sideways && this.hscale.scaled)) this.render()
     else {
       this.sticky.update()
       this.minimap.update(this.minimapWidth)
@@ -746,7 +823,16 @@ export class EditorView {
    * wheel moves it by the distance itself instead.
    */
   private onWheel(event: WheelEvent): void {
-    if (!this.scale.scaled || event.ctrlKey || event.defaultPrevented || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+    if (event.ctrlKey || event.defaultPrevented) return
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      // Sideways the same: in a scaled width the text moves by the wheel's distance.
+      if (!this.hscale.scaled) return
+      event.preventDefault()
+      const unit = event.deltaMode === 1 ? this.metrics.charWidth * 3 : event.deltaMode === 2 ? this.viewport.width : 1
+      this.scroller.scrollLeft += this.hscale.toScroll(event.deltaX * unit)
+      return
+    }
+    if (!this.scale.scaled) return
     event.preventDefault()
     const unit = event.deltaMode === 1 ? this.metrics.lineHeight : event.deltaMode === 2 ? this.viewport.height : 1
     this.scrollBy(event.deltaY * unit)
@@ -808,20 +894,12 @@ export class EditorView {
     const foldColumn = this.options.folding ? FOLD_COLUMN : 0
     const gutterWidth = (this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12) + foldColumn
     this.minimapWidth = this.minimap.widthFor(viewportWidth, gutterWidth)
-    // The minimap sits over the right of the text area: the longest line can scroll clear of it.
-    const textWidth = this.metrics.paddingX * 2 + this.maxCols * charWidth + this.minimapWidth
-    const contentWidth = Math.min(MAX_CONTENT_WIDTH, Math.max(viewportWidth - gutterWidth, Math.ceil(textWidth)))
     if (gutterWidth !== this.gutterWidth) {
       this.gutterWidth = gutterWidth
       this.gutter.style.width = `${gutterWidth}px`
       this.root.style.setProperty('--enc-gutter-w', `${gutterWidth}px`)
     }
-    if (contentWidth !== this.contentWidth) {
-      this.contentWidth = contentWidth
-      this.sizer.style.width = `${gutterWidth + contentWidth}px`
-    } else if (this.sizer.style.width === '') {
-      this.sizer.style.width = `${gutterWidth + contentWidth}px`
-    }
+    this.setTextWidth(this.maxCols)
     const scrollHeight = `${this.scale.scrollHeight}px`
     if (this.sizer.style.height !== scrollHeight) this.sizer.style.height = scrollHeight
 
@@ -835,6 +913,17 @@ export class EditorView {
     const scrollTop = this.scroller.scrollTop
     const scrollLeft = this.scroller.scrollLeft
     this.lastScroll = { top: scrollTop, left: scrollLeft }
+    const docLeft = this.hscale.toDoc(scrollLeft)
+    const originX = this.hscale.scaled ? Math.max(0, Math.floor((docLeft - ORIGIN_MARGIN_X) / ORIGIN_STEP_X) * ORIGIN_STEP_X) : 0
+    if (originX !== this.originX) {
+      this.originX = originX
+      // Every line is drawn again from the new left edge, an empty one too, and none keeps its piece.
+      for (const el of this.lineEls.values()) {
+        el.text = ''
+        el.from = -1
+      }
+    }
+    this.docLeft = docLeft
     const top = this.scale.toDoc(scrollTop)
     const overscan = Math.max(lineHeight * 12, viewportHeight * 0.6)
     const first = this.heights.lineAt(top - overscan)
@@ -846,7 +935,7 @@ export class EditorView {
     }
     this.placeLayers()
 
-    this.drawLines(first, last, scrollLeft, viewportWidth - gutterWidth)
+    this.drawLines(first, last, docLeft, viewportWidth - gutterWidth)
     this.drawZones(first, last)
     this.rendered = { first, last }
     this.drawLayers(first, last)
@@ -865,17 +954,23 @@ export class EditorView {
     return this.heights.isHidden(n)
   }
 
-  /** Puts the layers where the scroll position needs them (they move with it only when the height is scaled). */
+  /** Puts the layers where the scroll position needs them (they move with it only when the height or width is scaled). */
   private placeLayers(): void {
     const top = this.scale.toDoc(this.scroller.scrollTop)
     const layerTop = this.scroller.scrollTop + (this.origin - top)
-    if (layerTop === this.layerTop && this.layer.style.top) return
-    this.layerTop = layerTop
-    this.layer.style.top = `${layerTop}px`
-    this.gutterLayer.style.top = `${layerTop}px`
+    if (layerTop !== this.layerTop || !this.layer.style.top) {
+      this.layerTop = layerTop
+      this.layer.style.top = `${layerTop}px`
+      this.gutterLayer.style.top = `${layerTop}px`
+    }
+    const layerLeft = this.hscale.scaled ? this.scroller.scrollLeft - this.docLeft + this.originX : 0
+    if (layerLeft !== this.layerLeft) {
+      this.layerLeft = layerLeft
+      this.layer.style.left = layerLeft ? `${layerLeft}px` : ''
+    }
   }
 
-  private drawLines(first: number, last: number, scrollLeft: number, visibleWidth: number): void {
+  private drawLines(first: number, last: number, docLeft: number, visibleWidth: number): void {
     const doc = this.state.doc
     const { charWidth } = this.metrics
     const tabSize = this.state.config.tabSize
@@ -909,8 +1004,8 @@ export class EditorView {
       let from = 0
       let to = info.text.length
       if (long) {
-        const firstCol = Math.max(0, Math.floor(Math.max(0, scrollLeft) / charWidth) - LONG_MARGIN)
-        const lastCol = Math.floor((scrollLeft + visibleWidth) / charWidth) + LONG_MARGIN
+        const firstCol = Math.max(0, Math.floor(Math.max(0, docLeft) / charWidth) - LONG_MARGIN)
+        const lastCol = Math.floor((docLeft + visibleWidth) / charWidth) + LONG_MARGIN
         // Re-cut the piece only when the viewport nears its edge.
         const keep = el.line === number && el.text === info.text && el.to - el.from < info.text.length
         if (keep && el.from <= Math.max(0, firstCol - LONG_MARGIN / 2) && el.to >= Math.min(info.text.length, lastCol + LONG_MARGIN / 2)) {
@@ -924,7 +1019,8 @@ export class EditorView {
       // A long line is drawn in part, and with no hints.
       const inlays = long ? undefined : this.inlays.line(number)
       if (el.text !== info.text || !sameTokens(el.tokens, highlighted.tokens) || el.from !== from || el.to !== to || el.exact !== highlighted.exact || el.inlays !== inlays) {
-        const lead = from > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth) : undefined
+        // What comes before the drawn piece, less what lies left of the layers' edge.
+        const lead = from > 0 || this.originX > 0 ? this.spacer(columnAt(info.text, from, tabSize) * charWidth - this.originX) : undefined
         el.drawnInlays = fillLine(el.dom, info.text, highlighted.tokens, from, to, lead, undefined, inlays)
         el.text = info.text
         el.tokens = highlighted.tokens
@@ -968,21 +1064,33 @@ export class EditorView {
   /** Makes the scrollable area wide enough for `cols` columns. */
   private growWidth(cols: number): void {
     this.maxCols = cols
-    const width = Math.min(
-      MAX_CONTENT_WIDTH,
-      Math.max(this.viewport.width - this.gutterWidth, Math.ceil(this.metrics.paddingX * 2 + cols * this.metrics.charWidth + this.minimapWidth)),
-    )
-    if (width !== this.contentWidth) {
+    this.setTextWidth(cols)
+  }
+
+  /**
+   * Sizes the scrollable area for text `cols` columns wide. The minimap sits over the right of the text area, so the
+   * longest line can scroll clear of it. Past MAX_CONTENT_WIDTH the scroll range is scaled.
+   */
+  private setTextWidth(cols: number): void {
+    const visible = Math.max(1, this.viewport.width - this.gutterWidth)
+    const textWidth = Math.max(visible, Math.ceil(this.metrics.paddingX * 2 + cols * this.metrics.charWidth + this.minimapWidth))
+    const scaled = this.hscale.scaled
+    this.hscale = new ScrollScale(textWidth, visible, MAX_CONTENT_WIDTH)
+    if (this.hscale.scaled !== scaled) this.root.classList.toggle('enc-wide', this.hscale.scaled)
+    const width = Math.ceil(this.hscale.scrollHeight)
+    if (width !== this.contentWidth || this.sizer.style.width === '') {
       this.contentWidth = width
       this.sizer.style.width = `${this.gutterWidth + width}px`
     }
   }
 
+  /** Room before a line's drawn text; a negative width moves the text left of the line's box. */
   private spacer(width: number): HTMLElement {
     const span = document.createElement('span')
     span.className = 'enc-pad'
     span.style.display = 'inline-block'
-    span.style.width = `${width}px`
+    if (width >= 0) span.style.width = `${width}px`
+    else span.style.marginLeft = `${Math.max(-MAX_SHIFT, width)}px`
     return span
   }
 
@@ -1035,7 +1143,7 @@ export class EditorView {
   private placeFixedZones(): void {
     for (const zone of this.attachedZones) {
       if (!zone.fixed) continue
-      zone.dom.style.left = `${this.scroller.scrollLeft}px`
+      zone.dom.style.left = `${this.scroller.scrollLeft - this.layerLeft}px`
       zone.dom.style.width = `${Math.max(0, this.scroller.clientWidth - this.gutterWidth - this.minimapWidth)}px`
     }
   }
@@ -1142,11 +1250,17 @@ export class EditorView {
       const line = doc.line(number)
       const start = Math.max(from, line.from) - line.from
       const end = Math.min(to, line.to) - line.from
-      const left = this.xOf(line, start)
+      let left = this.xOf(line, start)
       let right = end === start ? left : this.xOf(line, end)
       // A selection that runs on past the line's end shows the line break.
       if (selection && to > line.to) right += charWidth * SHORT
       else if (!selection && right === left) right = left + 2
+      if (this.hscale.scaled) {
+        // In a scaled width a rectangle can run millions of pixels past the view; only the part near it is drawn.
+        const near = this.docLeft - this.originX
+        left = Math.max(left, near - this.viewport.width)
+        right = Math.min(right, near + this.viewport.width * 2)
+      }
       if (right <= left) continue
       pool.rect(className, left, this.heights.top(number) - this.origin, right - left, lineHeight)
       drawn++
@@ -1184,7 +1298,7 @@ export class EditorView {
       if (levels < 1 && width <= unit) continue
       const count = Math.max(0, Math.ceil(width / unit) - 1)
       if (count < 1) continue
-      const el = this.backgrounds.rect('enc-guides', paddingX, this.heights.top(number) - this.origin, count * unit * charWidth, lineHeight)
+      const el = this.backgrounds.rect('enc-guides', paddingX - this.originX, this.heights.top(number) - this.origin, count * unit * charWidth, lineHeight)
       el.style.backgroundSize = `${unit * charWidth}px 100%`
     }
   }
@@ -1215,7 +1329,7 @@ export class EditorView {
       const x = this.domX(el, offset)
       if (x !== null) return x
     }
-    return paddingX + columnAt(line.text, offset, this.state.config.tabSize) * charWidth
+    return paddingX + columnAt(line.text, offset, this.state.config.tabSize) * charWidth - this.originX
   }
 
   private range: Range | null = null
@@ -1267,7 +1381,7 @@ export class EditorView {
     const tabSize = this.state.config.tabSize
     const el = this.lineEls.get(line.number)
     if (!el || el.simple || el.text !== line.text) {
-      return indexAtColumn(line.text, Math.max(0, (x - paddingX) / charWidth), tabSize)
+      return indexAtColumn(line.text, Math.max(0, (x + this.originX - paddingX) / charWidth), tabSize)
     }
     const text = line.text
     // A point on a hint is its column: the hint is no text to put the caret inside.
@@ -1309,8 +1423,7 @@ export class EditorView {
     if (docY >= this.heights.contentHeight) return doc.length
     const number = Math.min(doc.lineCount, Math.max(1, this.heights.lineAt(docY)))
     const line = doc.line(number)
-    const x = clientX - this.content.getBoundingClientRect().left
-    return line.from + this.offsetAtX(line, x)
+    return line.from + this.offsetAtX(line, this.layerX(clientX))
   }
 
   /** The client x of the gutter's right edge. */
@@ -1332,7 +1445,22 @@ export class EditorView {
     const scrollerRect = this.scroller.getBoundingClientRect()
     const x = this.xOf(line, pos - line.from)
     const top = scrollerRect.top + (this.heights.top(line.number) - this.scale.toDoc(this.scroller.scrollTop))
-    return { left: this.content.getBoundingClientRect().left + x, top, bottom: top + this.metrics.lineHeight }
+    return { left: this.layer.getBoundingClientRect().left + x, top, bottom: top + this.metrics.lineHeight }
+  }
+
+  /** A client x as x in the layers (what `xOf` gives). */
+  private layerX(clientX: number): number {
+    return clientX - this.layer.getBoundingClientRect().left
+  }
+
+  /** The document x (from the text area's left edge, padding included, as if the text were never scaled) at a client x. */
+  docXAt(clientX: number): number {
+    return this.layerX(clientX) + this.originX
+  }
+
+  /** The document x at the left edge of the text in sight: the scroll offset, unless the width is scaled. */
+  get scrollLeftInDoc(): number {
+    return this.hscale.toDoc(this.scroller.scrollLeft)
   }
 
   /** Whether `pos` is on screen. */
@@ -1441,9 +1569,9 @@ export class EditorView {
     const x = this.metrics.paddingX + columnAt(line.text, pos - line.from, this.state.config.tabSize) * charWidth
     const visible = this.viewport.width - this.gutterWidth - this.minimapWidth
     const marginX = Math.min(charWidth * 6, visible / 4)
-    const left = this.scroller.scrollLeft
-    if (x - marginX < left) this.scroller.scrollLeft = Math.max(0, x - marginX)
-    else if (x + marginX > left + visible) this.scroller.scrollLeft = x + marginX - visible
+    const left = this.hscale.toDoc(this.scroller.scrollLeft)
+    if (x - marginX < left) this.scroller.scrollLeft = Math.max(0, this.hscale.toScroll(x - marginX))
+    else if (x + marginX > left + visible) this.scroller.scrollLeft = this.hscale.toScroll(x + marginX - visible)
   }
 
   // ----------------------------------------------------------------- focus
@@ -1510,6 +1638,8 @@ export class EditorView {
     for (const dispose of this.disposers.splice(0)) dispose()
     for (const entry of this.zones) this.detachZone(entry.zone)
     this.root.remove()
+    // A long line counted for this editor is not kept after it.
+    forgetColumnIndexes()
   }
 }
 

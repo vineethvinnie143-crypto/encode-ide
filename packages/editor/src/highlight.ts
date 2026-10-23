@@ -7,10 +7,15 @@ export const MAX_TOKENIZED_LINE = 10_000
 const SYNC_LINES = 3_000
 /** Lines run from the start state to guess a far line's state. */
 const GUESS_LINES = 80
+/** Lines read on from the frontier, once per place it stops, to see whether the states settle on the old ones. */
+const SETTLE_LINES = 256
 /** Tokenized lines kept for reuse. */
 const CACHE_SIZE = 5_000
 /** Lines tokenized between deadline checks. */
 const BATCH = 256
+/** The most lines, and characters, one batch for another thread holds. */
+export const MAX_BATCH_LINES = 16_384
+export const MAX_BATCH_CHARS = 1_000_000
 
 const NONE = -1
 
@@ -148,6 +153,38 @@ export interface LineBrackets {
   readonly exact: boolean
 }
 
+/**
+ * Lines for another thread (a worker) to tokenize, so the page's own thread only stores what comes back: the states
+ * the lines end in and, with bracket colouring on, what each does to the bracket depth.
+ */
+export interface HighlightBatch {
+  readonly id: number
+  /** The language whose tokenizer reads the lines, by id. */
+  readonly language: string
+  /** The bracket pairs to note, or null while bracket colouring is off. */
+  readonly brackets: readonly (readonly [string, string])[] | null
+  /** The state the first line starts in. */
+  readonly state: string
+  /** The lines, each cut where tokenizing stops (MAX_TOKENIZED_LINE). */
+  readonly lines: readonly string[]
+}
+
+/** What came back for a batch. */
+export interface HighlightResult {
+  readonly id: number
+  /** The distinct states, which `states` points into. */
+  readonly table: readonly string[]
+  /** For each line, the state it ends in, as an index into `table`. */
+  readonly states: Int32Array
+  /** For each line, the lowest point and the net change of the bracket depth; null without brackets. */
+  readonly summaries: Int32Array | null
+}
+
+/** Tokenizes batches somewhere else. Resolves null when it cannot: it does not know the language, or it failed. */
+export interface HighlightService {
+  run(batch: HighlightBatch): Promise<HighlightResult | null>
+}
+
 export interface HighlightedLine {
   /** Flat [start, kind, ...] as a tokenizer produces them. */
   tokens: readonly number[]
@@ -176,6 +213,14 @@ export class Highlighter {
   private depths = new Int32Array(1024)
   private depthValid = 1
   private bracketCache = new Map<number, { text: string; tokens: readonly number[]; depth: number; brackets: number[] }>()
+  private bracketPairs: readonly (readonly [string, string])[] | null = null
+  /** The batch another thread is tokenizing; `dirty` is the first line an edit has touched since it was made. */
+  private inflight: { id: number; from: number; count: number; dirty: number } | null = null
+  private batchId = 0
+  /** The frontier where settling on old states was last tried. */
+  private settleTried = -1
+  /** The last far line drawn from a guess, so the next one down goes on from it instead of guessing again. */
+  private lastGuess: { line: number; state: string; valid: number; doc: Text } | null = null
 
   /** Told about tokenizer errors (the line falls back to plain text). */
   onError: ((error: unknown) => void) | null = null
@@ -204,6 +249,8 @@ export class Highlighter {
     this.valid = 1
     this.cache.clear()
     this.resetBrackets()
+    this.inflight = null
+    this.lastGuess = null
   }
 
   /**
@@ -214,18 +261,18 @@ export class Highlighter {
     if (!pairs?.length) {
       if (!this.bracketChars) return
       this.bracketChars = null
+      this.bracketPairs = null
       this.resetBrackets()
+      this.inflight = null
       return
     }
-    const chars = new Map<number, number>()
-    for (const [open, close] of pairs) {
-      if (open.length === 1) chars.set(open.charCodeAt(0), 1)
-      if (close.length === 1) chars.set(close.charCodeAt(0), -1)
-    }
+    const chars = bracketCharsOf(pairs)
     const same = this.bracketChars && this.bracketChars.size === chars.size && [...chars].every(([code, dir]) => this.bracketChars!.get(code) === dir)
     if (same) return
     this.bracketChars = chars
+    this.bracketPairs = pairs
     this.resetBrackets()
+    this.inflight = null
     // The known states hold, but their lines were never read for brackets: tokenize again from the top.
     this.states.truncate(1)
     this.valid = 1
@@ -249,6 +296,8 @@ export class Highlighter {
     const lastNew = doc.lineAt(span.toB).number
     const known = this.states.length
     this.valid = Math.min(this.valid, first)
+    // A batch out on another thread still holds for the lines above the edit.
+    if (this.inflight) this.inflight.dirty = Math.min(this.inflight.dirty, first)
     if (this.bracketChars) {
       // The edited lines are read again; the depth at their first line still follows from the lines above it.
       this.summaries.splice(first - 1, lastOld - first + 1, lastNew - first + 1)
@@ -269,14 +318,19 @@ export class Highlighter {
   line(n: number): HighlightedLine {
     let state: string
     let exact = true
-    // Usually a few lines settle on the states from before an edit and the rest hold again.
-    if (n - 1 >= this.valid) this.advance(Math.min(n, this.valid + SYNC_LINES), Infinity)
+    if (n - 1 >= this.valid) {
+      if (n - 1 - this.valid <= SYNC_LINES) this.advance(n, Infinity)
+      else if (this.states.length > this.valid && this.settleTried !== this.valid) {
+        // After an edit the states usually settle on the old ones within a line or two, and all below holds again.
+        // Reading every line up to a far one here would hold up the frame, so it is tried once per place.
+        this.advance(this.valid + SETTLE_LINES, Infinity)
+        this.settleTried = this.valid
+      }
+    }
     if (n - 1 < this.valid) state = this.states.get(n - 1)!
     else {
       exact = false
-      state = this.tokenizer.start
-      const from = Math.max(this.valid, n - GUESS_LINES)
-      for (const text of this.doc.lineTexts(from, n - 1)) state = this.tokenize(text, state).state
+      state = this.guess(n)
     }
     const text = this.doc.line(n).text
     const cached = this.cache.get(n)
@@ -285,6 +339,24 @@ export class Highlighter {
     if (this.cache.size >= CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!)
     this.cache.set(n, { text, state, tokens: result.tokens })
     return { tokens: result.tokens, exact }
+  }
+
+  /** A start state for line `n`, far past the frontier: from the lines just above it, or on from the line above's. */
+  private guess(n: number): string {
+    const last = this.lastGuess
+    const fresh = last !== null && last.valid === this.valid && last.doc === this.doc
+    // A line is read twice in a row for its tokens and its brackets.
+    if (fresh && last.line === n) return last.state
+    let state: string
+    if (fresh && last.line === n - 1) {
+      state = this.tokenize(this.doc.line(n - 1).text, last.state).state
+    } else {
+      state = this.tokenizer.start
+      const from = Math.max(this.valid, n - GUESS_LINES)
+      for (const text of this.doc.lineTexts(from, n - 1)) state = this.tokenize(text, state).state
+    }
+    this.lastGuess = { line: n, state, valid: this.valid, doc: this.doc }
+    return state
   }
 
   /**
@@ -350,6 +422,63 @@ export class Highlighter {
     return kind
   }
 
+  /**
+   * The next lines for another thread to tokenize, from the first whose start state is not known yet; null when every
+   * state is known or a batch is still out. `language` is the id of the language whose tokenizer this is.
+   */
+  nextBatch(language: string, maxLines = MAX_BATCH_LINES, maxChars = MAX_BATCH_CHARS): HighlightBatch | null {
+    if (this.inflight || this.done) return null
+    const from = this.valid
+    // The last line's end state starts no line, so it is not asked for (as tokenizing here does not).
+    const last = Math.min(this.doc.lineCount - 1, from + Math.max(1, maxLines) - 1)
+    const lines: string[] = []
+    let chars = 0
+    for (const text of this.doc.lineTexts(from, last)) {
+      const line = text.length > MAX_TOKENIZED_LINE ? text.slice(0, MAX_TOKENIZED_LINE) : text
+      if (lines.length && chars + line.length + 1 > maxChars) break
+      lines.push(line)
+      chars += line.length + 1
+    }
+    const id = ++this.batchId
+    this.inflight = { id, from, count: lines.length, dirty: Infinity }
+    return { id, language, brackets: this.bracketPairs, state: this.states.get(from - 1)!, lines }
+  }
+
+  /**
+   * Stores what another thread found for the batch out now, for the lines no edit has reached since. Stops where a
+   * state equals the one the line had before an edit, as tokenizing here does. True when the known states moved on.
+   */
+  acceptBatch(result: HighlightResult): boolean {
+    const flight = this.inflight
+    if (!flight || result.id !== flight.id) return false
+    this.inflight = null
+    if (!wellFormed(result, flight.count, this.bracketChars !== null)) return false
+    const limit = Math.min(flight.from + flight.count, flight.dirty)
+    if (this.valid < flight.from || this.valid >= limit) return false
+    try {
+      for (let index = this.valid; index < limit; index++) {
+        const local = index - flight.from
+        const state = result.table[result.states[local]]
+        if (this.bracketChars) this.summaries.set(index - 1, result.summaries![local * 2], result.summaries![local * 2 + 1])
+        if (index < this.states.length && this.states.get(index) === state) {
+          this.states.set(index, state)
+          this.valid = this.states.nextUnverified(index + 1)
+          break
+        }
+        this.states.set(index, state)
+        this.valid = index + 1
+      }
+    } finally {
+      this.states.unverify(this.valid)
+    }
+    return true
+  }
+
+  /** Forgets the batch out now: what comes back for it is ignored, and the next one starts where the states end. */
+  dropBatch(): void {
+    this.inflight = null
+  }
+
   /** Tokenizes ahead until `deadline` (a performance.now() time); true while lines remain. */
   work(deadline: number): boolean {
     this.advance(this.doc.lineCount, deadline)
@@ -405,16 +534,80 @@ export class Highlighter {
   }
 
   private tokenize(text: string, state: string): { tokens: number[]; state: string } {
-    try {
-      if (text.length <= MAX_TOKENIZED_LINE) return this.tokenizer.line(text, state)
-      const head = this.tokenizer.line(text.slice(0, MAX_TOKENIZED_LINE), state)
-      return { tokens: [...head.tokens, MAX_TOKENIZED_LINE, T.plain], state: head.state }
-    } catch (error) {
-      // A tokenizer bug costs this line its colours, never the editor.
-      this.onError?.(error)
-      return { tokens: text ? [0, T.plain] : [], state }
+    return tokenizeLine(this.tokenizer, text, state, this.onError)
+  }
+}
+
+/** One line's tokens and end state, as far as tokenizing goes on a long line; a tokenizer that throws leaves it plain. */
+function tokenizeLine(tokenizer: Tokenizer, text: string, state: string, onError?: ((error: unknown) => void) | null): { tokens: number[]; state: string } {
+  try {
+    if (text.length <= MAX_TOKENIZED_LINE) return tokenizer.line(text, state)
+    const head = tokenizer.line(text.slice(0, MAX_TOKENIZED_LINE), state)
+    return { tokens: [...head.tokens, MAX_TOKENIZED_LINE, T.plain], state: head.state }
+  } catch (error) {
+    // A tokenizer bug costs this line its colours, never the editor.
+    onError?.(error)
+    return { tokens: text ? [0, T.plain] : [], state }
+  }
+}
+
+/** Bracket characters by code: 1 opens, -1 closes. Only single characters count. */
+function bracketCharsOf(pairs: readonly (readonly [string, string])[]): Map<number, number> {
+  const chars = new Map<number, number>()
+  for (const [open, close] of pairs) {
+    if (open.length === 1) chars.set(open.charCodeAt(0), 1)
+    if (close.length === 1) chars.set(close.charCodeAt(0), -1)
+  }
+  return chars
+}
+
+/** Whether a batch's result has a state for each of its `count` lines, within its table, and summaries when asked. */
+function wellFormed(result: HighlightResult, count: number, brackets: boolean): boolean {
+  const { table, states, summaries } = result
+  if (!Array.isArray(table) || !(states instanceof Int32Array) || states.length !== count) return false
+  for (const state of table) if (typeof state !== 'string') return false
+  for (let index = 0; index < count; index++) if (states[index] < 0 || states[index] >= table.length) return false
+  if (!brackets) return true
+  if (!(summaries instanceof Int32Array) || summaries.length !== count * 2) return false
+  for (let index = 0; index < count; index++) if (summaries[index * 2] > 0) return false
+  return true
+}
+
+/**
+ * Tokenizes a batch, as another thread does: the state each line ends in and, when the batch names brackets, what
+ * each line does to the bracket depth. `onError` hears about a tokenizer that throws (the line counts as plain).
+ */
+export function tokenizeBatch(tokenizer: Tokenizer, batch: HighlightBatch, onError?: (error: unknown) => void): HighlightResult {
+  const count = batch.lines.length
+  const states = new Int32Array(count)
+  const table: string[] = []
+  const ids = new Map<string, number>()
+  const chars = batch.brackets?.length ? bracketCharsOf(batch.brackets) : null
+  const summaries = chars ? new Int32Array(count * 2) : null
+  let state = batch.state
+  for (let index = 0; index < count; index++) {
+    const text = batch.lines[index]
+    const result = tokenizeLine(tokenizer, text, state, onError)
+    state = result.state
+    let id = ids.get(state)
+    if (id === undefined) {
+      id = table.length
+      table.push(state)
+      ids.set(state, id)
+    }
+    states[index] = id
+    if (chars) {
+      let low = 0
+      let net = 0
+      scanBrackets(text, result.tokens, chars, (_offset, dir) => {
+        net += dir
+        if (net < low) low = net
+      })
+      summaries![index * 2] = low
+      summaries![index * 2 + 1] = net
     }
   }
+  return { id: batch.id, table, states, summaries }
 }
 
 /** Calls `found` for each bracket character of `text` that is not in a string, a comment or a regular expression. */

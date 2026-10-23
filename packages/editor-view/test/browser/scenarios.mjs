@@ -9,5 +9,6 @@ import { host } from './scenarios/host.mjs'
 import { fold } from './scenarios/fold.mjs'
 import { structure } from './scenarios/structure.mjs'
 import { hints } from './scenarios/hints.mjs'
+import { large } from './scenarios/large.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large]

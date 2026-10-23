@@ -282,6 +282,10 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+/* A text wider than the scroll range: the layers move along it, and what they hold past its ends must not widen it. */
+.enc-wide .enc-content {
+  overflow: clip;
+}
 .enc-layer {
   position: absolute;
   left: 0;

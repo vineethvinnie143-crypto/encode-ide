@@ -67,6 +67,7 @@ const api: EncodeApi = {
     list: (path: string) => invoke('workspace:list', path),
     listAllFiles: () => invoke('workspace:list-all'),
     read: (path: string) => invoke('workspace:read', path),
+    readForEditor: (path: string) => invoke('workspace:read-for-editor', path),
     write: (path: string, content: string) => invoke('workspace:write', path, content),
     createFile: (parent: string, name: string) => invoke('workspace:create-file', parent, name),
     createDir: (parent: string, name: string) => invoke('workspace:create-dir', parent, name),

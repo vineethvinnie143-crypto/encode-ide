@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { BackgroundJob } from '@shared/types'
 import { api } from '../../api'
+import { tooLargeForServers } from '../../editor/language'
 import { useProblems } from '../../editor/marks'
 import { footerStatus } from '../../panels/code'
 import { useCode } from '../../stores/code'
@@ -51,7 +52,7 @@ export function FilesPane() {
 function CodeStatus({ path }: { path: string }) {
   const count = useProblems((state) => state.counts[path])
   const report = useCode((state) => state.report)
-  const status = footerStatus(report, path)
+  const status = footerStatus(report, path, tooLargeForServers(path))
   const openSettings = () => useUi.getState().openSettings('code')
   return (
     <span className="editor-footer-group">

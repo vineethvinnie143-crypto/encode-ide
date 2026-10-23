@@ -159,7 +159,7 @@ export function isDirty(path: string): boolean {
 /** Whether `content`, as read from disk just now, is what the document last read or wrote there: nobody else has changed the file since. */
 export function matchesSaved(path: string, content: string): boolean {
   const entry = docs.get(path)
-  return entry ? Text.of(normalize(content)).eq(entry.saved) : true
+  return entry ? entry.saved.eqString(normalize(content)) : true
 }
 
 /** The document as one save reads it: the text to write, and what "saved" will mean once the write has succeeded. */
@@ -237,9 +237,11 @@ export function applyExternal(path: string, content: string): boolean {
   const entry = docs.get(path)
   if (!entry) return false
   const host = entry.host
-  const tr = reload(host?.state ?? entry.state, normalize(content))
+  const current = host?.state ?? entry.state
+  const text = normalize(content)
+  // Usually what eNCode itself just wrote: compared in place, which in a large file costs far less than a diff.
+  const tr = current.doc.eqString(text) ? null : reload(current, text)
   if (!tr) {
-    const current = host?.state ?? entry.state
     entry.saved = current.doc
     entry.savedPoint = current.history.point
     watcher?.changed(path, current, false)

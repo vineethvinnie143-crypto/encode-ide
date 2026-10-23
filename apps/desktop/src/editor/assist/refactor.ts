@@ -5,6 +5,7 @@ import { noAnswerReason } from '../../panels/code'
 import { create } from '../../store'
 import { useCode } from '../../stores/code'
 import { useUi } from '../../stores/ui'
+import { tooLargeForServers } from '../language'
 import { marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf } from '../marks'
 import { askServers, lspAt } from './ask'
 import { canUndoChange, count, discardPreview, makeChange, undoChange, type ChangeAsk, type ChangeOutcome } from './changes'
@@ -83,7 +84,7 @@ const notify = (kind: 'info' | 'success' | 'error', text: string, action?: { lab
 /** Why nothing could be asked of the file's servers, with what to do about it. */
 async function tellNoServer(path: string, feature: string): Promise<void> {
   if (!useCode.getState().report) await useCode.getState().refresh()
-  notify('info', noAnswerReason(useCode.getState().report, path, feature))
+  notify('info', noAnswerReason(useCode.getState().report, path, feature, tooLargeForServers(path)))
 }
 
 const fileName = (path: string): string => path.split('/').pop() ?? path
