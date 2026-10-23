@@ -287,6 +287,22 @@ the session and say it finished, without what the agent wrote. Clicking it shoul
 What is most useful to hear: a setting the search does not find by the word you would use, a change that did not stick,
 a notice that did not show (and whether Windows' Focus assist was on), and the computer sleeping while the agent worked.
 
+## Work in the background
+
+- Ask for something that runs a while next to the work: "start the dev server in the background and watch its log for
+  errors while you fix the failing test". The header should count them ("2 jobs running"), and the Jobs tab (Summary, then
+  Background jobs) should show the server by what the agent called it, with the command under it, and the monitor
+  badged Monitor. An error in the log should reach the agent within a few seconds, as one line in the chat.
+- Ask it to "look into X in the background with a subagent and tell me when it is done", then ask something else. The
+  subagent's report should arrive as a notice and a short reply of the agent's own, with no message of yours added.
+  If its command needs approval, the card is tagged Background and waits even when nothing else runs.
+- Ask it to "check again in two minutes". The Jobs tab shows "Wakes at" with Cancel. Close eNCode before the time and
+  open it a few minutes after: the agent should wake, and say it is late.
+- Press Stop while background work reports: nothing should start again until you write.
+
+What is most useful to hear: a background turn you did not expect, one that repeated itself, or a card that stayed
+after the work was gone.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
