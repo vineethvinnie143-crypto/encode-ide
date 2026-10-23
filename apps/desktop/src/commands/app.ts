@@ -7,6 +7,7 @@ import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
 import { hasActiveEditor, runEditorCommand } from '../editor/active'
 import { useEditor } from '../stores/editor'
+import { focusBreadcrumbs, useEditorLayout } from '../stores/editor-layout'
 import { useFind } from '../stores/find'
 import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
@@ -122,7 +123,7 @@ function createAppActions(): AppActions {
     newSession: () => void sessions().newSession(),
     newChat: () => void sessions().newChat(),
     openFolder: () => void useWorkspace.getState().openDialog(),
-    quickOpen: () => ui().setQuickOpenOpen(true),
+    quickOpen: (query) => ui().setQuickOpenOpen(true, query),
     save: () => {
       // Out of habit, on the Settings page: it keeps each change as it is made.
       if (ui().settingsOpen) ui().notify('info', 'Settings are kept as you change them.')
@@ -140,6 +141,16 @@ function createAppActions(): AppActions {
     },
     hasEditor: () => hasActiveEditor(),
     editorCommand: (name) => void runEditorCommand(name),
+    editorLayout: () => useEditorLayout.getState(),
+    toggleEditorPart: (part) => {
+      const layout = useEditorLayout.getState()
+      layout.set({ [part]: !layout[part] })
+    },
+    focusBreadcrumbs: () => {
+      const layout = useEditorLayout.getState()
+      if (!layout.breadcrumbs) layout.set({ breadcrumbs: true })
+      focusBreadcrumbs()
+    },
     searchInFiles: () => panels().open('files', { view: 'search' }),
     canFind: () => ui().settingsOpen || panels().side.layout !== 'full',
     isFinding: () => useFind.getState().open,

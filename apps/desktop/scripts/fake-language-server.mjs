@@ -13,6 +13,10 @@
  * refactoring that cannot be taken; formats (tabs to spaces, no trailing spaces), a range of lines, and a line as `;`
  * is typed (no spaces before it).
  *
+ * And it knows the shape of the code as one does: a file's classes, their methods, its functions, interfaces and
+ * top-level constants as a tree; the folder's, searched by name; and the calls between the functions and methods of
+ * the folder's src, both ways.
+ *
  *   node scripts/fake-language-server.mjs --stdio [--marker=file]
  *
  * With a marker file, the server appends a line when it starts, one for each document it is given or loses, and one
@@ -326,6 +330,153 @@ function formatOnType({ textDocument, position, ch }) {
   return spaces ? [{ range: range(position.line, spaces.index, before.length), newText: '' }] : []
 }
 
+// ------------------------------------------------------------ the shape of the code
+
+const SK = { class: 5, method: 6, interface: 11, function: 12, variable: 13, constant: 14 }
+const NOT_METHODS = new Set(['if', 'for', 'while', 'switch', 'return', 'catch', 'function', 'constructor'])
+
+/**
+ * The symbols of a text as a tree: `class`, its methods, `function`, `interface` and top-level `const` or `let`, each
+ * from its line to the line its braces close on.
+ */
+function symbolsOf(text) {
+  const lines = text.split(/\r?\n/)
+  const opens = lines.map((line) => (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length)
+  const depthBefore = []
+  let depth = 0
+  for (const delta of opens) {
+    depthBefore.push(depth)
+    depth = Math.max(0, depth + delta)
+  }
+  /** The line on which the braces opened on `line` close again. */
+  const endOf = (line) => {
+    if (!lines[line].includes('{')) return line
+    let level = depthBefore[line]
+    for (let at = line; at < lines.length; at++) {
+      level += opens[at]
+      if (level <= depthBefore[line]) return at
+    }
+    return lines.length - 1
+  }
+  const make = (name, kind, line, detail) => {
+    const start = lines[line].indexOf(name)
+    const end = endOf(line)
+    return { name, kind, ...(detail ? { detail } : {}), range: { start: { line, character: 0 }, end: { line: end, character: lines[end].length } }, selectionRange: range(line, start, start + name.length) }
+  }
+  const top = []
+  let owner = null
+  lines.forEach((text, line) => {
+    if (owner && line > owner.range.end.line) owner = null
+    const level = depthBefore[line]
+    let match
+    if (level === 0 && (match = /^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/.exec(text))) {
+      owner = { ...make(match[1], SK.class, line), children: [] }
+      top.push(owner)
+    } else if (level === 0 && (match = /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/.exec(text))) {
+      top.push(make(match[1], SK.interface, line))
+    } else if (level === 0 && (match = /^\s*(?:export\s+)?function\s+([A-Za-z_$][\w$]*)\s*(\([^)]*\))/.exec(text))) {
+      top.push(make(match[1], SK.function, line, match[2]))
+    } else if (level === 0 && (match = /^\s*(?:export\s+)?(const|let)\s+([A-Za-z_$][\w$]*)/.exec(text))) {
+      top.push(make(match[2], match[1] === 'const' ? SK.constant : SK.variable, line))
+    } else if (owner && level === 1 && (match = /^\s*(?:(?:public|private|static|async)\s+)*([A-Za-z_$][\w$]*)\s*(\([^)]*\))\s*(?::[^{]*)?\{/.exec(text)) && !NOT_METHODS.has(match[1])) {
+      owner.children.push(make(match[1], SK.method, line, match[2]))
+    }
+  })
+  return top
+}
+
+/** Every function and method of the folder's src, with the file it is in and what it is in. */
+function callables() {
+  const out = []
+  for (const [uri, text] of folderTexts()) {
+    for (const symbol of symbolsOf(text)) {
+      if (symbol.kind === SK.function) out.push({ uri, symbol, container: undefined })
+      for (const child of symbol.children ?? []) out.push({ uri, symbol: child, container: symbol.name })
+    }
+  }
+  return out
+}
+
+const callItem = ({ uri, symbol, container }) => ({
+  name: symbol.name,
+  kind: symbol.kind,
+  ...(container ? { detail: container } : {}),
+  uri,
+  range: symbol.range,
+  selectionRange: symbol.selectionRange,
+  data: { uri, line: symbol.selectionRange.start.line, name: symbol.name },
+})
+
+/** The calls of `name` (a word followed by `(`) on the lines of `text` from `first` to `last`, the declaration left out. */
+function callsIn(text, name, first, last, skip) {
+  const out = []
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (index < first || index > last) return
+    for (const match of line.matchAll(WORD)) {
+      if (match[0] !== name || !/^\s*\(/.test(line.slice(match.index + name.length))) continue
+      if (skip && skip.line === index && skip.character === match.index) continue
+      out.push(range(index, match.index, match.index + name.length))
+    }
+  })
+  return out
+}
+
+const sameItem = (a, b) => sameFile(a.uri, b.uri) && a.selectionRange.start.line === b.selectionRange.start.line && a.name === b.name
+
+function prepareCalls({ textDocument, position }) {
+  const at = wordAt(textDocument.uri, position)
+  if (!at) return null
+  const all = callables()
+  const own = all.find((entry) => sameFile(entry.uri, textDocument.uri) && entry.symbol.selectionRange.start.line === position.line && entry.symbol.name === at.word)
+  const found = own ?? all.find((entry) => entry.symbol.name === at.word)
+  return found ? [callItem(found)] : null
+}
+
+/** Who calls `item`: each function or method with a call of its name inside it, and where those calls are. */
+function incomingCalls({ item }) {
+  const texts = folderTexts()
+  const out = []
+  for (const entry of callables()) {
+    const text = [...texts].find(([uri]) => sameFile(uri, entry.uri))?.[1] ?? ''
+    const sites = callsIn(text, item.name, entry.symbol.range.start.line, entry.symbol.range.end.line, sameFile(entry.uri, item.uri) ? item.selectionRange.start : null)
+    if (sites.length) out.push({ from: callItem(entry), fromRanges: sites })
+  }
+  return out
+}
+
+/** What `item` calls: each function or method of the folder called inside it, and where. */
+function outgoingCalls({ item }) {
+  const text = [...folderTexts()].find(([uri]) => sameFile(uri, item.uri))?.[1] ?? ''
+  const out = []
+  for (const entry of callables()) {
+    if (sameItem(callItem(entry), item)) continue
+    const sites = callsIn(text, entry.symbol.name, item.range.start.line, item.range.end.line, null)
+    if (sites.length) out.push({ to: callItem(entry), fromRanges: sites })
+  }
+  return out
+}
+
+/** The folder's symbols whose names hold the query's letters in order, as a flat list. */
+function workspaceSymbols({ query }) {
+  const q = String(query ?? '').toLowerCase()
+  const spells = (name) => {
+    let at = 0
+    for (const char of name.toLowerCase()) if (char === q[at]) at++
+    return at === q.length
+  }
+  const out = []
+  for (const [uri, text] of folderTexts()) {
+    const walk = (symbols, container) => {
+      for (const symbol of symbols) {
+        if (spells(symbol.name)) out.push({ name: symbol.name, kind: symbol.kind, location: { uri, range: symbol.selectionRange }, ...(container ? { containerName: container } : {}) })
+        if (symbol.children) walk(symbol.children, symbol.name)
+      }
+    }
+    walk(symbolsOf(text), undefined)
+  }
+  return out
+}
+
 function handle(message) {
   // An answer to a request of ours.
   if (message.method === undefined) {
@@ -355,6 +506,9 @@ function handle(message) {
           documentFormattingProvider: true,
           documentRangeFormattingProvider: true,
           documentOnTypeFormattingProvider: { firstTriggerCharacter: ';', moreTriggerCharacter: ['}'] },
+          documentSymbolProvider: true,
+          workspaceSymbolProvider: true,
+          callHierarchyProvider: true,
         },
         serverInfo: { name: 'fake-ts', version: '1' },
       })
@@ -409,6 +563,16 @@ function handle(message) {
       return reply(id, formatLines(params.textDocument.uri, params.options, params.range.start.line, params.range.end.line))
     case 'textDocument/onTypeFormatting':
       return reply(id, formatOnType(params))
+    case 'textDocument/documentSymbol':
+      return reply(id, symbolsOf(docs.get(params.textDocument.uri)?.text ?? ''))
+    case 'workspace/symbol':
+      return reply(id, workspaceSymbols(params))
+    case 'textDocument/prepareCallHierarchy':
+      return reply(id, prepareCalls(params))
+    case 'callHierarchy/incomingCalls':
+      return reply(id, incomingCalls(params))
+    case 'callHierarchy/outgoingCalls':
+      return reply(id, outgoingCalls(params))
     case 'shutdown':
       shutdown = true
       return reply(id, null)

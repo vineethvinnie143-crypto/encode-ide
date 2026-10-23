@@ -1,7 +1,9 @@
 import type { CodeRange, EditorLocation } from '@shared/types'
 import { useEditor } from '../../stores/editor'
 import { useUi } from '../../stores/ui'
+import { activeEditor } from '../active'
 import { docState } from '../docs'
+import { lspAt } from './ask'
 
 /** A place in a file of the folder, as the servers count (zero-based lines, UTF-16 columns). */
 export interface Place {
@@ -42,6 +44,23 @@ export function goToLocation(location: EditorLocation, from: Place | null): void
     return
   }
   const to: Place = { path: location.path, range: rangeOfLocation(location) }
+  if (from && !samePlace(from, to)) remember(back, from)
+  forward.length = 0
+  void useEditor.getState().openAt(to.path, to.range)
+}
+
+/** Where the editor's cursor is, as a place Back returns to; null when no file is shown. */
+export function currentPlace(): Place | null {
+  const view = activeEditor()
+  const path = useEditor.getState().activePath
+  if (!view || !path || !docState(path)) return null
+  const at = lspAt(view.state.doc, view.state.selection.main.head)
+  return { path, range: { start: at, end: at } }
+}
+
+/** Goes to a place of the folder's files (a symbol of the outline, of Go to symbol), remembering the cursor's for Back. */
+export function goToPlace(to: Place): void {
+  const from = currentPlace()
   if (from && !samePlace(from, to)) remember(back, from)
   forward.length = 0
   void useEditor.getState().openAt(to.path, to.range)

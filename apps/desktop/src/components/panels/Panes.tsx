@@ -15,6 +15,9 @@ import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
 import { jobText } from '../jobs-text'
 import EditorTabs from '../EditorTabs'
+import { Breadcrumbs } from '../code/Breadcrumbs'
+import { OutlinePane } from '../code/OutlinePane'
+import { useEditorLayout } from '../../stores/editor-layout'
 import Sidebar from '../Sidebar/Sidebar'
 
 const FILE_VIEWS: { view: SidebarView; icon: typeof Files; label: string }[] = [
@@ -81,17 +84,23 @@ export function EditorPane() {
   const cursor = useEditor((state) => state.cursor)
   const info = useEditor((state) => state.info)
   const active = tabs.find((tab) => tab.path === activePath) ?? null
+  const breadcrumbs = useEditorLayout((state) => state.breadcrumbs)
+  const outline = useEditorLayout((state) => state.outline)
   return (
     <div className="editor-pane">
       <EditorTabs />
-      <div className="editor-host">
-        <CodeEditor tab={active} />
-        {!active && (
-          <div className="editor-empty">
-            <Code2 size={18} />
-            <span>Open a file from Files or Quick Open</span>
-          </div>
-        )}
+      {active && breadcrumbs && <Breadcrumbs path={active.path} />}
+      <div className="editor-body">
+        <div className="editor-host">
+          <CodeEditor tab={active} />
+          {!active && (
+            <div className="editor-empty">
+              <Code2 size={18} />
+              <span>Open a file from Files or Quick Open</span>
+            </div>
+          )}
+        </div>
+        {active && outline && <OutlinePane path={active.path} />}
       </div>
       <div className="editor-footer">
         <span className="editor-footer-side">

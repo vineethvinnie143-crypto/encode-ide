@@ -227,13 +227,33 @@ export function readCallHierarchyItem(value: unknown): CallHierarchyItem | null 
 
 /** incomingCalls (`from`) or outgoingCalls (`to`): the other end of each call. */
 export function readCalls(value: unknown, end: 'from' | 'to'): CallHierarchyItem[] {
+  return readCallSites(value, end).map((call) => call.item)
+}
+
+/** The places of the calls a call hierarchy names for one item; more are left out. */
+const MAX_CALL_SITES = 100
+
+/**
+ * incomingCalls (`from`) or outgoingCalls (`to`): the other end of each call, and where the calls are (`fromRanges`): in
+ * the caller's file for incoming calls, in the item's own file for outgoing ones.
+ */
+export function readCallSites(value: unknown, end: 'from' | 'to'): { item: CallHierarchyItem; sites: Range[] }[] {
   if (!Array.isArray(value)) return []
-  const out: CallHierarchyItem[] = []
-  for (const item of value) {
+  const out: { item: CallHierarchyItem; sites: Range[] }[] = []
+  for (const entry of value) {
     if (out.length >= MAX_LOCATIONS) break
-    if (!isObject(item)) continue
-    const read = readCallHierarchyItem(item[end])
-    if (read) out.push(read)
+    if (!isObject(entry)) continue
+    const item = readCallHierarchyItem(entry[end])
+    if (!item) continue
+    const sites: Range[] = []
+    if (Array.isArray(entry.fromRanges)) {
+      for (const range of entry.fromRanges) {
+        if (sites.length >= MAX_CALL_SITES) break
+        const read = readRange(range)
+        if (read) sites.push(read)
+      }
+    }
+    out.push({ item, sites })
   }
   return out
 }

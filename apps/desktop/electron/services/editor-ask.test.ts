@@ -73,6 +73,27 @@ describe('a question of the editor to the language servers', () => {
     for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value)?.slice(0, 120))
   })
 
+  it('takes the questions about symbols and calls, a search across the folder with no file shown included', () => {
+    assert.deepEqual(readEditorAsk({ kind: 'symbols', path: 'src\\a.ts', line: 4 }, relative), { kind: 'symbols', path: 'src/a.ts' })
+    assert.deepEqual(readEditorAsk({ kind: 'workspaceSymbols', path: '', query: 'Shape' }, relative), { kind: 'workspaceSymbols', path: '', query: 'Shape' })
+    assert.deepEqual(readEditorAsk({ kind: 'workspaceSymbols', path: 'a.ts', query: '' }, relative), { kind: 'workspaceSymbols', path: 'a.ts', query: '' })
+    assert.deepEqual(readEditorAsk({ kind: 'callHierarchy', path: 'a.ts', line: 2, character: 5, list: 9 }, relative), { kind: 'callHierarchy', path: 'a.ts', line: 2, character: 5 })
+    assert.deepEqual(readEditorAsk({ kind: 'calls', path: 'a.ts', list: 3, id: 12, direction: 'outgoing', item: {} }, relative), { kind: 'calls', path: 'a.ts', list: 3, id: 12, direction: 'outgoing' })
+    const refused: unknown[] = [
+      { kind: 'workspaceSymbols', path: '', query: 'x'.repeat(201) },
+      { kind: 'workspaceSymbols', path: '', query: 'two\nlines' },
+      { kind: 'workspaceSymbols', path: '../outside.ts', query: 'x' },
+      { kind: 'workspaceSymbols', path: '' },
+      { kind: 'symbols', path: '' },
+      { kind: 'symbols', path: '../outside.ts' },
+      { kind: 'callHierarchy', path: 'a.ts', line: -1, character: 0 },
+      { kind: 'calls', path: 'a.ts', list: 3, id: 1, direction: 'sideways' },
+      { kind: 'calls', path: 'a.ts', list: 3, id: 10_001, direction: 'incoming' },
+      { kind: 'calls', path: 'a.ts', list: 1.5, id: 1, direction: 'incoming' },
+    ]
+    for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value)?.slice(0, 120))
+  })
+
   it('takes a change with its file and the open files made the folder\'s own, and refuses anything else', () => {
     assert.deepEqual(readEditorChange({ kind: 'rename', path: 'src\\a.ts', line: 1, character: 2, newName: 'next', preview: false, open: ['src/a.ts', '../outside.ts', 7, 'b.ts'], extra: 1 }, relative), {
       kind: 'rename',

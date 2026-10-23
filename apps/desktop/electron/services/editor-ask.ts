@@ -1,7 +1,7 @@
 import type { CodeRange, EditorAsk, EditorChangeRequest, SignatureHelp } from '../../shared/types'
 
 /** The kinds of question the editor asks the language servers. */
-const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType'])
+const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType', 'symbols', 'workspaceSymbols', 'callHierarchy', 'calls'])
 
 /** Lines and columns past these are not in any file the editor gives a server (8 MB at most). */
 const MAX_LINE = 10_000_000
@@ -15,6 +15,10 @@ const MAX_ACTION_KINDS = 8
 const MAX_NAME_CHARS = 500
 /** The files the editor has open, as a change is told of them; more than this many tabs is not a person's editor. */
 const MAX_OPEN = 2_000
+/** What is typed to find a symbol across the folder: one line, a name's length. */
+const MAX_QUERY_CHARS = 200
+/** The functions a call hierarchy numbers, at most (the agent host refuses more). */
+const MAX_CALL_ID = 10_000
 
 const isCount = (value: unknown, max: number): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max
 const isTriggerKind = (value: unknown): value is 1 | 2 | 3 => value === 1 || value === 2 || value === 3
@@ -53,9 +57,20 @@ export function readEditorAsk(value: unknown, relative: (path: string) => string
   const ask = value as Record<string, unknown>
   const kind = ask.kind as EditorAsk['kind']
   if (!KINDS.has(kind) || typeof ask.path !== 'string') return null
+  if (kind === 'workspaceSymbols') {
+    if (typeof ask.query !== 'string' || ask.query.length > MAX_QUERY_CHARS || /[\u0000-\u001f\u007f]/.test(ask.query)) return null
+    // A search across the folder may come with no file shown.
+    if (ask.path === '') return { kind, path: '', query: ask.query }
+    const path = relative(ask.path)
+    return path ? { kind, path, query: ask.query } : null
+  }
   const path = relative(ask.path)
   if (!path) return null
-  if (kind === 'triggers') return { kind, path }
+  if (kind === 'triggers' || kind === 'symbols') return { kind, path }
+  if (kind === 'calls') {
+    if (!isCount(ask.list, Number.MAX_SAFE_INTEGER) || !isCount(ask.id, MAX_CALL_ID) || (ask.direction !== 'incoming' && ask.direction !== 'outgoing')) return null
+    return { kind, path, list: ask.list, id: ask.id, direction: ask.direction }
+  }
   if (kind === 'codeActions') {
     const range = readRange(ask.range)
     if (!range || typeof ask.automatic !== 'boolean') return null

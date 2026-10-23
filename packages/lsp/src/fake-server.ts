@@ -229,6 +229,14 @@ async function handle(message) {
     case 'textDocument/documentSymbol': {
       const doc = docs.get(params.textDocument.uri)
       if (!doc) return reply(id, [])
+      // An older server's flat list, one of its entries in another file.
+      if (doc.text.includes('flat-symbols')) {
+        const flat = functions(params.textDocument.uri, doc.text).flatMap((fn) => [
+          { name: fn.name, kind: 12, location: { uri: params.textDocument.uri, range: { start: { line: fn.line, character: 0 }, end: { line: fn.line + 1, character: 0 } } } },
+          { name: 'inner', kind: 13, location: { uri: params.textDocument.uri, range: fn.range }, containerName: fn.name },
+        ])
+        return reply(id, [...flat.reverse(), { name: 'elsewhere', kind: 12, location: { uri: 'file:///elsewhere.fk', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } } }])
+      }
       return reply(id, functions(params.textDocument.uri, doc.text).map((fn) => ({ name: fn.name, kind: 12, range: { start: { line: fn.line, character: 0 }, end: { line: fn.line + 1, character: 0 } }, selectionRange: fn.range, children: [{ name: 'inner', kind: 13, range: fn.range, selectionRange: fn.range }] })))
     }
     case 'workspace/symbol': {
@@ -244,8 +252,8 @@ async function handle(message) {
     case 'callHierarchy/incomingCalls':
     case 'callHierarchy/outgoingCalls': {
       const end = method === 'callHierarchy/incomingCalls' ? 'from' : 'to'
-      const item = { name: end === 'from' ? 'caller' : 'callee', kind: 12, uri: params.item.uri, range: params.item.range, selectionRange: params.item.range }
-      return reply(id, [{ [end]: item, fromRanges: [] }])
+      const item = { name: end === 'from' ? 'caller' : 'callee', kind: 12, uri: params.item.uri, range: params.item.range, selectionRange: params.item.range, detail: params.item.name }
+      return reply(id, [{ [end]: item, fromRanges: [params.item.selectionRange] }])
     }
     case 'textDocument/prepareRename': {
       const doc = docs.get(params.textDocument.uri)

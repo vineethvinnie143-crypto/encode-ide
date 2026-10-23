@@ -14,7 +14,8 @@ import type { LaunchPlan } from './discover'
 import { applyTextEdits } from './edits'
 import { RpcFailure } from './jsonrpc'
 import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeAction, type CompletionItem, type Diagnostic, type DocumentSymbol, type Range, type SignatureHelp, type TextEdit, type WorkspaceEdit } from './protocol'
-import { readCallHierarchyItems, readCalls, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readPrepareRename, readRange, readSignatureHelp, readSymbolInformation, readTextEditList, readWorkspaceEdit } from './results'
+import { readCallHierarchyItems, readCalls, readCallSites, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readPrepareRename, readRange, readSignatureHelp, readSymbolInformation, readTextEditList, readWorkspaceEdit } from './results'
+import { fromDocumentSymbols, nestSymbols, type EditorSymbol } from './symbols'
 import { documentKey, uriToPath } from './uri'
 
 export type Severity = 'error' | 'warning' | 'info' | 'hint'
@@ -101,6 +102,35 @@ export interface ActionInfo {
   command?: boolean
 }
 
+/** A symbol found by name across the folder's files, for the editor. */
+export interface EditorSymbolHit {
+  name: string
+  kind: string
+  container?: string
+  file: string
+  /** The range of its name, or the start of the file when the server gave only the file. */
+  range: Range
+}
+
+/** A function of a call hierarchy, numbered in the editor's newest one so that its calls can be asked for. */
+export interface EditorCallItem {
+  id: number
+  name: string
+  kind: string
+  detail?: string
+  file: string
+  /** The range of its name. */
+  range: Range
+}
+
+/** One end of the calls of a function: the caller for incoming calls, the callee for outgoing ones, and where the calls are. */
+export interface EditorCall {
+  item: EditorCallItem
+  /** The file the calls are in: the caller's for incoming calls, the asked function's own for outgoing ones. */
+  file: string
+  sites: Range[]
+}
+
 export type ServerState = 'missing' | 'stopped' | 'starting' | 'running' | 'failed' | 'off'
 
 export interface ServerView {
@@ -145,6 +175,11 @@ const CRASHES_ALLOWED = 3
 const RETRY_AFTER_FAILURE_MS = 5 * 60_000
 const DISCOVERY_TTL_MS = 30_000
 const REQUEST_MS = 15_000
+/** Symbols found across a folder for the editor: more than a list can show. */
+const MAX_SYMBOL_HITS = 1_000
+/** The functions a call hierarchy starts from, and all it may grow to as it is opened. */
+const MAX_CALL_ROOTS = 20
+const MAX_CALL_ITEMS = 5_000
 const ACTIONS_TTL_MS = 5 * 60_000
 /** The most text one plan may carry, before and after together. */
 const MAX_PLAN_BYTES = 64 * 1024 * 1024
@@ -245,6 +280,9 @@ export class LanguageServers {
   /** The editor's own list of actions, apart from the agent's: neither replaces the other's. Only the newest is kept. */
   private editorActions: { list: number; file: string; client: LanguageClient; server: string; items: CodeAction[] } | null = null
   private editorActionLists = 0
+  /** The editor's newest call hierarchy: every function it named, numbered, with the server that named them. */
+  private editorCallItems: { list: number; client: LanguageClient; items: CallHierarchyItem[] } | null = null
+  private editorCallLists = 0
   /** Files with marks in the editor, by server: taken back when the server closes the file or stops. */
   private readonly marked = new Map<string, Map<string, string>>()
   private readonly idleTimer: NodeJS.Timeout
@@ -1191,6 +1229,123 @@ export class LanguageServers {
       signal,
       2_000,
     )
+  }
+
+  /** The outline of a document of the editor's as a tree; a server that answers with a flat list has it nested by range. */
+  editorSymbols(file: string, signal?: AbortSignal): Promise<EditorSymbol[] | null> {
+    return this.editorAsk(
+      file,
+      'documentSymbol',
+      'textDocument/documentSymbol',
+      (doc) => ({ textDocument: { uri: doc.uri } }),
+      (value) => {
+        const read = readDocumentSymbols(value)
+        if ('tree' in read) return fromDocumentSymbols(read.tree)
+        const key = this.key(file)
+        const flat: EditorSymbol[] = []
+        for (const item of read.flat) {
+          // A flat list names a place for each symbol; one in another file, or with no range, is not this outline's.
+          if (!('range' in item.location)) continue
+          const at = uriToPath(item.location.uri, this.platform)
+          if (!at || this.key(at) !== key) continue
+          flat.push({ name: item.name, kind: SYMBOL_KINDS[item.kind] ?? 'symbol', range: item.location.range, selection: item.location.range })
+        }
+        return nestSymbols(flat)
+      },
+      signal,
+    )
+  }
+
+  /**
+   * Symbols by name across the folder for the editor: from every server running in it, and the one of `file` (started
+   * if it is not). Null while no running server searches symbols.
+   */
+  async editorWorkspaceSymbols(query: string, file: string | undefined, signal?: AbortSignal): Promise<EditorSymbolHit[] | null> {
+    if (file && this.covers(file).ok) await this.open(file, signal).catch(() => undefined)
+    const clients: LanguageClient[] = []
+    for (const server of this.servers.values()) if (server.client && !server.client.exited && server.client.supports('workspaceSymbol')) clients.push(server.client)
+    if (!clients.length) return null
+    const answers = await Promise.all(
+      clients.map(async (client) => {
+        try {
+          return readSymbolInformation(await client.request('workspace/symbol', { query }, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) }))
+        } catch (error) {
+          if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+          this.options.log?.(`[${client.name}] workspace/symbol: ${error instanceof Error ? error.message : String(error)}`)
+          return []
+        }
+      }),
+    )
+    const out: EditorSymbolHit[] = []
+    for (const list of answers) {
+      for (const item of list) {
+        if (out.length >= MAX_SYMBOL_HITS) return out
+        const at = uriToPath(item.location.uri, this.platform)
+        if (!at) continue
+        const range = 'range' in item.location ? item.location.range : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }
+        out.push({ name: item.name, kind: SYMBOL_KINDS[item.kind] ?? 'symbol', ...(item.containerName ? { container: item.containerName } : {}), file: at, range })
+      }
+    }
+    return out
+  }
+
+  /**
+   * The functions at a position a call hierarchy starts from (usually one), numbered in a new hierarchy that replaces
+   * the editor's last; null when no server offers call hierarchies in the file.
+   */
+  editorPrepareCalls(file: string, line: number, character: number, signal?: AbortSignal): Promise<{ list: number; items: EditorCallItem[] } | null> {
+    const list = ++this.editorCallLists
+    return this.editorAsk(
+      file,
+      'callHierarchy',
+      'textDocument/prepareCallHierarchy',
+      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }),
+      (value, client) => {
+        const items = readCallHierarchyItems(value).slice(0, MAX_CALL_ROOTS)
+        if (list === this.editorCallLists) this.editorCallItems = { list, client, items: [...items] }
+        const out: EditorCallItem[] = []
+        items.forEach((item, id) => {
+          const named = this.callItem(item, id)
+          if (named) out.push(named)
+        })
+        return { list, items: out }
+      },
+      signal,
+    )
+  }
+
+  /** Who calls a function of the editor's newest call hierarchy (`incoming`), or what it calls (`outgoing`), numbered in it in turn. */
+  async editorCalls(list: number, id: number, direction: 'incoming' | 'outgoing', signal?: AbortSignal): Promise<{ calls: EditorCall[] } | { reason: string }> {
+    const known = this.editorCallItems
+    const asked = known && known.list === list ? known.items[id] : undefined
+    if (!known || !asked) return { reason: 'That call hierarchy is out of date. Open it again.' }
+    if (known.client.exited) return { reason: 'The language server stopped. Open the call hierarchy again.' }
+    let value: unknown
+    try {
+      value = await known.client.request(direction === 'incoming' ? 'callHierarchy/incomingCalls' : 'callHierarchy/outgoingCalls', { item: asked }, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) })
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+      return { reason: `${known.client.name} could not answer. ${serverWords(error, 'It gave no reason.')}` }
+    }
+    const askedFile = uriToPath(asked.uri, this.platform)
+    const calls: EditorCall[] = []
+    for (const { item, sites } of readCallSites(value, direction === 'incoming' ? 'from' : 'to')) {
+      // A hierarchy is opened a level at a time; past this many functions it has grown beyond what anyone reads.
+      if (known.items.length >= MAX_CALL_ITEMS) break
+      const siteFile = direction === 'incoming' ? uriToPath(item.uri, this.platform) : askedFile
+      if (!siteFile) continue
+      const named = this.callItem(item, known.items.length)
+      if (!named) continue
+      known.items.push(item)
+      calls.push({ item: named, file: siteFile, sites })
+    }
+    return { calls }
+  }
+
+  private callItem(item: CallHierarchyItem, id: number): EditorCallItem | null {
+    const file = uriToPath(item.uri, this.platform)
+    if (!file) return null
+    return { id, name: item.name, kind: SYMBOL_KINDS[item.kind] ?? 'symbol', ...(item.detail ? { detail: item.detail } : {}), file, range: item.selectionRange }
   }
 
   // ------------------------------------------------------------ the servers

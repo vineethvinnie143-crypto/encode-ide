@@ -143,6 +143,14 @@ export const GitPullRequest = icon(
 export const Regex = icon('Regex', <><path d="M17 4v8 M13.5 6l7 4 M20.5 6l-7 4" /><rect x="4" y="15" width="5" height="5" rx="1" /></>)
 export const CaseSensitive = icon('CaseSensitive', <><path d="M3.5 17 7 7l3.5 10 M4.8 13.5h4.4" /><circle cx="16.5" cy="14" r="3" /><path d="M19.5 11v6" /></>)
 export const ListTree = icon('ListTree', <path d="M9 6h11 M13 12h7 M13 18h7 M5 4.5v11.5a2 2 0 0 0 2 2h3 M5 12h5" />)
+/** Sorting: an arrow down beside an arrow up. */
+export const ArrowDownUp = icon('ArrowDownUp', <path d="M7 4v16 M3.5 16.5 7 20l3.5-3.5 M17 20V4 M13.5 7.5 17 4l3.5 3.5" />)
+/** Folding every level shut: two chevrons pointing in. */
+export const ChevronsDownUp = icon('ChevronsDownUp', <path d="M7 20l5-5 5 5 M7 4l5 5 5-5" />)
+/** Following the cursor: a ring with its four marks. */
+export const Crosshair = icon('Crosshair', <path d="M12 5.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z M12 2.5v4 M12 17.5v4 M2.5 12h4 M17.5 12h4" />)
+/** A line number: the number sign. */
+export const Hash = icon('Hash', <path d="M4.5 9h15 M4.5 15h15 M10 4l-2 16 M16 4l-2 16" />)
 export const ListTodo = icon(
   'ListTodo',
   <>

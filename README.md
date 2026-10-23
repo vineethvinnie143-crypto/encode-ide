@@ -105,7 +105,9 @@ primary platform; the code stays cross-platform.
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and
   Forward. F2 renames across the project with a preview and one Undo for the whole change; Ctrl+. and a lightbulb
   offer the servers' fixes and refactorings; imports are organized and files formatted (on save and as you type, if
-  you want); a Problems panel and F8 go through every problem. eNCode talks to them through its own client and
+  you want); a Problems panel and F8 go through every problem. Breadcrumbs and an outline show where the cursor is
+  among the file's symbols; Go to symbol finds one in the file or the whole folder, and a call hierarchy follows
+  callers and calls a level at a time. eNCode talks to them through its own client and
   carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.
@@ -255,7 +257,8 @@ The main ones as shipped:
 | Command palette: sessions, actions and settings pages | `Ctrl+K` or `Ctrl+Shift+P` |
 | New session, new chat | `Ctrl+N`, `Ctrl+Alt+O` |
 | Open a folder | `Ctrl+O` |
-| Go to file | `Ctrl+P` |
+| Go to file (`@` a symbol, `#` a symbol of the folder, `:` a line, `name.ts:12`) | `Ctrl+P` |
+| Go to symbol in the file / in the folder | `Ctrl+Shift+O` / `Ctrl+Alt+T` |
 | Choose the model, the effort | `Alt+M`, `Ctrl+Shift+M` |
 | Send a message | `Enter`, or `Ctrl+Enter` if you choose it in Settings → General |
 | Steer the agent now, queue a message (while it works) | `Ctrl+Enter`, `Enter` (swapped in Settings → General) |
@@ -286,6 +289,8 @@ The main ones as shipped:
 | Select the next occurrence, all occurrences | `Ctrl+D`, `Ctrl+Shift+L` (in the editor) |
 | Add a cursor above or below | `Ctrl+Alt+Up`/`Down`, or `Alt`+click (in the editor) |
 | Delete the line | `Ctrl+Shift+K` (in the editor) |
+| Callers of a function, what it calls | `Shift+Alt+H` (in the editor) |
+| Move through the breadcrumbs | `Ctrl+Shift+.` |
 | Leave the editor with the keyboard | `Esc`, then `Tab` (a plain `Tab` indents) |
 
 The editor takes its own keys while it has focus, so `Ctrl+/`, `Ctrl+[` and `Ctrl+]` comment
@@ -308,7 +313,9 @@ apps/desktop/                 the Electron app (@encode/desktop)
     components/panels/        the side and bottom panels: tab strip, pages, New tab
     editor/                   the open documents: text, history and what is on disk; the language servers' marks, and
                               (assist/) suggestions, parameter hints, the symbol's places and the history of jumps,
-                              rename, code actions and formatting; the Problems list and F8
+                              rename, code actions and formatting, the outline; the Problems list and F8, the
+                              symbols' ranking and the call hierarchy's rows
+    palette/                  the command palette's and Go to file's ranking and modes, as pure functions
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)

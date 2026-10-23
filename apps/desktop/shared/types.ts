@@ -794,6 +794,43 @@ export interface EditorLocation {
   preview?: string
 }
 
+/** A symbol of a file as the outline and the breadcrumbs show it: its whole range, its name's, and what it holds. */
+export interface EditorSymbol {
+  name: string
+  /** As people read it: "function", "class", "enum member". */
+  kind: string
+  detail?: string
+  range: CodeRange
+  /** The range of its name: where going to it puts the cursor. */
+  selection: CodeRange
+  children?: EditorSymbol[]
+}
+
+/** A symbol found by name across the folder; only the folder's own files are listed. */
+export interface EditorSymbolMatch {
+  name: string
+  kind: string
+  container?: string
+  path: string
+  range: CodeRange
+}
+
+/** A function of a call hierarchy, numbered in the newest one so that its calls can be asked for. */
+export interface EditorCallFunction {
+  id: number
+  name: string
+  kind: string
+  detail?: string
+  /** Its name. */
+  at: EditorLocation
+}
+
+/** The other end of a function's calls (who calls it, or what it calls) and where those calls are. */
+export interface EditorCallEntry {
+  item: EditorCallFunction
+  sites: EditorLocation[]
+}
+
 interface EditorAt {
   /** As the file tree names it: "src/a.ts". */
   path: string
@@ -823,6 +860,14 @@ export interface EditorAsks {
   format: { params: { path: string; range?: CodeRange; tabSize: number; insertSpaces: boolean }; result: CodeTextEdit[] | null }
   /** The edits that format what was just typed: `ch`, which ends at the position. */
   formatOnType: { params: EditorAt & { ch: string; tabSize: number; insertSpaces: boolean }; result: CodeTextEdit[] | null }
+  /** The file's outline, as a tree. */
+  symbols: { params: { path: string }; result: EditorSymbol[] | null }
+  /** Symbols by name across the folder; `path` is the file shown ('' for none), whose server starts if it is not running. */
+  workspaceSymbols: { params: { path: string; query: string }; result: EditorSymbolMatch[] | null }
+  /** The functions at a position a call hierarchy starts from, numbered in a new hierarchy. */
+  callHierarchy: { params: EditorAt; result: { list: number; items: EditorCallFunction[] } | null }
+  /** Who calls a function of the newest hierarchy (`incoming`), or what it calls (`outgoing`). */
+  calls: { params: { path: string; list: number; id: number; direction: 'incoming' | 'outgoing' }; result: { calls: EditorCallEntry[] } | { reason: string } | null }
 }
 
 /**
