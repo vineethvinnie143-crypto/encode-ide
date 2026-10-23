@@ -286,6 +286,8 @@ export class AgentSession {
   private readonly questions = new Map<string, { request: AskRequest; finish: (answer: string) => void }>()
   /** What the user approved for the rest of the session; never stored. */
   private readonly grants = new Set<string>()
+  /** The rules "Always allow" is saving: the next call is judged once they are in place, so the card's "applies at once" holds. */
+  private saving: Promise<unknown> = Promise.resolve()
   /** Under Auto review, the model that answers the low-risk questions. One per session, so its run of declines carries over from turn to turn. */
   private readonly reviewer: AutoReviewer | undefined
   private disposed = false
@@ -718,7 +720,7 @@ export class AgentSession {
     if (!remember) return
     const chosen: RuleScope = scope === 'user' || scope === 'project' || scope === 'local' ? scope : 'local'
     const list = always.rules.join(', ')
-    void remember([...always.rules], chosen).then(
+    const saved = remember([...always.rules], chosen).then(
       (result) => {
         if (this.disposed) return
         if (!result.ok) this.notice(`Could not save ${list}: ${result.reason}`, 'error')
@@ -730,6 +732,13 @@ export class AgentSession {
         if (!this.disposed) this.notice(`Could not save ${list}: ${errorMessage(error)}`, 'error')
       },
     )
+    this.saving = Promise.all([this.saving, saved]).catch(() => undefined)
+  }
+
+  /** Brings the rules up to date before a call is judged, after any rule still being saved. Never rejects. */
+  private readonly refreshRules = async (): Promise<void> => {
+    await this.saving
+    await this.env.refresh?.()
   }
 
   resolveAnswer(requestId: string, answer: string): boolean {
@@ -892,7 +901,7 @@ export class AgentSession {
       assessor: env.assessor,
       ...(env.rules ? { rules: env.rules } : {}),
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
-      ...(env.refresh ? { refresh: env.refresh } : {}),
+      refresh: this.refreshRules,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
     })
@@ -912,7 +921,7 @@ export class AgentSession {
       assessor: env.assessor,
       ...(env.rules ? { rules: env.rules } : {}),
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
-      ...(env.refresh ? { refresh: env.refresh } : {}),
+      refresh: this.refreshRules,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
       preface: this.preface,
@@ -1017,7 +1026,7 @@ export class AgentSession {
       platform: env.platform,
       extraRoots: env.extraRoots?.() ?? [],
       ...(env.rules ? { rules: env.rules } : {}),
-      ...(env.refresh ? { refresh: env.refresh } : {}),
+      refresh: this.refreshRules,
       files: this.files,
       skills: env.skills,
       holds: (block) => this.messages.some((message) => message.role === 'user' && message.content.some((part) => part.type === 'text' && part.text === block)),
