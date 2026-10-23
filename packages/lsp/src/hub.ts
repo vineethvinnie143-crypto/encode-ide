@@ -769,8 +769,25 @@ export class LanguageServers {
     return this.ask(file, 'references', 'textDocument/references', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, context: { includeDeclaration } }), (value) => this.locations(value), signal)
   }
 
-  hover(file: string, line: number, character: number, signal?: AbortSignal): Promise<string | null> {
-    return this.ask(file, 'hover', 'textDocument/hover', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), (value) => readHover(value), signal)
+  async hover(file: string, line: number, character: number, signal?: AbortSignal): Promise<string | null> {
+    const main = await this.ask(file, 'hover', 'textDocument/hover', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), (value) => readHover(value), signal)
+    const extra = await this.askCompanions(file, 'textDocument/hover', { position: { line, character } }, signal)
+    const parts = [main, ...extra.map((value) => readHover(value))].filter((text): text is string => Boolean(text))
+    return parts.length ? parts.join('\n\n---\n\n') : null
+  }
+
+  /** What the running companions of a file's language say to a request, each within 1.5 s; a failure is no answer. */
+  private async askCompanions(file: string, method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown[]> {
+    const found = serverFor(file, this.catalog)
+    if (!found || !this.options.allowed().ok) return []
+    const asked = this.companionsFor(found.languageId).flatMap((server) => {
+      const client = server.client
+      const doc = client && !client.exited ? client.document(file) : undefined
+      if (!client || !doc) return []
+      server.lastUse = Date.now()
+      return [client.request(method, { textDocument: { uri: doc.uri }, ...params }, { timeoutMs: 1500, ...(signal ? { signal } : {}) }).catch(() => null)]
+    })
+    return (await Promise.all(asked)).filter((value) => value !== null && value !== undefined)
   }
 
   documentSymbols(file: string, signal?: AbortSignal): Promise<CodeSymbol[]> {
@@ -1068,7 +1085,7 @@ export class LanguageServers {
 
   async completion(file: string, line: number, character: number, context: { triggerKind: 1 | 2 | 3; triggerCharacter?: string }, signal?: AbortSignal): Promise<CompletionResult | null> {
     const list = ++this.completionLists
-    return this.editorAsk(
+    const main = await this.editorAsk(
       file,
       'completion',
       'textDocument/completion',
@@ -1082,6 +1099,12 @@ export class LanguageServers {
       },
       signal,
     )
+    // A companion's suggestions (Tailwind's classes) follow the main server's, numbered after them and not resolved.
+    const extra = (await this.askCompanions(file, 'textDocument/completion', { position: { line, character }, context }, signal)).map((value) => readCompletion(value))
+    const items = extra.flatMap((read) => read.items)
+    if (!items.length) return main
+    const base: CompletionResult = main ?? { list, incomplete: false, items: [] }
+    return { ...base, incomplete: base.incomplete || extra.some((read) => read.incomplete), items: [...base.items, ...items.map((item, index) => toEntry(item, base.items.length + index, true))] }
   }
 
   /** Fills in an item of the newest list: its documentation, and the edits it brings (an import). */
