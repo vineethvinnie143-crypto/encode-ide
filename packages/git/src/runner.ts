@@ -34,7 +34,7 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 const MAX_STDERR = 64 * 1024
 
-export type GitErrorCode = 'failed' | 'timeout' | 'too-large' | 'missing'
+export type GitErrorCode = 'failed' | 'timeout' | 'too-large' | 'missing' | 'stopped'
 
 export class GitError extends Error {
   constructor(
@@ -60,6 +60,10 @@ export interface RunOptions {
   timeoutMs?: number
   /** Output beyond this many bytes ends the command with a `too-large` error. */
   maxBytes?: number
+  /** Stops git when it aborts: the command ends with a `stopped` error. */
+  signal?: AbortSignal
+  /** Settings for this command only, passed as `-c` after eNCode's own. */
+  config?: ReadonlyArray<readonly [key: string, value: string]>
 }
 
 export interface GitRunnerOptions {
@@ -110,9 +114,14 @@ export class GitRunner {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
     return new Promise<GitResult>((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(new GitError(`git ${args[0] ?? ''} was stopped.`, 'stopped'))
+        return
+      }
       let child: ReturnType<typeof spawn>
       try {
-        child = spawn(this.git, [...SETTING_ARGS, ...args], { cwd: this.cwd, env: this.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+        const extra = (options.config ?? []).flatMap(([key, value]) => ['-c', `${key}=${value}`])
+        child = spawn(this.git, [...SETTING_ARGS, ...extra, ...args], { cwd: this.cwd, env: this.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
       } catch (error) {
         reject(new GitError(`git could not be started: ${error instanceof Error ? error.message : String(error)}`, 'missing'))
         return
@@ -121,10 +130,15 @@ export class GitRunner {
       let size = 0
       let stderr = ''
       let settled = false
+      const onAbort = () => {
+        child.kill()
+        finish(new GitError(`git ${args[0] ?? ''} was stopped.`, 'stopped', stderr))
+      }
       const finish = (outcome: GitResult | GitError) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        options.signal?.removeEventListener('abort', onAbort)
         if (outcome instanceof GitError) reject(outcome)
         else resolve(outcome)
       }
@@ -132,6 +146,7 @@ export class GitRunner {
         child.kill()
         finish(new GitError(`git ${args[0] ?? ''} took longer than ${Math.round(timeoutMs / 1000)} s and was stopped.`, 'timeout', stderr))
       }, timeoutMs)
+      options.signal?.addEventListener('abort', onAbort, { once: true })
       child.stdout!.on('data', (chunk: Buffer) => {
         size += chunk.length
         if (size > maxBytes) {
