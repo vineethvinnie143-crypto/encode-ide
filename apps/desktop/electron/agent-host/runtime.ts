@@ -384,6 +384,12 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     workspaces?.editorDocument(root, change).catch((error) => log(`could not pass a file of the editor to its language server: ${describe(error)}`))
   })
 
+  // After the editor's changes above: the folder's lane makes the question wait for them.
+  peer.handle('codeAsk', async ({ root, ask }) => {
+    if (!workspaces) return ask.kind === 'highlights' ? [] : null
+    return workspaces.editorAsk(root, ask)
+  })
+
   peer.handle('codeReport', async ({ root, logs }) => {
     if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
     return workspaces.languageServersReport(root, logs ? { logs } : {})

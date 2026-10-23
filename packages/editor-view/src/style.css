@@ -18,6 +18,10 @@
   --e-match: var(--enc-editor-match-bg, rgba(245, 181, 74, 0.22));
   --e-match-active: var(--enc-editor-match-active-bg, rgba(245, 181, 74, 0.45));
   --e-bracket: var(--enc-editor-bracket-match-bg, rgba(127, 166, 255, 0.22));
+  --e-symbol: var(--enc-editor-symbol-bg, rgba(150, 160, 180, 0.16));
+  --e-symbol-write: var(--enc-editor-symbol-write-bg, rgba(127, 166, 255, 0.2));
+  --e-snippet: var(--enc-editor-snippet-border, rgba(127, 166, 255, 0.55));
+  --e-link: var(--enc-editor-link, #7fa6ff);
   --e-guide: var(--enc-editor-indent-guide, rgba(255, 255, 255, 0.07));
   --e-whitespace: var(--enc-editor-whitespace, rgba(255, 255, 255, 0.25));
   --e-error: var(--enc-editor-error, #ff6b6b);
@@ -266,6 +270,40 @@
   background: var(--e-bracket);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-cursor) 55%, transparent);
   border-radius: 2px;
+}
+/* The other places of the symbol at the cursor, as the language server sees them; where it is written to stands out. */
+.enc-mark-symbol {
+  background: var(--e-symbol);
+  border-radius: 2px;
+}
+.enc-mark-symbol-write {
+  background: var(--e-symbol-write);
+  border-radius: 2px;
+}
+/* A snippet's stops: the one being filled in, and the ones Tab goes to next. */
+.enc-snippet-stop {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e-snippet) 45%, transparent);
+  border-radius: 2px;
+}
+.enc-snippet-active {
+  background: color-mix(in srgb, var(--e-snippet) 12%, transparent);
+  box-shadow: inset 0 0 0 1px var(--e-snippet);
+  border-radius: 2px;
+}
+/* Ctrl held over a symbol: it is a link to its definition. */
+.enc-mark-link {
+  box-shadow: inset 0 -1px 0 var(--e-link);
+}
+.enc-editor.enc-linking .enc-content {
+  cursor: pointer;
+}
+/* The place a peek shows, in its preview: the symbol, on its line. */
+.enc-mark-peek {
+  background: var(--e-match);
+  border-radius: 2px;
+}
+.enc-line-peek {
+  background: color-mix(in srgb, var(--e-match) 30%, transparent);
 }
 .enc-line-inserted {
   background: var(--e-inserted-line);

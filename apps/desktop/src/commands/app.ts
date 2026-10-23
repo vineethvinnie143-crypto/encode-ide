@@ -5,6 +5,7 @@
  */
 import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
+import { hasActiveEditor, runEditorCommand } from '../editor/active'
 import { useEditor } from '../stores/editor'
 import { useFind } from '../stores/find'
 import { usePanels } from '../stores/panels'
@@ -137,6 +138,8 @@ function createAppActions(): AppActions {
         /* the focused element may not support it */
       }
     },
+    hasEditor: () => hasActiveEditor(),
+    editorCommand: (name) => void runEditorCommand(name),
     searchInFiles: () => panels().open('files', { view: 'search' }),
     canFind: () => ui().settingsOpen || panels().side.layout !== 'full',
     isFinding: () => useFind.getState().open,

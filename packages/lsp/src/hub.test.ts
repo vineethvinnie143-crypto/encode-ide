@@ -326,6 +326,63 @@ describe('the language servers of a folder', () => {
     await h.servers.dispose()
   })
 
+  it('completes for the editor\'s text: snippets, the word to replace, a resolve that brings an import, and members after a dot', async () => {
+    const dir = await project({ 'lib.fk': 'function greet\nfunction grow\n' })
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'gr', true)
+    await until('the server', () => h.servers.editorTriggers(a) !== null)
+    assert.deepEqual(h.servers.editorTriggers(a), { completion: ['.'], commit: [';'], signature: ['('], signatureRetrigger: [','] })
+    // The library is not open: what the server knows of it comes from the disk (the extra file).
+    const result = (await h.servers.completion(a, 0, 2, { triggerKind: 1 }))!
+    assert.equal(result.incomplete, false)
+    const labels = result.items.map((item) => item.label)
+    assert.ok(labels.includes('function') && labels.includes('helper'))
+    const helper = result.items.find((item) => item.label === 'helper')!
+    assert.deepEqual({ kind: helper.kind, description: helper.description, resolved: helper.resolved, additional: helper.additionalEdits }, { kind: 'function', description: './helpers', resolved: false, additional: undefined })
+    assert.deepEqual(helper.replace, { start: { line: 0, character: 0 }, end: { line: 0, character: 2 } })
+    assert.deepEqual(helper.commitCharacters, ['('])
+    assert.equal(result.items.find((item) => item.label === 'oldThing')?.deprecated, true)
+    const resolved = (await h.servers.resolveCompletion(a, result.list, helper.id))!
+    assert.equal(resolved.resolved, true)
+    assert.deepEqual(resolved.documentation, { kind: 'markdown', value: '**helper** does a thing.' })
+    assert.deepEqual(resolved.additionalEdits, [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'import helper\n' }])
+    // A newer list makes the older one's items unknown.
+    const newer = (await h.servers.completion(a, 0, 2, { triggerKind: 1 }))!
+    assert.equal(await h.servers.resolveCompletion(a, result.list, helper.id), null)
+    assert.ok(newer.list > result.list)
+    h.servers.editorChange(a, 'items.', true)
+    const members = (await h.servers.completion(a, 0, 6, { triggerKind: 2, triggerCharacter: '.' }))!
+    const push = members.items.find((item) => item.label === 'push')!
+    assert.deepEqual({ text: push.insertText, snippet: push.snippet, kind: push.kind }, { text: 'push($1)', snippet: true, kind: 'method' })
+    await h.servers.dispose()
+  })
+
+  it('helps with a call\'s signature, highlights a symbol, and hovers, for the editor', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'function add\nadd(1, 2)\nadd', true)
+    const help = (await h.servers.signatureHelp(a, 1, 6, { triggerKind: 2, triggerCharacter: ',', isRetrigger: false }))!
+    assert.equal(help.signatures[0].label, 'add(a: number, b: string)')
+    assert.equal(help.activeParameter, 1)
+    assert.deepEqual(help.signatures[0].parameters?.[0], { label: [4, 13], documentation: { kind: 'plaintext', value: 'the first' } })
+    assert.equal(await h.servers.signatureHelp(a, 2, 1, { triggerKind: 1, isRetrigger: false }), null)
+    const marks = await h.servers.highlights(a, 1, 1)
+    assert.deepEqual(marks.map((item) => [item.range.start.line, item.kind]), [[0, 'write'], [1, 'read'], [2, 'read']])
+    const hover = await h.servers.editorHover(a, 1, 1)
+    assert.equal(hover?.markdown, '**add**')
+    // Where nothing is, nothing is said; and a server that does not offer a feature answers nothing, not an error.
+    assert.equal(await h.servers.editorHover(a, 1, 5), null)
+    assert.deepEqual(await h.servers.editorLocations('definition', a, 1, 1), [{ file: a, line: 0, character: 9, endLine: 0, endCharacter: 12 }])
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'add(', true)
+    assert.equal(await bare.servers.completion(a, 0, 4, { triggerKind: 1 }), null)
+    assert.deepEqual(await bare.servers.highlights(a, 0, 1), [])
+    await bare.servers.dispose()
+  })
+
   it('keeps no more than 64 documents open for the agent', async () => {
     const files: Record<string, string> = {}
     for (let index = 0; index < 70; index++) files[`f${index}.fk`] = `x${index}`

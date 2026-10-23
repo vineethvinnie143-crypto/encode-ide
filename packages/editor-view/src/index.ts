@@ -6,3 +6,4 @@ export { Keymap, comboOf, defaultBindings, isMac, parseCombo, type KeyBinding, t
 export { controlLabel, hasControl, isSimpleText, segmentsOf, type Segment } from './line'
 export { ReviewController, type ReviewChange, type ReviewLabels } from './review-view'
 export { FindController } from './find'
+export { SnippetController, type SnippetInsert } from './snippet'

@@ -26,6 +26,7 @@ import { fillLine, isSimpleText } from './line'
 import { PointerHandler } from './pointer'
 import { RectPool } from './rects'
 import { ReviewController } from './review-view'
+import { SnippetController } from './snippet'
 
 /** Lines longer than this are drawn in part: the piece around the viewport. */
 export const LONG_LINE = 4000
@@ -69,6 +70,11 @@ export interface ViewZone {
   height: number
   /** The zone's content. The view sizes and places it. */
   dom: HTMLElement
+  /**
+   * Spans the part of the text in sight and stays put when the text scrolls sideways: a panel between the lines (a
+   * peek), not more text. Without it the zone is as wide as the longest line and scrolls with the text.
+   */
+  fixed?: boolean
 }
 
 export interface ViewEvents {
@@ -193,6 +199,7 @@ export class EditorView {
   readonly pointer: PointerHandler
   readonly find: FindController
   readonly review: ReviewController
+  readonly snippet: SnippetController
 
   constructor(config: EditorViewConfig) {
     this.state = config.state
@@ -264,6 +271,7 @@ export class EditorView {
     this.pointer = new PointerHandler(this)
     this.find = new FindController(this)
     this.review = new ReviewController(this)
+    this.snippet = new SnippetController(this)
 
     this.listen(this.scroller, 'scroll', () => this.onScroll(), { passive: true })
     this.listen(this.scroller, 'wheel', (event) => this.onWheel(event), { passive: false })
@@ -370,6 +378,7 @@ export class EditorView {
     this.input.reset()
     this.find.stateReplaced()
     this.review.stateReplaced()
+    this.snippet.stateReplaced()
     this.pendingReveal = null
     this.pendingScroll = scroll ?? null
     if (!scroll) {
@@ -549,8 +558,10 @@ export class EditorView {
     const { scrollTop, scrollLeft } = this.scroller
     if (scrollTop === this.lastScroll.top && scrollLeft === this.lastScroll.left) return
     const vertical = scrollTop !== this.lastScroll.top
+    const sideways = scrollLeft !== this.lastScroll.left
     this.lastScroll = { top: scrollTop, left: scrollLeft }
     if (vertical && this.scale.scaled) this.placeLayers()
+    if (sideways) this.placeFixedZones()
     if (!this.coversViewport() || (scrollLeft !== 0 && this.hasLongLines())) this.render()
     this.emit('viewport')
   }
@@ -810,6 +821,16 @@ export class EditorView {
       dom.style.height = `${entry.zone.height}px`
     }
     for (const zone of [...this.attachedZones]) if (!wanted.has(zone)) this.detachZone(zone)
+    this.placeFixedZones()
+  }
+
+  /** The fixed zones over the part of the text in sight, wherever it is scrolled sideways. */
+  private placeFixedZones(): void {
+    for (const zone of this.attachedZones) {
+      if (!zone.fixed) continue
+      zone.dom.style.left = `${this.scroller.scrollLeft}px`
+      zone.dom.style.width = `${Math.max(0, this.scroller.clientWidth - this.gutterWidth)}px`
+    }
   }
 
   /** The line numbers with a cursor on them. */

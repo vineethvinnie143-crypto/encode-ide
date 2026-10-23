@@ -8,12 +8,13 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LANGUAGE_SERVERS, serverFor, type ServerSpec } from './catalog'
-import { LanguageClient, type OpenDocument, type ServerProcess } from './client'
+import { LanguageClient, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
+import { toEntry, type CompletionEntry, type CompletionResult, type EditorHighlight } from './completion'
 import type { LaunchPlan } from './discover'
 import { applyTextEdits } from './edits'
 import { RpcFailure } from './jsonrpc'
-import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeAction, type Diagnostic, type DocumentSymbol, type Range, type TextEdit, type WorkspaceEdit } from './protocol'
-import { readCallHierarchyItems, readCalls, readCodeAction, readCodeActions, readDocumentSymbols, readHover, readLocations, readRange, readSymbolInformation, readWorkspaceEdit } from './results'
+import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeAction, type CompletionItem, type Diagnostic, type DocumentSymbol, type Range, type SignatureHelp, type TextEdit, type WorkspaceEdit } from './protocol'
+import { readCallHierarchyItems, readCalls, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readRange, readSignatureHelp, readSymbolInformation, readWorkspaceEdit } from './results'
 import { documentKey, uriToPath } from './uri'
 
 export type Severity = 'error' | 'warning' | 'info' | 'hint'
@@ -210,6 +211,9 @@ export class LanguageServers {
   private readonly discovered = new Map<string, { result: LaunchPlan | { missing: string }; at: number }>()
   /** Whether servers could run at the last `sync`. */
   private wasAllowed: boolean | undefined
+  /** The last completion list, kept as the server sent it so that an item can be resolved. */
+  private completions: { list: number; file: string; client: LanguageClient; items: CompletionItem[] } | null = null
+  private completionLists = 0
   private actions: { file: string; items: CodeAction[]; at: number; server: string } | null = null
   /** Files with marks in the editor, by server: taken back when the server closes the file or stops. */
   private readonly marked = new Map<string, Map<string, string>>()
@@ -863,6 +867,109 @@ export class LanguageServers {
   /** Reads a range the way the protocol has it, or null. */
   static range(value: unknown): Range | null {
     return readRange(value)
+  }
+
+  // ------------------------------------------------------------ the editor's requests
+
+  /**
+   * Asks the server of a file the editor shows, for the editor's text as it is now. A server that cannot answer, or a
+   * file no server may serve, gets null: the editor shows nothing rather than an error for each keystroke.
+   */
+  private async editorAsk<T>(file: string, feature: Parameters<LanguageClient['supports']>[0], method: string, params: (doc: OpenDocument) => unknown, read: (value: unknown, client: LanguageClient) => T, signal?: AbortSignal, timeoutMs = REQUEST_MS): Promise<T | null> {
+    if (!this.covers(file).ok) return null
+    const opened = await this.open(file, signal).catch(() => ({ reason: 'gone' }))
+    if ('reason' in opened || !opened.client.supports(feature)) return null
+    try {
+      const value = await opened.client.request(method, params(opened.doc), { timeoutMs, ...(signal ? { signal } : {}) })
+      return read(value, opened.client)
+    } catch (error) {
+      if (!(error instanceof RpcFailure && error.code === 'cancelled')) this.options.log?.(`[${opened.client.name}] ${method}: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
+  }
+
+  /** What typing asks of the server of a file, or null while none runs for it. */
+  editorTriggers(file: string): EditorTriggers | null {
+    return this.runningFor(file)?.client.triggers() ?? null
+  }
+
+  async completion(file: string, line: number, character: number, context: { triggerKind: 1 | 2 | 3; triggerCharacter?: string }, signal?: AbortSignal): Promise<CompletionResult | null> {
+    const list = ++this.completionLists
+    return this.editorAsk(
+      file,
+      'completion',
+      'textDocument/completion',
+      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, context }),
+      (value, client) => {
+        const read = readCompletion(value)
+        const resolvable = client.supports('completionResolve')
+        // Only the newest list can be resolved; an older answer that arrives late is still shown by its caller's choice.
+        if (list === this.completionLists) this.completions = { list, file, client, items: read.items }
+        return { list, incomplete: read.incomplete, items: read.items.map((item, index) => toEntry(item, index, !resolvable)) }
+      },
+      signal,
+    )
+  }
+
+  /** Fills in an item of the newest list: its documentation, and the edits it brings (an import). */
+  async resolveCompletion(file: string, list: number, id: number, signal?: AbortSignal): Promise<CompletionEntry | null> {
+    const known = this.completions
+    if (!known || known.list !== list || known.file !== file || !known.items[id]) return null
+    const item = known.items[id]
+    if (!known.client.supports('completionResolve') || known.client.exited) return toEntry(item, id, true)
+    try {
+      const value = await known.client.request('completionItem/resolve', item, { timeoutMs: 5_000, ...(signal ? { signal } : {}) })
+      const read = readCompletion([value]).items[0]
+      if (!read) return toEntry(item, id, true)
+      // A resolve fills in; it does not move the item. What it left out stays as the list had it.
+      const merged: CompletionItem = { ...item, ...read, textEdit: read.textEdit ?? item.textEdit, insertText: read.insertText ?? item.insertText }
+      known.items[id] = merged
+      return toEntry(merged, id, true)
+    } catch (error) {
+      if (!(error instanceof RpcFailure && error.code === 'cancelled')) this.options.log?.(`[${known.client.name}] completionItem/resolve: ${error instanceof Error ? error.message : String(error)}`)
+      return toEntry(item, id, true)
+    }
+  }
+
+  signatureHelp(file: string, line: number, character: number, context: { triggerKind: 1 | 2 | 3; triggerCharacter?: string; isRetrigger: boolean; activeSignatureHelp?: SignatureHelp }, signal?: AbortSignal): Promise<SignatureHelp | null> {
+    return this.editorAsk(file, 'signatureHelp', 'textDocument/signatureHelp', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, context }), (value) => readSignatureHelp(value), signal)
+  }
+
+  async highlights(file: string, line: number, character: number, signal?: AbortSignal): Promise<EditorHighlight[]> {
+    const kinds = { 1: 'text', 2: 'read', 3: 'write' } as const
+    const read = await this.editorAsk(file, 'documentHighlight', 'textDocument/documentHighlight', (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }), (value) => readHighlights(value), signal, 3_000)
+    return (read ?? []).map((item) => ({ range: item.range, kind: kinds[(item.kind ?? 1) as 1 | 2 | 3] }))
+  }
+
+  /** The hover of a position for the editor: markdown, and the range it is about. */
+  editorHover(file: string, line: number, character: number, signal?: AbortSignal): Promise<{ markdown: string; range?: Range } | null> {
+    return this.editorAsk(
+      file,
+      'hover',
+      'textDocument/hover',
+      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character } }),
+      (value) => {
+        const markdown = readHover(value)
+        if (!markdown) return null
+        const range = value && typeof value === 'object' ? readRange((value as { range?: unknown }).range) : null
+        return { markdown, ...(range ? { range } : {}) }
+      },
+      signal,
+      5_000,
+    )
+  }
+
+  /** Where a symbol is defined, for the editor: the same as the agent's lookup, without its errors. */
+  async editorLocations(kind: 'definition' | 'typeDefinition' | 'implementation' | 'references', file: string, line: number, character: number, signal?: AbortSignal): Promise<CodeLocation[] | null> {
+    const method = { definition: 'textDocument/definition', typeDefinition: 'textDocument/typeDefinition', implementation: 'textDocument/implementation', references: 'textDocument/references' }[kind]
+    return this.editorAsk(
+      file,
+      kind,
+      method,
+      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, ...(kind === 'references' ? { context: { includeDeclaration: true } } : {}) }),
+      (value) => this.locations(value),
+      signal,
+    )
   }
 
   // ------------------------------------------------------------ the servers

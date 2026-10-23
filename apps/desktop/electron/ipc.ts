@@ -8,6 +8,7 @@ import { rewindRequestOf } from './agent-host/rewind-request'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
 import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
+import { noAnswer, readEditorAsk } from './services/editor-ask'
 import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
@@ -224,6 +225,22 @@ export function registerIpc(deps: IpcDeps): void {
     // Larger than a server is given: the editor shows it without one.
     if (text.length > MAX_DOCUMENT_CHARS) return agent.document({ kind: 'close', root, path })
     agent.document({ kind, root, path, text, dirty: dirty === true })
+  })
+  // A question of the editor's about a file it shows. The same channel as the changes above, so it comes after them.
+  handle('code:ask', async (value: unknown) => {
+    const root = workspace.current?.root
+    const kind = (value as { kind?: unknown } | null)?.kind
+    if (!root) return noAnswer(kind)
+    const ask = readEditorAsk(value, (rel) => {
+      try {
+        return workspace.toRelative(workspace.resolve(rel)) || null
+      } catch {
+        return null
+      }
+    })
+    if (!ask) return noAnswer(kind)
+    // The editor shows nothing for a question it could not have answered; a reason would only be noise there.
+    return agent.codeAsk(root, ask).catch(() => noAnswer(kind))
   })
   handle('code:report', () => {
     const root = workspace.current?.root

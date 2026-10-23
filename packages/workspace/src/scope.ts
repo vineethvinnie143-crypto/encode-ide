@@ -4,9 +4,20 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import type { LanguageServers } from '@encode/lsp'
+import type { CodeLocation, LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
-import { folderLanguageServers, languageServersReport, type EditorDocumentChange, type LanguageServerOptions, type LanguageServersReport } from './code'
+import {
+  folderLanguageServers,
+  languageServersReport,
+  type EditorAnswer,
+  type EditorAsk,
+  type EditorAsks,
+  type EditorDocumentChange,
+  type EditorLocation,
+  type LanguageServerOptions,
+  type LanguageServersReport,
+  withPreviews,
+} from './code'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
@@ -22,6 +33,13 @@ import { sandboxReport, type SandboxReport } from './sandbox-report'
 const DAY_MS = 24 * 60 * 60 * 1000
 /** How long opening a session waits for the sandbox to find out whether this machine has one (the first run on Windows builds its helper). */
 const SANDBOX_WAIT_MS = 15_000
+
+/** A file's path in a folder, '/'-separated, or null when it is the folder itself or outside it. */
+function inFolder(root: string, file: string): string | null {
+  const relative = path.relative(root, file)
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
+  return relative.split(path.sep).join('/')
+}
 
 export interface CheckpointStoreOptions {
   /** The store's base folder; a folder for each workspace is made under it. */
@@ -74,6 +92,9 @@ export class Workspaces {
   private readonly hubs = new Map<string, McpHub>()
   /** A folder's language servers, shared by its sessions and the editor; each server in it stops when unused. */
   private readonly code = new Map<string, LanguageServers>()
+  /** The editor's changes and questions, by the folder path it gives. */
+  private readonly lanes = new Map<string, { pending: Promise<void>; asking: Map<string, AbortController> }>()
+  private readonly realRoots = new Map<string, string>()
   private readonly stores: CheckpointStoreOptions | undefined
   /** The stores already tidied by this program, so that opening a second session in a folder does not do it again. */
   private readonly tidied = new Set<string>()
@@ -165,18 +186,93 @@ export class Workspaces {
 
   /**
    * The editor opened, changed or closed a file of a folder (given as any path to it). A path that leaves the folder
-   * is ignored: the editor shows only the folder's own files.
+   * is ignored: the editor shows only the folder's own files. Changes are applied in the order they came, and a
+   * question the editor asks after one waits for it (`editorAsk`).
    */
-  async editorDocument(root: string, change: EditorDocumentChange): Promise<void> {
-    if (!this.options.languageServers) return
-    const config = this.config(await realPathOf(root))
-    const file = path.resolve(config.root, change.path)
-    const relative = path.relative(config.root, file)
-    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return
-    const servers = this.languageServers(config.root)!
-    if (change.kind === 'close') servers.editorClose(file)
-    else if (change.kind === 'open') servers.editorOpen(file, change.text, change.dirty)
-    else servers.editorChange(file, change.text, change.dirty)
+  editorDocument(root: string, change: EditorDocumentChange): Promise<void> {
+    if (!this.options.languageServers) return Promise.resolve()
+    const lane = this.editorLane(root)
+    lane.pending = lane.pending.then(async () => {
+      const at = await this.editorFile(root, change.path)
+      if (!at) return
+      if (change.kind === 'close') at.servers.editorClose(at.file)
+      else if (change.kind === 'open') at.servers.editorOpen(at.file, change.text, change.dirty)
+      else at.servers.editorChange(at.file, change.text, change.dirty)
+    }).catch((error: unknown) => this.warn?.(`The language servers could not follow the editor: ${error instanceof Error ? error.message : String(error)}`))
+    return lane.pending
+  }
+
+  /**
+   * A question of the editor's to the servers of a file it shows, for its text as it is now: it waits for the changes
+   * the editor sent before it. A newer question of the same kind cancels an older one still waiting for its answer.
+   */
+  async editorAsk<K extends keyof EditorAsks>(root: string, ask: { kind: K } & EditorAsks[K]['params']): Promise<EditorAnswer<K>> {
+    const empty = (ask.kind === 'highlights' ? [] : null) as EditorAnswer<K>
+    if (!this.options.languageServers) return empty
+    const lane = this.editorLane(root)
+    await lane.pending
+    const at = await this.editorFile(root, ask.path)
+    if (!at) return empty
+    const { servers, file, root: real } = at
+    const slot = ask.kind === 'resolve' || ask.kind === 'triggers' ? null : ask.kind
+    const controller = new AbortController()
+    if (slot) {
+      lane.asking.get(slot)?.abort()
+      lane.asking.set(slot, controller)
+    }
+    const signal = controller.signal
+    const a = ask as EditorAsk
+    const where = async (items: CodeLocation[] | null): Promise<EditorLocation[] | null> => items && withPreviews(items.map((item) => ({ path: inFolder(real, item.file), ...item })))
+    try {
+      switch (a.kind) {
+        case 'complete':
+          return (await servers.completion(file, a.line, a.character, { triggerKind: a.triggerKind, ...(a.triggerCharacter ? { triggerCharacter: a.triggerCharacter } : {}) }, signal)) as EditorAnswer<K>
+        case 'resolve':
+          return (await servers.resolveCompletion(file, a.list, a.id)) as EditorAnswer<K>
+        case 'signature':
+          return (await servers.signatureHelp(file, a.line, a.character, { triggerKind: a.triggerKind, isRetrigger: a.isRetrigger, ...(a.triggerCharacter ? { triggerCharacter: a.triggerCharacter } : {}), ...(a.active ? { activeSignatureHelp: a.active } : {}) }, signal)) as EditorAnswer<K>
+        case 'hover':
+          return (await servers.editorHover(file, a.line, a.character, signal)) as EditorAnswer<K>
+        case 'highlights':
+          return (await servers.highlights(file, a.line, a.character, signal)) as EditorAnswer<K>
+        case 'definition':
+        case 'typeDefinition':
+        case 'implementation':
+        case 'references':
+          return (await where(await servers.editorLocations(a.kind, file, a.line, a.character, signal))) as EditorAnswer<K>
+        case 'triggers':
+          return servers.editorTriggers(file) as EditorAnswer<K>
+        default:
+          return empty
+      }
+    } catch {
+      return empty
+    } finally {
+      if (slot && lane.asking.get(slot) === controller) lane.asking.delete(slot)
+    }
+  }
+
+  /** The order the editor's changes of a folder are applied in, and the questions it waits on, by the path it gave. */
+  private editorLane(root: string): { pending: Promise<void>; asking: Map<string, AbortController> } {
+    let lane = this.lanes.get(root)
+    if (!lane) {
+      lane = { pending: Promise.resolve(), asking: new Map() }
+      this.lanes.set(root, lane)
+    }
+    return lane
+  }
+
+  /** The file a path of the editor's names in the real folder, with the folder's servers, or null outside the folder. */
+  private async editorFile(root: string, relativePath: string): Promise<{ servers: LanguageServers; file: string; root: string } | null> {
+    let real = this.realRoots.get(root)
+    if (!real) {
+      real = await realPathOf(root)
+      this.realRoots.set(root, real)
+    }
+    const config = this.config(real)
+    const file = path.resolve(config.root, relativePath)
+    if (inFolder(config.root, file) === null) return null
+    return { servers: this.languageServers(config.root)!, file, root: config.root }
   }
 
   /**

@@ -3,6 +3,7 @@ import { api } from '../api'
 import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, matchesSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
 import { errorText } from '../ipc-error'
+import type { CodeRange } from '@shared/types'
 
 export interface Tab {
   path: string
@@ -25,7 +26,11 @@ interface EditorStore {
   cursor: { line: number; column: number }
   info: DocInfo
   revealLine: number | null
+  /** A place to show and select, as the language servers count (zero-based lines and UTF-16 columns). */
+  revealRange: CodeRange | null
   openFile(path: string, line?: number): Promise<void>
+  /** Opens a file and selects `range` in it: where Go to definition lands. */
+  openAt(path: string, range: CodeRange): Promise<void>
   closeTab(path: string): Promise<void>
   closeOthers(path: string): Promise<void>
   closeAll(): Promise<void>
@@ -46,7 +51,10 @@ interface EditorStore {
   setCursor(line: number, column: number): void
   setInfo(info: DocInfo): void
   consumeRevealLine(): void
+  consumeRevealRange(): void
 }
+
+type Reveal = { revealLine: number | null; revealRange: CodeRange | null }
 
 const nameOf = (path: string): string => path.split('/').pop() ?? path
 
@@ -75,30 +83,11 @@ export const useEditor = create<EditorStore>((set, get) => ({
   cursor: { line: 1, column: 1 },
   info: { indent: 'Spaces: 2', eol: 'LF' },
   revealLine: null,
+  revealRange: null,
 
-  openFile: async (path, line) => {
-    if (get().tabs.some((tab) => tab.path === path)) {
-      set({ activePath: path, revealLine: line ?? null })
-      return
-    }
-    try {
-      const file = await api.workspace.read(path)
-      if (file.binary) {
-        useUi.getState().notify('error', `${path} is a binary file and cannot be opened as text.`)
-        return
-      }
-      const state = openDoc(path, file.content)
-      set((current) => ({
-        tabs: current.tabs.some((tab) => tab.path === path)
-          ? current.tabs
-          : [...current.tabs, { path, name: nameOf(path), language: state.config.language.id, dirty: false }],
-        activePath: path,
-        revealLine: line ?? null,
-      }))
-    } catch (error) {
-      useUi.getState().notify('error', errorText(error))
-    }
-  },
+  openFile: (path, line) => open(path, { revealLine: line ?? null, revealRange: null }),
+
+  openAt: (path, range) => open(path, { revealLine: null, revealRange: range }),
 
   closeTab: async (path) => {
     const tab = get().tabs.find((item) => item.path === path)
@@ -109,6 +98,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
       tabs: state.tabs.filter((item) => item.path !== path),
       activePath: state.activePath === path ? neighbour(state.tabs, path) : state.activePath,
       revealLine: null,
+      revealRange: null,
     }))
   },
 
@@ -118,7 +108,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     const others = get().tabs.filter((tab) => tab.path !== path)
     if (!(await confirmDiscard(others.filter((tab) => tab.dirty)))) return
     for (const tab of others) closeDoc(tab.path)
-    set({ tabs: [keep], activePath: keep.path, revealLine: null })
+    set({ tabs: [keep], activePath: keep.path, revealLine: null, revealRange: null })
   },
 
   closeAll: async () => {
@@ -129,7 +119,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
 
   dropAll: () => {
     for (const tab of get().tabs) closeDoc(tab.path)
-    set({ tabs: [], activePath: null, revealLine: null })
+    set({ tabs: [], activePath: null, revealLine: null, revealRange: null })
   },
 
   closeTabsUnder: (prefix) => {
@@ -156,7 +146,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     }))
   },
 
-  setActive: (path) => set({ activePath: path, revealLine: null }),
+  setActive: (path) => set({ activePath: path, revealLine: null, revealRange: null }),
 
   setDirty: (path, dirty) => {
     if (get().tabs.some((tab) => tab.path === path && tab.dirty !== dirty)) {
@@ -191,7 +181,33 @@ export const useEditor = create<EditorStore>((set, get) => ({
   },
 
   consumeRevealLine: () => set({ revealLine: null }),
+  consumeRevealRange: () => set({ revealRange: null }),
 }))
+
+/** Shows a file, opening it first when it is not open, and what in it to reveal. */
+async function open(path: string, reveal: Reveal): Promise<void> {
+  if (useEditor.getState().tabs.some((tab) => tab.path === path)) {
+    useEditor.setState({ activePath: path, ...reveal })
+    return
+  }
+  try {
+    const file = await api.workspace.read(path)
+    if (file.binary) {
+      useUi.getState().notify('error', `${path} is a binary file and cannot be opened as text.`)
+      return
+    }
+    const state = openDoc(path, file.content)
+    useEditor.setState((current) => ({
+      tabs: current.tabs.some((tab) => tab.path === path)
+        ? current.tabs
+        : [...current.tabs, { path, name: nameOf(path), language: state.config.language.id, dirty: false }],
+      activePath: path,
+      ...reveal,
+    }))
+  } catch (error) {
+    useUi.getState().notify('error', errorText(error))
+  }
+}
 
 /**
  * A file that someone else changed since eNCode read it (the agent, a formatter, git) is

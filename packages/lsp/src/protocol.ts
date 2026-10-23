@@ -126,6 +126,67 @@ export interface CallHierarchyItem {
   data?: unknown
 }
 
+export interface InsertReplaceEdit {
+  newText: string
+  insert: Range
+  replace: Range
+}
+
+export const InsertTextFormat = { PlainText: 1, Snippet: 2 } as const
+
+export interface CompletionItem {
+  label: string
+  labelDetails?: { detail?: string; description?: string }
+  kind?: number
+  tags?: number[]
+  detail?: string
+  documentation?: string | MarkupContent
+  deprecated?: boolean
+  preselect?: boolean
+  sortText?: string
+  filterText?: string
+  insertText?: string
+  insertTextFormat?: number
+  textEdit?: TextEdit | InsertReplaceEdit
+  textEditText?: string
+  additionalTextEdits?: TextEdit[]
+  commitCharacters?: string[]
+  command?: Command
+  data?: unknown
+}
+
+export interface CompletionList {
+  isIncomplete: boolean
+  itemDefaults?: { commitCharacters?: string[]; editRange?: Range | { insert: Range; replace: Range }; insertTextFormat?: number; data?: unknown }
+  items: CompletionItem[]
+}
+
+export interface ParameterInformation {
+  /** The label's text, or where it is in the signature's label (UTF-16 offsets, end exclusive). */
+  label: string | [number, number]
+  documentation?: string | MarkupContent
+}
+
+export interface SignatureInformation {
+  label: string
+  documentation?: string | MarkupContent
+  parameters?: ParameterInformation[]
+  activeParameter?: number
+}
+
+export interface SignatureHelp {
+  signatures: SignatureInformation[]
+  activeSignature?: number
+  activeParameter?: number
+}
+
+export const DocumentHighlightKind = { Text: 1, Read: 2, Write: 3 } as const
+
+export interface DocumentHighlight {
+  range: Range
+  kind?: number
+}
+
 /** The server's capabilities eNCode reads. A capability is there when it is `true` or an options object. */
 export interface ServerCapabilities {
   positionEncoding?: string
@@ -142,9 +203,41 @@ export interface ServerCapabilities {
   codeActionProvider?: boolean | { resolveProvider?: boolean; codeActionKinds?: string[] }
   diagnosticProvider?: { interFileDependencies?: boolean; workspaceDiagnostics?: boolean }
   executeCommandProvider?: { commands?: string[] }
+  completionProvider?: { triggerCharacters?: string[]; allCommitCharacters?: string[]; resolveProvider?: boolean }
+  signatureHelpProvider?: { triggerCharacters?: string[]; retriggerCharacters?: string[] }
+  documentHighlightProvider?: unknown
 }
 
 export const TextDocumentSyncKind = { None: 0, Full: 1, Incremental: 2 } as const
+
+/** Names for completion item kinds, as people read them. */
+export const COMPLETION_KINDS: Record<number, string> = {
+  1: 'text',
+  2: 'method',
+  3: 'function',
+  4: 'constructor',
+  5: 'field',
+  6: 'variable',
+  7: 'class',
+  8: 'interface',
+  9: 'module',
+  10: 'property',
+  11: 'unit',
+  12: 'value',
+  13: 'enum',
+  14: 'keyword',
+  15: 'snippet',
+  16: 'color',
+  17: 'file',
+  18: 'reference',
+  19: 'folder',
+  20: 'enum member',
+  21: 'constant',
+  22: 'struct',
+  23: 'event',
+  24: 'operator',
+  25: 'type parameter',
+}
 
 /** Names for symbol kinds, as people read them. */
 export const SYMBOL_KINDS: Record<number, string> = {

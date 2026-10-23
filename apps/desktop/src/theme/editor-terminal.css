@@ -23,6 +23,10 @@
   --enc-editor-match-bg: color-mix(in srgb, var(--warning) 22%, transparent);
   --enc-editor-match-active-bg: color-mix(in srgb, var(--warning) 45%, transparent);
   --enc-editor-bracket-match-bg: color-mix(in srgb, var(--accent) 22%, transparent);
+  --enc-editor-symbol-bg: color-mix(in srgb, var(--text-2) 14%, transparent);
+  --enc-editor-symbol-write-bg: color-mix(in srgb, var(--accent) 20%, transparent);
+  --enc-editor-snippet-border: color-mix(in srgb, var(--accent) 60%, transparent);
+  --enc-editor-link: var(--accent);
   --enc-editor-indent-guide: var(--border-subtle);
   --enc-editor-whitespace: color-mix(in srgb, var(--text-3) 45%, transparent);
   --enc-editor-error: var(--danger);

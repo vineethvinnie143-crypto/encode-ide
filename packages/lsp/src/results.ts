@@ -3,13 +3,16 @@
  * checked for shape, and lists are cut to a size eNCode can show. An item that does not read is left out; a whole
  * answer that does not read is an empty one.
  */
-import type { CallHierarchyItem, CodeAction, Command, Diagnostic, DocumentSymbol, Location, Position, Range, SymbolInformation, TextEdit, WorkspaceEdit } from './protocol'
+import type { CallHierarchyItem, CodeAction, Command, CompletionItem, Diagnostic, DocumentHighlight, DocumentSymbol, Location, MarkupContent, Position, Range, SignatureHelp, SignatureInformation, SymbolInformation, TextEdit, WorkspaceEdit } from './protocol'
 
 export const MAX_LOCATIONS = 1_000
 export const MAX_SYMBOLS = 5_000
 export const MAX_DIAGNOSTICS = 1_000
 export const MAX_EDITS = 20_000
 export const MAX_ACTIONS = 100
+export const MAX_COMPLETIONS = 5_000
+export const MAX_SIGNATURES = 50
+export const MAX_HIGHLIGHTS = 2_000
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** 31
@@ -254,4 +257,119 @@ export function readCodeAction(item: unknown): CodeAction | null {
     ...(command ? { command } : {}),
     ...(item.data !== undefined ? { data: item.data } : {}),
   }
+}
+
+/** Documentation as the server wrote it: markdown, or plain text that is shown as it is. */
+export function readMarkup(value: unknown, max = 20_000): MarkupContent | undefined {
+  if (typeof value === 'string') return value.trim() ? { kind: 'plaintext', value: value.slice(0, max) } : undefined
+  if (!isObject(value) || typeof value.value !== 'string' || !value.value.trim()) return undefined
+  return { kind: value.kind === 'markdown' ? 'markdown' : 'plaintext', value: value.value.slice(0, max) }
+}
+
+function readCompletionItem(value: unknown, budget: { left: number }): CompletionItem | null {
+  if (!isObject(value)) return null
+  const label = text(value.label, 500)
+  if (!label) return null
+  const out: CompletionItem = { label }
+  if (isObject(value.labelDetails)) {
+    const detail = text(value.labelDetails.detail, 300)
+    const description = text(value.labelDetails.description, 300)
+    if (detail || description) out.labelDetails = { ...(detail ? { detail } : {}), ...(description ? { description } : {}) }
+  }
+  if (typeof value.kind === 'number' && value.kind >= 1 && value.kind <= 25) out.kind = value.kind
+  if (Array.isArray(value.tags) && value.tags.includes(1)) out.tags = [1]
+  const detail = text(value.detail, 1_000)
+  if (detail) out.detail = detail
+  const documentation = readMarkup(value.documentation)
+  if (documentation) out.documentation = documentation
+  if (value.deprecated === true) out.deprecated = true
+  if (value.preselect === true) out.preselect = true
+  for (const key of ['sortText', 'filterText', 'insertText', 'textEditText'] as const) {
+    const read = text(value[key], 20_000)
+    if (read !== undefined) out[key] = read
+  }
+  if (value.insertTextFormat === 1 || value.insertTextFormat === 2) out.insertTextFormat = value.insertTextFormat
+  if (isObject(value.textEdit) && typeof value.textEdit.newText === 'string' && value.textEdit.newText.length <= 20_000) {
+    const range = readRange(value.textEdit.range)
+    const insert = readRange(value.textEdit.insert)
+    const replace = readRange(value.textEdit.replace)
+    if (range) out.textEdit = { range, newText: value.textEdit.newText }
+    else if (insert && replace) out.textEdit = { insert, replace, newText: value.textEdit.newText }
+  }
+  if (value.additionalTextEdits !== undefined) {
+    const edits = readTextEdits(value.additionalTextEdits, budget)
+    if (edits) out.additionalTextEdits = edits
+  }
+  if (Array.isArray(value.commitCharacters)) out.commitCharacters = value.commitCharacters.filter((item): item is string => typeof item === 'string' && item.length === 1).slice(0, 20)
+  const command = value.command === undefined ? null : readCommand(value.command)
+  if (command) out.command = command
+  if (value.data !== undefined) out.data = value.data
+  return out
+}
+
+/** CompletionItem[] or CompletionList; the list's defaults are applied to each item that lacks them. */
+export function readCompletion(value: unknown): { incomplete: boolean; items: CompletionItem[] } {
+  const list = Array.isArray(value) ? { items: value, isIncomplete: false } : isObject(value) && Array.isArray(value.items) ? value : null
+  if (!list) return { incomplete: false, items: [] }
+  const defaults = isObject(list.itemDefaults) ? list.itemDefaults : null
+  const defaultRange = defaults ? (readRange(defaults.editRange) ?? (isObject(defaults.editRange) ? { insert: readRange(defaults.editRange.insert), replace: readRange(defaults.editRange.replace) } : null)) : null
+  const defaultCommit = defaults && Array.isArray(defaults.commitCharacters) ? defaults.commitCharacters.filter((item): item is string => typeof item === 'string' && item.length === 1).slice(0, 20) : undefined
+  const defaultFormat = defaults && (defaults.insertTextFormat === 1 || defaults.insertTextFormat === 2) ? defaults.insertTextFormat : undefined
+  const budget = { left: MAX_EDITS }
+  const items: CompletionItem[] = []
+  for (const raw of list.items as unknown[]) {
+    if (items.length >= MAX_COMPLETIONS) break
+    const item = readCompletionItem(raw, budget)
+    if (!item) continue
+    if (!item.textEdit && defaultRange) {
+      const newText = item.textEditText ?? item.insertText ?? item.label
+      if ('start' in defaultRange) item.textEdit = { range: defaultRange, newText }
+      else if (defaultRange.insert && defaultRange.replace) item.textEdit = { insert: defaultRange.insert, replace: defaultRange.replace, newText }
+    }
+    if (!item.commitCharacters && defaultCommit?.length) item.commitCharacters = defaultCommit
+    if (item.insertTextFormat === undefined && defaultFormat !== undefined) item.insertTextFormat = defaultFormat
+    if (item.data === undefined && defaults && defaults.data !== undefined) item.data = defaults.data
+    items.push(item)
+  }
+  return { incomplete: (list as { isIncomplete?: unknown }).isIncomplete === true, items }
+}
+
+function readSignature(value: unknown): SignatureInformation | null {
+  if (!isObject(value)) return null
+  const label = text(value.label, 2_000)
+  if (!label) return null
+  const parameters: NonNullable<SignatureInformation['parameters']> = []
+  if (Array.isArray(value.parameters)) {
+    for (const item of value.parameters.slice(0, 100)) {
+      if (!isObject(item)) continue
+      const documentation = readMarkup(item.documentation, 4_000)
+      if (typeof item.label === 'string') parameters.push({ label: item.label.slice(0, 500), ...(documentation ? { documentation } : {}) })
+      else if (Array.isArray(item.label) && isCount(item.label[0]) && isCount(item.label[1]) && item.label[0] <= item.label[1] && item.label[1] <= label.length) parameters.push({ label: [item.label[0], item.label[1]], ...(documentation ? { documentation } : {}) })
+    }
+  }
+  const documentation = readMarkup(value.documentation, 10_000)
+  return { label, ...(documentation ? { documentation } : {}), ...(parameters.length ? { parameters } : {}), ...(isCount(value.activeParameter) ? { activeParameter: value.activeParameter } : {}) }
+}
+
+export function readSignatureHelp(value: unknown): SignatureHelp | null {
+  if (!isObject(value) || !Array.isArray(value.signatures)) return null
+  const signatures = value.signatures.slice(0, MAX_SIGNATURES).map(readSignature).filter((item): item is SignatureInformation => item !== null)
+  if (!signatures.length) return null
+  return {
+    signatures,
+    ...(isCount(value.activeSignature) ? { activeSignature: value.activeSignature } : {}),
+    ...(isCount(value.activeParameter) ? { activeParameter: value.activeParameter } : {}),
+  }
+}
+
+export function readHighlights(value: unknown): DocumentHighlight[] {
+  if (!Array.isArray(value)) return []
+  const out: DocumentHighlight[] = []
+  for (const item of value) {
+    if (out.length >= MAX_HIGHLIGHTS) break
+    if (!isObject(item)) continue
+    const range = readRange(item.range)
+    if (range) out.push({ range, ...(item.kind === 1 || item.kind === 2 || item.kind === 3 ? { kind: item.kind } : {}) })
+  }
+  return out
 }

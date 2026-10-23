@@ -64,6 +64,22 @@ export const MENUS: readonly MenuSpec[] = [
     ],
   },
   {
+    label: 'Go',
+    items: [
+      'editor.navigateBack',
+      'editor.navigateForward',
+      '-',
+      'editor.goToDefinition',
+      'editor.peekDefinition',
+      'editor.goToTypeDefinition',
+      'editor.goToImplementation',
+      'editor.goToReferences',
+      '-',
+      'editor.triggerSuggest',
+      'editor.parameterHints',
+    ],
+  },
+  {
     label: 'Session',
     items: [
       'session.rename',

@@ -6,7 +6,7 @@
 import type { SessionSummary, ZoomAction } from '@shared/types'
 import type { Command } from './registry'
 
-export const GROUPS = ['File', 'Edit', 'View', 'Session', 'Help'] as const
+export const GROUPS = ['File', 'Edit', 'View', 'Go', 'Session', 'Help'] as const
 
 export interface AppActions {
   activeSession(): SessionSummary | undefined
@@ -24,6 +24,10 @@ export interface AppActions {
   quit(): void
 
   edit(command: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'): void
+  /** The code editor shows a file, so its commands (Go to definition) have something to act on. */
+  hasEditor(): boolean
+  /** Runs one of the code editor's commands, as its key would. */
+  editorCommand(name: string): void
   searchInFiles(): void
   /** Find in the open session: the thread is on screen, not under a full-width panel. */
   canFind(): boolean
@@ -100,6 +104,33 @@ export interface AppActions {
   showLogs(): void
 }
 
+/**
+ * What the language servers add to the editor, in the palette too. The editor binds their keys itself (they mean
+ * something only there), so the palette shows them as hints.
+ */
+function editorCommands(a: AppActions): Command[] {
+  const command = (id: string, title: string, name: string, hint: string | undefined, keywords: string): Command => ({
+    id: `editor.${id}`,
+    title,
+    group: 'Go',
+    ...(hint ? { hint } : {}),
+    keywords,
+    enabled: () => a.hasEditor(),
+    run: () => a.editorCommand(name),
+  })
+  return [
+    command('goToDefinition', 'Go to definition', 'goToDefinition', 'F12', 'code symbol declaration jump navigate'),
+    command('peekDefinition', 'Peek definition', 'peekDefinition', 'Alt+F12', 'code symbol declaration inline'),
+    command('goToReferences', 'Go to references', 'goToReferences', 'Shift+F12', 'code symbol usages find all callers'),
+    command('goToImplementation', 'Go to implementation', 'goToImplementation', 'Ctrl+F12', 'code symbol interface implementations'),
+    command('goToTypeDefinition', 'Go to type definition', 'goToTypeDefinition', undefined, 'code symbol type'),
+    command('triggerSuggest', 'Show suggestions', 'triggerSuggest', 'Ctrl+Space', 'code completion autocomplete intellisense'),
+    command('parameterHints', 'Show parameter hints', 'triggerParameterHints', 'Ctrl+Shift+Space', 'code signature arguments call'),
+    command('navigateBack', 'Go back in the editor', 'navigateBack', 'Alt+Left', 'code navigate previous location'),
+    command('navigateForward', 'Go forward in the editor', 'navigateForward', 'Alt+Right', 'code navigate next location'),
+  ]
+}
+
 export function buildCommands(a: AppActions): Command[] {
   const hasSession = () => a.activeSession() !== undefined
   const session: Pick<Command, 'group' | 'enabled'> = { group: 'Session', enabled: hasSession }
@@ -132,6 +163,7 @@ export function buildCommands(a: AppActions): Command[] {
     },
     { id: 'edit.findNext', title: 'Find next', group: 'Edit', keys: ['F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(1) },
     { id: 'edit.findPrevious', title: 'Find previous', group: 'Edit', keys: ['Shift+F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(-1) },
+    ...editorCommands(a),
     {
       id: 'edit.searchInFiles',
       title: 'Search in files',

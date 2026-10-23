@@ -1081,3 +1081,47 @@ read the project, hear the editor's unsaved text and answer the agent.
   counted, a mark tells its message when pointed at, typing adds a mark and undo takes it back; Settings > Language
   servers says the server runs, found in the project; the agent writes a file with an error, is told so, is sent back
   by the gate and fixes it; the diagnostics report lists the server; taking trust back stops it.
+
+## The editor's language features (Editor and language intelligence 1)
+
+Written with the pull request that adds suggestions, snippets, parameter hints, hover documentation, the symbol's
+other places, go to definition and implementation, the peek of definitions and references, and Back and Forward to the
+editor
+([0074](../adr/0074-the-editor-asks-the-language-servers-through-checked-questions-and-draws-their-answers-with-its-own-widgets.md)).
+The new paths are questions from the renderer to the folder's language servers, and what the servers write for people
+drawn in the app's page.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| A1 | What a server writes (hover, a suggestion's details, a signature's documentation) puts markup or script in the app's page | Markdown goes through the app's renderer, which escapes everything first and allows only its own tags; links only to `http(s)` and `mailto`, which open outside the app; code blocks are coloured from escaped text by the editor's own tokenizers; plain text is escaped. | Mitigated |
+| A2 | A compromised renderer asks about a file outside the folder, or sends a question built to break the host | The main process rebuilds each question field by field (a kind from a fixed set, counts within bounds, a trigger character of one character, the open signature at most 64 KB) and makes the path the folder's own; anything else gets no answer. The host resolves the file inside the folder's root again. | Mitigated |
+| A3 | A suggestion changes more than it shows: an edit elsewhere over the text being typed, or an import that lands after the person moved on | Edits that overlap where the item goes are left out; an import that comes once the item was chosen goes in only within three seconds and only while the document can still be followed to it; the item and its edits are one step of the undo history. | Mitigated |
+| A4 | A snippet reads what it should not (the clipboard, the environment) or runs something | Snippets are parsed by eNCode's own parser; the variables are the file's and the date's only; the clipboard is never read and nothing runs. | Mitigated |
+| A5 | A server floods the editor or keeps it waiting | At most 5,000 suggestions, 50 signatures, 2,000 highlights and 1,000 places an answer; documentation and code are cut; only the rows in sight are drawn; every request has a time limit, and a newer question of the same kind cancels an older one. | Mitigated |
+| A6 | An answer for older text lands in newer text (a suggestion in the wrong place, a stale hover) | A question waits for the change being made and for the changes sent before it; answers are dropped when the document or the file shown has changed; a suggestion's place is followed through what was typed since it was asked. | Mitigated |
+| A7 | Going to a definition opens a file outside the folder (a library, a system header) in the editor | Such a place is not opened: the person is told where it is, and a peek shows its path; previews read files only through the workspace calls the file list uses. | Mitigated |
+
+### Residual risks
+
+- **A server can describe a symbol misleadingly.** What it writes is shown as its own words, in its own card; it is
+  not run and does not reach the agent through these features.
+- **A link a server wrote opens in the browser when clicked.** Only `http(s)` and `mailto` links are drawn as links.
+
+### Verification
+
+- The editor tests parse snippets (stops, placeholders, choices, mirrors, variables, transforms, broken ones) and
+  match suggestions fuzzily; the renderer tests rank items, plan where an item and its edits go (left out when they
+  overlap), and say why a feature has no answer; the keymap tests check that a snippet takes Tab first and that an
+  editor's own bindings come before the built-in ones.
+- The main process tests rebuild questions and refuse malformed ones; the lsp tests run completion, resolve,
+  signature help, hover, highlights and the places of a symbol against a server written for them; the workspace tests
+  answer for the editor's text as it is, give places their line's text, cancel an older question of the same kind and
+  answer nothing for a file outside the folder.
+- The end-to-end run uses a test server that answers all of these the way a real one does: hover shows the symbol's
+  code, the symbol's other places are marked, F12 and Ctrl+click go to the definition and Back and Forward return,
+  Shift+F12 opens the peek with both places and the file marked, Esc closes it and Enter goes, a word typed brings
+  suggestions and Enter takes one, `(` shows the parameters and `,` moves to the next, Ctrl+Space and a snippet's
+  placeholder is typed over and Tab goes to its end, and an item filled in when chosen shows its details and brings
+  its import.

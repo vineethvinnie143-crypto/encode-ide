@@ -101,7 +101,9 @@ primary platform; the code stays cross-platform.
   text read differently from how it is stored (bidi controls, zero-width and hidden
   characters) are drawn as labelled markers. In a folder you trust, the language servers installed on
   your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
-  errors and warnings as you type; eNCode talks to them through its own client and carries none of them. The editor can also show a change against a
+  errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
+  parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and
+  Forward; eNCode talks to them through its own client and carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.
 - **Hand-written internals.**
@@ -301,7 +303,8 @@ apps/desktop/                 the Electron app (@encode/desktop)
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
     components/panels/        the side and bottom panels: tab strip, pages, New tab
-    editor/                   the open documents: text, history and what is on disk; the language servers' marks
+    editor/                   the open documents: text, history and what is on disk; the language servers' marks, and
+                              (assist/) suggestions, parameter hints, the symbol's places and the history of jumps
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)

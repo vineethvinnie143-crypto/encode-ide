@@ -664,6 +664,141 @@ export interface FileMarks {
   diagnostics: CodeDiagnostic[]
 }
 
+/** A place in a file as a language server counts it: zero-based lines, and columns in UTF-16 units. */
+export interface CodePosition {
+  line: number
+  character: number
+}
+
+export interface CodeRange {
+  start: CodePosition
+  end: CodePosition
+}
+
+/** Text a server wrote for people: markdown, or plain text. */
+export interface CodeMarkup {
+  kind: 'plaintext' | 'markdown'
+  value: string
+}
+
+export interface CodeTextEdit {
+  range: CodeRange
+  newText: string
+}
+
+/** One suggestion of a language server, as the editor shows and inserts it. */
+export interface CompletionEntry {
+  /** Its place in its list; with the list's number it names the item to fill in. */
+  id: number
+  label: string
+  /** "function", "property", "keyword"... */
+  kind?: string
+  detail?: string
+  /** Shown right after the label, such as a signature: `(a: number)`. */
+  labelDetail?: string
+  /** Shown at the end of the row, such as the module an import comes from. */
+  description?: string
+  documentation?: CodeMarkup
+  deprecated?: boolean
+  preselect?: boolean
+  sortText: string
+  filterText: string
+  /** The text to put in, or a snippet when `snippet` is true. */
+  insertText: string
+  snippet: boolean
+  /** Where the text goes: `replace` covers the whole word under the cursor, `insert` only up to the cursor. */
+  replace?: CodeRange
+  insert?: CodeRange
+  /** Edits elsewhere in the file, such as the import an item needs. */
+  additionalEdits?: CodeTextEdit[]
+  commitCharacters?: string[]
+  /** What the editor does once the item is in: suggest again, or show the parameters of the call. */
+  then?: 'suggest' | 'parameterHints'
+  /** False while the server can still fill in documentation or edits. */
+  resolved: boolean
+}
+
+export interface CompletionResult {
+  /** The list's number. */
+  list: number
+  /** The server did not send everything: typing more asks again. */
+  incomplete: boolean
+  items: CompletionEntry[]
+}
+
+export interface SignatureParameter {
+  /** The parameter's text, or where it is in the signature's label (UTF-16 offsets, end exclusive). */
+  label: string | [number, number]
+  documentation?: string | CodeMarkup
+}
+
+export interface SignatureInfo {
+  label: string
+  documentation?: string | CodeMarkup
+  parameters?: SignatureParameter[]
+  activeParameter?: number
+}
+
+/** The calls a function can take, and which parameter the cursor is on. */
+export interface SignatureHelp {
+  signatures: SignatureInfo[]
+  activeSignature?: number
+  activeParameter?: number
+}
+
+/** Another place of the symbol at the cursor; `write` where it is assigned. */
+export interface EditorHighlight {
+  range: CodeRange
+  kind: 'text' | 'read' | 'write'
+}
+
+/** The characters that make the editor ask a file's server: for suggestions, to accept one, for a call's parameters. */
+export interface EditorTriggers {
+  completion: string[]
+  commit: string[]
+  signature: string[]
+  signatureRetrigger: string[]
+}
+
+/** A place a server pointed to: in the folder by its path, or outside it (a library) by its whole path only. */
+export interface EditorLocation {
+  /** The path in the folder, or null for a file outside it. */
+  path: string | null
+  file: string
+  line: number
+  character: number
+  endLine: number
+  endCharacter: number
+  /** The text of its first line (its end trimmed, at most 300 characters), for a list of places; only for a file in the folder. */
+  preview?: string
+}
+
+interface EditorAt {
+  /** As the file tree names it: "src/a.ts". */
+  path: string
+  /** Zero-based. */
+  line: number
+  /** Zero-based, in UTF-16 units: a JavaScript string index. */
+  character: number
+}
+
+/** What the editor asks the servers of the file it shows, by kind, with what each answers. */
+export interface EditorAsks {
+  complete: { params: EditorAt & { triggerKind: 1 | 2 | 3; triggerCharacter?: string }; result: CompletionResult | null }
+  resolve: { params: { path: string; list: number; id: number }; result: CompletionEntry | null }
+  signature: { params: EditorAt & { triggerKind: 1 | 2 | 3; triggerCharacter?: string; isRetrigger: boolean; active?: SignatureHelp }; result: SignatureHelp | null }
+  hover: { params: EditorAt; result: { markdown: string; range?: CodeRange } | null }
+  highlights: { params: EditorAt; result: EditorHighlight[] }
+  definition: { params: EditorAt; result: EditorLocation[] | null }
+  typeDefinition: { params: EditorAt; result: EditorLocation[] | null }
+  implementation: { params: EditorAt; result: EditorLocation[] | null }
+  references: { params: EditorAt; result: EditorLocation[] | null }
+  triggers: { params: { path: string }; result: EditorTriggers | null }
+}
+
+export type EditorAsk = { [K in keyof EditorAsks]: { kind: K } & EditorAsks[K]['params'] }[keyof EditorAsks]
+export type EditorAnswer<K extends keyof EditorAsks = keyof EditorAsks> = EditorAsks[K]['result']
+
 /** A request of the person's after which the agent's file tools changed files, for the rewind menu. */
 export interface RewindTurn {
   /** The request's id: the id of its entry in the conversation. */
@@ -1161,6 +1296,11 @@ export interface EncodeApi {
     open(path: string, text: string, dirty: boolean): void
     change(path: string, text: string, dirty: boolean): void
     close(path: string): void
+    /**
+     * A question to the servers of a file the editor shows, for its text as last given (send pending changes first).
+     * Null (an empty list for highlights) when no server answers: none runs for the file, or it cannot say.
+     */
+    ask<K extends keyof EditorAsks>(ask: { kind: K } & EditorAsks[K]['params']): Promise<EditorAnswer<K>>
     /** A server's problems in a file, as they change. */
     onMarks(cb: (marks: FileMarks) => void): () => void
     /** A server started, stopped or failed: ask for the report again. */

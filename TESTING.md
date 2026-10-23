@@ -328,8 +328,27 @@ was found, and the command that installs a missing one. A server you just instal
   edits the card lists them before anything changes.
 - Turn **Use language servers** off: the marks go and every server stops.
 
+In the editor itself (a TypeScript or Python file in a trusted folder is the quickest to try):
+
+- Type the start of a name: suggestions open under it after a moment, the letters you typed in bold. Up and Down move,
+  Enter or Tab takes one, Esc closes. `gEBI` should find `getElementById`. **Ctrl+Space** opens the list anywhere, and
+  pressed again with the list open shows the selected item's documentation beside it.
+- Take a suggestion that needs an import (a function from another file or a package): the import line should appear
+  at the top as it goes in. Take a snippet (in TypeScript, `for` or a function with parameters): its first part is
+  selected to type over, Tab moves to the next, Esc ends it.
+- Type a function's name and `(`: its parameters show above the line, the one you are typing in bold; `,` moves to
+  the next. **Ctrl+Shift+Space** shows them again.
+- Rest the pointer on a name: what it is shows in a card (its type, its documentation). Rest the cursor on it: its
+  other places in the file are marked.
+- **F12** or **Ctrl+click** on a name goes to its definition, **Alt+Left** comes back and **Alt+Right** goes forward
+  again. **Shift+F12** lists its uses between the lines (arrows move, Enter goes there, Esc closes), **Alt+F12** its
+  definition the same way, **Ctrl+F12** goes to an implementation. The **Go** menu has all of these.
+- A definition in a library outside the folder is not opened: eNCode says where it is.
+
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
-language that is not found although it is installed, and the agent finishing with errors it made.
+language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
+suggestions that come too late or in the wrong place, an import that went in twice or not at all, a key that did
+something other than you expected while a list or a snippet was open, and a jump that went to the wrong place.
 
 ## Worktrees
 
@@ -398,5 +417,5 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: the editor shows their errors and warnings; completion, hover, go to definition and rename in the
-  editor itself, and installing a server with one click, come with the next build.
+- Language servers: rename, quick fixes, formatting, the outline and installing a server with one click are not in
+  the editor yet (the agent can rename through LSPEdit); they come with the next builds.
