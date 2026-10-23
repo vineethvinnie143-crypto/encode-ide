@@ -636,6 +636,7 @@ async function runProviderPhase() {
   await runSteerChecks()
   await runEffortChecks()
   await runSubagentChecks()
+  await runParityChecks()
   await runWebChecks()
   await runSearchChecks()
   await runPermissionChecks()
@@ -1709,6 +1710,51 @@ async function runEffortChecks() {
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload after the effort checks')
   console.log('[smoke] effort: ok')
+}
+
+/** EnterPlanMode's card in its own words; a PDF read by page; a notebook cell changed, with a row that says so. */
+async function runParityChecks() {
+  console.log('[smoke] --- plan first, PDFs and notebooks ---')
+  // Workspace Write asks before planning; Full Access would plan without a card.
+  await evaluate("window.eNCode.settings.save({ agentMode: 'code', policy: 'workspace-write' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:plan-first] Rework the settings page.')
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the plan-first card')
+  const card = await evaluate(`(() => {
+    const card = document.querySelector('.approval-card')
+    return { title: card.querySelector('.approval-head')?.textContent ?? '', buttons: [...card.querySelectorAll('.btn')].map((button) => button.textContent.trim()) }
+  })()`)
+  console.log('[smoke] plan-first card:', JSON.stringify(card))
+  if (!card.title.includes('Plan before changing anything')) throw new Error(`the plan-first card is titled ${card.title}`)
+  // A button's text ends with its key, when it has one ("Plan first Enter").
+  for (const word of ['Plan first', 'Go ahead without a plan']) if (!card.buttons.some((text) => text.startsWith(word))) throw new Error(`the plan-first card has no ${word} button`)
+  await screenshot('15-plan-first.png')
+  await click('.approval-card .btn', 'Go ahead without a plan')
+  await driveAgent('15-plan-first')
+  if (!(await evaluate("document.body.textContent.includes('Going ahead without a plan, as asked.')"))) throw new Error('the agent did not go on after the person said to')
+
+  const pdf = path.join(demoPath, 'smoke.pdf')
+  const notebook = path.join(demoPath, 'smoke.ipynb')
+  await fs.copyFile(path.join(root, '..', '..', 'packages', 'tools', 'src', 'pdf', 'fixtures', 'reportlab.pdf'), pdf)
+  const cells = [{ cell_type: 'code', execution_count: 1, id: 'a1b2c3d4', metadata: {}, outputs: [], source: ['print(1)'] }]
+  await fs.writeFile(notebook, `${JSON.stringify({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 }, null, 1)}\n`)
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:pdf-notebook] Read page 2 of smoke.pdf and fix the notebook.')
+  await driveAgent('16-pdf-notebook')
+  const outputs = await toolOutputs()
+  console.log('[smoke] pdf and notebook:', JSON.stringify(outputs))
+  const read = outputs.find((entry) => entry.name === 'Read')
+  if (!read || read.state !== 'done' || read.output !== '1 page of 2') throw new Error(`the PDF read shows ${JSON.stringify(read)}`)
+  const edit = outputs.find((entry) => entry.name === 'NotebookEdit')
+  if (!edit || edit.state !== 'done') throw new Error(`the notebook edit shows ${JSON.stringify(edit)}`)
+  const saved = JSON.parse(await fs.readFile(notebook, 'utf8'))
+  if ([].concat(saved.cells[0].source).join('') !== 'print(2)' || saved.cells[0].id !== 'a1b2c3d4') throw new Error(`the notebook holds ${JSON.stringify(saved.cells[0])}`)
+  await openWorkLogs()
+  const rows = await evaluate("[...document.querySelectorAll('.tool-row')].map((row) => row.textContent.replace(/\\s+/g, ' '))")
+  if (!rows.some((text) => text.includes('Edited') && text.includes('smoke.ipynb'))) throw new Error(`no row says the notebook was edited: ${JSON.stringify(rows)}`)
+  await screenshot('16-pdf-notebook.png')
+  await fs.rm(pdf, { force: true })
+  await fs.rm(notebook, { force: true })
 }
 
 async function runSubagentChecks() {
