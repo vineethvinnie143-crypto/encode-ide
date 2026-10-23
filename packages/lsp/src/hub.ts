@@ -6,6 +6,7 @@
  * the disk when the agent needs it.
  */
 import fs from 'node:fs/promises'
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { LANGUAGE_SERVERS, serverFor, type Prepared, type ServerSpec } from './catalog'
 import { LanguageClient, type EditorTriggers, type OpenDocument, type ServerProcess } from './client'
@@ -306,6 +307,9 @@ export class LanguageServers {
   private editorCallLists = 0
   /** Files with marks in the editor, by server: taken back when the server closes the file or stops. */
   private readonly marked = new Map<string, Map<string, string>>()
+  /** Each server's marks per file, so a companion's are shown with the main server's (ADR 0086). */
+  private readonly markItems = new Map<string, Map<string, CodeDiagnostic[]>>()
+  private readonly companionUse = new Map<string, { at: number; uses: boolean }>()
   private readonly idleTimer: NodeJS.Timeout
   private disposed = false
 
@@ -424,7 +428,7 @@ export class LanguageServers {
         // What the editor has open of its languages is shown to it at once.
         for (const doc of this.editorDocs.values()) {
           const found = serverFor(doc.file, this.catalog)
-          if (found?.spec.id === server.spec.id) this.syncTo(client, doc.file, found.languageId, doc.text)
+          if (found?.spec.id === server.spec.id || (found && server.spec.companion?.languages.includes(found.languageId))) this.syncTo(client, doc.file, found.languageId, doc.text)
         }
       },
       (error: unknown) => {
@@ -463,13 +467,60 @@ export class LanguageServers {
   private mark(server: Server, file: string, items: CodeDiagnostic[]): void {
     const key = this.key(file)
     let files = this.marked.get(server.spec.id)
+    let held = this.markItems.get(server.spec.id)
     if (items.length) {
       if (!files) this.marked.set(server.spec.id, (files = new Map()))
       files.set(key, file)
+      if (!held) this.markItems.set(server.spec.id, (held = new Map()))
+      held.set(key, items)
     } else {
       files?.delete(key)
+      held?.delete(key)
     }
-    this.options.onDiagnostics?.(file, items)
+    this.options.onDiagnostics?.(file, this.allMarks(key))
+  }
+
+  /** Every server's marks for a file, the main server's first. */
+  private allMarks(key: string): CodeDiagnostic[] {
+    return [...this.markItems.values()].flatMap((held) => held.get(key) ?? [])
+  }
+
+  /** The companions that take a language in this folder (Tailwind beside the CSS server), checked at most every 30 s. */
+  private companionsFor(languageId: string): Server[] {
+    const out: Server[] = []
+    for (const server of this.servers.values()) {
+      const companion = server.spec.companion
+      if (!companion?.languages.includes(languageId)) continue
+      const known = this.companionUse.get(server.spec.id)
+      let uses = known && Date.now() - known.at < 30_000 ? known.uses : undefined
+      if (uses === undefined) {
+        const exists = this.options.exists ?? (() => false)
+        try {
+          uses = companion.uses(this.root, exists, (file) => (exists(file) ? readSmall(file) : null))
+        } catch {
+          uses = false
+        }
+        this.companionUse.set(server.spec.id, { at: Date.now(), uses })
+      }
+      if (uses) out.push(server)
+    }
+    return out
+  }
+
+  /** Gives a file to the companions of its language, starting them when they may run. */
+  private companionsSync(file: string, languageId: string, text: string, saved = false): void {
+    if (!this.options.allowed().ok) return
+    for (const server of this.companionsFor(languageId)) {
+      server.lastUse = Date.now()
+      if (server.client && !server.client.exited) {
+        this.syncTo(server.client, file, languageId, text, saved)
+        continue
+      }
+      if (server.state === 'failed' && server.failedAt && Date.now() - server.failedAt < RETRY_AFTER_FAILURE_MS) continue
+      if ('missing' in this.discover(server.spec)) continue
+      // Once it runs, the start below gives it the editor's files of its languages.
+      void this.start(server).catch(() => undefined)
+    }
   }
 
   /** The server closed the file, or stopped: its marks are taken back, since nothing keeps them up to date. */
@@ -480,7 +531,8 @@ export class LanguageServers {
       const known = files.get(key)
       if (known === undefined) continue
       files.delete(key)
-      this.options.onDiagnostics?.(known, [])
+      this.markItems.get(server.spec.id)?.delete(key)
+      this.options.onDiagnostics?.(known, this.allMarks(key))
     }
   }
 
@@ -528,6 +580,8 @@ export class LanguageServers {
     const server = this.runningFor(file)
     if (server) this.syncTo(server.client, file, server.languageId, text, !dirty)
     else this.bringUp(file)
+    const found = serverFor(file, this.catalog)
+    if (found) this.companionsSync(file, found.languageId, text, !dirty)
   }
 
   editorClose(file: string): void {
@@ -537,6 +591,12 @@ export class LanguageServers {
     if (server) {
       this.closeIn(server.client, file)
       this.syncedAt.delete(key)
+    }
+    const found = serverFor(file, this.catalog)
+    for (const companion of found ? this.companionsFor(found.languageId) : []) {
+      if (!companion.client || companion.client.exited) continue
+      companion.client.close(file)
+      this.unmark(companion, file)
     }
   }
 
@@ -548,6 +608,9 @@ export class LanguageServers {
         if ('client' in got && doc) this.syncTo(got.client, file, got.languageId, doc.text)
       })
       .catch(() => undefined)
+    const found = serverFor(file, this.catalog)
+    const doc = this.editorDocs.get(this.key(file))
+    if (found && doc) this.companionsSync(file, found.languageId, doc.text)
   }
 
   private runningFor(file: string): { client: LanguageClient; languageId: string } | null {
@@ -1577,4 +1640,13 @@ function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
       },
     )
   })
+}
+
+/** A small text file (a package.json), or null. */
+function readSmall(file: string): string | null {
+  try {
+    return statSync(file).size <= 1024 * 1024 ? readFileSync(file, 'utf8') : null
+  } catch {
+    return null
+  }
 }

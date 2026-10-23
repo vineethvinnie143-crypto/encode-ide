@@ -76,6 +76,27 @@ export interface ServerSpec {
   prepare?(context: PrepareContext): Prepared | null
   /** A server that is part of eNCode (ADR 0085): its script beside eNCode's own, run with eNCode's Node.js. */
   builtin?: { script: string; args: string[] }
+  /**
+   * A server that runs beside the one a file has, not instead of it (ADR 0086): it is given the files of these
+   * languages, and its marks, suggestions and hovers are added to the main server's. It starts only in a folder that
+   * `uses` says needs it. A companion has no extensions of its own.
+   */
+  companion?: { languages: string[]; uses(root: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean }
+}
+
+const TAILWIND_CONFIGS = ['tailwind.config.js', 'tailwind.config.cjs', 'tailwind.config.mjs', 'tailwind.config.ts', 'tailwind.config.cts', 'tailwind.config.mts']
+
+/** A folder with a Tailwind config, or with tailwindcss among its package's dependencies (version 4 needs no config). */
+export function usesTailwind(root: string, exists: (file: string) => boolean, read: (file: string) => string | null): boolean {
+  if (TAILWIND_CONFIGS.some((name) => exists(path.join(root, name)))) return true
+  const manifest = read(path.join(root, 'package.json'))
+  if (!manifest) return false
+  try {
+    const parsed = JSON.parse(manifest) as Record<string, Record<string, string> | undefined>
+    return ['dependencies', 'devDependencies', 'peerDependencies'].some((field) => Object.hasOwn(parsed[field] ?? {}, 'tailwindcss') || Object.hasOwn(parsed[field] ?? {}, '@tailwindcss/vite') || Object.hasOwn(parsed[field] ?? {}, '@tailwindcss/postcss'))
+  } catch {
+    return false
+  }
 }
 
 const ts = { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' }
@@ -291,6 +312,30 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     candidates: [],
     builtin: { script: 'weblang-server.cjs', args: ['--stdio'] },
     install: 'it comes with the eNCode app',
+  },
+  {
+    // Svelte's own server (ADR 0086): the person allowed it as a separate program, though it runs Microsoft's CSS and
+    // HTML language services inside it.
+    id: 'svelte',
+    label: 'Svelte',
+    extensions: { '.svelte': 'svelte' },
+    candidates: [{ command: 'svelteserver', args: ['--stdio'] }],
+    install: 'npm install -g svelte-language-server',
+    installer: { kind: 'npm', lock: 'svelte', script: 'node_modules/svelte-language-server/bin/server.js', args: ['--stdio'] },
+    markers: ['svelte.config.js', 'svelte.config.mjs', 'svelte.config.ts'],
+  },
+  {
+    // Tailwind's own server, beside the main one for class names (ADR 0086). Only its tailwindcss-language-server is
+    // run; the package's css-language-server (built on VS Code's CSS service) never is.
+    id: 'tailwind',
+    label: 'Tailwind CSS',
+    extensions: {},
+    candidates: [{ command: 'tailwindcss-language-server', args: ['--stdio'] }],
+    install: 'npm install -g @tailwindcss/language-server',
+    installer: { kind: 'npm', lock: 'tailwind', script: 'node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server', args: ['--stdio'] },
+    markers: TAILWIND_CONFIGS,
+    companion: { languages: ['css', 'scss', 'less', 'html', 'javascriptreact', 'typescriptreact', 'svelte', 'vue'], uses: usesTailwind },
+    settings: { tailwindCSS: { validate: true, hovers: true, suggestions: true, codeActions: true, emmetCompletions: false, colorDecorators: false, lint: { cssConflict: 'warning', invalidApply: 'error', invalidScreen: 'error', invalidVariant: 'error', invalidConfigPath: 'error', invalidTailwindDirective: 'error', recommendedVariantOrder: 'warning' } } },
   },
 ]
 

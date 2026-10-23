@@ -27,6 +27,10 @@ const SERVERS = {
   yaml: { 'yaml-language-server': '2.0.0' },
   // Not a server: Cfx.re's own typings of FiveM's natives, which eNCode turns into Lua definitions (ADR 0084).
   fivem: { '@citizenfx/client': '2.0.37850-1', '@citizenfx/server': '2.0.37850-1' },
+  // Tailwind's own server, beside eNCode's CSS server (ADR 0086); one bundled package.
+  tailwind: { '@tailwindcss/language-server': '0.16.0' },
+  // Svelte's own server; it runs Microsoft's CSS and HTML language services inside it, allowed as a separate program (ADR 0086).
+  svelte: { 'svelte-language-server': '0.18.4' },
 }
 
 const only = process.argv.slice(2)
