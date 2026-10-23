@@ -151,9 +151,13 @@ export const wrap = [
       assert.equal(rects.length, 3, JSON.stringify(rects))
       rects.forEach((rect, index) => assert.ok(Math.abs(rect.top - rows[index].top) < 1, `rect ${index} on row ${index}`))
       assert.ok(Math.abs(rects[0].left - (rows[0].left + 5 * metrics.charWidth)) < 1.5)
-      // Rows the selection runs on from reach the same right edge; the last ends where the selection does.
-      assert.ok(Math.abs(rects[0].right - rects[1].right) < 1)
-      assert.ok(rects[0].right >= rows[0].right && rects[1].right >= rows[1].right)
+      // Rows the selection runs on from reach the edge rows wrap at, or past it the spaces a row keeps at its end (which
+      // of the rows keeps such spaces depends on the font and the width); the last ends where the selection does.
+      const edge = rows[0].left + (await ev(() => window.view.wrapping.spec.width)) * metrics.charWidth
+      for (const index of [0, 1]) {
+        const expected = Math.max(edge, rows[index].right)
+        assert.ok(Math.abs(rects[index].right - expected) < 1, `rect ${index} ends at ${rects[index].right}, not ${expected}`)
+      }
       assert.ok(Math.abs(rects[2].right - (rows[2].left + 4 * metrics.charWidth)) < 1.5)
       await shot('wrap-selection')
     },
