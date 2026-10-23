@@ -227,6 +227,7 @@ interface TaskInput extends Record<string, unknown> {
   description: string
   prompt: string
   subagent_type: string
+  run_in_background?: boolean
 }
 
 export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> {
@@ -245,6 +246,8 @@ export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> 
         '- The subagent sees none of this conversation. Write prompt as a complete brief: the goal, what is known, what to return, and whether it may change files.',
         '- Its report reaches only you; tell the user what matters from it.',
         '- To run several subagents at once, call Task more than once in the same reply.',
+        '- run_in_background true returns at once; the report reaches you as a notice when it ends. Do not wait or poll.',
+        '- The result names an agent id: SendMessage to it continues that work.',
         '- description is three to five words naming the task.',
       ].join('\n'),
       inputSchema: {
@@ -253,6 +256,7 @@ export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> 
           description: { type: 'string', minLength: 1, description: 'Three to five words naming the task.' },
           prompt: { type: 'string', minLength: 1, description: 'The complete brief for the subagent.' },
           subagent_type: { type: 'string', enum: names, description: 'Which kind of subagent to start.' },
+          run_in_background: { type: 'boolean', description: 'Return at once; the report arrives as a notice.' },
         },
         required: ['description', 'prompt', 'subagent_type'],
         additionalProperties: false,
@@ -261,11 +265,27 @@ export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> 
     kind: 'agent',
     readOnly: true,
     access: () => ({ type: 'agent' }),
-    describe: (input) => ({ title: input.description, detail: input.prompt }),
+    describe: (input) => ({ title: input.description, detail: input.prompt + (input.run_in_background ? '\n(in the background)' : '') }),
     async run(input, ctx) {
       if (!ctx.subagents) return fail('Subagents are not available here. Do the work yourself.')
-      const result = await ctx.subagents.run({ description: input.description, prompt: input.prompt, type: input.subagent_type, toolUseId: ctx.toolUseId, mode: ctx.mode }, ctx.signal)
-      return { ok: result.ok, content: result.report || '(the subagent returned no report)' }
+      const request = { description: input.description, prompt: input.prompt, type: input.subagent_type, toolUseId: ctx.toolUseId, mode: ctx.mode }
+      if (input.run_in_background) {
+        if (!ctx.subagents.start) return fail('Subagents cannot run in the background here. Call Task without run_in_background.')
+        const started = await ctx.subagents.start(request)
+        if (!started.ok) return fail(started.report)
+        return {
+          ok: true,
+          content: `Started agent ${started.agentId} in the background. Its report reaches you as a notice when it ends; carry on with other work or end your turn.`,
+          display: { output: `Working in the background (${started.agentId})` },
+        }
+      }
+      const result = await ctx.subagents.run(request, ctx.signal)
+      const report = result.report || '(the subagent returned no report)'
+      return {
+        ok: result.ok,
+        content: result.agentId && ctx.subagents.message ? `${report}\n\n(agent id: ${result.agentId}; SendMessage to it continues this work)` : report,
+        display: { output: report },
+      }
     },
   }
 }

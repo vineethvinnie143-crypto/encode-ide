@@ -426,6 +426,8 @@ export interface ApprovalRequest {
   review?: { by: 'floor' | 'reviewer'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
+  /** Asked by a subagent in the background: the card stays when the turn ends, or shows when no turn runs. */
+  background?: boolean
 }
 
 /** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */
@@ -760,6 +762,11 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+/**
+ * Something going on in the background of a session: a command, a monitor (a command whose lines reach the agent),
+ * a subagent, or the wake-up the agent asked for. For a subagent `command` is its task, `title` its type and `output`
+ * what it did last; for a wake-up `command` is its reason, `startedAt` when it fires and `output` its prompt.
+ */
 export interface BackgroundJob {
   id: string
   command: string
@@ -769,6 +776,10 @@ export interface BackgroundJob {
   status: 'running' | 'done' | 'error' | 'killed'
   exitCode?: number
   output: string
+  /** Default `command`. */
+  kind?: 'command' | 'monitor' | 'agent' | 'wakeup'
+  /** What the agent said it is for; a subagent's type. */
+  title?: string
 }
 
 export interface Schedule {
@@ -810,7 +821,7 @@ export type AgentEventBody =
   | { type: 'entry'; entry: ConversationEntry }
   | { type: 'delta'; entryId: string; text: string }
   | { type: 'approval-request'; request: ApprovalRequest }
-  | { type: 'ask'; id: string; entryId: string; question: string; options?: string[] }
+  | { type: 'ask'; id: string; entryId: string; question: string; options?: string[]; background?: boolean }
   | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number; cachedTokens?: number }
   | { type: 'goal'; goal: SessionGoal | null }
   | { type: 'todos'; todos: TodoItem[] }
@@ -842,6 +853,8 @@ export interface SessionSummary {
   preview: string
   /** How many entries the conversation has; 0 for a session nobody has used. */
   entryCount: number
+  /** When the agent asked to be woken (ScheduleWakeup), epoch ms. */
+  wakeAt?: number
 }
 
 /** What the renderer may change about a session. */

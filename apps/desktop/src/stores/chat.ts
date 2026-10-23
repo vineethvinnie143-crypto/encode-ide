@@ -26,7 +26,15 @@ export interface AskState {
   entryId: string
   question: string
   options?: string[]
+  /** Asked by a subagent in the background: it stays when the turn ends. */
+  background?: boolean
 }
+
+/** What a subagent in the background still waits on once the turn is over; the turn's own cards leave with it. */
+const outlives = (state: { approvals: ApprovalRequest[]; ask: AskState | null }) => ({
+  approvals: state.approvals.filter((item) => item.background),
+  ask: state.ask?.background ? state.ask : null,
+})
 
 interface ChatStore {
   entries: ConversationEntry[]
@@ -377,9 +385,10 @@ export const useChat = create<ChatStore>((set, get) => ({
         set((state) => ({
           status: event.status,
           running: event.status === 'thinking' || event.status === 'running-tool' || event.status === 'awaiting-approval' || event.status === 'awaiting-user',
-          // Cards leave when you answer them, or when the run ends (stopping, for one, ends the wait).
-          approvals: event.status === 'idle' || event.status === 'done' || event.status === 'error' ? [] : state.approvals,
-          ask: event.status === 'awaiting-user' ? state.ask : null,
+          // Cards leave when you answer them, or when the run ends (stopping, for one, ends the wait); a background
+          // subagent's stay until it has its answer.
+          ...(event.status === 'idle' || event.status === 'done' || event.status === 'error' ? outlives(state) : { approvals: state.approvals }),
+          ...(event.status === 'awaiting-user' ? {} : { ask: state.ask?.background ? state.ask : null }),
         }))
         break
       case 'entry':
@@ -394,7 +403,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         break
       case 'ask':
         set({
-          ask: { id: event.id, entryId: event.entryId, question: event.question, options: event.options },
+          ask: { id: event.id, entryId: event.entryId, question: event.question, options: event.options, ...(event.background ? { background: true } : {}) },
           status: 'awaiting-user',
           running: true,
         })
@@ -406,8 +415,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           return {
             running: false,
             status: 'done',
-            approvals: [],
-            ask: null,
+            ...outlives(state),
             tokensPerSecond: measured || state.tokensPerSecond,
             streamStartedAt: 0,
             streamChars: 0,
@@ -419,8 +427,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         set((state) => ({
           running: false,
           status: 'error',
-          approvals: [],
-          ask: null,
+          ...outlives(state),
           entries: event.entryId ? state.entries : withLocalProblem(state.entries, event.message, event.problem ?? HOST_PROBLEM),
         }))
         // A model notice that said the same thing a moment ago (a refused key) is now said by the card, with its buttons.

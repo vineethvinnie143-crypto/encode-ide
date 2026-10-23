@@ -277,3 +277,67 @@ describe('marks and summaries', () => {
     assert.equal(summary.pinned, false)
   })
 })
+
+describe('background work in the log', () => {
+  const info = (status: 'running' | 'done', extra: Record<string, unknown> = {}) => ({ id: 'agent_1', type: 'Explore', description: 'Look around', status, background: true, mode: 'code' as const, startedAt: 1, ...extra })
+
+  it('keeps a subagent\'s messages to itself, and replays them for it after its own compactions', async () => {
+    const { store, dir } = await fresh()
+    const log = await store.create({ root: '/work' })
+    await prompt(log, 'p1', 'look around')
+    await log.append({ type: 'agent', agent: info('running') })
+    await log.append({ type: 'message', message: userText('BRIEF'), turnId: 'p1', agentId: 'agent_1' })
+    await log.append({ type: 'message', message: { role: 'assistant', content: [textBlock('first look')] }, turnId: 'p1', agentId: 'agent_1' })
+    await reply(log, 'p1', 'main reply')
+    assert.deepEqual(log.snapshot().messages.map((record) => record.message.content.map((block) => (block.type === 'text' ? block.text : '')).join('')), ['look around', 'main reply'])
+    assert.equal(log.agentMessages('agent_1').length, 2)
+    assert.deepEqual(log.agentMessages('agent_2'), [])
+
+    // A compaction of the subagent's starts its conversation over and leaves the main one alone.
+    const kept = { type: 'message' as const, id: 'k1', at: 2, message: userText('SUMMARY'), turnId: 'p1', agentId: 'agent_1' }
+    await log.append({ type: 'compaction', agentId: 'agent_1', trigger: 'auto', summary: 'SUMMARY', removed: 2, messages: [kept] })
+    await log.append({ type: 'message', message: userText('MORE'), turnId: 'p1', agentId: 'agent_1' })
+    assert.deepEqual(log.agentMessages('agent_1').map((message) => (message.content[0] as { text: string }).text), ['SUMMARY', 'MORE'])
+    assert.equal(log.snapshot().messages.length, 2)
+    await log.close()
+
+    const again = (await createSessionStore({ dir }).open(log.id))!
+    assert.deepEqual(again.agentMessages('agent_1').map((message) => (message.content[0] as { text: string }).text), ['SUMMARY', 'MORE'])
+    await again.close()
+  })
+
+  it('keeps the latest record of each subagent and of the wake-up, which do not make a session look used', async () => {
+    const { store, dir } = await fresh()
+    const log = await store.create({ root: '/work' })
+    const touched = log.snapshot().updatedAt
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await log.append({ type: 'agent', agent: info('running') })
+    await log.append({ type: 'agent', agent: info('done', { report: 'R', told: false }) })
+    await log.append({ type: 'wakeup', wakeup: { at: 5_000, reason: 'check', prompt: 'P' } })
+    assert.deepEqual(log.snapshot().agents, [info('done', { report: 'R', told: false })])
+    assert.deepEqual(log.snapshot().wakeup, { at: 5_000, reason: 'check', prompt: 'P' })
+    assert.equal(log.snapshot().updatedAt, touched)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal((await store.list())[0].wakeAt, 5_000)
+    const index = JSON.parse(await fs.readFile(path.join(dir, 'index.json'), 'utf8')) as { sessions: { wakeAt?: number }[] }
+    assert.equal(index.sessions[0].wakeAt, 5_000)
+
+    await log.append({ type: 'wakeup', wakeup: null })
+    assert.equal(log.snapshot().wakeup, null)
+    assert.equal((await store.list())[0].wakeAt, undefined)
+  })
+
+  it('drops what a rewind cut: the subagents and the wake-up after the request go with it', async () => {
+    const { store } = await fresh()
+    const log = await store.create({ root: '/work' })
+    await prompt(log, 'p1', 'one')
+    await prompt(log, 'p2', 'two')
+    await log.append({ type: 'agent', agent: info('running') })
+    await log.append({ type: 'message', message: userText('BRIEF'), turnId: 'p2', agentId: 'agent_1' })
+    await log.append({ type: 'wakeup', wakeup: { at: 5_000, reason: 'check', prompt: 'P' } })
+    await log.truncateBefore('p2')
+    assert.deepEqual(log.snapshot().agents, [])
+    assert.equal(log.snapshot().wakeup, null)
+    assert.deepEqual(log.agentMessages('agent_1'), [])
+  })
+})

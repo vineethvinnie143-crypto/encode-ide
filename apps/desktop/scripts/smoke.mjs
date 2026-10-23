@@ -1906,6 +1906,48 @@ async function runSubagentChecks() {
   await evaluate("window.eNCode.settings.save({ agentMode: 'code', policy: 'workspace-write' })")
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after code mode')
+
+  await runBackgroundAgentCheck()
+}
+
+/**
+ * A subagent in the background: the turn ends once it is started, its command asks on a card tagged Background while
+ * no turn runs, the header and the Jobs tab show it with its type, and its report starts a turn of its own that is no
+ * message of the person's.
+ */
+async function runBackgroundAgentCheck() {
+  await evaluate('window.eNCode.agent.reset()')
+  const bottomClosed = await evaluate("document.querySelector('.bottom-panel')?.classList.contains('is-closed') ?? true")
+  await sendPrompt('[scenario:background-check] Check the shell in the background.')
+  await waitFor("document.body.textContent.includes('Started it in the background.')", 60000, 'the turn ends once the subagent is started')
+  await waitFor("!!document.querySelector('.approval-card .approval-tag')", 60000, 'the subagent asks on a card tagged Background')
+  const card = await evaluate("document.querySelector('.approval-card .approval-detail')?.textContent ?? ''")
+  if (!card.includes('echo background-sub-ok')) throw new Error(`the background card does not show the command: ${card}`)
+  const chip = await evaluate("document.querySelector('button[title=\"Show what runs in the background\"]')?.textContent ?? ''")
+  if (chip !== '1 agent running') throw new Error(`the header says "${chip}" while one subagent runs`)
+  await click('button[title="Show what runs in the background"]')
+  const agentCard = (state) =>
+    `[...document.querySelectorAll('.bottom-panel .job-card[data-kind=agent]')].some((card) => card.querySelector('.job-name')?.textContent === 'Background check' && card.querySelector('.job-badge')?.textContent === 'general-purpose' && card.querySelector('.job-status')?.textContent === '${state}')`
+  await waitFor(agentCard('Running'), 8000, 'the Jobs tab shows the subagent running, with its type')
+  await sleep(250)
+  await screenshot('13-background-agent.png')
+
+  await click('.approval-card .btn.primary')
+  await waitFor("document.body.textContent.includes('The background check reported back.')", 60000, 'the report starts a turn of its own')
+  await waitFor("document.querySelector('.chat-panel')?.dataset.status === 'done'", 30000, 'the turn of the report ends')
+  await waitFor(agentCard('Done'), 8000, 'the Jobs tab shows the subagent done')
+  const shown = await evaluate(`({
+    asked: document.querySelectorAll('.turn-user').length,
+    chip: !!document.querySelector('button[title="Show what runs in the background"]'),
+  })`)
+  console.log('[smoke] background subagent:', JSON.stringify(shown))
+  if (shown.asked !== 1) throw new Error(`the report's turn shows ${shown.asked - 1} messages the person did not send`)
+  if (shown.chip) throw new Error('the header still says something runs in the background')
+  await screenshot('13-background-agent-reported.png')
+  if (bottomClosed) {
+    await key({ key: 'j', code: 'KeyJ', ctrlKey: true })
+    await waitFor("document.querySelector('.bottom-panel')?.classList.contains('is-closed')", 4000, 'the bottom panel closes again')
+  }
 }
 
 const DEFAULT_APPEARANCE = {

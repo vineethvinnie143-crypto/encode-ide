@@ -129,6 +129,8 @@ export interface HostOptions {
   goalDelayMs?: number
   /** Name each session with one small call to the utility model after its first turn. Default true. */
   nameSessions?: boolean
+  /** How background news is timed in every session (see SessionEnv); tests shorten it. */
+  timing?: SessionEnv['timing']
 }
 
 const NO_SESSION = 'That session does not exist.'
@@ -233,6 +235,7 @@ export class AgentHost {
       ...(o.system ? { system: o.system } : {}),
       ...(o.warn ? { warn: o.warn } : {}),
       ...(o.nameSessions === false ? { nameSessions: false } : {}),
+      ...(o.timing ? { timing: o.timing } : {}),
       emit: (event) => o.emit(event),
       jobsChanged: () => this.reportJobs(),
     }
@@ -356,6 +359,25 @@ export class AgentHost {
     // Moved to another project: its shell and tools belong to the old folder, so the next use opens it afresh.
     if (session.marks().projectRoot !== before && !session.isRunning()) await this.retire(sessionId, session)
     return summary
+  }
+
+  /**
+   * Opens the sessions whose agent asked to be woken (ScheduleWakeup), so that the wake-up fires although nobody opens
+   * them; one missed while eNCode was closed fires now, and the agent is told it is late. Resolves to how many.
+   */
+  async resumeWakeups(): Promise<number> {
+    const waiting = (await this.store.list()).filter((summary) => summary.wakeAt !== undefined && !summary.archived)
+    let opened = 0
+    for (const summary of waiting) {
+      if (this.disposed) break
+      try {
+        await this.open(summary.id)
+        opened++
+      } catch (error) {
+        this.o.warn?.(`Could not open session ${summary.id} for its wake-up: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return opened
   }
 
   /** The sessions an agent is working in or waiting on; idle ones are left out. */

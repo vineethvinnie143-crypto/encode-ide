@@ -13,6 +13,7 @@ export { readTool, writeTool, editTool, multiEditTool, writeFileBytes, readMenti
 export { notebookEditTool, renderNotebook, type RenderedNotebook } from './notebook'
 export { globTool, grepTool, grepRegex, FILE_TYPES } from './search'
 export { createBashTool, bashOutputTool, killShellTool, BASH_OUTPUT_LIMIT, type BashSandbox } from './bash'
+export * from './background'
 export * from './shell/programs'
 export * from './shell/environment'
 export * from './shell/detect'

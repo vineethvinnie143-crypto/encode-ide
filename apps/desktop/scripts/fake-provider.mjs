@@ -69,6 +69,28 @@ const SCENARIOS = {
     { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo subagent-command-ok' } } },
     { text: 'Subagent ran the command.' },
   ],
+  // A subagent in the background: the turn ends once it is started, its command asks on a card while no turn runs, and
+  // its report starts a turn of its own (background-wake), which is no message of the person's.
+  'background-check': [
+    {
+      text: 'Starting a subagent in the background.',
+      call: {
+        name: 'Task',
+        args: {
+          description: 'Background check',
+          prompt: '[scenario:background-sub] Run echo background-sub-ok and report back.',
+          subagent_type: 'general-purpose',
+          run_in_background: true,
+        },
+      },
+    },
+    { text: 'Started it in the background.' },
+  ],
+  'background-sub': [
+    { text: 'Running the check.', call: { name: 'Bash', args: { command: 'echo background-sub-ok', description: 'Echo a word' } } },
+    { text: 'background-report-ok' },
+  ],
+  'background-wake': [{ text: 'The background check reported back.' }],
   // Started in Plan mode: the subagent must not be able to write either.
   'plan-escalation': [
     {
@@ -315,10 +337,15 @@ function lastSteer(messages) {
   return message ? textOf(message.content).split('\n\n').at(-1).trim() : ''
 }
 
+/** What eNCode tells the model when background work it started reports in a turn of its own. */
+const BACKGROUND_NEWS = 'Background work you started reports (the user did not write this)'
+
 function scenarioOf(messages) {
   const content = messages[lastUserIndex(messages)]?.content
   const match = /\[scenario:([a-z-]+)\]/.exec(typeof content === 'string' ? content : '')
-  return match && SCENARIOS[match[1]] ? match[1] : 'default'
+  if (match && SCENARIOS[match[1]]) return match[1]
+  // A turn of background news continues the request before it.
+  return textOf(content).includes(BACKGROUND_NEWS) && textOf(content).includes('background-report-ok') ? 'background-wake' : 'default'
 }
 
 /** True once eNCode has put a summary in the conversation (the system prompt only mentions the tag). */

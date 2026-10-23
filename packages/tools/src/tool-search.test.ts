@@ -20,16 +20,18 @@ const call = (name: string, input: Record<string, unknown>, id = `id_${name}`): 
 
 describe('deferring tools', () => {
   it('sends outside tools in full while their definitions are short, and defers them once they are long', () => {
+    const outside = (registry: ToolRegistry) => registry.deferred().filter((tool) => tool.definition.name.startsWith('mcp__'))
     const small = registryWith(['github', GITHUB.slice(0, 3), 100])
-    assert.equal(small.deferred().length, 0, 'three short definitions are cheaper than a search')
-    assert.equal(small.has(TOOL_SEARCH), false)
+    assert.equal(outside(small).length, 0, 'three short definitions are cheaper than a search')
+    // The built-in tools that always wait for a search (NotebookEdit) are all it lists then.
+    assert.deepEqual(small.deferred().map((tool) => tool.definition.name), ['NotebookEdit'])
     const names = small.visibleDefinitions(undefined, new Set()).map((tool) => tool.name)
     assert.ok(names.includes('mcp__github__create_issue'))
 
     const large = registryWith(['github', GITHUB, 900], ['slack', SLACK, 900])
-    assert.equal(large.deferred().length, GITHUB.length + SLACK.length)
+    assert.equal(outside(large).length, GITHUB.length + SLACK.length)
     assert.ok(large.has(TOOL_SEARCH))
-    const total = large.deferred().reduce((sum, tool) => sum + JSON.stringify(tool.definition).length, 0)
+    const total = outside(large).reduce((sum, tool) => sum + JSON.stringify(tool.definition).length, 0)
     assert.ok(total > DEFER_ABOVE_CHARS)
     const visible = large.visibleDefinitions(undefined, new Set()).map((tool) => tool.name)
     assert.ok(visible.includes(TOOL_SEARCH) && visible.includes('Read'))
@@ -55,8 +57,7 @@ describe('deferring tools', () => {
   it('leaves tools that do not ask for it alone, however many there are', () => {
     const registry = createToolRegistry({ dialect: 'bash', platform: 'linux' })
     for (const tool of outsideTools('big', GITHUB, 2000)) registry.register({ ...tool, defer: false })
-    assert.equal(registry.deferred().length, 0)
-    assert.equal(addToolSearch(registry), false)
+    assert.deepEqual(registry.deferred().map((tool) => tool.definition.name), ['NotebookEdit'])
   })
 
   it('registers ToolSearch once, and only when something is deferred', () => {

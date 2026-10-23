@@ -95,6 +95,8 @@ export interface ApprovalRequest {
   review?: { by: 'floor' | 'reviewer'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
+  /** Asked by a subagent in the background: it still waits when the turn ends, or when no turn runs. */
+  background?: boolean
 }
 
 /** Which settings file a saved rule goes to: every project of the user, the project's shared file, or the project's private one. */
@@ -113,6 +115,8 @@ export interface AskRequest {
   entryId: string
   question: string
   options?: string[]
+  /** Asked by a subagent in the background: it still waits when the turn ends, or when no turn runs. */
+  background?: boolean
 }
 
 export type GoalStatus = 'active' | 'paused' | 'complete' | 'blocked'
@@ -152,6 +156,8 @@ export interface SessionSummary {
   preview: string
   /** How many entries the conversation has; 0 for a session nobody has used. */
   entryCount: number
+  /** When the agent asked to be woken (ScheduleWakeup), epoch ms. */
+  wakeAt?: number
 }
 
 /** What a client may change about a session. */
@@ -190,6 +196,11 @@ export interface AgentHistory {
   ask?: AskRequest | null
 }
 
+/**
+ * Something going on in the background of a session: a command, a monitor (a command whose lines reach the agent),
+ * a subagent, or the wake-up the agent asked for. For a subagent `command` is its task, `title` its type and `output`
+ * what it did last; for a wake-up `command` is its reason, `startedAt` when it fires and `output` its prompt.
+ */
 export interface BackgroundJob {
   id: string
   command: string
@@ -199,6 +210,10 @@ export interface BackgroundJob {
   status: JobStatus
   exitCode?: number
   output: string
+  /** Default `command`. */
+  kind?: 'command' | 'monitor' | 'agent' | 'wakeup'
+  /** What the agent said it is for; a subagent's type. */
+  title?: string
 }
 
 // ------------------------------------------------------------ checkpoints and rewind

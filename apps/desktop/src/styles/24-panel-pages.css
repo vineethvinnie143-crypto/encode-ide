@@ -224,15 +224,53 @@
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
-.job-command {
+.job-status.job-killed {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.job-kind {
+  flex: none;
+  color: var(--text-3);
+}
+.job-card[data-kind='agent'] .job-kind,
+.job-card[data-kind='wakeup'] .job-kind {
+  color: var(--accent);
+}
+.job-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--text-1);
+}
+.job-name.is-mono {
   font-family: var(--font-mono);
   font-size: var(--fs-12);
-  color: var(--text-1);
+  font-weight: 400;
+}
+.job-badge {
+  flex: none;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.job-command {
+  margin: 6px 0 0 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 .job-output {
   margin: 8px 0 0;
@@ -247,6 +285,10 @@
   color: var(--text-2);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.job-output.is-prompt {
+  font-family: inherit;
+  font-size: var(--fs-12);
 }
 
 /* ---------- New tab ---------- */

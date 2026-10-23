@@ -15,6 +15,7 @@ import {
   SESSION_FORMAT,
   type ContextRecord,
   type CreateSessionOptions,
+  type Message,
   type MessageRecord,
   type NewRecord,
   type SessionHeader,
@@ -23,6 +24,8 @@ import {
   type SessionRecord,
   type SessionSnapshot,
   type SessionStore,
+  type SubagentInfo,
+  type Wakeup,
 } from './session-records'
 
 export const DEFAULT_TITLE = 'New session'
@@ -43,6 +46,8 @@ interface Derived {
   goal: SessionGoal | null
   todos: TodoItem[]
   plan: PlanRequest | null
+  agents: Map<string, SubagentInfo>
+  wakeup: Wakeup | null
   updatedAt: number
 }
 
@@ -56,6 +61,8 @@ function start(header: SessionHeader): Derived {
     goal: null,
     todos: [],
     plan: null,
+    agents: new Map(),
+    wakeup: null,
     updatedAt: header.at,
   }
 }
@@ -76,6 +83,7 @@ function apply(state: Derived, record: SessionRecord): void {
       state.entries.set(record.entry.id, record.entry)
       break
     case 'compaction':
+      if (record.agentId && record.agentId !== 'main') return
       state.messages = [...record.messages]
       break
     case 'title':
@@ -89,6 +97,12 @@ function apply(state: Derived, record: SessionRecord): void {
       return
     case 'plan':
       state.plan = record.plan
+      return
+    case 'agent':
+      state.agents.set(record.agent.id, record.agent)
+      return
+    case 'wakeup':
+      state.wakeup = record.wakeup
       return
     case 'meta':
       // Marking a session changes where it sits, not when it was last worked on.
@@ -171,9 +185,20 @@ class FileSessionLog implements SessionLog {
       goal: state.goal,
       todos: state.todos,
       plan: state.plan,
+      agents: [...state.agents.values()].map((agent) => ({ ...agent })),
+      wakeup: state.wakeup ? { ...state.wakeup } : null,
       lastRecordId: this.live[this.live.length - 1].id,
       updatedAt: state.updatedAt,
     }
+  }
+
+  agentMessages(agentId: string): Message[] {
+    let messages: Message[] = []
+    for (const record of this.live) {
+      if (record.type === 'message' && record.agentId === agentId) messages.push(record.message)
+      else if (record.type === 'compaction' && record.agentId === agentId) messages = record.messages.map((kept) => kept.message)
+    }
+    return messages
   }
 
   private write(record: SessionRecord): Promise<void> {
@@ -277,6 +302,7 @@ function indexOf(derived: Derived): IndexEntry {
     ...derived.marks,
     preview: previewOf([...derived.entries.values()]),
     entryCount: derived.entries.size,
+    ...(derived.wakeup ? { wakeAt: derived.wakeup.at } : {}),
   }
 }
 

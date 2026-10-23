@@ -983,3 +983,48 @@ and renderer errors written to the log.
 - The end-to-end run makes the fake provider refuse the key with a key-shaped string in its JSON, checks the card's
   sentence, its Open Settings and Switch model buttons and its redacted Details, then sends empty replies, presses
   Retry once the provider answers again, and checks the answer arrives with the request sent once.
+
+## Work in the background (Parity 2)
+
+Written with the pull request that adds subagents in the background, SendMessage, Monitor and ScheduleWakeup
+([0071](../adr/0071-work-goes-on-in-the-background-and-what-it-reports-reaches-the-agent-between-steps-or-in-a-turn-of-its-own.md)).
+The new paths are turns that start without a message from the person, output of long-running commands read by the
+model, subagents that outlive the turn that started them, and sessions opened at startup for their wake-ups.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| B1 | Background news starts turn after turn and spends the person's money (a chatty log, a loop of wake-ups) | At most twenty turns of news in a row, then the session says so and waits for the person; news gathers a second before a turn; at the end of a turn news waits for a turn of its own instead of extending the one that runs; a monitor's lines come in batches of at most 50 lines and 6,000 characters; one wake-up per session, at least 60 s ahead. Stop holds all of it until the person writes. | Mitigated |
+| B2 | A monitored command, or a subagent's report, carries instructions to the model | The news reaches the model in a system reminder that says the user did not write it, with no more authority than a tool result; it runs no UserPromptSubmit hook, and the chat never shows it as the person's message. | Residual (as for every command output the agent reads) |
+| B3 | Work in the background escapes the rules the turn works under | A monitor runs through the same shell, sandbox and approval check as a background Bash command; a subagent keeps the mode, policy, rules and grants of the session, and its approvals come to the person on the usual card. | Mitigated |
+| B4 | A subagent in the background waits on the person forever, or its card is lost when the turn ends | Its approvals and questions are marked `background` and stay when the turn ends; the session shows awaiting approval with no turn running; Stop refuses what it waits on; the Jobs tab and KillShell stop the subagent; starting over stops it. | Mitigated |
+| B5 | Background work runs on after the person thinks it stopped | Stop holds news and takes back the wake-up; the Jobs tab lists every command, monitor, subagent and wake-up with Stop or Cancel; the header chip says what runs; starting over and rewinding stop monitors, subagents and the wake-up, and silence background commands (a dev server outlives a rewind, and stays in the Jobs tab with Stop); quitting stops every command and monitor with its process tree. | Mitigated |
+| B6 | Too much runs at once (process or memory exhaustion) | At most four subagents and eight monitors in the background a session, an inbox of at most 60 items, monitor lines cut at 1,000 characters and output tails kept short. | Mitigated |
+| B7 | A wake-up opens a session the person archived, or runs while eNCode is closed | `resumeWakeups()` opens only sessions that are not archived, and only when eNCode starts; a late wake-up says it is late. Nothing runs while eNCode is closed. | Mitigated |
+| B8 | SendMessage continues a subagent of another session, or one that never existed | Agent ids are looked up in the session's own pool; an unknown id is refused with its reason. | Mitigated |
+
+### Residual risks
+
+- **A turn can start while the person is away.** It is bounded and shown, but it is a model request the person did not
+  send at that moment. Wake-ups and background subagents are the agent's choice, under the same policy as everything
+  else it does.
+- **A model can ignore the end of a batch** ("12 more lines not sent") and draw conclusions from part of a log.
+
+### Verification
+
+- The core tests start a background subagent and check its report reaches the agent in a turn of its own, between two
+  steps of a running turn, or with the next message; a message sent to it while it works; continuing it after it
+  ended and after a restart; an interrupted one named after eNCode closed; the person's stop told without a wake; the
+  agent's own stop with no notice; its approval kept after the turn and refused by Stop; starting over; the limit of
+  four. Commands and monitors: an ended command's tail, batches with what was left out, the time limit, and the limit
+  of twenty turns. Wake-ups: once with its prompt, after a restart and late, cancelled by the agent, by the person and
+  by Stop.
+- The store tests keep subagent messages and compactions by agent id, the latest agent and wake-up records with the
+  index's `wakeAt`, and drop them with a rewind; the host test opens sessions that wait for a wake-up.
+- The tool tests check Monitor, ScheduleWakeup, SendMessage, Task in the background and KillShell on a subagent, and
+  that the background tools come only where there is background work and wait for ToolSearch.
+- The renderer tests keep a background card when the turn ends and word the Jobs cards and the header chip.
+- The end-to-end run starts a subagent in the background from the fake provider, sees its command ask on a card tagged
+  Background with no turn running, the header say "1 agent running" and the Jobs tab show it with its type; approves
+  it, and checks its report starts a turn of its own with no message of the person's.

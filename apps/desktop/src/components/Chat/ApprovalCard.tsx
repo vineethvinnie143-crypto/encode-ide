@@ -114,6 +114,11 @@ export default function ApprovalCard() {
         <div className="approval-head">
           {approval.tool === 'EnterPlanMode' ? <ListTree size={16} /> : <ShieldAlert size={16} />}
           <span>{approval.title}</span>
+          {approval.background && (
+            <em className="approval-tag" title="A subagent working in the background asks. It waits for you; nothing else does.">
+              Background
+            </em>
+          )}
         </div>
         {approvals.length > 1 && (
           <div className="approval-step" aria-label={`Approval ${index + 1} of ${approvals.length}`}>

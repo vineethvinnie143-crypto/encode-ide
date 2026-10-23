@@ -47,8 +47,9 @@ primary platform; the code stays cross-platform.
     notebooks cell by cell, and PDFs page by page with their outline, through eNCode's own PDF reader; a model that
     reads PDFs also gets the pages that have figures or scans, as the pages themselves;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
-    `KillShell`);
-  - delegation: subagents through `Task`;
+    `KillShell`), and `Monitor`, which turns the lines of a command into events the agent hears;
+  - delegation: subagents through `Task`, in the foreground or the background, continued with `SendMessage`;
+  - time: `ScheduleWakeup` brings the agent back to a session when it asked to be, also after eNCode restarts;
   - planning: `TodoWrite`, goals, `EnterPlanMode` (it asks you first), `ExitPlanMode`;
   - knowledge: `Skill`, `WebSearch`, `WebFetch`;
   - questions: `AskUserQuestion`.

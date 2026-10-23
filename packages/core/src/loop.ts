@@ -40,6 +40,7 @@ import {
   loadedTools,
   truncateMiddle,
   type AgentShell,
+  type BackgroundWork,
   type DesktopServices,
   type DiffHunk,
   type FileStateTracker,
@@ -116,6 +117,8 @@ export interface LoopServices {
   skills?: Skills
   goals?: Goals
   subagents?: Subagents
+  /** Monitor and ScheduleWakeup; the main agent's only. */
+  background?: BackgroundWork
   /** The desktop the Computer tool works on; absent when the session has none. */
   desktop?: DesktopServices
   beforeWrite?: ToolContext['beforeWrite']
@@ -341,7 +344,7 @@ export class AgentLoop {
     let stopRounds = 0
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
-      if (!o.steers?.waiting()) return false
+      if (!o.steers?.waiting('end')) return false
       const blocks = await o.steers.take(signal)
       if (!blocks.length) return false
       await o.conversation.add({ role: 'user', content: blocks }, { turnId: turn.turnId })
@@ -962,6 +965,21 @@ export class AgentLoop {
     }
   }
 
+  /**
+   * The subagents as one call sees them: what they ask shows under its card, and what they change counts under the
+   * request the turn works on, also when they work on in the background after it.
+   */
+  private subagentsFor(subagents: Subagents, entry: ConversationEntry, turn: Turn, progress?: (text: string) => void): Subagents {
+    const call = { entryId: entry.id, turnId: turn.turnId }
+    return {
+      types: () => subagents.types(),
+      run: (request, signal) => subagents.run({ ...request, ...call, ...(progress ? { progress } : {}) }, signal),
+      ...(subagents.start ? { start: (request) => subagents.start!({ ...request, ...call }) } : {}),
+      ...(subagents.message ? { message: (request, signal) => subagents.message!({ ...request, ...call, ...(progress && !request.background ? { progress } : {}) }, signal) } : {}),
+      ...(subagents.stop ? { stop: (agentId) => subagents.stop!(agentId) } : {}),
+    }
+  }
+
   private contextFor(block: ToolUseBlock, _input: Record<string, unknown>, entry: ConversationEntry, turn: Turn, progress?: (text: string) => void): ToolContext {
     const { o } = this
     const s = o.services
@@ -992,7 +1010,8 @@ export class AgentLoop {
         proposePlan: (plan, signal) => o.surface.proposePlan(entry.id, plan, signal),
         setTodos: (todos) => o.surface.setTodos(todos),
       },
-      ...(s.subagents ? { subagents: { types: () => s.subagents!.types(), run: (request, signal) => s.subagents!.run({ ...request, entryId: entry.id, ...(progress ? { progress } : {}) }, signal) } } : {}),
+      ...(s.subagents ? { subagents: this.subagentsFor(s.subagents, entry, turn, progress) } : {}),
+      ...(s.background ? { background: s.background } : {}),
       ...(s.skills ? { skills: s.skills } : {}),
       ...(s.goals ? { goals: s.goals } : {}),
       ...(s.desktop

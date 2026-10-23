@@ -18,6 +18,7 @@ import { Activity, ChevronDown, ExternalLink, GitBranch, MoreHorizontal, PanelRi
 import { Menu, type MenuEntry } from '../ui/Menu'
 import { Spinner } from '../ui/Spinner'
 import { editTotals, isCommandTool, isSubagentTool } from './Chat/turns'
+import { runningLabel } from './jobs-text'
 
 const MODES: { value: AgentMode; label: string; description: string }[] = [
   { value: 'code', label: 'Standard mode', description: 'Reads, edits and runs commands.' },
@@ -65,7 +66,8 @@ export default function SessionHeader() {
   const session = sessions.find((item) => item.id === activeId)
   const mode = settings?.agentMode ?? 'code'
   const live = liveState(status)
-  const runningJobs = jobs.filter((job) => job.status === 'running')
+  const running = runningLabel(jobs)
+  const waking = jobs.some((job) => job.kind === 'wakeup' && job.status === 'running')
 
   useEffect(() => {
     document.title = `${session?.title ?? 'New session'} — eNCode`
@@ -94,7 +96,7 @@ export default function SessionHeader() {
     {
       id: 'jobs',
       label: 'Background jobs',
-      description: runningJobs.length ? `${runningJobs.length} running` : 'None running',
+      description: running ?? (waking ? 'A wake-up is set' : 'None running'),
       onSelect: () => usePanels.getState().openBottom('jobs'),
     },
     { kind: 'separator', id: 'sep-trajectory' },
@@ -168,10 +170,10 @@ export default function SessionHeader() {
             </ChipButton>
           )}
         />
-        {runningJobs.length > 0 && (
-          <ChipButton className="tone-accent" title="Show the background jobs" onClick={() => usePanels.getState().openBottom('jobs')}>
+        {running && (
+          <ChipButton className="tone-accent" title="Show what runs in the background" onClick={() => usePanels.getState().openBottom('jobs')}>
             <Activity size={12} />
-            {runningJobs.length} job{runningJobs.length === 1 ? '' : 's'} running
+            {running}
           </ChipButton>
         )}
       </div>

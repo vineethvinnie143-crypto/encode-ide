@@ -8,6 +8,11 @@
  * loop reports into events for a client. Everything that varies per turn
  * (environment, project memory, mode, goal, date) goes to the model as
  * reminders in the user's message, never in the system prompt.
+ *
+ * Work can go on in the background of a session: commands, monitors, subagents
+ * and a wake-up the agent asked for. What they report reaches the main agent as
+ * notices: between two of its steps while a turn runs, with the person's next
+ * message, or, when the agent is idle, in a turn of its own.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import {
@@ -28,15 +33,20 @@ import {
   createToolRegistry,
   type AgentMode,
   type BackgroundJobs,
+  type BackgroundWork,
   type DesktopServices,
   type FileStateTracker,
   type Goals,
+  type JobInfo,
+  type JobManager,
   type ManagedShell,
   type PlanConsent,
   type PlanVerdict,
   type Question,
   type ShellCommandAssessor,
   type Skills,
+  type SubagentResult,
+  type Subagents,
   type TodoInput,
   type Tool,
   type ToolContext,
@@ -56,10 +66,10 @@ import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
 import { pruneScreens, withoutScreens } from './screens'
-import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord } from './session-records'
+import type { CompactionRecord, ContextRecord, MessageRecord, NewRecord, SessionLog, SessionMarks, SessionRecord, SubagentInfo, Wakeup } from './session-records'
 import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
-import { builtinDefinitions, createSubagents, loadAgentDefinitions, type AgentSource } from './subagents'
+import { builtinDefinitions, createSubagents, loadAgentDefinitions, SubagentPool, type AgentSource, type SubagentStore } from './subagents'
 import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
 import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
 import {
@@ -100,6 +110,24 @@ const CANCELLED = '(cancelled)'
 const IDLE_NOTICE_MS = 60_000
 /** How long SessionEnd hooks may hold up the end of a session; quitting waits least. */
 const SESSION_END_MS = { quit: 5_000, other: 15_000 } as const
+/** How long the session waits for more background news before it wakes the agent for it. */
+const WAKE_DEBOUNCE_MS = 1_000
+/** Turns in a row background news may start before the session waits for the person. */
+const MAX_AUTO_TURNS = 20
+/** How long a monitor's lines gather before they go to the agent, and how much goes at once. */
+const MONITOR_BATCH_MS = 1_500
+const MONITOR_BATCH_LINES = 50
+const MONITOR_BATCH_CHARS = 6_000
+const MONITOR_LINE_CHARS = 1_000
+const MAX_MONITORS = 8
+/** Notices kept for the agent while it does not read them; the oldest monitor lines go first. */
+const MAX_INBOX = 60
+/** What the notice of a finished command shows of its output. */
+const JOB_TAIL_CHARS = 2_000
+/** A wake-up later than this was missed while eNCode was closed, and the agent is told. */
+const LATE_WAKE_MS = 60_000
+/** The job id of the wake-up, in the jobs list. */
+const WAKEUP_JOB = 'wakeup'
 
 /** Why a session ends, in eNCode's words; SessionEnd hooks get Claude Code's reason beside it. */
 export type SessionEnding = SessionEndEvent['detail']
@@ -164,6 +192,8 @@ export interface SessionEnv {
   idleNoticeMs?: number
   /** Whether Auto review has a Reviewer to ask; without one, it asks the person as Workspace Write does. Default true. */
   autoReview?: boolean
+  /** How background news is timed, in ms; tests shorten it. `wakeup` maps the wait a wake-up asked for to the real one. */
+  timing?: { gather?: number; monitorBatch?: number; wakeup?(ms: number): number }
 }
 
 /** What saving an "Always allow" rule came to. */
@@ -238,6 +268,44 @@ function missingShell(error: unknown, root: string): ManagedShell {
   }
 }
 
+/** News from background work for the main agent. */
+interface BackgroundNotice {
+  /** What the model reads. */
+  text: string
+  /** One line for the person. */
+  line: string
+  /** Starts a turn when the agent is idle. What the person did themselves is only told. */
+  wake: boolean
+  /** Lines of a monitor, the first to go when too many notices wait. */
+  lines?: boolean
+  /** The subagent whose end this tells: it is marked told once the model has read it. */
+  agentId?: string
+}
+
+/** A command whose lines go to the agent (Monitor). */
+interface MonitorRun {
+  id: string
+  description: string
+  lines: string[]
+  chars: number
+  dropped: number
+  /** The end of the output that is not a whole line yet. */
+  partial: string
+  batch?: NodeJS.Timeout
+  deadline?: NodeJS.Timeout
+  timedOut: boolean
+}
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? '' : 's'}`
+}
+
+/** How a subagent in the background ended, for the main agent. */
+function agentEndText(info: SubagentInfo, report: string): string {
+  const how = info.status === 'done' ? 'finished' : info.status === 'stopped' ? 'was stopped before it finished' : 'did not finish'
+  return `Subagent ${info.id} (${info.type}: ${info.description}) ${how}. Its report:\n${report || '(no report)'}\n\nSendMessage to "${info.id}" goes on with this work.`
+}
+
 interface TurnState {
   mode?: AgentMode
   memory?: string
@@ -288,8 +356,9 @@ export class AgentSession {
   private current: Promise<unknown> = Promise.resolve()
   private chain: Promise<unknown> = Promise.resolve()
   private gateTail: Promise<unknown> = Promise.resolve()
-  private readonly approvals = new Map<string, { request: ApprovalRequest; grant?: string; always?: AlwaysAllow; finish: (result: ApprovalResult) => void }>()
-  private readonly questions = new Map<string, { request: AskRequest; finish: (answer: string) => void }>()
+  /** `background`: asked by a subagent in the background, so it stays when the turn ends. */
+  private readonly approvals = new Map<string, { request: ApprovalRequest; grant?: string; always?: AlwaysAllow; background?: boolean; finish: (result: ApprovalResult) => void }>()
+  private readonly questions = new Map<string, { request: AskRequest; background?: boolean; finish: (answer: string) => void }>()
   /** What the user approved for the rest of the session; never stored. */
   private readonly grants = new Set<string>()
   /** The rules "Always allow" is saving: the next call is judged once they are in place, so the card's "applies at once" holds. */
@@ -298,6 +367,28 @@ export class AgentSession {
   private readonly reviewer: AutoReviewer | undefined
   private disposed = false
   private disposing: Promise<void> | undefined
+  /** Where the session rests between turns (idle, done or error), for when a background question is answered. */
+  private resting: AgentStatus = 'idle'
+  /** The session's subagents, from its log and running now. It outlives the loops, so background work survives a changed setting. */
+  private readonly pool: SubagentPool
+  /** What background work reported that the agent has not read yet, oldest first. */
+  private inbox: BackgroundNotice[] = []
+  private readonly monitors = new Map<string, MonitorRun>()
+  /** Jobs and subagents the agent stopped itself: their end needs no notice. */
+  private readonly quiet = new Set<string>()
+  /** Jobs and subagents the person stopped: the agent is told, never woken for it. */
+  private readonly stoppedByPerson = new Set<string>()
+  private wakeup: (Wakeup & { setAt: number }) | null = null
+  private wakeupTimer: NodeJS.Timeout | undefined
+  /** Gathers background news for a moment before it starts a turn. */
+  private wakeTimer: NodeJS.Timeout | undefined
+  /** Turns background news started since the person last wrote. */
+  private autoTurns = 0
+  /** The person stopped the agent: background news waits for their next message instead of starting a turn. */
+  private held = false
+  /** Background work is being stopped with the conversation (reset, rewind, close): what it reports now is dropped. */
+  private silent = false
+  private readonly openedAt = Date.now()
 
   constructor(
     private readonly log: SessionLog,
@@ -313,9 +404,16 @@ export class AgentSession {
       shell = missingShell(error, env.root)
     }
     this.shell = shell
-    this.jobsManager = createJobManager(shell, { onChange: () => env.jobsChanged?.(this.id) })
+    this.jobsManager = createJobManager(shell, { onChange: () => env.jobsChanged?.(this.id), onEnd: (job) => this.jobEnded(job) })
     this.reviewer = env.autoReview === false ? undefined : createAutoReviewer({ client: env.client, sticky: this.id, onUsage: (usage) => this.surface.usage(usage) })
     this.load()
+    const store: SubagentStore = {
+      list: () => this.log.snapshot().agents,
+      save: (info) => this.persist({ type: 'agent', agent: { ...info } }),
+      conversation: (agentId) => this.agentConversation(agentId),
+    }
+    this.pool = new SubagentPool(store, { ended: (info, result) => this.agentEnded(info, result), changed: () => env.jobsChanged?.(this.id) })
+    this.restoreBackground()
   }
 
   // ------------------------------------------------------------ state
@@ -344,6 +442,7 @@ export class AgentSession {
       ...snapshot.marks,
       preview: previewOf(snapshot.entries),
       entryCount: snapshot.entries.length,
+      ...(snapshot.wakeup ? { wakeAt: snapshot.wakeup.at } : {}),
     }
   }
 
@@ -458,6 +557,7 @@ export class AgentSession {
   }
 
   private setStatus(status: AgentStatus): void {
+    if (status === 'idle' || status === 'done' || status === 'error') this.resting = status
     if (status === this.statusValue) return
     this.statusValue = status
     this.send({ type: 'status', status })
@@ -520,6 +620,27 @@ export class AgentSession {
     },
   }
 
+  /**
+   * A subagent's conversation, stored in the session's log under its id so that SendMessage can take it on later, also
+   * after a restart. Its system prompt and tools follow from its type, so they are not stored.
+   */
+  private agentConversation(agentId: string): Conversation {
+    let messages: Message[] = this.log.agentMessages(agentId)
+    const stored = (message: Message, turnId: string): MessageRecord => ({ type: 'message', id: newRecordId(), at: Date.now(), message: withoutDocuments(withoutScreens(message)), turnId, agentId })
+    return {
+      messages: () => messages,
+      add: async (message, meta) => {
+        await this.write({ type: 'message', message: withoutDocuments(withoutScreens(message)), turnId: meta.turnId, agentId, ...(meta.usage ? { usage: meta.usage } : {}) })
+        messages = [...pruneScreens([...messages, message])]
+      },
+      replace: async (next, rewrite) => {
+        await this.write({ type: 'compaction', agentId, trigger: rewrite.trigger, summary: rewrite.summary, removed: rewrite.removed, messages: next.map((message) => stored(message, rewrite.turnId)) })
+        messages = [...next]
+      },
+      context: async () => false,
+    }
+  }
+
   // ------------------------------------------------------------ the surface
 
   private addEntry(entry: NewEntry): ConversationEntry {
@@ -580,7 +701,7 @@ export class AgentSession {
     fileChanged: (path) => this.send({ type: 'file-changed', path }),
     approve: (prompt, signal) => this.requestApproval(prompt, signal),
     granted: (grant) => this.grants.has(grant),
-    ask: (entryId, question, signal) => this.gate(() => this.requestAnswer(entryId, question, signal)),
+    ask: (entryId, question, signal, options) => this.gate(() => this.requestAnswer(entryId, question, signal, options?.background === true)),
     enterPlan: (entryId, reason, signal) => this.askToPlan(entryId, reason, signal),
     proposePlan: async (_entryId, plan, signal) => {
       if (this.env.reviewPlan) return this.env.reviewPlan(plan, signal)
@@ -610,21 +731,35 @@ export class AgentSession {
       ...(prompt.warnings?.length ? { warnings: prompt.warnings } : {}),
       grantable: Boolean(prompt.grant),
       ...(prompt.always && this.env.remember ? { always: { label: prompt.always.label, rules: [...prompt.always.rules] } } : {}),
+      ...(prompt.background ? { background: true } : {}),
     }
     return new Promise<ApprovalResult>((resolve) => {
       const finish = (result: ApprovalResult) => {
         signal.removeEventListener('abort', onAbort)
         this.approvals.delete(id)
         resolve(result)
-        if (!signal.aborted && !this.approvals.size && !this.questions.size) this.setStatus('running-tool')
+        this.answered(signal)
       }
       const onAbort = () => finish({ approved: false })
-      this.approvals.set(id, { request, ...(prompt.grant ? { grant: prompt.grant } : {}), ...(prompt.always && this.env.remember ? { always: prompt.always } : {}), finish })
+      this.approvals.set(id, {
+        request,
+        ...(prompt.grant ? { grant: prompt.grant } : {}),
+        ...(prompt.always && this.env.remember ? { always: prompt.always } : {}),
+        ...(prompt.background ? { background: true } : {}),
+        finish,
+      })
       signal.addEventListener('abort', onAbort, { once: true })
       this.setStatus('awaiting-approval')
       this.send({ type: 'approval-request', request: structuredClone(request) })
       this.notifyHooks('permission_prompt', `eNCode needs your approval: ${prompt.title}`)
     })
+  }
+
+  /** Nothing waits for the person any more: back to work, or, with no turn running (a background subagent asked), to rest. */
+  private answered(signal: AbortSignal): void {
+    if (this.approvals.size || this.questions.size) return
+    if (!this.controller) this.setStatus(this.resting)
+    else if (!signal.aborted) this.setStatus('running-tool')
   }
 
   /**
@@ -694,20 +829,28 @@ export class AgentSession {
     }
   }
 
-  private requestAnswer(entryId: string, question: Question, signal: AbortSignal): Promise<string> {
+  private requestAnswer(entryId: string, question: Question, signal: AbortSignal, background = false): Promise<string> {
     if (signal.aborted) return Promise.resolve(CANCELLED)
     const id = randomUUID()
     const described = question.options.filter((option) => option.description)
     const text = described.length ? `${question.question}\n\n${question.options.map((option) => `- ${option.label}${option.description ? `: ${option.description}` : ''}`).join('\n')}` : question.question
-    const request: AskRequest = { id, entryId, question: text, ...(question.options.length ? { options: question.options.map((option) => option.label) } : {}) }
+    const request: AskRequest = {
+      id,
+      entryId,
+      question: text,
+      ...(question.options.length ? { options: question.options.map((option) => option.label) } : {}),
+      ...(background ? { background: true } : {}),
+    }
     return new Promise<string>((resolve) => {
       const finish = (answer: string) => {
         signal.removeEventListener('abort', onAbort)
         this.questions.delete(id)
         resolve(answer)
+        // A question of the turn's own is followed by the loop's next status; one from the background has no turn to do it.
+        if (background) this.answered(signal)
       }
       const onAbort = () => finish(CANCELLED)
-      this.questions.set(id, { request, finish })
+      this.questions.set(id, { request, ...(background ? { background: true } : {}), finish })
       signal.addEventListener('abort', onAbort, { once: true })
       this.setStatus('awaiting-user')
       this.send({ type: 'ask', ...request })
@@ -790,6 +933,7 @@ export class AgentSession {
         skills: this.env.skills.list().slice(0, 20),
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
+        background: true,
         ...(sandbox ? { sandbox } : {}),
       },
       [...(this.env.extraTools ?? [])],
@@ -892,15 +1036,16 @@ export class AgentSession {
       sessionId: this.id,
       files: this.files,
       shell: this.shell,
-      jobs: this.jobsManager,
+      jobs: this.agentJobs,
       web: env.web,
       skills: env.skills,
       goals,
+      background: this.background,
       ...(this.desktop ? { desktop: this.desktop } : {}),
       ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}),
       summarize: this.summarizePage,
     }
-    const subagents = createSubagents({
+    const created = createSubagents({
       definitions: () => definitions,
       client: env.client,
       registry,
@@ -908,7 +1053,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.jobsManager, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage },
       files: this.files,
       createShell: env.createShell,
       approvedHosts: this.approvedHosts,
@@ -918,7 +1063,16 @@ export class AgentSession {
       refresh: this.refreshRules,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
+      pool: this.pool,
     })
+    // A subagent the agent stops itself (KillShell) needs no notice that it stopped.
+    const subagents: Subagents = {
+      ...created,
+      stop: (agentId) => {
+        this.quiet.add(agentId)
+        return created.stop!(agentId)
+      },
+    }
     return new AgentLoop({
       agentId: 'main',
       role: 'main',
@@ -943,6 +1097,24 @@ export class AgentSession {
     })
   }
 
+  /** The jobs as the agents see them: a command the agent stops itself needs no notice that it ended. */
+  private readonly agentJobs: JobManager = {
+    start: (command, options) => this.jobsManager.start(command, options),
+    read: (id, options) => this.jobsManager.read(id, options),
+    kill: (id) => {
+      this.quiet.add(id)
+      return this.jobsManager.kill(id)
+    },
+    list: () => this.jobsManager.list(),
+  }
+
+  /** Monitor and ScheduleWakeup, for the main agent. */
+  private readonly background: BackgroundWork = {
+    monitor: (request) => this.startMonitor(request),
+    wake: (request) => this.setWakeup(request),
+    cancelWake: () => this.cancelWakeup('agent'),
+  }
+
   /** What the user last asked, in their own words: what the Reviewer measures a command against. */
   private readonly recentRequests = (): string[] => {
     const requests: string[] = []
@@ -959,6 +1131,36 @@ export class AgentSession {
 
   /** The reminders and the user's text, as the message the model reads. */
   private async promptBlocks(input: AgentStartInput, text: string, mode: AgentMode, turnId: string, signal: AbortSignal): Promise<{ blocks: UserBlock[] } | { blocked: string }> {
+    const { env } = this
+    const blocks = await this.reminders(mode, signal)
+    const add = (reminderText: string | undefined) => {
+      if (reminderText) blocks.push(textBlock(reminderText))
+    }
+
+    try {
+      const submitted = await env.hooks.userPromptSubmit?.({ sessionId: this.id, agentId: 'main', root: env.root, mode, signal, messageId: turnId, prompt: text })
+      if (submitted?.block) return { blocked: submitted.block }
+      if (submitted?.context) add(reminder(submitted.context))
+    } catch (error) {
+      this.hookFailed('UserPromptSubmit', error)
+    }
+
+    for (const block of await this.mentions(text)) blocks.push(textBlock(block))
+
+    const attached = (input.attachments ?? [])
+      .filter((file) => file.content)
+      .map((file) => `--- ${file.path} ---\n${file.content.slice(0, MAX_ATTACHMENT_CHARS)}`)
+      .join('\n\n')
+    blocks.push(textBlock(attached ? `${text}\n\n<attached_files>\n${attached}\n</attached_files>` : text))
+    return { blocks }
+  }
+
+  /**
+   * What the model must be told before a request, of a person or of background work: where it works, the project's
+   * memory and the MCP servers' notes once they change, a new mode, the goal, a new day. The first request of the
+   * session in this process runs the SessionStart hooks.
+   */
+  private async reminders(mode: AgentMode, signal: AbortSignal): Promise<UserBlock[]> {
     const { env } = this
     const first = this.messages.length === 0
     const blocks: UserBlock[] = []
@@ -1012,23 +1214,7 @@ export class AgentSession {
     const today = localDate()
     if (this.turn.date && this.turn.date !== today) add(dateReminder(today))
     this.turn.date = today
-
-    try {
-      const submitted = await env.hooks.userPromptSubmit?.({ ...hookEvent, messageId: turnId, prompt: text })
-      if (submitted?.block) return { blocked: submitted.block }
-      if (submitted?.context) add(reminder(submitted.context))
-    } catch (error) {
-      this.hookFailed('UserPromptSubmit', error)
-    }
-
-    for (const block of await this.mentions(text)) blocks.push(textBlock(block))
-
-    const attached = (input.attachments ?? [])
-      .filter((file) => file.content)
-      .map((file) => `--- ${file.path} ---\n${file.content.slice(0, MAX_ATTACHMENT_CHARS)}`)
-      .join('\n\n')
-    blocks.push(textBlock(attached ? `${text}\n\n<attached_files>\n${attached}\n</attached_files>` : text))
-    return { blocks }
+    return blocks
   }
 
   /** What a message points at with @ and $, as Read and the Skill tool would bring it. Never rejects. */
@@ -1068,7 +1254,9 @@ export class AgentSession {
   }
 
   private readonly steering: Steers = {
-    waiting: () => this.steerable && this.steers.length > 0,
+    // Background news goes with the results of a step; at the end of a turn it waits for a turn of its own, so a chatty
+    // monitor cannot keep one turn going.
+    waiting: (at) => this.steerable && (this.steers.length > 0 || (at !== 'end' && this.inbox.length > 0)),
     take: (signal) => this.takeSteers(signal),
     close: () => {
       this.steerable = false
@@ -1078,8 +1266,10 @@ export class AgentSession {
   /**
    * The waiting messages as the model reads them: each is shown in the transcript where it is taken (its entry has
    * the id `steer` gave), goes through the userPromptSubmit hook as a request does, and brings what it mentions.
+   * What background work reported comes first.
    */
   private async takeSteers(signal: AbortSignal): Promise<UserBlock[]> {
+    const notices = this.readInbox()
     const taken = this.steers.splice(0)
     const blocks: UserBlock[] = []
     for (const { id, text } of taken) {
@@ -1097,7 +1287,7 @@ export class AgentSession {
       for (const block of await this.mentions(text)) blocks.push(textBlock(block))
       blocks.push(textBlock(text))
     }
-    return blocks.length ? [textBlock(STEER_NOTE), ...blocks] : []
+    return [...notices, ...(blocks.length ? [textBlock(STEER_NOTE), ...blocks] : [])]
   }
 
   /** Runs one turn on the user's request. Resolves when the turn ends; rejects only when the request cannot start. */
@@ -1107,6 +1297,7 @@ export class AgentSession {
     if (this.controller) throw new Error('eNCode is already working on this session. Stop it first.')
     const text = (input.text ?? '').trim()
     if (!text) throw new Error('Type a request first.')
+    this.heard()
     return this.exclusive((controller) => this.runTurn(input, text, controller))
   }
 
@@ -1121,13 +1312,27 @@ export class AgentSession {
     const turnId = this.unfinishedTurn()
     if (!turnId) throw new Error('The last request finished, so there is nothing to try again. Send a new message.')
     const mode: AgentMode = this.turn.mode ?? (input.mode === 'ask' || input.mode === 'plan' ? input.mode : 'code')
+    this.heard()
     return this.exclusive((controller) => this.rerunTurn(turnId, mode, controller))
+  }
+
+  /** The person is back: background news may start turns again. */
+  private heard(): void {
+    this.held = false
+    this.autoTurns = 0
+    if (this.wakeTimer) clearTimeout(this.wakeTimer)
+    this.wakeTimer = undefined
   }
 
   /** The request a retry would continue: the last one, unless the model's answer ended it. */
   private unfinishedTurn(): string | undefined {
     const last = this.messages.at(-1)
     if (!last || (last.role === 'assistant' && !last.content.some((part) => part.type === 'tool-use'))) return undefined
+    return this.lastTurnId()
+  }
+
+  /** The request the conversation is on: what a turn of background news continues, so its changes count under it. */
+  private lastTurnId(): string | undefined {
     for (let index = this.records.length - 1; index >= 0; index--) {
       const turnId = this.records[index].turnId
       if (turnId) return turnId
@@ -1151,7 +1356,12 @@ export class AgentSession {
       this.steerable = false
       this.steers = []
       this.clearPending()
+      // A subagent in the background may still wait for the person.
+      if (this.approvals.size) this.setStatus('awaiting-approval')
+      else if (this.questions.size) this.setStatus('awaiting-user')
       await this.flush().catch(() => undefined)
+      // News that came after the turn stopped reading it starts a turn of its own.
+      this.wakeSoon()
     }
   }
 
@@ -1170,6 +1380,8 @@ export class AgentSession {
         return { kind: 'cancelled' }
       }
 
+      // What background work reported while nobody read it goes with the request, before the person's words.
+      prompt.blocks.splice(prompt.blocks.length - 1, 0, ...this.readInbox())
       const message: UserMessage = { role: 'user', content: prompt.blocks }
       // The entry is stored before the message, so rewinding to the message takes both.
       this.settleEntry(this.addEntry({ id: turnId, kind: 'user', text: input.text }))
@@ -1283,12 +1495,29 @@ export class AgentSession {
     }
   }
 
+  /** What the turn left waiting for the person; a background subagent's questions stay until it ends. */
   private clearPending(): void {
-    for (const pending of [...this.approvals.values()]) pending.finish({ approved: false })
-    for (const pending of [...this.questions.values()]) pending.finish(CANCELLED)
+    for (const pending of [...this.approvals.values()]) if (!pending.background) pending.finish({ approved: false })
+    for (const pending of [...this.questions.values()]) if (!pending.background) pending.finish(CANCELLED)
   }
 
   cancel(): void {
+    const waiting = [...this.approvals.values(), ...this.questions.values()].some((pending) => pending.background)
+    // Stopping the agent also keeps background news from starting it again, and takes back its wake-up.
+    if (this.controller || waiting) {
+      this.held = true
+      this.cancelWakeup('stop')
+    }
+    // With no turn running, Stop stands for what a subagent in the background waits on: it is refused, and the
+    // subagent carries on without it (the Jobs tab stops the subagent itself).
+    if (!this.controller) {
+      for (const pending of [...this.approvals.values()]) pending.finish({ approved: false })
+      for (const pending of [...this.questions.values()]) pending.finish(CANCELLED)
+    }
+    this.abortTurn()
+  }
+
+  private abortTurn(): void {
     this.controller?.abort()
     // Stopping hands the mouse and keyboard back at once; the next call takes them again.
     this.desktop?.backend.dispose().catch(() => undefined)
@@ -1301,6 +1530,302 @@ export class AgentSession {
 
   private assertIdle(): void {
     if (this.controller) throw new Error('eNCode is working on this session. Stop it first.')
+  }
+
+  // ------------------------------------------------------------ background work
+
+  /** News for the main agent. With nobody reading, the oldest monitor lines go first when too much waits. */
+  private deliver(notice: BackgroundNotice): void {
+    if (this.disposed || this.silent) return
+    this.inbox.push(notice)
+    while (this.inbox.length > MAX_INBOX) {
+      const index = this.inbox.findIndex((item) => item.lines)
+      this.inbox.splice(index === -1 ? 0 : index, 1)
+    }
+    if (notice.wake) this.wakeSoon()
+  }
+
+  /** Takes what waits for the model: shown to the person in one line, given to the model as a reminder. */
+  private readInbox(): UserBlock[] {
+    const notices = this.inbox.splice(0)
+    if (!notices.length) return []
+    const first = notices[0].line
+    const text = notices.length === 1 ? first : `${first}, and ${plural(notices.length - 1, 'more update')}`
+    this.notice(text, 'notice', notices.map((notice) => notice.text).join('\n\n'))
+    for (const notice of notices) if (notice.agentId) this.pool.told(notice.agentId)
+    const body = notices.map((notice) => notice.text).join('\n\n---\n\n')
+    return [textBlock(reminder(`Background work you started reports (the user did not write this):\n\n${body}`))]
+  }
+
+  /** Starts a turn for the news once it has gathered a moment, when the agent is idle and the person has not stopped it. */
+  private wakeSoon(): void {
+    if (this.wakeTimer || this.disposed || this.silent || this.held || !this.env.root || !this.inbox.some((notice) => notice.wake)) return
+    this.wakeTimer = setTimeout(() => {
+      this.wakeTimer = undefined
+      this.wakeUp().catch((error: unknown) => this.env.warn?.(`A turn for background news could not run: ${errorMessage(error)}`))
+    }, this.env.timing?.gather ?? WAKE_DEBOUNCE_MS)
+    this.wakeTimer.unref?.()
+  }
+
+  private async wakeUp(): Promise<void> {
+    // A running turn reads the news itself, and its end looks again.
+    if (this.controller || this.disposed || this.silent || this.held || !this.inbox.some((notice) => notice.wake)) return
+    if (this.autoTurns >= MAX_AUTO_TURNS) {
+      if (this.autoTurns++ === MAX_AUTO_TURNS) this.notice(`Background work reported ${MAX_AUTO_TURNS} times in a row, so eNCode waits for your next message before it reads more.`)
+      return
+    }
+    this.autoTurns++
+    await this.exclusive((controller) => this.wakeTurn(controller))
+  }
+
+  /** A turn of background news: no message of the person's, the same request, so Rewind and the Review tab see one request. */
+  private async wakeTurn(controller: AbortController): Promise<TurnEnd> {
+    const { signal } = controller
+    const mode: AgentMode = this.turn.mode ?? 'code'
+    const turnId = this.lastTurnId() ?? newRecordId()
+    try {
+      this.setStatus('thinking')
+      await this.env.external?.ready?.(signal).catch(() => undefined)
+      const blocks = await this.reminders(mode, signal)
+      const news = this.readInbox()
+      if (!news.length || signal.aborted) {
+        this.setStatus(this.resting)
+        return { kind: 'cancelled' }
+      }
+      const message: UserMessage = { role: 'user', content: [...blocks, ...news] }
+      const record = (await this.write({ type: 'message', message, turnId, agentId: 'main' })) as MessageRecord
+      this.messages = [...this.messages, message]
+      this.records = [...this.records, record]
+      const loop = this.getLoop()
+      this.steerable = true
+      const end = await loop.run({ turnId, mode, signal })
+      this.finishStreaming()
+      this.conclude(end)
+      return end
+    } catch (error) {
+      return this.broken(error, signal)
+    }
+  }
+
+  /** Subagents that ended without the agent hearing it, or were cut off when eNCode closed; a wake-up still to come. */
+  private restoreBackground(): void {
+    for (const info of this.pool.list()) {
+      if (info.told) continue
+      if (info.status === 'interrupted') {
+        this.inbox.push({
+          text: `Subagent ${info.id} (${info.type}: ${info.description}) was cut off when eNCode closed. SendMessage to "${info.id}" goes on from where it stopped.`,
+          line: `A subagent was cut off when eNCode closed: ${info.description}`,
+          wake: false,
+          agentId: info.id,
+        })
+      } else if (info.background && info.status !== 'running') {
+        this.inbox.push({ text: agentEndText(info, info.report ?? ''), line: `A subagent ended while eNCode was closed: ${info.description}`, wake: false, agentId: info.id })
+      }
+    }
+    const wakeup = this.log.snapshot().wakeup
+    if (wakeup && this.env.root) this.armWakeup(wakeup)
+  }
+
+  private agentEnded(info: SubagentInfo, result: SubagentResult): void {
+    if (this.disposed || this.silent) return
+    if (this.quiet.delete(info.id)) {
+      this.pool.told(info.id)
+      return
+    }
+    if (this.stoppedByPerson.delete(info.id)) {
+      this.deliver({
+        text: `The user stopped subagent ${info.id} (${info.type}: ${info.description}) before it finished. SendMessage to "${info.id}" goes on from where it stopped.`,
+        line: `You stopped the subagent: ${info.description}`,
+        wake: false,
+        agentId: info.id,
+      })
+      return
+    }
+    const how = info.status === 'done' ? 'finished' : 'stopped without finishing'
+    this.deliver({ text: agentEndText(info, result.report), line: `Subagent ${how}: ${info.description}`, wake: true, agentId: info.id })
+  }
+
+  /** A background command or monitor ended. A subagent's commands are its own to read. */
+  private jobEnded(job: JobInfo): void {
+    if (this.disposed) return
+    const quiet = this.quiet.delete(job.id)
+    const byPerson = this.stoppedByPerson.delete(job.id)
+    if (job.kind === 'monitor') {
+      this.monitorEnded(job, quiet, byPerson)
+      return
+    }
+    if (quiet || (job.agentId ?? 'main') !== 'main') return
+    const command = job.command.length > 200 ? `${job.command.slice(0, 200)}…` : job.command
+    if (byPerson) {
+      this.deliver({ text: `The user stopped background command ${job.id} (\`${command}\`).`, line: `You stopped a background command: ${command}`, wake: false })
+      return
+    }
+    const how =
+      job.status === 'done' ? `finished with exit code ${job.exitCode ?? 0}` : job.status === 'killed' ? 'was stopped' : `failed${job.exitCode !== undefined ? ` with exit code ${job.exitCode}` : ''}`
+    const output = this.jobsManager.output(job.id) ?? ''
+    let tail = output.slice(-JOB_TAIL_CHARS)
+    if (tail.length < output.length) tail = `…${tail.slice(tail.indexOf('\n') + 1)}`
+    this.deliver({
+      text: `Background command ${job.id} (\`${command}\`) ${how}. ${tail.trim() ? `The end of its output:\n${tail.trimEnd()}\n\nBashOutput with bash_id "${job.id}" shows what you have not read.` : 'It printed nothing.'}`,
+      line: `A background command ${job.status === 'done' && !job.exitCode ? 'finished' : 'ended'}: ${command}`,
+      wake: true,
+    })
+  }
+
+  // ------------------------------------------------------------ monitors
+
+  private async startMonitor(request: { command: string; description: string; cwd: string; timeoutMs: number | null }): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
+    if (this.monitors.size >= MAX_MONITORS) return { ok: false, reason: `${MAX_MONITORS} monitors already run. Stop one with KillShell before you start another.` }
+    const run: MonitorRun = { id: '', description: request.description, lines: [], chars: 0, dropped: 0, partial: '', timedOut: false }
+    let job: JobInfo
+    try {
+      job = await this.jobsManager.start(request.command, { cwd: request.cwd, kind: 'monitor', description: request.description, agentId: 'main', onOutput: (text) => this.monitorOutput(run, text) })
+    } catch (error) {
+      return { ok: false, reason: `The command could not start: ${plainError(error)}` }
+    }
+    run.id = job.id
+    this.monitors.set(job.id, run)
+    if (request.timeoutMs !== null) {
+      run.deadline = setTimeout(() => {
+        run.timedOut = true
+        this.jobsManager.kill(run.id).catch(() => undefined)
+      }, request.timeoutMs)
+      run.deadline.unref?.()
+    }
+    return { ok: true, id: job.id }
+  }
+
+  private monitorOutput(run: MonitorRun, text: string): void {
+    const parts = (run.partial + text).split('\n')
+    run.partial = parts.pop() ?? ''
+    // A line that never ends still reaches the agent.
+    if (run.partial.length > MONITOR_LINE_CHARS) {
+      parts.push(run.partial)
+      run.partial = ''
+    }
+    for (const part of parts) this.monitorLine(run, part)
+  }
+
+  private monitorLine(run: MonitorRun, raw: string): void {
+    const line = raw.replace(/\r$/, '')
+    if (!line.trim()) return
+    const kept = line.length > MONITOR_LINE_CHARS ? `${line.slice(0, MONITOR_LINE_CHARS)}…` : line
+    if (run.lines.length >= MONITOR_BATCH_LINES || run.chars + kept.length > MONITOR_BATCH_CHARS) run.dropped++
+    else {
+      run.lines.push(kept)
+      run.chars += kept.length + 1
+    }
+    if (!run.batch) {
+      run.batch = setTimeout(() => this.flushMonitor(run), this.env.timing?.monitorBatch ?? MONITOR_BATCH_MS)
+      run.batch.unref?.()
+    }
+  }
+
+  /** The lines gathered so far, as one notice. */
+  private flushMonitor(run: MonitorRun): void {
+    if (run.batch) clearTimeout(run.batch)
+    run.batch = undefined
+    if (!run.lines.length && !run.dropped) return
+    const count = run.lines.length + run.dropped
+    const dropped = run.dropped ? `\n(${plural(run.dropped, 'more line')} came at the same time and were left out; print fewer lines to see them all.)` : ''
+    this.deliver({ text: `Monitor ${run.id} (${run.description}):\n${run.lines.join('\n')}${dropped}`, line: `${run.description}: ${plural(count, 'new line')}`, wake: true, lines: true })
+    run.lines = []
+    run.chars = 0
+    run.dropped = 0
+  }
+
+  private monitorEnded(job: JobInfo, quiet: boolean, byPerson: boolean): void {
+    const run = this.monitors.get(job.id)
+    this.monitors.delete(job.id)
+    if (run?.deadline) clearTimeout(run.deadline)
+    if (run && quiet) {
+      if (run.batch) clearTimeout(run.batch)
+      return
+    }
+    if (run) {
+      if (run.partial) this.monitorLine(run, run.partial)
+      run.partial = ''
+      this.flushMonitor(run)
+    }
+    const name = `Monitor ${job.id} (${job.description ?? job.command})`
+    if (quiet) return
+    if (byPerson) {
+      this.deliver({ text: `The user stopped ${name}.`, line: `You stopped a monitor: ${job.description ?? job.command}`, wake: false })
+      return
+    }
+    const how = run?.timedOut ? 'stopped at its time limit' : `ended${job.exitCode !== undefined ? ` with exit code ${job.exitCode}` : ''}`
+    this.deliver({ text: `${name} ${how}. Start it again with Monitor if you still need it.`, line: `A monitor ${run?.timedOut ? 'reached its time limit' : 'ended'}: ${job.description ?? job.command}`, wake: true })
+  }
+
+  // ------------------------------------------------------------ the wake-up
+
+  private setWakeup(request: { delayMs: number; reason: string; prompt: string }): { at: number; replaced: boolean } {
+    const replaced = this.wakeup !== null
+    const wakeup: Wakeup = { at: Date.now() + request.delayMs, reason: request.reason, prompt: request.prompt }
+    this.armWakeup(wakeup)
+    this.persist({ type: 'wakeup', wakeup })
+    return { at: wakeup.at, replaced }
+  }
+
+  private armWakeup(wakeup: Wakeup): void {
+    if (this.wakeupTimer) clearTimeout(this.wakeupTimer)
+    this.wakeup = { ...wakeup, setAt: Date.now() }
+    const wait = Math.max(0, wakeup.at - Date.now())
+    this.wakeupTimer = setTimeout(() => this.wakeupDue(), this.env.timing?.wakeup ? this.env.timing.wakeup(wait) : wait)
+    this.wakeupTimer.unref?.()
+    this.env.jobsChanged?.(this.id)
+  }
+
+  private wakeupDue(): void {
+    const due = this.wakeup
+    this.wakeup = null
+    this.wakeupTimer = undefined
+    if (!due || this.disposed || this.silent) return
+    this.persist({ type: 'wakeup', wakeup: null })
+    const lateBy = Date.now() - due.at
+    const late = lateBy > LATE_WAKE_MS ? ` It comes ${plural(Math.round(lateBy / 60_000), 'minute')} late: eNCode was not running when it was due.` : ''
+    this.deliver({ text: `It is time for the wake-up you scheduled (${due.reason}).${late} What you asked yourself to do:\n${due.prompt}`, line: `Wake-up: ${due.reason}`, wake: true })
+    this.env.jobsChanged?.(this.id)
+  }
+
+  /** Takes the wake-up back. The agent hears of it when the person did it. */
+  private cancelWakeup(by: 'agent' | 'person' | 'stop'): boolean {
+    const had = this.wakeup
+    if (!had) return false
+    if (this.wakeupTimer) clearTimeout(this.wakeupTimer)
+    this.wakeupTimer = undefined
+    this.wakeup = null
+    this.persist({ type: 'wakeup', wakeup: null })
+    if (by === 'person') this.deliver({ text: `The user cancelled the wake-up you scheduled (${had.reason}).`, line: `You cancelled the wake-up: ${had.reason}`, wake: false })
+    if (by === 'stop') this.deliver({ text: `The user stopped you, which also cancelled the wake-up you scheduled (${had.reason}).`, line: `The wake-up was cancelled: ${had.reason}`, wake: false })
+    this.env.jobsChanged?.(this.id)
+    return true
+  }
+
+  /**
+   * Stops what runs in the background with the conversation it belongs to. On closing, subagents are kept as cut off and
+   * the wake-up stays in the log, so that both go on after a restart.
+   */
+  private async stopBackground(closing: boolean): Promise<void> {
+    this.silent = true
+    if (this.wakeTimer) clearTimeout(this.wakeTimer)
+    this.wakeTimer = undefined
+    if (this.wakeupTimer) clearTimeout(this.wakeupTimer)
+    this.wakeupTimer = undefined
+    this.wakeup = null
+    for (const run of this.monitors.values()) {
+      if (run.batch) clearTimeout(run.batch)
+      if (run.deadline) clearTimeout(run.deadline)
+    }
+    const monitors = [...this.monitors.keys()]
+    this.monitors.clear()
+    for (const id of monitors) this.quiet.add(id)
+    // Commands keep running (a dev server outlives a rewind), but the agent they would report to is gone.
+    for (const job of this.jobsManager.list()) if (job.status === 'running') this.quiet.add(job.id)
+    await Promise.all(monitors.map((id) => this.jobsManager.kill(id).catch(() => false)))
+    await this.pool.stopAll(closing ? 'interrupted' : 'stopped')
+    this.inbox = []
+    if (!closing) this.silent = false
   }
 
   // ------------------------------------------------------------ changing the conversation
@@ -1336,6 +1861,7 @@ export class AgentSession {
   /** Starts the conversation over; the title, goal, task list and plan stay. */
   async reset(): Promise<void> {
     this.cancel()
+    await this.stopBackground(false)
     await this.idle()
     this.stopIdleTimer()
     // As in Claude Code: the cleared session ends, and the next request starts it again from "clear".
@@ -1352,9 +1878,17 @@ export class AgentSession {
     if (keep.todos.length) await this.write({ type: 'todos', todos: keep.todos })
     if (keep.plan) await this.write({ type: 'plan', plan: keep.plan })
     this.load()
+    await this.afterCut()
     this.forgetRuntimeState()
     this.setStatus('idle')
     this.send({ type: 'session-reset' })
+  }
+
+  /** After the log was cut: the subagents it still has are the ones known, and no wake-up from before the cut fires. */
+  private async afterCut(): Promise<void> {
+    this.pool.reload()
+    if (this.log.snapshot().wakeup) await this.write({ type: 'wakeup', wakeup: null })
+    this.env.jobsChanged?.(this.id)
   }
 
   /** Goes back to just before a request of the user's, which is returned to be edited and sent again. */
@@ -1378,9 +1912,12 @@ export class AgentSession {
   private async cutBefore(entryId: string): Promise<{ text: string }> {
     const entry = this.entries.find((candidate) => candidate.id === entryId && candidate.kind === 'user')
     if (!entry) throw new Error('That request is not in this session.')
+    // Background work belongs to the conversation that is going away.
+    await this.stopBackground(false)
     await this.flush()
     await this.log.truncateBefore(entryId)
     this.load()
+    await this.afterCut()
     this.forgetRuntimeState()
     this.setStatus('idle')
     return { text: entry.text ?? '' }
@@ -1474,8 +2011,9 @@ export class AgentSession {
 
   // ------------------------------------------------------------ jobs, export, closing
 
+  /** What goes on in the background: commands and monitors, subagents working in the background, and the wake-up. */
   jobs(): BackgroundJob[] {
-    return this.jobsManager.list().map((job) => ({
+    const jobs: BackgroundJob[] = this.jobsManager.list().map((job) => ({
       id: job.id,
       command: job.command,
       cwd: job.cwd,
@@ -1484,14 +2022,46 @@ export class AgentSession {
       status: job.status,
       ...(job.exitCode !== undefined ? { exitCode: job.exitCode } : {}),
       output: (this.jobsManager.output(job.id) ?? '').slice(-JOB_PREVIEW_CHARS),
+      ...(job.kind === 'monitor' ? { kind: 'monitor' as const } : {}),
+      ...(job.description ? { title: job.description } : {}),
     }))
+    for (const info of this.pool.list()) {
+      const running = this.pool.isRunning(info.id)
+      // Those from an earlier run of eNCode were told to the agent; the list shows this run's.
+      if (!info.background || (!running && (info.endedAt ?? 0) < this.openedAt)) continue
+      jobs.push({
+        id: info.id,
+        kind: 'agent',
+        command: info.description,
+        title: info.type,
+        cwd: this.env.root,
+        sessionId: this.id,
+        startedAt: info.startedAt,
+        status: running ? 'running' : info.status === 'done' ? 'done' : info.status === 'failed' ? 'error' : 'killed',
+        output: this.pool.progress(info.id).slice(-JOB_PREVIEW_CHARS),
+      })
+    }
+    if (this.wakeup) {
+      jobs.push({ id: WAKEUP_JOB, kind: 'wakeup', command: this.wakeup.reason, title: this.wakeup.reason, cwd: this.env.root, sessionId: this.id, startedAt: this.wakeup.at, status: 'running', output: this.wakeup.prompt })
+    }
+    return jobs
   }
 
   jobOutput(jobId: string): string | undefined {
+    if (jobId === WAKEUP_JOB) return this.wakeup?.prompt
+    if (this.pool.get(jobId)) return this.pool.progress(jobId)
     return this.jobsManager.output(jobId)
   }
 
+  /** The person stops something in the background: the agent is told when it next reads, and is not woken for it. */
   async killJob(jobId: string): Promise<boolean> {
+    if (jobId === WAKEUP_JOB) return this.cancelWakeup('person')
+    if (this.pool.get(jobId)) {
+      if (!this.pool.isRunning(jobId)) return false
+      this.stoppedByPerson.add(jobId)
+      return (await this.pool.stop(jobId))?.stopped ?? false
+    }
+    if (this.jobsManager.list().some((job) => job.id === jobId && job.status === 'running')) this.stoppedByPerson.add(jobId)
     return this.jobsManager.kill(jobId)
   }
 
@@ -1532,9 +2102,10 @@ export class AgentSession {
   }
 
   private async shutdown(ending: SessionEnding): Promise<void> {
-    this.cancel()
+    this.abortTurn()
     this.namingController.abort()
     this.stopIdleTimer()
+    await this.stopBackground(true)
     await this.idle()
     await this.endHooks(ending)
     this.disposed = true

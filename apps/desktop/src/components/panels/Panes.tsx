@@ -6,9 +6,10 @@ import { usePanels } from '../../stores/panels'
 import { useUi } from '../../stores/ui'
 import type { SidebarView } from '../../stores/ui'
 import { Button } from '../../ui/Button'
-import { Activity, Code2, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal } from '../../ui/icons'
+import { Activity, Bot, Clock, Code2, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal } from '../../ui/icons'
 import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
+import { jobText } from '../jobs-text'
 import EditorTabs from '../EditorTabs'
 import Sidebar from '../Sidebar/Sidebar'
 
@@ -71,7 +72,39 @@ export function EditorPane() {
   )
 }
 
-/** Background commands the agent started, with the tail of their output. */
+const JOB_ICONS = { command: SquareTerminal, monitor: Eye, agent: Bot, wakeup: Clock } as const
+
+/** One thing the agent left running: what it is, how it stands, and a way to stop it. */
+function JobCard({ job }: { job: BackgroundJob }) {
+  const { kind, name, mono, badge, command, status } = jobText(job)
+  const Icon = JOB_ICONS[kind]
+  const running = job.status === 'running'
+  return (
+    <div className="job-card" data-kind={kind}>
+      <div className="job-card-head">
+        <Icon size={14} className="job-kind" />
+        <span className={mono ? 'job-name is-mono' : 'job-name'} title={name}>
+          {name}
+        </span>
+        {badge && <span className="job-badge">{badge}</span>}
+        <span className={`job-status job-${job.status}`}>{status}</span>
+        {running && (
+          <Button size="sm" variant={kind === 'wakeup' ? 'ghost' : 'danger'} onClick={() => void api.jobs.kill(job.id)}>
+            {kind === 'wakeup' ? 'Cancel' : 'Stop'}
+          </Button>
+        )}
+      </div>
+      {command && (
+        <div className="job-command" title={command}>
+          {command}
+        </div>
+      )}
+      {job.output && <pre className={kind === 'wakeup' ? 'job-output is-prompt' : 'job-output'}>{job.output.slice(-1200)}</pre>}
+    </div>
+  )
+}
+
+/** What the agents left running in the background: commands, monitors, subagents and wake-ups, the next wake-up first. */
 export function JobsPane() {
   const [jobs, setJobs] = useState<BackgroundJob[]>([])
   useEffect(() => {
@@ -82,27 +115,14 @@ export function JobsPane() {
     return (
       <div className="panel-empty">
         <Activity size={18} />
-        <span>No background jobs. Commands the agent runs in the background show up here.</span>
+        <span>Nothing in the background. Commands, monitors, subagents and wake-ups the agent leaves running show up here.</span>
       </div>
     )
   }
   return (
     <div className="jobs-pane">
       {jobs.map((job) => (
-        <div className="job-card" key={job.id}>
-          <div className="job-card-head">
-            <span className={`job-status job-${job.status}`}>{job.status}</span>
-            <span className="job-command" title={job.command}>
-              {job.command}
-            </span>
-            {job.status === 'running' && (
-              <Button size="sm" variant="danger" onClick={() => void api.jobs.kill(job.id)}>
-                Stop
-              </Button>
-            )}
-          </div>
-          {job.output && <pre className="job-output">{job.output.slice(-1200)}</pre>}
-        </div>
+        <JobCard key={job.id} job={job} />
       ))}
     </div>
   )

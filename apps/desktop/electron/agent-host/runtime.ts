@@ -346,6 +346,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     }
     host = created
     serveHost(peer, created)
+    // A wake-up an agent set fires although nobody opens its session; one missed while eNCode was closed fires now.
+    void created.resumeWakeups().catch((error) => log(`could not resume the wake-ups: ${describe(error)}`))
   })
 
   peer.handle('configure', (next: HostConfig) => apply(next))

@@ -157,6 +157,11 @@ export default function ChatPanel() {
           <div className="ask-head">
             <MessageCircleQuestion size={14} />
             <span>{ask.question}</span>
+            {ask.background && (
+              <em className="approval-tag" title="A subagent working in the background asks. It waits for you; nothing else does.">
+                Background
+              </em>
+            )}
           </div>
           {ask.options && ask.options.length > 0 && (
             <div className="ask-options">

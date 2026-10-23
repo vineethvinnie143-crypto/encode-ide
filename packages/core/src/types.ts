@@ -49,6 +49,8 @@ export interface ApprovalPrompt {
   review?: { by: 'floor' | 'reviewer'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
+  /** Asked by a subagent working in the background: it stays when the main agent's turn ends. */
+  background?: boolean
 }
 
 /** What "Always allow" would save: the rules, and what they say in a phrase. */
@@ -87,8 +89,8 @@ export interface Surface {
   approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<ApprovalResult>
   /** Whether the user already allowed this grant for the rest of the session, so nothing needs to judge it again. */
   granted?(grant: string): boolean
-  /** One answer to one question. */
-  ask(entryId: string, question: Question, signal: AbortSignal): Promise<string>
+  /** One answer to one question. `background`: a subagent in the background asks, and the question outlives the turn. */
+  ask(entryId: string, question: Question, signal: AbortSignal, options?: { background?: boolean }): Promise<string>
   /** Whether the user wants a plan agreed first (EnterPlanMode); `reason` is the agent's, for the user. */
   enterPlan(entryId: string, reason: string, signal: AbortSignal): Promise<PlanConsent>
   proposePlan(entryId: string, plan: string, signal: AbortSignal): Promise<PlanVerdict>
@@ -118,8 +120,11 @@ export interface Turn {
  * of the step that ran (or after a reply that would have ended the turn), so they belong to the turn they steer.
  */
 export interface Steers {
-  /** A message is waiting. */
-  waiting(): boolean
+  /**
+   * A message is waiting. `end`: the model has just given its final answer, and only a message that should keep the
+   * turn going counts (the person's, not background news, which waits for a turn of its own).
+   */
+  waiting(at?: 'end'): boolean
   /** The waiting messages as the model reads them, shown in the transcript as they are taken; empty when none is left to read. Never rejects. */
   take(signal: AbortSignal): Promise<UserBlock[]>
   /** The turn is ending: it takes no more, and a message sent from now on waits for the next turn. */

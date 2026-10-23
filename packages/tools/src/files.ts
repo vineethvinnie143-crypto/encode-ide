@@ -465,7 +465,7 @@ function finishedEdit(file: string, name: string, loaded: Loaded, outcome: { tex
 
 const isNotebook = (file: unknown) => typeof file === 'string' && path.extname(file).toLowerCase() === '.ipynb'
 /** Read shows a notebook's cells, not its JSON, so text copied from it would never match the file. */
-const NOTEBOOK_NOTE = 'this is a Jupyter notebook; change its cells with NotebookEdit.'
+const NOTEBOOK_NOTE = 'this is a Jupyter notebook; change its cells with NotebookEdit (load it with ToolSearch).'
 
 const editProperties = {
   old_string: { type: 'string', description: 'The exact text to replace.' },

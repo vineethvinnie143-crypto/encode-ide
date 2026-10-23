@@ -426,3 +426,26 @@ describe('background jobs', () => {
     assert.deepEqual(h.host.jobs().map((job) => job.id).sort(), [`${a.id}:bash_1`, `${b.id}:bash_1`].sort())
   })
 })
+
+describe('wake-ups across a restart', () => {
+  it('opens the sessions that asked to be woken, so the wake-up fires with nobody looking at them', async () => {
+    const script: Script = [
+      { calls: [{ name: 'ScheduleWakeup', input: { delaySeconds: 600, reason: 'check the build', prompt: 'WAKE-PROMPT' } }] },
+      { text: 'I will look again.' },
+      { text: 'Looked again.' },
+    ]
+    const first = await hostHarness({ script, host: { timing: { wakeup: () => 60_000 } } })
+    const [summary] = await first.host.sessions()
+    await first.host.start(summary.id, { text: 'build it', mode: 'code' })
+    assert.ok((await first.host.sessions())[0].wakeAt)
+    assert.equal(first.host.jobs().find((job) => job.kind === 'wakeup')?.title, 'check the build')
+    await first.host.dispose()
+
+    const second = await hostHarness({ host: { dir: first.dir, client: first.client, workspace: first.root, home: first.home, timing: { gather: 5, wakeup: () => 0 } } })
+    assert.equal(await second.host.resumeWakeups(), 1)
+    await until(() => first.client.requests.length === 3)
+    await until(() => second.of('done', summary.id).length === 1)
+    assert.match(JSON.stringify(first.client.requests[2].payload.messages.at(-1)), /WAKE-PROMPT/)
+    assert.equal(await second.host.resumeWakeups(), 0)
+  })
+})
