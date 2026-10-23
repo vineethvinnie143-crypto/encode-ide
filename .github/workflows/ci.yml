@@ -15,42 +15,54 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Every job runs on eNCode's own Windows runner, a virtual machine on Vineeth's PC set up by
+# scripts/ci/windows-runner.ps1 (docs/ci/windows-runner.md): the account's included Actions minutes ran out on
+# 2026-10-23. The repository variable ENCODE_WINDOWS_RUNNER, as JSON, sends them elsewhere: "windows-latest" puts
+# them back on GitHub's runners.
 jobs:
   # A private repository's artifact storage is small (500 MB on a free account), and every run adds screenshots,
   # while a build is about 200 MB. This keeps the newest build and a day of screenshots, so a run is never refused
   # for space. It never fails the run.
   storage:
     name: Artifact storage
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.ENCODE_WINDOWS_RUNNER || '["self-hosted","windows","encode"]') }}
     timeout-minutes: 5
     continue-on-error: true
     permissions:
       actions: write
     steps:
+      # Windows PowerShell, which every Windows has; the runner needs nothing else for this.
       - name: Delete old artifacts, keeping the newest build
+        shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          list="$RUNNER_TEMP/artifacts.tsv"
-          cutoff=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
-          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.expired | not) | [.id, .name, .created_at] | @tsv' > "$list"
-          newest=$(awk -F'\t' '$2 ~ /^eNCode-windows-/ && $3 > best { best = $3; id = $1 } END { print id }' "$list")
-          while IFS=$'\t' read -r id name created; do
-            if [[ $name == eNCode-windows-* ]]; then
-              [[ $id == "$newest" ]] && continue
-            elif [[ $created > $cutoff ]]; then
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $api = "$env:GITHUB_API_URL/repos/$env:REPO/actions/artifacts"
+          $all = @()
+          for ($page = 1; $page -le 50; $page++) {
+            $batch = @((Invoke-RestMethod -Uri "$($api)?per_page=100&page=$page" -Headers $headers).artifacts)
+            $all += $batch
+            if ($batch.Count -lt 100) { break }
+          }
+          $live = @($all | Where-Object { -not $_.expired })
+          $cutoff = [DateTimeOffset]::UtcNow.AddHours(-24)
+          $newest = $live | Where-Object { $_.name -like 'eNCode-windows-*' } | Sort-Object { [DateTimeOffset]$_.created_at } -Descending | Select-Object -First 1
+          foreach ($artifact in $live) {
+            if ($artifact.name -like 'eNCode-windows-*') {
+              if ($newest -and $artifact.id -eq $newest.id) { continue }
+            } elseif ([DateTimeOffset]$artifact.created_at -gt $cutoff) {
               continue
-            fi
-            gh api -X DELETE "repos/$REPO/actions/artifacts/$id" > /dev/null
-            echo "deleted $name ($created)"
-          done < "$list"
+            }
+            Invoke-RestMethod -Method Delete -Uri "$api/$($artifact.id)" -Headers $headers | Out-Null
+            "deleted $($artifact.name) ($($artifact.created_at))"
+          }
 
   windows:
     name: Windows
-    runs-on: windows-latest
+    runs-on: ${{ fromJSON(vars.ENCODE_WINDOWS_RUNNER || '["self-hosted","windows","encode"]') }}
     timeout-minutes: 45
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -66,6 +78,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+
+      # On eNCode's runner: its desktop must be on screen, and eNCode's data from an earlier job goes, as on a new
+      # machine.
+      - name: Tidy eNCode's runner
+        if: runner.environment == 'self-hosted'
+        shell: powershell
+        run: ./scripts/ci/tidy-runner.ps1 -Start
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -149,6 +168,13 @@ jobs:
             TESTING.md
           if-no-files-found: error
           retention-days: 14
+
+      # eNCode's runner is kept from one job to the next: nothing this job started may stay open and hold files the
+      # next checkout deletes (an eNCode, an Electron or a helper left by a failed step).
+      - name: Stop what the job left open
+        if: always()
+        shell: powershell
+        run: if (Test-Path scripts/ci/tidy-runner.ps1) { ./scripts/ci/tidy-runner.ps1 }
 
       # Every run, so a UI change can be reviewed by eye in both themes. Full storage loses the pictures, not the run.
       - name: Keep screenshots and the Electron log

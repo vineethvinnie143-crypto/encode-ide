@@ -32,6 +32,11 @@ function fail(message) {
 if (!process.env.CI && process.env.ENCODE_PACKAGED_SMOKE_ANYWAY !== '1') {
   fail('A packaged build uses the real profile. Run this in CI, or set ENCODE_PACKAGED_SMOKE_ANYWAY=1 to use yours.')
 }
+// On a runner of our own, only a machine set up for CI (scripts/ci/windows-runner.ps1) lends its profile: never an
+// everyday account that happens to run a runner.
+if (process.env.RUNNER_ENVIRONMENT === 'self-hosted' && process.env.ENCODE_CI_MACHINE !== '1') {
+  fail('This self-hosted runner was not set up by scripts/ci/windows-runner.ps1, and this uses the real profile. Run it on a machine set up for CI.')
+}
 if (!fs.existsSync(exe)) fail(`${exe} is missing. Run pnpm package first.`)
 
 const port = await new Promise((resolve, reject) => {
