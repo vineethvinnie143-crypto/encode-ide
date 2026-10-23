@@ -227,7 +227,8 @@ async function shrink<T>(
 function callSite(): string {
   const line = new Error().stack?.split('\n')[3] ?? ''
   const match = /\(?(.+?:\d+):\d+\)?$/.exec(line.trim())
-  return (match ? match[1] : 'unknown').replace(/^file:\/\//, '').replace(/^.*?\b(packages|apps)\//, '$1/')
+  // Windows writes the path with backslashes: the report names it as the repository does.
+  return (match ? match[1] : 'unknown').replace(/^file:\/\//, '').replace(/\\/g, '/').replace(/^.*?\b(packages|apps)\//, '$1/')
 }
 
 /** With ENCODE_FUZZ_REPORT set, one JSON line per `check`: where, how many cases, how long, the seed, and whether it failed. */
