@@ -136,7 +136,8 @@ describe('DirectClient', () => {
     const outcome = await client.complete(call())
     assert.equal(outcome.kind, 'paused')
     assert.equal(outcome.kind === 'paused' && outcome.reason, 'auth')
-    assert.match(outcome.kind === 'paused' ? outcome.message : '', /local-model on local: HTTP 401/)
+    assert.equal(outcome.kind === 'paused' && outcome.message, 'local did not accept the API key.')
+    assert.match(outcome.kind === 'paused' ? (outcome.detail ?? '') : '', /local-model on local: HTTP 401/)
     assert.equal(adapter.calls, 1)
   })
 

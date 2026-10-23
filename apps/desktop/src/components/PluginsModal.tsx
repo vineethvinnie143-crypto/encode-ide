@@ -4,6 +4,7 @@ import type { SkillInfo } from '@shared/types'
 import { api } from '../api'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
+import { errorText } from '../ipc-error'
 
 export default function PluginsModal() {
   const setPluginsOpen = useUi((state) => state.setPluginsOpen)
@@ -33,7 +34,7 @@ export default function PluginsModal() {
       await refresh()
       notify('success', `Created skill ${name}`)
     } catch (error) {
-      notify('error', (error as Error).message)
+      notify('error', errorText(error))
     }
   }
 

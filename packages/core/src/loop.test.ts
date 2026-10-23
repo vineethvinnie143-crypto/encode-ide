@@ -75,7 +75,7 @@ describe('a turn', () => {
     const hopeless = await loopHarness({ script: [{}] })
     const end = await hopeless.run('go')
     assert.equal(end.kind, 'failed')
-    assert.match(end.kind === 'failed' ? end.message : '', /empty response/)
+    assert.match(end.kind === 'failed' ? end.message : '', /empty replies/)
   })
 
   it('continues a reply the output limit cut off', async () => {
@@ -251,7 +251,7 @@ describe('hooks', () => {
     await h.run('write')
     const results = resultsOf(h.conversation.messages())
     assert.equal(results[0].text, 'A hook refused this call: no writes today')
-    assert.match(results[2].text, /A preToolUse hook failed \(hook crashed\), so the call was not run\./)
+    assert.match(results[2].text, /the PreToolUse hook could not run \(hook crashed\), so the call was not run\./)
     assert.equal(await fs.readFile(path.join(h.root, 'rewrite.txt'), 'utf8'), 'rewritten')
     await assert.rejects(fs.stat(path.join(h.root, 'deny.txt')))
   })

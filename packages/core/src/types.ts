@@ -6,7 +6,7 @@
 import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, UserBlock } from '@encode/providers'
 import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
-import type { AgentStatus, ApprovalPolicy, ConversationEntry } from './ui'
+import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
 
 export interface AgentSettings {
   policy: ApprovalPolicy
@@ -133,8 +133,10 @@ export type TurnEnd =
   | { kind: 'stopped'; summary: string }
   | { kind: 'max-steps'; steps: number }
   /** No model could run now. */
-  | { kind: 'paused'; reason: PauseReason; message: string; retryAt?: number }
-  | { kind: 'failed'; message: string }
+  /** No model could run now. `message` is plain; `detail` the longer account (see CompletionOutcome). */
+  | { kind: 'paused'; reason: PauseReason; message: string; detail?: string; retryAt?: number }
+  /** The request cannot go on. `message` is plain, for the person; `code` what kind of trouble it is. */
+  | { kind: 'failed'; message: string; code?: ProblemCode; detail?: string }
   /** The turn did not run to its end: the user stopped it, or a hook refused the request. */
   | { kind: 'cancelled' }
 

@@ -72,9 +72,9 @@ export function refusalMessage(kind: RefusalKind, model: string, text: string): 
       return `Your OpenRouter privacy settings leave ${model} no endpoint (usually because a free model may log prompts for training). eNCode skips it for a day. To use it, allow it in your OpenRouter settings${link ? ` (${link})` : ''}, then check again.`
     }
     case 'app-only':
-      return `OpenRouter limits ${model} to the coding apps on its list and refused eNCode (HTTP 403). eNCode skips it for a day.`
+      return `OpenRouter lets only the coding apps on its list use ${model}, and eNCode is not one of them. eNCode skips it for a day.`
     case 'forbidden':
-      return `OpenRouter refused ${model} (HTTP 403: ${text.replace(/^HTTP 403:?\s*/, '').slice(0, 160) || 'no reason given'}). eNCode skips it for an hour; the key and the other models are not affected.`
+      return `OpenRouter refused ${model} for this account. eNCode skips it for an hour; the key and the other models are not affected.`
     case 'server-tool':
       // The providers package wrote this text itself: it names the tool and says what to change in the preset.
       return `${text.replace(/^HTTP 400:?\s*/, '').slice(0, 400)} eNCode skips ${model} for 15 minutes; the key and the other models are not affected.`

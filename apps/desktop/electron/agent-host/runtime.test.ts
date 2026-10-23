@@ -258,7 +258,7 @@ describe('when a model fails', () => {
     assert.equal(f.alerts.length, 0, 'a failover is silent')
     assert.deepEqual([...new Set(seen.map((request) => request.body.model))], ['model-a', 'model-b'])
     // The notice in the conversation names the connections as the person does, not by the router's ids.
-    assert.ok(result.notices.some((notice) => /^Switched from First: model-a to Second: model-b/.test(notice)), result.notices.join(' | '))
+    assert.ok(result.notices.some((notice) => /^Switched to model-b \(Second\)\. model-a had a problem on the provider's side\.$/.test(notice)), result.notices.join(' | '))
     assert.ok(result.notices.every((notice) => !/p-local|p-other/.test(notice)))
   })
 

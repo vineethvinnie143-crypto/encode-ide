@@ -49,7 +49,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       set({ settings, loading: false })
     } catch (error) {
       set({ loading: false })
-      useUi.getState().notify('error', `Could not load settings: ${(error as Error).message}`)
+      useUi.getState().notify('error', `Could not load settings: ${errorText(error)}`)
     }
   },
 
@@ -62,7 +62,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       if (turn === saves) set({ settings })
       return true
     } catch (error) {
-      useUi.getState().notify('error', `Could not save settings: ${(error as Error).message}`)
+      useUi.getState().notify('error', `Could not save settings: ${errorText(error)}`)
       // What shows must be what is saved: read it again rather than guess what a failed save left.
       const settings = await api.settings.get().catch(() => before)
       if (turn === saves) set({ settings })

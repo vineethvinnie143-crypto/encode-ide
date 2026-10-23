@@ -44,6 +44,7 @@ import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { reminder } from './prompt'
 import type { AutoReviewer } from './reviewer'
+import { describeError, detailsOf, plainError } from './problems'
 import { readSmallFile, staysInProject } from './safe-files'
 import { parseFrontMatter } from './skills'
 import { AgentAbortedError, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface } from './types'
@@ -309,7 +310,8 @@ export function createSubagents(options: SubagentsOptions): Subagents {
         const started = await options.hooks.subagentStart?.({ sessionId: options.services.sessionId, agentId, root: options.services.root, mode: request.mode, agentType: definition.name, signal })
         context = started?.context?.trim() ?? ''
       } catch (error) {
-        options.parent.settle(options.parent.entry({ kind: 'notice', text: `The subagentStart hook failed: ${error instanceof Error ? error.message : String(error)}` }))
+        const details = detailsOf(describeError(error))
+        options.parent.settle(options.parent.entry({ kind: 'notice', text: 'The SubagentStart hook could not run.', ...(details ? { details } : {}) }))
       }
       if (signal.aborted) throw new AgentAbortedError()
       await conversation.add(context ? { role: 'user', content: [textBlock(reminder(context)), textBlock(request.prompt)] } : userText(request.prompt), { turnId: agentId })
@@ -355,7 +357,7 @@ export function createSubagents(options: SubagentsOptions): Subagents {
         }
       } catch (error) {
         if (error instanceof AgentAbortedError || signal.aborted) throw new AgentAbortedError()
-        return { ok: false, report: `The subagent failed: ${error instanceof Error ? error.message : String(error)}` }
+        return { ok: false, report: `The subagent failed: ${plainError(error)}` }
       } finally {
         await Promise.resolve(shell.dispose?.()).catch(() => undefined)
       }

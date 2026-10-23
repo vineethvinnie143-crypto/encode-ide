@@ -246,7 +246,7 @@ describe('scripts/free-models.mjs with real calls', () => {
     }
     const { status, out } = live({ MOCK_REFUSE: JSON.stringify(refuse) })
     assert.equal(status, 1)
-    assert.match(out, /– vendor\/big:free: skipped\. OpenRouter limits vendor\/big:free to the coding apps/)
+    assert.match(out, /– vendor\/big:free: skipped\. OpenRouter lets only the coding apps on its list use vendor\/big:free/)
     assert.match(out, /0 answered, 2 shut out by this account or app/)
     assert.match(out, /no call was answered, so the comparison above proves nothing/)
   })
@@ -260,7 +260,7 @@ describe('scripts/free-models.mjs with real calls', () => {
   it('does not call a clean run when no call was answered, and keeps the key out of what the provider says back', () => {
     const { status, out, err } = live({ MOCK_CHAT_ERROR: '1' })
     assert.equal(status, 1)
-    assert.match(out, /✖ vendor\/big:free: .*HTTP 401/)
+    assert.match(out, /✖ vendor\/big:free: openrouter did not accept the API key\. \(HTTP 401/)
     assert.match(out, /no call was answered, so the comparison above proves nothing/)
     assert.doesNotMatch(out + err, /sk-or-v1/)
     assert.doesNotMatch(out + err, /mock-key/)

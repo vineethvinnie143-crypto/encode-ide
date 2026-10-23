@@ -6,6 +6,7 @@ import { choicesFor, defaultChoice, outcomeNote, requestFor, type RewindChoice }
 import { useChat } from './chat'
 import { useSessions } from './sessions'
 import { useUi } from './ui'
+import { errorText } from '../ipc-error'
 
 /** Where the dialog is pointed: a request of the person's in a session, or (to undo) just the session. */
 export interface RewindTarget {
@@ -47,7 +48,7 @@ interface RewindStore {
 }
 
 function described(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return errorText(error)
 }
 
 export const useRewind = create<RewindStore>((set, get) => {

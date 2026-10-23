@@ -31,6 +31,7 @@ import { fetchFreeQuota, fetchOpenRouterCatalog, nextUtcMidnight, type Fetch } f
 import { FreePool, type PoolSnapshot } from './pool'
 import { FREE_POOL, modelKey, parseModelRef, splitKey } from './refs'
 import { ModelRegistry, type CatalogEntry, type RegistrySnapshot } from './registry'
+import { failureOf, roleText, skipSentence } from './plain'
 import { notFreeMessage, scopes, selectCandidates, type Candidate, type SelectionContext, type Skip } from './select'
 
 /**
@@ -54,7 +55,7 @@ import { notFreeMessage, scopes, selectCandidates, type Candidate, type Selectio
  * limit, a cooldown) are sat out, and announced with a `wait` event.
  */
 
-export type RouterAlert =
+export type RouterAlert = (
   /** The provider refused the key. The provider stays blocked until keysChanged(). */
   | { type: 'key-refused'; provider: string; message: string }
   /** eNCode's gateway wants the user to sign in again. */
@@ -74,6 +75,10 @@ export type RouterAlert =
    * per provider and reason until retryRefused() or keysChanged().
    */
   | { type: 'model-refused'; provider: string; model: string; reason: RefusalKind; message: string; until: number }
+) & {
+  /** `message` is a plain sentence; this is what the provider said, for a Details fold and the log. */
+  detail?: string
+}
 
 export interface RouterLogEntry {
   level: 'debug' | 'info' | 'warn'
@@ -155,7 +160,10 @@ export interface CheckResult {
   cost?: number
   /** The provider will not serve this model on this account (see RefusalKind); it is skipped for a day or an hour, and `message` says why. */
   blocked?: RefusalKind
+  /** In plain words. */
   message: string
+  /** What the provider said, keys removed, when the check failed on its answer. */
+  detail?: string
 }
 
 /** A catalog older than this is refreshed in the background when a request needs it. */
@@ -184,7 +192,8 @@ const KEY_READ_MS = 20_000
 /** Canaries run only while at least this many free requests are left today. */
 const CANARY_RESERVE = 100
 
-type FailureKind = TransportErrorKind | RefusalKind | 'empty' | 'tool-json'
+/** `no-key`: none is stored; `key-read`: the store could not be read. */
+type FailureKind = TransportErrorKind | RefusalKind | 'empty' | 'tool-json' | 'no-key' | 'key-read'
 
 interface RequestState {
   readonly startedAt: number
@@ -201,7 +210,7 @@ interface RequestState {
   forceKey?: string
   /** After an overflow: the prompt size a server counted, which beats the estimate for every model tried next. */
   overflowUsed?: number
-  lastFailure?: { key: string; kind: FailureKind; message: string; retryAt?: number }
+  lastFailure?: { key: string; kind: FailureKind; message: string; retryAt?: number; feature?: string }
   previousKey?: string
   /** A finished but flawed reply (unreadable tool JSON, empty), committed if nothing better arrives. */
   fallback?: AssembledReply
@@ -213,10 +222,6 @@ const NEXT: Step = { next: true }
 function adapterMap(adapters: RouterOptions['adapters']): Map<ProviderType, ProviderAdapter> {
   const list = Array.isArray(adapters) ? adapters : Object.values(adapters as Partial<Record<ProviderType, ProviderAdapter>>)
   return new Map(list.filter((adapter): adapter is ProviderAdapter => Boolean(adapter)).map((adapter) => [adapter.type, adapter]))
-}
-
-function clockTime(ms: number): string {
-  return new Date(ms).toISOString().slice(11, 16)
 }
 
 export class ModelRouter implements ModelClient {
@@ -301,7 +306,7 @@ export class ModelRouter implements ModelClient {
     const announcement = `${provider}:${refusal.kind}`
     if (!this.announced.has(announcement)) {
       this.announced.add(announcement)
-      this.alert({ type: 'model-refused', provider, model, reason: refusal.kind, message, until })
+      this.alert({ type: 'model-refused', provider, model, reason: refusal.kind, message, until, detail: redact(providerText, secrets) })
     }
     return message
   }
@@ -387,7 +392,7 @@ export class ModelRouter implements ModelClient {
 
   private alert(alert: RouterAlert): void {
     try {
-      this.options.onAlert?.({ ...alert, message: redact(alert.message) })
+      this.options.onAlert?.({ ...alert, message: redact(alert.message), ...(alert.detail ? { detail: redact(alert.detail) } : {}) })
     } catch {
       // An alert listener must never break a request.
     }
@@ -408,7 +413,7 @@ export class ModelRouter implements ModelClient {
       // complete() rejects only on abort; anything else is a bug, reported as a pause rather than a crash.
       const message = error instanceof Error ? error.message : String(error)
       this.log('warn', `The router failed unexpectedly: ${message}`)
-      outcome = { kind: 'paused', reason: 'unavailable', message: `The model router failed: ${redact(message)}` }
+      outcome = { kind: 'paused', reason: 'unavailable', message: "eNCode's model router hit a problem it did not expect.", detail: redact(message) }
       return outcome
     } finally {
       this.trace(request, state, outcome)
@@ -474,7 +479,7 @@ export class ModelRouter implements ModelClient {
         continue
       }
       if (candidate.delayMs > 0) {
-        emit({ type: 'wait', until: this.clock.now() + candidate.delayMs, reason: 'Pacing requests to stay within the free tier.' })
+        emit({ type: 'wait', until: this.clock.now() + candidate.delayMs, reason: 'The free models take only so many requests a minute.' })
         await sleep(this.clock, candidate.delayMs, signal)
         continue
       }
@@ -502,10 +507,17 @@ export class ModelRouter implements ModelClient {
     state.attempts++
     try {
       if (state.previousKey !== undefined && state.previousKey !== key) {
-        emit({ type: 'switch', from: state.previousKey, to: key, reason: state.lastFailure?.message ?? 'The previous model failed.' })
+        const last = state.lastFailure
+        emit({
+          type: 'switch',
+          from: state.previousKey,
+          to: key,
+          reason: failureOf(last ?? { kind: 'unavailable' }, last?.key ?? state.previousKey),
+          ...(last ? { detail: last.message } : {}),
+        })
       } else if (state.previousKey === undefined && context.sticky !== undefined && context.sticky !== key) {
         const skip = context.skipped.find((entry) => entry.key === context.sticky)
-        if (skip) emit({ type: 'switch', from: context.sticky, to: key, reason: skip.message })
+        if (skip) emit({ type: 'switch', from: context.sticky, to: key, reason: skipSentence(skip, this.skipKind(skip)), detail: skip.message })
       }
       state.previousKey = key
       emit({ type: 'attempt', attempt: state.attempts, key, provider: provider.id, model: info.model })
@@ -518,7 +530,7 @@ export class ModelRouter implements ModelClient {
         if (read.problem) this.log('warn', read.problem, key)
         if (!apiKey) {
           state.excluded.add(scopes.provider(provider.id))
-          state.lastFailure = { key, kind: 'auth', message: redact(read.problem ?? `No key is set for ${provider.id}.`) }
+          state.lastFailure = { key, kind: read.problem ? 'key-read' : 'no-key', message: redact(read.problem ?? `No key is set for ${provider.id}.`) }
           return NEXT
         }
       }
@@ -749,7 +761,7 @@ export class ModelRouter implements ModelClient {
       state.excluded.add(key)
       return NEXT
     }
-    state.lastFailure = { key, kind: error.kind, message, retryAt: error.retryAt }
+    state.lastFailure = { key, kind: error.kind, message, retryAt: error.retryAt, ...(error.feature ? { feature: error.feature } : {}) }
     const openRouter = provider.type === 'openrouter'
     const account = error.scope === 'account' || (error.scope === undefined && !openRouter && (error.kind === 'quota' || error.kind === 'payment'))
 
@@ -767,8 +779,8 @@ export class ModelRouter implements ModelClient {
         if (fresh) {
           this.alert(
             error.code === 'invalid_token' || error.code === 'token_expired'
-              ? { type: 'sign-in', provider: provider.id, message }
-              : { type: 'key-refused', provider: provider.id, message },
+              ? { type: 'sign-in', provider: provider.id, message: `Sign in to ${provider.id} again to keep using its models.`, detail: message }
+              : { type: 'key-refused', provider: provider.id, message: failureOf({ kind: 'auth' }, key), detail: message },
           )
         }
         return NEXT
@@ -777,7 +789,7 @@ export class ModelRouter implements ModelClient {
         const until = error.retryAt ?? now + DEFAULT_BLOCK_MS.payment
         // A negative balance stops free models too; otherwise only paid ones need money.
         const scope = info.free ? scopes.provider(provider.id) : scopes.paid(provider.id)
-        if (this.block(scope, until, 'payment', message)) this.alert({ type: 'payment', provider: provider.id, message, until })
+        if (this.block(scope, until, 'payment', message)) this.alert({ type: 'payment', provider: provider.id, message: failureOf({ kind: 'payment' }, key), detail: message, until })
         return NEXT
       }
       case 'quota': {
@@ -794,7 +806,7 @@ export class ModelRouter implements ModelClient {
         } else {
           fresh = this.block(scopes.provider(provider.id), until, 'quota', message)
         }
-        if (fresh) this.alert({ type: 'quota', provider: provider.id, message, until })
+        if (fresh) this.alert({ type: 'quota', provider: provider.id, message: failureOf({ kind: tier ? 'free-daily' : 'quota' }, key), detail: message, until })
         return NEXT
       }
       case 'rate-limit': {
@@ -848,7 +860,7 @@ export class ModelRouter implements ModelClient {
       }
       case 'content-filter':
         // A safety system stopped the request. eNCode does not route around it to another model.
-        return { outcome: { kind: 'paused', reason: 'refused', message } }
+        return { outcome: { kind: 'paused', reason: 'refused', message: failureOf(error, key), detail: message } }
       case 'invalid-request': {
         this.health.soft(key)
         state.excluded.add(key)
@@ -883,7 +895,7 @@ export class ModelRouter implements ModelClient {
 
     if (earliest && earliest.until! <= budgetEnd && budgetLeft) {
       state.firstProblemAt ??= now
-      emit({ type: 'wait', until: earliest.until!, reason: earliest.message })
+      emit({ type: 'wait', until: earliest.until!, reason: skipSentence(earliest, this.skipKind(earliest)), detail: earliest.message })
       await sleep(this.clock, earliest.until! - now, request.signal)
       return NEXT
     }
@@ -905,16 +917,21 @@ export class ModelRouter implements ModelClient {
     const skips = skipped ?? selectCandidates(this.selection, { role, refs, requirements }).skipped
     const future = skips.filter((skip) => skip.until !== undefined && skip.until > now)
     const retryAt = future.length ? Math.min(...future.map((skip) => skip.until!)) : undefined
-    const { reason, message } = this.pauseReason(state, role, refs, skips)
+    const { reason, message, detail } = this.pauseReason(state, role, refs, skips)
     return {
       kind: 'paused',
       reason,
       message,
+      ...(detail ? { detail } : {}),
       ...(retryAt !== undefined ? { retryAt } : reason === 'unavailable' || reason === 'network' ? { retryAt: now + this.config.limits.cooldownMs } : {}),
     }
   }
 
-  private pauseReason(state: RequestState, role: string, refs: readonly string[], skips: Skip[]): { reason: PauseReason; message: string } {
+  /**
+   * Why a request cannot run, in one or two plain sentences, and the router's longer account of it as `detail`. Times
+   * are left to the caller, which has `retryAt` and knows the person's clock.
+   */
+  private pauseReason(state: RequestState, role: string, refs: readonly string[], skips: Skip[]): { reason: PauseReason; message: string; detail?: string } {
     const now = this.clock.now()
     const last = state.lastFailure
     const kindReason = (kind: string): PauseReason => {
@@ -925,6 +942,9 @@ export class ModelRouter implements ModelClient {
         case 'rate-limit':
         case 'network':
           return kind
+        case 'no-key':
+        case 'key-read':
+          return 'auth'
         case 'free-daily':
           return 'quota'
         case 'free-rpm':
@@ -937,45 +957,58 @@ export class ModelRouter implements ModelClient {
         case 'policy':
         case 'app-only':
         case 'forbidden':
+        case 'server-tool':
           return 'no-model'
         default:
           return 'unavailable'
       }
     }
+    const whom = roleText(role)
     if (last && state.attempts > 0) {
-      const reason = kindReason(last.kind)
-      const until = skips.filter((skip) => skip.until !== undefined && skip.until > now).map((skip) => skip.until!)
-      const when = until.length ? ` Trying again at ${clockTime(Math.min(...until))} UTC.` : ''
-      return { reason, message: `No model for the ${role} role can answer right now. The last one failed: ${last.message}${when}` }
+      // Models of the same provider fail for the same reason, which the sentence already says.
+      const provider = parseModelRef(last.key)?.provider
+      const others = skips.filter((skip) => skip.key !== last.key && parseModelRef(skip.key)?.provider !== provider)
+      const rest = others.length ? ` The other models chosen for ${whom} cannot answer either.` : ''
+      const detail = [last.message, ...others.map((skip) => `${skip.key}: ${skip.message}`)].join('\n')
+      return { reason: kindReason(last.kind), message: `${failureOf(last, last.key)}${rest}`, detail }
     }
     const blocking = skips.filter((skip) => skip.until !== undefined && skip.until > now).sort((a, b) => a.until! - b.until!)[0]
     if (blocking) {
-      const block = blocking.reason === 'free-closed' ? this.closureKind(blocking) : this.blockKind(blocking)
-      return { reason: kindReason(block), message: `${blocking.message} Trying again at ${clockTime(blocking.until!)} UTC.` }
+      const kind = this.skipKind(blocking)
+      return { reason: kindReason(kind ?? 'unavailable'), message: skipSentence(blocking, kind), detail: blocking.message }
     }
     // Models that free-only mode refused are not what stopped the call, unless they are all there is.
     const rest = skips.filter((skip) => skip.reason !== 'not-free')
+    const detail = skips.length ? skips.map((skip) => `${skip.key}: ${skip.message}`).join('\n') : undefined
+    const withDetail = (reason: PauseReason, message: string) => ({ reason, message, ...(detail ? { detail } : {}) })
     if (!rest.length) {
       const pooled = refs.includes(FREE_POOL)
       const missing = pooled ? this.config.freePool.providers.filter((id) => this.registry.catalogFetchedAt(id) === undefined) : []
-      if (missing.length) return { reason: 'unavailable', message: `The free model list from ${missing.join(', ')} could not be loaded yet. Check the connection.` }
+      if (missing.length) return withDetail('unavailable', `The list of free models from ${missing.join(', ')} has not loaded yet. Check the connection.`)
       if (skips.length) {
-        const advice = pooled ? 'The free pool has no model to offer right now.' : `Add "${FREE_POOL}" to the role in Settings, or turn off free-only mode.`
-        return { reason: 'no-model', message: `Only free models are enabled, and none of the ${role} role's models is free. ${advice}` }
+        return withDetail(
+          'no-model',
+          pooled
+            ? 'Only free models are allowed, and none is available right now.'
+            : `Only free models are allowed, and none of the models chosen for ${whom} is free. Choose free models for it in Settings, or turn off free-only mode.`,
+        )
       }
-      return { reason: 'no-model', message: pooled ? `The free pool has no model for the ${role} role right now.` : `No model is set for the ${role} role. Choose one in Settings.` }
+      return withDetail('no-model', pooled ? `The free models have nothing for ${whom} right now.` : `No model is chosen for ${whom}.`)
     }
     const noKey = [...new Set(rest.filter((skip) => skip.reason === 'no-key').map((skip) => parseModelRef(skip.key)?.provider ?? skip.key))]
     if (noKey.length && rest.every((skip) => skip.reason === 'no-key' || skip.reason === 'no-adapter' || skip.reason === 'tried')) {
-      return { reason: 'no-model', message: `Add a key for ${noKey.join(', ')} in Settings to use the ${role} role's models.` }
+      return withDetail('no-model', `Add an API key for ${noKey.join(' and ')} to use the models chosen for ${whom}.`)
     }
-    if (rest.some((skip) => skip.reason === 'tools')) {
-      return { reason: 'no-model', message: `None of the ${role} role's models that are ready can use tools. Add one that can in Settings.` }
-    }
-    if (rest.some((skip) => skip.reason === 'images')) {
-      return { reason: 'no-model', message: `None of the ${role} role's models that are ready can read images.` }
-    }
-    return { reason: 'no-model', message: `No model for the ${role} role can take this request.` }
+    if (rest.some((skip) => skip.reason === 'tools')) return withDetail('no-model', `None of the models chosen for ${whom} that are ready can use tools.`)
+    if (rest.some((skip) => skip.reason === 'images')) return withDetail('no-model', `None of the models chosen for ${whom} that are ready can read images.`)
+    return withDetail('no-model', `None of the models chosen for ${whom} can take this request.`)
+  }
+
+  /** The kind of block behind a skip that waits (a provider held back, a free tier closed), for the words that tell it. */
+  private skipKind(skip: Skip): string | undefined {
+    if (skip.reason === 'free-closed') return this.closureKind(skip)
+    if (skip.reason === 'provider-blocked' || skip.reason === 'paid-blocked' || skip.reason === 'pacing' || skip.reason === 'cooling') return this.blockKind(skip)
+    return undefined
   }
 
   private closureKind(skip: Skip): string {
@@ -1130,11 +1163,12 @@ export class ModelRouter implements ModelClient {
         this.syncErrors.delete(id)
       } catch (error) {
         if (signal?.aborted) return
-        const message = redact(`Could not load the model list from ${id}: ${error instanceof Error ? error.message : String(error)}`)
+        const detail = redact(`Could not load the model list from ${id}: ${error instanceof Error ? error.message : String(error)}`)
+        const message = `eNCode could not load the list of models from ${id}.`
         const known = this.syncErrors.has(id)
         this.syncErrors.set(id, message)
-        this.log('warn', message)
-        if (!known) this.alert({ type: 'catalog', provider: id, message })
+        this.log('warn', detail)
+        if (!known) this.alert({ type: 'catalog', provider: id, message, detail })
         return
       }
     }
@@ -1211,13 +1245,13 @@ export class ModelRouter implements ModelClient {
     const secrets = apiKey ? [apiKey] : []
     if (!result.ok) {
       const { error } = result
-      const message = redact(error.message, secrets)
+      const detail = redact(error.message, secrets)
       const refusal = refusalOf(provider.type, error)
-      if (refusal) return { ok: false, key, toolCall: false, blocked: refusal.kind, message: this.refuse(key, refusal, error.message, secrets) }
+      if (refusal) return { ok: false, key, toolCall: false, blocked: refusal.kind, message: this.refuse(key, refusal, error.message, secrets), detail }
       if (error.kind === 'server' || error.kind === 'overloaded' || error.kind === 'timeout' || error.kind === 'protocol') {
-        this.health.failure(key, { kind: error.kind, message, retryAt: error.retryAt })
+        this.health.failure(key, { kind: error.kind, message: detail, retryAt: error.retryAt })
       }
-      return { ok: false, key, toolCall: false, message }
+      return { ok: false, key, toolCall: false, message: failureOf({ kind: error.kind, ...(error.feature ? { feature: error.feature } : {}) }, key), detail }
     }
     const call = result.reply.message.content.find((block): block is ToolUseBlock => block.type === 'tool-use')
     const toolCall = Boolean(call && !call.invalid && call.name === 'echo' && typeof call.input.text === 'string')

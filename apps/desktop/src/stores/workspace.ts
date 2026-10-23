@@ -5,6 +5,7 @@ import { useEditor } from './editor'
 import { SWITCH_BLOCKED, canSwitchProject, sameRoot } from './sidebar-model'
 import { useStatus } from './status'
 import { useUi } from './ui'
+import { errorText } from '../ipc-error'
 
 interface WorkspaceStore {
   workspace: OpenWorkspace | null
@@ -46,7 +47,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       }
     } catch (error) {
       set({ initializing: false })
-      useUi.getState().notify('error', `Could not restore workspace: ${(error as Error).message}`)
+      useUi.getState().notify('error', `Could not restore workspace: ${errorText(error)}`)
     }
   },
 
@@ -65,7 +66,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       set({ workspace, children: {}, expanded: {}, selected: null })
       await get().loadDir('')
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -84,7 +85,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       set({ workspace, children: {}, expanded: {}, selected: null })
       await get().loadDir('')
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -111,7 +112,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       }))
     } catch (error) {
       set((state) => ({ loadingDirs: { ...state.loadingDirs, [rel]: false } }))
-      useUi.getState().notify('error', `Could not read ${rel || 'folder'}: ${(error as Error).message}`)
+      useUi.getState().notify('error', `Could not read ${rel || 'folder'}: ${errorText(error)}`)
     }
   },
 
@@ -143,7 +144,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       await get().loadDir(parentRel)
       useUi.getState().notify('success', `Created ${name}`)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -154,7 +155,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       await get().loadDir(parentRel)
       useUi.getState().notify('success', `Created ${name}/`)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -165,7 +166,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       await get().refreshAll()
       useUi.getState().notify('success', `Renamed to ${newName}`)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 
@@ -176,7 +177,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       await get().refreshAll()
       useUi.getState().notify('info', `Moved ${name} to the trash`)
     } catch (error) {
-      useUi.getState().notify('error', (error as Error).message)
+      useUi.getState().notify('error', errorText(error))
     }
   },
 }))

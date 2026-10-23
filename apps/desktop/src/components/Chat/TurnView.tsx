@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Copy, CornerDownRight, GitFork, Info, Pencil, Undo2 } from '../../ui/icons'
+import { Check, ChevronDown, Copy, CornerDownRight, GitFork, Pencil, Undo2 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
@@ -13,6 +13,7 @@ import { Button, IconButton } from '../../ui/Button'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
+import { NoticeLine, ProblemCard } from './ProblemCard'
 import WorkLog from './WorkLog'
 import { editedFiles, editTotals, type Turn, type TurnPart } from './turns'
 
@@ -96,20 +97,8 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
       </div>
     )
   }
-  if (entry.kind === 'error') {
-    return (
-      <div className="msg msg-error">
-        <AlertTriangle size={14} />
-        <span>{entry.text}</span>
-      </div>
-    )
-  }
-  return (
-    <div className="msg msg-notice">
-      <Info size={13} />
-      <span>{entry.text}</span>
-    </div>
-  )
+  if (entry.kind === 'error') return <ProblemCard entry={entry} />
+  return <NoticeLine entry={entry} />
 }
 
 /** One part of a turn: the message that started it when you sent it while the agent worked, the work log, and the reply. */

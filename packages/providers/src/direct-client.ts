@@ -30,6 +30,7 @@ import { repairJson } from './json-repair'
 import { isEmptyReply } from './messages'
 import { modelInfo, providerTypeFor } from './models'
 import { createOpenAICompatibleAdapter, createOpenRouterAdapter } from './openai'
+import { failureSentence } from './plain'
 
 export interface DirectRoute {
   target: TransportTarget
@@ -179,7 +180,7 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
     const route = await options.route(request.role, { sticky: request.sticky, tool: request.tool, agent: request.agent })
     const { target } = route
     const adapter = adapters[target.providerType]
-    if (!adapter) return { kind: 'paused', reason: 'unavailable', message: `No adapter speaks ${target.providerType}.` }
+    if (!adapter) return { kind: 'paused', reason: 'unavailable', message: `eNCode cannot talk to ${target.provider}.`, detail: `No adapter speaks ${target.providerType}.` }
     let emptyRetried = false
 
     for (let attempt = 1; ; attempt++) {
@@ -230,7 +231,8 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
       const describe = (reason: PauseReason, retryAt?: number): CompletionOutcome => ({
         kind: 'paused',
         reason,
-        message: `${target.model} on ${target.provider}: ${error.message}`,
+        message: failureSentence(error, { model: target.model, provider: target.provider }),
+        detail: `${target.model} on ${target.provider}: ${error.message}`,
         ...(retryAt !== undefined ? { retryAt } : {}),
       })
       if (!RETRYABLE.has(error.kind)) return describe(PAUSE_FOR[error.kind] ?? 'unavailable', error.retryAt)
@@ -238,7 +240,7 @@ export function createDirectClient(options: DirectClientOptions): DirectClient {
       const limit = error.kind === 'rate-limit' || error.kind === 'overloaded' ? patientAttempts : attempts
       if (attempt >= limit || wait > maxWaitMs) return describe(PAUSE_FOR[error.kind] ?? 'unavailable', error.retryAt)
       if (wait > 0) {
-        emit({ type: 'wait', until: now() + wait, reason: error.message })
+        emit({ type: 'wait', until: now() + wait, reason: failureSentence(error, { model: target.model, provider: target.provider }), detail: error.message })
         await sleep(wait, signal)
       }
     }

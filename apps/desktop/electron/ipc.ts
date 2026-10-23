@@ -2,6 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell as osShell, type IpcMainInvo
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
+import { describeError, shownError } from '@encode/core'
 import { isRpcError } from '@encode/protocol'
 import { rewindRequestOf } from './agent-host/rewind-request'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
@@ -101,8 +102,24 @@ export function registerIpc(deps: IpcDeps): void {
     ipcMain.removeHandler(channel)
     ipcMain.handle(channel, async (event, ...args: unknown[]) => {
       if (!fromApp(event)) throw new Error(`eNCode refused ${channel} from ${event.senderFrame?.url ?? 'an unknown frame'}`)
-      return fn(...args)
+      try {
+        return await fn(...args)
+      } catch (error) {
+        throw plainFailure(channel, error)
+      }
     })
+  }
+
+  /**
+   * What the renderer may show of a failure: one plain line (a system error in words, no class name, no stack, no
+   * key). The whole of it goes to the log, where Diagnostics finds it.
+   */
+  const plainFailure = (channel: string, error: unknown): Error => {
+    const text = shownError(error)
+    const whole = describeError(error)
+    // A failure already said plainly is the caller's to show; anything else is worth a line in the log.
+    if (whole.split('\n')[0] !== `Error: ${text}`) logs.write('warn', `${channel} failed: ${whole}`)
+    return new Error(text)
   }
 
   const sendToWindow = (channel: string, payload: unknown): void => {
@@ -233,7 +250,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (!profile || profile.kind === 'demo' || !model || !profile.baseUrl.trim()) return listing
     try {
       const check = await agent.modelCheck(id, model)
-      return { ok: check.ok, message: check.ok && listing.ok ? `${listing.message}. ${check.message}` : check.message }
+      return { ok: check.ok, message: check.ok && listing.ok ? `${listing.message}. ${check.message}` : check.message, ...(check.detail ? { detail: check.detail } : {}) }
     } catch (error) {
       return { ok: false, message: hostFailure(error).message }
     }
@@ -278,6 +295,13 @@ export function registerIpc(deps: IpcDeps): void {
   handle('agent:start', async (sessionId: string, input: AgentStartInput) => {
     try {
       await host.start(String(sessionId), input)
+    } catch (error) {
+      throw hostFailure(error)
+    }
+  })
+  handle('agent:retry', async (sessionId: string, mode?: unknown) => {
+    try {
+      await host.retry(String(sessionId), mode === 'ask' || mode === 'plan' || mode === 'code' ? mode : undefined)
     } catch (error) {
       throw hostFailure(error)
     }

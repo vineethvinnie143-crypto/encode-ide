@@ -5,6 +5,7 @@ import { api } from '../../api'
 import { TerminalBuffer } from '../../terminal/buffer'
 import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
+import { errorText } from '../../ipc-error'
 
 interface SessionMeta {
   id: string
@@ -91,7 +92,7 @@ export default function TerminalPanel() {
       setRunning(false)
       setInput('')
     } catch (error) {
-      useUi.getState().notify('error', `Could not start the eNCode Shell: ${(error as Error).message}`)
+      useUi.getState().notify('error', `Could not start the eNCode Shell: ${errorText(error)}`)
     }
   }, [])
 

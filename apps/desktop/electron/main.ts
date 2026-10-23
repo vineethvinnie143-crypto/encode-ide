@@ -257,6 +257,10 @@ if (!gotLock) {
     win.webContents.on('render-process-gone', (_event, details) => {
       console.error('[eNCode] renderer process gone:', details.reason)
     })
+    // The interface shows a fault in one sentence and prints the rest; the log, and so a diagnostics report, keeps it.
+    win.webContents.on('console-message', (details) => {
+      if (details.level === 'error') console.error(`[renderer] ${details.message} (${path.basename(details.sourceId)}:${details.lineNumber})`)
+    })
 
     const diagnostics = async (): Promise<string> => {
       const sessions = await agentHost.client.sessions().catch(() => null)

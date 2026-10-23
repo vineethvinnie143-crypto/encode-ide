@@ -14,6 +14,7 @@ import type { McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, Permiss
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
+import { HOST_STOPPED_MESSAGE } from '../../shared/problems'
 
 export interface HostProcess {
   port: Port
@@ -49,7 +50,7 @@ export interface AgentHostServiceOptions {
   healthyAfterMs?: number
 }
 
-export const HOST_STOPPED_MESSAGE = 'The agent process stopped unexpectedly. Your conversation is saved; send your message again.'
+export { HOST_STOPPED_MESSAGE }
 
 const REQUEST_TIMEOUT_MS = 60_000
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000
@@ -272,7 +273,7 @@ export class AgentHostService {
     this.log(`the agent process stopped (failure ${this.failures})`)
 
     for (const sessionId of [...this.working]) {
-      this.o.onEvent({ type: 'error', message: HOST_STOPPED_MESSAGE, sessionId })
+      this.o.onEvent({ type: 'error', message: HOST_STOPPED_MESSAGE, problem: { code: 'host', actions: ['retry'] }, sessionId })
       this.o.onEvent({ type: 'status', status: 'error', sessionId })
     }
     this.working.clear()
