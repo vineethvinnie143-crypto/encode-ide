@@ -35,8 +35,11 @@ of 100 MB (about 1.8 million lines of code) and one minified line of 10 to 50 MB
   state settles on the one known before, so an edit re-reads only what it changed.
 - **A visible line far past what is known is drawn from a guess**: within 3,000 lines of the known states it is read
   at once; further away its state is guessed from the 80 lines above it (chained from a guess just above, when there
-  is one), drawn marked as a guess, and drawn again with its true colours when the worker gets there. Each place the
-  known states stop is first read on 256 lines to see whether they settle on the old ones.
+  is one), drawn marked as a guess, and drawn again with its true colours when the worker gets there. A line below
+  the last one guessed goes on from where that one ended, over any lines between that were not asked for (the minimap
+  skips blank ones), so lines drawn in order are read once each; restarting the guess at every gap had made a far
+  jump read over ten times as many lines as it drew. Each place the known states stop is first read on 256 lines
+  to see whether they settle on the old ones.
 - **The worker is checked both ways.** It takes only a batch of the expected shape (at most 65,536 lines, all
   strings, a known language) and answers anything else with nothing. The page stops a worker that reports an error,
   sends something it cannot read, or takes more than 20 s over a batch; then every editor colours its file on its own
@@ -83,8 +86,9 @@ of 100 MB (about 1.8 million lines of code) and one minified line of 10 to 50 MB
   longer than its limit: opening and the first screen 3 s, a far jump 100 ms, a wheel step 50 ms, a keystroke 25 ms
   typical and 100 ms worst, undo 100 ms, a search that reads to the end 1.5 s, the find box's jump to the last match
   1.5 s, the whole text as one string 1.5 s, the worker reading every line 60 s, and script time on the page's thread
-  while it does 1 s. On a development machine they measure about 0.5 s, 16 ms, 16 ms, 8 and 10 ms, 8 ms, 160 ms,
-  150 ms, 0.5 s, 7 s and 17 ms; the limits leave room for a shared CI runner. It also checks colours line by line
+  while it does 1 s. On a development machine they measure about 0.7 s, 8 ms, 5 ms, 3 and 3 ms, 2 ms, 160 ms,
+  150 ms, 0.4 s, 7.5 s and 14 ms; the limits leave room for a shared CI runner, which runs these steps about five
+  times slower. It also checks colours line by line
   against a fresh read of the same lines.
 - **A browser test types in a line of ten million characters** (minified JSON): a keystroke 30 ms typical and 150 ms
   worst (about 7 and 10 ms measured), a caret move 50 ms (about 7), a click 50 ms (under 1). It checks that both ends

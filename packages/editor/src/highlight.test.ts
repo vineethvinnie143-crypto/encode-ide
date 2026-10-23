@@ -302,6 +302,29 @@ describe('Highlighter', () => {
     assert.equal(TOKEN_NAMES[highlighter.line(8000).tokens[1]], 'comment')
   })
 
+  it('reads far lines drawn in order once each, going on over the lines not asked for', () => {
+    const tokenizer = languageById('typescript')!.tokenizer
+    let calls = 0
+    const counting: Tokenizer = { start: tokenizer.start, line: (text, state) => (calls++, tokenizer.line(text, state)) }
+    // Comments that open and close, so a line read from a wrong state is coloured otherwise; blank lines between.
+    const lines = Array.from({ length: 20_000 }, (_, index) =>
+      index % 7 === 3 ? '' : index % 5 === 0 ? '/* open' : index % 5 === 2 ? 'close */ const y = 2' : `line(${index})`,
+    )
+    const doc = Text.of(lines)
+    const every = new Highlighter(tokenizer, doc)
+    const some = new Highlighter(counting, doc)
+    // A view draws every line; a minimap skips the blank ones, and here some others too (one that opens a comment).
+    const drawn = new Map<number, readonly number[]>()
+    for (let line = 15_000; line <= 15_200; line++) drawn.set(line, every.line(line).tokens)
+    const asked = [...drawn.keys()].filter((line) => lines[line - 1] !== '' && line % 4 !== 1)
+    for (const line of asked) {
+      const guessed = some.line(line)
+      assert.equal(guessed.exact, false)
+      assert.deepEqual(guessed.tokens, drawn.get(line), `line ${line}`)
+    }
+    assert.ok(calls <= 80 + 201, `tokenized ${calls} lines for ${asked.length}`)
+  })
+
   it('re-tokenizes only a few lines after an edit in a large file', () => {
     const tokenizer = languageById('typescript')!.tokenizer
     let calls = 0

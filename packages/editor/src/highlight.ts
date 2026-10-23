@@ -204,7 +204,7 @@ export class Highlighter {
   private states = new StateStore()
   /** states[0 .. valid) are right for the current document. Entry i is the state at the start of line i + 1. */
   private valid = 1
-  private cache = new Map<number, { text: string; state: string; tokens: number[] }>()
+  private cache = new Map<number, { text: string; state: string; tokens: number[]; end: string }>()
   /** Bracket characters by code: 1 opens, -1 closes; null while bracket colouring is off. */
   private bracketChars: Map<number, number> | null = null
   /** summaries entry i: what line i + 1 does to the bracket depth. Kept for lines tokenized from a known state. */
@@ -220,7 +220,7 @@ export class Highlighter {
   /** The frontier where settling on old states was last tried. */
   private settleTried = -1
   /** The last far line drawn from a guess, so the next one down goes on from it instead of guessing again. */
-  private lastGuess: { line: number; state: string; valid: number; doc: Text } | null = null
+  private lastGuess: { line: number; state: string; valid: number; doc: Text; end?: string } | null = null
 
   /** Told about tokenizer errors (the line falls back to plain text). */
   onError: ((error: unknown) => void) | null = null
@@ -333,12 +333,16 @@ export class Highlighter {
       state = this.guess(n)
     }
     const text = this.doc.line(n).text
-    const cached = this.cache.get(n)
-    if (cached && cached.text === text && cached.state === state) return { tokens: cached.tokens, exact }
-    const result = this.tokenize(text, state)
-    if (this.cache.size >= CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!)
-    this.cache.set(n, { text, state, tokens: result.tokens })
-    return { tokens: result.tokens, exact }
+    let entry = this.cache.get(n)
+    if (!entry || entry.text !== text || entry.state !== state) {
+      const result = this.tokenize(text, state)
+      if (this.cache.size >= CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!)
+      entry = { text, state, tokens: result.tokens, end: result.state }
+      this.cache.set(n, entry)
+    }
+    // A guess goes on to the line below from where this one ends, without reading this one again.
+    if (!exact && this.lastGuess?.line === n) this.lastGuess.end = entry.end
+    return { tokens: entry.tokens, exact }
   }
 
   /** A start state for line `n`, far past the frontier: from the lines just above it, or on from the line above's. */
@@ -348,8 +352,10 @@ export class Highlighter {
     // A line is read twice in a row for its tokens and its brackets.
     if (fresh && last.line === n) return last.state
     let state: string
-    if (fresh && last.line === n - 1) {
-      state = this.tokenize(this.doc.line(n - 1).text, last.state).state
+    if (fresh && last.line < n && n - last.line <= GUESS_LINES) {
+      // On from the line guessed last, over any lines between that were not asked for (a blank line the minimap skips).
+      state = last.end ?? this.tokenize(this.doc.line(last.line).text, last.state).state
+      if (last.line + 1 < n) for (const text of this.doc.lineTexts(last.line + 1, n - 1)) state = this.tokenize(text, state).state
     } else {
       state = this.tokenizer.start
       const from = Math.max(this.valid, n - GUESS_LINES)
