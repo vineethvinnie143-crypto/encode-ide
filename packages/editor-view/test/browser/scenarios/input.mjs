@@ -14,15 +14,18 @@ export const input = [
         assert.equal(await ev(() => window.view.metrics.lineHeight), 19)
         for (const scale of [1.25, 1.5, 1.75, 1]) {
           await page.send('Emulation.setDeviceMetricsOverride', { ...PAGE, deviceScaleFactor: scale })
-          await settle(4)
+          // The page is told of the new scale when the browser gets to it, which on Windows can be some frames later.
+          const deadline = Date.now() + 3000
+          do await settle(2)
+          while (Date.now() < deadline && !(await ev((s) => { const d = window.view.metrics.lineHeight * s; return Math.abs(d - Math.round(d)) < 1e-6 }, scale)))
           const seen = await ev(() => {
             const view = window.view
             const lines = [...document.querySelectorAll('.enc-line')].slice(0, 20).map((el) => el.getBoundingClientRect().top)
-            return { ratio: devicePixelRatio, lineHeight: view.metrics.lineHeight, lines }
+            return { ratio: devicePixelRatio, lineHeight: view.metrics.lineHeight, measuredAt: view.measuredRatio, lines }
           })
           assert.equal(seen.ratio, scale)
           const device = seen.lineHeight * scale
-          assert.ok(Math.abs(device - Math.round(device)) < 1e-6, `at ${scale} a line is ${device} device pixels`)
+          assert.ok(Math.abs(device - Math.round(device)) < 1e-6, `at ${scale} a line is ${device} device pixels (measured at ${seen.measuredAt})`)
           assert.ok(Math.abs(seen.lineHeight - 19) <= 0.5 / scale + 1e-9, `at ${scale} the line height ${seen.lineHeight} stays near 19`)
           // Each line's own top, not a sum of heights: off a pixel by no more than the layout's 1/64 of a CSS pixel.
           for (const top of seen.lines) {
