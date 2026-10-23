@@ -194,7 +194,7 @@ async function waitForDone(timeoutMs = 120000) {
     if (status !== last) console.log(`[perf] status ${status || '(none)'} after ${Math.round((Date.now() - deadline + timeoutMs) / 100) / 10}s`)
     last = status
     if (status === 'done') return
-    if (status === 'error') throw new Error(`The agent failed: ${await evaluate("[...document.querySelectorAll('.msg-error')].map((node) => node.textContent).join(' ')")}`)
+    if (status === 'error') throw new Error(`The agent failed: ${await evaluate("[...document.querySelectorAll('.problem-card .problem-text')].map((node) => node.textContent).join(' ')")}`)
     await sleep(100)
   }
   throw new Error('The agent did not finish')

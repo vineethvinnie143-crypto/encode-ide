@@ -189,7 +189,7 @@ async function driveAgent(label, timeoutMs = 120000, options = {}) {
     if (status === 'done') return approvals
     if (status === 'error') {
       const detail = await evaluate(
-        "[...document.querySelectorAll('.msg-error')].map((node) => node.textContent).join('\\n')",
+        "[...document.querySelectorAll('.problem-card .problem-text')].map((node) => node.textContent).join('\\n')",
       )
       throw new Error(`${label} agent errored: ${detail}`)
     }
@@ -637,6 +637,7 @@ async function runProviderPhase() {
   await runEffortChecks()
   await runSubagentChecks()
   await runParityChecks()
+  await runProblemChecks()
   await runWebChecks()
   await runSearchChecks()
   await runPermissionChecks()
@@ -1755,6 +1756,78 @@ async function runParityChecks() {
   await screenshot('16-pdf-notebook.png')
   await fs.rm(pdf, { force: true })
   await fs.rm(notebook, { force: true })
+}
+
+/** The problem card the conversation ends on: its sentence, its buttons, and what its Details fold holds once opened. */
+async function problemCard() {
+  await click('.problem-card[role=alert] .problem-details-toggle')
+  await sleep(300)
+  return evaluate(`(() => {
+    const card = document.querySelector('.problem-card[role=alert]')
+    if (!card) return null
+    return {
+      text: card.querySelector('.problem-text')?.textContent ?? '',
+      buttons: [...card.querySelectorAll('.problem-foot .btn')].map((button) => button.textContent.trim()),
+      details: card.querySelector('.problem-details-body pre')?.textContent ?? '',
+    }
+  })()`)
+}
+
+/**
+ * Codex-style problems: a request that fails ends on one plain sentence with what can be done about it, the
+ * provider's words folded under Details without the key in them, and Retry runs the same request on.
+ */
+async function runProblemChecks() {
+  console.log('[smoke] --- problems in plain words ---')
+  const fail = async (mode) => {
+    const answer = await fetch(`http://127.0.0.1:${providerPort}/__fail/${mode}`, { method: 'POST' })
+    if (!answer.ok) throw new Error(`the fake provider did not take failure mode ${mode}`)
+  }
+  const raw = /HTTP|[{}]|invalid_api_key|sk-smoke|Error:|undefined/
+  try {
+    await evaluate('window.eNCode.agent.reset()')
+    await fail('auth')
+    await sendPrompt('[scenario:retry-check] Say hello.')
+    await waitFor("!!document.querySelector('.problem-card[role=alert]')", 60000, 'a problem card for the refused key')
+    const refused = await problemCard()
+    console.log('[smoke] refused key:', JSON.stringify(refused))
+    if (!/did not accept the API key\.$/.test(refused.text) || raw.test(refused.text)) throw new Error(`the refused key reads: ${refused.text}`)
+    if (refused.buttons.join('|') !== 'Open Settings|Switch model') throw new Error(`the refused key offers ${JSON.stringify(refused.buttons)}`)
+    // The corner notice that said it first gives way to the card, which says it with its buttons.
+    await waitFor("![...document.querySelectorAll('.toast')].some((toast) => toast.textContent.includes('did not accept'))", 5000, 'the key notice gives way to the card')
+    // The provider's words, with the key-shaped string taken out (the transport masks it as "sk-…").
+    if (!refused.details.includes('HTTP 401: Incorrect API key provided') || refused.details.includes('not-a-real-key')) throw new Error(`its details hold ${refused.details}`)
+    await screenshot('17-problem-key.png')
+
+    // A refused key holds its provider back until a key changes; this stands in for entering a new one.
+    await evaluate('window.eNCode.models.recheck()')
+    await fail('empty')
+    await sendPrompt('[scenario:retry-check] Say hello again.')
+    await waitFor("document.querySelector('.problem-card[role=alert] .problem-text')?.textContent.includes('empty replies')", 60000, 'a problem card for empty replies')
+    const empty = await problemCard()
+    console.log('[smoke] empty replies:', JSON.stringify(empty))
+    if (raw.test(empty.text) || !empty.buttons[0]?.startsWith('Retry')) throw new Error(`the empty replies card shows ${JSON.stringify(empty)}`)
+    const settled = await evaluate("document.querySelectorAll('.problem-card.is-settled').length")
+    if (settled < 1) throw new Error('the refused key card kept its buttons after a new request')
+    await screenshot('17-problem-retry.png')
+
+    await fail('off')
+    if (!(await click('.problem-card[role=alert] .problem-foot .btn', 'Retry'))) throw new Error('no Retry button to press')
+    await waitFor("document.body.textContent.includes('Answered after trying again.')", 60000, 'the answer after Retry')
+    await waitFor("document.querySelector('.chat-panel')?.dataset.status === 'done'", 30000, 'the retried request finishes')
+    const after = await evaluate(`({
+      live: document.querySelectorAll('.problem-card[role=alert]').length,
+      asked: [...document.querySelectorAll('.turn-user')].filter((node) => node.textContent.includes('Say hello again.')).length,
+    })`)
+    console.log('[smoke] after Retry:', JSON.stringify(after))
+    if (after.live !== 0) throw new Error('a problem card still offers its buttons after Retry worked')
+    if (after.asked !== 1) throw new Error(`Retry sent the request ${after.asked} times`)
+    await screenshot('17-problem-after-retry.png')
+  } finally {
+    await fail('off')
+    await evaluate('window.eNCode.models.recheck()')
+  }
+  console.log('[smoke] problems: ok')
 }
 
 async function runSubagentChecks() {
