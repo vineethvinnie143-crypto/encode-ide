@@ -11,6 +11,8 @@ import { isInsideReal } from './real-path'
 const IGNORED_NAMES = new Set([
   'node_modules',
   '.git',
+  // The agent's worktrees: each a whole copy of the project.
+  '.encode-worktrees',
   'dist',
   'build',
   'out',

@@ -26,7 +26,8 @@ import {
   type ModelRole,
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
-import { SearchError, createSearchProvider, createWebAccess, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
+import { createWorktreeGit } from '@encode/git'
+import { SearchError, createSearchProvider, createWebAccess, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Sandbox } from '@encode/sandbox'
 import { Workspaces } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
@@ -334,6 +335,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       onJobs: (jobs) => peer.notify('jobs', jobs),
       warn: (message) => peer.notify('warn', message),
       scope: workspaces.scope,
+      // git by absolute path, looked up at each use: a bare `git` could be a git.exe in the project on Windows.
+      worktrees: createWorktreeGit({ git: () => searchPath('git', process.env) }),
       web: createWebAccess({ searchProvider }),
       ...options.hostOptions,
     })
