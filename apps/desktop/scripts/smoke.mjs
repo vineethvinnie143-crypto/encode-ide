@@ -127,7 +127,7 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
+const KEY_CODES = { End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
@@ -1499,6 +1499,7 @@ async function runLanguageServerChecks() {
   await runEditorStructureChecks(markerLines)
   await runEditorHintsChecks(markerLines)
   await runWrapChecks()
+  await runInputChecks()
   await runLargeFileChecks()
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
@@ -2542,6 +2543,86 @@ async function runWrapChecks() {
     await evaluate("window.eNCode.workspace.delete('src/wrap.txt').catch(() => null)").catch(() => null)
   }
   console.log('[smoke] word wrap and whitespace: ok')
+}
+
+/**
+ * Editor 6 in the app: Windows' own clipboard keys, Ctrl+M for Tab, the screen reader mode from Settings > Editor
+ * (the lines around the cursor in the editor's field, notices spoken), and right-to-left text in reading order only
+ * inside strings and comments once it is turned on.
+ */
+async function runInputChecks() {
+  console.log('[smoke] --- Windows input, screen readers and right-to-left text ---')
+  const hebrew = String.fromCodePoint(0x5e9, 0x5dc, 0x5d5, 0x5dd)
+  const source = [`const greeting = "${hebrew}" // ${hebrew}`, 'let first = 1', 'let second = 2', ''].join('\n')
+  await evaluate(`window.eNCode.workspace.write('src/input.ts', ${JSON.stringify(source)})`)
+  await quickOpen('src/input.ts', 'let first = 1')
+  const EDITOR = "document.querySelector('.code-editor > .enc-editor')"
+  const TEXT = `${EDITOR}.querySelector('.enc-input')`
+  const SAID = `${EDITOR}.querySelector('.enc-announce')?.textContent ?? ''`
+  const ISOLATES = `${EDITOR}.querySelectorAll('.enc-line .enc-bidi').length`
+  const segment = (setting, label) =>
+    evaluate(`(() => {
+      const button = [...document.querySelectorAll('[data-setting=${JSON.stringify(setting)}] [role="radio"]')].find((node) => node.textContent === ${JSON.stringify(label)})
+      button?.click()
+      return Boolean(button)
+    })()`)
+  try {
+    // Shift+Insert pastes what Ctrl+Insert copied, as on any Windows text field.
+    await focusEditor()
+    await pressKey('Home', { ctrl: true })
+    await pressKey('ArrowDown')
+    await pressKey('End', { shift: true })
+    await pressKey('Insert', { ctrl: true })
+    await pressKey('End')
+    await pressKey('Enter')
+    await pressKey('Insert', { shift: true })
+    await until(async () => (await evaluate(RENDERED_LINES)).filter((line) => line === 'let first = 1').length === 2, 6000, 'the line copied with Ctrl+Insert and pasted with Shift+Insert')
+    await pressKey('z', { ctrl: true })
+    await pressKey('z', { ctrl: true })
+    await until(async () => (await evaluate(RENDERED_LINES)).filter((line) => line === 'let first = 1').length === 1, 6000, 'the paste undone')
+
+    // Ctrl+M: Tab leaves the editor, and says so; again: Tab indents.
+    await focusEditor()
+    await pressKey('m', { ctrl: true })
+    await until(async () => (await evaluate(SAID)) === 'Tab now moves the focus.', 4000, 'Ctrl+M said')
+    const before = await evaluate(RENDERED_LINES)
+    await pressKey('Tab')
+    await until(async () => !(await evaluate(`document.activeElement === ${TEXT}`)), 4000, 'Tab moved the focus out of the editor')
+    if (JSON.stringify(await evaluate(RENDERED_LINES)) !== JSON.stringify(before)) throw new Error('Tab typed into the editor with Tab moves the focus on')
+    await focusEditor()
+    await pressKey('m', { ctrl: true })
+    await until(async () => (await evaluate(SAID)) === 'Tab now inserts a tab.', 4000, 'Ctrl+M again said')
+
+    // Screen reader mode On: the editor's field holds the lines around the cursor, the cursor in them.
+    if (await evaluate(`${TEXT}.value !== ''`)) throw new Error('The editor field holds text with no screen reader')
+    await openSettings('Editor')
+    if (!(await segment('editor.screenReader', 'On'))) throw new Error('No screen reader mode in Settings > Editor')
+    await closeSettings()
+    await focusEditor()
+    await pressKey('Home', { ctrl: true })
+    await pressKey('ArrowDown')
+    await until(async () => (await evaluate(`${TEXT}.value`)).includes('let second = 2'), 6000, 'the lines in the editor field')
+    const caret = await evaluate(`[${TEXT}.selectionStart, ${TEXT}.value.indexOf('let first')]`)
+    if (caret[0] !== caret[1]) throw new Error(`The field's caret is at ${caret[0]}, not at the cursor's line (${caret[1]})`)
+    await screenshot('30-editor-screen-reader.png')
+
+    // Right-to-left text: stored order until asked; then the string and the comment read in their own order.
+    if (await evaluate(ISOLATES)) throw new Error('Right-to-left text is reordered before it was asked for')
+    await openSettings('Editor')
+    if (!(await click('#editor-bidi'))) throw new Error('No right-to-left switch in Settings > Editor')
+    await waitFor("document.querySelector('#editor-bidi')?.getAttribute('aria-checked') === 'true'", 4000, 'the switch on')
+    await closeSettings()
+    await until(async () => (await evaluate(ISOLATES)) === 2, 6000, 'the string and the comment in reading order')
+    await screenshot('31-editor-right-to-left.png')
+  } finally {
+    await openSettings('Editor').catch(() => null)
+    await segment('editor.screenReader', 'Auto').catch(() => null)
+    if (await evaluate("document.querySelector('#editor-bidi')?.getAttribute('aria-checked') === 'true'").catch(() => false)) await click('#editor-bidi').catch(() => null)
+    await closeSettings().catch(() => null)
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'input.ts')?.querySelector('.tab-close')?.click()`).catch(() => null)
+    await evaluate("window.eNCode.workspace.delete('src/input.ts').catch(() => null)").catch(() => null)
+  }
+  console.log('[smoke] Windows input, screen readers and right-to-left text: ok')
 }
 
 /** The most each step with a 100 MB file may take in the app, in milliseconds, on the slowest machine it runs on. */

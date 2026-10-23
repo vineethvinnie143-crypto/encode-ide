@@ -1272,6 +1272,10 @@ export interface EncodeApi {
     testNotification(): Promise<void>
     /** A notice was clicked: open that session. */
     onOpenSession(cb: (sessionId: string) => void): () => void
+    /** Whether a screen reader (or another assistive program) is using eNCode now: Chromium turns its accessibility on for one. */
+    screenReader(): Promise<boolean>
+    /** A screen reader started or stopped. */
+    onScreenReader(cb: (active: boolean) => void): () => void
   }
   window: {
     minimize(): Promise<void>

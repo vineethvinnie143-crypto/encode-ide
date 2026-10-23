@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { Text } from '@encode/text'
 import { Highlighter, languageForPath, T } from '@encode/editor'
 import { check, gen } from '@encode/testkit'
-import { controlLabel, DEPRECATED, hasControl, isSimpleText, segmentsOf, tokenClass, withSemantic, type SemanticSpan } from './line'
+import { BRACKET_SHIFT, controlLabel, DEPRECATED, hasControl, hasRtl, isolatesOf, isSimpleText, segmentsOf, tokenClass, withSemantic, type SemanticSpan } from './line'
 
 describe('segmentsOf', () => {
   it('splits a line along its tokens', () => {
@@ -220,5 +220,55 @@ describe('withSemantic', () => {
         if (out.length) assert.equal(out[0], 0)
       },
     )
+  })
+})
+
+describe('isolatesOf', () => {
+  const ch = (...points: number[]) => String.fromCodePoint(...points)
+  const shalom = ch(0x5e9, 0x5dc, 0x5d5, 0x5dd)
+  const salam = ch(0x633, 0x644, 0x627, 0x645)
+
+  it('finds right-to-left letters, Hebrew, Arabic and the scripts past the first plane', () => {
+    assert.equal(hasRtl(shalom), true)
+    assert.equal(hasRtl(salam), true)
+    assert.equal(hasRtl(ch(0x1e900)), true, 'Adlam')
+    assert.equal(hasRtl('plain ascii, café, \u00e9'), false)
+    assert.equal(hasRtl(ch(0x4e2d, 0x6587)), false)
+  })
+
+  it('takes the strings and comments that have right-to-left text, escapes in a string with it', () => {
+    // const s = "<shalom>\n" // <salam>
+    const text = `const s = "${shalom}\\n" // ${salam}`
+    const quote = text.indexOf('"')
+    const escape = text.indexOf('\\')
+    const comment = text.indexOf('//')
+    const tokens = [0, T.keyword, 5, T.plain, quote, T.string, escape, T.escape, escape + 2, T.string, escape + 3, T.plain, comment, T.comment]
+    assert.deepEqual(isolatesOf(text, tokens, false), [
+      [quote, escape + 3],
+      [comment, text.length],
+    ])
+  })
+
+  it('leaves code, and strings without right-to-left text, in stored order', () => {
+    const text = `x = "abc"; ${shalom} = 1`
+    const tokens = [0, T.plain, 4, T.string, 9, T.punct, 10, T.plain]
+    assert.deepEqual(isolatesOf(text, tokens, false), [])
+    assert.deepEqual(isolatesOf('no letters here', [], false), [])
+  })
+
+  it('reads a bracket-coloured or deprecated token by its kind', () => {
+    const text = `"${shalom}"`
+    assert.deepEqual(isolatesOf(text, [0, T.string | (1 << BRACKET_SHIFT) | DEPRECATED], false), [[0, text.length]])
+  })
+
+  it('takes all of prose but inline code', () => {
+    const text = `# ${shalom} \`${salam}\` ${salam}`
+    const tick = text.indexOf('`')
+    const after = text.lastIndexOf('`') + 1
+    assert.deepEqual(isolatesOf(text, [0, T.heading, tick, T.code, after, T.plain], true), [
+      [0, tick],
+      [after, text.length],
+    ])
+    assert.deepEqual(isolatesOf(shalom, [], true), [[0, shalom.length]])
   })
 })

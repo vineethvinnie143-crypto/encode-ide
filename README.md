@@ -99,9 +99,11 @@ primary platform; the code stays cross-platform.
   tokenizers for 35 languages, multiple cursors, find and replace, undo that survives tab
   switches. Files up to 256 MB open and stay quick (a 100 MB file opens in under a second and is coloured on another
   thread), and a minified file's one long line can be typed in and scrolled to its end. Long lines wrap onto rows
-  with Alt+Z (at the window's edge or a column), and spaces and tabs can be shown as faint marks. Characters that make
-  text read differently from how it is stored (bidi controls, zero-width and hidden
-  characters) are drawn as labelled markers. In a folder you trust, the language servers installed on
+  with Alt+Z (at the window's edge or a column), and spaces and tabs can be shown as faint marks. Input methods
+  compose in place at every cursor, a screen reader reads the lines around the cursor, and the editor keeps to
+  Windows' scaling and contrast themes. Characters that make text read differently from how it is stored (bidi
+  controls, zero-width and hidden characters) are drawn as labelled markers, and right-to-left text reads in its own
+  order only inside strings, comments and prose, when you ask for it. In a folder you trust, the language servers installed on
   your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and

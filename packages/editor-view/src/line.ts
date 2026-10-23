@@ -110,16 +110,21 @@ export interface InlaySpec {
   readonly from: number
   readonly to: number
   readonly label: string
-  readonly kind?: 'type' | 'parameter'
+  /** `compose`: what an input method is composing, drawn as text at the caret until it is committed. */
+  readonly kind?: 'type' | 'parameter' | 'compose'
   readonly paddingLeft?: boolean
   readonly paddingRight?: boolean
 }
 
-/** A hint as drawn: its column, its element, and whether the caret at its column is drawn before it (a type's hint). */
+/**
+ * A hint as drawn: its column, its element, whether the caret at its column is drawn before it (a type's hint), and
+ * whether it is a composition (the caret is drawn after it, where the input method types next).
+ */
 export interface DrawnInlay {
   readonly col: number
   readonly el: HTMLElement
   readonly caretBefore: boolean
+  readonly compose?: boolean
 }
 
 /**
@@ -179,6 +184,41 @@ export function isSimpleText(text: string): boolean {
 
 export function hasControl(text: string): boolean {
   return CONTROL.test(text)
+}
+
+/** Right-to-left letters: Hebrew, Arabic, Syriac, Thaana, N'Ko and the other scripts written right to left. */
+const RTL = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc\u{10800}-\u{10fff}\u{1e800}-\u{1efff}]/u
+
+export function hasRtl(text: string): boolean {
+  return RTL.test(text)
+}
+
+/**
+ * The stretches of a line shown in reading order when right-to-left text is: each string and comment (the escapes in a
+ * string with it), or in prose every stretch but inline code, that has right-to-left letters in it. Each is shown on
+ * its own (isolated), so nothing in it can move the text around it; the code between them stays in stored order.
+ * Sorted and apart.
+ */
+export function isolatesOf(text: string, tokens: readonly number[], prose: boolean): [number, number][] {
+  if (!hasRtl(text)) return []
+  const out: [number, number][] = []
+  const take = (kind: number): boolean => {
+    const base = kind & KIND_MASK
+    return prose ? base !== T.code : base === T.string || base === T.escape || base === T.comment
+  }
+  const add = (from: number, to: number) => {
+    if (from >= to) return
+    const last = out[out.length - 1]
+    if (last && last[1] === from) last[1] = to
+    else out.push([from, to])
+  }
+  if (!tokens.length || tokens[0] > 0) {
+    if (prose) add(0, tokens.length ? tokens[0] : text.length)
+  }
+  for (let index = 0; index < tokens.length; index += 2) {
+    if (take(tokens[index + 1])) add(tokens[index], index + 2 < tokens.length ? tokens[index + 2] : text.length)
+  }
+  return out.filter(([from, to]) => RTL.test(text.slice(from, to)))
 }
 
 export interface Segment {
@@ -241,6 +281,9 @@ export function segmentsOf(text: string, tokens: readonly number[], from = 0, to
  * The spaces and tabs inside `whitespace` (ranges, sorted and apart) are drawn
  * with a mark: a run of spaces as one span of class `enc-ws-space`, a tab as
  * one of `enc-ws-tab`, the text itself unchanged so offsets still count.
+ * The text inside `isolates` (from `isolatesOf`) goes in a span of class
+ * `enc-bidi` each, shown in reading order; a hint at an isolate's edge stays
+ * outside it.
  */
 export function fillLine(
   dom: HTMLElement,
@@ -252,8 +295,17 @@ export function fillLine(
   highlights?: readonly (readonly [number, number])[],
   inlays?: readonly InlaySpec[],
   whitespace?: readonly (readonly [number, number])[] | null,
+  isolates?: readonly (readonly [number, number])[],
 ): DrawnInlay[] {
   const nodes: Node[] = lead ? [lead] : []
+  // Where each node starts in the line (-1 for the lead), and which are hints, for the isolates.
+  const starts: number[] = lead ? [-1] : []
+  const hints: boolean[] = lead ? [false] : []
+  const push = (node: Node, start: number, hint = false) => {
+    nodes.push(node)
+    starts.push(start)
+    hints.push(hint)
+  }
   const drawn: DrawnInlay[] = []
   let nextInlay = 0
   // Pieces are added in order, so the stretch of marked whitespace a position might be in only moves on.
@@ -269,19 +321,20 @@ export function fillLine(
       const inlay = inlays[nextInlay++]
       if (inlay.from < from) continue
       const el = inlayElement(inlay)
-      nodes.push(el)
-      drawn.push({ col: inlay.from, el, caretBefore: inlay.kind !== 'parameter' })
+      push(el, inlay.from, true)
+      const compose = inlay.kind === 'compose'
+      drawn.push({ col: inlay.from, el, caretBefore: inlay.kind !== 'parameter' && !compose, compose })
     }
   }
-  const addText = (piece: string, kind: number, marked: boolean) => {
+  const addText = (piece: string, start: number, kind: number, marked: boolean) => {
     if (kind === T.plain && !marked) {
-      nodes.push(document.createTextNode(piece))
+      push(document.createTextNode(piece), start)
     } else {
       const span = document.createElement('span')
       const name = tokenClass(kind)
       span.className = marked ? `${name} enc-zone-mark` : name
       span.textContent = piece
-      nodes.push(span)
+      push(span, start)
     }
   }
   const add = (piece: string, start: number, kind: number, control: boolean, marked: boolean) => {
@@ -292,15 +345,15 @@ export function fillLine(
       // Not the character itself: a bidi control in the DOM would still reorder the text after it.
       // One blank per UTF-16 unit it stands for, so offsets keep counting the way the document does.
       span.textContent = ' '.repeat(piece.length)
-      nodes.push(span)
+      push(span, start)
       return
     }
-    if (!whitespace?.length || !WHITESPACE.test(piece)) return addText(piece, kind, marked)
+    if (!whitespace?.length || !WHITESPACE.test(piece)) return addText(piece, start, kind, marked)
     let at = 0
     while (at < piece.length) {
       let blank = at
       while (blank < piece.length && !(isBlank(piece.charCodeAt(blank)) && markedAt(start + blank))) blank++
-      if (blank > at) addText(piece.slice(at, blank), kind, marked)
+      if (blank > at) addText(piece.slice(at, blank), start + at, kind, marked)
       if (blank >= piece.length) break
       const code = piece.charCodeAt(blank)
       let end = blank + 1
@@ -308,7 +361,7 @@ export function fillLine(
       const span = document.createElement('span')
       span.className = `${code === 32 ? 'enc-ws enc-ws-space' : 'enc-ws enc-ws-tab'}${marked ? ' enc-zone-mark' : ''}`
       span.textContent = piece.slice(blank, end)
-      nodes.push(span)
+      push(span, start + blank)
       at = end
     }
   }
@@ -333,8 +386,27 @@ export function fillLine(
     if (cursor < end) add(text.slice(cursor, end), cursor, segment.kind, false, false)
   }
   flush(to)
-  dom.replaceChildren(...nodes)
+  dom.replaceChildren(...(isolates?.length ? isolated(nodes, starts, hints, isolates) : nodes))
   return drawn
+}
+
+/** The nodes, those of each isolate in a span of its own; a hint at an isolate's edge stays outside. */
+function isolated(nodes: readonly Node[], starts: readonly number[], hints: readonly boolean[], isolates: readonly (readonly [number, number])[]): Node[] {
+  const out: Node[] = []
+  let next = 0
+  const inside = (index: number, [from, to]: readonly [number, number]) => (hints[index] ? starts[index] > from && starts[index] < to : starts[index] >= from && starts[index] < to)
+  for (let index = 0; index < nodes.length; ) {
+    while (next < isolates.length && isolates[next][1] <= starts[index]) next++
+    if (starts[index] < 0 || next >= isolates.length || !inside(index, isolates[next])) {
+      out.push(nodes[index++])
+      continue
+    }
+    const span = document.createElement('span')
+    span.className = 'enc-bidi'
+    while (index < nodes.length && starts[index] >= 0 && inside(index, isolates[next])) span.append(nodes[index++])
+    out.push(span)
+  }
+  return out
 }
 
 const WHITESPACE = /[ \t]/
@@ -354,6 +426,7 @@ export function fillRows(
   rowTo: number,
   inlays?: readonly InlaySpec[],
   whitespace?: readonly (readonly [number, number])[] | null,
+  isolates?: readonly (readonly [number, number])[],
 ): DrawnInlay[] {
   const rows: HTMLElement[] = []
   const drawn: DrawnInlay[] = []
@@ -365,7 +438,7 @@ export function fillRows(
     if (row > 0 && wrap.indent) el.style.paddingLeft = `calc(var(--enc-char-w) * ${wrap.indent})`
     const last = row === wrap.breaks.length
     const mine = inlays?.length ? inlays.filter((inlay) => inlay.from >= from && (inlay.from < to || (last && inlay.from === to))) : undefined
-    for (const inlay of fillLine(el, text, tokens, from, to, undefined, undefined, mine, whitespace)) drawn.push(inlay)
+    for (const inlay of fillLine(el, text, tokens, from, to, undefined, undefined, mine, whitespace, isolates)) drawn.push(inlay)
     rows.push(el)
   }
   dom.replaceChildren(...rows)

@@ -74,12 +74,30 @@ function addCursorByRow(view: EditorView, state: core.EditorState, direction: -1
   return state.update({ selection: core.EditorSelection.create(ranges, main), scrollIntoView: true, origin: 'select' })
 }
 
-/** A folding command: it applies only where folding is on, and takes its key there even when there is nothing to fold. */
+/**
+ * A folding command: it applies only where folding is on, and takes its key there even when there is nothing to fold.
+ * A screen reader is told what folded or opened, which the text it reads does not show.
+ */
 function folding(run: (view: EditorView) => boolean): ViewCommand {
   return (view) => {
     if (!view.options.folding) return false
+    const before = view.folding.folded.length
     run(view)
+    const after = view.folding.folded.length
+    if (after > before) view.announce(after - before === 1 ? 'Folded.' : `Folded ${after - before} blocks.`)
+    else if (after < before) view.announce(before - after === 1 ? 'Unfolded.' : `Unfolded ${before - after} blocks.`)
     return true
+  }
+}
+
+/** A command that adds cursors; a screen reader is told how many there are now. */
+function counted(command: ViewCommand): ViewCommand {
+  return (view) => {
+    const before = view.state.selection.ranges.length
+    const handled = command(view)
+    const after = view.state.selection.ranges.length
+    if (after !== before && after > 1) view.announce(`${after} cursors.`)
+    return handled
   }
 }
 
@@ -115,16 +133,16 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   selectPageDown: page(1, true),
   scrollLineUp: (view) => (view.scrollBy(-view.metrics.lineHeight), true),
   scrollLineDown: (view) => (view.scrollBy(view.metrics.lineHeight), true),
-  addCursorAbove: addCursor(-1),
-  addCursorBelow: addCursor(1),
+  addCursorAbove: counted(addCursor(-1)),
+  addCursorBelow: counted(addCursor(1)),
   moveLineUp: run(core.moveLineUp),
   moveLineDown: run(core.moveLineDown),
   copyLineUp: run(core.copyLineUp),
   copyLineDown: run(core.copyLineDown),
   selectAll: move(core.selectAll),
   selectLine: move(core.selectLine),
-  selectNextOccurrence: move(core.selectNextOccurrence),
-  selectAllOccurrences: move(core.selectAllOccurrences),
+  selectNextOccurrence: counted(move(core.selectNextOccurrence)),
+  selectAllOccurrences: counted(move(core.selectAllOccurrences)),
   jumpToBracket: move(core.jumpToBracket),
   collapseSelection: run(core.collapseSelection),
 
@@ -143,6 +161,12 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   toggleBlockComment: run(core.toggleBlockComment),
   undo: run(core.undo),
   redo: run(core.redo),
+  toggleTabMovesFocus: (view) => {
+    const on = !view.options.tabMovesFocus
+    view.setOptions({ tabMovesFocus: on })
+    view.announce(on ? 'Tab now moves the focus.' : 'Tab now inserts a tab.')
+    return true
+  },
 
   openFind: (view) => (view.find.open(false), true),
   openReplace: (view) => (view.find.open(true), true),

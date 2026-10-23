@@ -49,6 +49,8 @@ const api: EncodeApi = {
     openLogs: () => invoke('app:open-logs'),
     testNotification: () => invoke('app:test-notification'),
     onOpenSession: (callback) => on<string>('app:open-session', callback),
+    screenReader: () => invoke('app:screen-reader'),
+    onScreenReader: (callback) => on<boolean>('app:screen-reader', callback),
   },
   window: {
     minimize: () => invoke('window:minimize'),

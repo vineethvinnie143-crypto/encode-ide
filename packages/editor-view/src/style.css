@@ -337,6 +337,12 @@
 .enc-ligatures .enc-line {
   font-variant-ligatures: contextual;
 }
+/* With right-to-left text shown in reading order: a string, comment or stretch of prose on its own (isolated), so its
+   text reads right to left inside it and cannot move what is around it. Bidi controls never reach the DOM. */
+.enc-bidi {
+  unicode-bidi: isolate;
+  direction: ltr;
+}
 /* A row of a wrapped line; the rows after the first are indented from it. */
 .enc-row {
   height: var(--enc-line-h);
@@ -502,13 +508,21 @@
   /* Only the keyboard and the input method talk to it; a click at the caret must reach the text. */
   pointer-events: none;
 }
+/* While an input method composes, the view draws the composition in place (an `enc-inlay-compose` at each cursor, the
+   caret after it) and the textarea stays invisible over it, as wide as it, so the input method's window follows it. */
 .enc-composing .enc-input {
-  opacity: 1;
   min-width: 2px;
-  color: var(--e-fg);
-  background: var(--e-bg);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+}
+
+/* What a screen reader is told; not seen. */
+.enc-announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* Control and invisible characters, drawn as markers */
@@ -667,6 +681,21 @@
   line-height: calc(var(--enc-line-h, 20px) - 4px);
   vertical-align: top;
   white-space: pre;
+}
+.enc-inlay-compose {
+  pointer-events: none;
+}
+.enc-inlay-compose::before {
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--e-fg);
+  font-size: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .enc-inlay-pl::before {
   margin-left: 0.5ch;
@@ -1023,9 +1052,133 @@
 .enc-probe-row {
   white-space: pre;
 }
+/* Boxes of their own, so the view hears when the font's size or line height changes. */
+.enc-probe-a,
+.enc-probe-b {
+  display: inline-block;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .enc-find-expand svg {
     transition: none;
+  }
+}
+
+/* Windows contrast themes. The system's colours replace the theme's, and backgrounds are dropped, so what the editor
+   marks with a background (the selection, matches, the active line, changes) is drawn here in system colours, as an
+   outline where the text over it must stay readable. */
+@media (forced-colors: active) {
+  .enc-selection-rect,
+  .enc-focused .enc-selection-rect {
+    forced-color-adjust: none;
+    background: color-mix(in srgb, Highlight 35%, transparent);
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  .enc-cursor-line,
+  .enc-cursor-underline,
+  .enc-cursor-block {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .enc-cursor-block {
+    background: color-mix(in srgb, CanvasText 60%, transparent);
+  }
+  .enc-line-active {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: inset 0 0 0 1px GrayText;
+  }
+  .enc-mark-find,
+  .enc-mark-peek,
+  .enc-mark-symbol,
+  .enc-mark-bracket,
+  .enc-snippet-stop {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: none;
+    outline: 1px dashed Highlight;
+    outline-offset: -1px;
+  }
+  .enc-mark-find-active,
+  .enc-mark-symbol-write,
+  .enc-snippet-active {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: none;
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .enc-mark-link {
+    forced-color-adjust: none;
+    box-shadow: inset 0 -1px 0 LinkText;
+  }
+  .enc-line-inserted {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: inset 3px 0 0 Highlight;
+  }
+  .enc-line-deleted {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: inset 3px 0 0 GrayText;
+  }
+  .enc-mark-inserted {
+    forced-color-adjust: none;
+    background: none;
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+  .enc-mark-deleted {
+    forced-color-adjust: none;
+    background: none;
+    outline: 1px dotted GrayText;
+    outline-offset: -1px;
+  }
+  .enc-squiggle-error,
+  .enc-squiggle-warning {
+    forced-color-adjust: none;
+    background: LinkText;
+  }
+  .enc-squiggle-info,
+  .enc-squiggle-hint {
+    forced-color-adjust: none;
+    background: GrayText;
+  }
+  .enc-guides {
+    forced-color-adjust: none;
+    background-image: linear-gradient(to right, GrayText 1px, transparent 1px);
+  }
+  .enc-ws-space {
+    forced-color-adjust: none;
+    background-image: radial-gradient(circle at 50% 50%, GrayText 0 1px, transparent 1.6px);
+  }
+  .enc-ws-tab {
+    forced-color-adjust: none;
+    background-image: linear-gradient(GrayText, GrayText);
+  }
+  .enc-ctrl::before,
+  .enc-inlay::before {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: GrayText;
+    border: 1px solid GrayText;
+  }
+  .enc-inlay-compose::before {
+    border: 0;
+    color: CanvasText;
+  }
+  .enc-fold-pill {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  .enc-minimap-slider {
+    forced-color-adjust: none;
+    background: none;
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
   }
 }

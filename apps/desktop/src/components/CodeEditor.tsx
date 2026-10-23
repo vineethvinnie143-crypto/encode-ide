@@ -24,7 +24,7 @@ import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged,
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
 import { useCode } from '../stores/code'
-import { textOptions, useEditorLayout } from '../stores/editor-layout'
+import { accessOptions, textOptions, useEditorLayout, useScreenReaderRunning } from '../stores/editor-layout'
 import { useEditor, type Tab } from '../stores/editor'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
@@ -71,7 +71,9 @@ const outlineWanted = (): boolean => {
 const viewOptions = () => {
   const layout = useEditorLayout.getState()
   const { folding, stickyScroll, bracketColors, minimap } = layout
-  return { folding, stickyScroll, bracketColors, minimap, ...textOptions(layout) }
+  // Reduce motion set to On in Settings > Appearance stops the caret blinking (with System, the view follows Windows itself).
+  const cursorBlink = useSettings.getState().settings?.appearance.motion !== 'reduce'
+  return { folding, stickyScroll, bracketColors, minimap, cursorBlink, ...textOptions(layout), ...accessOptions(layout, useScreenReaderRunning.getState().running) }
 }
 
 /** The blocks folded in the file a view shows, kept to fold them again when the file is shown next. */
@@ -231,22 +233,22 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     return () => stops.forEach((stop) => stop())
   }, [])
 
-  // Folding, sticky scroll, bracket colours, the minimap, wrapping or the spaces shown changed; folding back on asks the
-  // server again.
-  useEffect(
-    () =>
-      useEditorLayout.subscribe(() => {
-        const current = viewRef.current
-        if (!current) return
-        const next = viewOptions()
-        const was = current.options
-        if ((Object.keys(next) as (keyof typeof next)[]).every((key) => next[key] === was[key])) return
-        const foldingOn = next.folding && !was.folding
-        current.setOptions(next)
-        if (foldingOn) foldingRef.current?.wake()
-      }),
-    [],
-  )
+  // Folding, sticky scroll, bracket colours, the minimap, wrapping, the spaces shown, the screen reader mode, the Tab key
+  // or the motion setting changed (or a screen reader started); folding back on asks the server again.
+  useEffect(() => {
+    const changed = () => {
+      const current = viewRef.current
+      if (!current) return
+      const next = viewOptions()
+      const was = current.options
+      if ((Object.keys(next) as (keyof typeof next)[]).every((key) => next[key] === was[key])) return
+      const foldingOn = next.folding && !was.folding
+      current.setOptions(next)
+      if (foldingOn) foldingRef.current?.wake()
+    }
+    const stops = [useEditorLayout.subscribe(changed), useScreenReaderRunning.subscribe(changed), useSettings.subscribe(changed)]
+    return () => stops.forEach((stop) => stop())
+  }, [])
 
   // Inlay hints or semantic colours turned on or off: asked for again, or taken away.
   useEffect(() => {
@@ -406,6 +408,13 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     formatSelection: () => (void refactorRef.current?.formatSelection(), true),
     nextProblem: () => (goToProblem(1), true),
     previousProblem: () => (goToProblem(-1), true),
+    // Ctrl+M: kept with the editor's layout, so it holds for every file and the next time eNCode starts.
+    toggleTabMovesFocus: (target) => {
+      const on = !useEditorLayout.getState().tabMovesFocus
+      useEditorLayout.getState().set({ tabMovesFocus: on })
+      target.announce(on ? 'Tab now moves the focus.' : 'Tab now inserts a tab.')
+      return true
+    },
   }
   // The view keeps the commands it was made with; they reach the current ones through this.
   const commandsRef = useRef(commands)
@@ -561,6 +570,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
         if (!items.length) return
         const box = target.coordsAtPos(pos)
         setHover({ items, anchor: { left: box.left, top: box.top, width: 1, height: box.bottom - box.top } })
+        // A screen reader reads the problem the cursor came to; the card is not in its way.
+        target.announce(items.map((item) => `${item.severity === 'error' ? 'Error' : item.severity === 'warning' ? 'Warning' : 'Note'}: ${item.message}`).join(' '))
       }),
     )
   }

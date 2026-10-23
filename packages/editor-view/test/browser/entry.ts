@@ -14,6 +14,8 @@ export interface MountOptions {
   height?: number
   config?: Partial<EditorViewConfig>
   readOnly?: boolean
+  /** The document's line breaks, as a file read with Windows line endings has. */
+  lineSeparator?: '\n' | '\r\n'
   focus?: boolean
   /** Tokenize on the page's highlighting worker, as the app does. */
   worker?: boolean
@@ -52,6 +54,7 @@ window.harness = {
       doc: options.text ?? '',
       language: options.path ? languageForPath(options.path) : undefined,
       readOnly: options.readOnly,
+      lineSeparator: options.lineSeparator,
     })
     const view = new EditorView({ state, parent: host, highlighting: options.worker ? window.harness.highlighting() : null, ...options.config })
     current = window.view = view

@@ -4,7 +4,9 @@ import {
   WRAP_COLUMN_MIN,
   clampWrapColumn,
   useEditorLayout,
+  useScreenReaderRunning,
   type EditorPart,
+  type ScreenReaderMode,
   type WhitespaceShown,
   type WrapAt,
 } from '../../stores/editor-layout'
@@ -41,6 +43,18 @@ const WHITESPACE_HELP: Record<WhitespaceShown, string> = {
   all: 'Marks every space with a dot and every tab with a line.',
 }
 
+const SCREEN_READER = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' },
+] as const satisfies readonly { value: ScreenReaderMode; label: string }[]
+
+const SCREEN_READER_HELP: Record<ScreenReaderMode, string> = {
+  auto: 'On while Windows has a screen reader (Narrator, NVDA, JAWS) using eNCode.',
+  on: 'Always on, for a screen reader eNCode does not notice.',
+  off: 'Never on.',
+}
+
 /** The parts of the editor turned on and off here as in the View menu, in the order they show there. */
 const PARTS: readonly { part: EditorPart; label: string; help: string }[] = [
   { part: 'breadcrumbs', label: 'Breadcrumbs', help: 'The path to the file and the symbols the cursor is in, above the text.' },
@@ -55,6 +69,7 @@ const PARTS: readonly { part: EditorPart; label: string; help: string }[] = [
 /** Settings > Editor: wrapping, spaces and tabs, and the parts around the text. Kept on this computer as they change. */
 export function EditorSection() {
   const layout = useEditorLayout()
+  const readerRunning = useScreenReaderRunning((state) => state.running)
   const toggleKeys = commandRegistry.shortcut('view.wordWrap')
   return (
     <>
@@ -98,6 +113,30 @@ export function EditorSection() {
           help={layout.showWhitespace ? 'Show whitespace in the View menu is on, so every space and tab is marked until you turn it off.' : WHITESPACE_HELP[layout.whitespace]}
         >
           <Select id="whitespace-shown" value={layout.whitespace} options={WHITESPACE} onChange={(whitespace) => layout.set({ whitespace })} />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Right-to-left text">
+        <SettingRow
+          id="editor.bidi"
+          htmlFor="editor-bidi"
+          label="Read right-to-left text in its own order"
+          help="Hebrew, Arabic and other right-to-left text in strings, comments and prose (text and Markdown files) reads right to left. Code stays in the order it is stored and runs in, and bidi control characters stay visible, so a line cannot look different from what it does."
+        >
+          <Toggle id="editor-bidi" checked={layout.bidi} onChange={(bidi) => layout.set({ bidi })} />
+        </SettingRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Accessibility">
+        <SettingRow
+          id="editor.screenReader"
+          label="Screen reader mode"
+          help={`The editor lets a screen reader read the line, word or character the cursor moves over and what is selected. ${SCREEN_READER_HELP[layout.screenReader]}${layout.screenReader === 'auto' ? (readerRunning ? ' One is running now.' : ' None is running now.') : ''}`}
+        >
+          <Segmented label="Screen reader mode" value={layout.screenReader} options={SCREEN_READER} onChange={(screenReader) => layout.set({ screenReader })} />
+        </SettingRow>
+        <SettingRow id="editor.tabMovesFocus" htmlFor="tab-moves-focus" label="Tab moves the focus" help="Tab and Shift+Tab leave the editor instead of indenting. Ctrl+M turns it on and off in the editor.">
+          <Toggle id="tab-moves-focus" checked={layout.tabMovesFocus} onChange={(tabMovesFocus) => layout.set({ tabMovesFocus })} />
         </SettingRow>
       </SettingsGroup>
 

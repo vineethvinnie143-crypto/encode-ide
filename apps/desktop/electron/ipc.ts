@@ -426,6 +426,7 @@ export function registerIpc(deps: IpcDeps): void {
     return picked.filePath
   })
   handle('app:test-notification', () => testNotice())
+  handle('app:screen-reader', () => app.isAccessibilitySupportEnabled())
   handle('app:open-logs', async () => {
     logs.flush()
     const failure = await osShell.openPath(logs.dir)

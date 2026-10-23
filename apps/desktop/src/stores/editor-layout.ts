@@ -34,11 +34,18 @@ export interface EditorLayout {
   outlineSort: OutlineSort
   /** The outline shows the symbol the cursor is in, opening the symbols it is under. */
   outlineFollow: boolean
+  /** The editor works with a screen reader: when one is running (Auto), always, or never. */
+  screenReader: ScreenReaderMode
+  /** Tab and Shift+Tab move the focus out of the editor instead of indenting (Ctrl+M). */
+  tabMovesFocus: boolean
+  /** Right-to-left text in strings, comments and prose reads in its own order; code stays in stored order. */
+  bidi: boolean
 }
 
 export type WrapAt = 'edge' | 'column' | 'bounded'
 /** The spaces and tabs shown: none, those at a word's edge or in a run, those in the selection, those at a line's end, or all. */
 export type WhitespaceShown = 'none' | 'boundary' | 'selection' | 'trailing' | 'all'
+export type ScreenReaderMode = 'auto' | 'on' | 'off'
 
 export const OUTLINE_MIN = 180
 export const OUTLINE_MAX = 480
@@ -57,9 +64,11 @@ export type EditorPart =
   | 'wordWrap'
   | 'wrapIndent'
   | 'showWhitespace'
+  | 'tabMovesFocus'
 
 const WRAP_AT: readonly WrapAt[] = ['edge', 'column', 'bounded']
 const WHITESPACE: readonly WhitespaceShown[] = ['none', 'boundary', 'selection', 'trailing', 'all']
+const SCREEN_READER: readonly ScreenReaderMode[] = ['auto', 'on', 'off']
 
 const DEFAULTS: EditorLayout = {
   breadcrumbs: true,
@@ -79,6 +88,9 @@ const DEFAULTS: EditorLayout = {
   outlineWidth: 248,
   outlineSort: 'position',
   outlineFollow: true,
+  screenReader: 'auto',
+  tabMovesFocus: false,
+  bidi: false,
 }
 
 /** A saved layout, each field checked; what is missing or wrong takes its default. */
@@ -107,6 +119,9 @@ export function normalizeLayout(value: unknown): EditorLayout {
     outlineWidth: Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, width)),
     outlineSort: raw.outlineSort === 'name' || raw.outlineSort === 'kind' || raw.outlineSort === 'position' ? raw.outlineSort : DEFAULTS.outlineSort,
     outlineFollow: typeof raw.outlineFollow === 'boolean' ? raw.outlineFollow : DEFAULTS.outlineFollow,
+    screenReader: oneOf(raw.screenReader, SCREEN_READER, DEFAULTS.screenReader),
+    tabMovesFocus: flag('tabMovesFocus'),
+    bidi: typeof raw.bidi === 'boolean' ? raw.bidi : DEFAULTS.bidi,
   }
 }
 
@@ -115,20 +130,33 @@ export function clampWrapColumn(column: number): number {
   return Math.min(WRAP_COLUMN_MAX, Math.max(WRAP_COLUMN_MIN, Math.round(column)))
 }
 
-/** What the editor's view is given for wrapping and spaces, from the layout. */
+/** What the editor's view is given for wrapping, spaces and right-to-left text, from the layout. */
 export function textOptions(layout: EditorLayout): {
   wordWrap: 'off' | 'on' | 'column' | 'bounded'
   wrapColumn: number
   wrapIndent: boolean
   renderWhitespace: WhitespaceShown
+  bidi: boolean
 } {
   return {
     wordWrap: !layout.wordWrap ? 'off' : layout.wrapAt === 'edge' ? 'on' : layout.wrapAt,
     wrapColumn: layout.wrapColumn,
     wrapIndent: layout.wrapIndent,
     renderWhitespace: layout.showWhitespace ? 'all' : layout.whitespace,
+    bidi: layout.bidi,
   }
 }
+
+/** What the editor's view is given for screen readers and the Tab key, from the layout and whether a screen reader runs. */
+export function accessOptions(layout: EditorLayout, screenReaderRunning: boolean): { screenReader: boolean; tabMovesFocus: boolean } {
+  return {
+    screenReader: layout.screenReader === 'on' || (layout.screenReader === 'auto' && screenReaderRunning),
+    tabMovesFocus: layout.tabMovesFocus,
+  }
+}
+
+/** Whether Windows has a screen reader using eNCode now, as Electron says; kept up to date from the app's start. */
+export const useScreenReaderRunning = create<{ running: boolean }>(() => ({ running: false }))
 
 function load(): EditorLayout {
   try {
