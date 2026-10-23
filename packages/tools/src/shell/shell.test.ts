@@ -5,7 +5,7 @@ import { after, describe, it } from 'node:test'
 import { gitSafetyProblem } from '@encode/permissions'
 import { bashOutputTool, createBashTool, killShellTool } from '../bash'
 import { tempWorkspace, testContext, textOf } from '../testing'
-import type { ToolContext } from '../types'
+import type { JobInfo, ToolContext } from '../types'
 import { detectShell } from './detect'
 import { agentEnvironment, looksSecret } from './environment'
 import { createJobManager } from './jobs'
@@ -181,6 +181,22 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     assert.equal(stopped.ok, true)
     assert.equal(jobs.list()[0].status, 'killed')
     assert.match(textOf((await bashOutputTool.run({ bash_id: 'nope' }, ctx)).content), /no background command nope\. Known ids: bash_1/)
+  })
+
+  it('names who started a job and what it is for, passes its output on as it comes, and says when it ends', async () => {
+    const { shell } = await shellIn()
+    const ended: JobInfo[] = []
+    const seen: string[] = []
+    const jobs = createJobManager(shell, { onEnd: (job) => ended.push(job) })
+    const job = await jobs.start('echo one; echo two; exit 3', { kind: 'monitor', description: '  Watch it  ', agentId: 'main', onOutput: (text) => seen.push(text) })
+    assert.deepEqual([job.kind, job.description, job.agentId], ['monitor', 'Watch it', 'main'])
+    for (let waited = 0; !ended.length && waited < 10_000; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.equal(ended.length, 1)
+    assert.deepEqual([ended[0].id, ended[0].status, ended[0].exitCode, ended[0].kind], [job.id, 'error', 3, 'monitor'])
+    assert.match(seen.join(''), /one\r?\ntwo/)
+    const plain = await jobs.start('echo plain', {})
+    assert.equal(plain.kind, undefined)
+    assert.equal(plain.agentId, undefined)
   })
 
   it('tells the model about the sandbox, offers to leave it only where that is allowed, and says when it may have been what stopped a command', async () => {

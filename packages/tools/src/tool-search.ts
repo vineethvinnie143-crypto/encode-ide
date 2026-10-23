@@ -154,7 +154,7 @@ export function createToolSearchTool(registry: ToolRegistry): Tool<ToolSearchInp
         '- The tools it finds are in your tool list from the next step on; call them as you call any tool. Read a tool\'s parameters before you call it.',
         '- max_results: how many tools to load (default 5, at most 10).',
         '',
-        'Tools that can be loaded, by server:',
+        registry.deferred().some((tool) => split(tool.definition.name).server) ? 'Tools that can be loaded, by server:' : 'Tools that can be loaded:',
         nameList(registry.deferred()),
       ].join('\n'),
       inputSchema: {

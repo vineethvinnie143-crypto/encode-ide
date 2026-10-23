@@ -4,6 +4,7 @@
  * built per session and then kept unchanged, keeping the prompt prefix
  * stable.
  */
+import { monitorTool, scheduleWakeupTool, sendMessageTool } from './background'
 import { bashOutputTool, createBashTool, killShellTool, type BashSandbox } from './bash'
 import { computerTool } from './computer/tool'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
@@ -42,6 +43,8 @@ export interface BuiltinToolOptions {
   web?: boolean
   /** The Computer tool, for sessions that have a desktop to use. Default false. */
   computer?: boolean
+  /** Monitor, ScheduleWakeup and SendMessage (with Task), for a session's main agent: their notices need a session. Default false. */
+  background?: boolean
   /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
   sandbox?: BashSandbox
   /** Only these tools, by name. */
@@ -65,6 +68,10 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
   if (options.computer) tools.push(computerTool as Tool)
   tools.push(todoWriteTool as Tool, askUserQuestionTool as Tool, enterPlanModeTool as Tool, exitPlanModeTool as Tool)
   if (options.subagentTypes?.length) tools.push(createTaskTool(options.subagentTypes) as Tool)
+  if (options.background) {
+    tools.push(monitorTool as Tool, scheduleWakeupTool as Tool)
+    if (options.subagentTypes?.length) tools.push(sendMessageTool as Tool)
+  }
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
   if (options.goals ?? true) tools.push(createGoalTool as Tool, updateGoalTool as Tool, getGoalTool)
   if (options.completion) tools.push(attemptCompletionTool as Tool)

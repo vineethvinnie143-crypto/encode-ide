@@ -112,11 +112,18 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
       }
       const unsandboxed = Boolean(input.unsandboxed && view?.active)
       if (input.run_in_background) {
-        const job = await ctx.jobs.start(input.command, { cwd: ctx.shell.state().cwd, ...(unsandboxed ? { unsandboxed } : {}) })
+        const job = await ctx.jobs.start(input.command, {
+          cwd: ctx.shell.state().cwd,
+          agentId: ctx.agentId,
+          ...(input.description?.trim() ? { description: input.description } : {}),
+          ...(unsandboxed ? { unsandboxed } : {}),
+        })
         if (job.status === 'error') return fail(`The command could not start: ${ctx.jobs.read(job.id)?.output.trim() || 'unknown error'}`)
+        // The main agent hears when the command ends; a subagent reads its output itself.
+        const told = ctx.background ? ' You are told when it ends, so do not wait for it.' : ''
         return {
           ok: true,
-          content: `Started in the background with id ${job.id}. Read its output with BashOutput (bash_id "${job.id}"); stop it with KillShell (shell_id "${job.id}").`,
+          content: `Started in the background with id ${job.id}.${told} Read its output with BashOutput (bash_id "${job.id}"); stop it with KillShell (shell_id "${job.id}").`,
           display: { output: `Background job ${job.id}` },
         }
       }
@@ -208,10 +215,10 @@ interface KillShellInput extends Record<string, unknown> {
 export const killShellTool: Tool<KillShellInput> = {
   definition: {
     name: 'KillShell',
-    description: 'Stops a background command started with Bash, and everything it started. shell_id is the id Bash returned.',
+    description: 'Stops a background command (Bash or Monitor) and everything it started, or a subagent running in the background. shell_id is the id you were given.',
     inputSchema: {
       type: 'object',
-      properties: { shell_id: { type: 'string', minLength: 1, description: 'The id of the background command to stop.' } },
+      properties: { shell_id: { type: 'string', minLength: 1, description: 'The id of the command, monitor or subagent to stop.' } },
       required: ['shell_id'],
       additionalProperties: false,
     },
@@ -223,7 +230,11 @@ export const killShellTool: Tool<KillShellInput> = {
   describe: (input) => ({ title: `Stop ${input.shell_id}` }),
   async run(input, ctx) {
     const job = ctx.jobs.list().find((item) => item.id === input.shell_id)
-    if (!job) return fail(`There is no background command ${input.shell_id}.`)
+    if (!job) {
+      const agent = await ctx.subagents?.stop?.(input.shell_id)
+      if (agent) return { ok: true, content: agent.stopped ? `Stopped agent ${input.shell_id}: ${agent.description}` : `Agent ${input.shell_id} was not running.` }
+      return fail(`There is no background command or subagent ${input.shell_id}.`)
+    }
     if (job.status !== 'running') return { ok: true, content: `${input.shell_id} had already ended (${job.status}).` }
     await ctx.jobs.kill(input.shell_id)
     return { ok: true, content: `Stopped ${input.shell_id}: ${job.command}` }

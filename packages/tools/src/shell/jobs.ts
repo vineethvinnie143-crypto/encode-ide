@@ -1,7 +1,8 @@
 /**
- * Background commands: dev servers, watchers, long builds. Each runs in the
- * agent's shell without a timeout until it ends or is killed, keeps the last
- * megabyte of its output, and hands out only what is new on every read.
+ * Background commands: dev servers, watchers, long builds, and the commands a
+ * Monitor watches. Each runs in the agent's shell without a timeout until it
+ * ends or is killed, keeps the last megabyte of its output, and hands out only
+ * what is new on every read.
  */
 import path from 'node:path'
 import { collapseCarriageReturns, stripAnsi } from '../text'
@@ -28,7 +29,13 @@ export interface BackgroundJobs extends JobManager {
   dispose(): Promise<void>
 }
 
-export function createJobManager(shell: ManagedShell, options: { onChange?(jobs: JobInfo[]): void } = {}): BackgroundJobs {
+export interface JobManagerOptions {
+  onChange?(jobs: JobInfo[]): void
+  /** A job that started has ended: by itself (`done`, `error`) or killed. One that could not start is the caller's to report. */
+  onEnd?(job: JobInfo): void
+}
+
+export function createJobManager(shell: ManagedShell, options: JobManagerOptions = {}): BackgroundJobs {
   const jobs = new Map<string, Job>()
   let counter = 0
   const changed = () => options.onChange?.(list())
@@ -49,11 +56,23 @@ export function createJobManager(shell: ManagedShell, options: { onChange?(jobs:
     async start(command, startOptions) {
       const id = `bash_${++counter}`
       const cwd = startOptions.cwd ?? shell.state().cwd
-      const job: Job = { info: { id, command, cwd, startedAt: Date.now(), status: 'running' }, output: '', dropped: 0, cursor: 0, killed: false }
+      const info: JobInfo = {
+        id,
+        command,
+        cwd,
+        startedAt: Date.now(),
+        status: 'running',
+        ...(startOptions.kind === 'monitor' ? { kind: 'monitor' as const } : {}),
+        ...(startOptions.description?.trim() ? { description: startOptions.description.trim().slice(0, 200) } : {}),
+        ...(startOptions.agentId ? { agentId: startOptions.agentId } : {}),
+      }
+      const job: Job = { info, output: '', dropped: 0, cursor: 0, killed: false }
       jobs.set(id, job)
       prune()
       const append = (text: string) => {
-        job.output += collapseCarriageReturns(stripAnsi(text))
+        const clean = collapseCarriageReturns(stripAnsi(text))
+        job.output += clean
+        if (clean) startOptions.onOutput?.(clean)
         if (job.output.length > KEEP_CHARS) {
           const cut = job.output.length - KEEP_CHARS
           job.output = job.output.slice(cut)
@@ -74,6 +93,7 @@ export function createJobManager(shell: ManagedShell, options: { onChange?(jobs:
         job.info.status = status
         if (exitCode !== null) job.info.exitCode = exitCode
         changed()
+        options.onEnd?.({ ...job.info })
       })
       return { ...job.info }
     },

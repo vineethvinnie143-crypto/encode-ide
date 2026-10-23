@@ -145,7 +145,7 @@ describe('NotebookEdit', () => {
 
     const registry = createToolRegistry({ dialect: 'bash', platform: 'linux' })
     assert.equal(registry.check('NotebookEdit', { notebook_path: '/a/b.py', new_source: 'x' }), 'Invalid input for NotebookEdit: NotebookEdit changes Jupyter notebooks (.ipynb); use Edit for other files.')
-    assert.equal(registry.check('Edit', { file_path: '/a/b.ipynb', old_string: 'a', new_string: 'b' }), 'Invalid input for Edit: this is a Jupyter notebook; change its cells with NotebookEdit.')
+    assert.equal(registry.check('Edit', { file_path: '/a/b.ipynb', old_string: 'a', new_string: 'b' }), 'Invalid input for Edit: this is a Jupyter notebook; change its cells with NotebookEdit (load it with ToolSearch).')
     assert.equal(registry.check('NotebookEdit', { notebook_path: '/a/b.ipynb', edit_mode: 'append' })?.startsWith('Invalid input for NotebookEdit'), true)
   })
 

@@ -424,6 +424,8 @@ export const notebookEditTool: Tool<NotebookEditInput> = {
   },
   kind: 'write',
   readOnly: false,
+  // Notebooks are rare, so the definition waits for ToolSearch; Read and Edit name it when one comes up.
+  defer: 'always',
   check(input) {
     if (path.extname(input.notebook_path).toLowerCase() !== '.ipynb') return 'NotebookEdit changes Jupyter notebooks (.ipynb); use Edit for other files.'
     return undefined

@@ -100,9 +100,10 @@ export interface Tool<Input extends Record<string, unknown> = Record<string, unk
   readonly modes?: readonly AgentMode[]
   /**
    * For tools there can be many of (those of MCP servers): once their definitions together are long, only their names
-   * are listed, and a definition is sent when the model asks for it with ToolSearch (tool-search.ts).
+   * are listed, and a definition is sent when the model asks for it with ToolSearch (tool-search.ts). `always`: a
+   * built-in tool that is seldom needed waits for ToolSearch however few tools there are, as in Claude Code.
    */
-  readonly defer?: boolean
+  readonly defer?: boolean | 'always'
   /** Rules the schema cannot express, checked after it passes. Returns what is wrong. */
   check?(input: Input): string | undefined
   /** What the call would touch, with paths resolved against the context. */
@@ -249,10 +250,26 @@ export interface JobInfo {
   startedAt: number
   status: JobStatus
   exitCode?: number
+  /** `monitor`: its lines reach the agent as they come (Monitor). Default `command`. */
+  kind?: 'command' | 'monitor'
+  /** What the agent said the job is for. */
+  description?: string
+  /** The agent that started it: 'main', or a subagent's id. */
+  agentId?: string
+}
+
+export interface JobStartOptions {
+  cwd?: string
+  unsandboxed?: boolean
+  kind?: 'command' | 'monitor'
+  description?: string
+  agentId?: string
+  /** Output as it comes, after ANSI codes are taken out. */
+  onOutput?(text: string): void
 }
 
 export interface JobManager {
-  start(command: string, options: { cwd?: string; unsandboxed?: boolean }): Promise<JobInfo>
+  start(command: string, options: JobStartOptions): Promise<JobInfo>
   /** Output since the last read, optionally only lines matching `filter`. */
   read(id: string, options?: { filter?: RegExp }): { job: JobInfo; output: string } | undefined
   kill(id: string): Promise<boolean>
@@ -357,6 +374,28 @@ export interface SubagentRequest {
   entryId?: string
   /** Shows what the subagent is doing on the call's card while it works. */
   progress?: (text: string) => void
+  /** The main agent's request it works for: what its file changes are recorded under, for Rewind and Review. */
+  turnId?: string
+}
+
+/** What a subagent came back with. `agentId` names it for SendMessage. */
+export interface SubagentResult {
+  ok: boolean
+  report: string
+  agentId?: string
+}
+
+/** SendMessage: a message for a subagent that is running, or one that ended and goes on from where it stopped. */
+export interface SubagentMessage {
+  to: string
+  text: string
+  /** Go on in the background and report through a notice, instead of waiting for the reply. */
+  background: boolean
+  toolUseId: string
+  mode: AgentMode
+  entryId?: string
+  progress?: (text: string) => void
+  turnId?: string
 }
 
 export interface SkillSummary {
@@ -377,7 +416,29 @@ export interface Interaction {
 export interface Subagents {
   types(): SubagentType[]
   /** Runs a subagent to completion; resolves to its final report. */
-  run(request: SubagentRequest, signal: AbortSignal): Promise<{ ok: boolean; report: string }>
+  run(request: SubagentRequest, signal: AbortSignal): Promise<SubagentResult>
+  /** Starts a subagent in the background and returns at once; its report reaches the main agent as a notice. */
+  start?(request: SubagentRequest): Promise<{ ok: true; agentId: string } | { ok: false; report: string }>
+  /**
+   * A message for a subagent. One that runs reads it between two of its steps (`delivered`); one that ended goes on
+   * from where it stopped, with its whole conversation, also after eNCode was restarted.
+   */
+  message?(request: SubagentMessage, signal: AbortSignal): Promise<SubagentResult & { delivered?: boolean }>
+  /** Stops a subagent running in the background. Undefined when no subagent has that id. */
+  stop?(agentId: string): Promise<{ stopped: boolean; description: string } | undefined>
+}
+
+/**
+ * Work that goes on while the agent does something else, and comes back to it as a notice: a command whose lines it
+ * watches (Monitor), and a wake-up it asked for (ScheduleWakeup). The main agent's only.
+ */
+export interface BackgroundWork {
+  /** Starts a command whose output lines reach the agent as notices, in batches. `timeoutMs` null: until it ends. */
+  monitor(request: { command: string; description: string; cwd: string; timeoutMs: number | null }): Promise<{ ok: true; id: string } | { ok: false; reason: string }>
+  /** Sets the session's one wake-up, replacing the one before. */
+  wake(request: { delayMs: number; reason: string; prompt: string }): { at: number; replaced: boolean }
+  /** Cancels the wake-up; false when none was set. */
+  cancelWake(): boolean
 }
 
 export interface Skills {
@@ -413,6 +474,8 @@ export interface ToolContext {
   readonly subagents?: Subagents
   readonly skills?: Skills
   readonly goals?: Goals
+  /** Monitor and ScheduleWakeup; absent for subagents. */
+  readonly background?: BackgroundWork
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.

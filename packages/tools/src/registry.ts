@@ -79,7 +79,10 @@ export class ToolRegistry {
     return this.list(allowed).map((tool) => tool.definition)
   }
 
-  /** The tools whose definitions wait for ToolSearch: those that ask for it, once together they are long enough to matter. */
+  /**
+   * The tools whose definitions wait for ToolSearch: those that ask for it, once together they are long enough to matter,
+   * and the seldom needed built-ins that always wait.
+   */
   deferred(): readonly Tool[] {
     const names = this.deferredSet()
     return [...this.tools.values()].filter((tool) => names.has(tool.definition.name))
@@ -105,7 +108,8 @@ export class ToolRegistry {
     if (!this.deferredNames) {
       const asking = [...this.tools.values()].filter((tool) => tool.defer)
       const chars = asking.reduce((sum, tool) => sum + JSON.stringify(tool.definition).length, 0)
-      this.deferredNames = new Set(chars > DEFER_ABOVE_CHARS ? asking.map((tool) => tool.definition.name) : [])
+      const deferred = chars > DEFER_ABOVE_CHARS ? asking : asking.filter((tool) => tool.defer === 'always')
+      this.deferredNames = new Set(deferred.map((tool) => tool.definition.name))
     }
     return this.deferredNames
   }
