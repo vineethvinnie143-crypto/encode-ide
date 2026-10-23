@@ -72,6 +72,10 @@ interface UiStore {
   pluginsOpen: boolean
   automationOpen: boolean
   quickOpenOpen: boolean
+  /** What Go to file starts with: '@' for the file's symbols, '#' for the folder's, ':' for a line. */
+  quickOpenQuery: string
+  /** Grows with each request to open it, so a request while it is open starts it again. */
+  quickOpenId: number
   /** The command palette (Ctrl+K). */
   paletteOpen: boolean
   aboutOpen: boolean
@@ -97,7 +101,7 @@ interface UiStore {
   setConnectOpen(open: boolean): void
   setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
-  setQuickOpenOpen(open: boolean): void
+  setQuickOpenOpen(open: boolean, query?: string): void
   setPaletteOpen(open: boolean): void
   setAboutOpen(open: boolean): void
   setStatusOpen(open: boolean): void
@@ -157,6 +161,8 @@ export const useUi = create<UiStore>((set, get) => ({
   pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
+  quickOpenQuery: '',
+  quickOpenId: 0,
   paletteOpen: false,
   aboutOpen: false,
   statusOpen: false,
@@ -185,7 +191,8 @@ export const useUi = create<UiStore>((set, get) => ({
   setConnectOpen: (open) => set({ connectOpen: open }),
   setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
-  setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
+  setQuickOpenOpen: (open, query = '') =>
+    set((state) => (open ? { quickOpenOpen: true, quickOpenQuery: query, quickOpenId: state.quickOpenId + 1 } : { quickOpenOpen: false })),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setAboutOpen: (open) => set({ aboutOpen: open }),
   setStatusOpen: (open) => set({ statusOpen: open }),

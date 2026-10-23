@@ -10,7 +10,34 @@ import { cx } from '../../ui/cx'
 import { ChevronDown, ChevronRight, X } from '../../ui/icons'
 
 /** The height of the peek between the lines. */
-const PEEK_HEIGHT = 300
+export const PEEK_HEIGHT = 300
+
+/**
+ * A zone between the lines of `view` under `line` (1-based), for a peek named `name`: brought into sight once placed,
+ * then `focus` runs. It is placed again whenever `data` changes, and taken away with the peek.
+ */
+export function usePeekZone(view: EditorView, name: string, line: number, data: unknown, focus: () => void): HTMLDivElement {
+  const zone = useMemo(() => {
+    const element = document.createElement('div')
+    element.className = 'enc-zone peek-zone'
+    return element
+  }, [])
+  useLayoutEffect(() => {
+    view.setZones(name, [{ after: line, height: PEEK_HEIGHT, dom: zone, fixed: true }])
+    const doc = view.state.doc
+    // The peek in sight: the line it is under near the top when it would run off the bottom.
+    requestAnimationFrame(() => {
+      const box = zone.getBoundingClientRect()
+      const scroller = view.scroller.getBoundingClientRect()
+      if (box.bottom > scroller.bottom) view.scroller.scrollTop += box.bottom - scroller.bottom + 8
+      else if (box.top < scroller.top) view.scrollToPos(doc.line(Math.min(line, doc.lineCount)).from, false)
+      focus()
+    })
+    return () => view.setZones(name, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, zone, name, line, data])
+  return zone
+}
 
 /** What a peek shows: the places a server named for the symbol on `line` (1-based), under that line. */
 export interface PeekData {
@@ -62,8 +89,8 @@ function PreviewLine({ location }: { location: EditorLocation }) {
   )
 }
 
-/** The file a place is in, read-only, scrolled to it with the place marked. */
-function PeekPreview({ location }: { location: EditorLocation | undefined }) {
+/** The file a place is in, read-only, scrolled to it with the place marked, and the other places of `also` in that file. */
+export function PeekPreview({ location, also }: { location: EditorLocation | undefined; also?: readonly EditorLocation[] }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const [missing, setMissing] = useState<string | null>(null)
@@ -118,12 +145,20 @@ function PeekPreview({ location }: { location: EditorLocation | undefined }) {
       view.setState(EditorState.create({ doc: text.text, language: languageForPath(text.path), readOnly: true }))
     }
     const doc = view.state.doc
-    const from = positionOf(doc, location.line, location.character)
-    const to = Math.max(from, positionOf(doc, location.endLine, location.endCharacter))
-    view.setSource('peek', DecorationSet.of(doc, { marks: to > from ? [{ from, to, className: 'enc-mark-peek' }] : [], lines: [{ line: doc.lineAt(from).number, className: 'enc-line-peek' }] }))
+    const rangeOf = (place: EditorLocation) => {
+      const start = positionOf(doc, place.line, place.character)
+      return { from: start, to: Math.max(start, positionOf(doc, place.endLine, place.endCharacter)) }
+    }
+    const { from } = rangeOf(location)
+    const marks = [location, ...(also ?? []).filter((place) => place.path === text.path)]
+      .map(rangeOf)
+      .filter((range) => range.to > range.from)
+      .sort((a, b) => a.from - b.from)
+      .map((range) => ({ ...range, className: 'enc-mark-peek' }))
+    view.setSource('peek', DecorationSet.of(doc, { marks, lines: [{ line: doc.lineAt(from).number, className: 'enc-line-peek' }] }))
     view.select(from)
     view.scrollToPos(from, true)
-  }, [text, location])
+  }, [text, location, also])
 
   return (
     <div className="peek-preview">
@@ -139,30 +174,12 @@ function PeekPreview({ location }: { location: EditorLocation | undefined }) {
  * Esc closes the peek and hands the keys back to the editor.
  */
 export function Peek({ view, peek, current, onOpen, onClose }: { view: EditorView; peek: PeekData; current: string | null; onOpen(location: EditorLocation): void; onClose(): void }) {
-  const zone = useMemo(() => {
-    const element = document.createElement('div')
-    element.className = 'enc-zone peek-zone'
-    return element
-  }, [])
   const listRef = useRef<HTMLDivElement>(null)
+  const zone = usePeekZone(view, 'peek', peek.line, peek, () => listRef.current?.focus())
   const groups = useMemo(() => groupsOf(peek.locations, current), [peek.locations, current])
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const order = useMemo(() => groups.flatMap((group) => (collapsed.has(group.key) ? [] : group.items.map((item) => item.index))), [groups, collapsed])
   const [selected, setSelected] = useState(() => groups[0]?.items[0]?.index ?? 0)
-
-  useLayoutEffect(() => {
-    view.setZones('peek', [{ after: peek.line, height: PEEK_HEIGHT, dom: zone, fixed: true }])
-    const doc = view.state.doc
-    // The peek in sight: the line it is under near the top when it would run off the bottom.
-    requestAnimationFrame(() => {
-      const box = zone.getBoundingClientRect()
-      const scroller = view.scroller.getBoundingClientRect()
-      if (box.bottom > scroller.bottom) view.scroller.scrollTop += box.bottom - scroller.bottom + 8
-      else if (box.top < scroller.top) view.scrollToPos(doc.line(Math.min(peek.line, doc.lineCount)).from, false)
-      listRef.current?.focus()
-    })
-    return () => view.setZones('peek', [])
-  }, [view, zone, peek])
 
   useLayoutEffect(() => {
     listRef.current?.querySelector('.peek-row.is-selected')?.scrollIntoView({ block: 'nearest' })

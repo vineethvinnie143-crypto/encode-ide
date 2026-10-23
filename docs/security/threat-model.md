@@ -1176,3 +1176,49 @@ commands the servers run, and the files the host writes, creates, moves and dele
   reason, Shift+Enter previews a rename across two files and Apply makes it, its notice's Undo takes it back, a
   refactoring's command makes its change, Shift+Alt+O organizes the imports and Shift+Alt+F formats with Ctrl+Z
   taking it back, and format on type and on save act once turned on in Settings.
+
+## Symbols and calls in the editor (Editor and language intelligence 3)
+
+Written with the pull request that adds the breadcrumbs, the outline, Go to symbol in the file and in the folder, a
+line from Go to file, and the call hierarchy to the editor
+([0076](../adr/0076-the-editor-finds-its-way-by-symbols-the-servers-name-asked-only-while-shown-and-calls-are-followed-a-level-at-a-time.md)).
+The new paths are four questions the renderer asks (`code:ask`: `symbols`, `workspaceSymbols`, `callHierarchy`,
+`calls`), the folder's servers' answers to them, and the call hierarchy the host keeps between questions.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| S1 | A compromised renderer asks a question built to reach outside the folder or to break the host | The main process rebuilds each question field by field: a file made the folder's own (none only for a folder search), a query of at most 200 characters without control characters, a position, list and number as counts (a number up to 10,000), and `incoming` or `outgoing`; anything else gets no answer. The host resolves the file inside the folder's root again. | Mitigated |
+| S2 | A renderer makes a server act on a call hierarchy item it invented or changed | The renderer never sends an item. The host keeps the items of the newest hierarchy the servers made and the renderer names one by its list and number; another list, a number it does not hold, or a server that stopped since is refused with a sentence. | Mitigated |
+| S3 | A server's answer leads the editor outside the folder (a symbol in a library, a call from a file elsewhere) | A folder search keeps only symbols in the folder's own files. A function or call outside the folder is listed by its full path and is not opened; going to it says where it is, as for definitions (0074). A flat outline keeps only the symbols of the file asked about. | Mitigated |
+| S4 | A server floods the editor with symbols or calls | A file's outline is read up to 5,000 symbols and Go to symbol lists 300; a folder search keeps 1,000 and lists 200; a hierarchy starts from at most 20 functions, numbers at most 5,000 and keeps 100 places a call; a breadcrumb's folder list shows 300 entries. Every request has a time limit, and a level is asked only when the person opens it. | Mitigated |
+| S5 | A symbol's name or detail carries markup or control characters into the page | Names, containers and details are read as text cut at 300 characters, and drawn as text, never as HTML. | Mitigated |
+| S6 | Asking for symbols on every pause loads a server or the computer for nothing | A file's symbols are asked only while the breadcrumbs, the outline or Go to symbol show them, 400 ms after typing pauses; a folder search waits 150 ms after typing rests; a newer question of a kind cancels the older. | Mitigated |
+| S7 | Moving through a list moves the person's cursor and loses their place, or a jump takes the keys from a dialog | Esc puts the cursor and scroll back as they were; Enter goes and Back returns to where the list was opened. A jump that finishes while a dialog is open (Go to file, the palette) leaves the keys with it. | Mitigated |
+
+### Residual risks
+
+- **A server can name the wrong symbols or calls.** eNCode shows what the server says; it checks where a place is,
+  not that it is right. A call hierarchy built from text alone, as some servers do, can miss calls or list a name
+  that is not one.
+- **A folder search asks every running server in the folder.** They already run only in folders the person trusts
+  (0073), and the search sends them only the query.
+
+### Verification
+
+- The lsp tests read an outline given as a tree or as a flat list (nested by range, other files left out, in any
+  order), search the folder's symbols across servers, and build a call hierarchy a level at a time both ways,
+  refusing a list that was replaced. A property test nests random flat lists.
+- The workspace tests give the editor a file's outline, the folder's symbols (only the folder's own) and call
+  hierarchies with their places. The main process tests take the four questions and refuse malformed ones (a query
+  with control characters or too long, a number or direction out of bounds).
+- The renderer tests find the symbols the cursor is in, build the breadcrumbs' parts, search, sort and filter the
+  outline, draw each kind, lay out the call tree with its notes, read `@`, `#` and `:` in Go to file, rank folder
+  symbols, keep the saved layout in bounds, and name the new commands and their keys.
+- The end-to-end run, with a test server that answers outlines, folder searches and call hierarchies: the breadcrumbs
+  follow the cursor and their lists go to a symbol or show the files beside the file, Ctrl+Shift+. opens a list from
+  the keys, the outline follows, goes, filters, collapses and is moved through with the keys, Ctrl+Shift+O previews
+  a symbol, Esc puts the cursor back and Enter goes with Back returning, Ctrl+Alt+T finds a function in a file not
+  open, `:12:5` goes to a line and column, and Shift+Alt+H lists a function's callers, goes to a call, and shows what
+  another calls with a level opened from the keys.

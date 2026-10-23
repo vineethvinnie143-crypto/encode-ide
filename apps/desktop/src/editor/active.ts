@@ -7,6 +7,9 @@ export function setActiveEditor(view: EditorView | null): void {
   active = view
 }
 
+/** The editor view, shown or not; null before the first file is opened. */
+export const activeEditor = (): EditorView | null => active
+
 /** True while the editor shows a file. */
 export const hasActiveEditor = (): boolean => active !== null && active.root.isConnected && active.root.clientHeight > 0
 

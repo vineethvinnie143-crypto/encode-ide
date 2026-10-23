@@ -1,0 +1,391 @@
+/* ============================================================
+   Finding one's way by symbols: the kind tiles, the breadcrumbs
+   above the text, the outline beside it, and the call hierarchy
+   between the lines
+   ============================================================ */
+
+/* ------------------------------------------------- kind tiles */
+
+/* A symbol's kind: a letter on a tile tinted like the code it names. */
+.sym-icon {
+  --sym-tone: var(--text-3);
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--sym-tone) 15%, transparent);
+  color: var(--sym-tone);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.sym-icon.is-function {
+  --sym-tone: var(--enc-tok-function, var(--accent));
+}
+.sym-icon.is-type {
+  --sym-tone: var(--enc-tok-type, var(--warning));
+}
+.sym-icon.is-interface {
+  --sym-tone: var(--enc-tok-attr, var(--accent));
+}
+.sym-icon.is-enum {
+  --sym-tone: var(--enc-tok-constant, var(--warning));
+}
+.sym-icon.is-value {
+  --sym-tone: var(--enc-tok-property, var(--accent));
+}
+.sym-icon.is-constant {
+  --sym-tone: var(--enc-tok-number, var(--success));
+}
+.sym-icon.is-module {
+  --sym-tone: var(--enc-tok-keyword, var(--text-2));
+}
+
+/* ------------------------------------------------- the editor pane's body */
+
+/* The text and, beside it, the outline. The outline lies over the text when the pane is too narrow for both. */
+.editor-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  container-type: inline-size;
+}
+.editor-body > .editor-host {
+  min-width: 0;
+}
+
+/* ------------------------------------------------- breadcrumbs */
+
+.breadcrumbs {
+  flex-shrink: 0;
+  height: 26px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--sidebar);
+}
+.bc-list {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin: 0;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  list-style: none;
+  scrollbar-width: none;
+}
+.bc-list::-webkit-scrollbar {
+  height: 0;
+}
+.bc-part {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+.bc-sep {
+  flex-shrink: 0;
+  margin: 0 1px;
+  color: var(--text-3);
+  opacity: 0.7;
+}
+.bc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out);
+}
+.bc-item:hover,
+.bc-item.is-open {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.bc-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.bc-part.is-file .bc-item,
+.bc-part.is-symbol:last-of-type .bc-item,
+.bc-part.is-symbol:nth-last-of-type(2) .bc-item {
+  color: var(--text-2);
+}
+.bc-file-icon {
+  color: var(--text-3);
+}
+.bc-part.is-children .bc-item {
+  padding: 0 3px;
+}
+.bc-label {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-menu {
+  min-width: 220px;
+}
+
+/* ------------------------------------------------- outline */
+
+.outline-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+@container (max-width: 560px) {
+  .outline-pane {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9;
+    max-width: 85%;
+    box-shadow: var(--shadow-pop);
+  }
+}
+.outline-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+}
+.outline-resize:hover,
+.outline-resize:active {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 6px 0 12px;
+}
+.outline-title {
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.outline-tools {
+  display: flex;
+  gap: 2px;
+}
+.outline-tool {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.outline-tool:hover,
+.outline-tool[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.outline-tool.is-on {
+  color: var(--accent);
+}
+.outline-tool:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.outline-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin: 0 8px 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-6);
+  background: var(--canvas);
+  color: var(--text-3);
+}
+.outline-filter:focus-within {
+  border-color: var(--focus);
+}
+.outline-filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+.outline-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 10px;
+}
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding-right: 8px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.outline-row:hover {
+  background: var(--hover);
+}
+.outline-row.is-current {
+  background: var(--row-selected);
+  color: var(--text-1);
+}
+.outline-row:focus-visible {
+  outline: none;
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--row-selected);
+}
+.outline-twisty {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-3);
+}
+.outline-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.outline-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+}
+.outline-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ------------------------------------------------- call hierarchy */
+
+.calls-switch {
+  display: inline-flex;
+  margin-left: 4px;
+  padding: 2px;
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+}
+.calls-switch-item {
+  height: 20px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out);
+}
+.calls-switch-item:hover {
+  color: var(--text-1);
+}
+.calls-switch-item.is-on {
+  background: var(--surface-1);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  color: var(--text-1);
+}
+.calls-switch-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.calls-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding-right: 10px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.calls-row:hover:not(.is-selected) {
+  background: var(--hover);
+}
+.calls-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text-1);
+}
+.calls-list:focus-visible .calls-row.is-selected {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.calls-row .outline-twisty {
+  cursor: pointer;
+}
+.calls-name {
+  flex: none;
+  color: var(--text-1);
+}
+.calls-detail,
+.calls-file {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+}
+.calls-file {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+}
+.calls-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding-right: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-style: italic;
+}
+.calls-note.is-loading {
+  font-style: normal;
+}

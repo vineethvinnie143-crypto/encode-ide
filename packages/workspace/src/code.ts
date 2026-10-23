@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorHighlight, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorHighlight, type EditorSymbol, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -81,6 +81,32 @@ export interface EditorLocation {
   preview?: string
 }
 
+/** A symbol found by name across the folder: only the folder's own files are listed. */
+export interface EditorSymbolMatch {
+  name: string
+  kind: string
+  container?: string
+  path: string
+  /** The range of its name, or the start of the file when the server gave only the file. */
+  range: Range
+}
+
+/** A function of a call hierarchy as the editor shows it, numbered in the newest one so that its calls can be asked for. */
+export interface EditorCallFunction {
+  id: number
+  name: string
+  kind: string
+  detail?: string
+  /** Its name. */
+  at: EditorLocation
+}
+
+/** The other end of a function's calls (who calls it, or what it calls) and where those calls are. */
+export interface EditorCallEntry {
+  item: EditorCallFunction
+  sites: EditorLocation[]
+}
+
 /** What the editor asks the servers, by kind, with what each answers. */
 export interface EditorAsks {
   complete: { params: At & { triggerKind: 1 | 2 | 3; triggerCharacter?: string }; result: CompletionResult | null }
@@ -104,6 +130,17 @@ export interface EditorAsks {
   format: { params: { path: string; range?: Range; tabSize: number; insertSpaces: boolean }; result: TextEdit[] | null }
   /** The edits that format what was just typed: `ch`, which ends at the position. */
   formatOnType: { params: At & { ch: string; tabSize: number; insertSpaces: boolean }; result: TextEdit[] | null }
+  /** The file's outline, as a tree. */
+  symbols: { params: { path: string }; result: EditorSymbol[] | null }
+  /**
+   * Symbols by name across the folder, from every server running in it; `path`, the file shown ('' for none), starts its
+   * server when it is not running yet. Null while no running server searches symbols.
+   */
+  workspaceSymbols: { params: { path: string; query: string }; result: EditorSymbolMatch[] | null }
+  /** The functions at a position a call hierarchy starts from, numbered in a new hierarchy. */
+  callHierarchy: { params: At; result: { list: number; items: EditorCallFunction[] } | null }
+  /** Who calls a function of the newest hierarchy (`incoming`), or what it calls (`outgoing`). */
+  calls: { params: { path: string; list: number; id: number; direction: 'incoming' | 'outgoing' }; result: { calls: EditorCallEntry[] } | { reason: string } | null }
 }
 
 export type EditorAsk = { [K in keyof EditorAsks]: { kind: K } & EditorAsks[K]['params'] }[keyof EditorAsks]

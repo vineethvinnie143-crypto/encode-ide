@@ -10,7 +10,7 @@ import { CommandRegistry } from './registry'
 const none = () => undefined
 /** Actions that do nothing, and answer the questions about state with "no". */
 function actions(patch: Partial<AppActions> = {}): AppActions {
-  const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, ...patch }
+  const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, editorLayout: () => ({ breadcrumbs: true, outline: false }), ...patch }
   return new Proxy(base as AppActions, { get: (target, name) => (name in target ? target[name as keyof AppActions] : none) })
 }
 function registryWith(patch: Partial<AppActions> = {}): CommandRegistry {
@@ -178,6 +178,25 @@ describe('menus', () => {
   it('say Pin or Unpin by the open session', () => {
     assert.equal(registryWith({ activeSession: () => session() }).titleOf('session.pin'), 'Pin session')
     assert.equal(registryWith({ activeSession: () => session({ pinned: true }) }).titleOf('session.pin'), 'Unpin session')
+  })
+
+  it('say Show or Hide for the breadcrumbs and the outline, and open Go to file on symbols', () => {
+    const shown = registryWith({ editorLayout: () => ({ breadcrumbs: true, outline: false }) })
+    assert.equal(shown.titleOf('view.breadcrumbs'), 'Hide breadcrumbs')
+    assert.equal(shown.titleOf('view.outline'), 'Show outline')
+    const hidden = registryWith({ editorLayout: () => ({ breadcrumbs: false, outline: true }) })
+    assert.equal(hidden.titleOf('view.breadcrumbs'), 'Show breadcrumbs')
+    assert.equal(hidden.titleOf('view.outline'), 'Hide outline')
+    const asked: (string | undefined)[] = []
+    const live = registryWith({ hasEditor: () => true, hasWorkspace: () => true, quickOpen: (query) => void asked.push(query) })
+    void live.run('editor.goToSymbol')
+    void live.run('editor.goToFolderSymbol')
+    void live.run('file.quickOpen')
+    assert.deepEqual(asked, ['@', '#', undefined])
+    assert.equal(live.shortcut('editor.goToSymbol'), 'Ctrl+Shift+O')
+    assert.equal(live.shortcut('editor.goToFolderSymbol'), 'Ctrl+Alt+T')
+    assert.equal(live.shortcut('editor.focusBreadcrumbs'), 'Ctrl+Shift+.')
+    assert.equal(live.shortcut('editor.callHierarchy'), 'Shift+Alt+H')
   })
 
   it('run the command when chosen', () => {

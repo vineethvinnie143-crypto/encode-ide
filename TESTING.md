@@ -358,13 +358,28 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
 - **Ctrl+Shift+Y** opens **Problems**: every file's errors and warnings, a filter and buttons to hide each kind; click a
   row to go there (the count in the editor's footer opens it too). **F8** goes to the next error or warning, on across
   files, **Shift+F8** back; Esc puts its message away.
+- Above the text, the **breadcrumbs** show the file's folders, the file and the symbols the cursor is in, following it.
+  Click a part for what is beside it: a folder or the file lists its folder's files, a symbol the symbols beside it
+  (the current one checked). **Ctrl+Shift+.** gives them the keys with the last list open; Left and Right move between
+  parts. **View → Hide breadcrumbs** turns them off.
+- **View → Show outline** puts the file's classes, functions and methods in a column beside the text (over it in a
+  narrow pane). It follows the cursor, sorts by position, name or kind, filters by name, and moves with the arrow keys
+  and Enter. Drag its edge to make it wider.
+- **Ctrl+Shift+O** (or `@` in Go to file) lists the file's symbols: moving through the list shows each one, Esc puts
+  you back where you were, Enter goes there and Alt+Left returns. **Ctrl+Alt+T** (or `#`) searches the symbols of the
+  whole folder, also in files that are not open. `:12` or `:12:5` goes to a line, and `name.ts:12` opens a file at one.
+- **Shift+Alt+H** on a function (or right-click → Show call hierarchy) lists who calls it between the lines; the
+  **Callers / Calls** switch shows what it calls instead. Right or the arrow opens the next level, Enter goes to the
+  call, Esc closes it.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
 suggestions that come too late or in the wrong place, an import that went in twice or not at all, a key that did
 something other than you expected while a list or a snippet was open, and a jump that went to the wrong place. For
 renames and fixes: a change that missed a place or touched the wrong file, an Undo that did not put everything back,
-and formatting that moved your cursor or fought with what you typed.
+and formatting that moved your cursor or fought with what you typed. For symbols: breadcrumbs that lag behind the
+cursor, an outline that misses something or shows it in the wrong place, a folder search that finds nothing a file
+plainly has, and a call hierarchy that lists the wrong callers.
 
 ## Worktrees
 
@@ -433,5 +448,5 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: the outline and breadcrumbs, symbols across the folder, inlay hints and installing a server with
-  one click are not in the editor yet; they come with the next builds.
+- Language servers: inlay hints and installing a server with one click are not in the editor yet; they come with the
+  next builds.

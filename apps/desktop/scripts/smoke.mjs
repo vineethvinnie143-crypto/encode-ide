@@ -1495,6 +1495,7 @@ async function runLanguageServerChecks() {
 
   await runEditorAssistChecks(markerLines)
   await runEditorChangeChecks(markerLines)
+  await runEditorSymbolChecks(markerLines)
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
@@ -1973,6 +1974,224 @@ async function runEditorChangeChecks(markerLines) {
   await evaluate("window.eNCode.workspace.delete('src/lsp-shape.ts').catch(() => null)")
   await evaluate("window.eNCode.workspace.delete('src/lsp-shape-use.ts').catch(() => null)")
   console.log('[smoke] editor changes: ok')
+}
+
+/** The breadcrumbs as drawn: each part's label, `›` for the part that lists what the last one holds. */
+const CRUMBS = "[...document.querySelectorAll('.breadcrumbs .bc-part')].map((part) => part.querySelector('.bc-label')?.textContent ?? '›')"
+/** The outline's rows, and the one the cursor is in. */
+const OUTLINE = `(() => ({
+  rows: [...document.querySelectorAll('.outline-pane .outline-row .outline-name')].map((node) => node.textContent),
+  current: document.querySelector('.outline-pane .outline-row.is-current .outline-name')?.textContent ?? '',
+}))()`
+/** Go to file's rows: the name of each, and the folder or symbol it is in. */
+const QUICK_ROWS = "[...document.querySelectorAll('.quickopen-item')].map((row) => [row.querySelector('.qo-name')?.textContent ?? '', row.querySelector('.qo-dir')?.textContent ?? ''])"
+/** The call hierarchy's rows, as name@level, and its title. */
+const CALLS = `(() => ({
+  title: document.querySelector('.calls-peek .peek-title')?.textContent ?? '',
+  rows: [...document.querySelectorAll('.calls-peek .calls-row')].map((row) => row.querySelector('.calls-name').textContent + '@' + row.getAttribute('aria-level')),
+  selected: document.querySelector('.calls-peek .calls-row.is-selected .calls-name')?.textContent ?? '',
+}))()`
+
+/**
+ * Finding one's way by symbols, against the test server: the breadcrumbs follow the cursor and list what is beside
+ * each part (by mouse and from Ctrl+Shift+.), the outline beside the text (follow, click, filter, collapse, keys),
+ * Go to symbol in the file (Ctrl+Shift+O, previewing as it moves, Esc putting the cursor back) and in the folder
+ * (Ctrl+Alt+T, into a file not open), a line from Go to file, and the call hierarchy (Shift+Alt+H) both ways, a
+ * level opened from the keys.
+ */
+async function runEditorSymbolChecks(markerLines) {
+  console.log('[smoke] --- editor symbols ---')
+  const shapes = [
+    'export class Shape {',
+    '  constructor(private side: number) {}',
+    '  area(): number {',
+    '    return this.side * this.side',
+    '  }',
+    '  describe(): string {',
+    '    return `area ${this.area()}`',
+    '  }',
+    '}',
+    '',
+    'export function report(shape: Shape): string {',
+    '  return shape.describe() + shape.area()',
+    '}',
+    '',
+    'export const LIMIT = 10',
+    '',
+  ].join('\n')
+  const use = "import { report, Shape } from './lsp-symbols'\nexport function printAll(): void {\n  console.log(report(new Shape(2)))\n}\n"
+  await evaluate(`window.eNCode.workspace.write('src/lsp-symbols-use.ts', ${JSON.stringify(use)})`)
+  await evaluate(`window.eNCode.workspace.write('src/lsp-symbols.ts', ${JSON.stringify(shapes)})`)
+  await quickOpen('src/lsp-symbols.ts', 'export const LIMIT = 10')
+  await until(async () => (await markerLines()).includes('open lsp-symbols.ts'), 10000, 'the server to be given the file')
+  const crumbsAre = (want, label) =>
+    waitFor(`JSON.stringify(${CRUMBS}) === ${JSON.stringify(JSON.stringify(want))}`, 8000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CRUMBS))}`)
+    })
+
+  // The breadcrumbs: the folders, the file and the symbols the cursor is in, following it.
+  await clickAt(await wordSpot('return this.side * this.side', 'side'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(4, undefined, 'the cursor in area')
+  await crumbsAre(['src', 'lsp-symbols.ts', 'Shape', 'area'], 'the breadcrumbs follow the cursor into area')
+  await screenshot('24-editor-breadcrumbs.png')
+
+  // A symbol's list holds the ones beside it, the current one checked; choosing one goes there.
+  await click('.breadcrumbs .bc-item', 'area')
+  await waitFor("document.querySelectorAll('.bc-menu .ui-menu-item').length === 2", 6000, 'the list of what is beside area')
+  const listed = await evaluate("[...document.querySelectorAll('.bc-menu .ui-menu-item')].map((item) => [item.querySelector('.ui-menu-label')?.textContent, item.getAttribute('aria-checked')])")
+  if (JSON.stringify(listed) !== JSON.stringify([['area', 'true'], ['describe', 'false']])) throw new Error(`The breadcrumbs list ${JSON.stringify(listed)}`)
+  await sleep(300)
+  await screenshot('24-editor-breadcrumbs-menu.png')
+  await click('.bc-menu .ui-menu-item', 'describe')
+  await cursorAt(6, 3, 'the breadcrumbs go to describe')
+  await crumbsAre(['src', 'lsp-symbols.ts', 'Shape', 'describe'], 'the breadcrumbs say describe')
+
+  // The file's list holds the files beside it, the file checked.
+  await click('.breadcrumbs .bc-part.is-file .bc-item')
+  await waitFor("[...document.querySelectorAll('.bc-menu .ui-menu-label')].some((node) => node.textContent === 'lsp-symbols-use.ts')", 8000, 'the files beside the file')
+  const checked = await evaluate("document.querySelector('.bc-menu .ui-menu-item[aria-checked=\"true\"] .ui-menu-label')?.textContent ?? ''")
+  if (checked !== 'lsp-symbols.ts') throw new Error(`The file's list checks ${JSON.stringify(checked)}`)
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.bc-menu')", 4000, 'Esc closes the list')
+
+  // Ctrl+Shift+.: the keys to the breadcrumbs, the current symbol's list open on it.
+  await focusEditor()
+  await pressKey('.', { ctrl: true, shift: true })
+  await waitFor("(document.querySelector('.bc-menu .ui-menu-item.is-active .ui-menu-label')?.textContent ?? '') === 'describe'", 6000, 'Ctrl+Shift+. opens the list on describe')
+  await pressKey('ArrowUp')
+  await pressKey('Enter')
+  await cursorAt(3, 3, 'Up and Enter in the list go to area')
+
+  // The outline beside the text: the file's tree, the symbol the cursor is in marked.
+  await focusEditor()
+  await pressKey('k', { ctrl: true })
+  await waitFor("!!document.querySelector('.palette-input')", 4000, 'the palette')
+  await typeInto('.palette-input', 'Show outline')
+  await waitFor("(document.querySelector('.palette-row.is-active .palette-title')?.textContent ?? '') === 'Show outline'", 4000, 'Show outline in the palette')
+  await paletteKey('Enter')
+  const outlineIs = (rows, current, label) =>
+    waitFor(`(() => { const now = ${OUTLINE}; return JSON.stringify(now.rows) === ${JSON.stringify(JSON.stringify(rows))} && now.current === ${JSON.stringify(current)} })()`, 8000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(OUTLINE))}`)
+    })
+  await outlineIs(['Shape', 'area', 'describe', 'report', 'LIMIT'], 'area', 'the outline, with area marked')
+  await screenshot('24-editor-outline.png')
+  await click('.outline-pane .outline-row', 'report')
+  await cursorAt(11, 17, 'a row of the outline goes to its symbol')
+  await outlineIs(['Shape', 'area', 'describe', 'report', 'LIMIT'], 'report', 'the outline follows to report')
+  await typeInto('.outline-filter input', 'desc')
+  await outlineIs(['Shape', 'describe'], '', 'the filter keeps describe and what it is in')
+  await typeInto('.outline-filter input', '')
+  await click('.outline-pane [aria-label="Collapse all"]')
+  await outlineIs(['Shape', 'report', 'LIMIT'], 'report', 'Collapse all')
+  await evaluate("document.querySelector('.outline-pane .outline-row')?.focus()")
+  await pressKey('ArrowRight')
+  await outlineIs(['Shape', 'area', 'describe', 'report', 'LIMIT'], 'report', 'Right opens Shape')
+  await pressKey('ArrowDown')
+  await pressKey('Enter')
+  await cursorAt(3, 3, 'Down and Enter in the outline go to area')
+  await click('.outline-pane [aria-label="Hide the outline"]')
+  await waitFor("!document.querySelector('.outline-pane')", 4000, 'the outline hides')
+
+  // Ctrl+Shift+O: the file's symbols. Moving onto one shows it; Esc puts the cursor back.
+  await focusEditor()
+  await pressKey('o', { ctrl: true, shift: true })
+  await waitFor("document.querySelector('.quickopen-input')?.value === '@' && document.activeElement?.classList.contains('quickopen-input')", 4000, 'Ctrl+Shift+O opens Go to symbol, with the keys')
+  await waitFor(`${QUICK_ROWS}.length === 5`, 8000, 'the file has five symbols').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(QUICK_ROWS))}`)
+  })
+  await typeInto('.quickopen-input', '@desc')
+  await waitFor(`JSON.stringify(${QUICK_ROWS}) === ${JSON.stringify(JSON.stringify([['describe', 'Shape']]))}`, 6000, 'the query finds describe in Shape')
+  await cursorAt(6, 3, 'the symbol shown as the list moves')
+  await screenshot('24-go-to-symbol.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.quickopen')", 4000, 'Go to symbol closes')
+  await cursorAt(3, 3, 'Esc puts the cursor back')
+  await pressKey('o', { ctrl: true, shift: true })
+  await waitFor(`${QUICK_ROWS}.length === 5 && document.activeElement?.classList.contains('quickopen-input')`, 8000, 'Go to symbol again')
+  await typeInto('.quickopen-input', '@desc')
+  await waitFor(`${QUICK_ROWS}.length === 1`, 6000, 'describe found again')
+  await pressKey('Enter')
+  await cursorAt(6, 3, 'Enter goes to describe')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(3, 3, 'Back returns to where Go to symbol started')
+
+  // Ctrl+Alt+T: the folder's symbols, into a file not open.
+  await pressKey('t', { ctrl: true, alt: true })
+  await waitFor("document.querySelector('.quickopen-input')?.value === '#' && document.activeElement?.classList.contains('quickopen-input')", 4000, 'Ctrl+Alt+T opens Go to symbol in the folder, with the keys')
+  await typeInto('.quickopen-input', '#printAll')
+  await waitFor(`${QUICK_ROWS}.some(([name, where]) => name === 'printAll' && where === 'src/lsp-symbols-use.ts')`, 10000, 'the folder search finds printAll').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(QUICK_ROWS))}`)
+  })
+  await screenshot('24-folder-symbols.png')
+  await pressKey('Enter')
+  const place = () => evaluate(EDITOR_PLACE)
+  await until(async () => {
+    const now = await place()
+    return now.file.includes('lsp-symbols-use.ts') && now.line === 2
+  }, 10000, 'the folder symbol opens its file at it').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await place())}`)
+  })
+  await crumbsAre(['src', 'lsp-symbols-use.ts', 'printAll'], 'the breadcrumbs of the other file')
+  await pressKey('ArrowLeft', { alt: true })
+  await until(async () => (await place()).file.includes('lsp-symbols.ts') && !(await place()).file.includes('-use'), 10000, 'Back to the first file')
+  await cursorAt(3, 3, 'Back to area')
+
+  // ":" in Go to file: a line and column of the file shown.
+  await pressKey('p', { ctrl: true })
+  await waitFor("document.activeElement?.classList.contains('quickopen-input')", 4000, 'Go to file, with the keys')
+  await typeInto('.quickopen-input', ':12:5')
+  await waitFor(`(${QUICK_ROWS}[0]?.[0] ?? '') === 'Go to line 12, column 5'`, 4000, 'the line offered')
+  await pressKey('Enter')
+  await cursorAt(12, 5, ':12:5 goes to line 12, column 5')
+
+  // Shift+Alt+H: who calls area, its callers' calls shown in their file; Enter goes to one.
+  await clickAt(await wordSpot('area(): number', 'area'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(3, undefined, 'the cursor on area')
+  await pressKey('h', { shift: true, alt: true })
+  const callsAre = (title, rows, label) =>
+    waitFor(`(() => { const now = ${CALLS}; return now.title === ${JSON.stringify(title)} && JSON.stringify(now.rows) === ${JSON.stringify(JSON.stringify(rows))} })()`, 10000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CALLS))}`)
+    })
+  await callsAre('Callers of area', ['area@1', 'describe@2', 'report@2'], 'the callers of area')
+  await waitFor("document.activeElement?.classList.contains('calls-list')", 4000, 'the call hierarchy has the keys')
+  await pressKey('ArrowDown')
+  await waitFor(`${CALLS}.selected === 'describe'`, 4000, 'describe selected')
+  const callMarks = "[...document.querySelectorAll('.calls-peek .peek-preview .enc-mark-peek')].filter((box) => box.style.display !== 'none').length"
+  await waitFor(`${callMarks} === 1`, 6000, 'the call marked in the preview')
+  await screenshot('24-call-hierarchy.png')
+  await pressKey('Enter')
+  await waitFor("!document.querySelector('.calls-peek')", 4000, 'Enter closes the call hierarchy')
+  await cursorAt(7, 25, 'Enter goes to the call in describe')
+  await pressKey('ArrowLeft', { alt: true })
+  await cursorAt(3, undefined, 'Back to area')
+
+  // And the other way: what report calls, a level further opened with Right.
+  await clickAt(await wordSpot('export function report(', 'report'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await pressKey('h', { shift: true, alt: true })
+  await callsAre('Callers of report', ['report@1', 'printAll@2'], 'the callers of report, in a file not open')
+  await click('.calls-peek .calls-switch-item', 'Calls')
+  await callsAre('Calls from report', ['report@1', 'area@2', 'describe@2'], 'what report calls')
+  await pressKey('ArrowDown')
+  await pressKey('ArrowDown')
+  await pressKey('ArrowRight')
+  await callsAre('Calls from report', ['report@1', 'area@2', 'describe@2', 'area@3'], 'what describe calls, opened from the keys')
+  await screenshot('24-call-hierarchy-calls.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.calls-peek') && !!document.activeElement?.closest('.code-editor')", 4000, 'Esc closes the call hierarchy and gives the keys back')
+
+  // Tidy up.
+  for (const name of ['lsp-symbols-use.ts', 'lsp-symbols.ts']) {
+    if (await evaluate(`[...document.querySelectorAll('.editor-tab')].some((tab) => tab.querySelector('.tab-label')?.textContent === ${JSON.stringify(name)})`)) {
+      await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === ${JSON.stringify(name)})?.querySelector('.tab-close')?.click()`)
+    }
+  }
+  await until(async () => (await markerLines()).includes('close lsp-symbols.ts'), 10000, 'the server to let the file go')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-symbols.ts').catch(() => null)")
+  await evaluate("window.eNCode.workspace.delete('src/lsp-symbols-use.ts').catch(() => null)")
+  console.log('[smoke] editor symbols: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

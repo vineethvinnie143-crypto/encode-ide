@@ -5,18 +5,21 @@ import { DecorationSet, EditorView, type KeyBinding, type ViewCommand } from '@e
 import '@encode/editor-view/style.css'
 import type { CodeDiagnostic, EditorLocation } from '@shared/types'
 import { api } from '../api'
+import { modalOpen } from '../commands/useKeymap'
 import { setActiveEditor } from '../editor/active'
 import { askServers, forgetTriggers, lspAt } from '../editor/assist/ask'
 import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
 import { markupHtml } from '../editor/assist/markup'
 import { goBack, goForward, goToLocation, withOpenText, type Place } from '../editor/assist/navigation'
+import { EditorOutline } from '../editor/assist/outline'
 import { EditorRefactor } from '../editor/assist/refactor'
 import { attach, docState, indentLabel, recordState, saveScroll, scrollOf } from '../editor/docs'
 import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
 import { useCode } from '../stores/code'
+import { useEditorLayout } from '../stores/editor-layout'
 import { useEditor, type Tab } from '../stores/editor'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
@@ -26,6 +29,7 @@ import { Kbd } from '../ui/Kbd'
 import { ContextMenu, type MenuEntry } from '../ui/Menu'
 import { place } from '../ui/place'
 import { SignatureCard, SuggestWidget } from './code/Assist'
+import { CallsPeek, type CallsData } from './code/CallsPeek'
 import { Peek, type PeekData } from './code/Peek'
 import { ActionMenu, ChangePreview, LightbulbButton, RenameBox } from './code/Refactor'
 
@@ -52,6 +56,17 @@ function parseLocation(text: string, state: EditorState): number | null {
   return line.from + Math.min(column - 1, line.to - line.from)
 }
 
+/** The file's symbols are asked for only while something shows them: the breadcrumbs, the outline, Go to symbol. */
+const outlineWanted = (): boolean => {
+  const layout = useEditorLayout.getState()
+  return layout.breadcrumbs || layout.outline || useUi.getState().quickOpenOpen
+}
+
+/** The keys to the editor after a jump, unless a dialog opened meanwhile (Go to file, the palette): it keeps them. */
+function takeKeys(view: EditorView): void {
+  if (!modalOpen()) view.focus()
+}
+
 /** How long the pointer rests on a mark before its message shows. */
 const HOVER_MS = 350
 
@@ -70,6 +85,7 @@ const BINDINGS: readonly KeyBinding[] = [
   { key: 'Ctrl-Shift-r', command: 'refactor' },
   { key: 'Shift-Alt-o', command: 'organizeImports' },
   { key: 'Shift-Alt-f', command: 'formatDocument' },
+  { key: 'Shift-Alt-h', command: 'callHierarchy' },
   { key: 'F8', command: 'nextProblem' },
   { key: 'Shift-F8', command: 'previousProblem' },
   // Before the editor's own Esc: an open peek closes first.
@@ -155,6 +171,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const viewRef = useRef<EditorView | null>(null)
   const assistRef = useRef<EditorAssist | null>(null)
   const refactorRef = useRef<EditorRefactor | null>(null)
+  const outlineRef = useRef<EditorOutline | null>(null)
   /** The problem F8 went to, whose message shows once the editor is there. */
   const problemCard = useRef<{ path: string; line: number; character: number } | null>(null)
   const pathRef = useRef<string | null>(null)
@@ -162,6 +179,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [hover, setHover] = useState<Hover | null>(null)
   const [peek, setPeek] = useState<(PeekData & { from: Place }) | null>(null)
+  const [calls, setCalls] = useState<(CallsData & { from: Place }) | null>(null)
   const hoverTimer = useRef<number | undefined>(undefined)
   const hoverAsk = useRef(0)
   const linkRange = useRef<{ from: number; to: number } | null>(null)
@@ -186,6 +204,13 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     [],
   )
 
+  // The breadcrumbs or the outline shown again, or Go to symbol opened: the symbols skipped meanwhile are asked for.
+  useEffect(() => {
+    const wake = () => outlineRef.current?.wake()
+    const stops = [useEditorLayout.subscribe(wake), useUi.subscribe(wake)]
+    return () => stops.forEach((stop) => stop())
+  }, [])
+
   // A server started or stopped: what typing asks of it may have changed.
   useEffect(
     () =>
@@ -203,6 +228,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       assistRef.current = null
       refactorRef.current?.dispose()
       refactorRef.current = null
+      outlineRef.current?.dispose()
+      outlineRef.current = null
       setActiveEditor(null)
       viewRef.current?.destroy()
       viewRef.current = null
@@ -251,19 +278,46 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       return
     }
     setHover(null)
+    setCalls(null)
     setPeek({ title: feature.title, locations: withOpenText(found), line: state.doc.lineAt(pos).number, from })
   }
 
+  /** Shift+Alt+H: who calls the function at the cursor, and what it calls, between the lines under it. */
+  async function showCalls(): Promise<void> {
+    const target = viewRef.current
+    const shown = pathRef.current
+    if (!target || !shown) return
+    const state = target.state
+    const pos = state.selection.main.head
+    const word = state.doc.sliceString(wordStart(state, pos), wordEnd(state, pos))
+    const found = await askServers({ kind: 'callHierarchy', path: shown, ...lspAt(state.doc, pos) })
+    if (viewRef.current !== target || pathRef.current !== shown) return
+    if (found === null) {
+      if (!useCode.getState().report) await useCode.getState().refresh()
+      notify(noAnswerReason(useCode.getState().report, shown, 'the call hierarchy'))
+      return
+    }
+    if (!found.items.length) {
+      notify(word ? `${word} is not a function the language server can follow calls of.` : 'Put the cursor on a function to see its calls.')
+      return
+    }
+    setHover(null)
+    setPeek(null)
+    setCalls({ path: shown, list: found.list, items: found.items, line: state.doc.lineAt(pos).number, from: placeOf(target, shown) })
+  }
+
   const peekOpen = useRef(false)
-  peekOpen.current = peek !== null
+  peekOpen.current = peek !== null || calls !== null
   const cardOpen = useRef(false)
   cardOpen.current = hover !== null
 
   const commands: Record<string, ViewCommand> = {
     // Escape closes what is over the text, the peek first; with nothing open it goes on to the editor's own uses.
     closePeek: () => {
-      if (peekOpen.current) setPeek(null)
-      else if (cardOpen.current) setHover(null)
+      if (peekOpen.current) {
+        setPeek(null)
+        setCalls(null)
+      } else if (cardOpen.current) setHover(null)
       else return false
       return true
     },
@@ -274,6 +328,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     goToReferences: () => (void locate('references', 'peek'), true),
     goToImplementation: () => (void locate('implementation', 'go'), true),
     goToTypeDefinition: () => (void locate('typeDefinition', 'go'), true),
+    callHierarchy: () => (void showCalls(), true),
     navigateBack: (target) => {
       const shown = pathRef.current
       if (!goBack(shown ? placeOf(target, shown) : null)) notify('Nothing to go back to.')
@@ -310,11 +365,13 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     let current = viewRef.current
     setHover(null)
     setPeek(null)
+    setCalls(null)
     if (!state) {
       current?.setState(NOTHING)
       if (current) showMarks(current, null)
       assistRef.current?.show(null)
       refactorRef.current?.show(null)
+      outlineRef.current?.show(null)
       return
     }
     if (current) {
@@ -328,6 +385,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       setActiveEditor(created)
       assistRef.current = new EditorAssist(created, { formatOnType: () => useSettings.getState().settings?.formatOnType === true })
       refactorRef.current = new EditorRefactor(created)
+      outlineRef.current = new EditorOutline(created, outlineWanted)
       const scroll = scrollOf(path!)
       if (scroll) created.setState(state, scroll)
       created.on('transaction', (tr) => {
@@ -361,6 +419,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     attach(path!, current)
     assistRef.current?.show(path)
     refactorRef.current?.show(path)
+    outlineRef.current?.show(path)
     showMarks(current, path)
     reportCursor(state)
     reportInfo(state)
@@ -375,7 +434,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     const line = doc.line(Math.max(1, Math.min(revealLine, doc.lineCount)))
     current.select(line.from, line.to)
     current.scrollToPos(line.from, true)
-    current.focus()
+    takeKeys(current)
     useEditor.getState().consumeRevealLine()
   }, [revealLine, path])
 
@@ -388,7 +447,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     const to = Math.max(from, positionOf(doc, revealRange.end.line, revealRange.end.character))
     current.select(to === from || doc.lineAt(from).number !== doc.lineAt(to).number ? from : to, from)
     current.scrollToPos(from, true)
-    current.focus()
+    takeKeys(current)
     useEditor.getState().consumeRevealRange()
     const card = problemCard.current
     if (card && card.path === pathRef.current) {
@@ -584,6 +643,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       { id: 'peek', label: 'Peek definition', shortcut: 'Alt+F12', onSelect: run('peekDefinition') },
       { id: 'references', label: 'Go to references', shortcut: 'Shift+F12', onSelect: run('goToReferences') },
       { id: 'implementation', label: 'Go to implementation', shortcut: 'Ctrl+F12', onSelect: run('goToImplementation') },
+      { id: 'calls', label: 'Show call hierarchy', shortcut: 'Shift+Alt+H', onSelect: run('callHierarchy') },
       { kind: 'separator', id: 'navigate' },
       { id: 'rename', label: 'Rename symbol', shortcut: 'F2', disabled: !editable, onSelect: run('renameSymbol') },
       { id: 'quick-fix', label: 'Quick fix…', shortcut: 'Ctrl+.', disabled: !editable, onSelect: run('quickFix') },
@@ -609,6 +669,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
 
   const closePeek = () => {
     setPeek(null)
+    setCalls(null)
     viewRef.current?.focus()
   }
 
@@ -679,6 +740,18 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
           onOpen={(location: EditorLocation) => {
             const from = peek.from
             setPeek(null)
+            goToLocation(location, from)
+          }}
+        />
+      ) : null}
+      {view && calls ? (
+        <CallsPeek
+          view={view}
+          calls={calls}
+          onClose={closePeek}
+          onOpen={(location: EditorLocation) => {
+            const from = calls.from
+            setCalls(null)
             goToLocation(location, from)
           }}
         />

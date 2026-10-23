@@ -12,6 +12,9 @@ export {
   type CodeLocation,
   type CodeSymbol,
   type Coverage,
+  type EditorCall,
+  type EditorCallItem,
+  type EditorSymbolHit,
   type EditPlan,
   type FileDiagnostics,
   type HubOptions,
@@ -23,3 +26,4 @@ export {
 export { JSONRPC_ERRORS, JsonRpcConnection, RpcFailure, type ConnectionOptions, type RequestOptions } from './jsonrpc'
 export { COMPLETION_KINDS, DiagnosticSeverity, SYMBOL_KINDS, type Diagnostic, type MarkupContent, type ParameterInformation, type Position, type Range, type SignatureHelp, type SignatureInformation, type TextEdit, type WorkspaceEdit } from './protocol'
 export { documentKey, pathToUri, uriToPath } from './uri'
+export { fromDocumentSymbols, holds, nestSymbols, type EditorSymbol } from './symbols'

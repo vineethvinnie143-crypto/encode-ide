@@ -18,7 +18,8 @@ export interface AppActions {
   /** A session that belongs to no project, in the chats folder. */
   newChat(): void
   openFolder(): void
-  quickOpen(): void
+  /** Go to file; '@' starts it on the file's symbols, '#' on the folder's. */
+  quickOpen(query?: string): void
   save(): void
   openSettings(): void
   quit(): void
@@ -28,6 +29,11 @@ export interface AppActions {
   hasEditor(): boolean
   /** Runs one of the code editor's commands, as its key would. */
   editorCommand(name: string): void
+  /** Which of the editor's breadcrumbs and outline are shown. */
+  editorLayout(): { breadcrumbs: boolean; outline: boolean }
+  toggleEditorPart(part: 'breadcrumbs' | 'outline'): void
+  /** The keyboard to the breadcrumbs, shown first if they were hidden. */
+  focusBreadcrumbs(): void
   searchInFiles(): void
   /** Find in the open session: the thread is on screen, not under a full-width panel. */
   canFind(): boolean
@@ -136,10 +142,38 @@ function editorCommands(a: AppActions): Command[] {
     command('goToReferences', 'Go to references', 'goToReferences', 'Shift+F12', 'code symbol usages find all callers'),
     command('goToImplementation', 'Go to implementation', 'goToImplementation', 'Ctrl+F12', 'code symbol interface implementations'),
     command('goToTypeDefinition', 'Go to type definition', 'goToTypeDefinition', undefined, 'code symbol type'),
+    command('callHierarchy', 'Show call hierarchy', 'callHierarchy', 'Shift+Alt+H', 'code callers calls incoming outgoing who calls function'),
     command('triggerSuggest', 'Show suggestions', 'triggerSuggest', 'Ctrl+Space', 'code completion autocomplete intellisense'),
     command('parameterHints', 'Show parameter hints', 'triggerParameterHints', 'Ctrl+Shift+Space', 'code signature arguments call'),
     command('navigateBack', 'Go back in the editor', 'navigateBack', 'Alt+Left', 'code navigate previous location'),
     command('navigateForward', 'Go forward in the editor', 'navigateForward', 'Alt+Right', 'code navigate next location'),
+    {
+      id: 'editor.goToSymbol',
+      title: 'Go to symbol in file…',
+      group: 'Go',
+      keys: ['Ctrl+Shift+O'],
+      keywords: 'code outline function class method jump @',
+      enabled: () => a.hasEditor(),
+      run: () => a.quickOpen('@'),
+    },
+    {
+      id: 'editor.goToFolderSymbol',
+      title: 'Go to symbol in folder…',
+      group: 'Go',
+      keys: ['Ctrl+Alt+T'],
+      keywords: 'code workspace project function class search #',
+      enabled: () => a.hasWorkspace(),
+      run: () => a.quickOpen('#'),
+    },
+    {
+      id: 'editor.focusBreadcrumbs',
+      title: 'Focus breadcrumbs',
+      group: 'Go',
+      keys: ['Ctrl+Shift+.'],
+      keywords: 'code path symbols navigation bar',
+      enabled: () => a.hasEditor(),
+      run: () => a.focusBreadcrumbs(),
+    },
   ]
 }
 
@@ -208,6 +242,22 @@ export function buildCommands(a: AppActions): Command[] {
       keys: ['Ctrl+Shift+Y'],
       keywords: 'errors warnings diagnostics language server markers',
       run: () => a.showProblems(),
+    },
+    {
+      id: 'view.breadcrumbs',
+      title: 'Toggle breadcrumbs',
+      label: () => (a.editorLayout().breadcrumbs ? 'Hide breadcrumbs' : 'Show breadcrumbs'),
+      group: 'View',
+      keywords: 'editor path symbols navigation bar',
+      run: () => a.toggleEditorPart('breadcrumbs'),
+    },
+    {
+      id: 'view.outline',
+      title: 'Toggle outline',
+      label: () => (a.editorLayout().outline ? 'Hide outline' : 'Show outline'),
+      group: 'View',
+      keywords: 'editor symbols structure tree functions classes',
+      run: () => a.toggleEditorPart('outline'),
     },
     { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },

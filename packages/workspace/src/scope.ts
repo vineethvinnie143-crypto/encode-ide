@@ -4,7 +4,7 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import { EditRefused, type CodeLocation, type EditPlan, type LanguageServers } from '@encode/lsp'
+import { EditRefused, type CodeLocation, type EditorCallItem, type EditPlan, type LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import {
   folderLanguageServers,
@@ -12,10 +12,13 @@ import {
   type EditorAnswer,
   type EditorAsk,
   type EditorAsks,
+  type EditorCallEntry,
+  type EditorCallFunction,
   type EditorChangeRequest,
   type EditorChangeResult,
   type EditorDocumentChange,
   type EditorLocation,
+  type EditorSymbolMatch,
   type LanguageServerOptions,
   type LanguageServersReport,
   withPreviews,
@@ -45,6 +48,11 @@ function inFolder(root: string, file: string): string | null {
   const relative = path.relative(root, file)
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
   return relative.split(path.sep).join('/')
+}
+
+/** A function of a call hierarchy for the editor, with its place as a list shows it. */
+function callFunction(item: EditorCallItem, at: EditorLocation): EditorCallFunction {
+  return { id: item.id, name: item.name, kind: item.kind, ...(item.detail ? { detail: item.detail } : {}), at }
 }
 
 /** A change of the editor's, planned and not applied yet: the server's edit, and the command that runs after it, if any. */
@@ -229,11 +237,13 @@ export class Workspaces {
     if (!this.options.languageServers) return empty
     const lane = this.editorLane(root)
     await lane.pending
-    const at = await this.editorFile(root, ask.path)
+    // A search across the folder may come with no file shown.
+    const at = await this.editorFile(root, ask.kind === 'workspaceSymbols' && !ask.path ? '' : ask.path, ask.kind === 'workspaceSymbols')
     if (!at) return empty
     const { servers, file, root: real } = at
-    // The lightbulb's own question does not cancel the person's, nor theirs the lightbulb's.
-    const slot = ask.kind === 'resolve' || ask.kind === 'triggers' ? null : ask.kind === 'codeActions' && (ask as EditorAsks['codeActions']['params']).automatic ? 'codeActions:automatic' : ask.kind
+    // The lightbulb's own question does not cancel the person's, nor theirs the lightbulb's; each level of a call
+    // hierarchy opened is a question of its own.
+    const slot = ask.kind === 'resolve' || ask.kind === 'triggers' || ask.kind === 'calls' ? null : ask.kind === 'codeActions' && (ask as EditorAsks['codeActions']['params']).automatic ? 'codeActions:automatic' : ask.kind
     const controller = new AbortController()
     if (slot) {
       lane.asking.get(slot)?.abort()
@@ -269,6 +279,34 @@ export class Workspaces {
           return (await servers.format(file, { tabSize: a.tabSize, insertSpaces: a.insertSpaces }, a.range, signal)) as EditorAnswer<K>
         case 'formatOnType':
           return (await servers.formatOnType(file, a.line, a.character, a.ch, { tabSize: a.tabSize, insertSpaces: a.insertSpaces }, signal)) as EditorAnswer<K>
+        case 'symbols':
+          return (await servers.editorSymbols(file, signal)) as EditorAnswer<K>
+        case 'workspaceSymbols': {
+          const hits = await servers.editorWorkspaceSymbols(a.query, a.path ? file : undefined, signal)
+          if (!hits) return null as EditorAnswer<K>
+          // Only the folder's own files: the editor shows nothing else.
+          const matches: EditorSymbolMatch[] = []
+          for (const hit of hits) {
+            const inside = inFolder(real, hit.file)
+            if (inside !== null) matches.push({ name: hit.name, kind: hit.kind, ...(hit.container ? { container: hit.container } : {}), path: inside, range: hit.range })
+          }
+          return matches as EditorAnswer<K>
+        }
+        case 'callHierarchy': {
+          const prepared = await servers.editorPrepareCalls(file, a.line, a.character, signal)
+          if (!prepared) return null as EditorAnswer<K>
+          const places = await where(prepared.items.map((item) => ({ file: item.file, line: item.range.start.line, character: item.range.start.character, endLine: item.range.end.line, endCharacter: item.range.end.character })))
+          return { list: prepared.list, items: prepared.items.map((item, index) => callFunction(item, places![index])) } as EditorAnswer<K>
+        }
+        case 'calls': {
+          const answer = await servers.editorCalls(a.list, a.id, a.direction, signal)
+          if ('reason' in answer) return answer as EditorAnswer<K>
+          const own = await where(answer.calls.map(({ item }) => ({ file: item.file, line: item.range.start.line, character: item.range.start.character, endLine: item.range.end.line, endCharacter: item.range.end.character })))
+          const sites = await where(answer.calls.flatMap((call) => call.sites.map((site) => ({ file: call.file, line: site.start.line, character: site.start.character, endLine: site.end.line, endCharacter: site.end.character }))))
+          let next = 0
+          const calls: EditorCallEntry[] = answer.calls.map((call, index) => ({ item: callFunction(call.item, own![index]), sites: sites!.slice(next, (next += call.sites.length)) }))
+          return { calls } as EditorAnswer<K>
+        }
         default:
           return empty
       }
@@ -443,7 +481,8 @@ export class Workspaces {
   }
 
   /** The file a path of the editor's names in the real folder, with the folder's servers, or null outside the folder. */
-  private async editorFile(root: string, relativePath: string): Promise<{ servers: LanguageServers; file: string; root: string } | null> {
+  /** A file of a folder the editor named, with the folder's servers; `orRoot` takes '' as the folder itself. */
+  private async editorFile(root: string, relativePath: string, orRoot = false): Promise<{ servers: LanguageServers; file: string; root: string } | null> {
     let real = this.realRoots.get(root)
     if (!real) {
       real = await realPathOf(root)
@@ -451,7 +490,7 @@ export class Workspaces {
     }
     const config = this.config(real)
     const file = path.resolve(config.root, relativePath)
-    if (inFolder(config.root, file) === null) return null
+    if (inFolder(config.root, file) === null && !(orRoot && relativePath === '')) return null
     return { servers: this.languageServers(config.root)!, file, root: config.root }
   }
 

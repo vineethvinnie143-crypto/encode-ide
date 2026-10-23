@@ -54,6 +54,7 @@ export default function App() {
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
+  const quickOpenId = useUi((state) => state.quickOpenId)
   const layout = usePanels((state) => state.side.layout)
   const bottomTabs = usePanels((state) => state.bottom.tabs.length)
   const bottomOpen = usePanels((state) => state.bottom.open)
@@ -207,7 +208,7 @@ export default function App() {
         </div>
       </div>
 
-      {quickOpenOpen && <QuickOpen />}
+      {quickOpenOpen && <QuickOpen key={quickOpenId} />}
       {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
       <ConnectModelDialog />

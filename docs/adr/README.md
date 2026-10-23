@@ -65,6 +65,7 @@ say so.
 | [0073](0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md) | Worktrees are made by eNCode with hooks off, and language servers run in trusted folders for the editor and the agent | Accepted, refines 0072 |
 | [0074](0074-the-editor-asks-the-language-servers-through-checked-questions-and-draws-their-answers-with-its-own-widgets.md) | The editor asks the language servers through checked questions, and draws their answers with its own widgets | Accepted, builds on 0072 and 0073 |
 | [0075](0075-a-change-a-language-server-plans-is-checked-whole-goes-into-the-editor-or-onto-the-disk-and-can-be-seen-first-and-taken-back.md) | A change a language server plans is checked whole, goes into the editor or onto the disk, and can be seen first and taken back | Accepted, builds on 0072, 0073 and 0074 |
+| [0076](0076-the-editor-finds-its-way-by-symbols-the-servers-name-asked-only-while-shown-and-calls-are-followed-a-level-at-a-time.md) | The editor finds its way by the symbols the servers name, asked only while shown, and calls are followed a level at a time | Accepted, builds on 0072, 0074 and 0075 |
 
 ## Template
 

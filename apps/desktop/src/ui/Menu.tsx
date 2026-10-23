@@ -67,8 +67,8 @@ export function MenuPanel({
   align?: Align
   width?: number
   className?: string
-  /** Which item starts active: none (pointer opened it), the first or the last (keyboard did). */
-  start?: 'none' | 'first' | 'last'
+  /** Which item starts active: none (pointer opened it), the first or the last (keyboard did), or the checked one (else the first). */
+  start?: 'none' | 'first' | 'last' | 'checked'
   /** Clicks inside this element do not close the menu; its owner handles them. */
   ignore?: RefObject<HTMLElement | null>
   onClose: (refocus: boolean) => void
@@ -83,7 +83,11 @@ export function MenuPanel({
   const typed = useRef({ text: '', at: 0 })
   const actions = entries.filter(isAction)
   const isDisabled = (index: number) => Boolean(actions[index]?.disabled)
-  const [active, setActive] = useState(() => (start === 'none' ? -1 : moveIndex(-1, start, actions.length, isDisabled)))
+  const [active, setActive] = useState(() => {
+    if (start === 'none') return -1
+    const checked = start === 'checked' ? actions.findIndex((action) => action.checked && !action.disabled) : -1
+    return checked >= 0 ? checked : moveIndex(-1, start === 'checked' ? 'first' : start, actions.length, isDisabled)
+  })
   const [spot, setSpot] = useState<{ left: number; top: number; side: Side } | null>(null)
 
   useLayoutEffect(() => {

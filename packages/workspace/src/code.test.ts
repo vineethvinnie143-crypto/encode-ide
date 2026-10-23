@@ -150,4 +150,40 @@ describe('a folder\'s language servers', () => {
       await s.workspaces.close()
     }
   })
+
+  it('give the editor a file\'s outline, the folder\'s symbols and call hierarchies, places in the folder only', async () => {
+    const s = await setup()
+    try {
+      await s.workspaces.act(s.root, { type: 'trust' })
+      const real = await realPathOf(s.root)
+      await writeFile(path.join(real, 'b.fk'), 'function helper\n')
+      await s.workspaces.editorDocument(s.root, { kind: 'open', path: 'a.fk', text: 'function add\nadd(1)\n', dirty: true })
+      const outline = await s.workspaces.editorAsk(s.root, { kind: 'symbols', path: 'a.fk' })
+      assert.deepEqual(outline?.map((item) => [item.name, item.kind, item.children?.length]), [['add', 'function', 1]])
+
+      // Across the folder, with the file shown or with none; nothing outside the folder is asked about.
+      const found = await s.workspaces.editorAsk(s.root, { kind: 'workspaceSymbols', path: 'a.fk', query: 'help' })
+      // The fake server searches the files it was given: b.fk is not one yet.
+      assert.deepEqual(found, [])
+      await s.workspaces.editorDocument(s.root, { kind: 'open', path: 'b.fk', text: 'function helper\n', dirty: false })
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'workspaceSymbols', path: '', query: 'help' }), [
+        { name: 'helper', kind: 'function', container: 'module', path: 'b.fk', range: { start: { line: 0, character: 9 }, end: { line: 0, character: 15 } } },
+      ])
+      assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'workspaceSymbols', path: '../outside.fk', query: 'help' }), null)
+      assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'symbols', path: '../outside.fk' }), null)
+
+      // A call hierarchy: the function with its line, then who calls it, each with the lines of the calls.
+      const prepared = await s.workspaces.editorAsk(s.root, { kind: 'callHierarchy', path: 'a.fk', line: 0, character: 10 })
+      assert.deepEqual(prepared?.items, [{ id: 0, name: 'add', kind: 'function', at: { path: 'a.fk', file: path.join(real, 'a.fk'), line: 0, character: 9, endLine: 0, endCharacter: 12, preview: 'an ERROR' } }])
+      const callers = await s.workspaces.editorAsk(s.root, { kind: 'calls', path: 'a.fk', list: prepared!.list, id: 0, direction: 'incoming' })
+      assert.ok(callers && 'calls' in callers)
+      assert.deepEqual(
+        callers.calls.map((call) => [call.item.id, call.item.name, call.item.detail, call.sites.map((site) => [site.path, site.line, site.character])]),
+        [[1, 'caller', 'add', [['a.fk', 0, 9]]]],
+      )
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'calls', path: 'a.fk', list: prepared!.list + 1, id: 0, direction: 'incoming' }), { reason: 'That call hierarchy is out of date. Open it again.' })
+    } finally {
+      await s.workspaces.close()
+    }
+  })
 })

@@ -452,6 +452,67 @@ describe('the language servers of a folder', () => {
     await h.servers.dispose()
   })
 
+  it('gives the editor a document\'s outline as a tree, nests a flat one, and searches symbols across the folder', async () => {
+    const dir = await project({ 'lib.fk': 'function greet\n  body\n' })
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'function add\nfunction sub\n', true)
+    const tree = (await h.servers.editorSymbols(a))!
+    assert.deepEqual(
+      tree.map((item) => [item.name, item.kind, item.selection.start.character, item.children?.map((child) => child.name)]),
+      [
+        ['add', 'function', 9, ['inner']],
+        ['sub', 'function', 9, ['inner']],
+      ],
+    )
+    // A flat list: nested by range, in the order of the text, and nothing from another file.
+    h.servers.editorChange(a, 'function add\nfunction sub\n// flat-symbols\n', true)
+    const nested = (await h.servers.editorSymbols(a))!
+    assert.deepEqual(
+      nested.map((item) => [item.name, item.range.start.line, item.children?.map((child) => [child.name, child.kind])]),
+      [
+        ['add', 0, [['inner', 'variable']]],
+        ['sub', 1, [['inner', 'variable']]],
+      ],
+    )
+    // Across the folder: from the server of the file named, which starts for it.
+    const hits = (await h.servers.editorWorkspaceSymbols('gre', path.join(dir, 'lib.fk')))!
+    assert.deepEqual(hits.map((item) => [item.name, item.kind, item.container, item.file, item.range.start]), [['greet', 'function', 'module', path.join(dir, 'lib.fk'), { line: 0, character: 9 }]])
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'function add', true)
+    assert.equal(await bare.servers.editorSymbols(a), null)
+    assert.equal(await bare.servers.editorWorkspaceSymbols('add', a), null)
+    await bare.servers.dispose()
+  })
+
+  it('opens a call hierarchy for the editor a level at a time, and refuses one that is out of date', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'function add\nadd(1)\n', true)
+    const first = (await h.servers.editorPrepareCalls(a, 0, 10))!
+    assert.deepEqual(first.items, [{ id: 0, name: 'add', kind: 'function', file: a, range: { start: { line: 0, character: 9 }, end: { line: 0, character: 12 } } }])
+    const incoming = await h.servers.editorCalls(first.list, 0, 'incoming')
+    assert.ok('calls' in incoming)
+    assert.deepEqual(
+      incoming.calls.map((call) => [call.item.id, call.item.name, call.item.detail, call.file, call.sites]),
+      [[1, 'caller', 'add', a, [{ start: { line: 0, character: 9 }, end: { line: 0, character: 12 } }]]],
+    )
+    // The caller found is numbered in the same hierarchy: its own callers can be asked for.
+    const deeper = await h.servers.editorCalls(first.list, 1, 'incoming')
+    assert.ok('calls' in deeper && deeper.calls[0].item.id === 2)
+    const outgoing = await h.servers.editorCalls(first.list, 0, 'outgoing')
+    assert.ok('calls' in outgoing && outgoing.calls[0].item.name === 'callee' && outgoing.calls[0].file === a)
+    // A new hierarchy replaces it; a number it never gave is refused too.
+    const second = (await h.servers.editorPrepareCalls(a, 1, 1))!
+    assert.deepEqual(await h.servers.editorCalls(first.list, 0, 'incoming'), { reason: 'That call hierarchy is out of date. Open it again.' })
+    assert.deepEqual(await h.servers.editorCalls(second.list, 9, 'incoming'), { reason: 'That call hierarchy is out of date. Open it again.' })
+    // Nothing there: an empty hierarchy, not an error.
+    assert.deepEqual((await h.servers.editorPrepareCalls(a, 1, 5))?.items, [])
+    await h.servers.dispose()
+  })
+
   it('formats the editor\'s text, a range of it, and as it is typed, keeping its line breaks', async () => {
     const dir = await project({})
     const h = hub(dir)
