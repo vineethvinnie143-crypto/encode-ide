@@ -1028,3 +1028,56 @@ model, subagents that outlive the turn that started them, and sessions opened at
 - The end-to-end run starts a subagent in the background from the fake provider, sees its command ask on a card tagged
   Background with no turn running, the header say "1 agent running" and the Jobs tab show it with its type; approves
   it, and checks its report starts a turn of its own with no message of the person's.
+
+## Worktrees and language servers (Parity 3)
+
+Written with the pull request that adds EnterWorktree and ExitWorktree, eNCode's language server client, the LSP and
+LSPEdit tools, errors after every edit with the error gate, and the editor's marks
+([0073](../adr/0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md)).
+The new paths are git run by eNCode for the agent, and long-running programs found in the project or on the PATH that
+read the project, hear the editor's unsaved text and answer the agent.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| W1 | A hook the agent wrote (a project's own hook folder, such as husky's) runs outside the sandbox when eNCode makes or removes a worktree | eNCode runs git itself with fixed arguments and `core.hooksPath` pointed at a folder that does not exist; the agent's text never becomes a git command line. | Mitigated |
+| W2 | A worktree name escapes the project (`../x`, an absolute path) or breaks git (`a.lock`) | A name is one plain path segment, at most 64 characters, that is also a valid branch name; the folder is always `.encode-worktrees/<name>` in the project. | Mitigated |
+| W3 | The agent removes work that is not merged anywhere | `remove` refuses while the worktree has changes not committed or commits only on its branch, and says what they are; `discard_changes` is judged as the `git worktree remove --force` command it stands for, so it asks as that command does. | Mitigated |
+| W4 | A worktree, a whole copy of the project, floods the file list, search and `git status`, or a rewind leaves the shell in a folder that is gone | The folder is kept out of the file list, Quick Open and search, and out of `git status` by `info/exclude`; the session keeps the worktree in its log and lets go of one whose folder is gone, with a notice. | Mitigated |
+| L1 | A project runs code through a language server (TypeScript plugins in `tsconfig.json`, Rust build scripts, a server in `node_modules/.bin`) | Servers start only in folders the person trusts, and only while Settings > Language servers is on; the project's own `node_modules/.bin` is looked in only then; taking trust back stops the servers. | Mitigated (trust is the line, as for hooks and MCP servers) |
+| L2 | A server reads API keys from its environment | Servers start with the agent's environment minus anything that looks like a secret; eNCode's own keys live in the keychain and never in an environment. | Mitigated |
+| L3 | A Windows `.cmd` shim is used to run a command line through cmd.exe | eNCode never starts a `.cmd`: it reads the script an npm or pnpm shim names, which must sit inside the shim's `node_modules`, and starts it with Node directly, without a shell. Anything else is not a server. | Mitigated |
+| L4 | A hostile or broken server exhausts memory or hangs eNCode | The client closes a connection on a header that never ends or a message over 64 MB; documents over 8 MB are not given; the agent keeps at most 64 documents open; every request has a time limit and an abort; a server that keeps crashing is reported and left stopped for a while. | Mitigated |
+| L5 | A server changes files on its own (`workspace/applyEdit`) or an edit plan reaches outside the project | A server may ask for an edit only while a command eNCode runs for an approved code action is running, and only of that action's file; LSPEdit applies the plan it showed, only when every file still reads as the server saw it, never outside the project, and through the checkpoint seam so Rewind can put it back. | Mitigated |
+| L6 | What a server reports carries instructions to the model | Diagnostics reach the model in a system reminder as the servers' findings, at most 400 characters a message and a few files and lines at a time; the model is told they are about its changes, nothing more. | Residual (as for every tool result) |
+| L7 | The renderer gives the servers a file outside the folder, or the text of a folder that is no longer open | The main process resolves every path the editor names inside the open folder and drops anything else; the agent host keeps the editor's documents per folder and closes them when the folder changes; the hub ignores a file outside its root. | Mitigated |
+| L8 | Marks that no longer hold mislead the person (a server stopped, trust was taken back) | The hub takes back a server's marks when it stops, crashes or loses its folder's trust, and a file's marks when it closes; the editor drops all marks when the folder changes. | Mitigated |
+| L9 | The error gate sends the agent back again and again and spends the person's money | Once a turn by default, at most three times when set to, or never; the chat says each time; the model may answer that the errors are expected. | Mitigated |
+
+### Residual risks
+
+- **A server in a trusted folder can do anything the person can.** Trust is the person's word that the project is
+  theirs or one they accept; a server on the PATH is one the person installed.
+- **The editor's unsaved text reaches the servers.** That is what a language server is for; it stays on the computer.
+- **A model can ignore what the servers report.** The gate sends it back, and it may still finish with errors once the
+  rounds are used.
+
+### Verification
+
+- The git tests make a worktree in a real repository with a hook that would write a file, and check the hook did not
+  run; they check names, what removing would lose, removing with and without discarding, and `info/exclude`.
+- The core tests keep a session in a worktree across a restart, a reset and a rewind, and let go of one whose folder is
+  gone; the tool tests check EnterWorktree and ExitWorktree, and that removing with `discard_changes` asks.
+- The lsp tests run a language server written for them over the real wire format: framing and its limits, document
+  sync by version, every lookup, rename and code action plans with each file's text before and after, refused edits,
+  lazy start, idle stop, crash restart, the marks the editor is given and taken back, and servers looked for again once
+  the folder is trusted. The discovery tests read npm and pnpm shims and refuse one that points outside its package.
+- The workspace and agent host tests take the editor's documents by their paths in the folder, ignore one outside it,
+  and give marks only once the folder is trusted and servers are on; the core tests tell the model what an edit
+  broke, send it back once, and tell it when the errors are fixed.
+- The end-to-end run puts a test server in the demo project's `node_modules/.bin` the way npm does: the editor shows
+  no marks and says the folder is not trusted; once it is trusted the open file's error and warning are drawn and
+  counted, a mark tells its message when pointed at, typing adds a mark and undo takes it back; Settings > Language
+  servers says the server runs, found in the project; the agent writes a file with an error, is told so, is sent back
+  by the gate and fixes it; the diagnostics report lists the server; taking trust back stops it.

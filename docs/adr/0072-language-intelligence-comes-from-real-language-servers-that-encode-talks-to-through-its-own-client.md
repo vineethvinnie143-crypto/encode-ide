@@ -1,6 +1,6 @@
 # 0072. Language intelligence comes from real language servers that eNCode talks to through its own client
 
-- Status: Accepted, refines 0003
+- Status: Accepted, refines 0003; where servers run is settled by 0073
 - Date: 2026-10-23
 
 ## Context

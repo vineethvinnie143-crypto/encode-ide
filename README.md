@@ -52,7 +52,13 @@ primary platform; the code stays cross-platform.
   - time: `ScheduleWakeup` brings the agent back to a session when it asked to be, also after eNCode restarts;
   - planning: `TodoWrite`, goals, `EnterPlanMode` (it asks you first), `ExitPlanMode`;
   - knowledge: `Skill`, `WebSearch`, `WebFetch`;
-  - questions: `AskUserQuestion`.
+  - questions: `AskUserQuestion`;
+  - code intelligence: `LSP` (definitions, references, hover, symbols, calls, diagnostics, code actions) and
+    `LSPEdit` (renames across files, code actions), through the language servers installed on your computer;
+  - worktrees: `EnterWorktree` and `ExitWorktree` keep the agent's work on a branch of its own, apart from your checkout.
+
+  After every edit the agent is told what the language servers say it broke, and a turn that would end with errors it
+  made goes back to it to fix them (once by default; **Settings → Language servers**).
 
   It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
   the window, and every session is an append-only log that survives a crash and can be forked.
@@ -93,7 +99,9 @@ primary platform; the code stays cross-platform.
   tokenizers for 35 languages, multiple cursors, find and replace, undo that survives tab
   switches, and a million-line file scrolls with a native scrollbar. Characters that make
   text read differently from how it is stored (bidi controls, zero-width and hidden
-  characters) are drawn as labelled markers. The editor can also show a change against a
+  characters) are drawn as labelled markers. In a folder you trust, the language servers installed on
+  your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
+  errors and warnings as you type; eNCode talks to them through its own client and carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.
 - **Hand-written internals.**
@@ -293,7 +301,7 @@ apps/desktop/                 the Electron app (@encode/desktop)
     commands/                 the command registry: one list behind the menus, shortcuts and dialogs
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
     components/panels/        the side and bottom panels: tab strip, pages, New tab
-    editor/                   the open documents: text, history and what is on disk
+    editor/                   the open documents: text, history and what is on disk; the language servers' marks
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)
@@ -311,8 +319,9 @@ packages/diff/                Myers diff, hunks that apply and unapply, word dif
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
 packages/gateway-protocol/    the gateway's wire contract, shared by the app and the gateway
-packages/git/                 the Review tab's git: a scope's changes read and diffed, hunks staged and reverted, commits and pushes (@encode/git)
+packages/git/                 the Review tab's git: a scope's changes read and diffed, hunks staged and reverted, commits and pushes; the agent's worktrees, made with hooks off (@encode/git)
 packages/hooks/               user hooks in Claude Code's format, run in the agent's shell and environment
+packages/lsp/                 eNCode's language server client: the wire format, document sync, lookups, rename and code action plans, and a hub per folder that finds, starts and stops the servers (@encode/lsp)
 packages/mcp/                 the MCP client: stdio, Streamable HTTP and SSE, with per-server approval; the app runs it through the workspace package's hub
 packages/permissions/         shell grammar, command policy, egress and path rules
 packages/protocol/            RPC over any message port, and the JSON Schema checks
@@ -321,7 +330,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web (fetch, and search through DuckDuckGo, Brave Search, Tavily or Exa), and the Computer tool with its Windows helper
-packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do
+packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
