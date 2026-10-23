@@ -76,6 +76,7 @@ export const MENUS: readonly MenuSpec[] = [
       'view.whitespace',
       'view.inlayHints',
       'view.semanticHighlighting',
+      'view.inlineSuggest',
       'view.tabMovesFocus',
       '-',
       'editor.fold',
@@ -113,6 +114,7 @@ export const MENUS: readonly MenuSpec[] = [
       '-',
       'editor.triggerSuggest',
       'editor.parameterHints',
+      'editor.inlineSuggest',
     ],
   },
   {

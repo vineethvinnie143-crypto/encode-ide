@@ -3,6 +3,7 @@
  * registers them; the title bar menus, the keymap and the shortcut list all
  * read `commandRegistry`.
  */
+import { inlineState } from '@shared/inline'
 import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
 import { hasActiveEditor, runEditorCommand } from '../editor/active'
@@ -145,6 +146,22 @@ function createAppActions(): AppActions {
     toggleEditorPart: (part) => {
       const layout = useEditorLayout.getState()
       layout.set({ [part]: !layout[part] })
+    },
+    inlineSuggestOn: () => {
+      const settings = useSettings.getState().settings
+      return settings ? inlineState(settings).on : false
+    },
+    toggleInlineSuggest: () => {
+      const store = useSettings.getState()
+      const settings = store.settings
+      if (!settings) return
+      if (inlineState(settings).on) {
+        void store.save({ inlineSuggest: 'off' })
+        return
+      }
+      void store.save({ inlineSuggest: 'on' })
+      // Still off with them on (no model, or none the settings let answer): Settings > Editor says why.
+      if (!inlineState({ ...settings, inlineSuggest: 'on' }).on) ui().openSettings('editor', 'editor.inlineSuggest')
     },
     focusBreadcrumbs: () => {
       const layout = useEditorLayout.getState()

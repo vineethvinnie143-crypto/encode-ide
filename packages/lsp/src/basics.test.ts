@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { check, gen } from '@encode/testkit'
-import { LANGUAGE_SERVERS, serverFor, type ServerSpec } from './catalog'
+import { companionFiles, LANGUAGE_SERVERS, serverFor, usesTailwind, type ServerSpec } from './catalog'
 import { discover, shimScript } from './discover'
 import { applyTextEdits, EditConflict } from './edits'
 import type { TextEdit } from './protocol'
@@ -191,6 +191,27 @@ describe('the servers eNCode knows', () => {
     for (const command of commands) assert.doesNotMatch(command, /vscode/i)
   })
 
+  it('runs Tailwind\'s server beside the main one for the files of its languages, and never its CSS server', () => {
+    const tailwind = LANGUAGE_SERVERS.find((item) => item.id === 'tailwind')!
+    assert.deepEqual(Object.keys(tailwind.extensions), [])
+    assert.deepEqual(companionFiles(tailwind).sort(), ['.css', '.htm', '.html', '.jsx', '.less', '.scss', '.svelte', '.tsx'])
+    assert.equal(serverFor('/p/src/index.css')?.spec.id, 'web')
+    assert.equal(serverFor('/p/src/App.svelte')?.spec.id, 'svelte')
+    // The package also carries css-language-server, built on VS Code's CSS service: only Tailwind's own runs.
+    const runs = [tailwind.installer && 'script' in tailwind.installer ? tailwind.installer.script : '', ...tailwind.candidates.map((candidate) => candidate.command)]
+    for (const name of runs) assert.match(name, /tailwindcss-language-server$/)
+    const files = new Map([
+      ['/a/tailwind.config.ts', ''],
+      ['/b/package.json', JSON.stringify({ devDependencies: { tailwindcss: '^4.1.0' } })],
+      ['/c/package.json', JSON.stringify({ dependencies: { '@tailwindcss/vite': '^4.1.0' } })],
+      ['/d/package.json', JSON.stringify({ dependencies: { react: '^19.0.0' } })],
+      ['/e/package.json', '{ not json'],
+    ])
+    const exists = (file: string) => files.has(file.replace(/\\/g, '/'))
+    const read = (file: string) => files.get(file.replace(/\\/g, '/')) ?? null
+    assert.deepEqual(['/a', '/b', '/c', '/d', '/e', '/f'].map((dir) => usesTailwind(dir, exists, read)), [true, true, true, false, false, false])
+  })
+
   it('points TypeScript at the project\'s own compiler when it has one', () => {
     const spec = LANGUAGE_SERVERS.find((item) => item.id === 'typescript')!
     assert.deepEqual(spec.initializationOptions?.('/p', () => false), { hostInfo: 'eNCode' })
@@ -235,5 +256,20 @@ describe('finding a server', () => {
     const files = new Set(['C:\\bin\\fake-ls.ps1', 'C:\\bin\\other-ls.exe'])
     const plan = discover(spec, 'C:\\p', { platform: 'win32', which: (name) => (name === 'fake-ls' ? 'C:\\bin\\fake-ls.ps1' : name === 'other-ls' ? 'C:\\bin\\other-ls.exe' : null), isFile: (file) => files.has(file) })
     assert.deepEqual(plan, { file: 'C:\\bin\\other-ls.exe', args: [], found: 'the PATH', command: 'other-ls' })
+  })
+
+  it("runs eNCode's own server with eNCode's Node.js, and says so when this copy has none", () => {
+    const web = LANGUAGE_SERVERS.find((item) => item.id === 'web')!
+    const node = { file: 'C:\\eNCode\\eNCode.exe', env: { ELECTRON_RUN_AS_NODE: '1' } }
+    const builtin = { dir: 'C:\\eNCode\\resources\\app.asar\\dist\\electron', node }
+    const script = 'C:\\eNCode\\resources\\app.asar\\dist\\electron\\weblang-server.cjs'
+    // Never looked for on the PATH or in the project: a program there with its name is not eNCode's.
+    const which = () => 'C:\\bin\\web.exe'
+    assert.deepEqual(discover(web, 'C:\\p', { platform: 'win32', which, projectBins: true, builtin, isFile: (file) => file === script }), { file: node.file, args: [script, '--stdio'], found: 'eNCode', command: 'web', env: node.env })
+    assert.match((discover(web, 'C:\\p', { platform: 'win32', which, builtin, isFile: () => false }) as { missing: string }).missing, /missing from this copy of eNCode/)
+    assert.match((discover(web, '/p', { which }) as { missing: string }).missing, /comes with the eNCode app/)
+    assert.equal(serverFor('C:\\p\\ui\\index.html')?.spec.id, 'web')
+    assert.equal(serverFor('/p/tsconfig.json')?.languageId, 'json')
+    assert.equal(serverFor('/p/.babelrc')?.languageId, 'jsonc')
   })
 })

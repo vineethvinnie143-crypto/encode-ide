@@ -9,6 +9,7 @@ import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/servic
 import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
 import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
+import { InlineRequests, readInlineRequest } from './services/inline-suggest'
 import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
@@ -22,11 +23,13 @@ import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
 import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
+import { inlineState } from '../shared/inline'
 import type { SearchProviderId } from '../shared/search'
 import type {
   AgentStartInput,
   ApprovalAnswer,
   EditorChangeResult,
+  InlineSuggestAnswer,
   McpAction,
   PermissionsAction,
   PlanRequest,
@@ -89,6 +92,8 @@ function hostFailure(error: unknown): Error {
 export function registerIpc(deps: IpcDeps): void {
   const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics, testNotice } = deps
   const host = agent.client
+  /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
+  const inline = new InlineRequests()
 
   /**
    * Only the app's own page may call the main process: the top frame of the
@@ -259,6 +264,25 @@ export function registerIpc(deps: IpcDeps): void {
       ok: false as const,
       reason: isRpcError(error) && error.code === 'closed' ? HOST_STOPPED_MESSAGE : 'The language servers did not finish the change in time. Look over the files it would change before you try again.',
     }))
+  })
+  // A suggestion as you type (ADR 0087): only while the settings have them on, for a file of the open folder.
+  handle('code:inline', async (value: unknown): Promise<InlineSuggestAnswer> => {
+    const root = workspace.current?.root
+    if (!root) return { kind: 'none' }
+    const state = inlineState(settings.get())
+    if (!state.on) return { kind: 'paused', message: state.reason, stop: true }
+    const request = readInlineRequest(value, (rel) => {
+      try {
+        return workspace.toRelative(workspace.resolve(rel)) || null
+      } catch {
+        return null
+      }
+    })
+    if (!request) return { kind: 'none' }
+    return inline.run(request.id, (signal) => agent.inlineSuggest(root, request, signal))
+  })
+  handle('code:inline-cancel', (id: unknown) => {
+    if (typeof id === 'number') inline.cancel(id)
   })
   handle('code:report', () => {
     const root = workspace.current?.root

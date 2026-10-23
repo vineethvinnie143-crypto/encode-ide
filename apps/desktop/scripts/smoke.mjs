@@ -127,11 +127,11 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
+const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221, '\\': 220 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
-const CODE_NAMES = { '.': 'Period', '[': 'BracketLeft', ']': 'BracketRight' }
+const CODE_NAMES = { '.': 'Period', '[': 'BracketLeft', ']': 'BracketRight', '\\': 'Backslash' }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
 async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
@@ -453,7 +453,7 @@ async function runFirstStartChecks() {
   if (!(await click('.model-picker-link', 'Roles'))) throw new Error('no way to the Roles settings')
   await waitFor("!!document.querySelector('.settings-page .settings-roles')", 8000, 'the Roles settings')
   const roles = await evaluate("[...document.querySelectorAll('.role-row')].map((node) => node.dataset.role)")
-  if (roles.join() !== 'main,explore,planner,reviewer,summarizer,utility') throw new Error(`the Roles settings list ${roles.join()}`)
+  if (roles.join() !== 'main,explore,planner,reviewer,summarizer,utility,inline') throw new Error(`the Roles settings list ${roles.join()}`)
   await waitFor("document.querySelectorAll('[data-section=\"status\"] .status-row').length >= 1", 30000, 'the connections report')
   const report = await evaluate("document.querySelector('[data-section=\"status\"]').textContent")
   if (!report.includes('Custom')) throw new Error(`the connections report reads "${report}"`)
@@ -649,6 +649,7 @@ async function runProviderPhase() {
   await runRewindChecks()
   await runMcpChecks()
   await runLanguageServerChecks()
+  await runInlineSuggestionChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -656,6 +657,121 @@ async function runProviderPhase() {
 
 async function providerStats() {
   return (await fetch(`http://127.0.0.1:${providerPort}/__stats`)).json()
+}
+
+/** The ghost text the editor draws now, its first line and the rows below it joined, or null when there is none. */
+const GHOST_TEXT = `(() => {
+  const inline = document.querySelector('.code-editor .enc-inlay-ghost')
+  if (!inline) return null
+  return [inline.dataset.label ?? '', ...[...document.querySelectorAll('.code-editor .enc-ghost-line')].map((row) => row.textContent)].join('\\n')
+})()`
+
+/**
+ * Suggestions as you type (ADR 0087), against the test provider. Once typing pauses the editor asks the model of the
+ * Inline suggestions role, which follows the main model here, and draws its answer faded at the cursor without
+ * making it text. Tab takes it as one step for Ctrl+Z, Ctrl+Right takes a word, Esc puts it away, and Alt+\\ asks at
+ * once, the answer kept for the place asking nothing again. A credential in the file is not sent, a file of secrets
+ * sends nothing, and turned off in Settings > Editor nothing is asked.
+ */
+async function runInlineSuggestionChecks() {
+  console.log('[smoke] --- suggestions as you type ---')
+  const source = "export function add(a: number, b: number): number {\n  return\n}\n\nconst client_secret = 'ghost-check-value-0123'\n"
+  await evaluate(`window.eNCode.workspace.write('src/ghost-check.ts', ${JSON.stringify(source)})`)
+  await quickOpen('src/ghost-check.ts', 'export function add(a: number, b: number): number {')
+  const asked = async () => (await providerStats()).inlineRequests ?? 0
+  const lastInline = async () => (await fetch(`http://127.0.0.1:${providerPort}/__last-inline`)).json()
+  const ghostIs = (text, label) =>
+    waitFor(`${GHOST_TEXT} === ${JSON.stringify(text)}`, 8000, label).catch(async (error) => {
+      const footer = await evaluate("document.querySelector('.editor-footer-ghost')?.title ?? null")
+      throw new Error(`${error.message}: drawn ${JSON.stringify(await evaluate(GHOST_TEXT))}, asked ${await asked()} times, footer ${JSON.stringify(footer)}`)
+    })
+  const lineIs = (text, label) => waitFor(`${RENDERED_LINES}.includes(${JSON.stringify(text)})`, 6000, label)
+
+  // On by default with a model of one's own: the footer says so.
+  const footer = await evaluate("document.querySelector('.editor-footer-ghost')?.title ?? ''")
+  if (!footer.startsWith('Suggestions as you type are on.')) throw new Error(`The footer does not say suggestions are on: ${JSON.stringify(footer)}`)
+
+  // A space after return, then a pause: the sum is drawn after the cursor and is not in the text.
+  const before = await asked()
+  await clickAt(await wordSpot('  return', 'return'))
+  await pressKey('End')
+  await send('Input.insertText', { text: ' ' })
+  await ghostIs('a + b', 'the suggestion after return')
+  if ((await evaluate(RENDERED_LINES)).some((line) => line.includes('a + b'))) throw new Error('The suggestion is in the text before it is taken')
+  const sent = await lastInline()
+  console.log('[smoke] inline request:', JSON.stringify({ model: sent.model, tools: sent.tools.length, maxTokens: sent.maxTokens, chars: sent.user.length }))
+  if (!sent.user.includes('  return <cursor/>')) throw new Error(`The request does not mark the cursor: ${JSON.stringify(sent.user)}`)
+  if (sent.user.includes('ghost-check-value-0123')) throw new Error('A credential in the file went with the suggestion request')
+  if (sent.tools.length) throw new Error('The suggestion request offered tools')
+  if ((await asked()) - before !== 1) throw new Error(`One pause should ask once, asked ${(await asked()) - before} times`)
+  await screenshot('56-ghost-text.png')
+
+  // Tab takes it; Ctrl+Z takes it back in one step.
+  await pressKey('Tab')
+  await lineIs('  return a + b', 'Tab takes the suggestion')
+  if ((await evaluate(GHOST_TEXT)) !== null) throw new Error('The suggestion is still drawn after Tab took it')
+  await pressKey('z', { ctrl: true })
+  await lineIs('  return ', 'Ctrl+Z takes the suggestion back in one step')
+
+  // Alt+\\ at the same place: the answer kept for it is drawn without asking again; Esc puts it away.
+  const kept = await asked()
+  await pressKey('\\', { alt: true })
+  await ghostIs('a + b', 'Alt+\\ draws the kept suggestion')
+  if ((await asked()) !== kept) throw new Error('The suggestion kept for this place was asked for again')
+  await pressKey('Escape')
+  await waitFor(`${GHOST_TEXT} === null`, 4000, 'Esc puts the suggestion away')
+  await sleep(700)
+  if ((await evaluate(GHOST_TEXT)) !== null) throw new Error('The suggestion came back after Esc')
+
+  // Ctrl+Right takes a word, and the rest stays drawn.
+  await pressKey('\\', { alt: true })
+  await ghostIs('a + b', 'Alt+\\ again')
+  await pressKey('ArrowRight', { ctrl: true })
+  await lineIs('  return a', 'Ctrl+Right takes a word')
+  await ghostIs(' + b', 'the rest of the suggestion after a word is taken')
+  await pressKey('Escape')
+  await pressKey('z', { ctrl: true })
+  await lineIs('  return ', 'Ctrl+Z takes the word back')
+
+  // In an empty line a suggestion may run over lines: the first drawn at the cursor, the others as rows below.
+  await clickAt(await wordSpot('}', '}'))
+  await pressKey('ArrowDown')
+  await send('Input.insertText', { text: ' ' })
+  await ghostIs('// ghost check\n return a + b', 'a suggestion of two lines')
+  await pressKey('Escape')
+  await pressKey('z', { ctrl: true })
+
+  // A file of secrets sends nothing.
+  await evaluate(`window.eNCode.workspace.write('secrets.json', ${JSON.stringify('{\n  "token": "abc"\n}\n')})`)
+  await quickOpen('secrets.json', '"token": "abc"')
+  const secrets = await asked()
+  await clickAt(await wordSpot('"token": "abc"', 'token'))
+  await pressKey('End')
+  await send('Input.insertText', { text: ',' })
+  await sleep(1500)
+  if ((await asked()) !== secrets) throw new Error('A file of secrets was sent for a suggestion')
+  if ((await evaluate(GHOST_TEXT)) !== null) throw new Error('A suggestion was drawn in a file of secrets')
+  await pressKey('z', { ctrl: true })
+
+  // Off in Settings > Editor: nothing is asked, and the footer shows no button for them.
+  await openSettings('Editor')
+  if (!(await click('[role="radiogroup"][aria-label="Suggest code as you type"] [role="radio"]', 'Off'))) throw new Error('No Off for suggestions as you type in Settings > Editor')
+  await settingIs("settings.inlineSuggest === 'off'", 'suggestions as you type off')
+  await closeSettings()
+  await quickOpen('src/ghost-check.ts', 'export function add(a: number, b: number): number {')
+  await waitFor("!document.querySelector('.editor-footer-ghost')", 4000, 'the footer drops the suggestions button')
+  const off = await asked()
+  await clickAt(await wordSpot('  return', 'return'))
+  await pressKey('End')
+  await send('Input.insertText', { text: 'x' })
+  await sleep(1500)
+  if ((await asked()) !== off || (await evaluate(GHOST_TEXT)) !== null) throw new Error('Turned off, a suggestion was still asked for')
+  await pressKey('z', { ctrl: true })
+  await openSettings('Editor')
+  await click('[role="radiogroup"][aria-label="Suggest code as you type"] [role="radio"]', 'Auto')
+  await settingIs("settings.inlineSuggest === 'auto'", 'suggestions as you type back to Auto')
+  await closeSettings()
+  console.log(`[smoke] suggestions as you type: ${(await asked()) - before} requests`)
 }
 
 /** Once its first turn is over a session is named by the model in a few words, and the name is kept. */
@@ -1415,7 +1531,7 @@ const EDITOR_MARKS = `(() => ({
   warnings: [...document.querySelectorAll('.enc-squiggle-warning')].filter((box) => box.style.display !== 'none').length,
   gutter: document.querySelectorAll('.enc-gutter-num.enc-gutter-error').length,
   counts: document.querySelector('.editor-footer-count')?.getAttribute('title') ?? '',
-  server: document.querySelector('.editor-footer .editor-footer-button')?.textContent ?? '',
+  server: document.querySelector('.editor-footer .editor-footer-button:not(.editor-footer-ghost)')?.textContent ?? '',
 }))()`
 
 /**
@@ -1527,6 +1643,8 @@ async function runLanguageServerChecks() {
   }
   await screenshot('ui-dark-settings-language-servers.png')
   await closeSettings()
+  // After the screen above, which counts the one server running.
+  await runWebLanguageChecks()
   await runInstallOfferChecks()
 
   // The agent: told what its edit broke, sent back once when it wants to finish, and it fixes the file.
@@ -1566,6 +1684,32 @@ async function runLanguageServerChecks() {
 }
 
 /**
+ * eNCode's own JSON, CSS and HTML server (ADR 0085), the real one, started from the app's own files with its Node.js:
+ * package.json is checked against eNCode's schema, a CSS slip is named with the likely property, and the server is
+ * shown as eNCode's in the footer.
+ */
+async function runWebLanguageChecks() {
+  console.log('[smoke] --- JSON, CSS and HTML ---')
+  const marks = async (want, label) =>
+    waitFor(`(() => { const now = ${EDITOR_MARKS}; return now.warnings === ${want} && now.server.startsWith('JSON, CSS and HTML') })()`, 20000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(EDITOR_MARKS))}`)
+    })
+  await evaluate(`window.eNCode.workspace.write('web-check/package.json', ${JSON.stringify('{\n  "name": "web-check",\n  "type": "esm"\n}\n')})`)
+  await quickOpen('web-check/package.json', '"type": "esm"')
+  await marks(1, 'the schema check of package.json')
+  const counts = await evaluate(EDITOR_MARKS)
+  await evaluate(`window.eNCode.workspace.write('web-check/site.css', ${JSON.stringify('a {\n  colr: red;\n  display: flex;\n}\n')})`)
+  await quickOpen('web-check/site.css', 'colr: red')
+  await marks(1, 'the unknown CSS property')
+  await screenshot('25-web-languages.png')
+  for (const name of ['site.css', 'package.json']) {
+    if (!(await click(`.editor-tab[title$="web-check/${name}"] .tab-close, .editor-tab[title$="web-check\\\\${name}"] .tab-close`))) throw new Error(`no tab for web-check/${name}`)
+    await evaluate(`window.eNCode.workspace.delete('web-check/${name}').catch(() => null)`)
+  }
+  console.log(`[smoke] JSON, CSS and HTML: ok (${JSON.stringify(counts)})`)
+}
+
+/**
  * One-click installs (ADR 0083), offline: a YAML file whose server is missing gets the offer above it, Install… opens
  * the dialog with what would be downloaded (read through the main and agent processes from eNCode's own list), Cancel
  * closes it without installing, and Not now hides the offer for YAML on this computer. Settings offers Install… too.
@@ -1574,7 +1718,7 @@ async function runInstallOfferChecks() {
   console.log('[smoke] --- language server installs ---')
   await evaluate("window.eNCode.workspace.write('lsp-offer.yaml', 'name: demo\\n')")
   await quickOpen('lsp-offer.yaml', 'name: demo')
-  const footerText = "document.querySelector('.editor-footer .editor-footer-button')?.textContent ?? ''"
+  const footerText = "document.querySelector('.editor-footer .editor-footer-button:not(.editor-footer-ghost)')?.textContent ?? ''"
   await waitFor(`(${footerText}).startsWith('YAML')`, 10000, 'the footer to name the YAML server')
   const footer = await evaluate(footerText)
   if (footer !== 'YAML: not installed') {
@@ -3274,7 +3418,7 @@ async function runEffortChecks() {
   if (!(await pick('Effort for each role…'))) throw new Error('no way from the effort menu to the roles')
   await waitFor("!!document.querySelector('.settings-page .settings-roles .role-effort')", 8000, 'the Roles settings with an effort for each role')
   const shown = await evaluate("[...document.querySelectorAll('.role-row')].map((row) => row.dataset.role + '=' + row.querySelector('.role-effort select').value).join()")
-  if (shown !== 'main=low,explore=default,planner=default,reviewer=default,summarizer=default,utility=default') throw new Error(`the roles show ${shown}`)
+  if (shown !== 'main=low,explore=default,planner=default,reviewer=default,summarizer=default,utility=default,inline=default') throw new Error(`the roles show ${shown}`)
   await selectOption('.role-row[data-role="explore"] .role-effort select', 'max')
   await sleep(250)
   await screenshot('ui-dark-role-efforts.png')

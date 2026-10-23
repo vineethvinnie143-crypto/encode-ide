@@ -37,7 +37,7 @@ export type AgentStatus =
 export type ProfileKind = 'custom' | 'openrouter' | 'demo'
 
 /** The jobs a model can be given; the names core and the model router use. */
-export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility'
+export type ModelRole = 'main' | 'explore' | 'planner' | 'reviewer' | 'summarizer' | 'utility' | 'inline'
 
 /** How hard a model thinks before it answers. The providers map it to their own dial; a model without one ignores it. */
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -60,6 +60,13 @@ export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | '
  * sends it back once to fix them, `on` up to three times, `off` lets it finish and only tells it.
  */
 export type ErrorGate = 'auto' | 'on' | 'off'
+
+/**
+ * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
+ * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
+ * `off`: never. See shared/inline.ts.
+ */
+export type InlineSuggest = 'auto' | 'on' | 'off'
 
 /**
  * Where API keys live: encrypted by the OS keychain on disk, or, when no
@@ -97,6 +104,8 @@ export interface Settings {
   formatOnSave: boolean
   /** The editor formats a line through its language server as it is typed, after `;`, `}` and the like. Default off. */
   formatOnType: boolean
+  /** See InlineSuggest. Default `auto`. */
+  inlineSuggest: InlineSuggest
   /** See ErrorGate. Default `auto`. */
   errorGate: ErrorGate
   /** A notice when a request finishes. Default `background`. */
@@ -652,6 +661,8 @@ export interface LanguageServerInfo {
   installError?: string
   /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
   libraries?: LanguageLibraryInfo[]
+  /** It runs beside the server a file has, for the files of its languages, in a folder that uses it (ADR 0086). */
+  companion?: true
 }
 
 /** A library eNCode installs for a server to read, listed under the server. */
@@ -943,6 +954,37 @@ export interface EditorAsks {
   /** Who calls a function of the newest hierarchy (`incoming`), or what it calls (`outgoing`). */
   calls: { params: { path: string; list: number; id: number; direction: 'incoming' | 'outgoing' }; result: { calls: EditorCallEntry[] } | { reason: string } | null }
 }
+
+/**
+ * What the editor sends for a suggestion at the cursor (ADR 0087). The main process checks every field and cuts what is
+ * too long (shared/inline.ts); the agent host leaves out what the folder's rules keep from the agent and what looks like
+ * a secret, and asks the model of the Inline suggestions role.
+ */
+export interface InlineSuggestRequest {
+  /** Names the request, so that `cancelInline` can stop it. */
+  id: number
+  /** As the file tree names it. */
+  path: string
+  /** The editor's language id for the file. */
+  language: string
+  /** The text before the cursor, from the start of a line. */
+  prefix: string
+  /** The text after the cursor, to the end of a line. */
+  suffix: string
+  /** Only spaces follow the cursor in its line, so the suggestion may run over several lines. */
+  multiline: boolean
+  /** Parts of other files open in the editor that look like the code at the cursor, by their paths in the tree. */
+  snippets: { path: string; text: string }[]
+}
+
+/**
+ * What came back: text to show; nothing to suggest; or no suggestion for now, `message` saying why for the editor's
+ * status line, with `until` when trying again later may help and `stop` when only a change of settings will.
+ */
+export type InlineSuggestAnswer =
+  | { kind: 'text'; text: string }
+  | { kind: 'none' }
+  | { kind: 'paused'; message: string; until?: number; stop?: boolean }
 
 /**
  * A change the editor asks for through the servers. `open` names every file the editor has open, so that none of them
@@ -1523,5 +1565,9 @@ export interface EncodeApi {
     onMarks(cb: (marks: FileMarks) => void): () => void
     /** A server started, stopped or failed: ask for the report again. */
     onChanged(cb: () => void): () => void
+    /** A suggestion at the cursor from the model of the Inline suggestions role; a newer request stops an older one. */
+    inline(request: InlineSuggestRequest): Promise<InlineSuggestAnswer>
+    /** Stops the request `id` if it still runs; it answers `none`. */
+    cancelInline(id: number): void
   }
 }

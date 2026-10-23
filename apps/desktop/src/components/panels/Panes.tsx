@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react'
+import { inlineState } from '@shared/inline'
 import type { BackgroundJob } from '@shared/types'
 import { api } from '../../api'
+import { useGhost } from '../../editor/assist/ghost'
+import { ghostFooter } from '../../editor/assist/ghost-text'
 import { tooLargeForServers } from '../../editor/language'
 import { useProblems } from '../../editor/marks'
 import { footerStatus, installOffer, serverForPath } from '../../panels/code'
 import { useCode } from '../../stores/code'
 import { useEditor } from '../../stores/editor'
 import { usePanels } from '../../stores/panels'
+import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import type { SidebarView } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Activity, AlertTriangle, Bot, Clock, Code2, Download, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, SquareTerminal, XCircle } from '../../ui/icons'
+import { Activity, AlertTriangle, Bot, Clock, Code2, Download, Eye, GitBranch, GitPullRequest, Files, Globe, ListTree, Search, Sparkles, SquareTerminal, XCircle } from '../../ui/icons'
 import type { PanelTabKind } from '../../panels/model'
 import CodeEditor from '../CodeEditor'
 import { jobText } from '../jobs-text'
@@ -57,6 +61,9 @@ function CodeStatus({ path }: { path: string }) {
   const server = serverForPath(report, path)
   const open = () =>
     report?.state === 'on' && server?.state === 'missing' && server.installer && !server.installing ? useCode.getState().offerInstall(server.id) : useUi.getState().openSettings('code')
+  const ghost = useGhost((state) => state.status)
+  const settings = useSettings((state) => state.settings)
+  const suggestions = ghostFooter(ghost, settings ? inlineState(settings) : null)
   return (
     <span className="editor-footer-group">
       {count && (count.errors > 0 || count.warnings > 0) && (
@@ -75,6 +82,18 @@ function CodeStatus({ path }: { path: string }) {
       {status && (
         <button type="button" className={cx('editor-footer-button', `is-${status.tone}`)} title={status.title} onClick={open}>
           <span className="editor-footer-label">{status.text}</span>
+        </button>
+      )}
+      {suggestions && (
+        <button
+          type="button"
+          className={cx('editor-footer-button', 'editor-footer-ghost', suggestions.tone !== 'idle' && `is-${suggestions.tone}`)}
+          title={suggestions.title}
+          aria-label={suggestions.title}
+          onClick={() => useUi.getState().openSettings('editor', 'editor.inlineSuggest')}
+        >
+          <Sparkles size={12} aria-hidden="true" />
+          {suggestions.text && <span className="editor-footer-label">{suggestions.text}</span>}
         </button>
       )}
     </span>

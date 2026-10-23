@@ -27,7 +27,7 @@ import {
 } from '@encode/providers'
 import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, type ModelRouter, type RouterAlert, type RouterOptions } from '@encode/router'
 import { createWorktreeGit } from '@encode/git'
-import { SearchError, createSearchProvider, createWebAccess, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
+import { SearchError, createSearchProvider, createWebAccess, realPathOf, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Sandbox } from '@encode/sandbox'
 import { Workspaces, type LanguageServerOptions } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
@@ -36,6 +36,7 @@ import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import { reviewChanges } from './code-review'
 import { draftCommitMessage } from './commit-message'
+import { inlineInput, suggestInline } from './inline-suggest'
 
 export interface HostRuntimeOptions {
   /** Lets a test replace pieces of the host (the shell, the web, the model). */
@@ -83,6 +84,8 @@ const SEARCH_CHECK_TIMEOUT_MS = 20_000
 const DRAFT_TIMEOUT_MS = 90_000
 /** A review reads a large change and thinks it over: it gets longer than a commit message. */
 const REVIEW_TIMEOUT_MS = 5 * 60_000
+/** A suggestion later than this is no use to someone typing. */
+const INLINE_TIMEOUT_MS = 10_000
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -332,7 +335,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       // One set of language servers per folder, for the agent and the editor; read at every start, so Settings applies at once.
       languageServers: {
         // eNCode's own Node.js runs the servers it installs from npm, so Node.js need not be installed.
-        ...(init.toolsDir ? { tools: { dir: init.toolsDir, cacheDir: init.serverCacheDir ?? path.join(init.toolsDir, '..', 'server-cache'), node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } } } } : {}),
+        ...(init.toolsDir ? { tools: { dir: init.toolsDir, cacheDir: init.serverCacheDir ?? path.join(init.toolsDir, '..', 'server-cache'), node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }, ...(typeof __dirname === 'string' ? { builtinDir: __dirname } : {}) } } : {}),
         ...options.languageServers,
         enabled: () => config?.languageServers ?? true,
         onDiagnostics: (root, file, diagnostics) => {
@@ -507,6 +510,33 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       throw new RpcError('failed', controller.signal.aborted ? `No model wrote a message within ${DRAFT_TIMEOUT_MS / 1000} seconds. Write it yourself, or try again.` : describe(error))
     } finally {
       clearTimeout(timer)
+    }
+  })
+
+  // What the folder's rules keep from the agent is kept from the suggestions too; see inline-suggest.ts.
+  peer.handle('inlineSuggest', async ({ root, request }, { signal }) => {
+    if (!workspaces) return { kind: 'none' as const }
+    const config = workspaces.config(await realPathOf(root))
+    const snapshot = await config.refresh()
+    const denied = (relative: string): boolean => {
+      const verdict = snapshot.judge.evaluate({ type: 'read', paths: [path.resolve(config.root, relative)] })
+      return verdict !== null && verdict.decision !== 'allow'
+    }
+    const { id: _id, ...asked } = request
+    const input = inlineInput(asked, denied)
+    if (!input) return { kind: 'none' as const }
+    const controller = new AbortController()
+    const stop = () => controller.abort(signal.reason)
+    signal.addEventListener('abort', stop, { once: true })
+    const timer = setTimeout(() => controller.abort(new RpcError('timeout', 'The suggestion took too long.')), INLINE_TIMEOUT_MS)
+    try {
+      return await suggestInline(client, input, controller.signal)
+    } catch (error) {
+      if (signal.aborted) throw error
+      return { kind: 'none' as const }
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', stop)
     }
   })
 

@@ -8,7 +8,7 @@
  */
 import type { ModelProfile, ModelRole, ReasoningEffort, Settings } from './types'
 
-export const MODEL_ROLES: readonly ModelRole[] = ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility']
+export const MODEL_ROLES: readonly ModelRole[] = ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility', 'inline']
 
 /** What a role is for, and which role answers for it when it has no list of its own. */
 export const ROLE_INFO: Readonly<Record<ModelRole, { label: string; hint: string; follows?: ModelRole }>> = {
@@ -18,6 +18,7 @@ export const ROLE_INFO: Readonly<Record<ModelRole, { label: string; hint: string
   reviewer: { label: 'Review', hint: 'Checks finished work, and judges low-risk commands under Auto review.', follows: 'main' },
   summarizer: { label: 'Compaction', hint: 'Summarizes old turns to make room.', follows: 'utility' },
   utility: { label: 'Small tasks', hint: 'Names sessions, summarizes pages and drafts commit messages.', follows: 'main' },
+  inline: { label: 'Inline suggestions', hint: 'Suggests code as you type in the editor. A fast, cheap model suits it best.', follows: 'utility' },
 }
 
 /** The efforts a role can be set to, least first. */
@@ -120,6 +121,19 @@ export function mainRefs(settings: Pick<Settings, 'roles' | 'profiles' | 'active
   if (named?.length) return named
   const profile = activeProfile(settings)
   return profile && profile.kind !== 'demo' && profile.model.trim() ? [modelRef(profile.id, profile.model.trim())] : []
+}
+
+/** The models a role tries: its own list, else the list of the role it follows, down to main's. */
+export function roleRefs(settings: Pick<Settings, 'roles' | 'profiles' | 'activeProfileId'>, role: ModelRole): string[] {
+  const seen = new Set<ModelRole>()
+  let current: ModelRole | undefined = role
+  while (current && current !== 'main' && !seen.has(current)) {
+    seen.add(current)
+    const named = settings.roles[current]
+    if (named?.length) return named
+    current = ROLE_INFO[current].follows
+  }
+  return mainRefs(settings)
 }
 
 /** What answers the model calls: the scripted demo, nothing yet, or real models through the router. */

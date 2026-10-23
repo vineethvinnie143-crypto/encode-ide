@@ -52,6 +52,14 @@ function texts() {
 
 function diagnosticsOf(text) {
   const out = []
+  // A companion (ADR 0086) marks only CLASS, as Tailwind marks a class it does not know.
+  if (mode === 'companion') {
+    text.split(/\r?\n/).forEach((line, index) => {
+      const at = line.indexOf('CLASS')
+      if (at >= 0) out.push({ range: { start: { line: index, character: at }, end: { line: index, character: at + 5 } }, severity: 2, message: 'Unknown class', source: 'companion' })
+    })
+    return out
+  }
   text.split(/\r?\n/).forEach((line, index) => {
     const error = line.indexOf('ERROR')
     if (error >= 0) out.push({ range: { start: { line: index, character: error }, end: { line: index, character: error + 5 } }, severity: 1, message: 'Something is wrong here', source: 'fake', code: 'E1' })
@@ -267,6 +275,7 @@ async function handle(message) {
     case 'textDocument/hover': {
       const doc = docs.get(params.textDocument.uri)
       const found = doc && wordAt(doc.text, params.position)
+      if (found && mode === 'companion') return reply(id, { contents: { kind: 'markdown', value: '_' + found.word + '_ as a class' } })
       return reply(id, found ? { contents: { kind: 'markdown', value: '**' + found.word + '**' } } : null)
     }
     case 'textDocument/definition': {
@@ -373,6 +382,7 @@ async function handle(message) {
     case 'textDocument/completion': {
       const doc = docs.get(params.textDocument.uri)
       if (!doc) return reply(id, null)
+      if (mode === 'companion') return reply(id, [{ label: 'bg-red-500', kind: 21, detail: 'background-color: red' }])
       const line = doc.text.split(/\r?\n/)[params.position.line] || ''
       let start = params.position.character
       while (start > 0 && /\w/.test(line[start - 1])) start--

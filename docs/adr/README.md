@@ -74,6 +74,9 @@ say so.
 | [0082](0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md) | The editor is held to its invariants by shrinking properties, timed fuzzing, real edits replayed, and random use of the browser and the app | Accepted, builds on 0033, 0079 and 0081 |
 | [0083](0083-a-language-server-is-installed-on-request-from-pinned-sources-unpacked-by-encode-and-run-from-its-own-folder.md) | A language server is installed on request, from pinned sources, unpacked by eNCode, and run from its own folder | Accepted, builds on 0072 and 0073 |
 | [0084](0084-fivem-lua-is-read-through-encodes-own-plugin-runtime-definitions-and-natives-written-from-cfx-re-typings.md) | FiveM's Lua is read through eNCode's own plugin, runtime definitions, and natives written from Cfx.re's typings | Accepted, builds on 0072, 0073 and 0083 |
+| [0085](0085-json-css-and-html-are-read-by-encodes-own-language-server.md) | JSON, CSS and HTML are read by eNCode's own language server | Accepted, builds on 0072 and 0083 |
+| [0086](0086-a-companion-server-runs-beside-a-files-own-server-tailwind-and-svelte.md) | A companion server runs beside a file's own server; Tailwind and Svelte | Accepted, builds on 0072, 0083 and 0085 |
+| [0087](0087-the-editor-suggests-code-as-you-type-from-the-inline-suggestions-role-drawn-as-ghost-text-and-sent-without-secrets.md) | The editor suggests code as you type, from the Inline suggestions role, drawn as ghost text and sent without secrets | Accepted, builds on 0052, 0060, 0062 and 0079 |
 
 ## Template
 

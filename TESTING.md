@@ -329,6 +329,41 @@ dialog that does not say clearly what will happen):
 - With no network, Install says why it failed and **Try again** retries.
 - For Go, C# or Rust without the toolchain, the dialog says what is needed instead of an Install button.
 
+JSON, CSS and HTML need no install: eNCode's own server reads them in a folder you trust (most useful to hear about: a
+mark on something that is right, or a slip it does not name):
+
+- In `package.json` or `tsconfig.json`, a wrong value is marked (`"type": "esm"`), keys complete with their notes, and
+  **Format Document** lays the file out again with its comments kept. In a `.json` file a comment is an error that says
+  to name it `.jsonc`.
+- In CSS, SCSS or Less, `colr: red` is marked with "Did you mean color?", and so are a pseudo-class slip (`a:hovr`) and
+  a missing semicolon. Tailwind's `@tailwind` and `@apply` are not marked. Values complete after `display: `, and
+  `var(--` lists the custom properties in the file.
+- In HTML, an element left open, an end tag that closes nothing and an `<img>` with no `alt` are named. `</` completes
+  the open element, and the CSS inside `<style>` is checked like a CSS file.
+
+Tailwind and Svelte (most useful to hear about: a class suggested or marked in a file outside your Tailwind project, or
+none inside it):
+
+- In a resource whose `web` folder has a Tailwind config, or a `package.json` with `tailwindcss`, open a `.css`, `.html`
+  or `.tsx` file there. The editor offers to install Tailwind's server once the file's own server is there. After it,
+  `class="bg-` suggests Tailwind's classes after the usual ones, a hover on a class shows the CSS it makes, and two
+  classes that set the same thing are marked. Settings > Language servers lists Tailwind "alongside" those files.
+- A `.css` file outside that folder gets no Tailwind suggestions or marks.
+- A `.svelte` file offers Svelte's server; after it, errors, completion and hovers work in its script and markup.
+
+Suggestions as you type (most useful to hear about: a suggestion that repeats what is already there, shows up where
+it should not, or a secret you find in **Help → Diagnostics** or your provider's log):
+
+- With a model of your own connected, open a `.ts` or `.lua` file and pause after `return ` or on an empty line inside a
+  function. A faded suggestion appears at the cursor, and on an empty line it can run over a few lines. **Tab** takes
+  it (one **Ctrl+Z** takes it back), **Ctrl+Right** takes one word, **Esc** puts it away and **Alt+\\** asks at once.
+- The sparkle button in the status line says where the suggestions come from; it shows *Paused* or *Stopped* when the
+  model cannot answer, and opens **Settings → Editor**.
+- With only the free models connected, **Auto** keeps them off so the agent keeps its daily requests; **On** uses them.
+  Give the **Inline suggestions** role a fast model of its own in **Settings → Models** for the best results.
+- Nothing is asked in a `.env` or `secrets.json` file, in a file your folder's rules keep from the agent, while the list
+  of suggestions is open, or with two cursors.
+
 FiveM resources (most useful to hear about: a red mark on code that runs fine in FiveM, a native or runtime function
 the editor does not know, or a hover that says something wrong):
 
@@ -546,9 +581,13 @@ Updating means installing the next build over the last one: everything above sta
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
 - Language servers: a server eNCode installed is not updated by itself; a newer one comes with a newer eNCode and is
-  installed when you click Install again. JSON, CSS, HTML, Tailwind and Svelte come with the next builds. A Lua server
+  installed when you click Install again. Tailwind's classes are not offered in `.ts` or `.js` files without JSX, nor in
+  Vue files, which have no server in eNCode yet. A Lua server
   that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- Suggestions as you type: one suggestion at a time (no choosing between several), none for a selection, and none that
+  change text before the cursor. Credentials are found by their shape, so a short password with a plain name in an
+  ordinary file can still go to the model's provider with the code around it.
 - In right-to-left text the arrow keys move through the characters in stored order, so the cursor can jump across a
   word; identifiers in a right-to-left script stay in stored order. A screen reader reads the text, not the hint
   labels or the problem marks beside it.

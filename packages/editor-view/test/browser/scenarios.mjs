@@ -13,5 +13,6 @@ import { large } from './scenarios/large.mjs'
 import { wrap } from './scenarios/wrap.mjs'
 import { input } from './scenarios/input.mjs'
 import { monkey } from './scenarios/monkey.mjs'
+import { ghost } from './scenarios/ghost.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...large, ...wrap, ...input, ...monkey]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure, ...hints, ...ghost, ...large, ...wrap, ...input, ...monkey]

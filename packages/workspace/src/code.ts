@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { companionFiles, discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -45,6 +45,8 @@ export interface ServerTools {
   cacheDir: string
   /** eNCode's own Node.js: the program, and what makes it run as Node. */
   node: { file: string; env?: Record<string, string> }
+  /** Where eNCode's own servers are (`weblang-server.cjs`, ADR 0085). */
+  builtinDir?: string
   arch?: string
   /** For tests. */
   fetch?: typeof fetch
@@ -77,6 +79,8 @@ export interface LanguageServerInfo {
   installError?: string
   /** What eNCode installs for it that this folder wants, or that is installed (FiveM's natives for Lua, ADR 0084). */
   libraries?: LanguageLibraryInfo[]
+  /** It runs beside the server a file has, for the files of its languages, in a folder that uses it (ADR 0086). */
+  companion?: true
 }
 
 /** A library eNCode installs for a server to read, as the Settings screen lists it under the server. */
@@ -332,7 +336,8 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
       const env = environment()
       const which = (name: string) => searchPath(name, env, platform)
       const tools = options.tools ? { dir: options.tools.dir, context: launchContext(options.tools, config.root, platform, env) } : undefined
-      return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}) })
+      const builtin = options.tools?.builtinDir ? { dir: options.tools.builtinDir, node: options.tools.node } : undefined
+      return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}), ...(builtin ? { builtin } : {}) })
     },
     spawn: (plan, cwd) => (options.spawn ?? start)(plan, cwd, environment()),
     ...(options.tools ? { tools: { dir: options.tools.dir, cacheDir: options.tools.cacheDir } } : {}),
@@ -390,7 +395,8 @@ export function languageServersReport(
     return {
       ...view,
       install: spec?.install ?? '',
-      files: spec ? [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})] : [],
+      files: !spec ? [] : spec.companion ? companionFiles(spec, catalog) : [...Object.keys(spec.extensions), ...Object.keys(spec.fileNames ?? {})],
+      ...(spec?.companion ? { companion: true as const } : {}),
       ...(use ? { used: { files: use.files, markers: use.markers } } : {}),
       ...(spec?.installer && spec.installer.kind !== 'library' && options.tools ? { installer: spec.installer.kind } : {}),
       ...(installed ? { installed: installed.version } : {}),

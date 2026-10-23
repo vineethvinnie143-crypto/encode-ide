@@ -44,6 +44,7 @@ const settings: Settings = {
   languageServers: true,
   formatOnSave: false,
   formatOnType: false,
+  inlineSuggest: 'auto',
   errorGate: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',

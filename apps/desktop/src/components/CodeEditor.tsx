@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { EditorState } from '@encode/editor'
 import { DecorationSet, EditorView, type KeyBinding, type ViewCommand } from '@encode/editor-view'
 import '@encode/editor-view/style.css'
+import { inlineState } from '@shared/inline'
 import type { CodeDiagnostic, EditorLocation } from '@shared/types'
 import { api } from '../api'
 import { modalOpen } from '../commands/useKeymap'
@@ -11,6 +12,7 @@ import { askServers, forgetTriggers, lspAt } from '../editor/assist/ask'
 import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
 import { EditorFolding } from '../editor/assist/folding'
+import { EditorGhost } from '../editor/assist/ghost'
 import { EditorInlays } from '../editor/assist/inlays'
 import { EditorSemanticColours } from '../editor/assist/semantic'
 import { markupHtml } from '../editor/assist/markup'
@@ -67,6 +69,12 @@ const outlineWanted = (): boolean => {
   return layout.breadcrumbs || layout.outline || useUi.getState().quickOpenOpen
 }
 
+/** Whether Settings > Editor and the models have suggestions as you type on now. */
+const inlineOn = (): boolean => {
+  const settings = useSettings.getState().settings
+  return settings !== null && settings !== undefined && inlineState(settings).on
+}
+
 /** What the editor's text shows, as the View menu and Settings set it. */
 const viewOptions = () => {
   const layout = useEditorLayout.getState()
@@ -93,6 +101,7 @@ const HOVER_MS = 350
 const BINDINGS: readonly KeyBinding[] = [
   { key: 'Ctrl-Space', command: 'triggerSuggest' },
   { key: 'Ctrl-Shift-Space', command: 'triggerParameterHints' },
+  { key: 'Alt-\\', command: 'triggerInlineSuggest' },
   { key: 'F12', command: 'goToDefinition' },
   { key: 'Alt-F12', command: 'peekDefinition' },
   { key: 'Shift-F12', command: 'goToReferences' },
@@ -189,6 +198,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const assistRef = useRef<EditorAssist | null>(null)
+  const ghostRef = useRef<EditorGhost | null>(null)
   const refactorRef = useRef<EditorRefactor | null>(null)
   const outlineRef = useRef<EditorOutline | null>(null)
   const foldingRef = useRef<EditorFolding | null>(null)
@@ -261,6 +271,16 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     })
   }, [])
 
+  // The settings changed: a model or key that stopped the suggestions may be fixed, or they were turned off.
+  useEffect(() => {
+    let was = useSettings.getState().settings
+    return useSettings.subscribe(() => {
+      const next = useSettings.getState().settings
+      if (next !== was) ghostRef.current?.wake()
+      was = next
+    })
+  }, [])
+
   // A server started or stopped: what typing asks of it may have changed.
   useEffect(
     () =>
@@ -285,6 +305,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       semanticRef.current = null
       assistRef.current?.dispose()
       assistRef.current = null
+      ghostRef.current?.dispose()
+      ghostRef.current = null
       refactorRef.current?.dispose()
       refactorRef.current = null
       outlineRef.current?.dispose()
@@ -382,6 +404,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     },
     triggerSuggest: () => (assistRef.current?.suggest(), true),
     triggerParameterHints: () => (assistRef.current?.parameterHints(), true),
+    triggerInlineSuggest: () => (ghostRef.current?.trigger(), true),
     goToDefinition: () => (void locate('definition', 'go'), true),
     peekDefinition: () => (void locate('definition', 'peek'), true),
     goToReferences: () => (void locate('references', 'peek'), true),
@@ -439,6 +462,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       current?.setState(NOTHING)
       if (current) showMarks(current, null)
       assistRef.current?.show(null)
+      ghostRef.current?.show(null)
       refactorRef.current?.show(null)
       outlineRef.current?.show(null)
       foldingRef.current?.show(null)
@@ -456,6 +480,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       setView(created)
       setActiveEditor(created)
       assistRef.current = new EditorAssist(created, { formatOnType: () => useSettings.getState().settings?.formatOnType === true })
+      ghostRef.current = new EditorGhost(created, inlineOn)
       refactorRef.current = new EditorRefactor(created)
       outlineRef.current = new EditorOutline(created, outlineWanted)
       foldingRef.current = new EditorFolding(created, () => useEditorLayout.getState().folding)
@@ -500,6 +525,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     const folds = foldsOf(path!)
     if (folds.length) current.folding.restore(folds)
     assistRef.current?.show(path)
+    ghostRef.current?.show(path, language)
     refactorRef.current?.show(path)
     outlineRef.current?.show(path)
     foldingRef.current?.show(path)

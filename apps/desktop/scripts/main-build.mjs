@@ -54,6 +54,8 @@ export function mainBuildOptions({ production = true } = {}) {
       'agent-host': path.join(root, 'electron/agent-host/entry.ts'),
       // The banner shown while the agent uses the computer is a window of its own.
       'overlay-preload': path.join(root, 'electron/computer-overlay-preload.ts'),
+      // eNCode's own JSON, CSS and HTML language server, run by the agent host as Node (ADR 0085).
+      'weblang-server': path.join(root, '../../packages/weblang/src/main.ts'),
     },
     outdir: path.join(root, 'dist/electron'),
     outExtension: { '.js': '.cjs' },

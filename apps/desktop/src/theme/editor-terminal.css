@@ -56,6 +56,8 @@
   /* Inlay hints: quiet, a step below comments, on a faint chip so they never read as code. */
   --enc-editor-inlay-fg: var(--text-3);
   --enc-editor-inlay-bg: color-mix(in srgb, var(--text-3) 12%, transparent);
+  /* A suggestion as you type: the quiet text colour, so it reads as not there yet without a chip. */
+  --enc-editor-ghost-fg: color-mix(in srgb, var(--text-3) 85%, transparent);
 
   /* Syntax; plain text is --enc-editor-fg */
   --enc-tok-comment: var(--syn-comment);

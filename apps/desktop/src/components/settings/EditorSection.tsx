@@ -1,3 +1,5 @@
+import { inlineState } from '@shared/inline'
+import type { InlineSuggest } from '@shared/types'
 import { commandRegistry } from '../../commands/app'
 import {
   WRAP_COLUMN_MAX,
@@ -10,6 +12,7 @@ import {
   type WhitespaceShown,
   type WrapAt,
 } from '../../stores/editor-layout'
+import { useSettings } from '../../stores/settings'
 import { Segmented } from '../../ui/Segmented'
 import { Select } from '../../ui/Select'
 import { Toggle } from '../../ui/Toggle'
@@ -43,6 +46,18 @@ const WHITESPACE_HELP: Record<WhitespaceShown, string> = {
   all: 'Marks every space with a dot and every tab with a line.',
 }
 
+const INLINE = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'on', label: 'On' },
+  { value: 'off', label: 'Off' },
+] as const satisfies readonly { value: InlineSuggest; label: string }[]
+
+const INLINE_HELP: Record<InlineSuggest, string> = {
+  auto: 'Auto suggests with the model of the Inline suggestions role (Settings, Models), unless that is a free model with a daily limit, which is kept for the agent.',
+  on: 'On suggests with the Inline suggestions role, free models too.',
+  off: 'Off never asks.',
+}
+
 const SCREEN_READER = [
   { value: 'auto', label: 'Auto' },
   { value: 'on', label: 'On' },
@@ -71,8 +86,23 @@ export function EditorSection() {
   const layout = useEditorLayout()
   const readerRunning = useScreenReaderRunning((state) => state.running)
   const toggleKeys = commandRegistry.shortcut('view.wordWrap')
+  const settings = useSettings((state) => state.settings)
+  const save = useSettings((state) => state.save)
+  const inline = settings ? inlineState(settings) : null
   return (
     <>
+      {settings && inline ? (
+        <SettingsGroup title="Suggestions as you type">
+          <SettingRow
+            id="editor.inlineSuggest"
+            label="Suggest code as you type"
+            help={`When you stop typing, a model suggests what comes next, shown faded after the cursor. Tab takes it, Ctrl+Right takes one word, Esc puts it away and Alt+\\ asks at once. Only the open file around the cursor and parts of other open files are sent, never files that hold secrets or that the folder's rules keep from the agent. ${INLINE_HELP[settings.inlineSuggest]} ${inline.reason}`}
+          >
+            <Segmented label="Suggest code as you type" value={settings.inlineSuggest} options={INLINE} onChange={(inlineSuggest) => void save({ inlineSuggest })} />
+          </SettingRow>
+        </SettingsGroup>
+      ) : null}
+
       <SettingsGroup title="Long lines">
         <SettingRow
           id="editor.wordWrap"

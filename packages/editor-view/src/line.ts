@@ -110,8 +110,11 @@ export interface InlaySpec {
   readonly from: number
   readonly to: number
   readonly label: string
-  /** `compose`: what an input method is composing, drawn as text at the caret until it is committed. */
-  readonly kind?: 'type' | 'parameter' | 'compose'
+  /**
+   * `compose`: what an input method is composing, drawn as text at the caret until it is committed. `ghost`: the first
+   * line of a suggestion, drawn faded after the caret until it is taken or dropped.
+   */
+  readonly kind?: 'type' | 'parameter' | 'compose' | 'ghost'
   readonly paddingLeft?: boolean
   readonly paddingRight?: boolean
 }

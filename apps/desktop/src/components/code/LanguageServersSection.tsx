@@ -83,7 +83,13 @@ function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo
     <div className="lsp-server" data-server={server.id}>
       <div className="lsp-server-head">
         <span className="lsp-server-name">{server.label}</span>
-        <span className="lsp-server-files">{filesLabel(server)}</span>
+        {server.companion ? (
+          <span className="lsp-server-files" title="Runs beside the server these files already have, in a project that uses it.">
+            alongside {filesLabel(server)}
+          </span>
+        ) : (
+          <span className="lsp-server-files">{filesLabel(server)}</span>
+        )}
         {used && <span className="lsp-server-used">{used}</span>}
         <span className={cx('lsp-server-state', `is-${tone}`)}>
           {label}

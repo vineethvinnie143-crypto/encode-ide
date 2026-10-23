@@ -1,5 +1,6 @@
 import type { AboutInfo, LanguageServersReport, Settings } from '../../shared/types'
 import { buildLine } from '../../shared/about'
+import { inlineState } from '../../shared/inline'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
 import { searchProviderInfo } from '../../shared/search'
 import { redact, type RedactContext } from './redact'
@@ -102,6 +103,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ],
     ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
     ['Language servers', `${settings.languageServers ? 'on' : 'off'}, errors before finishing ${settings.errorGate}`],
+    ['Suggestions as you type', `${settings.inlineSuggest}, ${inlineState(settings).on ? 'on' : 'off'}`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],
     ['API keys', keys],

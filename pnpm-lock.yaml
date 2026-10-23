@@ -428,6 +428,19 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/weblang:
+    dependencies:
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/workspace:
     dependencies:
       '@encode/checkpoints':
