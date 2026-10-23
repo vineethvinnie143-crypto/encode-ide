@@ -905,7 +905,8 @@ describe('subagents', () => {
     const h = await sessionHarness({
       script: (request: { agent?: string }, step) => {
         void step
-        if (request.agent) return request.agent.endsWith('1') || !(h.client.requests.filter((item) => item.agent).length > 1)
+        // The subagent's first step writes, its second reports. (Its id is random, so the steps are counted.)
+        if (request.agent) return h.client.requests.filter((item) => item.agent).length === 1
           ? { calls: [{ name: 'Write', input: { file_path: path.join(h.root, '.encode', 'sub.md'), content: 'y' } }] }
           : { text: 'wrote it' }
         return h.client.requests.filter((item) => !item.agent).length === 1

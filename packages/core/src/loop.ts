@@ -55,6 +55,7 @@ import {
   type ToolOutcome,
   type ToolRegistry,
   type WebAccess,
+  type Worktrees,
 } from '@encode/tools'
 import { alwaysAllowFor, decideApproval, grantKey, hostOf, type ApprovalDecision, type RuleJudge } from './approval'
 import {
@@ -123,6 +124,10 @@ export interface LoopServices {
   desktop?: DesktopServices
   beforeWrite?: ToolContext['beforeWrite']
   summarize?: ToolContext['summarize']
+  /** Where relative paths and searches start, asked at each call: the root, or the worktree the agent works in. */
+  cwd?: () => string
+  /** EnterWorktree and ExitWorktree; the main agent's only. */
+  worktrees?: Worktrees
 }
 
 export interface LoopOptions {
@@ -1026,6 +1031,8 @@ export class AgentLoop {
       readsDocuments: () => this.documents === true,
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
+      ...(s.cwd ? { cwd: s.cwd() } : {}),
+      ...(s.worktrees ? { worktrees: s.worktrees } : {}),
       ...(progress ? { progress } : {}),
     }
   }

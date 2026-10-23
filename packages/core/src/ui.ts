@@ -158,6 +158,8 @@ export interface SessionSummary {
   entryCount: number
   /** When the agent asked to be woken (ScheduleWakeup), epoch ms. */
   wakeAt?: number
+  /** The worktree the agent works in (EnterWorktree), by name. */
+  worktree?: string
 }
 
 /** What a client may change about a session. */
@@ -353,5 +355,7 @@ export type AgentEventBody =
   | { type: 'error'; message: string; problem?: EntryProblem; entryId?: string }
   | { type: 'session-reset' }
   | { type: 'title'; title: string }
+  /** The agent works in this worktree of the project now, or in the project folder again (null). */
+  | { type: 'worktree'; worktree: { name: string; branch: string; path: string } | null }
 
 export type AgentEvent = AgentEventBody & { sessionId: string }

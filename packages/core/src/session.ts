@@ -15,6 +15,7 @@
  * message, or, when the agent is idle, in a turn of its own.
  */
 import { createHash, randomUUID } from 'node:crypto'
+import fs from 'node:fs/promises'
 import {
   messageText,
   textBlock,
@@ -52,6 +53,8 @@ import {
   type ToolContext,
   type ToolRegistry,
   type WebAccess,
+  type WorktreeInfo,
+  type Worktrees,
 } from '@encode/tools'
 import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
@@ -61,7 +64,7 @@ import type { AgentHooks, NotificationKind, SessionEndEvent } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -71,6 +74,7 @@ import { DEFAULT_TITLE, newRecordId } from './session-store'
 import type { SkillEntry } from './skills'
 import { builtinDefinitions, createSubagents, loadAgentDefinitions, SubagentPool, type AgentSource, type SubagentStore } from './subagents'
 import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
+import type { WorktreeGit } from './worktrees'
 import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
 import {
   previewOf,
@@ -158,6 +162,8 @@ export interface SessionEnv {
   web: WebAccess
   /** A shell for one agent; each session (and each subagent) gets its own, so working directories do not mix. */
   createShell: () => ManagedShell
+  /** The git work behind EnterWorktree and ExitWorktree; without it the agent has no worktrees. */
+  worktrees?: WorktreeGit
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -268,6 +274,10 @@ function missingShell(error: unknown, root: string): ManagedShell {
   }
 }
 
+async function isDirectory(dir: string): Promise<boolean> {
+  return fs.stat(dir).then((stats) => stats.isDirectory(), () => false)
+}
+
 /** News from background work for the main agent. */
 interface BackgroundNotice {
   /** What the model reads. */
@@ -314,6 +324,8 @@ interface TurnState {
   date?: string
   /** The workspace root the model was last told about. */
   root?: string
+  /** The worktree the model was last told it works in ('' for none). */
+  worktree?: string
 }
 
 export class AgentSession {
@@ -379,6 +391,9 @@ export class AgentSession {
   /** Jobs and subagents the person stopped: the agent is told, never woken for it. */
   private readonly stoppedByPerson = new Set<string>()
   private wakeup: (Wakeup & { setAt: number }) | null = null
+  /** The worktree the agent works in, from the log; the shell stands in it once `worktreeSettled` resolves. */
+  private worktree: WorktreeInfo | null = null
+  private worktreeSettled: Promise<void> = Promise.resolve()
   private wakeupTimer: NodeJS.Timeout | undefined
   /** Gathers background news for a moment before it starts a turn. */
   private wakeTimer: NodeJS.Timeout | undefined
@@ -414,6 +429,7 @@ export class AgentSession {
     }
     this.pool = new SubagentPool(store, { ended: (info, result) => this.agentEnded(info, result), changed: () => env.jobsChanged?.(this.id) })
     this.restoreBackground()
+    this.worktreeSettled = this.settleWorktree()
   }
 
   // ------------------------------------------------------------ state
@@ -428,8 +444,88 @@ export class AgentSession {
     this.goalState = snapshot.goal ? { ...snapshot.goal } : null
     this.todoList = snapshot.todos.map((todo) => ({ ...todo }))
     this.planState = snapshot.plan ? { ...snapshot.plan } : null
-    this.turn = this.messages.length ? { date: localDate(new Date(snapshot.updatedAt)) } : {}
+    this.worktree = snapshot.worktree ? { ...snapshot.worktree } : null
+    // A conversation that went on in a worktree told the model so; a new one is told with its first request.
+    this.turn = this.messages.length ? { date: localDate(new Date(snapshot.updatedAt)), worktree: this.worktree?.path ?? '' } : {}
     this.started = false
+  }
+
+  /**
+   * Puts the shell where the log says the agent works. A worktree whose folder is gone (the person removed it) is let go
+   * of: the agent works in the project folder again, and is told so with its next request. Never rejects.
+   */
+  private async settleWorktree(): Promise<void> {
+    const worktree = this.worktree
+    try {
+      if (worktree && !(await isDirectory(worktree.path))) {
+        this.worktree = null
+        await this.write({ type: 'worktree', worktree: null })
+        this.notice(`The worktree ${worktree.name} is gone, so the agent works in the project folder again.`)
+      }
+      if (this.env.root) await this.shell.setCwd(this.worktree?.path ?? this.env.root, { base: true })
+    } catch (error) {
+      this.env.warn?.(`Could not return to the worktree: ${errorMessage(error)}`)
+    }
+    this.send({ type: 'worktree', worktree: this.shownWorktree() })
+  }
+
+  private shownWorktree(): { name: string; branch: string; path: string } | null {
+    return this.worktree ? { name: this.worktree.name, branch: this.worktree.branch, path: this.worktree.path } : null
+  }
+
+  /** EnterWorktree and ExitWorktree. eNCode does the git work itself (`env.worktrees`), with fixed commands. */
+  private readonly worktreeTools: Worktrees = {
+    current: () => this.worktree,
+    enter: async ({ name }, signal) => {
+      const git = this.env.worktrees
+      if (!git) return { ok: false, reason: 'Worktrees are not available in this session.' }
+      if (this.worktree) return { ok: false, reason: `You already work in the worktree ${this.worktree.name}. ExitWorktree first.` }
+      const why = await git.unavailable(this.env.root, signal)
+      if (why) return { ok: false, reason: why }
+      let worktree: WorktreeInfo
+      try {
+        worktree = await git.create(this.env.root, name ?? `wt-${randomUUID().slice(0, 8)}`, signal)
+      } catch (error) {
+        return { ok: false, reason: errorMessage(error) }
+      }
+      if (!(await this.shell.setCwd(worktree.path, { base: true }))) {
+        await git.remove(this.env.root, worktree, { force: true }).catch(() => undefined)
+        return { ok: false, reason: `The worktree was made at ${worktree.path}, but the shell could not move into it, so it was removed again.` }
+      }
+      this.worktree = worktree
+      // The tool's result tells the model.
+      this.turn.worktree = worktree.path
+      await this.write({ type: 'worktree', worktree })
+      this.send({ type: 'worktree', worktree: this.shownWorktree() })
+      return { ok: true, worktree }
+    },
+    exit: async ({ action, discard }, signal) => {
+      const worktree = this.worktree
+      const git = this.env.worktrees
+      if (!worktree || !git) return { ok: false, reason: 'You are not in a worktree.' }
+      if (action === 'remove') {
+        if (!discard) {
+          let work
+          try {
+            work = await git.work(worktree, signal)
+          } catch (error) {
+            return { ok: false, reason: `What the worktree holds could not be checked, so it was not removed: ${errorMessage(error)}` }
+          }
+          if (work.changed.length || work.commits) return { ok: false, reason: `The worktree ${worktree.name} was not removed.`, work }
+        }
+        try {
+          await git.remove(this.env.root, worktree, { force: discard }, signal)
+        } catch (error) {
+          return { ok: false, reason: errorMessage(error) }
+        }
+      }
+      await this.shell.setCwd(this.env.root, { base: true })
+      this.worktree = null
+      this.turn.worktree = ''
+      await this.write({ type: 'worktree', worktree: null })
+      this.send({ type: 'worktree', worktree: null })
+      return { ok: true, left: worktree, removed: action === 'remove' }
+    },
   }
 
   summary(): SessionSummary {
@@ -443,6 +539,7 @@ export class AgentSession {
       preview: previewOf(snapshot.entries),
       entryCount: snapshot.entries.length,
       ...(snapshot.wakeup ? { wakeAt: snapshot.wakeup.at } : {}),
+      ...(this.worktree ? { worktree: this.worktree.name } : {}),
     }
   }
 
@@ -934,6 +1031,7 @@ export class AgentSession {
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
         background: true,
+        worktrees: Boolean(this.env.worktrees),
         ...(sandbox ? { sandbox } : {}),
       },
       [...(this.env.extraTools ?? [])],
@@ -955,6 +1053,7 @@ export class AgentSession {
   /** Text that must survive a compaction: where the agent is, and the project's instructions. */
   private readonly preface = async (): Promise<string[]> => {
     const parts = [environmentReminder(await gatherEnvironment(this.env.root, this.shell, this.env.platform))]
+    if (this.worktree) parts.push(worktreeReminder(this.worktree, this.env.root))
     const memory = renderMemory(await this.memory())
     if (memory) parts.push(memory)
     const notes = renderExternalNotes(this.env.external?.instructions?.() ?? [])
@@ -1044,6 +1143,8 @@ export class AgentSession {
       ...(this.desktop ? { desktop: this.desktop } : {}),
       ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}),
       summarize: this.summarizePage,
+      cwd: this.workdir,
+      ...(env.worktrees ? { worktrees: this.worktreeTools } : {}),
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1053,9 +1154,14 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir },
       files: this.files,
-      createShell: env.createShell,
+      // A subagent starts where the main agent works, in its worktree when it entered one.
+      createShell: async () => {
+        const shell = env.createShell()
+        if (this.worktree) await shell.setCwd(this.worktree.path, { base: true })
+        return shell
+      },
       approvedHosts: this.approvedHosts,
       assessor: env.assessor,
       ...(env.rules ? { rules: env.rules } : {}),
@@ -1096,6 +1202,9 @@ export class AgentSession {
       steers: this.steering,
     })
   }
+
+  /** Where relative paths and searches start: the root, or the worktree the agent works in. */
+  private readonly workdir = (): string => this.worktree?.path ?? this.env.root
 
   /** The jobs as the agents see them: a command the agent stops itself needs no notice that it ended. */
   private readonly agentJobs: JobManager = {
@@ -1176,6 +1285,10 @@ export class AgentSession {
       if (this.turn.root && this.turn.root !== env.root) add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform), this.turn.root))
     }
     this.turn.root = env.root
+
+    // Told when it changed other than through the agent's own EnterWorktree and ExitWorktree, whose results say so.
+    if ((this.worktree?.path ?? '') !== (this.turn.worktree ?? '')) add(worktreeReminder(this.worktree, env.root))
+    this.turn.worktree = this.worktree?.path ?? ''
 
     const memory = await this.memory().catch(() => [])
     const fingerprint = memoryFingerprint(memory)
@@ -1345,7 +1458,8 @@ export class AgentSession {
     const controller = new AbortController()
     this.controller = controller
     this.stopIdleTimer()
-    const running = run(controller)
+    // The shell is back in the worktree the log names before the first command runs.
+    const running = this.worktreeSettled.then(() => run(controller))
     this.current = running.catch(() => undefined)
     try {
       return await running
@@ -1871,9 +1985,11 @@ export class AgentSession {
     }
     await this.flush()
     const { header } = this.log.snapshot()
-    const keep = { title: this.titleValue, goal: this.goalState, todos: this.todoList, plan: this.planState }
+    // The worktree stays too: its folder and branch hold work, and the shell stands in it.
+    const keep = { title: this.titleValue, goal: this.goalState, todos: this.todoList, plan: this.planState, worktree: this.worktree }
     await this.log.truncateAfter(header.id)
     if (keep.title !== header.title) await this.write({ type: 'title', title: keep.title })
+    if (keep.worktree) await this.write({ type: 'worktree', worktree: keep.worktree })
     if (keep.goal) await this.write({ type: 'goal', goal: keep.goal })
     if (keep.todos.length) await this.write({ type: 'todos', todos: keep.todos })
     if (keep.plan) await this.write({ type: 'plan', plan: keep.plan })
@@ -1884,10 +2000,15 @@ export class AgentSession {
     this.send({ type: 'session-reset' })
   }
 
-  /** After the log was cut: the subagents it still has are the ones known, and no wake-up from before the cut fires. */
+  /**
+   * After the log was cut: the subagents it still has are the ones known, no wake-up from before the cut fires, and the
+   * shell goes back to where the agent worked at that point (a worktree entered later stays on disk, left).
+   */
   private async afterCut(): Promise<void> {
     this.pool.reload()
     if (this.log.snapshot().wakeup) await this.write({ type: 'wakeup', wakeup: null })
+    this.worktreeSettled = this.settleWorktree()
+    await this.worktreeSettled
     this.env.jobsChanged?.(this.id)
   }
 

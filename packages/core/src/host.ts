@@ -38,6 +38,7 @@ import { createSessionStore, type FileSessionStore } from './session-store'
 import { createSkills, type SkillSource } from './skills'
 import type { AgentSource } from './subagents'
 import type { AgentSettings, TurnEnd } from './types'
+import type { WorktreeGit } from './worktrees'
 import type {
   AgentMode,
   AgentEvent,
@@ -107,6 +108,8 @@ export interface HostOptions {
    * folder. `notice` puts a line in the session's conversation (a hook that failed, a store that could not be read).
    */
   scope?(request: { sessionId: string; root: string; notice(text: string): void }): SessionScope | Promise<SessionScope>
+  /** The git work behind the agent's worktrees, for every folder; without it the agent has no EnterWorktree. */
+  worktrees?: WorktreeGit
   web?: WebAccess
   /** Options for the agent's shells: sandboxing, variables to keep. */
   shell?: Omit<AgentShellOptions, 'root'>
@@ -221,6 +224,7 @@ export class AgentHost {
       ...(scope?.release ? { release: scope.release } : {}),
       ...(scope?.checkpoints ? { checkpoints: scope.checkpoints } : {}),
       ...(scope?.external ? { external: scope.external } : {}),
+      ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
       skills: createSkills(() => this.skillSources(root)),

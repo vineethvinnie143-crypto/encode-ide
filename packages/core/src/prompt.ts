@@ -8,7 +8,7 @@
  * the conversation like anything else.
  */
 import type { SystemPart } from '@encode/providers'
-import type { AgentMode } from '@encode/tools'
+import type { AgentMode, WorktreeInfo } from '@encode/tools'
 import type { SessionGoal } from './ui'
 
 export const SYSTEM_PROMPT = `You are eNCode, a coding agent working in the user's project through the tools you are given, from the eNCode IDE or a terminal. Work like a capable, friendly colleague: talk plainly, get on with the job, and finish it.
@@ -127,6 +127,17 @@ export function environmentReminder(info: EnvironmentInfo, previousRoot?: string
     `- Top-level entries: ${entries}`,
   ]
   return reminder(lines.join('\n'))
+}
+
+/**
+ * Where the agent works, when that is a git worktree it entered (EnterWorktree); with `worktree` null, that it is back
+ * in the project folder.
+ */
+export function worktreeReminder(worktree: WorktreeInfo | null, root: string): string {
+  if (!worktree) return reminder(`You no longer work in a worktree. Relative paths, Glob, Grep and Bash start at the workspace root, ${root}, again.`)
+  return reminder(
+    `You work in the git worktree ${worktree.path}, on branch ${worktree.branch}, apart from the user's checkout in ${root}. Relative paths, Glob, Grep and Bash start there. Commit your work on the branch; ExitWorktree takes you back.`,
+  )
 }
 
 export function dateReminder(date: string): string {
