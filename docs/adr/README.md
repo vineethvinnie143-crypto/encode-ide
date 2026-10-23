@@ -69,6 +69,7 @@ say so.
 | [0077](0077-the-editor-folds-by-the-servers-ranges-or-the-indentation-and-pins-colours-and-maps-the-text-from-what-it-already-reads.md) | The editor folds by the servers' ranges or the indentation, and pins, colours and maps the text from what it already reads | Accepted, builds on 0003, 0072, 0074 and 0076 |
 | [0078](0078-inlay-hints-and-semantic-tokens-are-kept-by-line-beside-the-text-and-follow-edits-until-the-server-answers-again.md) | Inlay hints and semantic tokens are kept by line beside the text, and follow edits until the server answers again | Accepted, builds on 0003, 0072, 0074 and 0077 |
 | [0079](0079-large-files-are-coloured-on-another-thread-counted-from-indexed-points-and-held-to-measured-limits.md) | Large files are coloured on another thread, counted from indexed points, and held to measured limits | Accepted, builds on 0003, 0072, 0074 and 0077 |
+| [0080](0080-long-lines-wrap-into-rows-the-layout-counts-and-spaces-and-tabs-are-marked-without-changing-the-text.md) | Long lines wrap into rows the layout counts, and spaces and tabs are marked without changing the text | Accepted, builds on 0003, 0077 and 0079 |
 
 ## Template
 

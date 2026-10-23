@@ -24,6 +24,7 @@ import {
   insertTyped,
   languageById,
   moveLineDown,
+  moveBy,
   moveLineUp,
   paste,
   redo,
@@ -219,6 +220,18 @@ describe('commands', () => {
     assert.equal(show(state), 'abcdef\nab|\nabcdefgh')
     state = run(state, cursorLineDown)
     assert.equal(show(state), 'abcdef\nab\nabcdef|gh')
+  })
+
+  it('keeps which side of a wrapped row break a cursor is on, through a move that extends it, until an edit', () => {
+    const state = EditorState.create({ doc: 'one two three', selection: EditorSelection.create([SelectionRange.cursor(4, undefined, -1)]) })
+    const at = state.selection.main
+    assert.equal(at.assoc, -1)
+    assert.ok(!at.eq(SelectionRange.cursor(4)), 'the end of a row is not the start of the next')
+    assert.ok(at.eq(SelectionRange.cursor(4, 7, -1)))
+    const extended = moveBy(state, true, () => SelectionRange.cursor(8, undefined, -1))!.state.selection.main
+    assert.deepEqual([extended.anchor, extended.head, extended.assoc], [4, 8, -1])
+    const typed = state.update({ changes: { from: 0, insert: 'x' } }).state.selection.main
+    assert.deepEqual([typed.head, typed.assoc], [5, undefined])
   })
 
   it('goes to the first non-blank character, then to the line start', () => {

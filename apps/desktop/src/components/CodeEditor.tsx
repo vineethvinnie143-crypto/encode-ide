@@ -24,7 +24,7 @@ import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged,
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
 import { useCode } from '../stores/code'
-import { useEditorLayout } from '../stores/editor-layout'
+import { textOptions, useEditorLayout } from '../stores/editor-layout'
 import { useEditor, type Tab } from '../stores/editor'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
@@ -67,10 +67,11 @@ const outlineWanted = (): boolean => {
   return layout.breadcrumbs || layout.outline || useUi.getState().quickOpenOpen
 }
 
-/** What the editor's text shows, as the View menu set it. */
+/** What the editor's text shows, as the View menu and Settings set it. */
 const viewOptions = () => {
-  const { folding, stickyScroll, bracketColors, minimap } = useEditorLayout.getState()
-  return { folding, stickyScroll, bracketColors, minimap }
+  const layout = useEditorLayout.getState()
+  const { folding, stickyScroll, bracketColors, minimap } = layout
+  return { folding, stickyScroll, bracketColors, minimap, ...textOptions(layout) }
 }
 
 /** The blocks folded in the file a view shows, kept to fold them again when the file is shown next. */
@@ -230,7 +231,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     return () => stops.forEach((stop) => stop())
   }, [])
 
-  // Folding, sticky scroll, bracket colours or the minimap turned on or off; folding back on asks the server again.
+  // Folding, sticky scroll, bracket colours, the minimap, wrapping or the spaces shown changed; folding back on asks the
+  // server again.
   useEffect(
     () =>
       useEditorLayout.subscribe(() => {
@@ -238,7 +240,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
         if (!current) return
         const next = viewOptions()
         const was = current.options
-        if (next.folding === was.folding && next.stickyScroll === was.stickyScroll && next.bracketColors === was.bracketColors && next.minimap === was.minimap) return
+        if ((Object.keys(next) as (keyof typeof next)[]).every((key) => next[key] === was[key])) return
         const foldingOn = next.folding && !was.folding
         current.setOptions(next)
         if (foldingOn) foldingRef.current?.wake()

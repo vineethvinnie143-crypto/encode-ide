@@ -97,13 +97,16 @@ function select(state: EditorState, ranges: readonly SelectionRange[], mainIndex
   return state.update({ selection, scrollIntoView: true, origin: 'select' })
 }
 
-/** Moves every range with `move`; when extending, only the head moves. */
-function moveBy(state: EditorState, extend: boolean, move: (range: SelectionRange) => SelectionRange): Transaction | null {
+/**
+ * Moves every range with `move`; when extending, only the head moves. Null when nothing moved. The view moves by
+ * wrapped rows through this.
+ */
+export function moveBy(state: EditorState, extend: boolean, move: (range: SelectionRange) => SelectionRange): Transaction | null {
   return select(
     state,
     state.selection.ranges.map((range) => {
       const moved = move(range)
-      return extend ? range.extend(moved.head, moved.goalColumn) : moved
+      return extend ? range.extend(moved.head, moved.goalColumn, moved.assoc) : moved
     }),
   )
 }

@@ -98,7 +98,8 @@ primary platform; the code stays cross-platform.
 - **Its own editor.** Not Monaco or CodeMirror. Files open into a virtualized editor with
   tokenizers for 35 languages, multiple cursors, find and replace, undo that survives tab
   switches. Files up to 256 MB open and stay quick (a 100 MB file opens in under a second and is coloured on another
-  thread), and a minified file's one long line can be typed in and scrolled to its end. Characters that make
+  thread), and a minified file's one long line can be typed in and scrolled to its end. Long lines wrap onto rows
+  with Alt+Z (at the window's edge or a column), and spaces and tabs can be shown as faint marks. Characters that make
   text read differently from how it is stored (bidi controls, zero-width and hidden
   characters) are drawn as labelled markers. In a folder you trust, the language servers installed on
   your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark

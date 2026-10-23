@@ -97,8 +97,19 @@ export class MinimapController {
     const progress = maxTop > 0 ? Math.min(1, Math.max(0, top / maxTop)) : 0
     const firstRow = total > capacity ? Math.round((total - capacity) * progress) : 0
     const viewRow = this.rowOf(view.lineAtDocY(top))
-    const sliderHeight = Math.max(4, Math.round((view.viewportHeight / lineHeight) * ROW))
-    const sliderTop = (viewRow - firstRow) * ROW + ((top - view.lineTop(view.lineAtDocY(top))) / lineHeight) * ROW
+    let sliderHeight = Math.max(4, Math.round((view.viewportHeight / lineHeight) * ROW))
+    let sliderTop = (viewRow - firstRow) * ROW + ((top - view.lineTop(view.lineAtDocY(top))) / lineHeight) * ROW
+    if (view.wrapped) {
+      // The map has a row per line: the slider covers the part of each line in view, however many rows it takes.
+      const along = (y: number): number => {
+        const line = view.lineAtDocY(y)
+        const height = Math.max(lineHeight, view.lineBottom(line) - view.lineTop(line))
+        return this.rowOf(line) + Math.min(1, Math.max(0, (y - view.lineTop(line)) / height))
+      }
+      const from = along(top)
+      sliderTop = (from - firstRow) * ROW
+      sliderHeight = Math.max(4, Math.round((along(top + view.viewportHeight) - from) * ROW))
+    }
     const hiddenKey = heights.hidden.map((range) => `${range.from}-${range.to}`).join(',')
     return { firstRow, rows: Math.min(capacity, total - firstRow), sliderTop: Math.max(0, sliderTop), sliderHeight, hiddenKey }
   }

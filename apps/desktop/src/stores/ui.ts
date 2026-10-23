@@ -6,6 +6,7 @@ export type SettingsSection =
   | 'general'
   | 'notifications'
   | 'appearance'
+  | 'editor'
   | 'shortcuts'
   | 'models'
   | 'roles'

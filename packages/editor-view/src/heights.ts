@@ -1,9 +1,9 @@
 /**
- * Vertical layout of a document: every line is `lineHeight` tall, zones
- * (the removed lines of a review hunk, a widget) add height between lines,
- * and folded lines take none. Pure arithmetic, so a million-line document
- * costs nothing to lay out and the module is tested in Node.
+ * Vertical layout of a document: every line is `lineHeight` tall, or that times its rows when long lines wrap, zones
+ * (the removed lines of a review hunk, a widget) add height between lines, and folded lines take none. Pure
+ * arithmetic, so a million-line document costs nothing to lay out and the module is tested in Node.
  */
+import type { RowMap } from './wrap'
 
 export interface Zone {
   readonly id: number
@@ -26,12 +26,18 @@ export class HeightMap {
   readonly hidden: readonly HiddenLines[]
   /** hiddenCum[i]: the lines hidden by hidden[0 .. i). */
   private readonly hiddenCum: Float64Array
+  /** hiddenRowCum[i]: the rows hidden by hidden[0 .. i), when lines wrap. */
+  private readonly hiddenRowCum: Float64Array | null
+  /** The version of the rows this layout was made with. */
+  readonly rowsVersion: number
 
   /**
    * @param padBottom Empty space after the last line, so the last line can scroll up the viewport.
    * @param zones Sorted by `after`; zones with the same `after` keep their order. A zone after a hidden line is left
    *   out by the caller.
    * @param hidden Folded lines, as `normalizeHidden` returns them.
+   * @param rows The rows each line takes when long lines wrap (for `lineCount` lines); null when they do not. The layout
+   *   is for the rows as they are now: one made after they change (`rowsVersion`) replaces it.
    */
   constructor(
     readonly lineHeight: number,
@@ -39,6 +45,7 @@ export class HeightMap {
     zones: readonly Zone[] = [],
     readonly padBottom = 0,
     hidden: readonly HiddenLines[] = [],
+    readonly rows: RowMap | null = null,
   ) {
     this.zones = zones.length > 1 && !isSorted(zones) ? stableSort(zones) : zones
     this.cumulative = new Float64Array(this.zones.length + 1)
@@ -48,6 +55,14 @@ export class HeightMap {
     for (let index = 0; index < this.hidden.length; index++) {
       this.hiddenCum[index + 1] = this.hiddenCum[index] + this.hidden[index].to - this.hidden[index].from + 1
     }
+    this.rowsVersion = rows?.version ?? 0
+    this.hiddenRowCum = rows ? new Float64Array(this.hidden.length + 1) : null
+    if (rows) {
+      for (let index = 0; index < this.hidden.length; index++) {
+        const range = this.hidden[index]
+        this.hiddenRowCum![index + 1] = this.hiddenRowCum![index] + rows.before(range.to + 1) - rows.before(range.from)
+      }
+    }
   }
 
   /** Lines folded away. */
@@ -55,9 +70,30 @@ export class HeightMap {
     return this.hiddenCum[this.hidden.length]
   }
 
+  /** Rows of the lines that show: the lines themselves when they do not wrap. */
+  get visibleRows(): number {
+    if (!this.rows) return this.lineCount - this.hiddenCount
+    return this.rows.total - this.hiddenRowCum![this.hidden.length]
+  }
+
   /** The height of the lines and zones, without the padding. */
   get contentHeight(): number {
-    return (this.lineCount - this.hiddenCount) * this.lineHeight + this.cumulative[this.zones.length]
+    return this.visibleRows * this.lineHeight + this.cumulative[this.zones.length]
+  }
+
+  /** Rows of line `n`: 1 unless it wraps; a hidden line's too, though it takes no height. */
+  rowsOf(n: number): number {
+    return this.rows && n >= 1 && n <= this.lineCount ? this.rows.rows(n) : 1
+  }
+
+  /** Rows of the lines before line `n` that show. */
+  rowsBefore(n: number): number {
+    if (!this.rows) return n - 1 - (this.hidden.length ? this.hiddenBefore(n) : 0)
+    const rows = this.rows.before(n)
+    const index = this.lastHiddenStartingBefore(n)
+    if (index < 0) return rows
+    const range = this.hidden[index]
+    return rows - this.hiddenRowCum![index] - (this.rows.before(Math.min(n, range.to + 1)) - this.rows.before(range.from))
   }
 
   /** Hidden lines before line `n`. */
@@ -106,12 +142,19 @@ export class HeightMap {
    * has no height: its top is that of the next line that shows.
    */
   top(n: number): number {
-    const hidden = this.hidden.length ? this.hiddenBefore(n) : 0
-    return (n - 1 - hidden) * this.lineHeight + this.cumulative[this.firstZoneAtOrAfter(n)]
+    return this.rowsBefore(n) * this.lineHeight + this.cumulative[this.firstZoneAtOrAfter(n)]
   }
 
+  /** The bottom of line `n`'s last row (a hidden line's as if it showed). */
   bottom(n: number): number {
-    return this.top(n) + this.lineHeight
+    return this.top(n) + this.rowsOf(n) * this.lineHeight
+  }
+
+  /** The row of line `n` at `y`, kept to the line's rows. */
+  rowAt(n: number, y: number): number {
+    const rows = this.rowsOf(n)
+    if (rows <= 1) return 0
+    return Math.max(0, Math.min(rows - 1, Math.floor((y - this.top(n)) / this.lineHeight)))
   }
 
   /**
@@ -120,7 +163,10 @@ export class HeightMap {
    */
   lineAt(y: number): number {
     if (y <= 0 || this.lineCount <= 1) return this.nextVisible(1) > this.lineCount ? 1 : this.nextVisible(1)
-    if (!this.zones.length && !this.hidden.length) return Math.min(this.lineCount, Math.floor(y / this.lineHeight) + 1)
+    if (!this.zones.length && !this.hidden.length) {
+      const row = Math.floor(y / this.lineHeight)
+      return this.rows ? Math.min(this.lineCount, this.rows.lineAtRow(row).line) : Math.min(this.lineCount, row + 1)
+    }
     let low = 1
     let high = this.lineCount
     while (low < high) {
@@ -138,9 +184,7 @@ export class HeightMap {
 
   /** Where zone number `index` (in layout order) starts. */
   zoneTop(index: number): number {
-    const after = this.zones[index].after
-    const hidden = this.hidden.length ? this.hiddenBefore(after + 1) : 0
-    return (after - hidden) * this.lineHeight + this.cumulative[index]
+    return this.rowsBefore(this.zones[index].after + 1) * this.lineHeight + this.cumulative[index]
   }
 
   /** Zones placed after lines `fromAfter`..`toAfter` (inclusive), in layout order, with their tops. */

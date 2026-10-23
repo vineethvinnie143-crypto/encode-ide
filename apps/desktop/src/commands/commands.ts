@@ -32,7 +32,7 @@ export interface AppActions {
   editorCommand(name: string): void
   /**
    * Which of the editor's parts are on: the breadcrumbs, the outline, folding, sticky scroll, bracket colours, the
-   * minimap, inlay hints and semantic colours.
+   * minimap, inlay hints, semantic colours, word wrap and its indent, and every space shown.
    */
   editorLayout(): Record<EditorPart, boolean>
   toggleEditorPart(part: EditorPart): void
@@ -315,6 +315,23 @@ export function buildCommands(a: AppActions): Command[] {
       group: 'View',
       keywords: 'editor overview map scrollbar picture of the file',
       run: () => a.toggleEditorPart('minimap'),
+    },
+    {
+      id: 'view.wordWrap',
+      title: 'Toggle word wrap',
+      label: () => (a.editorLayout().wordWrap ? 'Turn word wrap off' : 'Turn word wrap on'),
+      group: 'View',
+      keys: ['Alt+Z'],
+      keywords: 'editor wrap long lines soft wrap rows fit width',
+      run: () => a.toggleEditorPart('wordWrap'),
+    },
+    {
+      id: 'view.whitespace',
+      title: 'Toggle whitespace',
+      label: () => (a.editorLayout().showWhitespace ? 'Hide whitespace' : 'Show whitespace'),
+      group: 'View',
+      keywords: 'editor render whitespace spaces tabs dots invisible characters',
+      run: () => a.toggleEditorPart('showWhitespace'),
     },
     {
       id: 'view.inlayHints',

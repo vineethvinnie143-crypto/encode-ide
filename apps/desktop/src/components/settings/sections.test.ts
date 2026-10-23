@@ -54,6 +54,12 @@ describe('searching the settings', () => {
     )
   })
 
+  it('finds the editor\'s wrapping and spaces', () => {
+    assert.deepEqual(found('wrap'), [['editor', ['editor.wordWrap', 'editor.wrapAt', 'editor.wrapColumn', 'editor.wrapIndent']]])
+    assert.deepEqual(found('alt z'), [['editor', ['editor.wordWrap']]])
+    assert.deepEqual(found('trailing'), [['editor', ['editor.whitespace']]])
+  })
+
   it('ignores case and punctuation', () => {
     assert.deepEqual(found('SEND MESSAGES'), [['general', ['general.send']]])
     assert.deepEqual(found('ctrl+enter'), found('Ctrl+Enter'))

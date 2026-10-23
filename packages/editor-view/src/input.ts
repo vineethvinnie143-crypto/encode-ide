@@ -150,8 +150,8 @@ export class InputHandler {
   /** Puts the textarea at the main caret, so an input method's window opens beside the text being typed. */
   positionTextarea(): void {
     const view = this.view
-    const head = view.state.selection.main.head
-    const { x, y } = view.layerCoords(head)
+    const { head, assoc } = view.state.selection.main
+    const { x, y } = view.layerCoords(head, assoc)
     const style = view.textarea.style
     style.left = `${x}px`
     style.top = `${y}px`

@@ -4,17 +4,20 @@ import type { ChangeSet } from '@encode/text'
  * One selection: from `anchor` (where it started) to `head` (where the
  * cursor is). An empty range is a cursor. `goalColumn` remembers the column
  * vertical motion aims for, so moving through a short line and on keeps the
- * original column.
+ * original column. `assoc` says which side of a wrapped line's break the head
+ * is drawn on: -1 at the end of the row before it (End was pressed there),
+ * otherwise at the start of the row after it.
  */
 export class SelectionRange {
   constructor(
     readonly anchor: number,
     readonly head: number,
     readonly goalColumn?: number,
+    readonly assoc?: -1 | 1,
   ) {}
 
-  static cursor(pos: number, goalColumn?: number): SelectionRange {
-    return new SelectionRange(pos, pos, goalColumn)
+  static cursor(pos: number, goalColumn?: number, assoc?: -1 | 1): SelectionRange {
+    return new SelectionRange(pos, pos, goalColumn, assoc)
   }
 
   get from(): number {
@@ -30,8 +33,8 @@ export class SelectionRange {
   }
 
   /** Moves the head, keeping the anchor; a cursor becomes a selection. */
-  extend(head: number, goalColumn?: number): SelectionRange {
-    return new SelectionRange(this.anchor, head, goalColumn)
+  extend(head: number, goalColumn?: number, assoc?: -1 | 1): SelectionRange {
+    return new SelectionRange(this.anchor, head, goalColumn, assoc)
   }
 
   /**
@@ -47,7 +50,7 @@ export class SelectionRange {
   }
 
   eq(other: SelectionRange): boolean {
-    return this.anchor === other.anchor && this.head === other.head
+    return this.anchor === other.anchor && this.head === other.head && (this.assoc ?? 1) === (other.assoc ?? 1)
   }
 }
 

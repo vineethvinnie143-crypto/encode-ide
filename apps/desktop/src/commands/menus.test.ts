@@ -8,7 +8,19 @@ import { MENUS, menuEntries } from './menus'
 import { CommandRegistry } from './registry'
 
 const none = () => undefined
-const LAYOUT = { breadcrumbs: true, outline: false, folding: true, stickyScroll: true, bracketColors: true, minimap: true, inlayHints: true, semanticHighlighting: true }
+const LAYOUT = {
+  breadcrumbs: true,
+  outline: false,
+  folding: true,
+  stickyScroll: true,
+  bracketColors: true,
+  minimap: true,
+  inlayHints: true,
+  semanticHighlighting: true,
+  wordWrap: false,
+  wrapIndent: true,
+  showWhitespace: false,
+}
 /** Actions that do nothing, and answer the questions about state with "no". */
 function actions(patch: Partial<AppActions> = {}): AppActions {
   const base = { hasWorkspace: () => false, canGoBack: () => false, canGoForward: () => false, activeSession: () => undefined, editorLayout: () => LAYOUT, ...patch }
@@ -211,6 +223,20 @@ describe('menus', () => {
     const live = registryWith({ hasEditor: () => true, toggleEditorPart: (part) => void toggled.push(part) })
     for (const id of ['view.inlayHints', 'view.semanticHighlighting']) void live.run(id)
     assert.deepEqual(toggled, ['inlayHints', 'semanticHighlighting'])
+  })
+
+  it('turn word wrap on and off with Alt+Z, and show every space and tab', () => {
+    const off = registryWith({})
+    assert.equal(off.titleOf('view.wordWrap'), 'Turn word wrap on')
+    assert.equal(off.titleOf('view.whitespace'), 'Show whitespace')
+    assert.equal(off.shortcut('view.wordWrap'), 'Alt+Z')
+    const on = registryWith({ editorLayout: () => ({ ...LAYOUT, wordWrap: true, showWhitespace: true }) })
+    assert.equal(on.titleOf('view.wordWrap'), 'Turn word wrap off')
+    assert.equal(on.titleOf('view.whitespace'), 'Hide whitespace')
+    const toggled: string[] = []
+    const live = registryWith({ toggleEditorPart: (part) => void toggled.push(part) })
+    for (const id of ['view.wordWrap', 'view.whitespace']) void live.run(id)
+    assert.deepEqual(toggled, ['wordWrap', 'showWhitespace'])
   })
 
   it('turn folding, sticky scroll, bracket colours and the minimap on and off, and fold only while folding is on', () => {

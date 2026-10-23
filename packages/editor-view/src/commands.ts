@@ -27,24 +27,51 @@ function move(command: core.Command): ViewCommand {
   }
 }
 
-/** A page up or down: the view scrolls by a screen and the cursors move the same distance, folded blocks not counted. */
+/** Every range moved `rows` rows, as the view counts them while lines wrap. */
+function byRows(view: EditorView, rows: number, extend: boolean): core.Command {
+  return (state) => core.moveBy(state, extend, (range) => view.verticalMove(range, rows, extend)!)
+}
+
+/**
+ * A page up or down: the view scrolls by a screen and the cursors move the same distance, folded blocks not counted
+ * (rows, while lines wrap).
+ */
 function page(direction: 1 | -1, extend: boolean): ViewCommand {
   return (view) => {
     const lines = Math.max(1, view.lineCapacity - 1) * direction
-    const transaction = core.cursorPage(lines, extend, view.folding.step)(view.state)
+    const transaction = (view.wrapped ? byRows(view, lines, extend) : core.cursorPage(lines, extend, view.folding.step))(view.state)
     view.scrollBy(lines * view.metrics.lineHeight)
     if (transaction) view.dispatch(transaction)
     return true
   }
 }
 
-/** The arrow keys: a line up or down, stepping over a folded block. */
+/** The arrow keys: a line up or down, stepping over a folded block; a row while lines wrap. */
 function vertical(lines: -1 | 1, extend: boolean): ViewCommand {
-  return (view) => move(core.cursorVertical(lines, extend, view.folding.step))(view)
+  return (view) => move(view.wrapped ? byRows(view, lines, extend) : core.cursorVertical(lines, extend, view.folding.step))(view)
 }
 
+/** Home or End: while lines wrap, to the edge of the row first. */
+function lineEdge(end: boolean, extend: boolean, command: core.Command): ViewCommand {
+  return (view) => move(view.wrapped ? (state) => core.moveBy(state, extend, (range) => view.rowEdge(range, end)) : command)(view)
+}
+
+/** A cursor added on the line above or below, or the row while lines wrap; none past the document's ends. */
 function addCursor(direction: -1 | 1): ViewCommand {
-  return (view) => move(core.addCursorVertical(direction, view.folding.step))(view)
+  return (view) => move(view.wrapped ? (state) => addCursorByRow(view, state, direction) : core.addCursorVertical(direction, view.folding.step))(view)
+}
+
+function addCursorByRow(view: EditorView, state: core.EditorState, direction: -1 | 1): core.Transaction | null {
+  const ranges = state.selection.ranges.slice()
+  let main = state.selection.mainIndex
+  for (const [index, range] of state.selection.ranges.entries()) {
+    const added = view.verticalMove(core.SelectionRange.cursor(range.head, range.goalColumn, range.assoc), direction, false, true)
+    if (!added) continue
+    ranges.push(added)
+    if (index === state.selection.mainIndex) main = ranges.length - 1
+  }
+  if (ranges.length === state.selection.ranges.length) return null
+  return state.update({ selection: core.EditorSelection.create(ranges, main), scrollIntoView: true, origin: 'select' })
 }
 
 /** A folding command: it applies only where folding is on, and takes its key there even when there is nothing to fold. */
@@ -74,10 +101,10 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   selectLineUp: vertical(-1, true),
   cursorLineDown: vertical(1, false),
   selectLineDown: vertical(1, true),
-  cursorLineStart: move(core.cursorLineStart),
-  selectLineStart: move(core.selectLineStart),
-  cursorLineEnd: move(core.cursorLineEnd),
-  selectLineEnd: move(core.selectLineEnd),
+  cursorLineStart: lineEdge(false, false, core.cursorLineStart),
+  selectLineStart: lineEdge(false, true, core.selectLineStart),
+  cursorLineEnd: lineEdge(true, false, core.cursorLineEnd),
+  selectLineEnd: lineEdge(true, true, core.selectLineEnd),
   cursorDocStart: move(core.cursorDocStart),
   selectDocStart: move(core.selectDocStart),
   cursorDocEnd: move(core.cursorDocEnd),
