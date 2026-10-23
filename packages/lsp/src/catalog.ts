@@ -32,6 +32,17 @@ export interface ServerSpec {
 
 const ts = { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' }
 
+const TS_HINTS = {
+  includeInlayParameterNameHints: 'literals',
+  includeInlayParameterNameHintsWhenArgumentMatchesName: false,
+  includeInlayFunctionParameterTypeHints: true,
+  includeInlayVariableTypeHints: true,
+  includeInlayVariableTypeHintsWhenTypeMatchesName: false,
+  includeInlayPropertyDeclarationTypeHints: true,
+  includeInlayFunctionLikeReturnTypeHints: true,
+  includeInlayEnumMemberValueHints: true,
+}
+
 export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
   {
     id: 'typescript',
@@ -39,6 +50,9 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     extensions: ts,
     candidates: [{ command: 'typescript-language-server', args: ['--stdio'] }],
     install: 'npm install -g typescript-language-server typescript',
+    // Inlay hints are off in the server until asked for: the names of literal arguments, and the types it worked out
+    // where none is written (a name that already says its type gets none).
+    settings: { typescript: { inlayHints: TS_HINTS }, javascript: { inlayHints: TS_HINTS } },
     // The project's own TypeScript, when it has one, so that the errors are the ones its build reports.
     initializationOptions: (root, exists) => {
       const lib = path.join(root, 'node_modules', 'typescript', 'lib')
@@ -71,6 +85,8 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     fileNames: { 'go.mod': 'go.mod' },
     candidates: [{ command: 'gopls', args: [] }],
     install: 'go install golang.org/x/tools/gopls@latest',
+    // gopls gives semantic tokens and hints only when asked to.
+    settings: { gopls: { semanticTokens: true, hints: { assignVariableTypes: true, compositeLiteralFields: true, constantValues: true, functionTypeParameters: true, parameterNames: true, rangeVariableTypes: true } } },
   },
   {
     id: 'c',
@@ -86,7 +102,7 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     candidates: [{ command: 'lua-language-server', args: [] }],
     install: 'install lua-language-server (https://luals.github.io/#install)',
     // FiveM's resources run Lua 5.4 with CfxLua's additions; its natives are globals the server cannot know.
-    settings: { Lua: { runtime: { version: 'Lua 5.4' }, telemetry: { enable: false }, workspace: { checkThirdParty: false } } },
+    settings: { Lua: { runtime: { version: 'Lua 5.4' }, telemetry: { enable: false }, workspace: { checkThirdParty: false }, hint: { enable: true }, semantic: { enable: true } } },
   },
   {
     id: 'csharp',

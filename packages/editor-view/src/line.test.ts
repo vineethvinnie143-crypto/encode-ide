@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { Text } from '@encode/text'
 import { Highlighter, languageForPath, T } from '@encode/editor'
 import { check, gen } from '@encode/testkit'
-import { controlLabel, hasControl, isSimpleText, segmentsOf } from './line'
+import { controlLabel, DEPRECATED, hasControl, isSimpleText, segmentsOf, tokenClass, withSemantic, type SemanticSpan } from './line'
 
 describe('segmentsOf', () => {
   it('splits a line along its tokens', () => {
@@ -150,5 +150,75 @@ describe('isSimpleText', () => {
     assert.ok(!isSimpleText(`e${String.fromCharCode(0x301)}`))
     assert.ok(!isSimpleText(`soft${String.fromCharCode(0xad)}hyphen`))
     assert.ok(!isSimpleText(`zero${String.fromCharCode(0x200b)}width`))
+  })
+})
+
+/** The kind of every character of a line of `length` from its flat tokens. */
+function kindsOf(tokens: readonly number[], length: number): number[] {
+  const out: number[] = []
+  for (let at = 0; at < length; at++) {
+    let kind = T.plain
+    for (let index = 0; index < tokens.length && tokens[index] <= at; index += 2) kind = tokens[index + 1]
+    out.push(kind)
+  }
+  return out
+}
+
+describe('withSemantic', () => {
+  it('draws the stretches a server named over the highlighter\'s tokens', () => {
+    // `let count = add(n)`: the lexer has a keyword and plain text; the server names `count`, `add` and `n`.
+    const tokens = [0, T.keyword, 3, T.plain, 12, T.function, 15, T.punct, 16, T.plain, 17, T.punct]
+    const spans: SemanticSpan[] = [
+      { from: 4, to: 9, kind: T.variable },
+      { from: 12, to: 15, kind: T.function | DEPRECATED },
+      { from: 16, to: 17, kind: T.variable },
+    ]
+    assert.deepEqual(withSemantic(tokens, spans, 18), [0, T.keyword, 3, T.plain, 4, T.variable, 9, T.plain, 12, T.function | DEPRECATED, 15, T.punct, 16, T.variable, 17, T.punct])
+    // Nothing named: the same tokens.
+    assert.equal(withSemantic(tokens, [], 18), tokens)
+    // A stretch past the line's end is cut to it; one before the line's first token makes it start at 0.
+    assert.deepEqual(withSemantic([2, T.keyword], [{ from: 0, to: 1, kind: T.type }, { from: 3, to: 99, kind: T.type }], 5), [0, T.type, 1, T.plain, 2, T.keyword, 3, T.type])
+  })
+
+  it('draws a deprecated name struck through', () => {
+    assert.match(tokenClass(T.function | DEPRECATED), /^tok-function enc-deprecated$/)
+    assert.equal(tokenClass(T.function), 'tok-function')
+  })
+
+  it('gives every character the kind of the first stretch over it, or its own, with well-formed tokens', async () => {
+    await check(
+      (random, size) => {
+        const length = Math.floor(random() * (size * 4 + 1))
+        const tokens: number[] = []
+        for (let at = Math.floor(random() * 3); at < length; at += 1 + Math.floor(random() * 4)) tokens.push(at, Math.floor(random() * 5))
+        const spans: SemanticSpan[] = []
+        for (let at = 0; at < length + 2; ) {
+          const from = at + Math.floor(random() * 4)
+          const to = from + Math.floor(random() * 4)
+          spans.push({ from, to, kind: 10 + Math.floor(random() * 3) })
+          at = random() < 0.2 ? Math.max(0, from - 1) : to
+        }
+        return { tokens, spans, length }
+      },
+      ({ tokens, spans, length }) => {
+        const out = withSemantic(tokens, spans, length)
+        const expected = kindsOf(tokens, length)
+        let reach = 0
+        for (const span of spans) {
+          const from = Math.max(span.from, reach)
+          const to = Math.min(span.to, length)
+          if (to <= from) continue
+          for (let at = from; at < to; at++) expected[at] = span.kind
+          reach = to
+        }
+        assert.deepEqual(kindsOf(out, length), expected)
+        if (!spans.some((span) => Math.min(span.to, length) > span.from)) return
+        for (let index = 2; index < out.length; index += 2) {
+          assert.ok(out[index] > out[index - 2], 'starts go up')
+          assert.notEqual(out[index + 1], out[index - 1], 'no two tokens in a row of one kind')
+        }
+        if (out.length) assert.equal(out[0], 0)
+      },
+    )
   })
 })

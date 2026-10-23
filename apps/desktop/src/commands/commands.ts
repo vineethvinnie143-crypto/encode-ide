@@ -30,7 +30,10 @@ export interface AppActions {
   hasEditor(): boolean
   /** Runs one of the code editor's commands, as its key would. */
   editorCommand(name: string): void
-  /** Which of the editor's parts are on: the breadcrumbs, the outline, folding, sticky scroll, bracket colours, the minimap. */
+  /**
+   * Which of the editor's parts are on: the breadcrumbs, the outline, folding, sticky scroll, bracket colours, the
+   * minimap, inlay hints and semantic colours.
+   */
   editorLayout(): Record<EditorPart, boolean>
   toggleEditorPart(part: EditorPart): void
   /** The keyboard to the breadcrumbs, shown first if they were hidden. */
@@ -312,6 +315,22 @@ export function buildCommands(a: AppActions): Command[] {
       group: 'View',
       keywords: 'editor overview map scrollbar picture of the file',
       run: () => a.toggleEditorPart('minimap'),
+    },
+    {
+      id: 'view.inlayHints',
+      title: 'Toggle inlay hints',
+      label: () => (a.editorLayout().inlayHints ? 'Hide inlay hints' : 'Show inlay hints'),
+      group: 'View',
+      keywords: 'editor types parameter names hints inline annotations language server',
+      run: () => a.toggleEditorPart('inlayHints'),
+    },
+    {
+      id: 'view.semanticHighlighting',
+      title: 'Toggle semantic colours',
+      label: () => (a.editorLayout().semanticHighlighting ? 'Turn semantic colours off' : 'Turn semantic colours on'),
+      group: 'View',
+      keywords: 'editor semantic highlighting tokens colors types deprecated language server',
+      run: () => a.toggleEditorPart('semanticHighlighting'),
     },
     { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },

@@ -15,6 +15,10 @@ export interface EditorLayout {
   bracketColors: boolean
   /** A small picture of the file beside the text. */
   minimap: boolean
+  /** The language server's hints among the text: the types it worked out, the names of the parameters arguments go to. */
+  inlayHints: boolean
+  /** Names coloured as the language server knows them (a type, a parameter, a deprecated function), over the lexer's colours. */
+  semanticHighlighting: boolean
   /** The outline's width in pixels, as the person dragged it. */
   outlineWidth: number
   outlineSort: OutlineSort
@@ -25,7 +29,7 @@ export interface EditorLayout {
 export const OUTLINE_MIN = 180
 export const OUTLINE_MAX = 480
 /** The parts of the editor a menu turns on and off. */
-export type EditorPart = 'breadcrumbs' | 'outline' | 'folding' | 'stickyScroll' | 'bracketColors' | 'minimap'
+export type EditorPart = 'breadcrumbs' | 'outline' | 'folding' | 'stickyScroll' | 'bracketColors' | 'minimap' | 'inlayHints' | 'semanticHighlighting'
 
 const DEFAULTS: EditorLayout = {
   breadcrumbs: true,
@@ -34,6 +38,8 @@ const DEFAULTS: EditorLayout = {
   stickyScroll: true,
   bracketColors: true,
   minimap: true,
+  inlayHints: true,
+  semanticHighlighting: true,
   outlineWidth: 248,
   outlineSort: 'position',
   outlineFollow: true,
@@ -52,6 +58,8 @@ export function normalizeLayout(value: unknown): EditorLayout {
     stickyScroll: flag('stickyScroll'),
     bracketColors: flag('bracketColors'),
     minimap: flag('minimap'),
+    inlayHints: flag('inlayHints'),
+    semanticHighlighting: flag('semanticHighlighting'),
     outlineWidth: Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, width)),
     outlineSort: raw.outlineSort === 'name' || raw.outlineSort === 'kind' || raw.outlineSort === 'position' ? raw.outlineSort : DEFAULTS.outlineSort,
     outlineFollow: typeof raw.outlineFollow === 'boolean' ? raw.outlineFollow : DEFAULTS.outlineFollow,

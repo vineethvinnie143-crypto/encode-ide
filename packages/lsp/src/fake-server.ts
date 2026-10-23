@@ -129,6 +129,37 @@ function foldingRanges(text) {
   return out
 }
 
+/** Inlay hints in lines from to to: ': number' after a name a number is put in (let n = 5). */
+function inlayHints(text, from, to) {
+  const out = []
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (index < from || index > to) return
+    for (const match of line.matchAll(/\b(?:let|const|var) (\w+) = \d/g)) out.push({ position: { line: index, character: match.index + match[0].length - 4 }, label: ': number', kind: 1, paddingLeft: false })
+  })
+  return out
+}
+
+/** The legend the semantic tokens below are numbered by. */
+const SEMANTIC_LEGEND = { tokenTypes: ['function', 'parameter', 'class'], tokenModifiers: ['declaration', 'deprecated'] }
+
+/** Semantic tokens: every use of a function the file declares, deprecated when its name starts with 'old'. */
+function semanticTokens(text) {
+  const names = new Set(functions('', text).map((fn) => fn.name))
+  const data = []
+  let lastLine = 0
+  let lastChar = 0
+  text.split(/\r?\n/).forEach((line, index) => {
+    for (const match of line.matchAll(/\w+/g)) {
+      if (!names.has(match[0])) continue
+      const deltaLine = index - lastLine
+      data.push(deltaLine, deltaLine ? match.index : match.index - lastChar, match[0].length, 0, match[0].startsWith('old') ? 2 : 0)
+      lastLine = index
+      lastChar = match.index
+    }
+  })
+  return { data }
+}
+
 /** Formatting: leading tabs become spaces (when spaces are asked for), and the spaces at a line's end go. */
 function formatEdits(text, options, range) {
   const edits = []
@@ -152,6 +183,8 @@ const capabilities = {
   workspaceSymbolProvider: true,
   callHierarchyProvider: true,
   foldingRangeProvider: true,
+  inlayHintProvider: true,
+  semanticTokensProvider: { legend: SEMANTIC_LEGEND, full: true },
   renameProvider: { prepareProvider: true },
   codeActionProvider: { resolveProvider: true },
   executeCommandProvider: { commands: ['fake.fixAll'] },
@@ -265,6 +298,14 @@ async function handle(message) {
     case 'textDocument/foldingRange': {
       const doc = docs.get(params.textDocument.uri)
       return reply(id, doc ? foldingRanges(doc.text) : null)
+    }
+    case 'textDocument/inlayHint': {
+      const doc = docs.get(params.textDocument.uri)
+      return reply(id, doc ? inlayHints(doc.text, params.range.start.line, params.range.end.line) : null)
+    }
+    case 'textDocument/semanticTokens/full': {
+      const doc = docs.get(params.textDocument.uri)
+      return reply(id, doc ? semanticTokens(doc.text) : null)
     }
     case 'workspace/symbol': {
       const out = []

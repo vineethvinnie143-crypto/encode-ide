@@ -17,6 +17,8 @@ import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeActi
 import { readCallHierarchyItems, readCalls, readCallSites, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readPrepareRename, readRange, readSignatureHelp, readSymbolInformation, readTextEditList, readWorkspaceEdit } from './results'
 import { fromDocumentSymbols, nestSymbols, type EditorSymbol } from './symbols'
 import { readFoldingRanges, type EditorFoldRange } from './folding'
+import { readInlayHints, type EditorInlayHint } from './inlay'
+import { readLegend, readSemanticTokens, type EditorSemanticTokens } from './semantic'
 import { documentKey, uriToPath } from './uri'
 
 export type Severity = 'error' | 'warning' | 'info' | 'hint'
@@ -1235,6 +1237,33 @@ export class LanguageServers {
   /** The blocks of a document of the editor's that can fold, by whole lines, as its server sees them. */
   editorFoldingRanges(file: string, signal?: AbortSignal): Promise<EditorFoldRange[] | null> {
     return this.editorAsk(file, 'foldingRange', 'textDocument/foldingRange', (doc) => ({ textDocument: { uri: doc.uri } }), (value) => readFoldingRanges(value), signal)
+  }
+
+  /** The hints a server draws among the lines `startLine` to `endLine` (0-based, both included) of a document of the editor's. */
+  editorInlayHints(file: string, startLine: number, endLine: number, signal?: AbortSignal): Promise<EditorInlayHint[] | null> {
+    return this.editorAsk(
+      file,
+      'inlayHint',
+      'textDocument/inlayHint',
+      (doc) => ({ textDocument: { uri: doc.uri }, range: { start: { line: startLine, character: 0 }, end: { line: endLine + 1, character: 0 } } }),
+      (value) => readInlayHints(value)?.filter((hint) => hint.line >= startLine && hint.line <= endLine) ?? null,
+      signal,
+    )
+  }
+
+  /** The semantic tokens of a whole document of the editor's, in the editor's own kinds. */
+  editorSemanticTokens(file: string, signal?: AbortSignal): Promise<EditorSemanticTokens | null> {
+    return this.editorAsk(
+      file,
+      'semanticTokens',
+      'textDocument/semanticTokens/full',
+      (doc) => ({ textDocument: { uri: doc.uri } }),
+      (value, client) => {
+        const legend = readLegend(client.capabilities.semanticTokensProvider)
+        return legend ? readSemanticTokens(value, legend) : null
+      },
+      signal,
+    )
   }
 
   /** The outline of a document of the editor's as a tree; a server that answers with a flat list has it nested by range. */

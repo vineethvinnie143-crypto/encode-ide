@@ -200,6 +200,8 @@ export interface ServerCapabilities {
   workspaceSymbolProvider?: unknown
   callHierarchyProvider?: unknown
   foldingRangeProvider?: unknown
+  inlayHintProvider?: unknown
+  semanticTokensProvider?: { legend?: { tokenTypes?: unknown; tokenModifiers?: unknown }; full?: unknown; range?: unknown }
   renameProvider?: boolean | { prepareProvider?: boolean }
   codeActionProvider?: boolean | { resolveProvider?: boolean; codeActionKinds?: string[] }
   diagnosticProvider?: { interFileDependencies?: boolean; workspaceDiagnostics?: boolean }

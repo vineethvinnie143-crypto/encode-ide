@@ -283,6 +283,10 @@ export class Workspaces {
           return (await servers.editorSymbols(file, signal)) as EditorAnswer<K>
         case 'folding':
           return (await servers.editorFoldingRanges(file, signal)) as EditorAnswer<K>
+        case 'inlayHints':
+          return (await servers.editorInlayHints(file, a.startLine, a.endLine, signal)) as EditorAnswer<K>
+        case 'semanticTokens':
+          return (await servers.editorSemanticTokens(file, signal)) as EditorAnswer<K>
         case 'workspaceSymbols': {
           const hits = await servers.editorWorkspaceSymbols(a.query, a.path ? file : undefined, signal)
           if (!hits) return null as EditorAnswer<K>

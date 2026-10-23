@@ -109,7 +109,9 @@ primary platform; the code stays cross-platform.
   among the file's symbols; Go to symbol finds one in the file or the whole folder, and a call hierarchy follows
   callers and calls a level at a time. Blocks fold as the server says (imports, comments, regions) or by indentation
   without one, the blocks you are in stay pinned above the text as you scroll, brackets are coloured by depth, and a
-  minimap shows the whole file. eNCode talks to them through its own client and
+  minimap shows the whole file. Inlay hints show the types a server worked out and the names of parameters among the
+  text, and names are coloured by what the server knows them to be, deprecated ones struck through. eNCode talks to
+  them through its own client and
   carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.

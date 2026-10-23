@@ -67,6 +67,7 @@ say so.
 | [0075](0075-a-change-a-language-server-plans-is-checked-whole-goes-into-the-editor-or-onto-the-disk-and-can-be-seen-first-and-taken-back.md) | A change a language server plans is checked whole, goes into the editor or onto the disk, and can be seen first and taken back | Accepted, builds on 0072, 0073 and 0074 |
 | [0076](0076-the-editor-finds-its-way-by-symbols-the-servers-name-asked-only-while-shown-and-calls-are-followed-a-level-at-a-time.md) | The editor finds its way by the symbols the servers name, asked only while shown, and calls are followed a level at a time | Accepted, builds on 0072, 0074 and 0075 |
 | [0077](0077-the-editor-folds-by-the-servers-ranges-or-the-indentation-and-pins-colours-and-maps-the-text-from-what-it-already-reads.md) | The editor folds by the servers' ranges or the indentation, and pins, colours and maps the text from what it already reads | Accepted, builds on 0003, 0072, 0074 and 0076 |
+| [0078](0078-inlay-hints-and-semantic-tokens-are-kept-by-line-beside-the-text-and-follow-edits-until-the-server-answers-again.md) | Inlay hints and semantic tokens are kept by line beside the text, and follow edits until the server answers again | Accepted, builds on 0003, 0072, 0074 and 0077 |
 
 ## Template
 

@@ -28,3 +28,5 @@ export { COMPLETION_KINDS, DiagnosticSeverity, SYMBOL_KINDS, type Diagnostic, ty
 export { documentKey, pathToUri, uriToPath } from './uri'
 export { fromDocumentSymbols, holds, nestSymbols, type EditorSymbol } from './symbols'
 export { MAX_FOLD_RANGES, readFoldingRanges, type EditorFoldRange } from './folding'
+export { MAX_INLAY_HINTS, MAX_INLAY_LABEL, readInlayHints, type EditorInlayHint } from './inlay'
+export { MAX_SEMANTIC_TOKENS, readLegend, readSemanticTokens, SEMANTIC_DEPRECATED, SEMANTIC_KINDS, SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES, type EditorSemanticTokens, type SemanticKind, type SemanticLegend } from './semantic'

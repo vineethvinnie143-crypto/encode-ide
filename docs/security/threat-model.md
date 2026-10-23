@@ -1268,3 +1268,46 @@ already holds (the text, its tokens and its decorations) and add no path across 
   scroll pins a class and its method and a click on one goes there, brackets are coloured by depth and can be turned
   off, the minimap scrolls the text when clicked and hides and shows, and folding turned off opens everything and
   turned on again folds by the server's ranges.
+
+## Inlay hints and semantic tokens (Editor and language intelligence 4b)
+
+Written with the pull request that adds inlay hints and semantic colours to the editor
+([0078](../adr/0078-inlay-hints-and-semantic-tokens-are-kept-by-line-beside-the-text-and-follow-edits-until-the-server-answers-again.md)).
+The new paths are two questions the renderer asks (`code:ask` `inlayHints` and `semanticTokens`), the servers'
+answers to them, and what of those answers the editor draws. The hints are the first text from a server drawn among
+the file's own text.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| H1 | A compromised renderer asks for hints or tokens of a file outside the folder, or for hints of a huge range | The main process rebuilds each question from a file the folder holds, and for hints two whole line numbers at most 2,000 apart; anything else is dropped, and the host resolves the file inside the folder's root again. | Mitigated |
+| H2 | A hint's label disguises or reorders the code around it (bidi controls, zero-width characters, line breaks, a label made to look like code) | The host makes control, bidi and zero-width characters spaces and cuts a label at 120 characters; the editor draws it from an attribute as plain text on a distinct chip in a muted colour, never as markup and never as part of the line's text. | Mitigated |
+| H3 | A hint changes what the person copies, searches or edits | A hint holds no text: copying, search, the caret and every offset count only the document. A click on one puts the caret at its column; it cannot be selected into or typed over. | Mitigated |
+| H4 | A server's tokens are malformed or hostile (wrong types, negative or huge numbers, unknown types, places past the line) | The host reads five whole numbers per token and stops where they stop making sense; a type is read through the legend the server declared and kept only when the editor has a kind for it (a name like `constructor` or `__proto__` is none); the view keeps tokens inside their line and drops those overlapping the one before. | Mitigated |
+| H5 | A server floods the editor with hints or tokens | At most 2,000 hints and 100,000 tokens are read from an answer; a line draws at most 50 hints; files over 50,000 lines or 2,000,000 characters are not asked for tokens; hints are asked only for the lines on screen and a screen either side. | Mitigated |
+| H6 | Asking on every pause loads a server or the computer for nothing | Hints are asked when a file is shown, 350 ms after typing pauses and 120 ms after scrolling stops when new lines came on screen; tokens when a file is shown and 300 ms after typing pauses. Neither is asked while turned off, and an answer for older text is dropped. | Mitigated |
+| H7 | Stale colours or hints mislead after an edit (a deprecated mark on the wrong name, a type on the wrong variable) | Between answers each item moves with the text; an edit drops what it reaches into, and a new answer replaces everything. | Mitigated |
+
+### Residual risks
+
+- **A server can be wrong.** A hint shows the type the server worked out, and a name is coloured as the server says;
+  a wrong server shows a wrong type until it answers again.
+- **A hint can be long and look like code.** It is muted and on a chip, and cut at 120 characters, but a person can
+  still misread one; View → Hide inlay hints takes them all away.
+
+### Verification
+
+- The lsp tests read hints (labels joined, hidden characters made spaces, cut, sorted, capped) and tokens (relative to
+  absolute places, unknown types skipped but counted, a stop where the numbers stop making sense, capped, the legend
+  read safely), and ask a server for both; the workspace tests answer the editor for a file of the folder and refuse
+  one outside it; the main process tests take the two questions only in their checked form.
+- The editor tests keep items by line through any edit as mapping each one's place would (a property test), and
+  merge tokens over the lexer's so every character gets the right kind (a property test). The renderer tests number
+  kinds as the host does and turn answers into the view's lines.
+- The browser tests draw hints with no text in the line, put the caret before a type's hint and after a parameter's,
+  put it at the hint's column on a click, move hints with typing, colour names by the server's tokens with deprecated
+  ones struck through, drop only the token an edit reaches into, and keep bracket colours on top.
+- The end-to-end run, with a test server that gives hints and tokens: a type and the parameters' names show among
+  the text without changing it, a deprecated function is struck through where it is declared and called, a call
+  typed gets its hints once typing pauses, and the View menu hides and shows both.

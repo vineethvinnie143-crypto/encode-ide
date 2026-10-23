@@ -503,6 +503,23 @@ describe('the language servers of a folder', () => {
     await bare.servers.dispose()
   })
 
+  it('gives the editor the hints of the lines it asks for and the semantic tokens of a document, by the server\'s legend', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'let a = 1\nlet bb = 2\nfunction run\nfunction oldRun\nrun(oldRun)\nlet c = 3\n', true)
+    assert.deepEqual(await h.servers.editorInlayHints(a, 1, 4), [{ line: 1, character: 6, label: ': number', kind: 'type' }])
+    const kinds = (await import('./semantic')).SEMANTIC_KINDS
+    const fn = kinds.indexOf('function')
+    assert.deepEqual((await h.servers.editorSemanticTokens(a))!.data, [2, 9, 3, fn, 0, 3, 9, 6, fn, 1, 4, 0, 3, fn, 0, 4, 4, 6, fn, 1])
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'let a = 1\n', true)
+    assert.equal(await bare.servers.editorInlayHints(a, 0, 10), null)
+    assert.equal(await bare.servers.editorSemanticTokens(a), null)
+    await bare.servers.dispose()
+  })
+
   it('opens a call hierarchy for the editor a level at a time, and refuses one that is out of date', async () => {
     const dir = await project({})
     const h = hub(dir)

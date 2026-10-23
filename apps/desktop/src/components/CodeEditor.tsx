@@ -11,6 +11,8 @@ import { askServers, forgetTriggers, lspAt } from '../editor/assist/ask'
 import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
 import { EditorFolding } from '../editor/assist/folding'
+import { EditorInlays } from '../editor/assist/inlays'
+import { EditorSemanticColours } from '../editor/assist/semantic'
 import { markupHtml } from '../editor/assist/markup'
 import { goBack, goForward, goToLocation, withOpenText, type Place } from '../editor/assist/navigation'
 import { EditorOutline } from '../editor/assist/outline'
@@ -185,6 +187,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const refactorRef = useRef<EditorRefactor | null>(null)
   const outlineRef = useRef<EditorOutline | null>(null)
   const foldingRef = useRef<EditorFolding | null>(null)
+  const inlaysRef = useRef<EditorInlays | null>(null)
+  const semanticRef = useRef<EditorSemanticColours | null>(null)
   /** The problem F8 went to, whose message shows once the editor is there. */
   const problemCard = useRef<{ path: string; line: number; character: number } | null>(null)
   const pathRef = useRef<string | null>(null)
@@ -240,6 +244,17 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     [],
   )
 
+  // Inlay hints or semantic colours turned on or off: asked for again, or taken away.
+  useEffect(() => {
+    let was = useEditorLayout.getState()
+    return useEditorLayout.subscribe(() => {
+      const next = useEditorLayout.getState()
+      if (next.inlayHints !== was.inlayHints) inlaysRef.current?.wake()
+      if (next.semanticHighlighting !== was.semanticHighlighting) semanticRef.current?.wake()
+      was = next
+    })
+  }, [])
+
   // A server started or stopped: what typing asks of it may have changed.
   useEffect(
     () =>
@@ -258,6 +273,10 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       }
       foldingRef.current?.dispose()
       foldingRef.current = null
+      inlaysRef.current?.dispose()
+      inlaysRef.current = null
+      semanticRef.current?.dispose()
+      semanticRef.current = null
       assistRef.current?.dispose()
       assistRef.current = null
       refactorRef.current?.dispose()
@@ -410,6 +429,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       refactorRef.current?.show(null)
       outlineRef.current?.show(null)
       foldingRef.current?.show(null)
+      inlaysRef.current?.show(null)
+      semanticRef.current?.show(null)
       return
     }
     if (current) {
@@ -425,6 +446,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       refactorRef.current = new EditorRefactor(created)
       outlineRef.current = new EditorOutline(created, outlineWanted)
       foldingRef.current = new EditorFolding(created, () => useEditorLayout.getState().folding)
+      inlaysRef.current = new EditorInlays(created, () => useEditorLayout.getState().inlayHints)
+      semanticRef.current = new EditorSemanticColours(created, () => useEditorLayout.getState().semanticHighlighting)
       const scroll = scrollOf(path!)
       if (scroll) created.setState(state, scroll)
       created.on('transaction', (tr) => {
@@ -467,6 +490,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     refactorRef.current?.show(path)
     outlineRef.current?.show(path)
     foldingRef.current?.show(path)
+    inlaysRef.current?.show(path)
+    semanticRef.current?.show(path)
     showMarks(current, path)
     reportCursor(state)
     reportInfo(state)

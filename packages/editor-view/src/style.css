@@ -46,6 +46,8 @@
   --e-bracket-stray: var(--enc-editor-bracket-stray, var(--e-error));
   --e-sticky-shadow: var(--enc-editor-sticky-shadow, 0 4px 6px -4px rgba(0, 0, 0, 0.55));
   --e-minimap-slider: var(--enc-editor-minimap-slider, rgba(150, 160, 180, 0.12));
+  --e-inlay-fg: var(--enc-editor-inlay-fg, #8a91a1);
+  --e-inlay-bg: var(--enc-editor-inlay-bg, rgba(150, 160, 180, 0.12));
   --e-minimap-slider-hover: var(--enc-editor-minimap-slider-hover, rgba(150, 160, 180, 0.22));
   --e-ui-font: var(--enc-editor-ui-font-family, system-ui, -apple-system, 'Segoe UI', sans-serif);
 
@@ -606,6 +608,44 @@
   text-decoration: underline wavy var(--e-bracket-stray);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+/* A name a language server marked deprecated */
+
+.enc-deprecated {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Inlay hints: a type a server worked out, a parameter's name. Drawn among the text from an attribute, so they hold
+   no text of their own and every offset in the line counts as the document does. */
+
+.enc-inlay {
+  user-select: none;
+  pointer-events: auto;
+}
+.enc-inlay::before {
+  content: attr(data-label);
+  display: inline-block;
+  box-sizing: border-box;
+  height: calc(var(--enc-line-h, 20px) - 4px);
+  margin-top: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--e-inlay-bg);
+  color: var(--e-inlay-fg);
+  font-size: 0.88em;
+  font-style: normal;
+  font-weight: 400;
+  line-height: calc(var(--enc-line-h, 20px) - 4px);
+  vertical-align: top;
+  white-space: pre;
+}
+.enc-inlay-pl::before {
+  margin-left: 0.5ch;
+}
+.enc-inlay-pr::before {
+  margin-right: 0.5ch;
 }
 
 /* Sticky scroll: the first lines of the blocks the top of the view is in */

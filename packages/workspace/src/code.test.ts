@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
-import type { ServerSpec } from '@encode/lsp'
+import { SEMANTIC_KINDS, type ServerSpec } from '@encode/lsp'
 import { fakeServer, type FakeServer } from '@encode/lsp/testing'
 import { realPathOf } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
@@ -176,6 +176,13 @@ describe('a folder\'s language servers', () => {
       await s.workspaces.editorDocument(s.root, { kind: 'change', path: 'b.fk', text: 'function helper {\n  body\n}\n', dirty: true })
       assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'folding', path: 'b.fk' }), [{ startLine: 0, endLine: 2, endCharacter: 1 }])
       assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'folding', path: '../outside.fk' }), null)
+
+      // Its hints for the lines asked for, and its semantic tokens in the editor's kinds.
+      await s.workspaces.editorDocument(s.root, { kind: 'change', path: 'b.fk', text: 'let n = 1\nfunction helper\nhelper()\nlet m = 2\n', dirty: true })
+      assert.deepEqual(await s.workspaces.editorAsk(s.root, { kind: 'inlayHints', path: 'b.fk', startLine: 0, endLine: 2 }), [{ line: 0, character: 5, label: ': number', kind: 'type' }])
+      const fn = SEMANTIC_KINDS.indexOf('function')
+      assert.deepEqual((await s.workspaces.editorAsk(s.root, { kind: 'semanticTokens', path: 'b.fk' }))?.data, [1, 9, 6, fn, 0, 2, 0, 6, fn, 0])
+      assert.equal(await s.workspaces.editorAsk(s.root, { kind: 'semanticTokens', path: '../outside.fk' }), null)
 
       // A call hierarchy: the function with its line, then who calls it, each with the lines of the calls.
       const prepared = await s.workspaces.editorAsk(s.root, { kind: 'callHierarchy', path: 'a.fk', line: 0, character: 10 })
