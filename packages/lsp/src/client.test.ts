@@ -4,6 +4,7 @@ import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { LanguageClient } from './client'
 import { fakeServer, type FakeServer } from './fake-server'
+import { pathToUri } from './uri'
 
 /** Real child processes: the fake server speaks the wire format over its standard input and output. */
 
@@ -47,7 +48,7 @@ describe('a language server', () => {
     assert.equal(c.supports('pullDiagnostics'), false)
     await until('the server to log its settings', () => c.logs().some((line) => line.startsWith('choice')))
     const logs = c.logs()
-    assert.ok(logs.some((line) => line.startsWith('init ') && line.includes(JSON.stringify(`file://${root.split('/').map(encodeURIComponent).join('/')}`))), logs.join('\n'))
+    assert.ok(logs.some((line) => line.startsWith('init ') && line.includes(JSON.stringify(pathToUri(root)))), logs.join('\n'))
     assert.ok(logs.includes('config ["on",null]'), logs.join('\n'))
     assert.ok(logs.includes('choice null'))
     assert.ok(logs.includes('settings {"fake":{"option":"on"}}'))
@@ -160,7 +161,8 @@ describe('a language server', () => {
     const c = await client
     await c.stop()
     const ended = await proc.exited
-    assert.equal(ended.signal, process.platform === 'win32' ? null : 'SIGKILL')
+    // Windows has no signals; Node reports the one asked for, or none, depending on its version.
+    assert.ok(ended.signal === 'SIGKILL' || (process.platform === 'win32' && ended.signal === null), String(ended.signal))
     assert.deepEqual(exits, [])
   })
 

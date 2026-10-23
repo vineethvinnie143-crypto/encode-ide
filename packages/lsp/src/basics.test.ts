@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { describe, it } from 'node:test'
 import { check, gen } from '@encode/testkit'
 import { LANGUAGE_SERVERS, serverFor, type ServerSpec } from './catalog'
@@ -193,7 +194,7 @@ describe('the servers eNCode knows', () => {
   it('points TypeScript at the project\'s own compiler when it has one', () => {
     const spec = LANGUAGE_SERVERS.find((item) => item.id === 'typescript')!
     assert.deepEqual(spec.initializationOptions?.('/p', () => false), { hostInfo: 'eNCode' })
-    assert.deepEqual(spec.initializationOptions?.('/p', (file) => file.endsWith('tsserver.js')), { hostInfo: 'eNCode', tsserver: { path: '/p/node_modules/typescript/lib' } })
+    assert.deepEqual(spec.initializationOptions?.('/p', (file) => file.endsWith('tsserver.js')), { hostInfo: 'eNCode', tsserver: { path: path.join('/p', 'node_modules', 'typescript', 'lib') } })
   })
 })
 

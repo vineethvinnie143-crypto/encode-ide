@@ -75,7 +75,8 @@ describe('worktrees of a project', () => {
     const repo = makeRepo()
     const base = git(repo, 'rev-parse', 'HEAD')
     const made = await worktrees.create(repo, 'fix-login')
-    assert.deepEqual(made, { name: 'fix-login', path: path.join(repo, '.encode-worktrees', 'fix-login'), branch: 'encode/fix-login', base, from: 'main' })
+    // The folder's real path: on Windows a temporary folder may be named by its short form (RUNNER~1).
+    assert.deepEqual(made, { name: 'fix-login', path: path.join(fs.realpathSync.native(repo), '.encode-worktrees', 'fix-login'), branch: 'encode/fix-login', base, from: 'main' })
     assert.equal(fs.readFileSync(path.join(made.path, 'a.txt'), 'utf8'), 'one\n')
     assert.equal(git(made.path, 'symbolic-ref', '--short', 'HEAD'), 'encode/fix-login')
     assert.equal(git(repo, 'status', '--porcelain'), '', 'the project shows nothing new')

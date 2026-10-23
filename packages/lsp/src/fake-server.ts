@@ -344,8 +344,18 @@ export async function fakeServer(): Promise<FakeServer> {
       return fromChildProcess(child)
     },
     async dispose() {
-      for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-      await rm(dir, { recursive: true, force: true })
+      const running = children.filter((child) => child.exitCode === null && child.signalCode === null)
+      for (const child of running) child.kill('SIGKILL')
+      // Windows keeps a folder busy while a process that ran in it is still going away.
+      await Promise.all(running.map((child) => new Promise<void>((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve()
+        const timer = setTimeout(resolve, 5_000)
+        child.once('exit', () => {
+          clearTimeout(timer)
+          resolve()
+        })
+      })))
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     },
   }
 }
