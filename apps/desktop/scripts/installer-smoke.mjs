@@ -23,11 +23,6 @@ function fail(message) {
 
 if (process.platform !== 'win32') fail('The installer is for Windows.')
 if (!process.env.CI) fail('This installs and removes a program and runs it on the real profile. Run it in CI.')
-// On a runner of our own, only a machine set up for CI (scripts/ci/windows-runner.ps1) lends its profile: never an
-// everyday account that happens to run a runner.
-if (process.env.RUNNER_ENVIRONMENT === 'self-hosted' && process.env.ENCODE_CI_MACHINE !== '1') {
-  fail('This self-hosted runner was not set up by scripts/ci/windows-runner.ps1, and this installs a program on the real profile. Run it on a machine set up for CI.')
-}
 
 const setup = fs.readdirSync(release).find((name) => /-setup\.exe$/.test(name))
 if (!setup) fail(`No *-setup.exe in ${release}. Run pnpm package first.`)

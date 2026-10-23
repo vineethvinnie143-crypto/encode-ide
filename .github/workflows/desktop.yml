@@ -20,10 +20,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # On eNCode's own Windows runner; see ci.yml.
   helper:
     name: Windows desktop helper
-    runs-on: ${{ fromJSON(vars.ENCODE_WINDOWS_RUNNER || '["self-hosted","windows","encode"]') }}
+    runs-on: windows-latest
     timeout-minutes: 25
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -34,13 +33,6 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-
-      # On eNCode's runner: its desktop must be on screen, and eNCode's data from an earlier job goes, as on a new
-      # machine.
-      - name: Tidy eNCode's runner
-        if: runner.environment == 'self-hosted'
-        shell: powershell
-        run: ./scripts/ci/tidy-runner.ps1 -Start
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -71,10 +63,3 @@ jobs:
           path: packages/tools/screenshots
           if-no-files-found: ignore
           retention-days: 3
-
-      # eNCode's runner is kept from one job to the next: nothing this job started may stay open and hold files the
-      # next checkout deletes (an eNCode, an Electron or a helper left by a failed step).
-      - name: Stop what the job left open
-        if: always()
-        shell: powershell
-        run: if (Test-Path scripts/ci/tidy-runner.ps1) { ./scripts/ci/tidy-runner.ps1 }

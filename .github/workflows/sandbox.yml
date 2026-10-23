@@ -20,10 +20,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # On eNCode's own Windows runner; see ci.yml.
   windows:
     name: Windows sandbox
-    runs-on: ${{ fromJSON(vars.ENCODE_WINDOWS_RUNNER || '["self-hosted","windows","encode"]') }}
+    runs-on: windows-latest
     timeout-minutes: 30
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
@@ -54,10 +53,3 @@ jobs:
       - name: What failed
         if: always()
         run: if (Test-Path "$env:RUNNER_TEMP/digest.txt") { Get-Content "$env:RUNNER_TEMP/digest.txt" }
-
-      # eNCode's runner is kept from one job to the next: nothing this job started may stay open and hold files the
-      # next checkout deletes (an eNCode, an Electron or a helper left by a failed step).
-      - name: Stop what the job left open
-        if: always()
-        shell: powershell
-        run: if (Test-Path scripts/ci/tidy-runner.ps1) { ./scripts/ci/tidy-runner.ps1 }
