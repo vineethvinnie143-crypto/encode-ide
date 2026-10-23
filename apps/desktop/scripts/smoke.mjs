@@ -127,15 +127,17 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F12: 123 }
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
+/** Keys whose physical key is not `Key` and their letter. */
+const CODE_NAMES = { '.': 'Period' }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
 async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
   const common = {
     key: KEY_VALUES[key] ?? key,
-    code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+    code: CODE_NAMES[key] ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key),
     modifiers: (alt ? 1 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0),
     windowsVirtualKeyCode: KEY_CODES[key] ?? key.toUpperCase().charCodeAt(0),
   }
@@ -1492,6 +1494,7 @@ async function runLanguageServerChecks() {
   await waitFor(`${EDITOR_MARKS}.errors === 1 && !document.querySelector('.editor-tab.is-dirty')`, 10000, 'the marks after undo')
 
   await runEditorAssistChecks(markerLines)
+  await runEditorChangeChecks(markerLines)
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
@@ -1742,6 +1745,234 @@ async function runEditorAssistChecks(markerLines) {
   await until(async () => (await markerLines()).includes('close lsp-assist.ts'), 10000, 'the server to let the file go')
   await evaluate("window.eNCode.workspace.delete('src/lsp-assist.ts').catch(() => null)")
   console.log('[smoke] editor assist: ok')
+}
+
+/** The active tab's file name and the cursor's line, as the footer says. */
+const EDITOR_PLACE = `(() => ({
+  file: document.querySelector('.editor-tab.is-active .tab-label')?.textContent ?? '',
+  line: Number(/Ln (\\d+)/.exec(document.querySelector('.editor-footer-side')?.textContent ?? '')?.[1] ?? 0),
+}))()`
+
+/** The open menu's rows: their labels, which are disabled, the section headers and the active one. */
+const ACTION_MENU = `(() => {
+  const menu = document.querySelector('.code-actions-menu')
+  if (!menu) return null
+  return {
+    label: menu.getAttribute('aria-label'),
+    groups: [...menu.querySelectorAll('.ui-menu-group')].map((node) => node.textContent),
+    items: [...menu.querySelectorAll('.ui-menu-item')].map((node) => ({ label: node.querySelector('.ui-menu-label')?.textContent ?? '', disabled: node.classList.contains('is-disabled'), active: node.classList.contains('is-active') })),
+  }
+})()`
+
+/**
+ * What the language servers change on request, against the test server: F8 and the Problems panel, the lightbulb and
+ * Ctrl+.'s fixes (one resolved when chosen), F2's rename across the folder with its preview, a refused name and
+ * Undo for the whole change, a refactoring that runs as the server's command, organizing the imports, formatting the
+ * file (one undo step), as `;` is typed and on save.
+ */
+async function runEditorChangeChecks(markerLines) {
+  console.log('[smoke] --- editor changes ---')
+  const shape = [
+    "import { zeta } from './zeta'",
+    "import { alpha } from './alpha'",
+    'export function widthOfBox(box: { width: number }): number {',
+    '\treturn box.width   ',
+    '}',
+    'export const total = widthOfBox({ width: 2 }) + ERROR',
+    'export const size = 2',
+    '',
+  ].join('\n')
+  const use = "import { widthOfBox } from './lsp-shape'\nexport const doubled = widthOfBox({ width: 4 }) * 2\n"
+  await evaluate(`window.eNCode.workspace.write('src/lsp-shape-use.ts', ${JSON.stringify(use)})`)
+  await evaluate(`window.eNCode.workspace.write('src/lsp-shape.ts', ${JSON.stringify(shape)})`)
+  const read = (name) => fs.readFile(path.join(demoPath, 'src', name), 'utf8')
+  await quickOpen('src/lsp-shape.ts', 'export const size = 2')
+  await until(async () => (await markerLines()).includes('open lsp-shape.ts'), 10000, 'the server to be given the file')
+  await waitFor(`${EDITOR_MARKS}.errors === 1`, 10000, 'the ERROR marked')
+  const place = () => evaluate(EDITOR_PLACE)
+  const placeIs = async (file, line, label) => {
+    await until(async () => {
+      const now = await place()
+      return now.file.includes(file) && now.line === line
+    }, 8000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await place())}`)
+    })
+  }
+
+  // F8: the next problem, its message beside it; on into the next file with problems, round, and back with Shift+F8.
+  await focusEditor()
+  await pressKey('Home', { ctrl: true })
+  await pressKey('F8')
+  await placeIs('lsp-shape.ts', 6, 'F8 goes to the problem in the file')
+  await waitFor("(document.querySelector('.mark-card')?.textContent ?? '').includes('Something is wrong here')", 6000, 'the message of the problem F8 went to')
+  await screenshot('22-editor-next-problem.png')
+  await pressKey('F8')
+  await placeIs('lsp-marks.ts', 2, 'F8 goes on to the next file with problems')
+  await pressKey('F8')
+  await placeIs('lsp-marks.ts', 3, 'F8 to the warning')
+  await pressKey('F8', { shift: true })
+  await placeIs('lsp-marks.ts', 2, 'Shift+F8 back to the error')
+  await pressKey('F8', { shift: true })
+  await placeIs('lsp-shape.ts', 6, 'Shift+F8 round to the last file')
+  // Escape puts the message away; the pointer is off the text, so nothing brings it back.
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await waitFor("!!document.querySelector('.mark-card')", 6000, 'the message of the problem Shift+F8 went to')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.mark-card')", 4000, 'Escape closes the message')
+
+  // The Problems panel: every file's problems, a filter, a row that opens its place.
+  await pressKey('y', { ctrl: true, shift: true })
+  await waitFor("document.querySelectorAll('.problems-pane .pp-row').length === 3", 8000, 'the Problems panel lists the problems').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate("[...document.querySelectorAll('.problems-pane .pp-file, .problems-pane .pp-row')].map((node) => node.textContent)"))}`)
+  })
+  const problemFiles = await evaluate("[...document.querySelectorAll('.problems-pane .pp-file .pp-name')].map((node) => node.textContent)")
+  if (problemFiles.join() !== 'lsp-marks.ts,lsp-shape.ts') throw new Error(`The Problems panel should group by file in path order: ${JSON.stringify(problemFiles)}`)
+  await screenshot('22-problems-panel.png')
+  await typeInto('.pp-filter input', 'better')
+  await waitFor("document.querySelectorAll('.problems-pane .pp-row').length === 1", 6000, 'the filter keeps the warning')
+  await click('.problems-pane .pp-row')
+  await placeIs('lsp-marks.ts', 3, 'a row opens its place')
+  await typeInto('.pp-filter input', '')
+  await pressKey('j', { ctrl: true })
+  await waitFor("!!document.querySelector('.bottom-panel.is-closed') || !document.querySelector('.bottom-panel')", 6000, 'Ctrl+J hides the bottom panel')
+
+  // The lightbulb on a line with a fixable problem; Ctrl+. lists the fixes and refactorings, the preferred fix first.
+  await quickOpen('src/lsp-shape.ts', 'export const size = 2')
+  await focusEditor()
+  await pressKey('Home', { ctrl: true })
+  for (let step = 0; step < 5; step++) await pressKey('ArrowDown')
+  await pressKey('Home')
+  await cursorAt(6, 1, 'the cursor at the start of the line with the problem')
+  await waitFor("!!document.querySelector('.code-editor .code-bulb')", 8000, 'the lightbulb')
+  await screenshot('22-editor-lightbulb.png')
+  await pressKey('.', { ctrl: true })
+  await waitFor(`${ACTION_MENU}?.items.length === 4`, 8000, 'the fixes and refactorings').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(ACTION_MENU))}`)
+  })
+  const menu = await evaluate(ACTION_MENU)
+  console.log('[smoke] quick fix menu:', JSON.stringify(menu))
+  const labels = menu.items.map((item) => item.label)
+  if (menu.groups.join() !== 'Quick fixes,Refactor' || labels.join() !== 'Replace ERROR with 0,Add a note about ERROR,Extract to constant,Move to a new file' || !menu.items[0].active || !menu.items[3].disabled) {
+    throw new Error(`The quick fix menu is not as the server offers it: ${JSON.stringify(menu)}`)
+  }
+  await screenshot('22-editor-quick-fix.png')
+  // The preferred fix comes without its edit: the server fills it in when it is chosen.
+  await pressKey('Enter')
+  await waitFor(`${EDITOR_MARKS}.errors === 0 && ${RENDERED_LINES}.includes('export const total = widthOfBox({ width: 2 }) + 0')`, 8000, 'the fix made')
+  if (!(await read('lsp-shape.ts')).includes('+ 0\n')) throw new Error('The fix is not on disk: the file had no unsaved changes, so it is written')
+  if (await evaluate("!!document.querySelector('.editor-tab.is-dirty')")) throw new Error('The fixed file shows unsaved changes')
+  await waitFor("!document.querySelector('.code-editor .code-bulb')", 6000, 'the lightbulb goes with the problem')
+
+  // F2 on a name: the box with it selected; a name the server refuses keeps the box, with its reason.
+  const call = 'export const total = widthOfBox({ width: 2 }) + 0'
+  await clickAt(await wordSpot(call, 'widthOfBox'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await pressKey('F2')
+  await waitFor("document.querySelector('.rename-box .rename-input')?.value === 'widthOfBox' && document.activeElement?.classList.contains('rename-input')", 8000, 'the rename box').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate("({ value: document.querySelector('.rename-box .rename-input')?.value ?? null, focus: document.activeElement?.className ?? null, tag: document.activeElement?.tagName })"))}`)
+  })
+  await send('Input.insertText', { text: '1bad' })
+  await pressKey('Enter')
+  await waitFor(`(document.querySelector('.rename-hint.is-error')?.textContent ?? '') === "'1bad' is not a valid name."`, 8000, 'the reason a name is refused').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate("document.querySelector('.rename-box')?.textContent ?? null"))}`)
+  })
+  await pressKey('a', { ctrl: true })
+  await send('Input.insertText', { text: 'measureBox' })
+  await waitFor("!document.querySelector('.rename-hint.is-error')", 4000, 'typing another name puts the reason away')
+  await screenshot('22-editor-rename.png')
+  // Shift+Enter shows what would change in every file, the one not open included.
+  await pressKey('Enter', { shift: true })
+  await waitFor("document.querySelectorAll('.change-preview .cp-file').length === 2", 8000, 'the preview of the rename')
+  const preview = await evaluate(`(() => ({
+    title: document.querySelector('.ui-dialog-title')?.textContent ?? '',
+    description: document.querySelector('.ui-dialog-description')?.textContent ?? '',
+    files: [...document.querySelectorAll('.change-preview .cp-file')].map((node) => ({ path: node.querySelector('.cp-path')?.textContent, lines: [...node.querySelectorAll('.cp-after')].map((line) => line.textContent) })),
+  }))()`)
+  console.log('[smoke] rename preview:', JSON.stringify(preview))
+  if (preview.title !== 'Rename to measureBox' || preview.description !== '4 changes in 2 files' || preview.files.map((file) => file.path).join() !== 'src/lsp-shape-use.ts,src/lsp-shape.ts' || !preview.files[0].lines.some((line) => line.includes('measureBox({ width: 4 })'))) {
+    throw new Error(`The preview does not show the rename: ${JSON.stringify(preview)}`)
+  }
+  if (!(await read('lsp-shape-use.ts')).includes('widthOfBox')) throw new Error('A preview changed a file')
+  await screenshot('22-editor-rename-preview.png')
+  await click('.ui-dialog .btn', 'Apply')
+  await waitFor("!document.querySelector('.change-preview')", 8000, 'the preview closes once applied')
+  await waitFor(`[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'Rename to measureBox: 4 places in 2 files.')`, 8000, 'the notice of the rename')
+  await waitFor(`${RENDERED_LINES}.includes('export const total = measureBox({ width: 2 }) + 0')`, 6000, 'the rename in the editor')
+  for (const name of ['lsp-shape.ts', 'lsp-shape-use.ts']) if (!(await read(name)).includes('measureBox(') || (await read(name)).includes('widthOfBox')) throw new Error(`${name} is not renamed on disk`)
+  if (await evaluate("!!document.querySelector('.editor-tab.is-dirty')")) throw new Error('The renamed file shows unsaved changes')
+  // Undo on the notice takes the whole change back, in both files.
+  if (!(await click('.toast-action', 'Undo'))) throw new Error('The notice of the rename offers no Undo')
+  await waitFor(`[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'Took back the change: Rename to measureBox.')`, 8000, 'the notice of the undo')
+  await waitFor(`${RENDERED_LINES}.includes(${JSON.stringify(call)})`, 6000, 'the rename taken back in the editor')
+  for (const name of ['lsp-shape.ts', 'lsp-shape-use.ts']) if ((await read(name)).includes('measureBox')) throw new Error(`${name} still has the rename on disk`)
+  // And at once with Enter.
+  await clickAt(await wordSpot(call, 'widthOfBox'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await pressKey('F2')
+  await waitFor("document.activeElement?.classList.contains('rename-input')", 8000, 'the rename box again')
+  await send('Input.insertText', { text: 'measureBox' })
+  await pressKey('Enter')
+  await waitFor(`${RENDERED_LINES}.includes('export const total = measureBox({ width: 2 }) + 0') && !document.querySelector('.rename-box')`, 8000, 'Enter renames')
+  if (!(await read('lsp-shape-use.ts')).includes('measureBox(')) throw new Error('The file that is not open is not renamed')
+
+  // A refactoring that runs as the server's command, which asks eNCode to make its edit.
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await pressKey('ArrowUp')
+  await pressKey('End')
+  await pressKey('ArrowLeft', { shift: true })
+  await pressKey('r', { ctrl: true, shift: true })
+  await waitFor(`${ACTION_MENU}?.label === 'Refactorings' && ${ACTION_MENU}.items[0]?.label === 'Extract to constant'`, 8000, 'the refactorings for the selection').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(ACTION_MENU))}`)
+  })
+  await pressKey('Enter')
+  await waitFor(`${RENDERED_LINES}.includes('const extracted = 2') && ${RENDERED_LINES}.includes('export const size = extracted')`, 8000, 'the command made its edit').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
+  if (!(await read('lsp-shape.ts')).includes('const extracted = 2\n')) throw new Error("The command's edit is not on disk")
+
+  // Shift+Alt+O sorts the imports.
+  await pressKey('o', { shift: true, alt: true })
+  await waitFor(`${RENDERED_LINES}[0] === "import { alpha } from './alpha'" && ${RENDERED_LINES}[1] === "import { zeta } from './zeta'"`, 8000, 'the imports sorted').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
+
+  // Shift+Alt+F formats the file as one step of the undo history; Ctrl+Z takes it back.
+  const trailing = `${RENDERED_LINES}.some((line) => line.startsWith('\\treturn box.width') && line.endsWith('   '))`
+  if (!(await evaluate(trailing))) throw new Error(`The line to format is not there: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  await pressKey('f', { shift: true, alt: true })
+  await waitFor(`!${trailing} && !!document.querySelector('.editor-tab.is-dirty')`, 8000, 'the file formatted')
+  await pressKey('z', { ctrl: true })
+  await waitFor(`${trailing} && !document.querySelector('.editor-tab.is-dirty')`, 8000, 'Ctrl+Z takes the formatting back at once')
+
+  // As `;` is typed, and on save, once they are turned on in Settings > Language servers.
+  const formatting = async (on) => {
+    await openSettings('Language servers')
+    for (const id of ['format-on-type', 'format-on-save']) {
+      if ((await evaluate(`document.querySelector('#${id}')?.getAttribute('aria-checked')`)) !== String(on)) await click(`#${id}`)
+    }
+    await settingIs(`${on ? '' : '!'}settings.formatOnType && ${on ? '' : '!'}settings.formatOnSave`, `formatting turned ${on ? 'on' : 'off'}`)
+    await closeSettings()
+  }
+  await formatting(true)
+  await focusEditor()
+  await pressKey('End', { ctrl: true })
+  await send('Input.insertText', { text: 'let spaced = 1   ;' })
+  await waitFor(`${RENDERED_LINES}.includes('let spaced = 1;')`, 8000, 'the line formatted as ; is typed').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
+  await pressKey('s', { ctrl: true })
+  await waitFor("!document.querySelector('.editor-tab.is-dirty')", 8000, 'saved')
+  const saved = await read('lsp-shape.ts')
+  if (/[ \t]+\n/.test(saved) || !saved.includes('let spaced = 1;') || !saved.includes('measureBox')) throw new Error(`The file was not formatted on save:\n${saved}`)
+  await formatting(false)
+
+  // Tidy up.
+  await click('.editor-tab.is-active .tab-close')
+  await until(async () => (await markerLines()).includes('close lsp-shape.ts'), 10000, 'the server to let the file go')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-shape.ts').catch(() => null)")
+  await evaluate("window.eNCode.workspace.delete('src/lsp-shape-use.ts').catch(() => null)")
+  console.log('[smoke] editor changes: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

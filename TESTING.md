@@ -344,11 +344,27 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
   again. **Shift+F12** lists its uses between the lines (arrows move, Enter goes there, Esc closes), **Alt+F12** its
   definition the same way, **Ctrl+F12** goes to an implementation. The **Go** menu has all of these.
 - A definition in a library outside the folder is not opened: eNCode says where it is.
+- **F2** on a name opens a box with the name selected: type the new one, Enter renames it everywhere, **Shift+Enter**
+  shows every file and line it would change first (Apply or Cancel). A name the server refuses keeps the box open with
+  its reason. A rename that touched several files has **Undo** in its notice: it takes the whole rename back.
+- Put the cursor on an error: a lightbulb shows beside the line. Click it or press **Ctrl+.**: the fixes the server
+  offers, the preferred one first, then its refactorings; Enter takes one, Shift+Enter shows it first. The error's
+  card has a **Quick fix…** button too. **Ctrl+Shift+R** lists the refactorings for the selection (extract a function
+  or a constant), **Shift+Alt+O** organizes the imports, and right-click has Source action… and the rest.
+- **Shift+Alt+F** formats the file, Format selection (right-click) only the selected lines; Ctrl+Z takes it back.
+  **Settings → Language servers** has **Format on save** and **Format on type** (both off at first). Not every server
+  formats: pyright does not, typescript-language-server does.
+- A file with unsaved changes is changed in the editor only (save it yourself); every other file is changed on disk.
+- **Ctrl+Shift+Y** opens **Problems**: every file's errors and warnings, a filter and buttons to hide each kind; click a
+  row to go there (the count in the editor's footer opens it too). **F8** goes to the next error or warning, on across
+  files, **Shift+F8** back; Esc puts its message away.
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
 suggestions that come too late or in the wrong place, an import that went in twice or not at all, a key that did
-something other than you expected while a list or a snippet was open, and a jump that went to the wrong place.
+something other than you expected while a list or a snippet was open, and a jump that went to the wrong place. For
+renames and fixes: a change that missed a place or touched the wrong file, an Undo that did not put everything back,
+and formatting that moved your cursor or fought with what you typed.
 
 ## Worktrees
 
@@ -417,5 +433,5 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: rename, quick fixes, formatting, the outline and installing a server with one click are not in
-  the editor yet (the agent can rename through LSPEdit); they come with the next builds.
+- Language servers: the outline and breadcrumbs, symbols across the folder, inlay hints and installing a server with
+  one click are not in the editor yet; they come with the next builds.

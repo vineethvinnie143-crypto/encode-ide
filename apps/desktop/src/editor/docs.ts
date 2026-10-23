@@ -1,5 +1,6 @@
 import { EditorState, detectIndent, languageForPath, reload, type Transaction } from '@encode/editor'
-import { Text } from '@encode/text'
+import { ChangeSet, Text, type ChangeSpec } from '@encode/text'
+import type { CodeTextEdit } from '@shared/types'
 
 export type Eol = '\n' | '\r\n'
 
@@ -83,6 +84,11 @@ export function indentLabel(state: EditorState): string {
 
 export function hasDoc(path: string): boolean {
   return docs.has(path)
+}
+
+/** The paths of every open document. */
+export function openDocPaths(): string[] {
+  return [...docs.keys()]
 }
 
 export function docState(path: string): EditorState | undefined {
@@ -218,4 +224,83 @@ export function applyExternal(path: string, content: string): boolean {
   host?.dispatch(tr)
   watcher?.changed(path, tr.state, false)
   return true
+}
+
+/** An offset for a server's position: a column past the line's end is its end, a line past the last is the end. */
+function offsetOf(doc: Text, line: number, character: number): number {
+  if (line >= doc.lineCount) return doc.length
+  const at = doc.line(Math.max(0, line) + 1)
+  return Math.min(at.to, at.from + Math.max(0, character))
+}
+
+/** A server's edits as changes to a document, their line breaks the document's own; null when two of them overlap. */
+export function changesFromEdits(doc: Text, edits: readonly CodeTextEdit[]): ChangeSpec[] | null {
+  const specs = edits.map((edit, order) => {
+    const from = offsetOf(doc, edit.range.start.line, edit.range.start.character)
+    const to = Math.max(from, offsetOf(doc, edit.range.end.line, edit.range.end.character))
+    return { from, to, insert: edit.newText.replace(/\r\n?/g, '\n'), order }
+  })
+  // Inserts at one place keep the order the server gave them.
+  specs.sort((a, b) => a.from - b.from || a.to - b.to || a.order - b.order)
+  for (let index = 1; index < specs.length; index++) if (specs[index].from < specs[index - 1].to) return null
+  return specs.map(({ from, to, insert }) => ({ from, to, insert }))
+}
+
+/** Edits a server made to an open document, as they can be taken back. */
+export interface ServerEdit {
+  path: string
+  changes: ChangeSet
+  /** The document before them and after them. */
+  before: Text
+  after: Text
+}
+
+/**
+ * Puts a server's edits (a rename, a code action, formatting) into an open document as one step of its undo history,
+ * through the view that shows it, if any, so its cursor and scroll stay. `saved`: the file on disk holds the result
+ * already, so they do not make the document unsaved. Null when the document is not open or the edits overlap.
+ */
+export function applyServerEdits(path: string, edits: readonly CodeTextEdit[], options: { saved?: boolean } = {}): ServerEdit | null {
+  const entry = docs.get(path)
+  if (!entry) return null
+  const host = entry.host
+  const state = host?.state ?? entry.state
+  const specs = changesFromEdits(state.doc, edits)
+  if (!specs) return null
+  const changes = ChangeSet.of(specs, state.doc.length)
+  const tr = state.update({ changes, origin: 'server', isolateHistory: true })
+  settle(path, entry, tr, Boolean(options.saved))
+  return { path, changes, before: state.doc, after: tr.state.doc }
+}
+
+/**
+ * Takes back edits `applyServerEdits` made, as a new step of the undo history, while the document is still what they
+ * left. `saved`: the file on disk was put back too. False when the document has changed since, or is not open.
+ */
+export function revertServerEdits(edit: ServerEdit, options: { saved?: boolean } = {}): boolean {
+  const entry = docs.get(edit.path)
+  if (!entry) return false
+  const state = entry.host?.state ?? entry.state
+  // The same text is enough: a document changed twice is the second change's taken back, a new text that reads the same.
+  if (state.doc !== edit.after && !state.doc.eq(edit.after)) return false
+  const tr = state.update({ changes: edit.changes.invert(edit.before), origin: 'server', isolateHistory: true })
+  settle(edit.path, entry, tr, Boolean(options.saved))
+  return true
+}
+
+/** The document takes a transaction made outside its view: saved first when the disk has its text, then shown. */
+function settle(path: string, entry: Entry, tr: Transaction, saved: boolean): void {
+  entry.state = tr.state
+  if (saved) {
+    entry.saved = tr.state.doc
+    entry.savedPoint = tr.state.history.point
+  }
+  entry.host?.dispatch(tr)
+  watcher?.changed(path, tr.state, differs(entry))
+}
+
+/** The document as it is now, by identity: a change since makes a new one. */
+export function currentDoc(path: string): Text | undefined {
+  const entry = docs.get(path)
+  return entry ? (entry.host?.state ?? entry.state).doc : undefined
 }

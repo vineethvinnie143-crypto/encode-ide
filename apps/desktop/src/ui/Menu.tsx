@@ -31,6 +31,8 @@ export interface MenuAction {
   disabled?: boolean
   danger?: boolean
   onSelect: () => void
+  /** Shift+Enter on the item: the other way to take it, such as showing what it changes first. */
+  onAlternate?: () => void
 }
 
 export type MenuEntry = MenuAction | { kind: 'separator'; id: string } | { kind: 'group'; id: string; label: string }
@@ -55,6 +57,7 @@ export function MenuPanel({
   ignore,
   onClose,
   onHorizontal,
+  footer,
 }: {
   entries: readonly MenuEntry[]
   anchor: Rect
@@ -71,6 +74,8 @@ export function MenuPanel({
   onClose: (refocus: boolean) => void
   /** Left and right arrows, for a menu bar that moves to the next menu. */
   onHorizontal?: (direction: -1 | 1) => void
+  /** A quiet line under the items, such as the keys that take them. */
+  footer?: ReactNode
 }) {
   const menuId = useId()
   const menuNode = useRef<HTMLDivElement>(null)
@@ -146,6 +151,13 @@ export function MenuPanel({
       onClose(false)
       return
     }
+    if (event.key === 'Enter' && event.shiftKey && active >= 0 && actions[active].onAlternate && !actions[active].disabled) {
+      event.preventDefault()
+      const alternate = actions[active].onAlternate!
+      onClose(true)
+      alternate()
+      return
+    }
     if ((event.key === 'Enter' || event.key === ' ') && active >= 0) {
       event.preventDefault()
       choose(actions[active])
@@ -171,6 +183,7 @@ export function MenuPanel({
       id={menuId}
       role="menu"
       aria-label={label}
+      aria-describedby={footer ? `${menuId}-footer` : undefined}
       tabIndex={-1}
       data-side={spot?.side ?? side}
       className={cx('ui-menu', className)}
@@ -222,6 +235,11 @@ export function MenuPanel({
           </button>
         )
       })}
+      {footer && (
+        <div id={`${menuId}-footer`} role="presentation" className="ui-menu-footer">
+          {footer}
+        </div>
+      )}
     </div>,
     document.body,
   )

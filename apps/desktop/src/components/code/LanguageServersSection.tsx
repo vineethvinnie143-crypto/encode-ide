@@ -96,6 +96,22 @@ export default function LanguageServersSection({ settings }: { settings: Setting
         >
           <Segmented label="Send the agent back to fix errors" value={settings.errorGate} options={GATES} onChange={(errorGate) => void save({ errorGate })} />
         </SettingRow>
+        <SettingRow
+          id="code.formatOnSave"
+          htmlFor="format-on-save"
+          label="Format on save"
+          help="Saving a file formats it first, the way its language server formats code. Not every server formats (pyright does not). A server that takes longer than a second and a half is not waited for, and the file is saved as it is."
+        >
+          <Toggle id="format-on-save" checked={settings.formatOnSave} onChange={(formatOnSave) => void save({ formatOnSave })} />
+        </SettingRow>
+        <SettingRow
+          id="code.formatOnType"
+          htmlFor="format-on-type"
+          label="Format as you type"
+          help="The server tidies a line once you finish it, after a ; or a } or a new line. Each tidy-up is its own step for Ctrl+Z."
+        >
+          <Toggle id="format-on-type" checked={settings.formatOnType} onChange={(formatOnType) => void save({ formatOnType })} />
+        </SettingRow>
       </SettingsGroup>
 
       <section className="settings-group" data-setting="code.servers">

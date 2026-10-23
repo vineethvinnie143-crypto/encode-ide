@@ -4,7 +4,7 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import type { CodeLocation, LanguageServers } from '@encode/lsp'
+import { EditRefused, type CodeLocation, type EditPlan, type LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import {
   folderLanguageServers,
@@ -12,6 +12,8 @@ import {
   type EditorAnswer,
   type EditorAsk,
   type EditorAsks,
+  type EditorChangeRequest,
+  type EditorChangeResult,
   type EditorDocumentChange,
   type EditorLocation,
   type LanguageServerOptions,
@@ -19,6 +21,7 @@ import {
   withPreviews,
 } from './code'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
+import { applyEditorPlan, ChangeRefused, previewPlan, undoEditorChange, type AppliedChange, type AppliedRecord, type ChangeContext } from './editor-changes'
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
 import { workspaceHooks } from './hooks'
@@ -31,6 +34,9 @@ import { actOnSandbox, type SandboxAction, type SandboxOutcome } from './sandbox
 import { sandboxReport, type SandboxReport } from './sandbox-report'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+/** How long a change of the editor's can be taken back, and a preview of one applied. */
+const UNDO_MS = 10 * 60_000
+const PREVIEW_MS = 10 * 60_000
 /** How long opening a session waits for the sandbox to find out whether this machine has one (the first run on Windows builds its helper). */
 const SANDBOX_WAIT_MS = 15_000
 
@@ -39,6 +45,15 @@ function inFolder(root: string, file: string): string | null {
   const relative = path.relative(root, file)
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null
   return relative.split(path.sep).join('/')
+}
+
+/** A change of the editor's, planned and not applied yet: the server's edit, and the command that runs after it, if any. */
+interface PendingChange {
+  id: number
+  title: string
+  plan?: EditPlan
+  command?: { file: string; list: number; id: number }
+  at: number
 }
 
 export interface CheckpointStoreOptions {
@@ -95,6 +110,9 @@ export class Workspaces {
   /** The editor's changes and questions, by the folder path it gives. */
   private readonly lanes = new Map<string, { pending: Promise<void>; asking: Map<string, AbortController> }>()
   private readonly realRoots = new Map<string, string>()
+  /** The editor's changes by folder: one shown for review, and the last one applied while it can be taken back. */
+  private readonly changes = new Map<string, { preview: PendingChange | null; applied: { id: number; record: AppliedRecord; at: number } | null }>()
+  private changeIds = 0
   private readonly stores: CheckpointStoreOptions | undefined
   /** The stores already tidied by this program, so that opening a second session in a folder does not do it again. */
   private readonly tidied = new Set<string>()
@@ -214,7 +232,8 @@ export class Workspaces {
     const at = await this.editorFile(root, ask.path)
     if (!at) return empty
     const { servers, file, root: real } = at
-    const slot = ask.kind === 'resolve' || ask.kind === 'triggers' ? null : ask.kind
+    // The lightbulb's own question does not cancel the person's, nor theirs the lightbulb's.
+    const slot = ask.kind === 'resolve' || ask.kind === 'triggers' ? null : ask.kind === 'codeActions' && (ask as EditorAsks['codeActions']['params']).automatic ? 'codeActions:automatic' : ask.kind
     const controller = new AbortController()
     if (slot) {
       lane.asking.get(slot)?.abort()
@@ -242,6 +261,14 @@ export class Workspaces {
           return (await where(await servers.editorLocations(a.kind, file, a.line, a.character, signal))) as EditorAnswer<K>
         case 'triggers':
           return servers.editorTriggers(file) as EditorAnswer<K>
+        case 'prepareRename':
+          return (await servers.editorPrepareRename(file, a.line, a.character, signal)) as EditorAnswer<K>
+        case 'codeActions':
+          return (await servers.editorCodeActions(file, a.range, { ...(a.only ? { only: a.only } : {}), automatic: a.automatic }, signal)) as EditorAnswer<K>
+        case 'format':
+          return (await servers.format(file, { tabSize: a.tabSize, insertSpaces: a.insertSpaces }, a.range, signal)) as EditorAnswer<K>
+        case 'formatOnType':
+          return (await servers.formatOnType(file, a.line, a.character, a.ch, { tabSize: a.tabSize, insertSpaces: a.insertSpaces }, signal)) as EditorAnswer<K>
         default:
           return empty
       }
@@ -249,6 +276,159 @@ export class Workspaces {
       return empty
     } finally {
       if (slot && lane.asking.get(slot) === controller) lane.asking.delete(slot)
+    }
+  }
+
+  /**
+   * A change of the editor's through a folder's servers: a rename or a code action, applied at once or shown first; a
+   * preview applied or let go; an applied change taken back. It waits for the editor's earlier changes, and the editor's
+   * later ones wait for it, so the servers' plan is for the text the person sees.
+   */
+  editorChange(root: string, request: EditorChangeRequest): Promise<EditorChangeResult> {
+    if (!this.options.languageServers) return Promise.resolve({ ok: false, reason: 'This program starts no language servers.' })
+    const lane = this.editorLane(root)
+    const run = lane.pending.then(() => this.runEditorChange(root, request))
+    lane.pending = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run.catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
+  }
+
+  private async runEditorChange(root: string, request: EditorChangeRequest): Promise<EditorChangeResult> {
+    let real = this.realRoots.get(root)
+    if (!real) {
+      real = await realPathOf(root)
+      this.realRoots.set(root, real)
+    }
+    const config = this.config(real)
+    const servers = this.languageServers(config.root)!
+    const key = workspaceKey(config.root, this.platform === 'win32')
+    let state = this.changes.get(key)
+    if (!state) {
+      state = { preview: null, applied: null }
+      this.changes.set(key, state)
+    }
+    const folder = config.root
+    const relative = (file: string) => inFolder(folder, file) ?? file
+    const resolve = (rel: string) => {
+      const file = path.resolve(folder, rel)
+      return inFolder(folder, file) === null ? null : file
+    }
+    const context = (open: readonly string[]): ChangeContext => ({ root: folder, servers, open: open.map(resolve).filter((file): file is string => file !== null), platform: this.platform })
+
+    if (request.kind === 'discard') {
+      if (state.preview?.id === request.id) state.preview = null
+      return { ok: true, done: 'discarded' }
+    }
+    if (request.kind === 'undo') {
+      const applied = state.applied
+      if (!applied || applied.id !== request.id || Date.now() - applied.at > UNDO_MS) return { ok: false, reason: 'That change can no longer be taken back as a whole. Use Undo in each file instead.' }
+      try {
+        const undone = await undoEditorChange(applied.record, context(request.open))
+        state.applied = null
+        return { ok: true, done: 'undone', id: applied.id, editor: undone.editor.map((item) => ({ path: relative(item.file), written: item.written })), written: undone.written.map(relative), created: undone.created.map(relative), deleted: undone.deleted.map(relative) }
+      } catch (error) {
+        if (error instanceof ChangeRefused) return { ok: false, reason: error.message }
+        throw error
+      }
+    }
+    if (request.kind === 'apply') {
+      const pending = state.preview
+      if (!pending || pending.id !== request.id || Date.now() - pending.at > PREVIEW_MS) return { ok: false, reason: 'That preview is out of date. Make the change again.' }
+      state.preview = null
+      return this.applyEditorChange(pending, servers, context(request.open), state, relative)
+    }
+
+    const file = resolve(request.path)
+    if (!file) return { ok: false, reason: 'That file is not in the open folder.' }
+    let pending: PendingChange
+    if (request.kind === 'rename') {
+      try {
+        const plan = await servers.rename(file, request.line, request.character, request.newName)
+        if (!plan.changes.length) return { ok: false, reason: 'The language server found nothing to rename.' }
+        pending = { id: ++this.changeIds, title: `Rename to ${request.newName}`, plan, at: Date.now() }
+      } catch (error) {
+        // The server's own words: the error's message is written for the agent.
+        if (error instanceof EditRefused) return { ok: false, reason: error.reason }
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+      }
+    } else {
+      const decided = await servers.editorAction(file, request.list, request.id)
+      if ('reason' in decided) return { ok: false, reason: decided.reason }
+      pending = { id: ++this.changeIds, title: decided.title, ...(decided.plan ? { plan: decided.plan } : {}), ...(decided.command ? { command: { file, list: request.list, id: request.id } } : {}), at: Date.now() }
+    }
+    if (request.preview && pending.plan) {
+      state.preview = pending
+      const files = previewPlan(pending.plan, { root: folder, servers })
+      return { ok: true, done: 'preview', id: pending.id, title: pending.title, files }
+    }
+    return this.applyEditorChange(pending, servers, context(request.open), state, relative)
+  }
+
+  /** Applies a planned change: its edit, then the command that goes with it, whose edits are applied as the server sends them. */
+  private async applyEditorChange(
+    pending: PendingChange,
+    servers: LanguageServers,
+    ctx: ChangeContext,
+    state: { applied: { id: number; record: AppliedRecord; at: number } | null },
+    relative: (file: string) => string,
+  ): Promise<EditorChangeResult> {
+    const done: AppliedChange = { editor: [], written: [], created: [], moved: [], deleted: [], places: 0, record: { disk: [], editor: [] } }
+    const add = (applied: AppliedChange) => {
+      done.editor.push(...applied.editor)
+      done.written.push(...applied.written)
+      done.created.push(...applied.created)
+      done.moved.push(...applied.moved)
+      done.deleted.push(...applied.deleted)
+      done.places += applied.places
+      done.record.disk.push(...applied.record.disk)
+      done.record.editor.push(...applied.record.editor)
+    }
+    const notes: string[] = []
+    if (pending.plan) {
+      try {
+        add(await applyEditorPlan(pending.plan, ctx))
+      } catch (error) {
+        if (error instanceof ChangeRefused) return { ok: false, reason: error.message }
+        throw error
+      }
+    }
+    if (pending.command) {
+      const { file, list, id } = pending.command
+      const ran = await servers.editorRunCommand(file, list, id, async (plan) => {
+        try {
+          add(await applyEditorPlan(plan, ctx))
+          return { applied: true }
+        } catch (error) {
+          return { applied: false, failureReason: error instanceof Error ? error.message : String(error) }
+        }
+      })
+      if ('reason' in ran) {
+        if (!pending.plan) return { ok: false, reason: ran.reason }
+        notes.push(ran.reason)
+      } else {
+        notes.push(...ran.refused)
+        if (!pending.plan && !ran.applied && ran.refused.length) return { ok: false, reason: `Nothing was changed: ${ran.refused.join(' ')}` }
+      }
+    }
+    const touched = new Set([...done.editor.map((item) => item.file), ...done.written, ...done.created, ...done.deleted, ...done.moved.flatMap((item) => [item.from, item.to])])
+    const undo = done.record.disk.length > 0 || done.record.editor.length > 0
+    if (undo) state.applied = { id: pending.id, record: done.record, at: Date.now() }
+    return {
+      ok: true,
+      done: 'applied',
+      id: pending.id,
+      title: pending.title,
+      editor: done.editor.map((item) => ({ path: relative(item.file), edits: item.edits, written: item.written })),
+      written: [...new Set(done.written)].map(relative),
+      created: done.created.map(relative),
+      moved: done.moved.map((item) => ({ from: relative(item.from), to: relative(item.to) })),
+      deleted: done.deleted.map(relative),
+      places: done.places,
+      files: touched.size,
+      undo,
+      notes,
     }
   }
 

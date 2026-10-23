@@ -70,6 +70,8 @@ export interface EditorTriggers {
   commit: string[]
   signature: string[]
   signatureRetrigger: string[]
+  /** Characters after which the server formats the line as it is typed (`}`, `;`, a new line). */
+  format: string[]
 }
 
 export interface OpenDocument {
@@ -147,8 +149,11 @@ function clientCapabilities(): object {
       documentSymbol: { hierarchicalDocumentSymbolSupport: true, symbolKind: { valueSet: Array.from({ length: 26 }, (_, index) => index + 1) } },
       callHierarchy: {},
       rename: { prepareSupport: true },
+      formatting: {},
+      rangeFormatting: {},
+      onTypeFormatting: {},
       codeAction: {
-        codeActionLiteralSupport: { codeActionKind: { valueSet: ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll'] } },
+        codeActionLiteralSupport: { codeActionKind: { valueSet: ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.move', 'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll'] } },
         isPreferredSupport: true,
         disabledSupport: true,
         dataSupport: true,
@@ -255,15 +260,17 @@ export class LanguageClient {
     const c = this.capabilitiesValue
     const completion = has(c.completionProvider) ? c.completionProvider : undefined
     const signature = has(c.signatureHelpProvider) ? c.signatureHelpProvider : undefined
+    const onType = c.documentOnTypeFormattingProvider
     return {
       completion: chars(completion?.triggerCharacters),
       commit: chars(completion?.allCommitCharacters),
       signature: chars(signature?.triggerCharacters),
       signatureRetrigger: chars(signature?.retriggerCharacters),
+      format: onType && typeof onType === 'object' ? [...new Set(chars([onType.firstTriggerCharacter, ...(Array.isArray(onType.moreTriggerCharacter) ? onType.moreTriggerCharacter : [])]))] : [],
     }
   }
 
-  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'codeAction' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight'): boolean {
+  supports(feature: 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbol' | 'workspaceSymbol' | 'callHierarchy' | 'rename' | 'prepareRename' | 'codeAction' | 'codeActionResolve' | 'pullDiagnostics' | 'completion' | 'completionResolve' | 'signatureHelp' | 'documentHighlight' | 'formatting' | 'rangeFormatting' | 'onTypeFormatting'): boolean {
     const c = this.capabilitiesValue
     switch (feature) {
       case 'completion':
@@ -292,8 +299,18 @@ export class LanguageClient {
         return has(c.callHierarchyProvider)
       case 'rename':
         return has(c.renameProvider)
+      case 'prepareRename':
+        return typeof c.renameProvider === 'object' && c.renameProvider?.prepareProvider === true
       case 'codeAction':
         return has(c.codeActionProvider)
+      case 'codeActionResolve':
+        return typeof c.codeActionProvider === 'object' && c.codeActionProvider?.resolveProvider === true
+      case 'formatting':
+        return has(c.documentFormattingProvider)
+      case 'rangeFormatting':
+        return has(c.documentRangeFormattingProvider)
+      case 'onTypeFormatting':
+        return typeof c.documentOnTypeFormattingProvider === 'object' && c.documentOnTypeFormattingProvider !== null && typeof c.documentOnTypeFormattingProvider.firstTriggerCharacter === 'string'
       case 'pullDiagnostics':
         return has(c.diagnosticProvider)
     }

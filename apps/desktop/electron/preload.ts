@@ -158,6 +158,7 @@ const api: EncodeApi = {
     change: (path: string, text: string, dirty: boolean) => void invoke('code:document', 'change', path, text, dirty).catch(() => undefined),
     close: (path: string) => void invoke('code:document', 'close', path).catch(() => undefined),
     ask: (ask) => invoke('code:ask', ask),
+    edit: (request) => invoke('code:edit', request),
     onMarks: (callback) => on<FileMarks>('code:marks', callback),
     onChanged: (callback) => on('code:changed', callback),
   },

@@ -50,6 +50,8 @@ function defaults(): StoredSettings {
     sendKey: 'enter',
     keepAwake: true,
     languageServers: true,
+    formatOnSave: false,
+    formatOnType: false,
     errorGate: 'auto',
     notifyDone: 'background',
     notifyNeeds: 'background',
@@ -252,6 +254,8 @@ export class SettingsService {
       sendKey: isSendKey(input.sendKey) ? input.sendKey : base.sendKey,
       keepAwake: typeof input.keepAwake === 'boolean' ? input.keepAwake : base.keepAwake,
       languageServers: typeof input.languageServers === 'boolean' ? input.languageServers : base.languageServers,
+      formatOnSave: typeof input.formatOnSave === 'boolean' ? input.formatOnSave : base.formatOnSave,
+      formatOnType: typeof input.formatOnType === 'boolean' ? input.formatOnType : base.formatOnType,
       errorGate: isErrorGate(input.errorGate) ? input.errorGate : base.errorGate,
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
@@ -297,6 +301,8 @@ export class SettingsService {
       sendKey: this.data.sendKey,
       keepAwake: this.data.keepAwake,
       languageServers: this.data.languageServers,
+      formatOnSave: this.data.formatOnSave,
+      formatOnType: this.data.formatOnType,
       errorGate: this.data.errorGate,
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
@@ -379,6 +385,8 @@ export class SettingsService {
     if (isSendKey(patch.sendKey)) next.sendKey = patch.sendKey
     if (typeof patch.keepAwake === 'boolean') next.keepAwake = patch.keepAwake
     if (typeof patch.languageServers === 'boolean') next.languageServers = patch.languageServers
+    if (typeof patch.formatOnSave === 'boolean') next.formatOnSave = patch.formatOnSave
+    if (typeof patch.formatOnType === 'boolean') next.formatOnType = patch.formatOnType
     if (isErrorGate(patch.errorGate)) next.errorGate = patch.errorGate
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds

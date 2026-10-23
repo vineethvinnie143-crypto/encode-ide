@@ -1125,3 +1125,54 @@ drawn in the app's page.
   suggestions and Enter takes one, `(` shows the parameters and `,` moves to the next, Ctrl+Space and a snippet's
   placeholder is typed over and Tab goes to its end, and an item filled in when chosen shows its details and brings
   its import.
+
+## Changes the language servers make in the editor (Editor and language intelligence 2)
+
+Written with the pull request that adds rename with a preview, code actions with the lightbulb, organize imports,
+formatting, the Problems panel and F8 to the editor
+([0075](../adr/0075-a-change-a-language-server-plans-is-checked-whole-goes-into-the-editor-or-onto-the-disk-and-can-be-seen-first-and-taken-back.md)).
+The new paths are changes the renderer asks for (`code:edit`), the plans the folder's servers make for them, the
+commands the servers run, and the files the host writes, creates, moves and deletes for them.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| E1 | A compromised renderer asks for a change built to reach outside the folder or to break the host | The main process rebuilds each change field by field (a kind from a fixed set, counts within bounds, a new name of one line without control characters and at most 500 characters, at most eight short dotted kinds of action, at most 2,000 open files, each made the folder's own) and makes its file the folder's own; anything else gets no change. The host resolves the file inside the folder's root again. | Mitigated |
+| E2 | A server's plan writes, creates, moves or deletes a file outside the folder | Every file of a plan is checked by its real path to be inside the folder before anything is written; a plan with one outside is refused whole. | Mitigated |
+| E3 | A change writes over the person's unsaved work, or over text the server did not read | A file with unsaved changes in the editor is changed in the editor only, and only if the editor's text is what the server read; it is never moved, replaced or deleted. Every other file is written only while it still holds what the server read; an open file too large for the servers is not touched. | Mitigated |
+| E4 | A change is half made: some files written, then a failure | The whole plan is checked against the files as they are before anything is written; a write that fails takes back the ones before it. | Mitigated |
+| E5 | A server runs a command the person did not choose, or sends edits when nobody asked | A command runs only when it is the chosen action's and the server lists it as its own; `workspace/applyEdit` is accepted only while a command eNCode asked to run is running, and goes through the same checks as any plan; at any other time it is refused. One command at a time per server, a minute at most. | Mitigated |
+| E6 | An action is taken that is not the one the person saw (a stale list, a forged number) | Actions are chosen by the number of the newest list the editor was given and their place in it; any other list is refused. A preview is applied only by its id, within ten minutes, and only the newest preview is held. | Mitigated |
+| E7 | Taking a change back loses work done since | A change is taken back whole only while every file and document it touched still holds what it left, within ten minutes; otherwise nothing is taken back and the person is told which file changed and to use Undo in each file. | Mitigated |
+| E8 | A file's encoding or line breaks are changed by a change (a CRLF file turned to LF, an ANSI file written as UTF-8) | Edits go on the file's own text, the server's line breaks take the file's own, and the file is written in its own encoding; a character an ANSI file cannot hold refuses the change. | Mitigated |
+| E9 | Formatting changes text the person typed after it was asked for, or holds a save | Formatting edits go in only while the document is the text they were made for, as one undo step; a save waits at most 1.5 s for the server and then saves the file as it is. Format on save and on type are off until the person turns them on. | Mitigated |
+| E10 | A server floods a preview or the editor | A preview shows at most 200 lines a file and 2,000 in all, each cut at 300 characters, and says when lines are left out; a server's list is read up to 100 actions, and its edits up to 20,000 an answer; every request has a time limit. | Mitigated |
+
+### Residual risks
+
+- **A change to closed files is written to disk at once.** It is not a checkpoint of the agent's; the notice's Undo
+  takes it back for ten minutes, and git after that.
+- **A server can plan a change that is wrong.** eNCode checks where a change goes, not what it means; the preview
+  shows every line before it is made, for the person to judge.
+- **A command runs the server's own code.** That is what a language server is; it already runs in a folder the
+  person trusts (0073).
+
+### Verification
+
+- The workspace tests change unsaved documents in the editor and saved and closed files on disk, keeping their
+  encoding and line breaks; refuse a whole plan, writing nothing, when any part of it does not hold; make, move and
+  delete files and put them all back; refuse to take a change back once something it touched has changed; show a
+  plan line by line; and rename, take a quick fix and a command's edits, and format, through a folder's servers.
+- The lsp tests prepare a rename and say why one cannot be made in the server's words, keep the editor's actions apart
+  from the agent's, narrow them by kind, plan or run the chosen one, and format a document, a range and as it is
+  typed, keeping its line breaks. The main process tests rebuild changes and questions and refuse malformed ones.
+- The renderer tests order F8 across files and round, filter the Problems list, put actions in their sections, and
+  apply and take back the servers' edits in the editor's documents.
+- The end-to-end run uses a test server that renames, offers fixes, refactorings and source actions, runs a command
+  that sends its edit, and formats: F8 and Shift+F8 go across files and round and Esc puts the message away, the
+  Problems panel lists, filters and opens a problem, the lightbulb shows, Ctrl+. lists the fixes with the preferred
+  first and Enter takes it (written to disk, the file not marked unsaved), F2 refuses a bad name with the server's
+  reason, Shift+Enter previews a rename across two files and Apply makes it, its notice's Undo takes it back, a
+  refactoring's command makes its change, Shift+Alt+O organizes the imports and Shift+Alt+F formats with Ctrl+Z
+  taking it back, and format on type and on save act once turned on in Settings.

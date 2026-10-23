@@ -239,6 +239,10 @@ export const Bot = icon(
 export const Puzzle = icon('Puzzle', <path d="M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M16.5 13.5v6 M13.5 16.5h6" />)
 export const Layers = icon('Layers', <path d="M12 3.5 3.5 8 12 12.5 20.5 8z M3.5 12 12 16.5 20.5 12 M3.5 16 12 20.5 20.5 16" />)
 export const Bolt = icon('Bolt', <path d="M13 3 5 13h6l-1 8 8-10h-6z" />)
+/** A fix the language server offers: a bulb with its two base rings. */
+export const Lightbulb = icon('Lightbulb', <path d="M9.5 18.5h5 M10.5 21h3 M12 3.5a5.8 5.8 0 0 0-3.4 10.5c.6.5.9 1.2.9 1.9v.6h5v-.6c0-.7.3-1.4.9-1.9A5.8 5.8 0 0 0 12 3.5z" />)
+/** Something that can be renamed or reshaped: a wrench, drawn for refactorings. */
+export const Wrench = icon('Wrench', <path d="M15 4.5a4.5 4.5 0 0 0-4.2 6.1l-6.3 6.3a1.8 1.8 0 0 0 2.6 2.6l6.3-6.3a4.5 4.5 0 0 0 6.1-4.2l-2.7 2.7-2.6-.5-.5-2.6 2.7-2.7A4.5 4.5 0 0 0 15 4.5z" />)
 export const Mic = icon('Mic', <path d="M12 3.5a2.8 2.8 0 0 0-2.8 2.8v5.4a2.8 2.8 0 0 0 5.6 0V6.3A2.8 2.8 0 0 0 12 3.5z M5.5 11.5a6.5 6.5 0 0 0 13 0 M12 18v2.5" />)
 export const MessageSquare = icon('MessageSquare', <path d="M4 5.5h16v11H9l-5 4z" />)
 export const MessageCircleQuestion = icon(

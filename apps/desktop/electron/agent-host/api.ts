@@ -6,7 +6,7 @@
  */
 import type { ErrorGate, HostEvents, HostRequests } from '@encode/core'
 import type { CodeDiagnostic } from '@encode/tools'
-import type { EditorAnswer, EditorAsk, EditorDocumentChange, LanguageServersReport } from '@encode/workspace'
+import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
@@ -101,6 +101,8 @@ export type DesktopHostRequests = HostRequests & {
   codeReport: { params: { root: string; logs?: number }; result: LanguageServersReport & { logs?: Record<string, string[]> } }
   /** A question of the editor's to the servers of a file it shows; answered for the text it sent before it. */
   codeAsk: { params: { root: string; ask: EditorAsk }; result: EditorAnswer }
+  /** A rename or a code action of the editor's, its preview, or taking one back; after the editor's earlier changes. */
+  codeChange: { params: { root: string; request: EditorChangeRequest }; result: EditorChangeResult }
 }
 
 /** A file the editor shows, opened, changed or closed, in a folder named as the main process knows it. */

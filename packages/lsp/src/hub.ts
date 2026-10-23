@@ -14,7 +14,7 @@ import type { LaunchPlan } from './discover'
 import { applyTextEdits } from './edits'
 import { RpcFailure } from './jsonrpc'
 import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeAction, type CompletionItem, type Diagnostic, type DocumentSymbol, type Range, type SignatureHelp, type TextEdit, type WorkspaceEdit } from './protocol'
-import { readCallHierarchyItems, readCalls, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readRange, readSignatureHelp, readSymbolInformation, readWorkspaceEdit } from './results'
+import { readCallHierarchyItems, readCalls, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readPrepareRename, readRange, readSignatureHelp, readSymbolInformation, readTextEditList, readWorkspaceEdit } from './results'
 import { documentKey, uriToPath } from './uri'
 
 export type Severity = 'error' | 'warning' | 'info' | 'hint'
@@ -76,6 +76,8 @@ export type PlannedChange =
       before: string
       after: string
       edits: number
+      /** The edits themselves, for `before`, their line breaks the file's own. */
+      textEdits: TextEdit[]
     }
   | { kind: 'create'; file: string; overwrite: boolean; ignoreIfExists: boolean }
   | { kind: 'rename'; from: string; to: string; overwrite: boolean; ignoreIfExists: boolean }
@@ -194,8 +196,33 @@ async function diskText(file: string): Promise<string | null> {
   }
 }
 
+/** A line break a server writes takes the file's own, so a file with CRLF lines keeps them and one with LF lines keeps those. */
+function fitLineBreaks(edits: TextEdit[], text: string): TextEdit[] {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  return edits.map((item) => (/[\r\n]/.test(item.newText) ? { range: item.range, newText: item.newText.replace(/\r\n?|\n/g, eol) } : item))
+}
+
 function lowerFirst(text: string): string {
   return text ? text[0].toLowerCase() + text.slice(1) : text
+}
+
+/** A server refused an edit: `message` tells the agent what to do next, `reason` is the server's own words, for a person. */
+export class EditRefused extends Error {
+  constructor(
+    message: string,
+    readonly reason: string,
+  ) {
+    super(message)
+    this.name = 'EditRefused'
+  }
+}
+
+/** A server's words for a person, as a sentence: trimmed, cut short, never empty. */
+const serverWords = (error: unknown, fallback: string): string => {
+  const words = (error instanceof Error ? error.message : String(error)).trim().slice(0, 300)
+  if (!words) return fallback
+  const sentence = words[0].toUpperCase() + words.slice(1)
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
 }
 
 export class LanguageServers {
@@ -215,6 +242,9 @@ export class LanguageServers {
   private completions: { list: number; file: string; client: LanguageClient; items: CompletionItem[] } | null = null
   private completionLists = 0
   private actions: { file: string; items: CodeAction[]; at: number; server: string } | null = null
+  /** The editor's own list of actions, apart from the agent's: neither replaces the other's. Only the newest is kept. */
+  private editorActions: { list: number; file: string; client: LanguageClient; server: string; items: CodeAction[] } | null = null
+  private editorActionLists = 0
   /** Files with marks in the editor, by server: taken back when the server closes the file or stops. */
   private readonly marked = new Map<string, Map<string, string>>()
   private readonly idleTimer: NodeJS.Timeout
@@ -691,18 +721,19 @@ export class LanguageServers {
     const provider = client.capabilities.renameProvider
     if (typeof provider === 'object' && provider?.prepareProvider) {
       const prepared = await client.request('textDocument/prepareRename', { textDocument, position }, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) }).catch((error: unknown) => {
-        throw new Error(`Nothing can be renamed there: ${lowerFirst(error instanceof Error ? error.message : String(error))}`)
+        if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+        throw new EditRefused(`Nothing can be renamed there: ${lowerFirst(error instanceof Error ? error.message : String(error))}`, serverWords(error, 'This element cannot be renamed.'))
       })
-      if (prepared === null) throw new Error('Nothing at that position can be renamed. Give the line and column of the symbol\'s name.')
+      if (prepared === null) throw new EditRefused('Nothing at that position can be renamed. Give the line and column of the symbol\'s name.', 'This element cannot be renamed.')
     }
     let value: unknown
     try {
       value = await client.request('textDocument/rename', { textDocument, position, newName }, { timeoutMs: 60_000, ...(signal ? { signal } : {}) })
     } catch (error) {
       if (error instanceof RpcFailure && error.code === 'cancelled') throw error
-      throw new Error(`${client.name} could not rename: ${lowerFirst(error instanceof Error ? error.message : String(error))}`)
+      throw new EditRefused(`${client.name} could not rename: ${lowerFirst(error instanceof Error ? error.message : String(error))}`, serverWords(error, 'The language server could not rename it.'))
     }
-    if (value === null) throw new Error('Nothing at that position can be renamed. Give the line and column of the symbol\'s name.')
+    if (value === null) throw new EditRefused('Nothing at that position can be renamed. Give the line and column of the symbol\'s name.', 'This element cannot be renamed.')
     const edit = readWorkspaceEdit(value)
     if (!edit) throw new Error(`${client.name} answered with an edit eNCode could not read, so nothing was changed.`)
     return await this.plan(edit, client, opened.server.spec.label)
@@ -820,11 +851,12 @@ export class LanguageServers {
     const textEdit = async (file: string, edits: TextEdit[]) => {
       const before = await textOf(file)
       if (before === null) throw new Error(`The edit changes ${path.basename(file)}, which is missing or not a text file eNCode can read; nothing was changed.`)
-      const after = applyTextEdits(before, edits)
+      const fitted = fitLineBreaks(edits, before)
+      const after = applyTextEdits(before, fitted)
       bytes += before.length + after.length
       if (bytes > MAX_PLAN_BYTES) throw new Error('The edit is too large to check and apply safely; nothing was changed.')
       state.set(this.key(file), after)
-      changes.push({ kind: 'edit', file, before, after, edits: edits.length })
+      changes.push({ kind: 'edit', file, before, after, edits: edits.length, textEdits: fitted })
       files.push(file)
     }
     if (edit.documentChanges) {
@@ -875,13 +907,13 @@ export class LanguageServers {
    * Asks the server of a file the editor shows, for the editor's text as it is now. A server that cannot answer, or a
    * file no server may serve, gets null: the editor shows nothing rather than an error for each keystroke.
    */
-  private async editorAsk<T>(file: string, feature: Parameters<LanguageClient['supports']>[0], method: string, params: (doc: OpenDocument) => unknown, read: (value: unknown, client: LanguageClient) => T, signal?: AbortSignal, timeoutMs = REQUEST_MS): Promise<T | null> {
+  private async editorAsk<T>(file: string, feature: Parameters<LanguageClient['supports']>[0], method: string, params: (doc: OpenDocument, client: LanguageClient) => unknown, read: (value: unknown, client: LanguageClient, server: string) => T, signal?: AbortSignal, timeoutMs = REQUEST_MS): Promise<T | null> {
     if (!this.covers(file).ok) return null
     const opened = await this.open(file, signal).catch(() => ({ reason: 'gone' }))
     if ('reason' in opened || !opened.client.supports(feature)) return null
     try {
-      const value = await opened.client.request(method, params(opened.doc), { timeoutMs, ...(signal ? { signal } : {}) })
-      return read(value, opened.client)
+      const value = await opened.client.request(method, params(opened.doc, opened.client), { timeoutMs, ...(signal ? { signal } : {}) })
+      return read(value, opened.client, opened.server.spec.label)
     } catch (error) {
       if (!(error instanceof RpcFailure && error.code === 'cancelled')) this.options.log?.(`[${opened.client.name}] ${method}: ${error instanceof Error ? error.message : String(error)}`)
       return null
@@ -969,6 +1001,195 @@ export class LanguageServers {
       (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, ...(kind === 'references' ? { context: { includeDeclaration: true } } : {}) }),
       (value) => this.locations(value),
       signal,
+    )
+  }
+
+  /** The editor's text of a file it has open, as it last sent it, and whether that has unsaved changes. */
+  editorText(file: string): { text: string; dirty: boolean } | null {
+    const doc = this.editorDocs.get(this.key(file))
+    return doc ? { text: doc.text, dirty: doc.dirty } : null
+  }
+
+  /**
+   * Whether the symbol at a position can be renamed, and what: the range and the name to start from, or no range when
+   * the server leaves it to the editor (the word there). The server's reason when it cannot; null when no server can
+   * rename in the file.
+   */
+  async editorPrepareRename(file: string, line: number, character: number, signal?: AbortSignal): Promise<{ ok: true; range?: Range; placeholder?: string } | { ok: false; reason: string } | null> {
+    if (!this.covers(file).ok) return null
+    const opened = await this.open(file, signal).catch(() => ({ reason: 'gone' }))
+    if ('reason' in opened || !opened.client.supports('rename')) return null
+    if (!opened.client.supports('prepareRename')) return { ok: true }
+    try {
+      const value = await opened.client.request('textDocument/prepareRename', { textDocument: { uri: opened.doc.uri }, position: { line, character } }, { timeoutMs: 5_000, ...(signal ? { signal } : {}) })
+      const read = readPrepareRename(value)
+      if (read === null) return { ok: false, reason: 'This element cannot be renamed.' }
+      return read === 'default' ? { ok: true } : { ok: true, ...read }
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+      return { ok: false, reason: serverWords(error, 'This element cannot be renamed.') }
+    }
+  }
+
+  /**
+   * The actions the server offers the editor for a range (quick fixes, refactors, source actions such as organizing the
+   * imports), with the problems published there, numbered by their place in the list. `only` keeps the kinds asked
+   * for ('quickfix' keeps 'quickfix.add'); `automatic` is the question the editor asks by itself, not the person.
+   */
+  editorCodeActions(file: string, range: Range, options: { only?: readonly string[]; automatic: boolean }, signal?: AbortSignal): Promise<{ list: number; actions: ActionInfo[] } | null> {
+    const list = ++this.editorActionLists
+    const before = (a: { line: number; character: number }, b: { line: number; character: number }) => a.line < b.line || (a.line === b.line && a.character < b.character)
+    return this.editorAsk(
+      file,
+      'codeAction',
+      'textDocument/codeAction',
+      (doc, client) => {
+        // The problems the range touches go with the question: most quick fixes are offered only for them.
+        const published = client.diagnosticsOf(file)?.items ?? []
+        const touching = published.filter((item) => !before(item.range.end, range.start) && !before(range.end, item.range.start))
+        return { textDocument: { uri: doc.uri }, range, context: { diagnostics: touching, ...(options.only ? { only: [...options.only] } : {}), triggerKind: options.automatic ? 2 : 1 } }
+      },
+      (value, client, server) => {
+        const only = options.only
+        // A server may offer more than was asked for; an action without a kind is not of any kind asked for.
+        const items = readCodeActions(value).filter((item) => !only || only.some((kind) => item.kind === kind || Boolean(item.kind?.startsWith(`${kind}.`))))
+        if (list === this.editorActionLists) this.editorActions = { list, file: this.key(file), client, server, items }
+        return {
+          list,
+          actions: items.map((item, index) => ({
+            id: index,
+            title: item.title,
+            ...(item.kind ? { kind: item.kind } : {}),
+            ...(item.isPreferred ? { preferred: true } : {}),
+            ...(item.disabled ? { disabled: item.disabled.reason } : {}),
+            ...(!item.edit && item.command ? { command: true } : {}),
+          })),
+        }
+      },
+      signal,
+      options.automatic ? 3_000 : REQUEST_MS,
+    )
+  }
+
+  /** An action of the editor's newest list, or why it cannot be taken. */
+  private editorListed(file: string, list: number, id: number): { action: CodeAction; client: LanguageClient; server: string } | { reason: string } {
+    const known = this.editorActions
+    if (!known || known.list !== list || known.file !== this.key(file) || known.client.exited) return { reason: 'That list of actions is out of date. Open it again.' }
+    const action = known.items[id]
+    if (!action) return { reason: 'That action is not in the list any more. Open it again.' }
+    if (action.disabled) return { reason: `${action.title}: ${action.disabled.reason}` }
+    return { action, client: known.client, server: known.server }
+  }
+
+  /** Whether the server runs a command itself, by its own list; a command it does not list belongs to another editor. */
+  private runsCommand(client: LanguageClient, command: string): boolean {
+    const listed = client.capabilities.executeCommandProvider?.commands
+    return !Array.isArray(listed) || listed.includes(command)
+  }
+
+  /**
+   * What an action of the editor's list changes: its edit (resolved first when the server sends it later), and whether
+   * a command of the server's runs after it (or instead, when it carries no edit). Nothing is changed yet.
+   */
+  async editorAction(file: string, list: number, id: number, signal?: AbortSignal): Promise<{ title: string; plan?: EditPlan; command: boolean } | { reason: string }> {
+    const listed = this.editorListed(file, list, id)
+    if ('reason' in listed) return listed
+    const { client, server } = listed
+    let action = listed.action
+    // An action that comes without its edit gets it from resolve: one with data for the server, or one with nothing else.
+    if (!action.edit && (action.data !== undefined || !action.command) && client.supports('codeActionResolve')) {
+      try {
+        const resolved = readCodeAction(await client.request('codeAction/resolve', action, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) }))
+        if (resolved) {
+          action = resolved
+          // What was resolved is what runs.
+          if (this.editorActions?.list === list) this.editorActions.items[id] = resolved
+        }
+      } catch (error) {
+        if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+        if (!action.command) return { reason: `${client.name} could not prepare "${action.title}": ${lowerFirst(error instanceof Error ? error.message : String(error))}` }
+      }
+    }
+    const command = action.command && this.runsCommand(client, action.command.command) ? action.command : undefined
+    if (!action.edit) {
+      if (command) return { title: action.title, command: true }
+      if (action.command) return { reason: `"${action.title}" asks the editor it was made for to do the work (${action.command.command.slice(0, 100)}), which eNCode cannot do.` }
+      return { reason: `"${action.title}" carries no change.` }
+    }
+    try {
+      return { title: action.title, plan: await this.plan(action.edit, client, server), command: Boolean(command) }
+    } catch (error) {
+      return { reason: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /**
+   * Runs the command of an action of the editor's list. The edits the server asks for while it runs go to `apply`, each
+   * as a plan; nothing it asks for after it ends is applied.
+   */
+  async editorRunCommand(file: string, list: number, id: number, apply: (plan: EditPlan) => Promise<{ applied: boolean; failureReason?: string }>, signal?: AbortSignal): Promise<{ applied: number; refused: string[] } | { reason: string }> {
+    const listed = this.editorListed(file, list, id)
+    if ('reason' in listed) return listed
+    const { action, client, server } = listed
+    if (!action.command || !this.runsCommand(client, action.command.command)) return { reason: `"${action.title}" has no command eNCode can run.` }
+    let applied = 0
+    const refused: string[] = []
+    try {
+      await client.executeCommand(
+        action.command,
+        async (edit) => {
+          let plan: EditPlan
+          try {
+            plan = await this.plan(edit, client, server)
+          } catch (error) {
+            refused.push(error instanceof Error ? error.message : String(error))
+            return { applied: false, failureReason: refused.at(-1) }
+          }
+          const result = await apply(plan)
+          if (result.applied) applied++
+          else if (result.failureReason) refused.push(result.failureReason)
+          return result
+        },
+        { timeoutMs: 60_000, ...(signal ? { signal } : {}) },
+      )
+    } catch (error) {
+      if (error instanceof RpcFailure && error.code === 'cancelled') throw error
+      return { reason: `${client.name} could not run "${action.title}": ${lowerFirst(error instanceof Error ? error.message : String(error))}` }
+    }
+    return { applied, refused }
+  }
+
+  /** The edits that format a document of the editor's, or a range of it, for its text as the editor sent it. */
+  format(file: string, options: { tabSize: number; insertSpaces: boolean }, range?: Range, signal?: AbortSignal): Promise<TextEdit[] | null> {
+    return this.editorAsk(
+      file,
+      range ? 'rangeFormatting' : 'formatting',
+      range ? 'textDocument/rangeFormatting' : 'textDocument/formatting',
+      (doc) => ({ textDocument: { uri: doc.uri }, ...(range ? { range } : {}), options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces } }),
+      (value) => {
+        const edits = readTextEditList(value)
+        const doc = this.editorDocs.get(this.key(file))
+        return edits && doc ? fitLineBreaks(edits, doc.text) : edits
+      },
+      signal,
+      10_000,
+    )
+  }
+
+  /** The edits that format what was just typed (`ch` at the position, after it), for the editor's text as it sent it. */
+  formatOnType(file: string, line: number, character: number, ch: string, options: { tabSize: number; insertSpaces: boolean }, signal?: AbortSignal): Promise<TextEdit[] | null> {
+    return this.editorAsk(
+      file,
+      'onTypeFormatting',
+      'textDocument/onTypeFormatting',
+      (doc) => ({ textDocument: { uri: doc.uri }, position: { line, character }, ch, options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces } }),
+      (value) => {
+        const edits = readTextEditList(value)
+        const doc = this.editorDocs.get(this.key(file))
+        return edits && doc ? fitLineBreaks(edits, doc.text) : edits
+      },
+      signal,
+      2_000,
     )
   }
 

@@ -3,9 +3,11 @@ import { DecorationSet, type EditorView, type MarkSpec } from '@encode/editor-vi
 import { ChangeSet } from '@encode/text'
 import type { CompletionEntry, EditorTriggers, SignatureHelp } from '@shared/types'
 import { create } from '../../store'
+import { applyServerEdits } from '../docs'
 import { positionOf } from '../marks'
 import { askServers, lspAt, triggersFor } from './ask'
 import { Since, commitCharactersOf, editsElsewhere, firstSelected, indentAt, indentText, isWordText, itemStart, planCompletion, rankEntries, wordStart, type Ranked } from './completion'
+import { indentOf } from './format'
 import { snippetVariable } from './variables'
 
 /** Where a widget belongs on screen: the client box of a place in the text. */
@@ -126,7 +128,11 @@ export class EditorAssist {
 
   constructor(
     private readonly view: EditorView,
-    private readonly options: { suggestOnType?: () => boolean } = {},
+    private readonly options: {
+      suggestOnType?: () => boolean
+      /** Whether the server formats a line as it is typed, after the characters it names (`;`, `}`, a new line). */
+      formatOnType?: () => boolean
+    } = {},
   ) {
     this.stops.push(view.on('transaction', (tr) => this.onTransaction(tr)))
     this.stops.push(view.on('blur', () => this.onBlur()))
@@ -258,6 +264,8 @@ export class EditorAssist {
     if (this.session || this.pending) this.followSuggest(typed)
     else if (typed) this.maybeSuggest(typed)
     this.followSignature(tr, typed)
+    const ended = typed ?? (tr.origin === 'input.newline' && tr.docChanged ? '\n' : null)
+    if (ended && this.triggers?.format.includes(ended) && this.options.formatOnType?.()) this.formatTyped(ended)
     if (tr.docChanged || tr.selectionChanged) this.scheduleHighlights()
   }
 
@@ -585,6 +593,22 @@ export class EditorAssist {
       this.highlighted = null
       this.view.setSource('symbols', null)
     }
+  }
+
+  // ------------------------------------------------------------ formatting as you type
+
+  /** The server formats what was just typed; its edits go in as their own undo step, if nothing was typed meanwhile. */
+  private formatTyped(ch: string): void {
+    const path = this.path
+    const state = this.view.state
+    // Several cursors: which of them the server should format for is not plain.
+    if (!path || state.selection.ranges.length > 1) return
+    const doc = state.doc
+    const at = lspAt(doc, state.selection.main.head)
+    void askServers({ kind: 'formatOnType', path, ...at, ch, ...indentOf(state) }).then((edits) => {
+      if (!edits?.length || this.path !== path || this.view.state.doc !== doc) return
+      applyServerEdits(path, edits)
+    })
   }
 
   // ------------------------------------------------------------ where the widgets go

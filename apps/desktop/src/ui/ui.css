@@ -442,6 +442,15 @@
 .ui-menu-shortcut {
   margin-left: 16px;
 }
+
+.ui-menu-footer {
+  margin: 4px -6px -6px;
+  padding: 6px 12px 7px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 15px;
+}
 .ui-menu-trailing {
   flex-shrink: 0;
   margin-left: 12px;

@@ -71,6 +71,8 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'sandbox.settings', section: 'sandbox', label: 'Sandbox for commands', keywords: 'isolation network' },
   { id: 'code.enabled', section: 'code', label: 'Use language servers', keywords: 'lsp errors editor marks' },
   { id: 'code.errorGate', section: 'code', label: 'Send the agent back to fix errors', keywords: 'error gate finish diagnostics' },
+  { id: 'code.formatOnSave', section: 'code', label: 'Format on save', keywords: 'formatter prettier save tidy style' },
+  { id: 'code.formatOnType', section: 'code', label: 'Format as you type', keywords: 'formatter on type semicolon brace tidy' },
   { id: 'code.servers', section: 'code', label: 'Language servers in this folder', keywords: 'install missing typescript pyright rust-analyzer gopls clangd' },
   { id: 'archived.list', section: 'archived', label: 'Archived sessions', keywords: 'restore delete' },
 ]

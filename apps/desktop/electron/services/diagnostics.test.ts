@@ -42,6 +42,8 @@ const settings: Settings = {
   sendKey: 'ctrl-enter',
   keepAwake: true,
   languageServers: true,
+  formatOnSave: false,
+  formatOnType: false,
   errorGate: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',

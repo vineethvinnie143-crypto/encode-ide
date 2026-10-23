@@ -234,8 +234,8 @@ describe('LSPEdit', () => {
         server: 'Fake',
         files: [path.join(root, 'a.txt'), path.join(root, 'b.txt')],
         changes: [
-          { kind: 'edit', file: path.join(root, 'a.txt'), before: 'one', after: 'ONE', edits: 1 },
-          { kind: 'edit', file: path.join(root, 'b.txt'), before: 'not two', after: 'TWO', edits: 1 },
+          { kind: 'edit', file: path.join(root, 'a.txt'), before: 'one', after: 'ONE', edits: 1, textEdits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, newText: 'ONE' }] },
+          { kind: 'edit', file: path.join(root, 'b.txt'), before: 'not two', after: 'TWO', edits: 1, textEdits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } }, newText: 'TWO' }] },
         ],
       },
       ctx,

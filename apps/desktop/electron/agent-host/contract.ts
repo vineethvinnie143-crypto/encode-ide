@@ -40,6 +40,7 @@ export type HostToRenderer = [
   Expect<Same<Tools.CodeDiagnostic, Ui.CodeDiagnostic>>,
   Expect<Same<Workspace.EditorAsks, Ui.EditorAsks>>,
   Expect<Same<Workspace.EditorAnswer, Ui.EditorAnswer>>,
+  Expect<Same<Workspace.EditorChangeResult, Ui.EditorChangeResult>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -55,4 +56,5 @@ export type RendererToHost = [
   Expect<Same<Core.RewindRequest, Ui.RewindRequest>>,
   Expect<Same<Core.ErrorGate, Ui.ErrorGate>>,
   Expect<Same<Workspace.EditorAsk, Ui.EditorAsk>>,
+  Expect<Same<Workspace.EditorChangeRequest, Ui.EditorChangeRequest>>,
 ]

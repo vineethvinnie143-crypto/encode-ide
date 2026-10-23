@@ -53,12 +53,17 @@ function CodeStatus({ path }: { path: string }) {
   return (
     <span className="editor-footer-group">
       {count && (count.errors > 0 || count.warnings > 0) && (
-        <span className="editor-footer-count" title={`${count.errors} ${count.errors === 1 ? 'error' : 'errors'} and ${count.warnings} ${count.warnings === 1 ? 'warning' : 'warnings'} in this file. Point at a mark in the text to read it.`}>
+        <button
+          type="button"
+          className="editor-footer-count"
+          title={`${count.errors} ${count.errors === 1 ? 'error' : 'errors'} and ${count.warnings} ${count.warnings === 1 ? 'warning' : 'warnings'} in this file. Open Problems to see every file's, or press F8 to go to the next.`}
+          onClick={() => usePanels.getState().openBottom('problems')}
+        >
           <XCircle size={12} className="is-error" aria-hidden="true" />
           <span>{count.errors}</span>
           <AlertTriangle size={12} className="is-warning" aria-hidden="true" />
           <span>{count.warnings}</span>
-        </span>
+        </button>
       )}
       {status && (
         <button type="button" className={cx('editor-footer-button', `is-${status.tone}`)} title={status.title} onClick={openSettings}>
