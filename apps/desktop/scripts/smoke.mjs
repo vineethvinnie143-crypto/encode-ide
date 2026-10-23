@@ -3852,10 +3852,12 @@ async function runSettingsPageChecks() {
   await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sessions again')
 
   // Ctrl+Alt+O starts a chat: the chats folder opens as the work folder, the sidebar says Chats, and the chat is listed
-  // under Chats.
+  // under Chats. The session open until then belongs to no project, so it is a chat too, listed under Chats and open
+  // while the new one is made: the new one is the one open once the open session is another.
+  const before = await evaluate("localStorage.getItem('eNCode.activeSession')")
   await key({ key: 'o', code: 'KeyO', ctrlKey: true, altKey: true })
   await waitFor(`document.querySelector('.proj-name')?.textContent === 'Chats' && document.querySelector('.proj-switch')?.title === ${JSON.stringify(chatsFolder)}`, 15000, 'Ctrl+Alt+O opens the chats folder')
-  await waitFor("!!document.querySelector('.session-sidebar section[aria-label=\"Chats\"] .sb-row.is-active')", 6000, 'the new chat is listed under Chats, open')
+  await waitFor(`localStorage.getItem('eNCode.activeSession') !== ${JSON.stringify(before)} && (document.querySelector('.session-sidebar section[aria-label="Chats"] .sb-row.is-active .title')?.textContent ?? ${JSON.stringify(firstSession)}) !== ${JSON.stringify(firstSession)}`, 6000, 'the new chat is listed under Chats, open')
   const chatId = await evaluate("localStorage.getItem('eNCode.activeSession')")
   const projects = await evaluate("[...document.querySelectorAll('.session-sidebar section[aria-label=\"Projects\"] .sb-project > .sb-row')].map((node) => node.title)")
   if (projects.some((root) => folderKey(root) === folderKey(chatsFolder))) throw new Error('the chats folder is listed as a project')
@@ -3892,7 +3894,9 @@ async function runSettingsPageChecks() {
   // The notice names the chat and says it finished, in eNCode's words only.
   if (noticesKept) {
     const done = () => windowsNotices().then((list) => list.find((notice) => notice.kind === 'done' && notice.sessionId === chatId))
-    await until(async () => Boolean(await done()), 10000, 'a notice that the chat finished')
+    await until(async () => Boolean(await done()), 10000, 'a notice that the chat finished').catch(async (error) => {
+      throw new Error(`${error.message} (chat ${chatId}; the notices: ${JSON.stringify(await windowsNotices())})`)
+    })
     const notice = await done()
     if (notice.title !== chatTitle || notice.body !== 'Finished.') throw new Error(`the notice reads ${JSON.stringify(notice)}`)
     if (JSON.stringify(await windowsNotices()).includes('offline demo')) throw new Error('a notice holds what the agent wrote')
