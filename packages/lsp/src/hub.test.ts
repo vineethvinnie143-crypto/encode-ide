@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import type { ServerSpec } from './catalog'
+import { applyTextEdits } from './edits'
 import { fakeServer, type FakeServer } from './fake-server'
 import { LanguageServers, type CodeDiagnostic, type EditPlan, type HubOptions } from './hub'
 
@@ -183,8 +184,8 @@ describe('the language servers of a folder', () => {
     assert.equal(plan.server, 'Fake')
     assert.deepEqual(plan.files.sort(), [a, b].sort())
     const byFile = new Map(plan.changes.map((change) => [change.kind === 'edit' ? change.file : '', change]))
-    assert.deepEqual(byFile.get(a), { kind: 'edit', file: a, before: 'function greet\ncall greet\n', after: 'function welcome\ncall welcome\n', edits: 2 })
-    assert.deepEqual(byFile.get(b), { kind: 'edit', file: b, before: 'call greet\n', after: 'call welcome\n', edits: 1 })
+    assert.deepEqual(byFile.get(a), { kind: 'edit', file: a, before: 'function greet\ncall greet\n', after: 'function welcome\ncall welcome\n', edits: 2, textEdits: [{ range: { start: { line: 0, character: 9 }, end: { line: 0, character: 14 } }, newText: 'welcome' }, { range: { start: { line: 1, character: 5 }, end: { line: 1, character: 10 } }, newText: 'welcome' }] })
+    assert.deepEqual(byFile.get(b), { kind: 'edit', file: b, before: 'call greet\n', after: 'call welcome\n', edits: 1, textEdits: [{ range: { start: { line: 0, character: 5 }, end: { line: 0, character: 10 } }, newText: 'welcome' }] })
     await assert.rejects(servers.rename(a, 1, 6, 'bad'), /fake-ls could not rename: that name cannot be used/)
     await assert.rejects(servers.rename(a, 9, 0, 'x'), /Nothing at that position can be renamed/)
     await servers.dispose()
@@ -213,7 +214,7 @@ describe('the language servers of a folder', () => {
     ])
     const fix = await servers.actionEdit(a, 1)
     assert.ok('plan' in fix)
-    assert.deepEqual(fix.plan.changes, [{ kind: 'edit', file: a, before: 'line one\nan ERROR here\n', after: 'line one\nan OK here\n', edits: 1 }])
+    assert.deepEqual(fix.plan.changes, [{ kind: 'edit', file: a, before: 'line one\nan ERROR here\n', after: 'line one\nan OK here\n', edits: 1, textEdits: [{ range: { start: { line: 1, character: 3 }, end: { line: 1, character: 8 } }, newText: 'OK' }] }])
     const resolved = await servers.actionEdit(a, 3)
     assert.ok('plan' in resolved && resolved.plan.changes[0].kind === 'edit' && resolved.plan.changes[0].after === '// note\nline one\nan ERROR here\n')
     await assert.rejects(servers.actionEdit(a, 4), /not available: It is Tuesday/)
@@ -332,7 +333,7 @@ describe('the language servers of a folder', () => {
     const a = path.join(dir, 'a.fk')
     h.servers.editorOpen(a, 'gr', true)
     await until('the server', () => h.servers.editorTriggers(a) !== null)
-    assert.deepEqual(h.servers.editorTriggers(a), { completion: ['.'], commit: [';'], signature: ['('], signatureRetrigger: [','] })
+    assert.deepEqual(h.servers.editorTriggers(a), { completion: ['.'], commit: [';'], signature: ['('], signatureRetrigger: [','], format: [';', '}'] })
     // The library is not open: what the server knows of it comes from the disk (the extra file).
     const result = (await h.servers.completion(a, 0, 2, { triggerKind: 1 }))!
     assert.equal(result.incomplete, false)
@@ -380,6 +381,99 @@ describe('the language servers of a folder', () => {
     bare.servers.editorOpen(a, 'add(', true)
     assert.equal(await bare.servers.completion(a, 0, 4, { triggerKind: 1 }), null)
     assert.deepEqual(await bare.servers.highlights(a, 0, 1), [])
+    await bare.servers.dispose()
+  })
+
+  it('prepares a rename for the editor, and says why one cannot be made', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'function add\nadd(1)', true)
+    assert.deepEqual(await h.servers.editorPrepareRename(a, 1, 1), { ok: true, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } } })
+    assert.deepEqual(await h.servers.editorPrepareRename(a, 1, 4), { ok: false, reason: 'This element cannot be renamed.' })
+    // A name with line breaks in a file of CRLF lines takes the file's own.
+    h.servers.editorChange(a, 'function add\r\nadd(1)', true)
+    const plan = await h.servers.rename(a, 1, 1, 'a\nb')
+    const edit = plan.changes[0]
+    assert.ok(edit.kind === 'edit')
+    assert.deepEqual(edit.textEdits.map((item) => item.newText), ['a\r\nb', 'a\r\nb'])
+    assert.equal(edit.after, 'function a\r\nb\r\na\r\nb(1)')
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'add', true)
+    assert.equal(await bare.servers.editorPrepareRename(a, 0, 1), null)
+    await bare.servers.dispose()
+  })
+
+  it('keeps the editor\'s actions apart from the agent\'s, narrows them by kind, and plans or runs the one chosen', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'ok\nERROR here\n', true)
+    await until('the marks', () => h.marks(a)?.length === 1)
+    const whole = { start: { line: 1, character: 0 }, end: { line: 1, character: 0 } }
+    const listed = (await h.servers.editorCodeActions(a, whole, { automatic: false }))!
+    assert.deepEqual(
+      listed.actions.map((item) => [item.id, item.title, item.preferred ?? false, item.command ?? false, item.disabled ?? '']),
+      [
+        [0, 'Replace ERROR with OK', true, false, ''],
+        [1, 'Fix everything in the file', false, true, ''],
+        [2, 'Add a note at the top', false, false, ''],
+        [3, 'Not now', false, false, 'It is Tuesday'],
+        [4, 'Run a bare command', false, true, ''],
+      ],
+    )
+    // The agent's list does not replace the editor's.
+    await h.servers.codeActions(a, whole)
+    const fix = await h.servers.editorAction(a, listed.list, 0)
+    assert.ok('plan' in fix && fix.plan)
+    assert.equal(fix.command, false)
+    const change = fix.plan.changes[0]
+    assert.ok(change.kind === 'edit')
+    assert.deepEqual(change.textEdits, [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } }, newText: 'OK' }])
+    assert.equal(change.after, 'ok\nOK here\n')
+    // One that comes without its edit is resolved; one that is disabled says why; a command is run, not planned.
+    const note = await h.servers.editorAction(a, listed.list, 2)
+    assert.ok('plan' in note && note.plan?.changes[0].kind === 'edit' && note.plan.changes[0].after.startsWith('// note\n'))
+    assert.deepEqual(await h.servers.editorAction(a, listed.list, 3), { reason: 'Not now: It is Tuesday' })
+    assert.deepEqual(await h.servers.editorAction(a, listed.list, 1), { title: 'Fix everything in the file', command: true })
+    const plans: EditPlan[] = []
+    const ran = await h.servers.editorRunCommand(a, listed.list, 1, async (plan) => {
+      plans.push(plan)
+      return { applied: true }
+    })
+    assert.deepEqual(ran, { applied: 1, refused: [] })
+    assert.equal(plans[0].changes[0].kind === 'edit' && plans[0].changes[0].after, 'ok\nOK here\n')
+    // Only quick fixes, as the lightbulb asks: kinds that only start the same do not count, nor actions without one.
+    const fixes = (await h.servers.editorCodeActions(a, whole, { only: ['quickfix'], automatic: true }))!
+    assert.deepEqual(fixes.actions.map((item) => item.title), ['Replace ERROR with OK'])
+    // The list before it is gone.
+    assert.deepEqual(await h.servers.editorAction(a, listed.list, 0), { reason: 'That list of actions is out of date. Open it again.' })
+    await h.servers.dispose()
+  })
+
+  it('formats the editor\'s text, a range of it, and as it is typed, keeping its line breaks', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    const text = '\tx = 1   \r\n\ty\r\n'
+    h.servers.editorOpen(a, text, true)
+    const options = { tabSize: 2, insertSpaces: true }
+    const whole = (await h.servers.format(a, options))!
+    assert.equal(applyTextEdits(text, whole), '  x = 1\r\n  y\r\n')
+    const range = (await h.servers.format(a, options, { start: { line: 1, character: 0 }, end: { line: 1, character: 2 } }))!
+    assert.equal(applyTextEdits(text, range), '\tx = 1   \r\n  y\r\n')
+    h.servers.editorChange(a, 'a = 1  ;', true)
+    const typed = (await h.servers.formatOnType(a, 0, 8, ';', options))!
+    assert.equal(applyTextEdits('a = 1  ;', typed), 'a = 1;')
+    // A formatter that fails answers nothing, and so does a server without one.
+    h.servers.editorChange(a, 'FORMAT_FAILS', true)
+    assert.equal(await h.servers.format(a, options), null)
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'x', true)
+    assert.equal(await bare.servers.format(a, options), null)
+    assert.equal(await bare.servers.formatOnType(a, 0, 1, ';', options), null)
     await bare.servers.dispose()
   })
 

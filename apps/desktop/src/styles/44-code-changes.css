@@ -1,0 +1,424 @@
+/* ============================================================
+   Changes the language servers make on request in the editor:
+   the rename box, the action menu and its lightbulb, the change
+   preview; and the bottom panel's Problems list
+   ============================================================ */
+
+/* ---------------------------------------------------- rename */
+
+/* Under the symbol, its name typed over; above the suggestions' layer, as it takes the keyboard. */
+.rename-box {
+  position: fixed;
+  z-index: 410;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  animation: ui-fade var(--dur-1) var(--ease-out);
+}
+.rename-input {
+  min-width: 16ch;
+  max-width: calc(100vw - 48px);
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--focus);
+  border-radius: var(--r-6);
+  outline: none;
+  background: var(--canvas);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-size, var(--fs-13));
+}
+.rename-box.has-error .rename-input {
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+.rename-box.is-busy .rename-input {
+  color: var(--text-2);
+}
+.rename-hint {
+  max-width: 420px;
+  padding: 0 4px 1px;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 15px;
+}
+.rename-hint.is-error {
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------- actions */
+
+.code-actions-menu {
+  min-width: 260px;
+  max-width: 520px;
+}
+.code-action-bulb {
+  color: var(--text-3);
+}
+.code-action-bulb.is-preferred {
+  color: var(--warning);
+}
+
+/* In the editor's own layer: in the line's indentation, or just left of the text. */
+.code-bulb {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: ui-fade var(--dur-2) var(--ease-out);
+}
+.code-bulb:hover {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+/* The mark card's way to the fixes for what it shows. */
+.mark-card-actions {
+  display: flex;
+  margin: 2px -4px -2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.mark-card-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.mark-card-action svg {
+  color: var(--warning);
+}
+.mark-card-action:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.mark-card-action:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.mark-card-kbd {
+  margin-left: 6px;
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------- preview */
+
+.change-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(60vh, 560px);
+  overflow: auto;
+  margin: -2px -4px;
+  padding: 2px 4px;
+}
+.cp-file {
+  flex: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  overflow: hidden;
+}
+.cp-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+}
+.cp-file-head > svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.cp-file.is-create .cp-file-head > svg {
+  color: var(--success);
+}
+.cp-file.is-delete .cp-file-head > svg {
+  color: var(--danger);
+}
+.cp-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-arrow {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.cp-spacer {
+  flex: 1;
+}
+.cp-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-4);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-11);
+}
+.cp-kind {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.cp-lines {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--canvas);
+}
+.cp-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 2px 10px;
+}
+.cp-num {
+  flex-shrink: 0;
+  width: 4ch;
+  padding-top: 2px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cp-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.cp-texts code {
+  display: block;
+  padding: 1px 6px;
+  border-radius: var(--r-4);
+  overflow: hidden;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.cp-before {
+  background: var(--enc-editor-deleted-line-bg, color-mix(in srgb, var(--danger) 10%, transparent));
+  color: var(--text-2);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.cp-after {
+  background: var(--enc-editor-inserted-line-bg, color-mix(in srgb, var(--success) 10%, transparent));
+}
+.cp-more {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+/* ---------------------------------------------------- problems */
+
+.problems-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.pp-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pp-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  max-width: 360px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-6);
+  background: var(--canvas);
+  color: var(--text-3);
+}
+.pp-filter:focus-within {
+  border-color: var(--focus);
+}
+.pp-filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+.pp-chips {
+  display: flex;
+  gap: 4px;
+}
+.pp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    opacity var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out);
+}
+.pp-chip:hover {
+  background: var(--hover);
+}
+.pp-chip.is-off {
+  opacity: 0.45;
+}
+.pp-chip.is-errors svg {
+  color: var(--danger);
+}
+.pp-chip.is-warnings svg {
+  color: var(--warning);
+}
+.pp-chip.is-others svg {
+  color: var(--accent);
+}
+.pp-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.pp-file,
+.pp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pp-file {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--fs-12);
+}
+.pp-file > svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.pp-row {
+  min-height: 22px;
+  padding: 2px 10px 2px 30px;
+  font-size: var(--fs-12);
+}
+.pp-file:hover,
+.pp-row:hover {
+  background: var(--hover);
+}
+.pp-file:focus-visible,
+.pp-row:focus-visible {
+  outline: none;
+  background: var(--row-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.pp-name {
+  flex-shrink: 0;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.pp-dir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pp-icon {
+  flex-shrink: 0;
+}
+.pp-row.is-error .pp-icon {
+  color: var(--danger);
+}
+.pp-row.is-warning .pp-icon {
+  color: var(--warning);
+}
+.pp-row.is-info .pp-icon,
+.pp-row.is-hint .pp-icon {
+  color: var(--accent);
+}
+.pp-message {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-source {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.pp-at {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

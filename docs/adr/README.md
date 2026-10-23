@@ -64,6 +64,7 @@ say so.
 | [0072](0072-language-intelligence-comes-from-real-language-servers-that-encode-talks-to-through-its-own-client.md) | Language intelligence comes from real language servers that eNCode talks to through its own client | Accepted, refines 0003; where servers run is settled by 0073 |
 | [0073](0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md) | Worktrees are made by eNCode with hooks off, and language servers run in trusted folders for the editor and the agent | Accepted, refines 0072 |
 | [0074](0074-the-editor-asks-the-language-servers-through-checked-questions-and-draws-their-answers-with-its-own-widgets.md) | The editor asks the language servers through checked questions, and draws their answers with its own widgets | Accepted, builds on 0072 and 0073 |
+| [0075](0075-a-change-a-language-server-plans-is-checked-whole-goes-into-the-editor-or-onto-the-disk-and-can-be-seen-first-and-taken-back.md) | A change a language server plans is checked whole, goes into the editor or onto the disk, and can be seen first and taken back | Accepted, builds on 0072, 0073 and 0074 |
 
 ## Template
 

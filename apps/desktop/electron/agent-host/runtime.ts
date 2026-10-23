@@ -390,6 +390,11 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     return workspaces.editorAsk(root, ask)
   })
 
+  peer.handle('codeChange', async ({ root, request }) => {
+    if (!workspaces) return { ok: false as const, reason: 'The agent is still starting. Try again in a moment.' }
+    return workspaces.editorChange(root, request)
+  })
+
   peer.handle('codeReport', async ({ root, logs }) => {
     if (!workspaces) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
     return workspaces.languageServersReport(root, logs ? { logs } : {})

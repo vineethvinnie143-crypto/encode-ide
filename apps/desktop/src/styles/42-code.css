@@ -167,7 +167,24 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  margin: 0 -6px;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.editor-footer-count:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.editor-footer-count:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
 }
 .editor-footer-count .is-error {
   color: var(--danger);

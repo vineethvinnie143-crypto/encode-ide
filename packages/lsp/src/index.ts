@@ -4,6 +4,7 @@ export { toEntry, type CompletionEntry, type CompletionResult, type EditorHighli
 export { discover, shimScript, type DiscoverOptions, type LaunchPlan } from './discover'
 export { applyTextEdits, EditConflict } from './edits'
 export {
+  EditRefused,
   LanguageServers,
   toCodeDiagnostic,
   type ActionInfo,

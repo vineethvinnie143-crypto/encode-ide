@@ -8,7 +8,7 @@ import { rewindRequestOf } from './agent-host/rewind-request'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
 import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
-import { noAnswer, readEditorAsk } from './services/editor-ask'
+import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
 import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
@@ -26,6 +26,7 @@ import type { SearchProviderId } from '../shared/search'
 import type {
   AgentStartInput,
   ApprovalAnswer,
+  EditorChangeResult,
   McpAction,
   PermissionsAction,
   PlanRequest,
@@ -241,6 +242,23 @@ export function registerIpc(deps: IpcDeps): void {
     if (!ask) return noAnswer(kind)
     // The editor shows nothing for a question it could not have answered; a reason would only be noise there.
     return agent.codeAsk(root, ask).catch(() => noAnswer(kind))
+  })
+  // A rename or code action across the folder: checked like a question, its open files made the folder's own.
+  handle('code:edit', async (value: unknown): Promise<EditorChangeResult> => {
+    const root = workspace.current?.root
+    if (!root) return { ok: false, reason: 'Open a folder first.' }
+    const request = readEditorChange(value, (rel) => {
+      try {
+        return workspace.toRelative(workspace.resolve(rel)) || null
+      } catch {
+        return null
+      }
+    })
+    if (!request) return { ok: false, reason: 'That change could not be made.' }
+    return agent.codeChange(root, request).catch((error: unknown) => ({
+      ok: false as const,
+      reason: isRpcError(error) && error.code === 'closed' ? HOST_STOPPED_MESSAGE : 'The language servers did not finish the change in time. Look over the files it would change before you try again.',
+    }))
   })
   handle('code:report', () => {
     const root = workspace.current?.root

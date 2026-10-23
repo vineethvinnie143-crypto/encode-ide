@@ -7,6 +7,12 @@
  * `log` snippet and `greet`, which brings an import once filled in), the parameters of a call to a `function` it
  * has seen, hover, definitions (the `function` line), references and the other places of a word.
  *
+ * And it changes code on request as a real one does: renames a word in every file of the folder's src (open or not),
+ * refusing a name that is not one; fixes ERROR (resolved only when chosen), fixes all of them, sorts the imports,
+ * extracts a selection to a constant through a command of its own that asks the client to apply the edit, offers a
+ * refactoring that cannot be taken; formats (tabs to spaces, no trailing spaces), a range of lines, and a line as `;`
+ * is typed (no spaces before it).
+ *
  *   node scripts/fake-language-server.mjs --stdio [--marker=file]
  *
  * With a marker file, the server appends a line when it starts, one for each document it is given or loses, and one
@@ -14,6 +20,8 @@
  * stopped it.
  */
 import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const option = (name) => process.argv.find((argument) => argument.startsWith(`--${name}=`))?.slice(name.length + 3)
 const marker = option('marker')
@@ -24,6 +32,11 @@ const mark = (text) => {
 const docs = new Map()
 let buffer = Buffer.alloc(0)
 let shutdown = false
+/** The folder the client opened, from initialize. */
+let root = null
+/** Requests of ours waiting for the client's answer, by id. */
+const asked = new Map()
+let nextAsk = 1
 
 function send(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8')
@@ -32,6 +45,14 @@ function send(message) {
 const reply = (id, result) => send({ jsonrpc: '2.0', id, result })
 const fail = (id, code, message) => send({ jsonrpc: '2.0', id, error: { code, message } })
 const notify = (method, params) => send({ jsonrpc: '2.0', method, params })
+/** Asks the client something and resolves with its answer. */
+function ask(method, params) {
+  const id = `fake-${nextAsk++}`
+  return new Promise((resolve) => {
+    asked.set(id, resolve)
+    send({ jsonrpc: '2.0', id, method, params })
+  })
+}
 const nameOf = (uri) => decodeURIComponent(uri.split('/').pop() ?? uri)
 
 function diagnosticsOf(text) {
@@ -176,13 +197,149 @@ function highlights({ textDocument, position }) {
   return placesOf(at.word, textDocument.uri).map((place) => ({ range: range(place.line, place.start, place.end), kind: /^\s*=[^=]/.test(place.text.slice(place.end)) ? 3 : 2 }))
 }
 
+// ------------------------------------------------------------ what the editor asks to change
+
+const KEYWORDS = new Set(['function', 'export', 'const', 'let', 'return', 'import', 'from', 'number', 'string'])
+
+/** The text of every file of the folder's src that ends in .ts, the open ones as the client has them. */
+function folderTexts() {
+  const out = new Map(docs.size ? [...docs].map(([uri, doc]) => [uri, doc.text]) : [])
+  if (!root) return out
+  const walk = (dir, depth) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory() && depth < 4) walk(full, depth + 1)
+      else if (entry.isFile() && entry.name.endsWith('.ts')) {
+        const uri = pathToFileURL(full).href
+        if (![...out.keys()].some((known) => sameFile(known, uri))) out.set(uri, fs.readFileSync(full, 'utf8'))
+      }
+    }
+  }
+  const src = path.join(root, 'src')
+  if (fs.existsSync(src)) walk(src, 0)
+  return out
+}
+
+/** Two file URIs of one file: Windows spells drive letters and escapes in more than one way. */
+const sameFile = (a, b) => decodeURIComponent(a).toLowerCase() === decodeURIComponent(b).toLowerCase()
+
+function prepareRename({ textDocument, position }) {
+  const at = wordAt(textDocument.uri, position)
+  if (!at || KEYWORDS.has(at.word)) return null
+  return { range: range(position.line, at.start, at.end), placeholder: at.word }
+}
+
+function rename({ textDocument, position, newName }) {
+  const at = wordAt(textDocument.uri, position)
+  if (!at || KEYWORDS.has(at.word)) return { error: [-32602, 'You cannot rename this element.'] }
+  if (!/^[A-Za-z_$][\w$]*$/.test(newName)) return { error: [-32602, `'${newName}' is not a valid name.`] }
+  const changes = {}
+  for (const [uri, text] of folderTexts()) {
+    text.split(/\r?\n/).forEach((line, index) => {
+      for (const match of line.matchAll(WORD)) {
+        if (match[0] === at.word) (changes[uri] ??= []).push({ range: range(index, match.index, match.index + at.word.length), newText: newName })
+      }
+    })
+  }
+  return { result: { changes } }
+}
+
+/** Each ERROR of a document as 0. */
+function errorEdits(uri) {
+  const edits = []
+  ;(docs.get(uri)?.text ?? '').split(/\r?\n/).forEach((line, index) => {
+    for (let at = line.indexOf('ERROR'); at >= 0; at = line.indexOf('ERROR', at + 5)) edits.push({ range: range(index, at, at + 5), newText: '0' })
+  })
+  return edits
+}
+
+function codeActions({ textDocument, range: asked, context }) {
+  const uri = textDocument.uri
+  const only = context.only
+  const wants = (kind) => !only || only.some((item) => kind === item || kind.startsWith(`${item}.`))
+  const out = []
+  const lines = (docs.get(uri)?.text ?? '').split(/\r?\n/)
+  if (wants('quickfix')) {
+    for (const problem of context.diagnostics ?? []) {
+      if (problem.code !== 'E1') continue
+      // Its edit comes from resolve, when it is chosen.
+      out.push({ title: 'Replace ERROR with 0', kind: 'quickfix', isPreferred: true, diagnostics: [problem], data: { fix: 'error', uri, line: problem.range.start.line, character: problem.range.start.character } })
+      out.push({ title: 'Add a note about ERROR', kind: 'quickfix', edit: { changes: { [uri]: [{ range: range(problem.range.start.line, 0, 0), newText: '// TODO: ERROR below\n' }] } } })
+    }
+  }
+  if (wants('refactor.extract') && (asked.start.line !== asked.end.line || asked.start.character !== asked.end.character)) {
+    out.push({ title: 'Extract to constant', kind: 'refactor.extract.constant', command: { title: 'Extract to constant', command: 'fake.extract', arguments: [uri, asked] } })
+  }
+  if (wants('refactor.move')) out.push({ title: 'Move to a new file', kind: 'refactor.move', disabled: { reason: 'Select a whole declaration first.' } })
+  if (wants('source.organizeImports')) {
+    const imports = lines.map((text, index) => ({ text, index })).filter((line) => /^import\s/.test(line.text))
+    const sorted = [...imports].sort((a, b) => (a.text < b.text ? -1 : a.text > b.text ? 1 : 0))
+    const edits = imports.filter((line, at) => line.text !== sorted[at].text).map((line, at) => ({ range: range(line.index, 0, line.text.length), newText: sorted[imports.indexOf(line)].text }))
+    out.push({ title: 'Organize imports', kind: 'source.organizeImports', edit: { changes: { [uri]: edits } } })
+  }
+  if (wants('source.fixAll') && errorEdits(uri).length) out.push({ title: 'Fix all ERRORs', kind: 'source.fixAll', edit: { changes: { [uri]: errorEdits(uri) } } })
+  return out
+}
+
+function resolveAction(action) {
+  if (action.data?.fix !== 'error') return action
+  const { uri, line, character } = action.data
+  return { ...action, edit: { changes: { [uri]: [{ range: range(line, character, character + 5), newText: '0' }] } } }
+}
+
+/** The selection as `const extracted = …` on a line of its own above it, through the client. */
+async function extract(id, [uri, selected]) {
+  const lines = (docs.get(uri)?.text ?? '').split(/\r?\n/)
+  const first = selected.start.line
+  const text = selected.start.line === selected.end.line ? lines[first].slice(selected.start.character, selected.end.character) : ''
+  if (!text) return fail(id, -32602, 'Select what to extract on one line.')
+  const indent = /^\s*/.exec(lines[first])[0]
+  const answer = await ask('workspace/applyEdit', {
+    label: 'Extract to constant',
+    edit: { changes: { [uri]: [{ range: range(first, 0, 0), newText: `${indent}const extracted = ${text}\n` }, { range: selected, newText: 'extracted' }] } },
+  })
+  if (!answer?.applied) return fail(id, -32603, answer?.failureReason ?? 'The edit was not applied.')
+  return reply(id, null)
+}
+
+/** Tabs at the start of a line as spaces, no spaces at the end, for the lines from `first` to `last`. */
+function formatLines(uri, options, first = 0, last = Infinity) {
+  const unit = options.insertSpaces ? ' '.repeat(options.tabSize) : '\t'
+  const edits = []
+  ;(docs.get(uri)?.text ?? '').split(/\r?\n/).forEach((line, index) => {
+    if (index < first || index > last) return
+    const lead = /^[\t ]*/.exec(line)[0]
+    const fixedLead = options.insertSpaces ? lead.replace(/\t/g, unit) : lead
+    if (fixedLead !== lead) edits.push({ range: range(index, 0, lead.length), newText: fixedLead })
+    const trail = /[\t ]+$/.exec(line)
+    if (trail && trail.index > lead.length) edits.push({ range: range(index, trail.index, line.length), newText: '' })
+  })
+  return edits
+}
+
+/** After `;`: no spaces before it. */
+function formatOnType({ textDocument, position, ch }) {
+  if (ch !== ';') return []
+  const line = lineOf(textDocument.uri, position.line)
+  const before = line.slice(0, position.character - 1)
+  const spaces = /[ \t]+$/.exec(before)
+  return spaces ? [{ range: range(position.line, spaces.index, before.length), newText: '' }] : []
+}
+
 function handle(message) {
-  // An answer to a request of ours: this server asks nothing, so there is nothing to do.
-  if (message.method === undefined) return
+  // An answer to a request of ours.
+  if (message.method === undefined) {
+    const resolve = asked.get(message.id)
+    asked.delete(message.id)
+    resolve?.(message.result ?? null)
+    return
+  }
   const { id, method, params } = message
   switch (method) {
     case 'initialize':
       mark('start')
+      if (params.rootUri) root = fileURLToPath(params.rootUri)
+      else if (params.workspaceFolders?.[0]) root = fileURLToPath(params.workspaceFolders[0].uri)
       return reply(id, {
         capabilities: {
           textDocumentSync: { openClose: true, change: 1, save: { includeText: false } },
@@ -192,6 +349,12 @@ function handle(message) {
           definitionProvider: true,
           referencesProvider: true,
           documentHighlightProvider: true,
+          renameProvider: { prepareProvider: true },
+          codeActionProvider: { codeActionKinds: ['quickfix', 'refactor.extract', 'refactor.move', 'source.organizeImports', 'source.fixAll'], resolveProvider: true },
+          executeCommandProvider: { commands: ['fake.extract'] },
+          documentFormattingProvider: true,
+          documentRangeFormattingProvider: true,
+          documentOnTypeFormattingProvider: { firstTriggerCharacter: ';', moreTriggerCharacter: ['}'] },
         },
         serverInfo: { name: 'fake-ts', version: '1' },
       })
@@ -227,6 +390,25 @@ function handle(message) {
       return reply(id, references(params))
     case 'textDocument/documentHighlight':
       return reply(id, highlights(params))
+    case 'textDocument/prepareRename':
+      return reply(id, prepareRename(params))
+    case 'textDocument/rename': {
+      const done = rename(params)
+      return done.error ? fail(id, ...done.error) : reply(id, done.result)
+    }
+    case 'textDocument/codeAction':
+      return reply(id, codeActions(params))
+    case 'codeAction/resolve':
+      return reply(id, resolveAction(params))
+    case 'workspace/executeCommand':
+      if (params.command === 'fake.extract') return void extract(id, params.arguments ?? [])
+      return fail(id, -32601, `${params.command} is not a command of this server`)
+    case 'textDocument/formatting':
+      return reply(id, formatLines(params.textDocument.uri, params.options))
+    case 'textDocument/rangeFormatting':
+      return reply(id, formatLines(params.textDocument.uri, params.options, params.range.start.line, params.range.end.line))
+    case 'textDocument/onTypeFormatting':
+      return reply(id, formatOnType(params))
     case 'shutdown':
       shutdown = true
       return reply(id, null)

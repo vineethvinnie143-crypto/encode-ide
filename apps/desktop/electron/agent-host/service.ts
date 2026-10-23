@@ -10,7 +10,7 @@
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
-import type { CodeDiagnostic, EditorAnswer, EditorAsk, LanguageServersReport, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, LanguageServersReport, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import type { CodeReviewInput, CodeReviewResult } from './code-review'
 import type { CommitDraftInput } from './commit-message'
@@ -60,6 +60,7 @@ const REQUEST_TIMEOUT_MS = 60_000
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000
 /** A server that starts for the question (the first one in a big project) can take this long to answer. */
 const CODE_ASK_TIMEOUT_MS = 30_000
+const CODE_CHANGE_TIMEOUT_MS = 120_000
 const INIT_TIMEOUT_MS = 30_000
 const SHUTDOWN_TIMEOUT_MS = 4_000
 
@@ -192,6 +193,14 @@ export class AgentHostService {
    */
   async codeAsk<K extends EditorAsk['kind']>(root: string, ask: Extract<EditorAsk, { kind: K }>): Promise<EditorAnswer<K>> {
     return (await (await this.ready()).request('codeAsk', { root, ask }, { timeoutMs: CODE_ASK_TIMEOUT_MS })) as EditorAnswer<K>
+  }
+
+  /**
+   * A rename or a code action of the editor's across the folder `root`, after the editor's earlier changes. A server's
+   * command can take a while (it is given a minute), and so can a large rename.
+   */
+  async codeChange(root: string, request: EditorChangeRequest): Promise<EditorChangeResult> {
+    return (await this.ready()).request('codeChange', { root, request }, { timeoutMs: CODE_CHANGE_TIMEOUT_MS })
   }
 
   /** The editor opened, changed or closed a file of the folder `root`. */

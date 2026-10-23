@@ -2,7 +2,9 @@ import { create } from '../store'
 import { api } from '../api'
 import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, matchesSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
 import { useUi } from './ui'
+import { useSettings } from './settings'
 import { errorText } from '../ipc-error'
+import { FORMAT_ON_SAVE_MS, formatDoc } from '../editor/assist/format'
 import type { CodeRange } from '@shared/types'
 
 export interface Tab {
@@ -235,6 +237,8 @@ async function confirmOverwrite(tab: Tab): Promise<boolean> {
 
 async function save(tab: Tab): Promise<void> {
   if (!isDirty(tab.path)) return
+  // Formatted first, so what is written is formatted; a server that is slow or has none leaves the file as it is.
+  if (useSettings.getState().settings?.formatOnSave) await formatDoc(tab.path, undefined, { waitMs: FORMAT_ON_SAVE_MS }).catch(() => undefined)
   const snapshot = snapshotForSave(tab.path)
   if (!snapshot) return
   try {

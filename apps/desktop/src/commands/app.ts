@@ -165,6 +165,7 @@ function createAppActions(): AppActions {
     showFiles: () => panels().open('files', { view: 'explorer' }),
     showReview: () => panels().open('review'),
     showTerminal: () => panels().openBottom('terminal'),
+    showProblems: () => panels().openBottom('problems'),
     zoom: (action) => void api.window.zoom(action),
     toggleFullScreen: () => void api.window.toggleFullScreen(),
     showPalette: () => ui().setPaletteOpen(true),

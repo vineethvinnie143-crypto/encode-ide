@@ -120,6 +120,27 @@ export function readWorkspaceEdit(value: unknown): WorkspaceEdit | null {
   return edit
 }
 
+/** TextEdit[] or null, as formatting answers (null from the server is no edits); null when any edit does not read. */
+export function readTextEditList(value: unknown): TextEdit[] | null {
+  if (value === null || value === undefined) return []
+  return readTextEdits(value, { left: MAX_EDITS })
+}
+
+/**
+ * What prepareRename answers: the range to rename and the text to start from, `default` when the server leaves the
+ * range to the editor (the word at the cursor), null when nothing there can be renamed.
+ */
+export function readPrepareRename(value: unknown): { range: Range; placeholder?: string } | 'default' | null {
+  if (!isObject(value)) return null
+  if (value.defaultBehavior === true) return 'default'
+  const plain = readRange(value)
+  if (plain) return { range: plain }
+  const range = readRange(value.range)
+  if (!range) return null
+  const placeholder = text(value.placeholder, 1_000)
+  return { range, ...(placeholder !== undefined ? { placeholder } : {}) }
+}
+
 function readDocumentSymbol(value: unknown, depth: number, count: { left: number }): DocumentSymbol | null {
   if (!isObject(value) || depth > 32) return null
   const name = text(value.name, 300)

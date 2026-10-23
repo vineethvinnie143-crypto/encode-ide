@@ -223,6 +223,19 @@ describe('bottom panel', () => {
     assert.equal(openBottom(state, 'files', 'x'), state)
   })
 
+  it('opens Problems once, in the bottom panel only', () => {
+    let state = openBottom(defaultPanels(), 'problems', 'p')
+    state = openBottom(state, 'terminal', 't')
+    state = openBottom(state, 'problems', 'again')
+    assert.deepEqual(state.bottom.tabs.map((tab) => [tab.kind, tab.title]), [
+      ['problems', 'Problems'],
+      ['terminal', 'Terminal'],
+    ])
+    assert.equal(state.bottom.activeId, 'p')
+    const base = defaultPanels()
+    assert.equal(openSide(base, 'problems', 'x'), base)
+  })
+
   it('hides itself when the last tab closes', () => {
     let state = openBottom(defaultPanels(), 'terminal', 'a')
     state = openBottom(state, 'jobs', 'b')

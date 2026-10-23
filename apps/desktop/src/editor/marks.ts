@@ -59,6 +59,16 @@ export function marksOf(path: string): readonly CodeDiagnostic[] {
   return marks.get(path) ?? []
 }
 
+/** Every file's problems, by path, the files in path order: what the Problems panel lists and F8 walks. */
+export function allMarks(): [string, readonly CodeDiagnostic[]][] {
+  return [...marks].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+/** Worst first. */
+export function bySeverity(a: CodeDiagnostic, b: CodeDiagnostic): number {
+  return SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
+}
+
 /** Calls back with the path whose marks changed. Returns the way to stop. */
 export function onMarksChanged(listener: (path: string) => void): () => void {
   listeners.add(listener)

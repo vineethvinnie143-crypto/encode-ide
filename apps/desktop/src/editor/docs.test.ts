@@ -3,7 +3,10 @@ import { afterEach, describe, it } from 'node:test'
 import { EditorSelection, undo, type EditorState, type Transaction } from '@encode/editor'
 import {
   applyExternal,
+  applyServerEdits,
   attach,
+  changesFromEdits,
+  currentDoc,
   closeDoc,
   closeDocsUnder,
   docState,
@@ -16,6 +19,7 @@ import {
   openDoc,
   recordState,
   renameDocs,
+  revertServerEdits,
   scrollOf,
   saveScroll,
   snapshotForSave,
@@ -203,5 +207,47 @@ describe('renames', () => {
     renameDocs(`${root}/a.ts`, `${root}/a.md`)
     assert.equal(view.state.config.language.id, 'markdown')
     assert.equal(docState(`${root}/a.md`)!.config.language.id, 'markdown')
+  })
+})
+
+describe("a server's edits", () => {
+  const edit = (line: number, character: number, endLine: number, endCharacter: number, newText: string) => ({ range: { start: { line, character }, end: { line: endLine, character: endCharacter } }, newText })
+
+  it('become changes in the order of the text, their line breaks the document\'s, and none when two overlap', () => {
+    const doc = openDoc(path, 'let a = 1\nlet b = a\n').doc
+    const specs = changesFromEdits(doc, [edit(1, 8, 1, 9, 'c'), edit(0, 4, 0, 5, 'c'), edit(1, 9, 1, 9, '\r\n// end')])
+    assert.deepEqual(specs, [
+      { from: 4, to: 5, insert: 'c' },
+      { from: 18, to: 19, insert: 'c' },
+      { from: 19, to: 19, insert: '\n// end' },
+    ])
+    // Past the end of a line is its end; past the last line is the end of the text.
+    assert.deepEqual(changesFromEdits(doc, [edit(0, 99, 7, 0, '')]), [{ from: 9, to: doc.length, insert: '' }])
+    assert.equal(changesFromEdits(doc, [edit(0, 0, 0, 5, 'x'), edit(0, 3, 0, 6, 'y')]), null)
+  })
+
+  it('go in as one step of the undo history, through the view, and come back out while the text is what they left', () => {
+    const view = host(openDoc(path, 'let a = 1\nlet b = a\n'))
+    attach(path, view)
+    const done = applyServerEdits(path, [edit(0, 4, 0, 5, 'total'), edit(1, 8, 1, 9, 'total')])!
+    assert.equal(view.state.doc.toString(), 'let total = 1\nlet b = total\n')
+    assert.equal(currentDoc(path), view.state.doc)
+    assert.equal(isDirty(path), true)
+    const undone = undo(view.state)!
+    assert.equal(undone.state.doc.toString(), 'let a = 1\nlet b = a\n', 'Ctrl+Z takes back both edits at once')
+    view.dispatch(undone)
+    assert.equal(revertServerEdits(done), false, 'the text is no longer what the edits left')
+    assert.equal(applyServerEdits('/work/none.ts', [edit(0, 0, 0, 0, 'x')]), null)
+  })
+
+  it('leave the document saved when the file on disk has them already', () => {
+    const view = host(openDoc(path, 'a\n'))
+    attach(path, view)
+    const done = applyServerEdits(path, [edit(0, 0, 0, 1, 'b')], { saved: true })!
+    assert.equal(isDirty(path), false)
+    assert.equal(view.reported.at(-1), false)
+    assert.equal(revertServerEdits(done, { saved: true }), true)
+    assert.equal(view.state.doc.toString(), 'a\n')
+    assert.equal(isDirty(path), false)
   })
 })

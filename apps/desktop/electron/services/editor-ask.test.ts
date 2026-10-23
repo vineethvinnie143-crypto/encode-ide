@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { noAnswer, readEditorAsk } from './editor-ask'
+import { noAnswer, readEditorAsk, readEditorChange } from './editor-ask'
 
 /** The folder's own paths only, as the workspace service checks them. */
 const relative = (path: string) => (path.startsWith('..') || path.startsWith('/') ? null : path.replace(/\\/g, '/'))
@@ -49,6 +49,58 @@ describe('a question of the editor to the language servers', () => {
       { kind: 'definition', path: 42, line: 0, character: 0 },
     ]
     for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value)?.slice(0, 120))
+  })
+
+  it('takes a range, the kinds of action, how the editor indents and the character typed for the questions that need them', () => {
+    const range = { start: { line: 1, character: 2 }, end: { line: 3, character: 0 }, extra: true }
+    const clean = { start: { line: 1, character: 2 }, end: { line: 3, character: 0 } }
+    assert.deepEqual(readEditorAsk({ kind: 'codeActions', path: 'a.ts', range, only: ['quickfix', 'source.organizeImports'], automatic: true }, relative), { kind: 'codeActions', path: 'a.ts', range: clean, automatic: true, only: ['quickfix', 'source.organizeImports'] })
+    assert.deepEqual(readEditorAsk({ kind: 'format', path: 'a.ts', tabSize: 2, insertSpaces: true }, relative), { kind: 'format', path: 'a.ts', tabSize: 2, insertSpaces: true })
+    assert.deepEqual(readEditorAsk({ kind: 'format', path: 'a.ts', range, tabSize: 4, insertSpaces: false }, relative), { kind: 'format', path: 'a.ts', range: clean, tabSize: 4, insertSpaces: false })
+    assert.deepEqual(readEditorAsk({ kind: 'formatOnType', path: 'a.ts', line: 0, character: 3, ch: ';', tabSize: 2, insertSpaces: true }, relative), { kind: 'formatOnType', path: 'a.ts', line: 0, character: 3, ch: ';', tabSize: 2, insertSpaces: true })
+    assert.deepEqual(readEditorAsk({ kind: 'prepareRename', path: 'a.ts', line: 0, character: 3 }, relative), { kind: 'prepareRename', path: 'a.ts', line: 0, character: 3 })
+    const refused: unknown[] = [
+      { kind: 'codeActions', path: 'a.ts', range, automatic: 'yes' },
+      { kind: 'codeActions', path: 'a.ts', range: { start: { line: 3, character: 0 }, end: { line: 1, character: 0 } }, automatic: true },
+      { kind: 'codeActions', path: 'a.ts', range, automatic: true, only: [] },
+      { kind: 'codeActions', path: 'a.ts', range, automatic: true, only: ['quick fix'] },
+      { kind: 'codeActions', path: 'a.ts', range, automatic: true, only: Array.from({ length: 9 }, () => 'quickfix') },
+      { kind: 'format', path: 'a.ts', tabSize: 0, insertSpaces: true },
+      { kind: 'format', path: 'a.ts', tabSize: 2 },
+      { kind: 'format', path: 'a.ts', tabSize: 2, insertSpaces: true, range: { start: { line: 0 } } },
+      { kind: 'formatOnType', path: 'a.ts', line: 0, character: 3, ch: ';;;', tabSize: 2, insertSpaces: true },
+    ]
+    for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value)?.slice(0, 120))
+  })
+
+  it('takes a change with its file and the open files made the folder\'s own, and refuses anything else', () => {
+    assert.deepEqual(readEditorChange({ kind: 'rename', path: 'src\\a.ts', line: 1, character: 2, newName: 'next', preview: false, open: ['src/a.ts', '../outside.ts', 7, 'b.ts'], extra: 1 }, relative), {
+      kind: 'rename',
+      path: 'src/a.ts',
+      line: 1,
+      character: 2,
+      newName: 'next',
+      preview: false,
+      open: ['src/a.ts', 'b.ts'],
+    })
+    assert.deepEqual(readEditorChange({ kind: 'action', path: 'a.ts', list: 3, id: 0, preview: true, open: [] }, relative), { kind: 'action', path: 'a.ts', list: 3, id: 0, preview: true, open: [] })
+    assert.deepEqual(readEditorChange({ kind: 'apply', id: 4, open: ['a.ts'] }, relative), { kind: 'apply', id: 4, open: ['a.ts'] })
+    assert.deepEqual(readEditorChange({ kind: 'undo', id: 4, open: [] }, relative), { kind: 'undo', id: 4, open: [] })
+    assert.deepEqual(readEditorChange({ kind: 'discard', id: 4 }, relative), { kind: 'discard', id: 4 })
+    const refused: unknown[] = [
+      null,
+      { kind: 'write', path: 'a.ts', open: [] },
+      { kind: 'rename', path: '../a.ts', line: 0, character: 0, newName: 'x', preview: false, open: [] },
+      { kind: 'rename', path: 'a.ts', line: 0, character: 0, newName: 'two\nlines', preview: false, open: [] },
+      { kind: 'rename', path: 'a.ts', line: 0, character: 0, newName: '   ', preview: false, open: [] },
+      { kind: 'rename', path: 'a.ts', line: 0, character: 0, newName: 'x'.repeat(501), preview: false, open: [] },
+      { kind: 'rename', path: 'a.ts', line: 0, character: 0, newName: 'x', open: [] },
+      { kind: 'rename', path: 'a.ts', line: 0, character: 0, newName: 'x', preview: false },
+      { kind: 'action', path: 'a.ts', list: 1, id: 5_000, preview: false, open: [] },
+      { kind: 'apply', id: -1, open: [] },
+      { kind: 'apply', id: 1, open: Array.from({ length: 2_001 }, () => 'a.ts') },
+    ]
+    for (const value of refused) assert.equal(readEditorChange(value, relative), null, JSON.stringify(value)?.slice(0, 120))
   })
 
   it('gets an empty answer of its kind when nothing answers', () => {

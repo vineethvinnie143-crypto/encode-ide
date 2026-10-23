@@ -44,6 +44,8 @@ export interface AppActions {
   showFiles(): void
   showReview(): void
   showTerminal(): void
+  /** The Problems panel: what the language servers found in the folder's files. */
+  showProblems(): void
   zoom(action: ZoomAction): void
   toggleFullScreen(): void
   showPalette(): void
@@ -109,16 +111,26 @@ export interface AppActions {
  * something only there), so the palette shows them as hints.
  */
 function editorCommands(a: AppActions): Command[] {
-  const command = (id: string, title: string, name: string, hint: string | undefined, keywords: string): Command => ({
+  const command = (id: string, title: string, name: string, hint: string | undefined, keywords: string, group: Command['group'] = 'Go'): Command => ({
     id: `editor.${id}`,
     title,
-    group: 'Go',
+    group,
     ...(hint ? { hint } : {}),
     keywords,
     enabled: () => a.hasEditor(),
     run: () => a.editorCommand(name),
   })
   return [
+    command('rename', 'Rename symbol', 'renameSymbol', 'F2', 'code refactor rename across files', 'Edit'),
+    command('quickFix', 'Quick fix…', 'quickFix', 'Ctrl+.', 'code action lightbulb fix error problem', 'Edit'),
+    command('refactor', 'Refactor…', 'refactor', 'Ctrl+Shift+R', 'code action extract move inline', 'Edit'),
+    command('sourceAction', 'Source action…', 'sourceAction', undefined, 'code action file imports', 'Edit'),
+    command('organizeImports', 'Organize imports', 'organizeImports', 'Shift+Alt+O', 'code sort remove unused imports', 'Edit'),
+    command('fixAll', 'Fix all', 'fixAll', undefined, 'code action auto fix problems file', 'Edit'),
+    command('formatDocument', 'Format document', 'formatDocument', 'Shift+Alt+F', 'code prettier beautify indent style', 'Edit'),
+    command('formatSelection', 'Format selection', 'formatSelection', undefined, 'code prettier beautify indent style range line', 'Edit'),
+    command('nextProblem', 'Next problem', 'nextProblem', 'F8', 'code error warning diagnostic marker'),
+    command('previousProblem', 'Previous problem', 'previousProblem', 'Shift+F8', 'code error warning diagnostic marker'),
     command('goToDefinition', 'Go to definition', 'goToDefinition', 'F12', 'code symbol declaration jump navigate'),
     command('peekDefinition', 'Peek definition', 'peekDefinition', 'Alt+F12', 'code symbol declaration inline'),
     command('goToReferences', 'Go to references', 'goToReferences', 'Shift+F12', 'code symbol usages find all callers'),
@@ -189,6 +201,14 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'view.files', title: 'Show files', group: 'View', keys: ['Ctrl+Shift+E'], enabled: () => a.hasWorkspace(), run: () => a.showFiles() },
     { id: 'view.review', title: 'Show review', group: 'View', keys: ['Ctrl+Shift+G'], enabled: () => a.hasWorkspace(), run: () => a.showReview() },
     { id: 'view.terminal', title: 'Show terminal', group: 'View', keys: ['Ctrl+`'], run: () => a.showTerminal() },
+    {
+      id: 'view.problems',
+      title: 'Show problems',
+      group: 'View',
+      keys: ['Ctrl+Shift+Y'],
+      keywords: 'errors warnings diagnostics language server markers',
+      run: () => a.showProblems(),
+    },
     { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },
     { id: 'panel.newTab', title: 'New tab', group: 'View', keys: ['Ctrl+T'], run: () => a.newPanelTab() },

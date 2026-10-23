@@ -107,6 +107,20 @@ function functions(uri, text) {
   return out
 }
 
+/** Formatting: leading tabs become spaces (when spaces are asked for), and the spaces at a line's end go. */
+function formatEdits(text, options, range) {
+  const edits = []
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (range && (index < range.start.line || index > range.end.line)) return
+    const lead = /^\t+/.exec(line)
+    const indent = lead ? lead[0].length : 0
+    if (lead && options.insertSpaces) edits.push({ range: { start: { line: index, character: 0 }, end: { line: index, character: indent } }, newText: ' '.repeat(options.tabSize * indent) })
+    const trail = /[ \t]+$/.exec(line)
+    if (trail && trail.index >= indent) edits.push({ range: { start: { line: index, character: trail.index }, end: { line: index, character: line.length } }, newText: '' })
+  })
+  return edits
+}
+
 const capabilities = {
   textDocumentSync: { openClose: true, change: mode === 'incremental' ? 2 : 1, save: { includeText: false } },
   hoverProvider: true,
@@ -121,6 +135,9 @@ const capabilities = {
   completionProvider: { triggerCharacters: ['.'], allCommitCharacters: [';'], resolveProvider: true },
   signatureHelpProvider: { triggerCharacters: ['('], retriggerCharacters: [','] },
   documentHighlightProvider: true,
+  documentFormattingProvider: true,
+  documentRangeFormattingProvider: true,
+  documentOnTypeFormattingProvider: { firstTriggerCharacter: ';', moreTriggerCharacter: ['}'] },
 }
 if (mode === 'pull') capabilities.diagnosticProvider = { interFileDependencies: false, workspaceDiagnostics: false }
 if (mode === 'bare') for (const key of Object.keys(capabilities)) if (key !== 'textDocumentSync') delete capabilities[key]
@@ -328,6 +345,22 @@ async function handle(message) {
         while ((match = re.exec(line))) out.push({ range: { start: { line: index, character: match.index }, end: { line: index, character: match.index + found.word.length } }, kind: line.slice(0, match.index).endsWith('function ') ? 3 : 2 })
       })
       return reply(id, out)
+    }
+    case 'textDocument/formatting':
+    case 'textDocument/rangeFormatting': {
+      const doc = docs.get(params.textDocument.uri)
+      if (!doc) return reply(id, null)
+      if (doc.text.includes('FORMAT_FAILS')) return fail(id, -32603, 'The formatter broke')
+      return reply(id, formatEdits(doc.text, params.options, method === 'textDocument/rangeFormatting' ? params.range : null))
+    }
+    case 'textDocument/onTypeFormatting': {
+      // The spaces before the character typed go: "a = 1  ;" becomes "a = 1;".
+      const doc = docs.get(params.textDocument.uri)
+      const line = doc ? doc.text.split(/\r?\n/)[params.position.line] || '' : ''
+      const before = line.slice(0, params.position.character - 1)
+      const spaces = /\s+$/.exec(before)
+      if (!spaces) return reply(id, [])
+      return reply(id, [{ range: { start: { line: params.position.line, character: spaces.index }, end: { line: params.position.line, character: before.length } }, newText: '' }])
     }
     case 'codeAction/resolve':
       return reply(id, Object.assign({}, params, { edit: { changes: { [params.data.uri]: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: '// note\n' }] } } }))

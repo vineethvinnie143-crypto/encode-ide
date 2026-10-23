@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorHighlight, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp } from '@encode/lsp'
+import { discover, fromChildProcess, LANGUAGE_SERVERS, LanguageServers, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorHighlight, type EditorTriggers, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -93,10 +93,80 @@ export interface EditorAsks {
   implementation: { params: At; result: EditorLocation[] | null }
   references: { params: At; result: EditorLocation[] | null }
   triggers: { params: { path: string }; result: EditorTriggers | null }
+  /**
+   * Whether the symbol at a position can be renamed: the range and the name to start from (none: the word there), the
+   * server's reason when it cannot, null when no server renames in the file.
+   */
+  prepareRename: { params: At; result: { ok: true; range?: Range; placeholder?: string } | { ok: false; reason: string } | null }
+  /** The actions for a range, numbered for `EditorChangeRequest`; `automatic` when the editor asks by itself (the lightbulb). */
+  codeActions: { params: { path: string; range: Range; only?: string[]; automatic: boolean }; result: { list: number; actions: ActionInfo[] } | null }
+  /** The edits that format the file, or a range of it, for the text the editor sent. */
+  format: { params: { path: string; range?: Range; tabSize: number; insertSpaces: boolean }; result: TextEdit[] | null }
+  /** The edits that format what was just typed: `ch`, which ends at the position. */
+  formatOnType: { params: At & { ch: string; tabSize: number; insertSpaces: boolean }; result: TextEdit[] | null }
 }
 
 export type EditorAsk = { [K in keyof EditorAsks]: { kind: K } & EditorAsks[K]['params'] }[keyof EditorAsks]
 export type EditorAnswer<K extends keyof EditorAsks = keyof EditorAsks> = EditorAsks[K]['result']
+
+/**
+ * What the editor asks to change through a folder's servers. `open` names every file the editor has open, so that none
+ * of them is written behind its back. A change is applied at once, or shown first (`preview`) and applied by its id;
+ * `undo` takes an applied one back while nothing it touched has changed since; `discard` lets a preview go.
+ */
+export type EditorChangeRequest =
+  | { kind: 'rename'; path: string; line: number; character: number; newName: string; preview: boolean; open: string[] }
+  | { kind: 'action'; path: string; list: number; id: number; preview: boolean; open: string[] }
+  | { kind: 'apply'; id: number; open: string[] }
+  | { kind: 'undo'; id: number; open: string[] }
+  | { kind: 'discard'; id: number }
+
+/** The edits a change makes to a file the editor has open; `written`: the file on disk was written too, so the editor's text is saved once they are in. */
+export interface EditorFileEdit {
+  path: string
+  edits: TextEdit[]
+  written: boolean
+}
+
+/** A file a change would make, edit, move or delete, for its preview. */
+export interface EditorChangeFile {
+  path: string
+  kind: 'edit' | 'create' | 'move' | 'delete'
+  /** Where a moved file goes. */
+  to?: string
+  /** How many places in it change. */
+  places: number
+  /** The lines that change, as they read before and after, for an edit; at most so many. */
+  lines?: { line: number; before: string; after: string }[]
+  /** Changed in the editor, where it has unsaved changes, rather than on disk. */
+  inEditor?: boolean
+  /** Some of its lines are left out: a preview shows at most so many. */
+  cut?: boolean
+}
+
+export type EditorChangeResult =
+  | { ok: true; done: 'preview'; id: number; title: string; files: EditorChangeFile[] }
+  | {
+      ok: true
+      done: 'applied'
+      id: number
+      title: string
+      /** In order: a file may get more than one set of edits when a command makes several changes. */
+      editor: EditorFileEdit[]
+      written: string[]
+      created: string[]
+      moved: { from: string; to: string }[]
+      deleted: string[]
+      places: number
+      files: number
+      /** It can be taken back with `undo`. */
+      undo: boolean
+      /** What the server refused or could not do while the change ran. */
+      notes: string[]
+    }
+  | { ok: true; done: 'undone'; id: number; editor: { path: string; written: boolean }[]; written: string[]; created: string[]; deleted: string[] }
+  | { ok: true; done: 'discarded' }
+  | { ok: false; reason: string }
 
 /** The most files a list of places reads for its previews, and the most characters a preview keeps. */
 const PREVIEW_FILES = 100

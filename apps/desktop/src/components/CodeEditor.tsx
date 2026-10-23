@@ -11,18 +11,23 @@ import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
 import { markupHtml } from '../editor/assist/markup'
 import { goBack, goForward, goToLocation, withOpenText, type Place } from '../editor/assist/navigation'
+import { EditorRefactor } from '../editor/assist/refactor'
 import { attach, docState, indentLabel, recordState, saveScroll, scrollOf } from '../editor/docs'
-import { decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
+import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
+import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
 import { useCode } from '../stores/code'
 import { useEditor, type Tab } from '../stores/editor'
+import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import { cx } from '../ui/cx'
-import { AlertTriangle, Info, XCircle } from '../ui/icons'
+import { AlertTriangle, Info, Lightbulb, XCircle } from '../ui/icons'
+import { Kbd } from '../ui/Kbd'
 import { ContextMenu, type MenuEntry } from '../ui/Menu'
 import { place } from '../ui/place'
 import { SignatureCard, SuggestWidget } from './code/Assist'
 import { Peek, type PeekData } from './code/Peek'
+import { ActionMenu, ChangePreview, LightbulbButton, RenameBox } from './code/Refactor'
 
 /** What the view shows when no file is open. */
 const NOTHING = EditorState.create({})
@@ -60,6 +65,13 @@ const BINDINGS: readonly KeyBinding[] = [
   { key: 'Mod-F12', command: 'goToImplementation' },
   { key: 'Alt-ArrowLeft', mac: 'Ctrl--', command: 'navigateBack' },
   { key: 'Alt-ArrowRight', mac: 'Ctrl-Shift--', command: 'navigateForward' },
+  { key: 'F2', command: 'renameSymbol' },
+  { key: 'Mod-.', command: 'quickFix' },
+  { key: 'Ctrl-Shift-r', command: 'refactor' },
+  { key: 'Shift-Alt-o', command: 'organizeImports' },
+  { key: 'Shift-Alt-f', command: 'formatDocument' },
+  { key: 'F8', command: 'nextProblem' },
+  { key: 'Shift-F8', command: 'previousProblem' },
   // Before the editor's own Esc: an open peek closes first.
   { key: 'Escape', command: 'closePeek' },
 ]
@@ -84,7 +96,7 @@ interface Hover {
 const SEVERITY_ICON = { error: XCircle, warning: AlertTriangle, info: Info, hint: Info } as const
 
 /** The messages of the marks under the pointer and what the server says of the symbol there, beside the text. */
-function HoverCard({ hover, language, onEnter, onLeave }: { hover: Hover; language: string; onEnter(): void; onLeave(): void }) {
+function HoverCard({ hover, language, onEnter, onLeave, onQuickFix }: { hover: Hover; language: string; onEnter(): void; onLeave(): void; onQuickFix?: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const [spot, setSpot] = useState<{ left: number; top: number } | null>(null)
   const docs = useMemo(() => (hover.markdown ? markupHtml({ kind: 'markdown', value: hover.markdown }, language) : ''), [hover.markdown, language])
@@ -117,6 +129,15 @@ function HoverCard({ hover, language, onEnter, onLeave }: { hover: Hover; langua
       })}
       {/* Built by markupHtml: everything escaped first, then the renderer's own tags only. */}
       {docs ? <div className="mark-card-docs markup" dangerouslySetInnerHTML={{ __html: docs }} /> : null}
+      {hover.items.length > 0 && onQuickFix && (
+        <div className="mark-card-actions">
+          <button type="button" className="mark-card-action" onClick={onQuickFix}>
+            <Lightbulb size={13} aria-hidden="true" />
+            <span>Quick fix…</span>
+            <Kbd keys="Ctrl+." plain className="mark-card-kbd" />
+          </button>
+        </div>
+      )}
     </div>,
     document.body,
   )
@@ -133,6 +154,9 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const assistRef = useRef<EditorAssist | null>(null)
+  const refactorRef = useRef<EditorRefactor | null>(null)
+  /** The problem F8 went to, whose message shows once the editor is there. */
+  const problemCard = useRef<{ path: string; line: number; character: number } | null>(null)
   const pathRef = useRef<string | null>(null)
   const [view, setView] = useState<EditorView | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -177,6 +201,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       if (pathRef.current) attach(pathRef.current, null)
       assistRef.current?.dispose()
       assistRef.current = null
+      refactorRef.current?.dispose()
+      refactorRef.current = null
       setActiveEditor(null)
       viewRef.current?.destroy()
       viewRef.current = null
@@ -230,11 +256,15 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
 
   const peekOpen = useRef(false)
   peekOpen.current = peek !== null
+  const cardOpen = useRef(false)
+  cardOpen.current = hover !== null
 
   const commands: Record<string, ViewCommand> = {
+    // Escape closes what is over the text, the peek first; with nothing open it goes on to the editor's own uses.
     closePeek: () => {
-      if (!peekOpen.current) return false
-      setPeek(null)
+      if (peekOpen.current) setPeek(null)
+      else if (cardOpen.current) setHover(null)
+      else return false
       return true
     },
     triggerSuggest: () => (assistRef.current?.suggest(), true),
@@ -254,6 +284,16 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       if (!goForward(shown ? placeOf(target, shown) : null)) notify('Nothing to go forward to.')
       return true
     },
+    renameSymbol: () => (void refactorRef.current?.rename(), true),
+    quickFix: () => (setHover(null), void refactorRef.current?.quickFix(), true),
+    refactor: () => (void refactorRef.current?.refactor(), true),
+    sourceAction: () => (void refactorRef.current?.sourceAction(), true),
+    organizeImports: () => (void refactorRef.current?.organizeImports(), true),
+    fixAll: () => (void refactorRef.current?.fixAll(), true),
+    formatDocument: () => (void refactorRef.current?.formatDocument(), true),
+    formatSelection: () => (void refactorRef.current?.formatSelection(), true),
+    nextProblem: () => (goToProblem(1), true),
+    previousProblem: () => (goToProblem(-1), true),
   }
   // The view keeps the commands it was made with; they reach the current ones through this.
   const commandsRef = useRef(commands)
@@ -274,6 +314,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       current?.setState(NOTHING)
       if (current) showMarks(current, null)
       assistRef.current?.show(null)
+      refactorRef.current?.show(null)
       return
     }
     if (current) {
@@ -285,7 +326,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       viewRef.current = created
       setView(created)
       setActiveEditor(created)
-      assistRef.current = new EditorAssist(created)
+      assistRef.current = new EditorAssist(created, { formatOnType: () => useSettings.getState().settings?.formatOnType === true })
+      refactorRef.current = new EditorRefactor(created)
       const scroll = scrollOf(path!)
       if (scroll) created.setState(state, scroll)
       created.on('transaction', (tr) => {
@@ -318,6 +360,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     }
     attach(path!, current)
     assistRef.current?.show(path)
+    refactorRef.current?.show(path)
     showMarks(current, path)
     reportCursor(state)
     reportInfo(state)
@@ -347,7 +390,45 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     current.scrollToPos(from, true)
     current.focus()
     useEditor.getState().consumeRevealRange()
+    const card = problemCard.current
+    if (card && card.path === pathRef.current) {
+      problemCard.current = null
+      showProblemCard(current, card)
+    }
   }, [revealRange, path])
+
+  /** F8 and Shift+F8: the next or previous problem in the folder's files, with its message beside it. */
+  function goToProblem(direction: 1 | -1): void {
+    const target = viewRef.current
+    const shown = pathRef.current
+    const from = target && shown ? { path: shown, ...lspAt(target.state.doc, target.state.selection.main.head) } : null
+    const found = problemFrom(allMarks(), from, direction)
+    if (!found) {
+      notify('No problems in the files the language servers checked.')
+      return
+    }
+    const at = { line: found.item.line, character: found.item.character }
+    problemCard.current = { path: found.path, ...at }
+    setHover(null)
+    void useEditor.getState().openAt(found.path, { start: at, end: at })
+  }
+
+  /** The message of the problem F8 went to, once the text has scrolled to it. */
+  function showProblemCard(target: EditorView, card: { path: string; line: number; character: number }): void {
+    target.flush()
+    // The scroll lands before the next frame, and a scroll closes a card; it shows after it.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (viewRef.current !== target || pathRef.current !== card.path) return
+        const { doc } = target.state
+        const pos = positionOf(doc, card.line, card.character)
+        const items = marksAt(doc, marksOf(card.path), pos)
+        if (!items.length) return
+        const box = target.coordsAtPos(pos)
+        setHover({ items, anchor: { left: box.left, top: box.top, width: 1, height: box.bottom - box.top } })
+      }),
+    )
+  }
 
   /** The marks under the pointer: on the text, the ones over it; on the gutter, the ones of the line. */
   const marksUnder = (clientX: number, clientY: number, target: EventTarget | null): Hover | null => {
@@ -504,6 +585,14 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       { id: 'references', label: 'Go to references', shortcut: 'Shift+F12', onSelect: run('goToReferences') },
       { id: 'implementation', label: 'Go to implementation', shortcut: 'Ctrl+F12', onSelect: run('goToImplementation') },
       { kind: 'separator', id: 'navigate' },
+      { id: 'rename', label: 'Rename symbol', shortcut: 'F2', disabled: !editable, onSelect: run('renameSymbol') },
+      { id: 'quick-fix', label: 'Quick fix…', shortcut: 'Ctrl+.', disabled: !editable, onSelect: run('quickFix') },
+      { id: 'refactor', label: 'Refactor…', shortcut: 'Ctrl+Shift+R', disabled: !editable, onSelect: run('refactor') },
+      { id: 'source-action', label: 'Source action…', disabled: !editable, onSelect: run('sourceAction') },
+      { kind: 'separator', id: 'change' },
+      { id: 'format', label: 'Format document', shortcut: 'Shift+Alt+F', disabled: !editable, onSelect: run('formatDocument') },
+      { id: 'format-selection', label: selected ? 'Format selection' : 'Format line', disabled: !editable, onSelect: run('formatSelection') },
+      { kind: 'separator', id: 'format' },
       { id: 'cut', label: 'Cut', shortcut: 'Ctrl+X', disabled: !selected || !editable, onSelect: native('cut') },
       { id: 'copy', label: 'Copy', shortcut: 'Ctrl+C', onSelect: native('copy') },
       { id: 'paste', label: 'Paste', shortcut: 'Ctrl+V', disabled: !editable, onSelect: native('paste') },
@@ -536,9 +625,6 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
           hoverAsk.current++
           setHover(null)
         }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape' && hover) setHover(null)
-        }}
       />
       {hover && (
         <HoverCard
@@ -552,12 +638,36 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
             overCard.current = false
             setHover(null)
           }}
+          onQuickFix={
+            viewRef.current?.state.config.readOnly
+              ? undefined
+              : () => {
+                  const current = viewRef.current
+                  const item = hover.items[0]
+                  overCard.current = false
+                  setHover(null)
+                  if (!current || !item) return
+                  // The fixes are for the problem the card shows: the cursor goes to it first.
+                  const { from } = rangeOf(current.state.doc, item)
+                  if (!marksAt(current.state.doc, [item], current.state.selection.main.head).length) current.select(from)
+                  current.focus()
+                  void refactorRef.current?.quickFix()
+                }
+          }
         />
       )}
       {view && assistRef.current && path ? (
         <>
           <SuggestWidget assist={assistRef.current} language={language} />
           <SignatureCard assist={assistRef.current} language={language} />
+        </>
+      ) : null}
+      {view && refactorRef.current && path ? (
+        <>
+          <RenameBox refactor={refactorRef.current} />
+          <ActionMenu refactor={refactorRef.current} />
+          <LightbulbButton refactor={refactorRef.current} view={view} />
+          <ChangePreview refactor={refactorRef.current} />
         </>
       ) : null}
       {view && peek ? (

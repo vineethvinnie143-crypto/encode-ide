@@ -93,6 +93,10 @@ export interface Settings {
    * and the agent finds definitions and sees what its edits broke. Default on.
    */
   languageServers: boolean
+  /** The editor formats a file through its language server before it saves it. Default off. */
+  formatOnSave: boolean
+  /** The editor formats a line through its language server as it is typed, after `;`, `}` and the like. Default off. */
+  formatOnType: boolean
   /** See ErrorGate. Default `auto`. */
   errorGate: ErrorGate
   /** A notice when a request finishes. Default `background`. */
@@ -758,6 +762,23 @@ export interface EditorTriggers {
   commit: string[]
   signature: string[]
   signatureRetrigger: string[]
+  /** The characters after which the server formats what was typed (`;`, `}`). */
+  format: string[]
+}
+
+/** An action a server offers for a range: a quick fix, a refactoring, a source action such as organizing the imports. */
+export interface EditorAction {
+  /** Its place in its list; with the list's number it names the action to take. */
+  id: number
+  title: string
+  /** "quickfix", "refactor.extract", "source.organizeImports"... */
+  kind?: string
+  /** The fix the server thinks best. */
+  preferred?: boolean
+  /** Why it cannot be taken now. */
+  disabled?: string
+  /** It runs a command of the server's, whose changes are known only once it runs. */
+  command?: boolean
 }
 
 /** A place a server pointed to: in the folder by its path, or outside it (a library) by its whole path only. */
@@ -794,7 +815,68 @@ export interface EditorAsks {
   implementation: { params: EditorAt; result: EditorLocation[] | null }
   references: { params: EditorAt; result: EditorLocation[] | null }
   triggers: { params: { path: string }; result: EditorTriggers | null }
+  /** Whether the symbol can be renamed: its range and the name to start from (none: the word there), or why not. */
+  prepareRename: { params: EditorAt; result: { ok: true; range?: CodeRange; placeholder?: string } | { ok: false; reason: string } | null }
+  /** The actions for a range; `automatic` when the editor asks by itself (the lightbulb), `only` to keep some kinds. */
+  codeActions: { params: { path: string; range: CodeRange; only?: string[]; automatic: boolean }; result: { list: number; actions: EditorAction[] } | null }
+  /** The edits that format the file, or a range of it. */
+  format: { params: { path: string; range?: CodeRange; tabSize: number; insertSpaces: boolean }; result: CodeTextEdit[] | null }
+  /** The edits that format what was just typed: `ch`, which ends at the position. */
+  formatOnType: { params: EditorAt & { ch: string; tabSize: number; insertSpaces: boolean }; result: CodeTextEdit[] | null }
 }
+
+/**
+ * A change the editor asks for through the servers. `open` names every file the editor has open, so that none of them
+ * is written behind its back. Applied at once, or shown first (`preview`) and applied by its id; `undo` takes an
+ * applied one back while nothing it touched has changed; `discard` lets a preview go.
+ */
+export type EditorChangeRequest =
+  | { kind: 'rename'; path: string; line: number; character: number; newName: string; preview: boolean; open: string[] }
+  | { kind: 'action'; path: string; list: number; id: number; preview: boolean; open: string[] }
+  | { kind: 'apply'; id: number; open: string[] }
+  | { kind: 'undo'; id: number; open: string[] }
+  | { kind: 'discard'; id: number }
+
+/** The edits a change makes to a file the editor has open; `written`: the file on disk was written too, so it is saved once they are in. */
+export interface EditorFileEdit {
+  path: string
+  edits: CodeTextEdit[]
+  written: boolean
+}
+
+/** A file a change would make, edit, move or delete, for its preview. */
+export interface EditorChangeFile {
+  path: string
+  kind: 'edit' | 'create' | 'move' | 'delete'
+  to?: string
+  places: number
+  lines?: { line: number; before: string; after: string }[]
+  /** Changed in the editor, where it has unsaved changes, rather than on disk. */
+  inEditor?: boolean
+  /** Some of its lines are left out: a preview shows at most so many. */
+  cut?: boolean
+}
+
+export type EditorChangeResult =
+  | { ok: true; done: 'preview'; id: number; title: string; files: EditorChangeFile[] }
+  | {
+      ok: true
+      done: 'applied'
+      id: number
+      title: string
+      editor: EditorFileEdit[]
+      written: string[]
+      created: string[]
+      moved: { from: string; to: string }[]
+      deleted: string[]
+      places: number
+      files: number
+      undo: boolean
+      notes: string[]
+    }
+  | { ok: true; done: 'undone'; id: number; editor: { path: string; written: boolean }[]; written: string[]; created: string[]; deleted: string[] }
+  | { ok: true; done: 'discarded' }
+  | { ok: false; reason: string }
 
 export type EditorAsk = { [K in keyof EditorAsks]: { kind: K } & EditorAsks[K]['params'] }[keyof EditorAsks]
 export type EditorAnswer<K extends keyof EditorAsks = keyof EditorAsks> = EditorAsks[K]['result']
@@ -1301,6 +1383,8 @@ export interface EncodeApi {
      * Null (an empty list for highlights) when no server answers: none runs for the file, or it cannot say.
      */
     ask<K extends keyof EditorAsks>(ask: { kind: K } & EditorAsks[K]['params']): Promise<EditorAnswer<K>>
+    /** A rename or a code action across the folder, its preview, or taking one back. Send pending changes first. */
+    edit(request: EditorChangeRequest): Promise<EditorChangeResult>
     /** A server's problems in a file, as they change. */
     onMarks(cb: (marks: FileMarks) => void): () => void
     /** A server started, stopped or failed: ask for the report again. */

@@ -206,6 +206,9 @@ export interface ServerCapabilities {
   completionProvider?: { triggerCharacters?: string[]; allCommitCharacters?: string[]; resolveProvider?: boolean }
   signatureHelpProvider?: { triggerCharacters?: string[]; retriggerCharacters?: string[] }
   documentHighlightProvider?: unknown
+  documentFormattingProvider?: unknown
+  documentRangeFormattingProvider?: unknown
+  documentOnTypeFormattingProvider?: { firstTriggerCharacter?: string; moreTriggerCharacter?: string[] }
 }
 
 export const TextDocumentSyncKind = { None: 0, Full: 1, Incremental: 2 } as const

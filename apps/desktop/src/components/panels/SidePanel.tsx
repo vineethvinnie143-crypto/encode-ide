@@ -7,6 +7,7 @@ import BrowserPanel from '../BrowserPanel'
 import ReviewPane from '../review/ReviewPane'
 import TerminalPanel from '../Terminal/TerminalPanel'
 import TrajectoryView from '../TrajectoryView'
+import { ProblemsPane } from '../code/ProblemsPane'
 import { EditorPane, FilesPane, JobsPane, NewTabPane } from './Panes'
 import { TabStrip } from './TabStrip'
 
@@ -29,6 +30,8 @@ export function PaneFor({ tab }: { tab: PanelTab }) {
       return <TrajectoryView />
     case 'jobs':
       return <JobsPane />
+    case 'problems':
+      return <ProblemsPane />
   }
 }
 

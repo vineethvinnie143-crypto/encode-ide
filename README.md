@@ -103,7 +103,10 @@ primary platform; the code stays cross-platform.
   your computer (typescript-language-server, pyright, rust-analyzer, gopls, clangd, lua-language-server and more) mark
   errors and warnings as you type, suggest as you type (with snippets and the imports they need), show a call's
   parameters and what a name is on hover, and take you to a definition or list its uses in a peek, with Back and
-  Forward; eNCode talks to them through its own client and carries none of them. The editor can also show a change against a
+  Forward. F2 renames across the project with a preview and one Undo for the whole change; Ctrl+. and a lightbulb
+  offer the servers' fixes and refactorings; imports are organized and files formatted (on save and as you type, if
+  you want); a Problems panel and F8 go through every problem. eNCode talks to them through its own client and
+  carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.
 - **Hand-written internals.**
@@ -304,7 +307,8 @@ apps/desktop/                 the Electron app (@encode/desktop)
     components/shell/         title bar and menus, icon rail, session sidebar, shell dialogs
     components/panels/        the side and bottom panels: tab strip, pages, New tab
     editor/                   the open documents: text, history and what is on disk; the language servers' marks, and
-                              (assist/) suggestions, parameter hints, the symbol's places and the history of jumps
+                              (assist/) suggestions, parameter hints, the symbol's places and the history of jumps,
+                              rename, code actions and formatting; the Problems list and F8
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
     styles/                   one stylesheet per area, in cascade order (index.css)
@@ -333,7 +337,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web (fetch, and search through DuckDuckGo, Brave Search, Tavily or Exa), and the Computer tool with its Windows helper
-packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers
+packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers with the changes they make for the editor
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model
