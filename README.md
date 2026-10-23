@@ -39,11 +39,13 @@ primary platform; the code stays cross-platform.
   session, never what the agent wrote), the taskbar button flashing while it waits for you, and keeping the computer
   awake while an agent works. **Archived sessions** restores or deletes what you put away.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
-  - files: `Read`, `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`;
+  - files: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`. Read shows images, Jupyter
+    notebooks cell by cell, and PDFs page by page with their outline, through eNCode's own PDF reader; a model that
+    reads PDFs also gets the pages that have figures or scans, as the pages themselves;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
     `KillShell`);
   - delegation: subagents through `Task`;
-  - planning: `TodoWrite`, goals, `ExitPlanMode`;
+  - planning: `TodoWrite`, goals, `EnterPlanMode` (it asks you first), `ExitPlanMode`;
   - knowledge: `Skill`, `WebSearch`, `WebFetch`;
   - questions: `AskUserQuestion`.
 
@@ -69,8 +71,8 @@ primary platform; the code stays cross-platform.
   permissions away but cannot give any until you trust the folder and approve what they say, and a banner tells
   you when a pull changed them. If a settings file cannot be read, nothing runs in that folder until it is fixed.
 - **Hooks, and a way back.** Commands you set under `hooks` in a settings file (Claude Code's format) run before and
-  after tool calls, when you send a message, and when the agent stops; a `PreToolUse` hook that exits with 2 refuses
-  the call. A project's hooks wait until you trust the folder. Every file the agent's tools change is kept first, so
+  after tool calls, when you send a message, when the agent stops, waits for you, starts a subagent, and when a
+  session ends; a `PreToolUse` hook that exits with 2 refuses the call. A project's hooks wait until you trust the folder. Every file the agent's tools change is kept first, so
   the **Rewind** button on any of your requests can put the files back to before it, and the conversation with them if
   you like; a file you edited since is left alone unless you say otherwise, and **Undo** brings the changes back.
   Changes made by commands (installs, builds, git) are not recorded.
