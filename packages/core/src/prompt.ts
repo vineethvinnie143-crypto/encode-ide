@@ -102,6 +102,8 @@ export interface EnvironmentInfo {
   git?: { branch?: string }
   /** Top-level entries of the workspace, directories marked with a trailing slash. */
   topLevel: string[]
+  /** The languages whose servers are installed and may run here, for the LSP tool. */
+  languageServers?: string[]
 }
 
 const PLATFORM_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }
@@ -125,6 +127,7 @@ export function environmentReminder(info: EnvironmentInfo, previousRoot?: string
     `- Git repository: ${info.git ? `yes${info.git.branch ? `, on branch ${info.git.branch}` : ''}` : 'no'}`,
     `- Today's date: ${info.date}`,
     `- Top-level entries: ${entries}`,
+    ...(info.languageServers?.length ? [`- Language servers: ${info.languageServers.join(', ')}. The LSP tool (ToolSearch select:LSP) finds definitions, references and errors exactly; LSPEdit renames across files.`] : []),
   ]
   return reminder(lines.join('\n'))
 }

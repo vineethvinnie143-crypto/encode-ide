@@ -134,6 +134,7 @@ async function handle(message) {
     case 'initialize':
       if (mode === 'hang') return
       log('init ' + JSON.stringify({ rootUri: params.rootUri, options: params.initializationOptions || null }))
+      if (mode === 'env') log('env ' + Object.keys(process.env).sort().join(',') + ' cwd ' + process.cwd())
       return reply(id, { capabilities, serverInfo: { name: 'fake', version: '1' } })
     case 'initialized': {
       const config = await ask('workspace/configuration', { items: [{ section: 'fake.option' }, { section: 'missing.part' }] })

@@ -494,6 +494,7 @@ export type CodeIntelligence = Pick<
   | 'codeActions'
   | 'actionEdit'
   | 'runActionCommand'
+  | 'status'
 >
 
 export interface Skills {

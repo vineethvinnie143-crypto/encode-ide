@@ -25,7 +25,7 @@ describe('the built-in subagents', () => {
     assert.equal(found.Review.role, 'reviewer')
     assert.equal(found['general-purpose'].role, undefined)
     for (const name of ['Explore', 'Plan', 'Review']) {
-      assert.deepEqual(found[name].tools, ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch'], name)
+      assert.deepEqual(found[name].tools, ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'LSP', 'WebFetch', 'WebSearch'], name)
       assert.ok(!found[name].tools?.includes('Write') && !found[name].tools?.includes('Edit'), name)
     }
     assert.match(found.Plan.prompt ?? '', /plan, do not build/)

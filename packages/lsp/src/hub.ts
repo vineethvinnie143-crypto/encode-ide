@@ -235,6 +235,11 @@ export class LanguageServers {
     return result
   }
 
+  /** Whether servers may run now, and why not. */
+  available(): { ok: true } | { ok: false; reason: string } {
+    return this.disposed ? { ok: false, reason: 'The language servers were closed.' } : this.options.allowed()
+  }
+
   /** Whether a server covers the file and may run, without starting one. */
   covers(file: string): Coverage {
     const found = serverFor(file, this.catalog)

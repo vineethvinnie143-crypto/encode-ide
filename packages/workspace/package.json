@@ -16,6 +16,7 @@
     "@encode/config": "workspace:*",
     "@encode/core": "workspace:*",
     "@encode/hooks": "workspace:*",
+    "@encode/lsp": "workspace:*",
     "@encode/mcp": "workspace:*",
     "@encode/permissions": "workspace:*",
     "@encode/sandbox": "workspace:*",

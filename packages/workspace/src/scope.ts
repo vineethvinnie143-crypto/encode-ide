@@ -4,7 +4,9 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
+import type { LanguageServers } from '@encode/lsp'
 import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
+import { folderLanguageServers, type LanguageServerOptions } from './code'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
@@ -53,6 +55,8 @@ export interface WorkspacesOptions {
   mcp?: Pick<McpHubOptions, 'manager' | 'startWaitMs' | 'idleMs'>
   /** The operating-system sandbox for the agent's commands; one for the whole program. Without it commands run as the user does. */
   sandbox?: Sandbox
+  /** The folders' language servers, for the agent and the editor. Without it no server is started. */
+  languageServers?: LanguageServerOptions
 }
 
 /**
@@ -68,6 +72,8 @@ export class Workspaces {
   private readonly configs = new Map<string, WorkspaceConfig>()
   /** A folder's MCP servers, shared by every session in it. Made on first use, let go of when nobody works in the folder. */
   private readonly hubs = new Map<string, McpHub>()
+  /** A folder's language servers, shared by its sessions and the editor; each server in it stops when unused. */
+  private readonly code = new Map<string, LanguageServers>()
   private readonly stores: CheckpointStoreOptions | undefined
   /** The stores already tidied by this program, so that opening a second session in a folder does not do it again. */
   private readonly tidied = new Set<string>()
@@ -123,6 +129,25 @@ export class Workspaces {
     return hub
   }
 
+  /** The language servers of a folder, given as a real path, or undefined when the program starts none. */
+  languageServers(root: string): LanguageServers | undefined {
+    const options = this.options.languageServers
+    if (!options) return undefined
+    const config = this.config(root)
+    const key = workspaceKey(config.root, this.platform === 'win32')
+    let servers = this.code.get(key)
+    if (!servers) {
+      servers = folderLanguageServers(config, this.platform, options)
+      this.code.set(key, servers)
+    }
+    return servers
+  }
+
+  /** Stops the servers that may no longer run, in every folder: the setting went off, or a folder lost its trust. */
+  async syncLanguageServers(): Promise<void> {
+    await Promise.all([...this.code.values()].map((servers) => servers.sync().catch(() => undefined)))
+  }
+
   /**
    * The folder's MCP servers as the Settings screen shows them. The folder may be given as any path to it. With
    * `start: false` no server is started for the sake of looking (the banner above the composer does that).
@@ -174,8 +199,10 @@ export class Workspaces {
   /** Stops every folder's MCP servers. Quick enough for a program that is closing. */
   async close(): Promise<void> {
     const hubs = [...this.hubs.values()]
+    const code = [...this.code.values()]
     this.hubs.clear()
-    await Promise.all(hubs.map((hub) => hub.close().catch(() => undefined)))
+    this.code.clear()
+    await Promise.all([...hubs.map((hub) => hub.close().catch(() => undefined)), ...code.map((servers) => servers.dispose().catch(() => undefined))])
   }
 
   /** The folder's permissions as the Permissions screen shows them. The folder may be given as any path to it. */
@@ -187,8 +214,9 @@ export class Workspaces {
   async act(root: string, action: PermissionsAction): Promise<PermissionsOutcome> {
     const config = this.config(await realPathOf(root))
     const outcome = await actOn(config, action, { fs: this.fs, platform: this.platform })
-    // Trusting a folder, or approving its settings, decides which of its MCP servers may run.
+    // Trusting a folder, or approving its settings, decides which of its MCP servers may run, and whether its language servers may.
     await this.hubs.get(workspaceKey(config.root, this.platform === 'win32'))?.follow(config)
+    await this.code.get(workspaceKey(config.root, this.platform === 'win32'))?.sync()
     return outcome
   }
 
@@ -271,6 +299,7 @@ export class Workspaces {
       settings: () => resolveSandboxSettings(config.current().effective.sandbox),
     })
     sandbox?.warm()
+    const code = this.languageServers(config.root)
     return {
       // What keeps the record comes first: a hook that stops a result must not leave the record out of date.
       hooks: combineHooks(
@@ -291,6 +320,7 @@ export class Workspaces {
       refresh: async () => {
         try {
           hub.sync(await config.refresh())
+          await code?.sync()
         } catch (error) {
           this.warn?.(`Could not reload the settings of ${request.root}: ${error instanceof Error ? error.message : String(error)}`)
         }
@@ -311,6 +341,7 @@ export class Workspaces {
           : {}),
       }),
       external: hub,
+      ...(code ? { code: () => (code.available().ok ? code : undefined) } : {}),
       release: async () => release(),
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
     }

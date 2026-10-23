@@ -16,6 +16,7 @@ export { createBashTool, bashOutputTool, killShellTool, BASH_OUTPUT_LIMIT, type 
 export * from './background'
 export * from './worktree'
 export { applyPlan, formatDiagnostics, lspEditTool, lspTool } from './lsp'
+export type { CodeDiagnostic, CodeLocation, CodeSymbol, EditPlan, FileDiagnostics, ServerView } from '@encode/lsp'
 export * from './shell/programs'
 export * from './shell/environment'
 export * from './shell/detect'

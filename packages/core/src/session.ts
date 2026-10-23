@@ -35,6 +35,7 @@ import {
   type AgentMode,
   type BackgroundJobs,
   type BackgroundWork,
+  type CodeIntelligence,
   type DesktopServices,
   type FileStateTracker,
   type Goals,
@@ -164,6 +165,11 @@ export interface SessionEnv {
   createShell: () => ManagedShell
   /** The git work behind EnterWorktree and ExitWorktree; without it the agent has no worktrees. */
   worktrees?: WorktreeGit
+  /**
+   * The folder's language servers, while they may run (a trusted folder, servers turned on): LSP, LSPEdit and the
+   * errors after every edit. Read when a turn starts.
+   */
+  code?: () => CodeIntelligence | undefined
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -1032,6 +1038,7 @@ export class AgentSession {
         computer: this.desktop !== undefined,
         background: true,
         worktrees: Boolean(this.env.worktrees),
+        code: Boolean(this.env.code?.()),
         ...(sandbox ? { sandbox } : {}),
       },
       [...(this.env.extraTools ?? [])],
@@ -1052,7 +1059,9 @@ export class AgentSession {
 
   /** Text that must survive a compaction: where the agent is, and the project's instructions. */
   private readonly preface = async (): Promise<string[]> => {
-    const parts = [environmentReminder(await gatherEnvironment(this.env.root, this.shell, this.env.platform))]
+    const environment = await gatherEnvironment(this.env.root, this.shell, this.env.platform)
+    const servers = this.env.code?.()?.status().filter((server) => server.state !== 'missing' && server.state !== 'off' && server.state !== 'failed').map((server) => server.label)
+    const parts = [environmentReminder({ ...environment, ...(servers?.length ? { languageServers: servers } : {}) })]
     if (this.worktree) parts.push(worktreeReminder(this.worktree, this.env.root))
     const memory = renderMemory(await this.memory())
     if (memory) parts.push(memory)
@@ -1097,7 +1106,7 @@ export class AgentSession {
     const agents = createHash('sha256').update(JSON.stringify(this.definitions())).digest('hex')
     // The sandbox is part of it too: Bash's description says whether commands are confined and may ask to leave.
     const sandbox = this.sandboxOfShell()
-    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? '', agents, sandbox ? (sandbox.escapable ? 'escapable' : 'confined') : ''])
+    return JSON.stringify([Boolean(settings.completionTool), Boolean(this.env.desktop && settings.computer), this.env.external?.key() ?? '', agents, sandbox ? (sandbox.escapable ? 'escapable' : 'confined') : '', Boolean(this.env.code?.())])
   }
 
   private getLoop(): AgentLoop {
@@ -1128,6 +1137,7 @@ export class AgentSession {
     const definitions = this.definitions()
     const registry = this.buildRegistry(definitions)
     const goals: Goals = { get: () => this.goal(), set: (goal) => this.setGoal(goal) }
+    const code = env.code?.()
     const services: LoopServices = {
       root: env.root,
       home: env.home,
@@ -1145,6 +1155,7 @@ export class AgentSession {
       summarize: this.summarizePage,
       cwd: this.workdir,
       ...(env.worktrees ? { worktrees: this.worktreeTools } : {}),
+      ...(code ? { code } : {}),
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1154,7 +1165,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}) },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {

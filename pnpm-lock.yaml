@@ -439,6 +439,9 @@ importers:
       '@encode/hooks':
         specifier: workspace:*
         version: link:../hooks
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
       '@encode/mcp':
         specifier: workspace:*
         version: link:../mcp

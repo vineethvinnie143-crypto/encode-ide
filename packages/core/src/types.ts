@@ -6,6 +6,7 @@
 import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, UserBlock } from '@encode/providers'
 import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
+import type { ErrorGate } from './edit-diagnostics'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
 
 export interface AgentSettings {
@@ -22,6 +23,11 @@ export interface AgentSettings {
   computer?: boolean
   /** Compact before the prompt passes this many tokens, whatever the window. 200,000 when absent. */
   contextCap?: number
+  /**
+   * When the agent wants to end a turn while the language servers report errors its changes introduced: `auto` sends
+   * it back once, `on` up to three times, `off` lets it end. Default `auto`.
+   */
+  errorGate?: ErrorGate
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8 }

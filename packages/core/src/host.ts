@@ -17,6 +17,7 @@ import {
   createDesktopBroker,
   createWebAccess,
   type AgentShellOptions,
+  type CodeIntelligence,
   type DesktopBackend,
   type DesktopBroker,
   type DesktopOptions,
@@ -83,6 +84,8 @@ export interface SessionScope {
   external?: ExternalToolSource
   /** Options for this session's shells, asked for each time one is made, merged over the host's. */
   shell?: () => Omit<AgentShellOptions, 'root'>
+  /** The folder's language servers while they may run (trusted, turned on); read when a turn starts. */
+  code?: () => CodeIntelligence | undefined
   /** The session closed: let go of what was held for it. */
   release?: () => Promise<void>
 }
@@ -224,6 +227,7 @@ export class AgentHost {
       ...(scope?.release ? { release: scope.release } : {}),
       ...(scope?.checkpoints ? { checkpoints: scope.checkpoints } : {}),
       ...(scope?.external ? { external: scope.external } : {}),
+      ...(scope?.code ? { code: scope.code } : {}),
       ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),
