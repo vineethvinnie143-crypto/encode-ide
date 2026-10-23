@@ -108,6 +108,67 @@ describe('Text', () => {
       { runs: 120, maxSize: 30 },
     )
   })
+
+  it('keeps its structure through edits of every size, pasted documents included', async () => {
+    // Spans from one character to thousands of lines, and inserts from a few characters to a pasted file.
+    const insert: Gen<string | Text> = gen.weighted<string | Text>(
+      [6, pieces],
+      [2, (random, size) => Array.from({ length: Math.floor(random() * size * 40) }, (_, index) => `pasted ${index}`).join('\n')],
+      [1, (random) => 'z'.repeat(Math.floor(random() * 40_000))],
+      [1, (random, size) => Text.of(docs(random, Math.min(size, 6)))],
+    )
+    const cases = gen.tuple(docs, gen.array(gen.tuple(gen.int(0, 1_000_000), gen.weighted([4, gen.int(0, 60)], [1, gen.int(0, 400_000)]), insert), 1, 10))
+    await check(
+      cases,
+      ([source, edits]) => {
+        let model = source
+        let text = Text.of(source)
+        assert.deepEqual(text.checkStructure(), [])
+        for (const [at, span, added] of edits) {
+          const from = at % (model.length + 1)
+          const to = Math.min(model.length, from + span)
+          model = model.slice(0, from) + added.toString() + model.slice(to)
+          text = text.replace(from, to, added)
+          assert.deepEqual(text.checkStructure(), [])
+          assert.ok(text.eqString(model))
+        }
+        assert.equal(text.toString(), model)
+        const lines = model.split('\n')
+        const first = 1 + (edits.length * 7919) % lines.length
+        const last = Math.min(lines.length, first + 300)
+        assert.deepEqual(text.lineTexts(first, last), lines.slice(first - 1, last))
+        assert.ok(text.eq(Text.of(model)) && Text.of(model).eq(text))
+        assert.equal(text.eqString(`${model}x`), false)
+      },
+      { runs: 80, maxSize: 30 },
+    )
+  })
+
+  it('does not leave a leaf of one line behind each Enter at the end of a full leaf', () => {
+    // Found by the property below: Enter pressed at the top of a file again and again split a leaf every time.
+    let text = Text.of(Array.from({ length: 4000 }, (_, index) => `line ${index}`).join('\n'))
+    for (let press = 0; press < 300; press++) text = text.replace(0, 0, '\n')
+    assert.deepEqual(text.checkStructure(), [])
+    assert.ok(text.leafCount <= Text.of(text.toString()).leafCount * 2 + 2, `${text.leafCount} leaves`)
+  })
+
+  it('does not leave a trail of small leaves after many small edits', async () => {
+    const start = Array.from({ length: 4000 }, (_, index) => `line ${index}`).join('\n')
+    await check(
+      gen.array(gen.tuple(gen.int(0, 10_000_000), gen.int(0, 3), gen.oneOf('', 'a', '\n', 'b\n', '\n\n')), 300, 300),
+      (edits) => {
+        let text = Text.of(start)
+        for (const [at, span, insert] of edits) {
+          const from = at % (text.length + 1)
+          text = text.replace(from, Math.min(text.length, from + span), insert)
+        }
+        assert.deepEqual(text.checkStructure(), [])
+        const fresh = Text.of(text.toString()).leafCount
+        assert.ok(text.leafCount <= fresh * 2 + 2, `${text.leafCount} leaves where ${fresh} would do`)
+      },
+      { runs: 20 },
+    )
+  })
 })
 
 describe('ChangeSet', () => {
@@ -181,6 +242,48 @@ describe('ChangeSet', () => {
         assert.equal(composed.invert(doc).apply(composed.apply(doc)).toString(), source)
       },
       { runs: 300, maxSize: 20 },
+    )
+  })
+
+  it('composes in any grouping, and maps untouched text as the sets one after the other do', async () => {
+    const setFor = (raw: [number, number, string][], length: number) =>
+      ChangeSet.of(
+        raw.filter(([from]) => from <= length).map(([from, span, insert]) => ({ from, to: Math.min(length, from + span), insert })),
+        length,
+      )
+    const cases: Gen<[string, [number, number, string][][]]> = (random, size) => {
+      const source = docs(random, Math.min(size, 3))
+      return [source, [0, 1, 2].map(() => specs(source.length + 30)(random, size))]
+    }
+    await check(
+      cases,
+      ([source, raws]) => {
+        let doc = Text.of(source)
+        const sets: ChangeSet[] = []
+        for (const raw of raws) {
+          const set = setFor(raw, doc.length)
+          sets.push(set)
+          doc = set.apply(doc)
+        }
+        const [a, b, c] = sets
+        const left = a.compose(b).compose(c)
+        const right = a.compose(b.compose(c))
+        const start = Text.of(source)
+        assert.equal(left.apply(start).toString(), doc.toString())
+        assert.equal(right.apply(start).toString(), doc.toString())
+        assert.deepEqual(left.changes, right.changes)
+        // A position no change touches maps the same through the composed set as through each set in turn.
+        const touched = (set: ChangeSet, pos: number) => set.changes.some((change) => pos >= change.from && pos <= change.to)
+        for (let pos = 0; pos <= source.length; pos++) {
+          if (touched(a, pos)) continue
+          const afterA = a.mapPos(pos)
+          if (touched(b, afterA)) continue
+          const afterB = b.mapPos(afterA)
+          if (touched(c, afterB)) continue
+          assert.equal(left.mapPos(pos), c.mapPos(afterB), `position ${pos}`)
+        }
+      },
+      { runs: 200, maxSize: 16 },
     )
   })
 

@@ -14,6 +14,8 @@
     "start": "pnpm --filter @encode/desktop start",
     "typecheck": "pnpm -r typecheck",
     "test": "node scripts/test.mjs",
+    "fuzz": "node scripts/fuzz.mjs",
+    "traces": "node scripts/edit-traces.mjs",
     "e2e": "pnpm --filter @encode/desktop e2e",
     "perf": "pnpm --filter @encode/desktop perf",
     "dist": "pnpm --filter @encode/desktop dist",

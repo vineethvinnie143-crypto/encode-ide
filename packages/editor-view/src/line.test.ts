@@ -86,6 +86,24 @@ describe('segmentsOf', () => {
     assert.ok(!hasControl(String.fromCharCode(0xdb40)))
   })
 
+  it('draws the joiner inside an emoji sequence as itself, and every other joiner as a marker', () => {
+    const zwj = String.fromCharCode(0x200d)
+    const emoji = (...codes: number[]) => String.fromCodePoint(...codes)
+    const family = [0x1f468, 0x1f469, 0x1f467].map((code) => emoji(code)).join(zwj)
+    // A family, a coder with a skin tone, a rainbow flag (with variation selector 16), a pirate flag.
+    for (const text of [family, emoji(0x1f469, 0x1f3fd) + zwj + emoji(0x1f4bb), emoji(0x1f3f3, 0xfe0f) + zwj + emoji(0x1f308), emoji(0x1f3f4) + zwj + emoji(0x2620, 0xfe0f)]) {
+      assert.ok(!hasControl(`x = "${text}"`), text)
+      assert.ok(segmentsOf(`"${text}"`, []).every((segment) => !segment.control), text)
+    }
+    // Between letters, at either end, or with only one picture next to it, it stays a marker.
+    for (const text of [`a${zwj}b`, `${zwj}${emoji(0x1f600)}`, `${emoji(0x1f600)}${zwj}`, `${emoji(0x1f600)}${zwj}a`, `a${zwj}${emoji(0x1f600)}`, `${emoji(0x1f600)}${zwj}${zwj}${emoji(0x1f600)}`]) {
+      assert.ok(hasControl(text), JSON.stringify(text))
+    }
+    // A sequence cut by a token boundary is judged by the whole line.
+    const line = `${emoji(0x1f468)}${zwj}${emoji(0x1f469)}`
+    assert.ok(segmentsOf(line, [0, T.string, 2, T.plain, 3, T.string]).every((segment) => !segment.control))
+  })
+
   it('keeps every character of highlighted source, whatever the language', async () => {
     const alphabet = `ab ={}()[]"'\`/*-#<>\\\t:;,.0123456789${String.fromCharCode(0x202e, 0x200b)}`
     for (const path of ['a.ts', 'a.py', 'a.lua', 'a.css', 'a.md', 'a.json', 'a.html', 'a.sh', 'a.sql']) {

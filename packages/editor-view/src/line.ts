@@ -171,6 +171,24 @@ const CONTROL = new RegExp(CONTROL_CLASS, 'u')
 const CONTROL_GLOBAL = new RegExp(CONTROL_CLASS, 'gu')
 
 /**
+ * The zero-width joiner inside an emoji sequence (a family, a profession, a flag with a sign on it) is drawn as
+ * itself, so the sequence shows as the one picture it is: it joins two pictures and nothing else, so it can neither
+ * reorder text nor hide letters. Anywhere else it is a marker like the other zero-width characters.
+ */
+const ZWJ = 0x200d
+const EMOJI_BEFORE = new RegExp(`\\p{Extended_Pictographic}${characterClass(0x1f3fb, 0x1f3ff, 0xfe0f, 0xfe0f)}?$`, 'u')
+const EMOJI_AFTER = /^\p{Extended_Pictographic}/u
+
+function joinsEmoji(text: string, at: number): boolean {
+  return EMOJI_BEFORE.test(text.slice(Math.max(0, at - 5), at)) && EMOJI_AFTER.test(text.slice(at + 1, at + 3))
+}
+
+/** Whether the match of CONTROL at `at` in `text` is drawn as a marker. */
+function marked(text: string, at: number, match: string): boolean {
+  return match.charCodeAt(0) !== ZWJ || !joinsEmoji(text, at)
+}
+
+/**
  * Text whose width the view can compute as columns times the character
  * width: printable ASCII, tabs, and the Latin, Greek and Cyrillic ranges
  * programming fonts cover. Anything else (wide and combining characters,
@@ -183,7 +201,9 @@ export function isSimpleText(text: string): boolean {
 }
 
 export function hasControl(text: string): boolean {
-  return CONTROL.test(text)
+  if (!CONTROL.test(text)) return false
+  for (const match of text.matchAll(CONTROL_GLOBAL)) if (marked(text, match.index!, match[0])) return true
+  return false
 }
 
 /** Right-to-left letters: Hebrew, Arabic, Syriac, Thaana, N'Ko and the other scripts written right to left. */
@@ -252,6 +272,8 @@ export function segmentsOf(text: string, tokens: readonly number[], from = 0, to
     }
     let last = 0
     for (const match of piece.matchAll(CONTROL_GLOBAL)) {
+      // Seen in the whole line, so a joiner at a token's edge is judged by the pictures on both sides of it.
+      if (!marked(text, start + match.index!, match[0])) continue
       if (match.index! > last) out.push({ text: piece.slice(last, match.index), kind, control: false, start: start + last })
       out.push({ text: match[0], kind, control: true, start: start + match.index! })
       last = match.index! + match[0].length

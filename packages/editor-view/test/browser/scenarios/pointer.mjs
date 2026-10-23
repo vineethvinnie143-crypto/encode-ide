@@ -121,4 +121,26 @@ export const pointer = [
       assert.ok(anchor < 20 && Math.abs(last) <= 4, `selection ${anchor}..${head}, ${last} lines from the bottom`)
     },
   },
+  {
+    name: 'a click on a scrollbar scrolls and leaves the focus and the caret in the editor',
+    async run({ mount, page, ev, selection, settle, assert }) {
+      const lines = Array.from({ length: 300 }, (_, index) => `line ${index + 1} ${'x'.repeat(index % 7 === 0 ? 300 : 10)}`).join('\n')
+      await mount({ text: lines, path: 'a.txt', width: 600, height: 300 })
+      const before = await selection()
+      const r = await ev(() => {
+        const scroller = window.view.scroller
+        const rect = scroller.getBoundingClientRect()
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, cw: scroller.clientWidth, ch: scroller.clientHeight }
+      })
+      assert.ok(r.cw < r.width && r.ch < r.height, 'both scrollbars show')
+      // The horizontal track, right of its thumb, and the vertical track, below its thumb.
+      await page.click(r.left + r.cw - 20, r.top + (r.ch + r.height) / 2)
+      await page.click(r.left + (r.cw + r.width) / 2, r.top + r.ch - 20)
+      await settle(4)
+      const after = await ev(() => ({ left: window.view.scroller.scrollLeft, top: window.view.scroller.scrollTop, focused: document.activeElement === window.view.textarea }))
+      assert.ok(after.left > 0 && after.top > 0, `scrolled to ${after.left}, ${after.top}`)
+      assert.ok(after.focused, 'the editor keeps the focus')
+      assert.deepEqual(await selection(), before)
+    },
+  },
 ]

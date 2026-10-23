@@ -83,7 +83,11 @@ export function* searchMatches(doc: Text, search: CompiledSearch, from = 0, to =
       const start = match.index
       const end = start + match[0].length
       if (start === end) regex.lastIndex = advance(text, start)
-      if (whole && !isWholeWord(text, start, end, search.wordChars)) continue
+      if (whole && !isWholeWord(text, start, end, search.wordChars)) {
+        // "b b" in "ab b b": the next try starts inside this one, not after it.
+        regex.lastIndex = advance(text, start)
+        continue
+      }
       yield { from: from + start, to: from + end, groups: match }
     }
     return
@@ -99,22 +103,31 @@ export function* searchMatches(doc: Text, search: CompiledSearch, from = 0, to =
       const end = start + match[0].length
       if (line.from + end > to) break
       if (start === end) regex.lastIndex = advance(line.text, start)
-      if (whole && !isWholeWord(line.text, start, end, search.wordChars)) continue
+      if (whole && !isWholeWord(line.text, start, end, search.wordChars)) {
+        regex.lastIndex = advance(line.text, start)
+        continue
+      }
       yield { from: line.from + start, to: line.from + end, groups: match }
       if (regex.lastIndex > line.text.length) break
     }
   }
 }
 
-/** The first match at or after `pos`, wrapping around to the start when `wrap`. */
+/**
+ * The first match at or after `pos`, wrapping around to the start when `wrap`: then the document's first match, which
+ * may be one that `pos` is inside.
+ */
 export function findNext(doc: Text, search: CompiledSearch, pos: number, wrap = true): SearchMatch | null {
   for (const match of searchMatches(doc, search, pos)) if (match.to > match.from || search.query.regexp) return match
   if (!wrap) return null
-  for (const match of searchMatches(doc, search, 0, pos)) if (match.to > match.from || search.query.regexp) return match
+  for (const match of searchMatches(doc, search, 0)) if (match.to > match.from || search.query.regexp) return match
   return null
 }
 
-/** The last match ending at or before `pos`, wrapping around to the end when `wrap`. */
+/**
+ * The last match ending at or before `pos`, wrapping around to the end when `wrap`: then the document's last match,
+ * which may be one that `pos` is inside.
+ */
 export function findPrevious(doc: Text, search: CompiledSearch, pos: number, wrap = true): SearchMatch | null {
   const lastIn = (from: number, to: number): SearchMatch | null => {
     if (search.multiline) {
@@ -132,7 +145,7 @@ export function findPrevious(doc: Text, search: CompiledSearch, pos: number, wra
     }
     return null
   }
-  return lastIn(0, pos) ?? (wrap ? lastIn(pos, doc.length) : null)
+  return lastIn(0, pos) ?? (wrap ? lastIn(0, doc.length) : null)
 }
 
 /** The text a match is replaced with: literal, or with `$1`, `$<name>`, `$&`, `$$`, `\n` and `\t` expanded for regular expressions. */

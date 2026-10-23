@@ -420,6 +420,9 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
   **Ctrl+M** makes Tab leave the editor instead of indenting (and back); it is in the View menu too. In a Windows
   contrast theme (Windows Settings → Accessibility → Contrast themes) the selection, the cursor and search matches show
   in the theme's colours.
+- **Emoji and invisible characters**: a family, a profession or a flag with a sign on it (say, a rainbow flag) shows
+  as the one picture it is. Any other invisible character, such as a zero-width space or a direction mark, shows as a
+  small marker on purpose, so nothing can hide in the code.
 - **Right-to-left text**: Hebrew or Arabic in a string or a comment shows letter by letter in stored order, on
   purpose, so code cannot be disguised. **Settings → Editor → Read right-to-left text in its own order** makes it
   read right to left inside strings, comments and text or Markdown files; the code around it stays as it is, and the
@@ -442,7 +445,9 @@ click landing in the wrong place in a very long line. For word wrap: a row that 
 past the edge, the cursor drawn at the wrong end of a row, arrows or Home and End going somewhere unexpected, and the
 text jumping when you resize the window or turn wrapping on. For typing and accessibility: an input method's window
 opening far from the text, a composition lost or typed twice, a screen reader that says nothing or the wrong line, and
-right-to-left text where the cursor or a click lands somewhere other than where it looks.
+right-to-left text where the cursor or a click lands somewhere other than where it looks. Anywhere in the editor: the
+keyboard suddenly typing nowhere (the editor lost the focus without you leaving it), and an Undo that does not bring
+the text back exactly as it was. Say what you did just before, as closely as you can.
 
 ## Worktrees
 

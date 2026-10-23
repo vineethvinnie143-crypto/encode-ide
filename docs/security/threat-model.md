@@ -1430,3 +1430,42 @@ reaching a place it should not, and input that changes the file in a way the per
 - The end-to-end run uses Ctrl+Insert and Shift+Insert, Ctrl+M and Tab, turns the screen reader mode on and reads
   the editor's field, and turns right-to-left reading order on from Settings > Editor.
 
+
+## Property tests, fuzzing and edit traces (Editor and language intelligence 7)
+
+Written with the pull request that makes property checks shrink and run for longer (fuzzing), checks the editor's
+invariants after every step of random commands, replays real edits from git history, and uses the view and the app
+at random ([0082](../adr/0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md)).
+Most of it is tests; what ships is the trace recorder, replayer and scrambler in `@encode/editor` (used by Editor 9's
+"Report editor issue"), a settable history clock, and the fixes the testing found. The concerns are code leaving the
+machine inside a trace, a fix that weakens a display defence, and test hooks that change behaviour in the product.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| F1 | An edit trace carries the code it was recorded on into a bug report | A trace is scrambled before it is shared: every run of letters, digits and underscores is replaced by another of the same length and kinds of character, the same word by the same word, so names, strings, comments, numbers and keys are gone; keywords, punctuation, spaces and line breaks are kept so the edits still fit. A unit test checks the shape is kept and the words are not; every regression trace is also replayed scrambled. | Mitigated |
+| F2 | The traces kept in the repository hold something private | They are made only from eNCode's own files in its own git history (docs, styles, the CI workflow, three source files), which are already in the repository; nothing from a user's project. | Mitigated |
+| F3 | The zero-width joiner drawn as itself inside emoji hides text or reorders code | Only a joiner with a pictograph (with at most one skin tone or variation selector) before it and a pictograph after it is drawn as itself; anywhere else it is a marker, as every other invisible and bidi control character is (0033), and the tag characters used to hide ASCII stay markers. A joiner between pictures only joins their glyphs. Unit tests pin both sides of the rule; `check-sources` still refuses joiners in the repository's own files. | Mitigated |
+| F4 | The editor keeping Tab and Shift+Tab traps the keyboard (WCAG 2.1.2) | Escape then Tab (or Shift+Tab) leaves; Ctrl+M makes Tab move the focus and says so; a read-only editor lets Tab go. Browser and end-to-end tests check each way out. | Mitigated |
+| F5 | The settable history clock changes undo in the product | `setHistoryClock` changes only how typing groups into undo steps, never the text; nothing in the app calls it (the browser tests do), and `withHistoryClock` puts the clock back however it ends. | Accepted |
+| F6 | A parser of untrusted input (shell commands for permissions, provider streams and repaired JSON, MCP streams, language server messages) mishandles input nobody wrote by hand | Each one's properties run under `pnpm fuzz` for minutes on fresh seeds, any failure shrunk to a small input with the seed that replays it, and kept as an example once fixed. | Mitigated |
+
+### Residual risks
+
+- **A scrambled trace still shows the shape of the code**: line lengths, indentation, punctuation, keywords, where the
+  edits were and when. A regular expression typed in Replace is kept as typed, since scrambling it would change what
+  it matches.
+- **Fuzzing is not guided by coverage**, so a bug behind a narrow condition can need more time than a run gives it.
+
+### Verification
+
+- Unit tests check shrinking (to the smallest failing list, string, nested array and number), examples, determinism
+  and the fuzz report; the text store's structure through edits of every size; the editor's invariants through random
+  command sequences in nine languages; pairs of commands that undo each other; search against a plain model; every
+  regression trace replayed, plain and scrambled; the bugs found, pinned.
+- Browser tests use the view at random, plain and with wrapping, right-to-left order, whitespace and the screen
+  reader mode, checking the DOM, the state, the screen reader's field and the focus after every step; Shift+Tab and a
+  scrollbar click keep the focus.
+- The end-to-end run edits a file with Windows line endings at random, saves, checks the file on disk, undoes
+  everything and checks the file is byte for byte what it was.

@@ -1,5 +1,5 @@
 import { ChangeSet, Text, type ChangeSpec, type Line } from '@encode/text'
-import { History } from './history'
+import { History, historyNow } from './history'
 import { plainText, type Language } from './language'
 import { EditorSelection, SelectionRange } from './selection'
 
@@ -109,7 +109,7 @@ export class EditorState {
     if (!history) {
       history = spec.isolateHistory ? this.history.isolate() : this.history
       if (!changes.empty && spec.addToHistory !== false) {
-        history = history.record(changes.invert(this.doc), this.selection, selection, spec.origin ?? 'command', Date.now())
+        history = history.record(changes.invert(this.doc), this.selection, selection, spec.origin ?? 'command', historyNow())
       }
     }
     let autoClosed = spec.autoClosed ?? (changes.empty ? this.autoClosed : mapAutoClosed(this.autoClosed, changes))
@@ -157,19 +157,22 @@ function keepNearCursors(doc: Text, selection: EditorSelection, positions: reado
   return positions.filter((pos) => pos < doc.length && pos >= (nearest.get(doc.lineAt(pos).number) ?? Infinity))
 }
 
-/** Undoes the newest step, restoring the selection from before it. Null when there is none. */
+/**
+ * Undoes the newest step, restoring the selection from before it. Null when there is none, or when the document is
+ * read-only (its history holds what came from disk, which undo must not take back).
+ */
 export function undo(state: EditorState): Transaction | null {
   const group = state.history.done[state.history.done.length - 1]
-  if (!group) return null
+  if (!group || state.config.readOnly) return null
   const forward = group.changes.invert(state.doc)
   const popped = state.history.popUndo(forward)!
   return withHistory(state, group.changes, group.selectionBefore, 'undo', popped.history)
 }
 
-/** Redoes the newest undone step. Null when there is none. */
+/** Redoes the newest undone step. Null when there is none, or when the document is read-only. */
 export function redo(state: EditorState): Transaction | null {
   const group = state.history.undone[state.history.undone.length - 1]
-  if (!group) return null
+  if (!group || state.config.readOnly) return null
   const inverse = group.changes.invert(state.doc)
   const popped = state.history.popRedo(inverse)!
   return withHistory(state, group.changes, group.selectionAfter, 'redo', popped.history)

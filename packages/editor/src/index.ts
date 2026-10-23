@@ -1,6 +1,6 @@
 export { EditorState, Transaction, redo, undo, type EditorConfig, type EditorStateSpec, type TransactionSpec } from './state'
 export { EditorSelection, SelectionRange } from './selection'
-export { History, GROUP_DELAY_MS, type HistoryGroup } from './history'
+export { History, GROUP_DELAY_MS, historyNow, setHistoryClock, withHistoryClock, type HistoryGroup } from './history'
 export { T, TOKEN_NAMES, TokenBuilder, plainText, type Language, type LineTokens, type TokenName, type Tokenizer } from './language'
 export {
   Highlighter,
@@ -76,3 +76,22 @@ export {
   unitWidth,
   wordAround,
 } from './text-utils'
+export {
+  TRACE_COMMANDS,
+  TraceRecorder,
+  TraceReplayer,
+  editorProblems,
+  expectOf,
+  hashText,
+  replayTrace,
+  scrambleTrace,
+  traceStart,
+  type EditorTrace,
+  type ProblemOptions,
+  type ReplayOptions,
+  type ReplayResult,
+  type TraceAction,
+  type TraceCommand,
+  type TraceProblem,
+  type TraceStep,
+} from './trace'

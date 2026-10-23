@@ -18,7 +18,10 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const outdir = path.join(root, '.test-dist')
+// Each run builds into a folder of its own, so a long fuzz run and a quick test run side by side never delete each
+// other's bundles; a folder whose run has ended is removed by the next run.
+const runs = path.join(root, '.test-dist')
+const outdir = path.join(runs, `run-${process.pid}`)
 const skipDirs = new Set(['node_modules', 'dist', 'release', '.test-dist', '.git'])
 
 async function findTests(dir, found = []) {
@@ -62,7 +65,18 @@ const forbidElectron = {
   },
 }
 
-await fs.rm(outdir, { recursive: true, force: true })
+function running(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error.code === 'EPERM'
+  }
+}
+for (const entry of await fs.readdir(runs).catch(() => [])) {
+  const pid = Number(/^run-(\d+)$/.exec(entry)?.[1])
+  if (!pid || pid === process.pid || !running(pid)) await fs.rm(path.join(runs, entry), { recursive: true, force: true })
+}
 try {
   await build({
     absWorkingDir: root,
@@ -99,4 +113,7 @@ const child = spawn(process.execPath, ['--test', ...reporters, '--enable-source-
   cwd: root,
   stdio: 'inherit',
 })
-child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)))
+child.on('exit', async (code, signal) => {
+  await fs.rm(outdir, { recursive: true, force: true }).catch(() => undefined)
+  process.exit(code ?? (signal ? 1 : 0))
+})

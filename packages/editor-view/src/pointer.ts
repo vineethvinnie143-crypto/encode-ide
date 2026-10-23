@@ -40,14 +40,22 @@ export class PointerHandler {
 
   private ignored(event: MouseEvent): boolean {
     const target = event.target as Element | null
-    if (target?.closest('.enc-zone, .enc-widgets, button, input, textarea')) return true
-    // The scrollbars belong to the browser.
+    return !!target?.closest('.enc-zone, .enc-widgets, button, input, textarea')
+  }
+
+  /** The scrollbars belong to the browser. */
+  private onScrollbar(event: MouseEvent): boolean {
     const rect = this.view.scroller.getBoundingClientRect()
     return event.clientX > rect.left + this.view.scroller.clientWidth || event.clientY > rect.top + this.view.scroller.clientHeight
   }
 
   private down(event: MouseEvent): void {
     if (event.button !== 0 || this.ignored(event)) return
+    if (this.onScrollbar(event)) {
+      // The scrollbar still scrolls; the focus stays where it was rather than going to the scroller.
+      event.preventDefault()
+      return
+    }
     const view = this.view
     // Keep the focus in the textarea and the browser from starting its own selection or drag.
     event.preventDefault()
@@ -232,7 +240,7 @@ export class PointerHandler {
   }
 
   private contextMenu(event: MouseEvent): void {
-    if (this.ignored(event)) return
+    if (this.ignored(event) || this.onScrollbar(event)) return
     event.preventDefault()
     const view = this.view
     const pos = view.posAtCoords(event.clientX, event.clientY)

@@ -21,7 +21,7 @@ export const edit = [
   },
   {
     name: 'Escape, then Tab, leaves the editor; Tab on its own still indents',
-    async run({ mount, ev, press, text, assert }) {
+    async run({ mount, ev, page, press, text, assert }) {
       await mount({ text: 'x', path: 'a.txt' })
       const focused = () => ev(() => document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName)
       await press('Tab')
@@ -39,6 +39,19 @@ export const edit = [
       await press('Tab')
       assert.ok((await text()).length > indented.length, 'a Tab after other keys indents again')
       assert.equal(await focused(), 'enc-input')
+      // A click in between disarms it too.
+      await press('Escape')
+      await page.click(...Object.values(await ev(() => {
+        const rect = document.querySelector('.enc-line').getBoundingClientRect()
+        return { x: rect.left + 2, y: rect.top + rect.height / 2 }
+      })))
+      await press('Tab')
+      assert.equal(await focused(), 'enc-input', 'a Tab after Escape and a click stays')
+      // Shift+Tab on a line with no indent changes nothing and keeps the focus.
+      await ev(() => window.view.dispatch({ changes: { from: 0, to: window.view.state.doc.length, insert: 'x' } }))
+      await press('Tab', { shift: true })
+      assert.equal(await text(), 'x')
+      assert.equal(await focused(), 'enc-input', 'Shift+Tab with nothing to outdent stays in the editor')
       // Shift on its own does not disarm it, and Shift+Tab goes back.
       await press('Escape')
       await press('Tab', { shift: true })

@@ -127,7 +127,7 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
+const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
@@ -1500,6 +1500,7 @@ async function runLanguageServerChecks() {
   await runEditorHintsChecks(markerLines)
   await runWrapChecks()
   await runInputChecks()
+  await runRandomEditChecks()
   await runLargeFileChecks()
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
@@ -2623,6 +2624,121 @@ async function runInputChecks() {
     await evaluate("window.eNCode.workspace.delete('src/input.ts').catch(() => null)").catch(() => null)
   }
   console.log('[smoke] Windows input, screen readers and right-to-left text: ok')
+}
+
+/**
+ * Random editing in the app, seeded (ENCODE_SMOKE_SEED for another run): keys, typing in several scripts, line moves,
+ * undo and redo, saves along the way, in a Lua file with Windows line endings. After it the file on disk is what the
+ * editor shows, with Windows line endings throughout; then everything is undone, saved, and the file is byte for byte
+ * what it was before the first key.
+ */
+async function runRandomEditChecks() {
+  console.log('[smoke] --- random editing, saved and undone ---')
+  const seed = Number(process.env.ENCODE_SMOKE_SEED) || 0x5eed
+  let state = seed >>> 0
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = Math.imul(state ^ (state >>> 15), state | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const pick = (list) => list[Math.floor(random() * list.length)]
+  const u = (...codes) => String.fromCodePoint(...codes)
+  const family = [0x1f468, 0x1f469, 0x1f467].map((code) => u(code)).join(u(0x200d))
+  const original = [
+    '-- A resource script, edited at random by the smoke',
+    'local Config = { speed = 1.5, name = "caf' + u(0xe9) + '" }',
+    '',
+    'local function greet(player)',
+    '\tlocal text = "hello " .. player',
+    '\tif #text > 3 then',
+    `\t\treturn "${u(0x6f22, 0x5b57)} ${family} ${u(0x1f600)}"`,
+    '\tend',
+    '\treturn text',
+    'end',
+    '',
+    'RegisterNetEvent("demo:greet", function(id)',
+    '  print(greet(id))',
+    'end)',
+    '',
+  ].join('\r\n')
+  const relative = 'scripts/random-edit.lua'
+  const file = path.join(demoPath, relative)
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(file, original)
+  const EDITOR = "document.querySelector('.code-editor > .enc-editor')"
+  const SHOWN = `[...${EDITOR}.querySelectorAll('.enc-line')].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map((line) => line.textContent)`
+  const DIRTY = "!!document.querySelector('.editor-tab.is-dirty')"
+  const KEYS = [
+    ['ArrowLeft'], ['ArrowRight'], ['ArrowUp'], ['ArrowDown'], ['Home'], ['End'], ['ArrowRight', { shift: true }], ['ArrowLeft', { shift: true }],
+    ['ArrowDown', { shift: true }], ['End', { shift: true }], ['ArrowRight', { ctrl: true }], ['Backspace'], ['Delete'], ['Backspace', { ctrl: true }],
+    ['Enter'], ['Tab'], ['Tab', { shift: true }], ['z', { ctrl: true }], ['y', { ctrl: true }], ['ArrowUp', { alt: true }], ['ArrowDown', { alt: true }],
+    ['ArrowDown', { alt: true, shift: true }], ['d', { ctrl: true }], ['Home', { ctrl: true }], ['End', { ctrl: true }],
+  ]
+  const WORDS = ['local ', 'value', ' = ', '(', ')', '{', '"', 'end', u(0xe9), u(0x5e9, 0x5dc, 0x5d5, 0x5dd), u(0x306b, 0x307b), u(0x1f600), ' -- note']
+  const done = []
+  try {
+    await quickOpen(relative, 'local function greet(player)')
+    await focusEditor()
+    const steps = Number(process.env.ENCODE_SMOKE_EDIT_STEPS) || 160
+    for (let step = 1; step <= steps; step++) {
+      const roll = random()
+      if (step % 50 === 0) {
+        done.push('save')
+        await pressKey('s', { ctrl: true })
+        await waitFor(`!${DIRTY}`, 8000, `the save at step ${step}`)
+      } else if (roll < 0.62) {
+        const [key, options] = pick(KEYS)
+        // Enter only now and then, so the file stays short enough to be on screen whole.
+        if (key === 'Enter' && random() < 0.6) continue
+        done.push(`${key}${options ? JSON.stringify(options) : ''}`)
+        await pressKey(key, options)
+      } else {
+        const text = pick(WORDS)
+        done.push(JSON.stringify(text))
+        await send('Input.insertText', { text })
+      }
+      if (step % 20 === 0 && !(await evaluate(`document.activeElement === ${EDITOR}.querySelector('.enc-input')`))) {
+        throw new Error(`The editor lost the focus by step ${step}`)
+      }
+    }
+    // Saved: the file holds what the editor shows, every line ending a Windows one.
+    await pressKey('s', { ctrl: true })
+    await waitFor(`!${DIRTY}`, 8000, 'the random edits saved')
+    await pressKey('Home', { ctrl: true })
+    await sleep(200)
+    const saved = await fs.readFile(file, 'utf8')
+    if (/(^|[^\r])\n/.test(saved) || /\r(?!\n)/.test(saved)) throw new Error('The saved file mixes line endings')
+    const shown = await evaluate(SHOWN)
+    if (JSON.stringify(saved.split('\r\n')) !== JSON.stringify(shown)) {
+      throw new Error(`The saved file is not what the editor shows:\n${JSON.stringify(saved.split('\r\n'))}\n${JSON.stringify(shown)}`)
+    }
+    // Everything undone, across the saves: the editor shows the file as it was, and once saved it is that file again.
+    let last = ''
+    let same = 0
+    for (let presses = 0; presses < 600 && same < 4; presses++) {
+      await pressKey('z', { ctrl: true })
+      await sleep(20)
+      const now = JSON.stringify(await evaluate(SHOWN))
+      same = now === last ? same + 1 : 0
+      last = now
+    }
+    if (last !== JSON.stringify(original.split('\r\n'))) throw new Error(`Undoing everything does not give the file back:\n${last}`)
+    if (await evaluate(DIRTY)) {
+      await pressKey('s', { ctrl: true })
+      await waitFor(`!${DIRTY}`, 8000, 'the undone file saved')
+    }
+    const back = await fs.readFile(file)
+    if (!back.equals(Buffer.from(original, 'utf8'))) throw new Error(`The file saved after undoing everything is not the file it was (${back.length} bytes, not ${Buffer.byteLength(original)})`)
+    await screenshot('32-editor-random-edits.png')
+  } catch (error) {
+    error.message += `\n  seed ${seed}; steps: ${done.slice(-40).join(' ')}`
+    throw error
+  } finally {
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'random-edit.lua')?.querySelector('.tab-close')?.click()`).catch(() => null)
+    await fs.rm(file, { force: true }).catch(() => null)
+  }
+  console.log(`[smoke] random editing, saved and undone: ok (seed ${seed}, ${done.length} steps)`)
 }
 
 /** The most each step with a 100 MB file may take in the app, in milliseconds, on the slowest machine it runs on. */

@@ -1,0 +1,2806 @@
+{
+ "version": 1,
+ "name": "adr-index",
+ "doc": "# Architecture decision records\n\nEach record states one decision, the forces behind it and what follows from it. Records are\nnever rewritten after they are accepted: a later decision supersedes an earlier one and both\nsay so.\n\n| # | Decision | Status |\n| --- | --- | --- |\n| [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted |\n| [0002](0002-pnpm-monorepo-and-in-house-test-tooling.md) | A pnpm monorepo with in-house test tooling | Accepted |\n| [0003](0003-own-code-above-the-platform.md) | Own code above the platform | Accepted |\n| [0004](0004-command-approval-from-one-grammar.md) | Command approval from one grammar and one policy | Accepted |\n| [0005](0005-programs-from-absolute-path-entries.md) | Programs resolve only from absolute PATH entries | Accepted |\n| [0006](0006-subagents-inherit-their-parents-authority.md) | Subagents inherit their parent's authority | Accepted |\n| [0007](0007-web-fetch-asks-per-site.md) | web_fetch asks per site and never reaches private addresses | Accepted |\n| [0008](0008-api-keys-in-the-os-keychain-only.md) | API keys in the OS keychain only | Accepted |\n| [0009](0009-compaction-keeps-every-tool-call-answered.md) | Compaction keeps every tool call answered | Accepted |\n| [0010](0010-renderer-isolation.md) | A sandboxed renderer that only the app's page can use | Accepted |\n| [0011](0011-agent-commands-run-in-the-os-shell.md) | The agent's commands run in the OS shell | Accepted, lands in M1 |\n| [0012](0012-windows-first-ci.md) | Windows-first CI with a sandboxed end-to-end smoke | Accepted |\n| [0013](0013-own-icons-tokens-and-bundled-fonts.md) | Own icons, one token set and bundled fonts | Accepted, amends 0003 |\n| [0014](0014-one-command-registry-and-no-project-switch-under-a-running-agent.md) | One command registry, and no project switch under a running agent | Accepted |\n| [0016](0016-windows-fonts-by-default-our-own-one-setting-away.md) | Windows' fonts by default, eNCode's own one setting away | Accepted, amends 0013 |\n| [0020](0020-the-free-tier-runs-behind-our-own-gateway.md) | The free tier runs behind our own gateway | Accepted |\n| [0021](0021-sessions-are-rotating-device-bound-refresh-tokens.md) | Sessions are short-lived tokens with rotating, device-bound refresh tokens | Accepted |\n| [0022](0022-connect-openrouter-with-pkce-on-a-loopback-listener.md) | Connect OpenRouter with PKCE on a loopback listener | Accepted |\n\n## Template\n\n```markdown\n# NNNN. Title in the imperative or as a statement\n\n- Status: Proposed | Accepted | Superseded by NNNN\n- Date: YYYY-MM-DD\n\n## Context\nWhat forces are at play, and what was wrong or missing.\n\n## Decision\nWhat we do, precisely enough to check code against it.\n\n## Consequences\nWhat gets easier, what gets harder, and what is still open.\n```\n",
+ "language": "markdown",
+ "tabSize": 4,
+ "indentUnit": "  ",
+ "lineSeparator": "\n",
+ "steps": [
+  {
+   "select": [
+    [
+     2026,
+     1873
+    ]
+   ],
+   "t": 2547
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 2725
+  },
+  {
+   "select": [
+    [
+     2285,
+     2285
+    ]
+   ],
+   "t": 5410
+  },
+  {
+   "insert": "|",
+   "t": 5521
+  },
+  {
+   "insert": " [0023](0023-failover-is-",
+   "t": 5691
+  },
+  {
+   "insert": "silent-and-only-a-clean-",
+   "t": 5799
+  },
+  {
+   "insert": "reply-is-committed.md)",
+   "t": 5848
+  },
+  {
+   "insert": " | Failover is",
+   "t": 5892
+  },
+  {
+   "insert": " silent, and only a",
+   "t": 6005
+  },
+  {
+   "insert": " clean reply is",
+   "t": 6121
+  },
+  {
+   "insert": " committed |",
+   "t": 6160
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 6258
+  },
+  {
+   "insert": "|",
+   "t": 6396
+  },
+  {
+   "insert": " [0024](0024-a-model-is-f",
+   "t": 6518
+  },
+  {
+   "insert": "ree-only-when-the-listin",
+   "t": 6639
+  },
+  {
+   "insert": "g-and-the-bill-say-so.md",
+   "t": 6775
+  },
+  {
+   "insert": ") | A model is free",
+   "t": 6922
+  },
+  {
+   "insert": " only when the",
+   "t": 7094
+  },
+  {
+   "insert": " listing and the",
+   "t": 7148
+  },
+  {
+   "insert": " bill say so |",
+   "t": 7296
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 7360
+  },
+  {
+   "insert": "|",
+   "t": 7394
+  },
+  {
+   "insert": " [0030](0030-the-agent-ru",
+   "t": 7545
+  },
+  {
+   "insert": "ns-in-a-host-that-client",
+   "t": 7695
+  },
+  {
+   "insert": "s-drive.md) | The",
+   "t": 7769
+  },
+  {
+   "insert": " agent runs in a",
+   "t": 7912
+  },
+  {
+   "insert": " host that clients",
+   "t": 7977
+  },
+  {
+   "insert": " drive over a",
+   "t": 8135
+  },
+  {
+   "insert": " message port |",
+   "t": 8177
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 8229
+  },
+  {
+   "insert": "|",
+   "t": 8333
+  },
+  {
+   "insert": " [0031](0031-sessions-are",
+   "t": 8392
+  },
+  {
+   "insert": "-append-only-logs.md)",
+   "t": 8484
+  },
+  {
+   "insert": " | Sessions are",
+   "t": 8640
+  },
+  {
+   "insert": " append-only logs |",
+   "t": 8735
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 8767
+  },
+  {
+   "insert": "|",
+   "t": 8797
+  },
+  {
+   "insert": " [0032](0032-claude-code-",
+   "t": 8853
+  },
+  {
+   "insert": "tool-contracts-and-remin",
+   "t": 8994
+  },
+  {
+   "insert": "ders.md) | Claude",
+   "t": 9165
+  },
+  {
+   "insert": " Code's tool",
+   "t": 9335
+  },
+  {
+   "insert": " contracts, and",
+   "t": 9388
+  },
+  {
+   "insert": " reminders instead",
+   "t": 9454
+  },
+  {
+   "insert": " of a changing",
+   "t": 9533
+  },
+  {
+   "insert": " prompt | Accepted |",
+   "t": 9662
+  },
+  {
+   "insert": "\n",
+   "t": 9816
+  },
+  {
+   "insert": "|",
+   "t": 9942
+  },
+  {
+   "insert": " [0040](0040-permission-r",
+   "t": 10032
+  },
+  {
+   "insert": "ules-are-judged-over-par",
+   "t": 10064
+  },
+  {
+   "insert": "sed-commands.md) |",
+   "t": 10205
+  },
+  {
+   "insert": " Permission rules",
+   "t": 10291
+  },
+  {
+   "insert": " are judged over",
+   "t": 10344
+  },
+  {
+   "insert": " parsed commands |",
+   "t": 10506
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 10543
+  },
+  {
+   "insert": "|",
+   "t": 10653
+  },
+  {
+   "insert": " [0041](0041-folder-setti",
+   "t": 10687
+  },
+  {
+   "insert": "ngs-grant-only-when-appr",
+   "t": 10809
+  },
+  {
+   "insert": "oved.md) | A",
+   "t": 10868
+  },
+  {
+   "insert": " folder's settings",
+   "t": 10961
+  },
+  {
+   "insert": " grant only what the",
+   "t": 11092
+  },
+  {
+   "insert": " user approved |",
+   "t": 11205
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 11305
+  },
+  {
+   "insert": "|",
+   "t": 11393
+  },
+  {
+   "insert": " [0042](0042-hooks-in-cla",
+   "t": 11507
+  },
+  {
+   "insert": "ude-codes-format-fail-cl",
+   "t": 11562
+  },
+  {
+   "insert": "osed.md) | Hooks in",
+   "t": 11643
+  },
+  {
+   "insert": " Claude Code's",
+   "t": 11694
+  },
+  {
+   "insert": " format, and a",
+   "t": 11822
+  },
+  {
+   "insert": " broken guard denies",
+   "t": 11934
+  },
+  {
+   "insert": " | Accepted |\n",
+   "t": 12016
+  },
+  {
+   "insert": "|",
+   "t": 12190
+  },
+  {
+   "insert": " [0043](0043-checkpoints-",
+   "t": 12261
+  },
+  {
+   "insert": "record-what-the-file-too",
+   "t": 12349
+  },
+  {
+   "insert": "ls-change.md) |",
+   "t": 12516
+  },
+  {
+   "insert": " Checkpoints record",
+   "t": 12554
+  },
+  {
+   "insert": " what the file tools",
+   "t": 12641
+  },
+  {
+   "insert": " change, and",
+   "t": 12808
+  },
+  {
+   "insert": " rewinding never",
+   "t": 12972
+  },
+  {
+   "insert": " overwrites silently",
+   "t": 13120
+  },
+  {
+   "insert": " | Accepted |\n",
+   "t": 13238
+  },
+  {
+   "insert": "|",
+   "t": 13319
+  },
+  {
+   "insert": " [0044](0044-an-in-house-",
+   "t": 13478
+  },
+  {
+   "insert": "mcp-client-with-per-serv",
+   "t": 13639
+  },
+  {
+   "insert": "er-approval.md) | An",
+   "t": 13801
+  },
+  {
+   "insert": " in-house MCP",
+   "t": 13846
+  },
+  {
+   "insert": " client, with",
+   "t": 14001
+  },
+  {
+   "insert": " per-server approval",
+   "t": 14180
+  },
+  {
+   "insert": " | Accepted |\n",
+   "t": 14353
+  },
+  {
+   "expect": {
+    "length": 4009,
+    "lines": 54,
+    "hash": "5d7a8f3a"
+   },
+   "t": 14853
+  },
+  {
+   "changes": [
+    [
+     1873,
+     1873,
+     "| [0015](0015-one-tab-model-for-the-side-and-bottom-panels.md) | One tab model for the side and bottom panels | Accepted |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 16858
+  },
+  {
+   "select": [
+    [
+     2701,
+     2408
+    ]
+   ],
+   "t": 18270
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 18475
+  },
+  {
+   "expect": {
+    "length": 3839,
+    "lines": 53,
+    "hash": "49783b23"
+   },
+   "t": 18975
+  },
+  {
+   "changes": [
+    [
+     2408,
+     2408,
+     "| [0023](0023-failover-is-silent-and-only-a-clean-reply-is-committed.md) | Failover is silent, and only a clean reply is committed | Accepted |\n| [0024](0024-a-model-is-free-only-when-the-listing-and-the-bill-say-so.md) | A model is free only when the listing and the bill say so | Accepted |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 21249
+  },
+  {
+   "expect": {
+    "length": 4132,
+    "lines": 55,
+    "hash": "896e3fb4"
+   },
+   "t": 21749
+  },
+  {
+   "command": "undo",
+   "t": 22149
+  },
+  {
+   "command": "undo",
+   "t": 22549
+  },
+  {
+   "expect": {
+    "length": 4132,
+    "lines": 55,
+    "hash": "896e3fb4"
+   },
+   "t": 22559
+  },
+  {
+   "command": "redo",
+   "t": 22959
+  },
+  {
+   "command": "redo",
+   "t": 23359
+  },
+  {
+   "expect": {
+    "length": 4132,
+    "lines": 55,
+    "hash": "896e3fb4"
+   },
+   "t": 23369
+  },
+  {
+   "select": [
+    [
+     1996,
+     1873
+    ]
+   ],
+   "t": 26095
+  },
+  {
+   "cut": true,
+   "t": 26330
+  },
+  {
+   "select": [
+    [
+     2959,
+     2959
+    ]
+   ],
+   "t": 28938
+  },
+  {
+   "insert": "|",
+   "t": 29054
+  },
+  {
+   "insert": " [0033](0033-the-editor-i",
+   "t": 29191
+  },
+  {
+   "insert": "s-our-own-engine.md)",
+   "t": 29248
+  },
+  {
+   "insert": " | The editor is",
+   "t": 29295
+  },
+  {
+   "insert": " our own engine:",
+   "t": 29424
+  },
+  {
+   "insert": " text model, core",
+   "t": 29515
+  },
+  {
+   "insert": " and view |",
+   "t": 29666
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 29706
+  },
+  {
+   "insert": "|",
+   "t": 29779
+  },
+  {
+   "insert": " [0034](0034-documents-li",
+   "t": 29857
+  },
+  {
+   "insert": "ve-outside-the-ui-store.",
+   "t": 29978
+  },
+  {
+   "insert": "md) | Open",
+   "t": 30091
+  },
+  {
+   "insert": " documents live",
+   "t": 30220
+  },
+  {
+   "insert": " outside the UI",
+   "t": 30368
+  },
+  {
+   "insert": " store, and",
+   "t": 30490
+  },
+  {
+   "insert": " \"unsaved\" is",
+   "t": 30603
+  },
+  {
+   "insert": " derived from the",
+   "t": 30670
+  },
+  {
+   "insert": " text | Accepted |\n",
+   "t": 30704
+  },
+  {
+   "expect": {
+    "length": 4277,
+    "lines": 56,
+    "hash": "99d63af9"
+   },
+   "t": 31204
+  },
+  {
+   "select": [
+    [
+     1873,
+     1873
+    ]
+   ],
+   "t": 33750
+  },
+  {
+   "insert": "|",
+   "t": 33818
+  },
+  {
+   "insert": " [0015](0015-one-tab-mode",
+   "t": 33913
+  },
+  {
+   "insert": "l-for-the-side-and-botto",
+   "t": 33983
+  },
+  {
+   "insert": "m-panels.md) | One tab",
+   "t": 34133
+  },
+  {
+   "insert": " model for the side and",
+   "t": 34203
+  },
+  {
+   "insert": " bottom panels |",
+   "t": 34373
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 34425
+  },
+  {
+   "insert": "|",
+   "t": 34596
+  },
+  {
+   "insert": " [0016](0016-windows-font",
+   "t": 34735
+  },
+  {
+   "insert": "s-by-default-our-own-one",
+   "t": 34867
+  },
+  {
+   "insert": "-setting-away.md) |",
+   "t": 34916
+  },
+  {
+   "insert": " Windows' fonts by",
+   "t": 35015
+  },
+  {
+   "insert": " default, eNCode's own",
+   "t": 35189
+  },
+  {
+   "insert": " one setting away |",
+   "t": 35242
+  },
+  {
+   "insert": " Accepted, amends 0013 |",
+   "t": 35407
+  },
+  {
+   "insert": "\n",
+   "t": 35491
+  },
+  {
+   "select": [
+    [
+     3503,
+     3235
+    ]
+   ],
+   "t": 38101
+  },
+  {
+   "cut": true,
+   "t": 38185
+  },
+  {
+   "expect": {
+    "length": 4285,
+    "lines": 56,
+    "hash": "6af5925d"
+   },
+   "t": 38685
+  },
+  {
+   "select": [
+    [
+     2149,
+     1996
+    ]
+   ],
+   "t": 40985
+  },
+  {
+   "cut": true,
+   "t": 41264
+  },
+  {
+   "select": [
+    [
+     3082,
+     3082
+    ]
+   ],
+   "t": 43860
+  },
+  {
+   "insert": "|",
+   "t": 43942
+  },
+  {
+   "insert": " [0033](0033-the-editor-i",
+   "t": 44038
+  },
+  {
+   "insert": "s-our-own-engine.md)",
+   "t": 44076
+  },
+  {
+   "insert": " | The editor",
+   "t": 44195
+  },
+  {
+   "insert": " is our own",
+   "t": 44282
+  },
+  {
+   "insert": " engine: text",
+   "t": 44315
+  },
+  {
+   "insert": " model, core",
+   "t": 44417
+  },
+  {
+   "insert": " and view |",
+   "t": 44527
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 44659
+  },
+  {
+   "insert": "|",
+   "t": 44790
+  },
+  {
+   "insert": " [0034](0034-documents-li",
+   "t": 44829
+  },
+  {
+   "insert": "ve-outside-the-ui-store.",
+   "t": 44898
+  },
+  {
+   "insert": "md) | Open",
+   "t": 45031
+  },
+  {
+   "insert": " documents",
+   "t": 45142
+  },
+  {
+   "insert": " live outside",
+   "t": 45292
+  },
+  {
+   "insert": " the UI",
+   "t": 45376
+  },
+  {
+   "insert": " store, and",
+   "t": 45418
+  },
+  {
+   "insert": " \"unsaved\" is",
+   "t": 45461
+  },
+  {
+   "insert": " derived from",
+   "t": 45606
+  },
+  {
+   "insert": " the text |",
+   "t": 45679
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 45833
+  },
+  {
+   "expect": {
+    "length": 4400,
+    "lines": 57,
+    "hash": "2822b673"
+   },
+   "t": 46333
+  },
+  {
+   "command": "undo",
+   "t": 46733
+  },
+  {
+   "command": "undo",
+   "t": 47133
+  },
+  {
+   "expect": {
+    "length": 4285,
+    "lines": 56,
+    "hash": "6af5925d"
+   },
+   "t": 47143
+  },
+  {
+   "command": "redo",
+   "t": 47543
+  },
+  {
+   "command": "redo",
+   "t": 47943
+  },
+  {
+   "expect": {
+    "length": 4400,
+    "lines": 57,
+    "hash": "2822b673"
+   },
+   "t": 47953
+  },
+  {
+   "changes": [
+    [
+     1996,
+     1996,
+     "| [0016](0016-windows-fonts-by-default-our-own-one-setting-away.md) | Windows' fonts by default, eNCode's own one setting away | Accepted, amends 0013 |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 48970
+  },
+  {
+   "expect": {
+    "length": 4553,
+    "lines": 58,
+    "hash": "1d725742"
+   },
+   "t": 49470
+  },
+  {
+   "select": [
+    [
+     1481,
+     1468
+    ]
+   ],
+   "t": 52435
+  },
+  {
+   "command": "deleteCharBackward",
+   "t": 52526
+  },
+  {
+   "expect": {
+    "length": 4540,
+    "lines": 58,
+    "hash": "45e4b7b3"
+   },
+   "t": 53026
+  },
+  {
+   "select": [
+    [
+     3490,
+     3490
+    ]
+   ],
+   "t": 53884
+  },
+  {
+   "insert": "| [0035](0035-openrouter-p",
+   "t": 54024
+  },
+  {
+   "insert": "resets-with-server-tools",
+   "t": 54202
+  },
+  {
+   "insert": "-go-through-the-messages",
+   "t": 54304
+  },
+  {
+   "insert": "-api.md) | A preset whose",
+   "t": 54479
+  },
+  {
+   "insert": " server tool",
+   "t": 54647
+  },
+  {
+   "insert": " chat-completions refuses",
+   "t": 54702
+  },
+  {
+   "insert": " is asked on the Messages",
+   "t": 54869
+  },
+  {
+   "insert": " API | Accepted |\n",
+   "t": 55022
+  },
+  {
+   "expect": {
+    "length": 4719,
+    "lines": 59,
+    "hash": "241520cd"
+   },
+   "t": 55522
+  },
+  {
+   "command": "undo",
+   "t": 55922
+  },
+  {
+   "command": "undo",
+   "t": 56322
+  },
+  {
+   "expect": {
+    "length": 4553,
+    "lines": 58,
+    "hash": "1d725742"
+   },
+   "t": 56332
+  },
+  {
+   "command": "redo",
+   "t": 56732
+  },
+  {
+   "command": "redo",
+   "t": 57132
+  },
+  {
+   "expect": {
+    "length": 4719,
+    "lines": 59,
+    "hash": "241520cd"
+   },
+   "t": 57142
+  },
+  {
+   "select": [
+    [
+     2136,
+     2136
+    ]
+   ],
+   "t": 57948
+  },
+  {
+   "insert": "| [0017](0017-the-thread-d",
+   "t": 58118
+  },
+  {
+   "insert": "raws-once-per-frame-and-",
+   "t": 58153
+  },
+  {
+   "insert": "only-what-changed.md) | The thread",
+   "t": 58229
+  },
+  {
+   "insert": " draws once per frame, and only",
+   "t": 58356
+  },
+  {
+   "insert": " what changed | Accepted |\n",
+   "t": 58489
+  },
+  {
+   "expect": {
+    "length": 4861,
+    "lines": 60,
+    "hash": "51030e38"
+   },
+   "t": 58989
+  },
+  {
+   "select": [
+    [
+     4497,
+     4497
+    ]
+   ],
+   "t": 60914
+  },
+  {
+   "insert": "|",
+   "t": 60991
+  },
+  {
+   "insert": " [0050](0050-the-desktop-",
+   "t": 61161
+  },
+  {
+   "insert": "is-used-through-one-tool",
+   "t": 61279
+  },
+  {
+   "insert": "-one-application-and-one",
+   "t": 61444
+  },
+  {
+   "insert": "-chat-at-a-time.md)",
+   "t": 61513
+  },
+  {
+   "insert": " | The",
+   "t": 61567
+  },
+  {
+   "insert": " desktop is",
+   "t": 61599
+  },
+  {
+   "insert": " used through",
+   "t": 61706
+  },
+  {
+   "insert": " one tool,",
+   "t": 61823
+  },
+  {
+   "insert": " one",
+   "t": 61964
+  },
+  {
+   "insert": " application",
+   "t": 62086
+  },
+  {
+   "insert": " and one chat",
+   "t": 62180
+  },
+  {
+   "insert": " at a time |",
+   "t": 62336
+  },
+  {
+   "insert": " Accepted |\n",
+   "t": 62436
+  },
+  {
+   "expect": {
+    "length": 5047,
+    "lines": 61,
+    "hash": "dc580280"
+   },
+   "t": 62936
+  },
+  {
+   "select": [
+    [
+     4683,
+     4683
+    ]
+   ],
+   "t": 65884
+  },
+  {
+   "insert": "|",
+   "t": 66061
+  },
+  {
+   "insert": " [0051](0051-tester-build",
+   "t": 66096
+  },
+  {
+   "insert": "s-carry-their-commit-kee",
+   "t": 66188
+  },
+  {
+   "insert": "p-a-scrubbed-log-and-rep",
+   "t": 66305
+  },
+  {
+   "insert": "ort-in-one-file.md) |",
+   "t": 66406
+  },
+  {
+   "insert": " Tester builds carry",
+   "t": 66544
+  },
+  {
+   "insert": " their commit, keep a",
+   "t": 66610
+  },
+  {
+   "insert": " scrubbed log and report",
+   "t": 66668
+  },
+  {
+   "insert": " in one file | Accepted |",
+   "t": 66729
+  },
+  {
+   "insert": "\n",
+   "t": 66860
+  },
+  {
+   "expect": {
+    "length": 5233,
+    "lines": 62,
+    "hash": "c77f0ed9"
+   },
+   "t": 67360
+  },
+  {
+   "command": "undo",
+   "t": 67760
+  },
+  {
+   "expect": {
+    "length": 5047,
+    "lines": 61,
+    "hash": "dc580280"
+   },
+   "t": 67770
+  },
+  {
+   "command": "redo",
+   "t": 68170
+  },
+  {
+   "expect": {
+    "length": 5233,
+    "lines": 62,
+    "hash": "c77f0ed9"
+   },
+   "t": 68180
+  },
+  {
+   "select": [
+    [
+     4869,
+     4869
+    ]
+   ],
+   "t": 70470
+  },
+  {
+   "insert": "| [0052](0052-every-model-",
+   "t": 70551
+  },
+  {
+   "insert": "call-goes-through-the-ro",
+   "t": 70608
+  },
+  {
+   "insert": "uter-keys-are-asked-for-",
+   "t": 70787
+  },
+  {
+   "insert": "by-origin.md) | Every model",
+   "t": 70949
+  },
+  {
+   "insert": " call goes through the router,",
+   "t": 71012
+  },
+  {
+   "insert": " and keys are asked for by",
+   "t": 71067
+  },
+  {
+   "insert": " origin | Accepted |\n",
+   "t": 71163
+  },
+  {
+   "expect": {
+    "length": 5411,
+    "lines": 63,
+    "hash": "1bd274b8"
+   },
+   "t": 71663
+  },
+  {
+   "changes": [
+    [
+     5047,
+     5047,
+     "| [0053](0053-the-windows-desktop-helper-is-our-own-program-built-on-the-machine-from-source-in-the-repository.md) | The Windows desktop helper is our own program, built on the machine from source in the repository | Accepted |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 73959
+  },
+  {
+   "expect": {
+    "length": 5639,
+    "lines": 64,
+    "hash": "16f89d06"
+   },
+   "t": 74459
+  },
+  {
+   "select": [
+    [
+     5275,
+     5275
+    ]
+   ],
+   "t": 76475
+  },
+  {
+   "insert": "|",
+   "t": 76525
+  },
+  {
+   "insert": " [0054](0054-computer-use",
+   "t": 76659
+  },
+  {
+   "insert": "-is-opt-in-visible-while",
+   "t": 76789
+  },
+  {
+   "insert": "-it-runs-and-stoppable-f",
+   "t": 76870
+  },
+  {
+   "insert": "rom-anywhere.md) |",
+   "t": 76941
+  },
+  {
+   "insert": " Computer use is",
+   "t": 77013
+  },
+  {
+   "insert": " opt-in, visible",
+   "t": 77068
+  },
+  {
+   "insert": " while it runs, and",
+   "t": 77158
+  },
+  {
+   "insert": " stoppable from",
+   "t": 77263
+  },
+  {
+   "insert": " anywhere | Accepted",
+   "t": 77383
+  },
+  {
+   "insert": " |\n",
+   "t": 77426
+  },
+  {
+   "expect": {
+    "length": 5820,
+    "lines": 65,
+    "hash": "c57311cf"
+   },
+   "t": 77926
+  },
+  {
+   "command": "undo",
+   "t": 78326
+  },
+  {
+   "expect": {
+    "length": 5639,
+    "lines": 64,
+    "hash": "16f89d06"
+   },
+   "t": 78336
+  },
+  {
+   "command": "redo",
+   "t": 78736
+  },
+  {
+   "expect": {
+    "length": 5820,
+    "lines": 65,
+    "hash": "c57311cf"
+   },
+   "t": 78746
+  },
+  {
+   "select": [
+    [
+     5456,
+     5456
+    ]
+   ],
+   "t": 81000
+  },
+  {
+   "insert": "|",
+   "t": 81144
+  },
+  {
+   "insert": " [0055](0055-a-folders-pe",
+   "t": 81222
+  },
+  {
+   "insert": "rmissions-are-one-snapsh",
+   "t": 81338
+  },
+  {
+   "insert": "ot-that-fails-closed.md)",
+   "t": 81502
+  },
+  {
+   "insert": " | A folder's",
+   "t": 81593
+  },
+  {
+   "insert": " permissions are",
+   "t": 81670
+  },
+  {
+   "insert": " one snapshot that",
+   "t": 81707
+  },
+  {
+   "insert": " fails closed |",
+   "t": 81873
+  },
+  {
+   "insert": " Accepted, builds",
+   "t": 82006
+  },
+  {
+   "insert": " on 0040 and 0041 |",
+   "t": 82074
+  },
+  {
+   "insert": "\n",
+   "t": 82219
+  },
+  {
+   "expect": {
+    "length": 5993,
+    "lines": 66,
+    "hash": "83095c6c"
+   },
+   "t": 82719
+  },
+  {
+   "select": [
+    [
+     5629,
+     5629
+    ]
+   ],
+   "t": 83750
+  },
+  {
+   "insert": "| [0056](0056-hooks-run-fr",
+   "t": 83883
+  },
+  {
+   "insert": "om-the-trusted-snapshot-",
+   "t": 83999
+  },
+  {
+   "insert": "and-every-write-is-kept-",
+   "t": 84169
+  },
+  {
+   "insert": "before-it-is-made.md) | Hooks",
+   "t": 84223
+  },
+  {
+   "insert": " run from the trusted snapshot,",
+   "t": 84314
+  },
+  {
+   "insert": " and every write is kept before",
+   "t": 84449
+  },
+  {
+   "insert": " it is made | Accepted, builds",
+   "t": 84522
+  },
+  {
+   "insert": " on 0042, 0043 and 0055 |\n",
+   "t": 84593
+  },
+  {
+   "expect": {
+    "length": 6214,
+    "lines": 67,
+    "hash": "0033311a"
+   },
+   "t": 85093
+  },
+  {
+   "select": [
+    [
+     5850,
+     5850
+    ]
+   ],
+   "t": 86932
+  },
+  {
+   "insert": "|",
+   "t": 86962
+  },
+  {
+   "insert": " [0057](0057-mcp-servers-",
+   "t": 87057
+  },
+  {
+   "insert": "run-from-the-folders-fil",
+   "t": 87130
+  },
+  {
+   "insert": "es-one-hub-per-folder-an",
+   "t": 87203
+  },
+  {
+   "insert": "d-looking-starts-nothing",
+   "t": 87292
+  },
+  {
+   "insert": ".md) | MCP",
+   "t": 87385
+  },
+  {
+   "insert": " servers run",
+   "t": 87497
+  },
+  {
+   "insert": " from the",
+   "t": 87574
+  },
+  {
+   "insert": " folder's",
+   "t": 87651
+  },
+  {
+   "insert": " files, one",
+   "t": 87749
+  },
+  {
+   "insert": " hub per",
+   "t": 87841
+  },
+  {
+   "insert": " folder, and",
+   "t": 87962
+  },
+  {
+   "insert": " looking",
+   "t": 88033
+  },
+  {
+   "insert": " starts",
+   "t": 88168
+  },
+  {
+   "insert": " nothing |",
+   "t": 88198
+  },
+  {
+   "insert": " Accepted,",
+   "t": 88248
+  },
+  {
+   "insert": " builds on",
+   "t": 88318
+  },
+  {
+   "insert": " 0044, 0055",
+   "t": 88348
+  },
+  {
+   "insert": " and 0056 |\n",
+   "t": 88489
+  },
+  {
+   "expect": {
+    "length": 6451,
+    "lines": 68,
+    "hash": "bc70a0a7"
+   },
+   "t": 88989
+  },
+  {
+   "command": "undo",
+   "t": 89389
+  },
+  {
+   "expect": {
+    "length": 6214,
+    "lines": 67,
+    "hash": "0033311a"
+   },
+   "t": 89399
+  },
+  {
+   "command": "redo",
+   "t": 89799
+  },
+  {
+   "expect": {
+    "length": 6451,
+    "lines": 68,
+    "hash": "bc70a0a7"
+   },
+   "t": 89809
+  },
+  {
+   "select": [
+    [
+     6087,
+     6087
+    ]
+   ],
+   "t": 90633
+  },
+  {
+   "insert": "|",
+   "t": 90681
+  },
+  {
+   "insert": " [0058](0058-web-search-g",
+   "t": 90775
+  },
+  {
+   "insert": "oes-through-the-provider",
+   "t": 90840
+  },
+  {
+   "insert": "-the-person-chose-and-it",
+   "t": 90958
+  },
+  {
+   "insert": "s-key-goes-to-that-provi",
+   "t": 91106
+  },
+  {
+   "insert": "der-alone.md) | Web",
+   "t": 91177
+  },
+  {
+   "insert": " search goes",
+   "t": 91245
+  },
+  {
+   "insert": " through the",
+   "t": 91357
+  },
+  {
+   "insert": " provider the",
+   "t": 91447
+  },
+  {
+   "insert": " person chose, and",
+   "t": 91574
+  },
+  {
+   "insert": " its key goes to",
+   "t": 91613
+  },
+  {
+   "insert": " that provider",
+   "t": 91697
+  },
+  {
+   "insert": " alone | Accepted,",
+   "t": 91747
+  },
+  {
+   "insert": " builds on 0007,",
+   "t": 91907
+  },
+  {
+   "insert": " 0008 and 0052 |\n",
+   "t": 91999
+  },
+  {
+   "expect": {
+    "length": 6704,
+    "lines": 69,
+    "hash": "bb949150"
+   },
+   "t": 92499
+  },
+  {
+   "select": [
+    [
+     6340,
+     6340
+    ]
+   ],
+   "t": 93513
+  },
+  {
+   "paste": "| [0059](0059-auto-review-asks-a-model-about-low-risk-commands-behind-checks-the-model-cannot-overrule.md) | Auto review asks a model about low-risk commands, behind checks the model cannot overrule | Accepted, builds on 0004, 0040 and 0055 |\n| [0060](0060-text-that-reads-differently-from-how-it-runs-is-shown-to-the-person-and-told-to-the-model.md) | Text that reads differently from how it runs is shown to the person and told to the model | Accepted, builds on 0004, 0012 and 0032 |\n| [0061](0061-subagents-are-defined-in-markdown-and-what-a-repository-fills-is-read-as-a-stranger-s-file.md) | Subagents are defined in Markdown, and what a repository fills is read as a stranger's file | Accepted, builds on 0006, 0041 and 0055 |\n",
+   "t": 93813
+  },
+  {
+   "expect": {
+    "length": 7438,
+    "lines": 72,
+    "hash": "97d5e05b"
+   },
+   "t": 94313
+  },
+  {
+   "select": [
+    [
+     7074,
+     7074
+    ]
+   ],
+   "t": 95636
+  },
+  {
+   "insert": "|",
+   "t": 95727
+  },
+  {
+   "insert": " [0062](0062-every-step-p",
+   "t": 95830
+  },
+  {
+   "insert": "ays-for-the-whole-reques",
+   "t": 95964
+  },
+  {
+   "insert": "t-so-its-parts-have-a-bu",
+   "t": 96038
+  },
+  {
+   "insert": "dget-and-the-large-ones-",
+   "t": 96082
+  },
+  {
+   "insert": "wait-until-asked-for.md)",
+   "t": 96206
+  },
+  {
+   "insert": " | Every step pays for",
+   "t": 96292
+  },
+  {
+   "insert": " the whole request, so",
+   "t": 96419
+  },
+  {
+   "insert": " its parts have a",
+   "t": 96556
+  },
+  {
+   "insert": " budget and the large",
+   "t": 96639
+  },
+  {
+   "insert": " ones wait until asked",
+   "t": 96773
+  },
+  {
+   "insert": " for | Accepted, builds",
+   "t": 96928
+  },
+  {
+   "insert": " on 0009 and 0057 |\n",
+   "t": 97083
+  },
+  {
+   "expect": {
+    "length": 7707,
+    "lines": 73,
+    "hash": "ed982a1b"
+   },
+   "t": 97583
+  },
+  {
+   "command": "undo",
+   "t": 97983
+  },
+  {
+   "command": "undo",
+   "t": 98383
+  },
+  {
+   "expect": {
+    "length": 6704,
+    "lines": 69,
+    "hash": "bb949150"
+   },
+   "t": 98393
+  },
+  {
+   "command": "redo",
+   "t": 98793
+  },
+  {
+   "command": "redo",
+   "t": 99193
+  },
+  {
+   "expect": {
+    "length": 7707,
+    "lines": 73,
+    "hash": "ed982a1b"
+   },
+   "t": 99203
+  },
+  {
+   "select": [
+    [
+     7343,
+     7343
+    ]
+   ],
+   "t": 101576
+  },
+  {
+   "insert": "|",
+   "t": 101663
+  },
+  {
+   "insert": " [0063](0063-the-agents-c",
+   "t": 101707
+  },
+  {
+   "insert": "ommands-run-in-the-opera",
+   "t": 101802
+  },
+  {
+   "insert": "ting-systems-sandbox-and",
+   "t": 101939
+  },
+  {
+   "insert": "-the-person-is-told-what",
+   "t": 102108
+  },
+  {
+   "insert": "-it-does-not-hold-back.m",
+   "t": 102253
+  },
+  {
+   "insert": "d) | The agent's",
+   "t": 102373
+  },
+  {
+   "insert": " commands run in the",
+   "t": 102443
+  },
+  {
+   "insert": " operating system's",
+   "t": 102497
+  },
+  {
+   "insert": " sandbox, and the person",
+   "t": 102559
+  },
+  {
+   "insert": " is told what it does",
+   "t": 102672
+  },
+  {
+   "insert": " not hold back |",
+   "t": 102814
+  },
+  {
+   "insert": " Accepted, builds on",
+   "t": 102869
+  },
+  {
+   "insert": " 0004, 0011, 0041, 0053",
+   "t": 102936
+  },
+  {
+   "insert": " and 0059 |\n",
+   "t": 103050
+  },
+  {
+   "expect": {
+    "length": 8000,
+    "lines": 74,
+    "hash": "4ae906e6"
+   },
+   "t": 103550
+  },
+  {
+   "changes": [
+    [
+     7636,
+     7636,
+     "| [0064](0064-the-review-tab-reads-git-itself-and-stages-a-hunk-the-way-git-add-p-does.md) | The Review tab reads git itself, and stages a hunk the way `git add -p` does | Accepted, builds on 0033, 0060 and 0063 |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 104759
+  },
+  {
+   "expect": {
+    "length": 8214,
+    "lines": 75,
+    "hash": "e5f73696"
+   },
+   "t": 105259
+  },
+  {
+   "select": [
+    [
+     7850,
+     7850
+    ]
+   ],
+   "t": 107522
+  },
+  {
+   "insert": "| [0065](0065-the-turn-vie",
+   "t": 107565
+  },
+  {
+   "insert": "w-reads-the-agents-recor",
+   "t": 107634
+  },
+  {
+   "insert": "d-and-writes-back-only-o",
+   "t": 107735
+  },
+  {
+   "insert": "ver-what-the-person-saw.md)",
+   "t": 107809
+  },
+  {
+   "insert": " | The Turn view reads the",
+   "t": 107850
+  },
+  {
+   "insert": " agent's record, and writes",
+   "t": 107888
+  },
+  {
+   "insert": " back only over what the",
+   "t": 107921
+  },
+  {
+   "insert": " person saw | Accepted,",
+   "t": 107994
+  },
+  {
+   "insert": " builds on 0056 and 0064 |\n",
+   "t": 108046
+  },
+  {
+   "expect": {
+    "length": 8442,
+    "lines": 76,
+    "hash": "088d81d0"
+   },
+   "t": 108546
+  },
+  {
+   "command": "undo",
+   "t": 108946
+  },
+  {
+   "command": "undo",
+   "t": 109346
+  },
+  {
+   "command": "undo",
+   "t": 109746
+  },
+  {
+   "expect": {
+    "length": 7707,
+    "lines": 73,
+    "hash": "ed982a1b"
+   },
+   "t": 109756
+  },
+  {
+   "command": "redo",
+   "t": 110156
+  },
+  {
+   "command": "redo",
+   "t": 110556
+  },
+  {
+   "command": "redo",
+   "t": 110956
+  },
+  {
+   "expect": {
+    "length": 8442,
+    "lines": 76,
+    "hash": "088d81d0"
+   },
+   "t": 110966
+  },
+  {
+   "select": [
+    [
+     8078,
+     8078
+    ]
+   ],
+   "t": 113550
+  },
+  {
+   "insert": "| [0066](0066-what-a-messa",
+   "t": 113694
+  },
+  {
+   "insert": "ge-mentions-comes-from-t",
+   "t": 113850
+  },
+  {
+   "insert": "he-core-under-the-tools-",
+   "t": 113968
+  },
+  {
+   "insert": "rules-and-the-palette-ru",
+   "t": 114035
+  },
+  {
+   "insert": "ns-the-menus-actions.md) |",
+   "t": 114098
+  },
+  {
+   "insert": " What a message mentions",
+   "t": 114237
+  },
+  {
+   "insert": " comes from the core under",
+   "t": 114303
+  },
+  {
+   "insert": " the tools' rules, and the",
+   "t": 114440
+  },
+  {
+   "insert": " palette runs the menus'",
+   "t": 114562
+  },
+  {
+   "insert": " actions | Accepted, builds",
+   "t": 114697
+  },
+  {
+   "insert": " on 0055, 0059 and 0062 |\n",
+   "t": 114738
+  },
+  {
+   "expect": {
+    "length": 8719,
+    "lines": 77,
+    "hash": "21a20efd"
+   },
+   "t": 115238
+  },
+  {
+   "changes": [
+    [
+     8355,
+     8355,
+     "| [0067](0067-steering-goes-through-what-a-request-goes-through-the-reviewer-reads-the-change-as-data-and-a-shortcut-leaves-typing-alone.md) | Steering goes through what a request goes through, the Reviewer reads the change as data, and a shortcut leaves typing alone | Accepted, builds on 0014, 0017, 0031, 0042, 0052, 0054 and 0064 |\n"
+    ]
+   ],
+   "origin": "external",
+   "t": 116478
+  },
+  {
+   "expect": {
+    "length": 9055,
+    "lines": 78,
+    "hash": "7f872005"
+   },
+   "t": 116978
+  },
+  {
+   "select": [
+    [
+     8691,
+     8691
+    ]
+   ],
+   "t": 119940
+  },
+  {
+   "insert": "| [0068](0068-settings-is-",
+   "t": 119973
+  },
+  {
+   "insert": "a-page-that-keeps-each-c",
+   "t": 120096
+  },
+  {
+   "insert": "hange-as-it-is-made-and-",
+   "t": 120275
+  },
+  {
+   "insert": "a-chat-is-a-session-in-a",
+   "t": 120335
+  },
+  {
+   "insert": "-folder-of-its-own.md) | Settings",
+   "t": 120375
+  },
+  {
+   "insert": " is a page that keeps each change",
+   "t": 120476
+  },
+  {
+   "insert": " as it is made, and a chat is a",
+   "t": 120565
+  },
+  {
+   "insert": " session in a folder of its own |",
+   "t": 120727
+  },
+  {
+   "insert": " Accepted, builds on 0052, 0054,",
+   "t": 120867
+  },
+  {
+   "insert": " 0066 and 0067 |\n",
+   "t": 121045
+  },
+  {
+   "expect": {
+    "length": 9332,
+    "lines": 79,
+    "hash": "29894744"
+   },
+   "t": 121545
+  },
+  {
+   "command": "undo",
+   "t": 121945
+  },
+  {
+   "command": "undo",
+   "t": 122345
+  },
+  {
+   "expect": {
+    "length": 8719,
+    "lines": 77,
+    "hash": "21a20efd"
+   },
+   "t": 122355
+  },
+  {
+   "command": "redo",
+   "t": 122755
+  },
+  {
+   "command": "redo",
+   "t": 123155
+  },
+  {
+   "expect": {
+    "length": 9332,
+    "lines": 79,
+    "hash": "29894744"
+   },
+   "t": 123165
+  },
+  {
+   "select": [
+    [
+     8968,
+     8968
+    ]
+   ],
+   "t": 124554
+  },
+  {
+   "paste": "| [0069](0069-the-agent-asks-before-planning-hooks-hear-what-it-waits-for-and-pdfs-are-read-by-encodes-own-reader.md) | The agent asks before planning, hooks hear what it waits for, notebooks change by cell, and PDFs are read by eNCode's own reader | Accepted, builds on 0031, 0042, 0059, 0062 and 0066 |\n",
+   "t": 124854
+  },
+  {
+   "expect": {
+    "length": 9637,
+    "lines": 80,
+    "hash": "fb7f7799"
+   },
+   "t": 125354
+  },
+  {
+   "select": [
+    [
+     9273,
+     9273
+    ]
+   ],
+   "t": 126983
+  },
+  {
+   "insert": "| [0070](0070-a-problem-is",
+   "t": 127021
+  },
+  {
+   "insert": "-said-in-a-sentence-with",
+   "t": 127058
+  },
+  {
+   "insert": "-what-can-be-done-and-wh",
+   "t": 127218
+  },
+  {
+   "insert": "at-the-provider-said-is-",
+   "t": 127343
+  },
+  {
+   "insert": "folded-under-it.md) | A problem",
+   "t": 127506
+  },
+  {
+   "insert": " is said in a sentence with what",
+   "t": 127627
+  },
+  {
+   "insert": " can be done, and what the",
+   "t": 127797
+  },
+  {
+   "insert": " provider said is folded under",
+   "t": 127928
+  },
+  {
+   "insert": " it | Accepted, builds on 0052",
+   "t": 128027
+  },
+  {
+   "insert": " and 0068 |\n",
+   "t": 128103
+  },
+  {
+   "expect": {
+    "length": 9896,
+    "lines": 81,
+    "hash": "725d64f3"
+   },
+   "t": 128603
+  },
+  {
+   "select": [
+    [
+     9532,
+     9532
+    ]
+   ],
+   "t": 130340
+  },
+  {
+   "paste": "| [0071](0071-work-goes-on-in-the-background-and-what-it-reports-reaches-the-agent-between-steps-or-in-a-turn-of-its-own.md) | Work goes on in the background, and what it reports reaches the agent between steps or in a turn of its own | Accepted, builds on 0031, 0042, 0062 and 0070 |\n| [0072](0072-language-intelligence-comes-from-real-language-servers-that-encode-talks-to-through-its-own-client.md) | Language intelligence comes from real language servers that eNCode talks to through its own client | Accepted, refines 0003 |\n",
+   "t": 130640
+  },
+  {
+   "expect": {
+    "length": 10426,
+    "lines": 83,
+    "hash": "784e91db"
+   },
+   "t": 131140
+  },
+  {
+   "command": "undo",
+   "t": 131540
+  },
+  {
+   "command": "undo",
+   "t": 131940
+  },
+  {
+   "command": "undo",
+   "t": 132340
+  },
+  {
+   "expect": {
+    "length": 9332,
+    "lines": 79,
+    "hash": "29894744"
+   },
+   "t": 132350
+  },
+  {
+   "command": "redo",
+   "t": 132750
+  },
+  {
+   "command": "redo",
+   "t": 133150
+  },
+  {
+   "command": "redo",
+   "t": 133550
+  },
+  {
+   "expect": {
+    "length": 10426,
+    "lines": 83,
+    "hash": "784e91db"
+   },
+   "t": 133560
+  },
+  {
+   "changes": [
+    [
+     10059,
+     10059,
+     "; where servers run is settled by 0073 |\n| [0073](0073-worktrees-are-made-by-encode-with-hooks-off-and-language-servers-run-in-trusted-folders-for-the-editor-and-the-agent.md) | Worktrees are made by eNCode with hooks off, and language servers run in trusted folders for the editor and the agent | Accepted, refines 0072"
+    ]
+   ],
+   "origin": "external",
+   "t": 135487
+  },
+  {
+   "expect": {
+    "length": 10746,
+    "lines": 84,
+    "hash": "c32fdd73"
+   },
+   "t": 135987
+  },
+  {
+   "select": [
+    [
+     10382,
+     10382
+    ]
+   ],
+   "t": 137012
+  },
+  {
+   "insert": "|",
+   "t": 137094
+  },
+  {
+   "insert": " [0074](0074-the-editor-a",
+   "t": 137253
+  },
+  {
+   "insert": "sks-the-language-servers",
+   "t": 137355
+  },
+  {
+   "insert": "-through-checked-questio",
+   "t": 137411
+  },
+  {
+   "insert": "ns-and-draws-their-answe",
+   "t": 137469
+  },
+  {
+   "insert": "rs-with-its-own-widgets.",
+   "t": 137612
+  },
+  {
+   "insert": "md) | The editor asks",
+   "t": 137778
+  },
+  {
+   "insert": " the language servers",
+   "t": 137866
+  },
+  {
+   "insert": " through checked",
+   "t": 138023
+  },
+  {
+   "insert": " questions, and draws",
+   "t": 138167
+  },
+  {
+   "insert": " their answers with its",
+   "t": 138254
+  },
+  {
+   "insert": " own widgets |",
+   "t": 138432
+  },
+  {
+   "insert": " Accepted, builds on",
+   "t": 138565
+  },
+  {
+   "insert": " 0072 and 0073 |\n",
+   "t": 138728
+  },
+  {
+   "expect": {
+    "length": 11021,
+    "lines": 85,
+    "hash": "5861dfb9"
+   },
+   "t": 139228
+  },
+  {
+   "select": [
+    [
+     10657,
+     10657
+    ]
+   ],
+   "t": 140443
+  },
+  {
+   "insert": "|",
+   "t": 140547
+  },
+  {
+   "insert": " [0075](0075-a-change-a-l",
+   "t": 140659
+  },
+  {
+   "insert": "anguage-server-plans-is-",
+   "t": 140757
+  },
+  {
+   "insert": "checked-whole-goes-into-",
+   "t": 140833
+  },
+  {
+   "insert": "the-editor-or-onto-the-d",
+   "t": 140898
+  },
+  {
+   "insert": "isk-and-can-be-seen-firs",
+   "t": 140935
+  },
+  {
+   "insert": "t-and-taken-back.md)",
+   "t": 141061
+  },
+  {
+   "insert": " | A change a",
+   "t": 141139
+  },
+  {
+   "insert": " language",
+   "t": 141305
+  },
+  {
+   "insert": " server plans",
+   "t": 141413
+  },
+  {
+   "insert": " is checked",
+   "t": 141566
+  },
+  {
+   "insert": " whole, goes",
+   "t": 141719
+  },
+  {
+   "insert": " into the",
+   "t": 141882
+  },
+  {
+   "insert": " editor or onto",
+   "t": 141991
+  },
+  {
+   "insert": " the disk, and",
+   "t": 142077
+  },
+  {
+   "insert": " can be seen",
+   "t": 142163
+  },
+  {
+   "insert": " first and",
+   "t": 142197
+  },
+  {
+   "insert": " taken back |",
+   "t": 142310
+  },
+  {
+   "insert": " Accepted,",
+   "t": 142459
+  },
+  {
+   "insert": " builds on",
+   "t": 142588
+  },
+  {
+   "insert": " 0072, 0073 and",
+   "t": 142683
+  },
+  {
+   "insert": " 0074 |\n",
+   "t": 142782
+  },
+  {
+   "expect": {
+    "length": 11337,
+    "lines": 86,
+    "hash": "d42a6a56"
+   },
+   "t": 143282
+  },
+  {
+   "command": "undo",
+   "t": 143682
+  },
+  {
+   "command": "undo",
+   "t": 144082
+  },
+  {
+   "expect": {
+    "length": 10746,
+    "lines": 84,
+    "hash": "c32fdd73"
+   },
+   "t": 144092
+  },
+  {
+   "command": "redo",
+   "t": 144492
+  },
+  {
+   "command": "redo",
+   "t": 144892
+  },
+  {
+   "expect": {
+    "length": 11337,
+    "lines": 86,
+    "hash": "d42a6a56"
+   },
+   "t": 144902
+  },
+  {
+   "select": [
+    [
+     10973,
+     10973
+    ]
+   ],
+   "t": 145797
+  },
+  {
+   "paste": "| [0076](0076-the-editor-finds-its-way-by-symbols-the-servers-name-asked-only-while-shown-and-calls-are-followed-a-level-at-a-time.md) | The editor finds its way by the symbols the servers name, asked only while shown, and calls are followed a level at a time | Accepted, builds on 0072, 0074 and 0075 |\n",
+   "t": 146097
+  },
+  {
+   "expect": {
+    "length": 11641,
+    "lines": 87,
+    "hash": "29269bbe"
+   },
+   "t": 146597
+  },
+  {
+   "select": [
+    [
+     11277,
+     11277
+    ]
+   ],
+   "t": 147891
+  },
+  {
+   "paste": "| [0077](0077-the-editor-folds-by-the-servers-ranges-or-the-indentation-and-pins-colours-and-maps-the-text-from-what-it-already-reads.md) | The editor folds by the servers' ranges or the indentation, and pins, colours and maps the text from what it already reads | Accepted, builds on 0003, 0072, 0074 and 0076 |\n",
+   "t": 148191
+  },
+  {
+   "expect": {
+    "length": 11954,
+    "lines": 88,
+    "hash": "bdfb53d7"
+   },
+   "t": 148691
+  },
+  {
+   "select": [
+    [
+     11590,
+     11590
+    ]
+   ],
+   "t": 149468
+  },
+  {
+   "insert": "| [0078](0078-inlay-hints-",
+   "t": 149596
+  },
+  {
+   "insert": "and-semantic-tokens-are-",
+   "t": 149714
+  },
+  {
+   "insert": "kept-by-line-beside-the-",
+   "t": 149884
+  },
+  {
+   "insert": "text-and-follow-edits-un",
+   "t": 150041
+  },
+  {
+   "insert": "til-the-server-answers-a",
+   "t": 150216
+  },
+  {
+   "insert": "gain.md) | Inlay hints and",
+   "t": 150354
+  },
+  {
+   "insert": " semantic tokens are kept by",
+   "t": 150393
+  },
+  {
+   "insert": " line beside the text, and",
+   "t": 150446
+  },
+  {
+   "insert": " follow edits until the server",
+   "t": 150586
+  },
+  {
+   "insert": " answers again | Accepted,",
+   "t": 150660
+  },
+  {
+   "insert": " builds on 0003, 0072, 0074",
+   "t": 150836
+  },
+  {
+   "insert": " and 0077 |\n",
+   "t": 150870
+  },
+  {
+   "expect": {
+    "length": 12251,
+    "lines": 89,
+    "hash": "e6f7d23a"
+   },
+   "t": 151370
+  },
+  {
+   "command": "undo",
+   "t": 151770
+  },
+  {
+   "command": "undo",
+   "t": 152170
+  },
+  {
+   "expect": {
+    "length": 11641,
+    "lines": 87,
+    "hash": "29269bbe"
+   },
+   "t": 152180
+  },
+  {
+   "command": "redo",
+   "t": 152580
+  },
+  {
+   "command": "redo",
+   "t": 152980
+  },
+  {
+   "expect": {
+    "length": 12251,
+    "lines": 89,
+    "hash": "e6f7d23a"
+   },
+   "t": 152990
+  },
+  {
+   "select": [
+    [
+     11887,
+     11887
+    ]
+   ],
+   "t": 155966
+  },
+  {
+   "insert": "| [0079](0079-large-files-",
+   "t": 156082
+  },
+  {
+   "insert": "are-coloured-on-another-",
+   "t": 156194
+  },
+  {
+   "insert": "thread-counted-from-inde",
+   "t": 156230
+  },
+  {
+   "insert": "xed-points-and-held-to-m",
+   "t": 156264
+  },
+  {
+   "insert": "easured-limits.md) | Large",
+   "t": 156361
+  },
+  {
+   "insert": " files are coloured on",
+   "t": 156437
+  },
+  {
+   "insert": " another thread, counted",
+   "t": 156505
+  },
+  {
+   "insert": " from indexed points, and",
+   "t": 156615
+  },
+  {
+   "insert": " held to measured limits |",
+   "t": 156661
+  },
+  {
+   "insert": " Accepted, builds on 0003,",
+   "t": 156827
+  },
+  {
+   "insert": " 0072, 0074 and 0077 |\n",
+   "t": 156950
+  },
+  {
+   "expect": {
+    "length": 12521,
+    "lines": 90,
+    "hash": "0ec73795"
+   },
+   "t": 157450
+  },
+  {
+   "select": [
+    [
+     12157,
+     12157
+    ]
+   ],
+   "t": 159225
+  },
+  {
+   "insert": "|",
+   "t": 159326
+  },
+  {
+   "insert": " [0080](0080-long-lines-w",
+   "t": 159454
+  },
+  {
+   "insert": "rap-into-rows-the-layout",
+   "t": 159549
+  },
+  {
+   "insert": "-counts-and-spaces-and-t",
+   "t": 159601
+  },
+  {
+   "insert": "abs-are-marked-without-c",
+   "t": 159739
+  },
+  {
+   "insert": "hanging-the-text.md) |",
+   "t": 159836
+  },
+  {
+   "insert": " Long lines wrap into",
+   "t": 159941
+  },
+  {
+   "insert": " rows the layout counts,",
+   "t": 160091
+  },
+  {
+   "insert": " and spaces and tabs are",
+   "t": 160229
+  },
+  {
+   "insert": " marked without changing",
+   "t": 160261
+  },
+  {
+   "insert": " the text | Accepted,",
+   "t": 160352
+  },
+  {
+   "insert": " builds on 0003, 0077",
+   "t": 160527
+  },
+  {
+   "insert": " and 0079 |\n",
+   "t": 160560
+  },
+  {
+   "expect": {
+    "length": 12788,
+    "lines": 91,
+    "hash": "8cf85d68"
+   },
+   "t": 161060
+  },
+  {
+   "select": [
+    [
+     3479,
+     3479
+    ]
+   ],
+   "t": 161660
+  },
+  {
+   "insert": "; right-to-left reading order",
+   "t": 161731
+  },
+  {
+   "insert": " (opt-in) and screen readers",
+   "t": 161880
+  },
+  {
+   "insert": " refined by 0081",
+   "t": 161951
+  },
+  {
+   "select": [
+    [
+     12497,
+     12497
+    ]
+   ],
+   "t": 163587
+  },
+  {
+   "insert": "| [0081](0081-input-method",
+   "t": 163708
+  },
+  {
+   "insert": "s-compose-in-place-scree",
+   "t": 163802
+  },
+  {
+   "insert": "n-readers-read-the-lines",
+   "t": 163936
+  },
+  {
+   "insert": "-around-the-cursor-and-r",
+   "t": 164022
+  },
+  {
+   "insert": "ight-to-left-text-reads-",
+   "t": 164158
+  },
+  {
+   "insert": "in-its-own-order-only-wh",
+   "t": 164334
+  },
+  {
+   "insert": "ere-it-cannot-move-code.md) |",
+   "t": 164444
+  },
+  {
+   "insert": " Input methods compose in place,",
+   "t": 164508
+  },
+  {
+   "insert": " screen readers read the lines",
+   "t": 164605
+  },
+  {
+   "insert": " around the cursor, and",
+   "t": 164695
+  },
+  {
+   "insert": " right-to-left text reads in its",
+   "t": 164782
+  },
+  {
+   "insert": " own order only where it cannot",
+   "t": 164946
+  },
+  {
+   "insert": " move code | Accepted, builds on",
+   "t": 165107
+  },
+  {
+   "insert": " 0003 and 0080, refines 0033 |\n",
+   "t": 165234
+  },
+  {
+   "expect": {
+    "length": 13247,
+    "lines": 92,
+    "hash": "8d40e543"
+   },
+   "t": 165734
+  },
+  {
+   "command": "undo",
+   "t": 166134
+  },
+  {
+   "expect": {
+    "length": 12861,
+    "lines": 91,
+    "hash": "463e10df"
+   },
+   "t": 166144
+  },
+  {
+   "command": "redo",
+   "t": 166544
+  },
+  {
+   "expect": {
+    "length": 13247,
+    "lines": 92,
+    "hash": "8d40e543"
+   },
+   "t": 166554
+  }
+ ]
+}

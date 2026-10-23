@@ -2,7 +2,7 @@
  * The page the browser tests load: the view, the core it sits on and a small
  * harness to mount editors with. Bundled by run.mjs; nothing here ships.
  */
-import { EditorSelection, EditorState, Highlighter, SelectionRange, T, compileSearch, connectHighlighting, findNext, languageForPath, searchMatches, type HighlightConnection } from '@encode/editor'
+import { EditorSelection, EditorState, Highlighter, SelectionRange, T, compileSearch, connectHighlighting, editorProblems, findNext, languageForPath, searchMatches, setHistoryClock, type HighlightConnection } from '@encode/editor'
 import { Text } from '@encode/text'
 import { EditorView, type EditorViewConfig } from '../../src/index'
 import '../../src/style.css'
@@ -33,7 +33,7 @@ declare global {
   }
 }
 
-const api = { EditorSelection, EditorState, SelectionRange, T, Text, EditorView, Highlighter, compileSearch, findNext, searchMatches, languageForPath }
+const api = { EditorSelection, EditorState, SelectionRange, T, Text, EditorView, Highlighter, compileSearch, editorProblems, findNext, searchMatches, languageForPath, setHistoryClock }
 window.enc = api
 
 let current: EditorView | null = null
