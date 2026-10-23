@@ -26,6 +26,9 @@
   the value after --token on that page (pasting the whole line works too), and it expires an hour after the page was
   opened. It is used once and not kept.
 
+  new-runner-vm.ps1 -Unattended runs it from the PC with -Token, -Password and -NoRestart, so nothing is asked, and
+  restarts the VM itself.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File C:\eNCode-CI\windows-runner.ps1 -AutoLogon
 #>
@@ -35,7 +38,11 @@ param(
   [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
   [string]$Repository = 'vineethvinnie143-crypto/encode-ide',
   [string]$RunnerDir = 'C:\actions-runner',
-  [switch]$AutoLogon
+  [switch]$AutoLogon,
+  # The account's password for -AutoLogon, so it is not asked.
+  [Security.SecureString]$Password,
+  # Leaves the restart -AutoLogon needs to whoever ran this.
+  [switch]$NoRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,12 +71,11 @@ $Token = $Token.Trim()
 if ($Token -match '--token\s+(\S+)') { $Token = $Matches[1] }
 if ($Token -notmatch '^[A-Za-z0-9_-]{20,200}$') { Fail 'That does not look like a registration token: copy the value after --token on GitHub''s page and run this again.' }
 
-$password = $null
 if ($AutoLogon) {
-  $password = Read-Host -AsSecureString "Windows password of $env:USERNAME, for signing in automatically"
+  if (-not $Password) { $Password = Read-Host -AsSecureString "Windows password of $env:USERNAME, for signing in automatically" }
   Add-Type -AssemblyName System.DirectoryServices.AccountManagement
   $machine = New-Object System.DirectoryServices.AccountManagement.PrincipalContext([System.DirectoryServices.AccountManagement.ContextType]::Machine)
-  $plain = Plain $password
+  $plain = Plain $Password
   try { $valid = $machine.ValidateCredentials($env:USERNAME, $plain) } finally { $plain = $null; $machine.Dispose() }
   if (-not $valid) { Fail "That password does not sign $env:USERNAME in. An account with no password needs one first (Settings, Accounts, Sign-in options, Password); then run this again." }
 }
@@ -198,20 +204,24 @@ Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Princi
 Say "The runner '$name' starts whenever $env:USERNAME signs in (task '$task')."
 
 if ($AutoLogon) {
-  # Windows Hello's "only Hello sign-in" setting turns automatic sign-in off.
+  # Windows Hello's "only Hello sign-in" setting turns automatic sign-in off, and so does a count of sign-ins left
+  # from an answer file once it reaches 0. A password that expires (after 42 days by default) would too.
   Set-Value 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device' 'DevicePasswordLessBuildVersion' 0
+  Remove-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name AutoLogonCount -ErrorAction SilentlyContinue
+  Set-LocalUser -Name $env:USERNAME -PasswordNeverExpires $true
   $tool = Join-Path $downloads 'Autologon64.exe'
   Invoke-WebRequest -Uri 'https://live.sysinternals.com/Autologon64.exe' -OutFile $tool -UseBasicParsing -Headers $agent
   Assert-Signed $tool 'O=Microsoft Corporation'
-  $plain = Plain $password
+  $plain = Plain $Password
   try {
     & $tool /accepteula $env:USERNAME $env:USERDOMAIN $plain | Out-Null
   } finally {
     $plain = $null
-    $password = $null
+    $Password = $null
   }
   Remove-Item -LiteralPath $downloads -Recurse -Force -ErrorAction SilentlyContinue
   Say "This machine signs in as $env:USERNAME when it starts, and the runner starts with it."
+  if ($NoRestart) { Say 'Done; restart the machine to finish.'; exit 0 }
   Say 'Restarting in 20 seconds to finish (Ctrl+C to restart later yourself)...'
   Start-Sleep -Seconds 20
   Restart-Computer -Force

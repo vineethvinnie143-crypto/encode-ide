@@ -23,7 +23,39 @@ covers all of `ci.yml` (artifact storage and the Windows build), `desktop.yml` a
   Actions, Variables) named `ENCODE_WINDOWS_RUNNER`, with the value `"windows-latest"`, quotes included.
 - **Back to the VM:** delete that variable.
 
-## Setting it up (about 45 minutes, most of it Windows installing)
+## Setting it up with nothing to click (about 40 minutes)
+
+This is how the VM on Vineeth's PC is made. It needs Hyper-V on (step 1 below, and virtualization on in the PC's
+firmware), the Windows 11 Enterprise evaluation ISO (step 2), both scripts in one folder, and a registration token
+(step 7). Then, in PowerShell as administrator:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\new-runner-vm.ps1 -IsoPath <the ISO> -Unattended -Token <token> -Processors 6 -DiskGB 80
+```
+
+What it does, start to finish:
+
+1. **Makes the VM** as in step 4 below.
+2. **Installs Windows from an answer file**, on a second disc made with Windows' own image mastering service:
+   - the disk is wiped and partitioned for UEFI, and the ISO's first image goes on it;
+   - setup asks nothing, and the account is a local administrator `ci`;
+   - the account's generated password is kept only for the PC's account, encrypted by Windows, in
+     `%LOCALAPPDATA%\eNCode-CI` (`-ShowPassword` prints it).
+3. **Starts the disc without a key press.** The VM's own keyboard presses one at the disc's prompt. A disk still empty
+   after 6 minutes means the disc never started, and the script tries again, up to 3 times.
+4. **Waits for Windows.** It waits until PowerShell Direct reaches the account and its desktop is up.
+5. **Runs the setup inside the VM.** It copies `windows-runner.ps1` in and runs it through PowerShell Direct with the
+   token and password, so nothing is asked. PowerShell Direct goes over Hyper-V's own channel; it needs no network and
+   no sign-in inside the VM. The answer file sets `LocalAccountTokenFilterPolicy` so that this session has
+   administrator rights.
+6. **Restarts the VM from its disk.** The discs are removed, the VM restarts from its disk, and the script checks that
+   the runner is running on the VM's desktop.
+
+Vineeth approved the settings this makes inside the VM on 2026-10-23: automatic sign-in, a password that never
+expires, Smart App Control off, Defender skipping `C:\actions-runner`, and administrator rights through PowerShell
+Direct. None of them touch the PC's own account.
+
+## Setting it up by hand (about 45 minutes, most of it Windows installing)
 
 This needs Windows Pro, Enterprise or Education on the PC for Hyper-V. Settings, System, About shows the edition. On
 Windows Home, see below.
