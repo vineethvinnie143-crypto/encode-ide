@@ -402,6 +402,9 @@ importers:
 
   packages/tools:
     dependencies:
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions

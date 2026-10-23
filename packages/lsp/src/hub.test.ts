@@ -204,22 +204,24 @@ describe('the language servers of a folder', () => {
       { id: 4, title: 'Not now', kind: 'refactor', disabled: 'It is Tuesday' },
       { id: 5, title: 'Run a bare command', command: true },
     ])
-    const none = async () => ({ applied: false })
-    const fix = await servers.actionEdit(a, 1, none)
+    const fix = await servers.actionEdit(a, 1)
     assert.ok('plan' in fix)
     assert.deepEqual(fix.plan.changes, [{ kind: 'edit', file: a, before: 'line one\nan ERROR here\n', after: 'line one\nan OK here\n', edits: 1 }])
-    const resolved = await servers.actionEdit(a, 3, none)
+    const resolved = await servers.actionEdit(a, 3)
     assert.ok('plan' in resolved && resolved.plan.changes[0].kind === 'edit' && resolved.plan.changes[0].after === '// note\nline one\nan ERROR here\n')
-    await assert.rejects(servers.actionEdit(a, 4, none), /not available: It is Tuesday/)
-    await assert.rejects(servers.actionEdit(a, 9, none), /There is no action 9; the list has 5\./)
+    await assert.rejects(servers.actionEdit(a, 4), /not available: It is Tuesday/)
+    await assert.rejects(servers.actionEdit(a, 9), /There is no action 9; the list has 5\./)
+    assert.deepEqual(await servers.actionEdit(a, 2), { command: 'Fix all' })
     const plans: EditPlan[] = []
-    const ran = await servers.actionEdit(a, 2, async (plan) => {
+    const ran = await servers.runActionCommand(a, 2, async (plan) => {
       plans.push(plan)
       return { applied: true }
     })
-    assert.deepEqual(ran, { ran: true, applied: 1 })
+    assert.deepEqual(ran, { applied: 1, refused: [] })
     assert.ok(plans[0].changes[0].kind === 'edit' && plans[0].changes[0].after === 'line one\nan OK here\n')
-    await assert.rejects(servers.actionEdit(path.join(dir, 'other.fk'), 1, none), /List the actions for this file again/)
+    const refused = await servers.runActionCommand(a, 5, async () => ({ applied: false, failureReason: 'Only a.fk may change.' }))
+    assert.deepEqual(refused, { applied: 0, refused: ['Only a.fk may change.'] })
+    await assert.rejects(servers.actionEdit(path.join(dir, 'other.fk'), 1), /List the actions for this file again/)
     await servers.dispose()
   })
 

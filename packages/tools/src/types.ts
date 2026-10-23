@@ -13,6 +13,7 @@
  *   - `ShellCommandAssessor`: judges a shell line (eNCode's own command rules).
  *   - `ToolRegistry.register`: tools from outside (MCP), with their own schema.
  */
+import type { LanguageServers } from '@encode/lsp'
 import type { ToolDefinition, ToolResultContent } from '@encode/providers'
 import type { DesktopHandle } from './computer/state'
 
@@ -470,6 +471,31 @@ export interface Worktrees {
   ): Promise<{ ok: true; left: WorktreeInfo; removed: boolean } | { ok: false; reason: string; work?: WorktreeWork }>
 }
 
+/**
+ * The project's language servers (@encode/lsp), shared with the editor: lookups and diagnostics for LSP, edit plans
+ * for LSPEdit, and what the loop tells them of the files the tools change.
+ */
+export type CodeIntelligence = Pick<
+  LanguageServers,
+  | 'covers'
+  | 'known'
+  | 'prefetch'
+  | 'changed'
+  | 'diagnostics'
+  | 'definition'
+  | 'typeDefinition'
+  | 'implementation'
+  | 'references'
+  | 'hover'
+  | 'documentSymbols'
+  | 'workspaceSymbols'
+  | 'calls'
+  | 'rename'
+  | 'codeActions'
+  | 'actionEdit'
+  | 'runActionCommand'
+>
+
 export interface Skills {
   list(): SkillSummary[]
   /** The skill's instructions, with its base directory, or undefined. */
@@ -512,6 +538,8 @@ export interface ToolContext {
   readonly background?: BackgroundWork
   /** EnterWorktree and ExitWorktree; absent for subagents and outside a git repository. */
   readonly worktrees?: Worktrees
+  /** LSP and LSPEdit; absent where no language servers may run (a folder not trusted, servers turned off). */
+  readonly code?: CodeIntelligence
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.

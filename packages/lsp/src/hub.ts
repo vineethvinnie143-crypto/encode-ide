@@ -68,7 +68,10 @@ export type PlannedChange =
   | {
       kind: 'edit'
       file: string
-      /** The text the server computed the edits for: the file must still read this when the plan is applied. */
+      /**
+       * The text the server computed the edits for: the file must still read this when the plan is applied (after the
+       * plan's earlier changes, when it has several for one file).
+       */
       before: string
       after: string
       edits: number
@@ -667,72 +670,101 @@ export class LanguageServers {
     }))
   }
 
-  /**
-   * The edit of an action `codeActions` listed. An action that only runs a command of the server's is run with
-   * `apply`, which gets the edits the server asks for while it runs (and only then).
-   */
-  async actionEdit(file: string, id: number, apply: (plan: EditPlan) => Promise<{ applied: boolean; failureReason?: string }>, signal?: AbortSignal): Promise<{ plan: EditPlan } | { ran: true; applied: number }> {
+  private listed(file: string, id: number): { action: CodeAction; server: string } {
     const listed = this.actions
     if (!listed || listed.file !== this.key(file) || Date.now() - listed.at > ACTIONS_TTL_MS) throw new Error('List the actions for this file again (codeActions); the list from before is gone.')
-    const chosen = listed.items[id - 1]
-    if (!chosen) throw new Error(`There is no action ${id}; the list has ${listed.items.length}.`)
-    if (chosen.disabled) throw new Error(`That action is not available: ${chosen.disabled.reason}`)
+    const action = listed.items[id - 1]
+    if (!action) throw new Error(`There is no action ${id}; the list has ${listed.items.length}.`)
+    if (action.disabled) throw new Error(`That action is not available: ${action.disabled.reason}`)
+    return { action, server: listed.server }
+  }
+
+  /**
+   * What an action `codeActions` listed would change, without changing anything: its edit (resolved first when the
+   * server sends it later), or the command it runs instead, whose edits are known only once it runs.
+   */
+  async actionEdit(file: string, id: number, signal?: AbortSignal): Promise<{ plan: EditPlan } | { command: string }> {
+    const { action: chosen, server } = this.listed(file, id)
     const opened = await this.open(file, signal)
     if ('reason' in opened) throw new Error(opened.reason)
     const { client } = opened
     let action: CodeAction = chosen
     const provider = client.capabilities.codeActionProvider
-    if (!action.edit && !action.command && typeof provider === 'object' && provider?.resolveProvider) {
-      const resolved = readCodeAction(await client.request('codeAction/resolve', chosen, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) }))
+    // An action that comes without its edit gets it from resolve: one with data for the server, or one with nothing else.
+    if (!action.edit && (action.data !== undefined || !action.command) && typeof provider === 'object' && provider?.resolveProvider) {
+      const resolved = readCodeAction(await client.request('codeAction/resolve', chosen, { timeoutMs: REQUEST_MS, ...(signal ? { signal } : {}) }).catch((error: unknown) => {
+        if (action.command) return null
+        throw new Error(`${client.name} could not prepare that action: ${lowerFirst(error instanceof Error ? error.message : String(error))}`)
+      }))
       if (resolved) action = resolved
+      // What was resolved is what runs.
+      if (this.actions?.items[id - 1] === chosen) this.actions.items[id - 1] = action
     }
-    if (action.edit) return { plan: await this.plan(action.edit, client, listed.server) }
-    if (!action.command) throw new Error('That action carries no change.')
+    if (action.edit) return { plan: await this.plan(action.edit, client, server) }
+    if (action.command) return { command: action.command.title || action.command.command }
+    throw new Error('That action carries no change.')
+  }
+
+  /**
+   * Runs the command of an action that has no edit of its own. The edits the server asks for while it runs go to
+   * `apply`, each as a plan; nothing the server asks for after it ends is applied.
+   */
+  async runActionCommand(file: string, id: number, apply: (plan: EditPlan) => Promise<{ applied: boolean; failureReason?: string }>, signal?: AbortSignal): Promise<{ applied: number; refused: string[] }> {
+    const { action, server } = this.listed(file, id)
+    if (!action.command) throw new Error('That action has no command to run.')
+    const opened = await this.open(file, signal)
+    if ('reason' in opened) throw new Error(opened.reason)
+    const { client } = opened
     let applied = 0
+    const refused: string[] = []
     await client.executeCommand(
       action.command,
       async (edit) => {
         let plan: EditPlan
         try {
-          plan = await this.plan(edit, client, listed.server)
+          plan = await this.plan(edit, client, server)
         } catch (error) {
-          return { applied: false, failureReason: error instanceof Error ? error.message : String(error) }
+          refused.push(error instanceof Error ? error.message : String(error))
+          return { applied: false, failureReason: refused.at(-1) }
         }
         const result = await apply(plan)
         if (result.applied) applied++
+        else if (result.failureReason) refused.push(result.failureReason)
         return result
       },
       { timeoutMs: 60_000, ...(signal ? { signal } : {}) },
     )
-    return { ran: true, applied }
+    return { applied, refused }
   }
 
   /**
-   * The changes an edit makes, each file's text before and after: the text the server saw when it has the document
-   * open, else the file on disk, which is what a server reads for a document it does not have open.
+   * The changes an edit makes, in order, each text edit with its file's text before and after: what the earlier
+   * changes of the edit left, else the text the server saw when it has the document open, else the file on disk, which
+   * is what a server reads for a document it does not have open.
    */
   private async plan(edit: WorkspaceEdit, client: LanguageClient, server: string): Promise<EditPlan> {
     const changes: PlannedChange[] = []
     const files: string[] = []
+    /** What the edit has made of a path so far: its text, or null once it is gone. */
+    const state = new Map<string, string | null>()
     let bytes = 0
     const fileOf = (uri: string): string => {
       const file = uriToPath(uri, this.platform)
       if (!file) throw new Error(`The edit names ${uri.slice(0, 200)}, which is not a file eNCode can change; nothing was changed.`)
       return file
     }
+    const textOf = async (file: string): Promise<string | null> => {
+      const key = this.key(file)
+      if (state.has(key)) return state.get(key)!
+      return client.document(file)?.text ?? (await this.read(file))
+    }
     const textEdit = async (file: string, edits: TextEdit[]) => {
-      // Two entries for one file are one change, the second applied to what the first made.
-      const earlier = changes.find((change): change is Extract<PlannedChange, { kind: 'edit' }> => change.kind === 'edit' && this.key(change.file) === this.key(file))
-      const before = earlier?.after ?? client.document(file)?.text ?? (await this.read(file))
-      if (before === null) throw new Error(`The edit changes ${path.basename(file)}, which eNCode cannot read as text; nothing was changed.`)
+      const before = await textOf(file)
+      if (before === null) throw new Error(`The edit changes ${path.basename(file)}, which is missing or not a text file eNCode can read; nothing was changed.`)
       const after = applyTextEdits(before, edits)
-      bytes += (earlier ? 0 : before.length) + after.length
+      bytes += before.length + after.length
       if (bytes > MAX_PLAN_BYTES) throw new Error('The edit is too large to check and apply safely; nothing was changed.')
-      if (earlier) {
-        earlier.after = after
-        earlier.edits += edits.length
-        return
-      }
+      state.set(this.key(file), after)
       changes.push({ kind: 'edit', file, before, after, edits: edits.length })
       files.push(file)
     }
@@ -742,19 +774,27 @@ export class LanguageServers {
           const file = fileOf(item.textDocument.uri)
           const open = client.document(file)
           // An edit made for another version of the document than the one open would land in the wrong places.
-          if (open && item.textDocument.version !== null && item.textDocument.version !== open.version) throw new Error(`The edit was made for an older version of ${path.basename(file)}; nothing was changed. Ask again.`)
+          if (open && !state.has(this.key(file)) && item.textDocument.version !== null && item.textDocument.version !== open.version) throw new Error(`The edit was made for an older version of ${path.basename(file)}; nothing was changed. Ask again.`)
           await textEdit(file, item.edits)
         } else if (item.kind === 'create') {
           const file = fileOf(item.uri)
-          changes.push({ kind: 'create', file, overwrite: Boolean(item.options?.overwrite), ignoreIfExists: Boolean(item.options?.ignoreIfExists) })
+          const overwrite = Boolean(item.options?.overwrite)
+          const ignoreIfExists = Boolean(item.options?.ignoreIfExists)
+          const existing = await textOf(file).catch(() => null)
+          if (existing === null || overwrite) state.set(this.key(file), '')
+          changes.push({ kind: 'create', file, overwrite, ignoreIfExists })
           files.push(file)
         } else if (item.kind === 'rename') {
           const from = fileOf(item.oldUri)
           const to = fileOf(item.newUri)
+          const moved = await textOf(from)
+          if (moved !== null) state.set(this.key(to), moved)
+          state.set(this.key(from), null)
           changes.push({ kind: 'rename', from, to, overwrite: Boolean(item.options?.overwrite), ignoreIfExists: Boolean(item.options?.ignoreIfExists) })
           files.push(from, to)
         } else {
           const file = fileOf(item.uri)
+          state.set(this.key(file), null)
           changes.push({ kind: 'delete', file, recursive: Boolean(item.options?.recursive), ignoreIfNotExists: Boolean(item.options?.ignoreIfNotExists) })
           files.push(file)
         }

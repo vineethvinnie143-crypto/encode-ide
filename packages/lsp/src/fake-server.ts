@@ -243,7 +243,19 @@ async function handle(message) {
         byUri.set(item.uri, entry)
       }
       if (mode === 'stale') for (const entry of byUri.values()) if (entry.textDocument.version !== null) entry.textDocument.version -= 1
-      return reply(id, { documentChanges: [...byUri.values()] })
+      const changes = [...byUri.values()]
+      if (mode === 'move') {
+        // The file is renamed after the symbol, and an index that names it is made.
+        const uri = params.textDocument.uri
+        const moved = uri.replace(/[^/]+$/, params.newName + '.fk')
+        const index = uri.replace(/[^/]+$/, 'index.fk')
+        changes.push({ kind: 'rename', oldUri: uri, newUri: moved })
+        changes.push({ textDocument: { uri: moved, version: null }, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: '-- moved\n' }] })
+        changes.push({ kind: 'create', uri: index, options: { ignoreIfExists: true } })
+        changes.push({ textDocument: { uri: index, version: null }, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'use ' + params.newName + '\n' }] })
+        changes.push({ kind: 'delete', uri: uri.replace(/[^/]+$/, 'old.fk'), options: { ignoreIfNotExists: true } })
+      }
+      return reply(id, { documentChanges: changes })
     }
     case 'textDocument/codeAction': {
       const uri = params.textDocument.uri

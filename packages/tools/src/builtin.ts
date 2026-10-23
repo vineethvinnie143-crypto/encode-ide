@@ -20,6 +20,7 @@ import {
   todoWriteTool,
   updateGoalTool,
 } from './interaction'
+import { lspEditTool, lspTool } from './lsp'
 import { notebookEditTool } from './notebook'
 import { ToolRegistry } from './registry'
 import { globTool, grepTool } from './search'
@@ -48,6 +49,8 @@ export interface BuiltinToolOptions {
   background?: boolean
   /** EnterWorktree and ExitWorktree, for a session's main agent in a git repository. Default false. */
   worktrees?: boolean
+  /** LSP and LSPEdit, for a session whose folder may run language servers. Default false. */
+  code?: boolean
   /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
   sandbox?: BashSandbox
   /** Only these tools, by name. */
@@ -76,6 +79,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
     if (options.subagentTypes?.length) tools.push(sendMessageTool as Tool)
   }
   if (options.worktrees) tools.push(enterWorktreeTool as Tool, exitWorktreeTool as Tool)
+  if (options.code) tools.push(lspTool as Tool, lspEditTool as Tool)
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
   if (options.goals ?? true) tools.push(createGoalTool as Tool, updateGoalTool as Tool, getGoalTool)
   if (options.completion) tools.push(attemptCompletionTool as Tool)
@@ -90,7 +94,7 @@ export function createToolRegistry(options: BuiltinToolOptions, extra: readonly 
 }
 
 /** What the built-in subagent types may use. */
-export const READ_ONLY_TOOL_NAMES = ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch'] as const
+export const READ_ONLY_TOOL_NAMES = ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'LSP', 'WebFetch', 'WebSearch'] as const
 
 export const BUILTIN_SUBAGENT_TYPES: readonly SubagentType[] = [
   {
