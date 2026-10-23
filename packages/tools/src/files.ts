@@ -41,8 +41,9 @@ export function fail(content: string): ToolOutcome {
   return { ok: false, content }
 }
 
+/** Paths are resolved and shown from where the agent works: the root, or a worktree it entered. */
 function where(ctx: ToolContext) {
-  return { root: ctx.root, home: ctx.home, platform: ctx.platform }
+  return { root: ctx.cwd ?? ctx.root, home: ctx.home, platform: ctx.platform }
 }
 
 export function filePath(input: { file_path?: unknown }, ctx: ToolContext): string {

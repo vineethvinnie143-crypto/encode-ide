@@ -25,6 +25,7 @@ import { ToolRegistry } from './registry'
 import { globTool, grepTool } from './search'
 import type { ShellDialect, SkillSummary, SubagentType, Tool } from './types'
 import { webFetchTool, webSearchTool } from './web/tools'
+import { enterWorktreeTool, exitWorktreeTool } from './worktree'
 
 export interface BuiltinToolOptions {
   dialect: ShellDialect
@@ -45,6 +46,8 @@ export interface BuiltinToolOptions {
   computer?: boolean
   /** Monitor, ScheduleWakeup and SendMessage (with Task), for a session's main agent: their notices need a session. Default false. */
   background?: boolean
+  /** EnterWorktree and ExitWorktree, for a session's main agent in a git repository. Default false. */
+  worktrees?: boolean
   /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
   sandbox?: BashSandbox
   /** Only these tools, by name. */
@@ -72,6 +75,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
     tools.push(monitorTool as Tool, scheduleWakeupTool as Tool)
     if (options.subagentTypes?.length) tools.push(sendMessageTool as Tool)
   }
+  if (options.worktrees) tools.push(enterWorktreeTool as Tool, exitWorktreeTool as Tool)
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
   if (options.goals ?? true) tools.push(createGoalTool as Tool, updateGoalTool as Tool, getGoalTool)
   if (options.completion) tools.push(attemptCompletionTool as Tool)

@@ -3,7 +3,8 @@
  * shell (Git Bash or PowerShell), never sourcing a profile, with stdin
  * closed. The working directory carries over from one command to the next;
  * variables do not. A command that leaves the workspace has its directory
- * reset to the workspace root, and says so.
+ * reset to the workspace root, or to the worktree the agent works in, and says
+ * so.
  *
  * The command reaches the shell in a private script file, not on the command
  * line, so no layer of command-line quoting can change what runs. A sandbox
@@ -178,8 +179,11 @@ export interface ManagedShell extends AgentShell {
   readonly removedEnv: readonly string[]
   /** Starts a command without waiting for it: background jobs use this. */
   start(command: string, options: { cwd?: string; unsandboxed?: boolean; onOutput?(text: string): void }): Promise<RunningCommand>
-  /** Moves the working directory, if it is a directory inside the workspace. */
-  setCwd(dir: string): Promise<boolean>
+  /**
+   * Moves the working directory, if it is a directory inside the workspace. `base`: it is also where the directory goes
+   * back to when a command leaves the workspace (a worktree the agent works in), until another base is set.
+   */
+  setCwd(dir: string, options?: { base?: boolean }): Promise<boolean>
   dispose(): Promise<void>
 }
 
@@ -204,6 +208,8 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
   const defaultTimeout = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxTimeout = options.maxTimeoutMs ?? MAX_TIMEOUT_MS
   let cwd = root
+  /** Where a command that leaves the workspace is put back: the root, or the worktree the agent works in. */
+  let base = root
   let counter = 0
   /** One scratch folder for each place scripts are kept: the system's temp folder, and the sandbox's. */
   const scratch = new Map<string, Promise<string>>()
@@ -357,13 +363,14 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     if (ended && ended !== cwd && (await isDirectory(ended))) {
       if (await inside(ended)) cwd = ended
       else {
-        cwd = root
-        notice = `Shell cwd was reset to ${root}`
+        cwd = base
+        notice = `Shell cwd was reset to ${base}`
       }
     }
     if (!(await isDirectory(cwd))) {
-      cwd = root
-      notice = `Shell cwd was reset to ${root}`
+      if (!(await isDirectory(base))) base = root
+      cwd = base
+      notice = `Shell cwd was reset to ${base}`
     }
 
     return {
@@ -384,10 +391,11 @@ export function createAgentShell(options: AgentShellOptions): ManagedShell {
     state: (): ShellState => ({ cwd, env: { ...env }, dialect: program.dialect, ...(options.sandbox ? { sandbox: options.sandbox(program.file) } : {}) }),
     run,
     start,
-    async setCwd(dir) {
+    async setCwd(dir, options) {
       const target = pathApi.resolve(root, dir)
       if (!(await isDirectory(target)) || !(await inside(target))) return false
       cwd = target
+      if (options?.base) base = target
       return true
     },
     async dispose() {

@@ -441,6 +441,35 @@ export interface BackgroundWork {
   cancelWake(): boolean
 }
 
+/** A git worktree the agent works in, inside the project at `.encode-worktrees/<name>`, on a branch of its own. */
+export interface WorktreeInfo {
+  name: string
+  /** The worktree's folder, absolute. */
+  path: string
+  branch: string
+  /** The commit it started from. */
+  base: string
+  /** The branch the project was on when it started, when it was on one. */
+  from?: string
+}
+
+/** What keeps a worktree from being removed: changes not committed, and commits on its branch only. */
+export interface WorktreeWork {
+  changed: string[]
+  commits: number
+}
+
+/** EnterWorktree and ExitWorktree. The main agent's only: a subagent works where the main agent works. */
+export interface Worktrees {
+  current(): WorktreeInfo | null
+  enter(request: { name?: string }, signal: AbortSignal): Promise<{ ok: true; worktree: WorktreeInfo } | { ok: false; reason: string }>
+  /** `remove` refuses when there is work in it, unless `discard`. */
+  exit(
+    request: { action: 'keep' | 'remove'; discard: boolean },
+    signal: AbortSignal,
+  ): Promise<{ ok: true; left: WorktreeInfo; removed: boolean } | { ok: false; reason: string; work?: WorktreeWork }>
+}
+
 export interface Skills {
   list(): SkillSummary[]
   /** The skill's instructions, with its base directory, or undefined. */
@@ -453,6 +482,11 @@ export interface Skills {
 export interface ToolContext {
   /** The workspace root, as a real path. */
   readonly root: string
+  /**
+   * Where the agent works: the root, or the worktree it entered (inside the root). Relative paths and searches start
+   * here. Absent means the root.
+   */
+  readonly cwd?: string
   readonly home: string
   readonly platform: NodeJS.Platform
   readonly sessionId: string
@@ -476,6 +510,8 @@ export interface ToolContext {
   readonly goals?: Goals
   /** Monitor and ScheduleWakeup; absent for subagents. */
   readonly background?: BackgroundWork
+  /** EnterWorktree and ExitWorktree; absent for subagents and outside a git repository. */
+  readonly worktrees?: Worktrees
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.
