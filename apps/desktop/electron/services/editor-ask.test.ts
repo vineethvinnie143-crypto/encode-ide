@@ -94,6 +94,11 @@ describe('a question of the editor to the language servers', () => {
     for (const value of refused) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value)?.slice(0, 120))
   })
 
+  it('takes the question of how a file folds, by its path alone', () => {
+    assert.deepEqual(readEditorAsk({ kind: 'folding', path: 'src\\a.ts', ranges: [{}] }, relative), { kind: 'folding', path: 'src/a.ts' })
+    for (const value of [{ kind: 'folding', path: '' }, { kind: 'folding', path: '../outside.ts' }, { kind: 'folding' }, { kind: 'folding', path: 5 }]) assert.equal(readEditorAsk(value, relative), null, JSON.stringify(value))
+  })
+
   it('takes a change with its file and the open files made the folder\'s own, and refuses anything else', () => {
     assert.deepEqual(readEditorChange({ kind: 'rename', path: 'src\\a.ts', line: 1, character: 2, newName: 'next', preview: false, open: ['src/a.ts', '../outside.ts', 7, 'b.ts'], extra: 1 }, relative), {
       kind: 'rename',

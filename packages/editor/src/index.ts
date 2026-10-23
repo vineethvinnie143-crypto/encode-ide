@@ -2,7 +2,23 @@ export { EditorState, Transaction, redo, undo, type EditorConfig, type EditorSta
 export { EditorSelection, SelectionRange } from './selection'
 export { History, GROUP_DELAY_MS, type HistoryGroup } from './history'
 export { T, TOKEN_NAMES, TokenBuilder, plainText, type Language, type LineTokens, type TokenName, type Tokenizer } from './language'
-export { Highlighter, MAX_TOKENIZED_LINE, sliceTokens, type HighlightedLine } from './highlight'
+export { Highlighter, MAX_TOKENIZED_LINE, sliceTokens, type HighlightedLine, type LineBrackets } from './highlight'
+export {
+  MAX_FOLD_RANGES,
+  allFoldRanges,
+  enclosingIndentRanges,
+  foldDepths,
+  foldRangeAt,
+  isRegionEnd,
+  isRegionStart,
+  lineIndent,
+  mapFoldRanges,
+  mapFolded,
+  normalizeFoldRanges,
+  rangeStartingAt,
+  rangesContaining,
+  type FoldRange,
+} from './folding'
 export { bracketAt, findMatching, type BracketPair } from './brackets'
 export {
   compileSearch,

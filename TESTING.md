@@ -371,6 +371,18 @@ In the editor itself (a TypeScript or Python file in a trusted folder is the qui
 - **Shift+Alt+H** on a function (or right-click → Show call hierarchy) lists who calls it between the lines; the
   **Callers / Calls** switch shows what it calls instead. Right or the arrow opens the next level, Enter goes to the
   call, Esc closes it.
+- **Folding**: point at the gutter and click the chevron after a line number to fold its block; the `⋯` after a
+  folded line opens it. In the editor **Ctrl+Shift+[** folds the block the cursor is in and **Ctrl+Shift+]** opens it
+  (outside the editor these keys still switch the side panel's tabs); **Ctrl+Alt+[** and **Ctrl+Alt+]** fold and open
+  everything. The palette has the rest: Fold level 1 to 7, Fold imports, Fold all block comments, Fold all regions.
+  With a language server the file folds as the language does (imports, comments, `#region`); without one it folds
+  by indentation. Typing inside a folded block, searching into it or moving the cursor there opens it. What you
+  folded stays folded when you switch files and come back.
+- **Sticky scroll**: as you scroll through a long class, its first line and the method you are in stay pinned at the
+  top; click one to go there. **Brackets** are coloured by how deeply they nest, and a bracket with no partner shows
+  in red. The **minimap** beside the text shows the whole file with errors, search matches and changes marked;
+  click or drag it to scroll (it hides when the editor is narrow). Each can be turned off in the **View** menu (Turn
+  folding off, Hide sticky scroll, Turn bracket colours off, Hide minimap).
 
 What is most useful to hear: marks that stay after the error is fixed, a server shown as running that does nothing, a
 language that is not found although it is installed, and the agent finishing with errors it made. In the editor:
@@ -379,7 +391,9 @@ something other than you expected while a list or a snippet was open, and a jump
 renames and fixes: a change that missed a place or touched the wrong file, an Undo that did not put everything back,
 and formatting that moved your cursor or fought with what you typed. For symbols: breadcrumbs that lag behind the
 cursor, an outline that misses something or shows it in the wrong place, a folder search that finds nothing a file
-plainly has, and a call hierarchy that lists the wrong callers.
+plainly has, and a call hierarchy that lists the wrong callers. For folding: a block that folds the wrong lines or
+will not open, a cursor stuck inside a folded block, folds lost when you switch files, pinned lines that show the
+wrong block, brackets in the wrong colour, and a minimap that is out of step with the text.
 
 ## Worktrees
 
@@ -448,5 +462,5 @@ Updating means installing the next build over the last one: everything above sta
   password are refused.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
-- Language servers: inlay hints and installing a server with one click are not in the editor yet; they come with the
-  next builds.
+- Language servers: inlay hints, semantic colouring and installing a server with one click are not in the editor
+  yet; they come with the next builds. Folds are kept while a file is open, not after you close it or the app.

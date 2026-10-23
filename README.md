@@ -107,7 +107,9 @@ primary platform; the code stays cross-platform.
   offer the servers' fixes and refactorings; imports are organized and files formatted (on save and as you type, if
   you want); a Problems panel and F8 go through every problem. Breadcrumbs and an outline show where the cursor is
   among the file's symbols; Go to symbol finds one in the file or the whole folder, and a call hierarchy follows
-  callers and calls a level at a time. eNCode talks to them through its own client and
+  callers and calls a level at a time. Blocks fold as the server says (imports, comments, regions) or by indentation
+  without one, the blocks you are in stay pinned above the text as you scroll, brackets are coloured by depth, and a
+  minimap shows the whole file. eNCode talks to them through its own client and
   carries none of them. The editor can also show a change against a
   baseline hunk by hunk with Keep and Undo; that review is wired to the agent's edits as the
   agent core lands.
@@ -290,11 +292,13 @@ The main ones as shipped:
 | Add a cursor above or below | `Ctrl+Alt+Up`/`Down`, or `Alt`+click (in the editor) |
 | Delete the line | `Ctrl+Shift+K` (in the editor) |
 | Callers of a function, what it calls | `Shift+Alt+H` (in the editor) |
+| Fold / unfold the block, fold / unfold everything | `Ctrl+Shift+[` / `Ctrl+Shift+]`, `Ctrl+Alt+[` / `Ctrl+Alt+]` (in the editor) |
 | Move through the breadcrumbs | `Ctrl+Shift+.` |
 | Leave the editor with the keyboard | `Esc`, then `Tab` (a plain `Tab` indents) |
 
 The editor takes its own keys while it has focus, so `Ctrl+/`, `Ctrl+[` and `Ctrl+]` comment
-and indent there instead of listing the shortcuts and moving between sessions.
+and indent there instead of listing the shortcuts and moving between sessions, and `Ctrl+Shift+[`
+and `Ctrl+Shift+]` fold instead of moving between the side panel's tabs.
 
 Opening a folder, or a session from another project, is refused while any session runs or
 waits for you: the agent works in the open folder, so switching would point its edits at the

@@ -107,6 +107,28 @@ function functions(uri, text) {
   return out
 }
 
+/** Folding: each brace block, ending on its closing brace, and each block comment over more than one line. */
+function foldingRanges(text) {
+  const out = []
+  const open = []
+  let comment = -1
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (comment < 0 && line.includes('/*') && !line.includes('*/')) comment = index
+    else if (comment >= 0 && line.includes('*/')) {
+      if (index > comment) out.push({ startLine: comment, endLine: index, kind: 'comment' })
+      comment = -1
+    }
+    for (let at = 0; at < line.length; at++) {
+      if (line[at] === '{') open.push(index)
+      else if (line[at] === '}' && open.length) {
+        const start = open.pop()
+        if (index > start) out.push({ startLine: start, endLine: index, endCharacter: at + 1 })
+      }
+    }
+  })
+  return out
+}
+
 /** Formatting: leading tabs become spaces (when spaces are asked for), and the spaces at a line's end go. */
 function formatEdits(text, options, range) {
   const edits = []
@@ -129,6 +151,7 @@ const capabilities = {
   documentSymbolProvider: true,
   workspaceSymbolProvider: true,
   callHierarchyProvider: true,
+  foldingRangeProvider: true,
   renameProvider: { prepareProvider: true },
   codeActionProvider: { resolveProvider: true },
   executeCommandProvider: { commands: ['fake.fixAll'] },
@@ -238,6 +261,10 @@ async function handle(message) {
         return reply(id, [...flat.reverse(), { name: 'elsewhere', kind: 12, location: { uri: 'file:///elsewhere.fk', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } } }])
       }
       return reply(id, functions(params.textDocument.uri, doc.text).map((fn) => ({ name: fn.name, kind: 12, range: { start: { line: fn.line, character: 0 }, end: { line: fn.line + 1, character: 0 } }, selectionRange: fn.range, children: [{ name: 'inner', kind: 13, range: fn.range, selectionRange: fn.range }] })))
+    }
+    case 'textDocument/foldingRange': {
+      const doc = docs.get(params.textDocument.uri)
+      return reply(id, doc ? foldingRanges(doc.text) : null)
     }
     case 'workspace/symbol': {
       const out = []

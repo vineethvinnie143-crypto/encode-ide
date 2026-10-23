@@ -127,11 +127,11 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190 }
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
-const CODE_NAMES = { '.': 'Period' }
+const CODE_NAMES = { '.': 'Period', '[': 'BracketLeft', ']': 'BracketRight' }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
 async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
@@ -1496,6 +1496,7 @@ async function runLanguageServerChecks() {
   await runEditorAssistChecks(markerLines)
   await runEditorChangeChecks(markerLines)
   await runEditorSymbolChecks(markerLines)
+  await runEditorStructureChecks(markerLines)
 
   // Settings > Language servers: the server runs, found in the project, with the open file.
   await openSettings('Language servers')
@@ -2192,6 +2193,186 @@ async function runEditorSymbolChecks(markerLines) {
   await evaluate("window.eNCode.workspace.delete('src/lsp-symbols.ts').catch(() => null)")
   await evaluate("window.eNCode.workspace.delete('src/lsp-symbols-use.ts').catch(() => null)")
   console.log('[smoke] editor symbols: ok')
+}
+
+/** The line numbers the code editor shows, top to bottom: folded lines are not among them. */
+const SHOWN_LINES = `[...document.querySelectorAll('.code-editor > .enc-editor .enc-gutter-num')]
+  .filter((node) => node.offsetParent !== null && node.textContent)
+  .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+  .map((node) => Number(node.textContent))`
+/** The lines the code editor pins above its text, by number. */
+const STICKY_LINES = "[...document.querySelectorAll('.code-editor .enc-sticky:not([hidden]) .enc-sticky-num')].map((node) => Number(node.textContent))"
+
+/** Runs a command from the palette by the title it shows now ("Hide minimap"). */
+async function runFromPalette(title) {
+  await pressKey('k', { ctrl: true })
+  await waitFor("!!document.querySelector('.palette-input')", 4000, 'the palette')
+  await typeInto('.palette-input', title)
+  await waitFor(`(document.querySelector('.palette-row.is-active .palette-title')?.textContent ?? '') === ${JSON.stringify(title)}`, 4000, `${title} in the palette`)
+  await paletteKey('Enter')
+  await waitFor("!document.querySelector('.palette-input')", 4000, 'the palette closes')
+}
+
+/**
+ * The shape of the code in the editor, against the test server: the server's fold ranges (a run of imports, which
+ * indentation cannot find), a block folded from its chevron and from the keys with the cursor stepping out of it, the
+ * folds kept when another file is shown and back, sticky scroll pinning the class and method the top of the view is
+ * in (a click on one goes there), brackets coloured by depth, the minimap (a click scrolls there), and each turned
+ * off and on from the View menu's commands.
+ */
+async function runEditorStructureChecks(markerLines) {
+  console.log('[smoke] --- editor structure ---')
+  const methods = Array.from({ length: 15 }, (_, index) => [`  method${index}() {`, `    const a = ${index}`, '    const b = a + 1', '    return a + b', '  }']).flat()
+  const board = [
+    "import { a } from './a'", // 1
+    "import { b } from './b'", // 2
+    "import { c } from './c'", // 3
+    '/*', // 4
+    ' * The board and its cells.', // 5
+    ' */', // 6
+    'export class Board {', // 7
+    '  cells = [[1, 2], [3, [4]]]', // 8
+    '  fill(value: number) {', // 9
+    '    for (const row of this.cells) {', // 10
+    '      row.fill(value)', // 11
+    '    }', // 12
+    '  }', // 13
+    ...methods, // 14 to 88: method k from line 14 + 5k, its body to 17 + 5k
+    '}', // 89
+    '',
+  ].join('\n')
+  await evaluate(`window.eNCode.workspace.write('src/lsp-structure-other.ts', ${JSON.stringify('export const other = 1\n')})`)
+  await evaluate(`window.eNCode.workspace.write('src/lsp-structure.ts', ${JSON.stringify(board)})`)
+  await quickOpen('src/lsp-structure.ts', 'export class Board {')
+  await until(async () => (await markerLines()).includes('open lsp-structure.ts'), 10000, 'the server to be given the file')
+  const shownAre = (want, label) =>
+    until(async () => JSON.stringify((await evaluate(SHOWN_LINES)).slice(0, want.length)) === JSON.stringify(want), 8000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(SHOWN_LINES))}`)
+    })
+  const chevron = (line) =>
+    evaluate(`(() => {
+      const gutter = document.querySelector('.code-editor > .enc-editor .enc-gutter')?.getBoundingClientRect()
+      const row = [...document.querySelectorAll('.code-editor > .enc-editor .enc-gutter-num')].find((node) => node.textContent === ${JSON.stringify(String(line))})
+      if (!gutter || !row) return null
+      const box = row.getBoundingClientRect()
+      return { x: gutter.right - 8, y: box.top + box.height / 2, open: row.classList.contains('enc-fold-open'), closed: row.classList.contains('enc-fold-closed') }
+    })()`)
+
+  // The imports fold as the server says: one indentation level has no block to fold there.
+  await until(async () => (await chevron(1))?.open === true, 10000, 'the server\'s fold range on the imports').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await chevron(1))}`)
+  })
+  await clickAt(await chevron(1))
+  await shownAre([1, 4, 5, 6, 7], 'the chevron folds the imports')
+  if (!(await chevron(1))?.closed) throw new Error('A folded line does not show its chevron closed')
+  await screenshot('25-editor-folded.png')
+
+  // From the keys: the block the cursor is in folds, the cursor steps out to its first line, and Ctrl+Shift+] opens it.
+  await clickAt(await wordSpot('row.fill(value)', 'fill'))
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(11, undefined, 'the cursor in the loop')
+  await pressKey('[', { ctrl: true, shift: true })
+  await cursorAt(10, undefined, 'Ctrl+Shift+[ folds the loop and the cursor leaves its hidden line')
+  await until(async () => {
+    const shown = await evaluate(SHOWN_LINES)
+    return shown.includes(10) && !shown.includes(11) && shown.includes(12)
+  }, 6000, 'the loop folded')
+  await pressKey('ArrowDown')
+  await cursorAt(12, undefined, 'Down steps over the folded line')
+  await pressKey('ArrowUp')
+  await pressKey(']', { ctrl: true, shift: true })
+  await until(async () => (await evaluate(SHOWN_LINES)).includes(11), 6000, 'Ctrl+Shift+] opens the loop')
+
+  // Another file, and back: the imports are still folded.
+  await quickOpen('src/lsp-structure-other.ts', 'export const other = 1')
+  await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === 'lsp-structure.ts')?.click()`)
+  await waitFor(`${RENDERED_LINES}.join('\\n').includes('export class Board {')`, 8000, 'back to the board')
+  await shownAre([1, 4, 5, 6, 7], 'the folds kept while another file was shown')
+  await focusEditor()
+  await pressKey(']', { ctrl: true, alt: true })
+  await shownAre([1, 2, 3, 4], 'Ctrl+Alt+] unfolds everything')
+
+  // Sticky scroll: with method3's body at the top, the class and the method stay pinned above it.
+  const lineHeight = await evaluate("document.querySelector('.code-editor > .enc-editor .enc-gutter-num').getBoundingClientRect().height")
+  await evaluate(`document.querySelector('.code-editor > .enc-editor .enc-scroller').scrollTop = ${29 * lineHeight}`)
+  await until(async () => JSON.stringify(await evaluate(STICKY_LINES)) === JSON.stringify([7, 29]), 6000, 'the class and the method pinned').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(STICKY_LINES))}`)
+  })
+  const pinned = await evaluate("document.querySelector('.code-editor .enc-sticky-row .enc-sticky-text')?.textContent ?? ''")
+  if (pinned !== 'export class Board {') throw new Error(`The first pinned line reads ${JSON.stringify(pinned)}`)
+  await screenshot('25-editor-sticky.png')
+  const pinnedRow = await evaluate(`(() => {
+    const box = document.querySelector('.code-editor .enc-sticky-row .enc-sticky-text').getBoundingClientRect()
+    return { x: box.left + 40, y: box.top + box.height / 2 }
+  })()`)
+  await clickAt(pinnedRow)
+  await cursorAt(7, 1, 'a click on the pinned class goes to it')
+  await until(async () => (await evaluate(STICKY_LINES)).length === 0, 6000, 'nothing pinned with the class at the top')
+
+  // Brackets by depth: the class's brace is the first colour, the arrays in it the next ones.
+  const BRACKETS = `(() => {
+    const line = [...document.querySelectorAll('.code-editor > .enc-editor .enc-line')].find((node) => node.textContent.startsWith('  cells'))
+    return line ? [...new Set([...line.querySelectorAll('[class*="enc-bracket-"]')].map((node) => [...node.classList].find((name) => name.startsWith('enc-bracket-'))))].sort() : null
+  })()`
+  await until(async () => JSON.stringify(await evaluate(BRACKETS)) === JSON.stringify(['enc-bracket-1', 'enc-bracket-2', 'enc-bracket-3']), 6000, 'the brackets coloured by depth').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(BRACKETS))}`)
+  })
+  await runFromPalette('Turn bracket colours off')
+  await until(async () => JSON.stringify(await evaluate(BRACKETS)) === '[]', 6000, 'bracket colours off')
+  await focusEditor()
+  await runFromPalette('Turn bracket colours on')
+  await until(async () => (await evaluate(BRACKETS))?.length === 3, 6000, 'bracket colours on again')
+
+  // The minimap, in the side panel at full width: a click on it scrolls the text there.
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor("document.querySelector('.side-panel')?.dataset.layout === 'full'", 4000, 'the panel at full width')
+  const MINIMAP = `(() => {
+    const map = document.querySelector('.code-editor > .enc-editor .enc-minimap')
+    if (!map || map.hidden) return null
+    const box = map.querySelector('.enc-minimap-canvas').getBoundingClientRect()
+    return { x: box.left + box.width / 2, y: box.top + Math.min(box.height - 2, 112), height: box.height }
+  })()`
+  await until(async () => (await evaluate(MINIMAP))?.height > 0, 6000, 'the minimap beside the text')
+  await screenshot('25-editor-minimap.png')
+  const scrollTop = () => evaluate("document.querySelector('.code-editor > .enc-editor .enc-scroller').scrollTop")
+  const before = await scrollTop()
+  await clickAt(await evaluate(MINIMAP))
+  await until(async () => (await scrollTop()) > before + 4 * lineHeight, 6000, 'a click on the minimap scrolls the text').catch(async (error) => {
+    throw new Error(`${error.message}: ${before} then ${await scrollTop()}`)
+  })
+  await focusEditor()
+  await runFromPalette('Hide minimap')
+  await until(async () => (await evaluate(MINIMAP)) === null, 6000, 'the minimap hidden')
+  await focusEditor()
+  await runFromPalette('Show minimap')
+  await until(async () => (await evaluate(MINIMAP)) !== null, 6000, 'the minimap shown again')
+  await key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+  await waitFor("document.querySelector('.side-panel')?.dataset.layout === 'split'", 4000, 'the panel split again')
+
+  // Folding off: no chevrons, and what was folded opens; on again, the server's ranges are back.
+  await focusEditor()
+  await pressKey('Home', { ctrl: true })
+  await until(async () => (await chevron(1)) !== null, 6000, 'the first line on screen again')
+  await clickAt(await chevron(1))
+  await shownAre([1, 4], 'the imports folded again')
+  await runFromPalette('Turn folding off')
+  await until(async () => {
+    const first = await chevron(1)
+    return first !== null && !first.open && !first.closed
+  }, 6000, 'no chevrons with folding off')
+  await shownAre([1, 2, 3, 4], 'folding off opens what was folded')
+  await focusEditor()
+  await runFromPalette('Turn folding on')
+  await until(async () => (await chevron(1))?.open === true, 10000, 'the server\'s ranges with folding on again')
+
+  // Tidy up.
+  for (const name of ['lsp-structure-other.ts', 'lsp-structure.ts']) {
+    await evaluate(`[...document.querySelectorAll('.editor-tab')].find((tab) => tab.querySelector('.tab-label')?.textContent === ${JSON.stringify(name)})?.querySelector('.tab-close')?.click()`)
+  }
+  await until(async () => (await markerLines()).includes('close lsp-structure.ts'), 10000, 'the server to let the file go')
+  await evaluate("window.eNCode.workspace.delete('src/lsp-structure.ts').catch(() => null)")
+  await evaluate("window.eNCode.workspace.delete('src/lsp-structure-other.ts').catch(() => null)")
+  console.log('[smoke] editor structure: ok')
 }
 
 /** The banner shown while the agent uses the computer is a page of its own, loaded from a data: address. */

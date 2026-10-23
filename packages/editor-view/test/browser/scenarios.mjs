@@ -6,5 +6,7 @@ import { find } from './scenarios/find.mjs'
 import { review } from './scenarios/review.mjs'
 import { edit } from './scenarios/edit.mjs'
 import { host } from './scenarios/host.mjs'
+import { fold } from './scenarios/fold.mjs'
+import { structure } from './scenarios/structure.mjs'
 
-export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host]
+export const scenarios = [...basic, ...pointer, ...scale, ...text, ...find, ...review, ...edit, ...host, ...fold, ...structure]

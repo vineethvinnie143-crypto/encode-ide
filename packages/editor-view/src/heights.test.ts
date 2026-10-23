@@ -158,3 +158,68 @@ describe('ScrollScale', () => {
     assert.ok(Math.abs(scale.toScroll(scale.toDoc(3_000_000)) - 3_000_000) < 1e-6)
   })
 })
+
+describe('HeightMap with folded lines', () => {
+  /** The slow way: hidden lines take no height, and the caller leaves out zones after them. */
+  function folded(lineHeight: number, lineCount: number, zones: readonly Zone[], hidden: Set<number>) {
+    const tops: number[] = [0]
+    let y = 0
+    const sorted = zones.map((zone, index) => ({ zone, index })).sort((a, b) => a.zone.after - b.zone.after || a.index - b.index)
+    let next = 0
+    const placeZones = (after: number) => {
+      while (next < sorted.length && sorted[next].zone.after === after) y += sorted[next++].zone.height
+    }
+    placeZones(0)
+    for (let line = 1; line <= lineCount; line++) {
+      tops[line] = y
+      if (!hidden.has(line)) y += lineHeight
+      placeZones(line)
+    }
+    tops[lineCount + 1] = y
+    return { tops, total: y }
+  }
+
+  it('lays out folded lines with no height, wherever the folds and zones are', async () => {
+    await check(gen.tuple(scenarios, gen.array(gen.tuple(gen.int(1, 400), gen.int(0, 30)), 0, 6)), ([{ lineHeight, lineCount, zones }, folds]) => {
+      const ranges = folds.map(([from, length]) => ({ from: Math.min(lineCount, from), to: Math.min(lineCount, from + length) }))
+      const hidden = new Set<number>()
+      for (const range of ranges) for (let line = range.from; line <= range.to; line++) hidden.add(line)
+      const shown = zones.filter((zone) => !hidden.has(zone.after))
+      const map = new HeightMap(lineHeight, lineCount, shown, 0, ranges)
+      const expected = folded(lineHeight, lineCount, shown, hidden)
+      assert.equal(map.contentHeight, expected.total)
+      assert.equal(map.hiddenCount, hidden.size)
+      for (let line = 1; line <= lineCount + 1; line++) {
+        assert.equal(map.top(line), expected.tops[line], `top of line ${line}`)
+        if (line <= lineCount) assert.equal(map.isHidden(line), hidden.has(line), `line ${line} hidden`)
+      }
+      for (let line = 1; line <= lineCount; line++) {
+        if (hidden.has(line)) continue
+        // Any y on a line that shows finds that line.
+        assert.equal(map.lineAt(expected.tops[line] + lineHeight / 2), line, `lineAt in line ${line}`)
+      }
+      // lineAt never returns a hidden line while one shows.
+      if (hidden.size < lineCount) {
+        for (const y of [-5, 0, expected.total / 3, expected.total - 1, expected.total + 50]) assert.equal(map.isHidden(map.lineAt(y)), false, `lineAt(${y})`)
+      }
+    })
+  })
+
+  it('steps to the lines that show around a fold', () => {
+    const map = new HeightMap(10, 20, [], 0, [
+      { from: 3, to: 5 },
+      { from: 6, to: 8 },
+      { from: 18, to: 20 },
+    ])
+    assert.deepEqual(map.hidden, [
+      { from: 3, to: 8 },
+      { from: 18, to: 20 },
+    ], 'touching folds merge')
+    assert.equal(map.nextVisible(4), 9)
+    assert.equal(map.previousVisible(4), 2)
+    assert.equal(map.nextVisible(9), 9)
+    assert.equal(map.nextVisible(19), 21)
+    assert.equal(map.lineAt(10_000), 17, 'below a fold that ends the document: the last line that shows')
+    assert.equal(map.hiddenBefore(10), 6)
+  })
+})

@@ -16,6 +16,7 @@ import { RpcFailure } from './jsonrpc'
 import { DiagnosticSeverity, SYMBOL_KINDS, type CallHierarchyItem, type CodeAction, type CompletionItem, type Diagnostic, type DocumentSymbol, type Range, type SignatureHelp, type TextEdit, type WorkspaceEdit } from './protocol'
 import { readCallHierarchyItems, readCalls, readCallSites, readCodeAction, readCodeActions, readCompletion, readDocumentSymbols, readHighlights, readHover, readLocations, readPrepareRename, readRange, readSignatureHelp, readSymbolInformation, readTextEditList, readWorkspaceEdit } from './results'
 import { fromDocumentSymbols, nestSymbols, type EditorSymbol } from './symbols'
+import { readFoldingRanges, type EditorFoldRange } from './folding'
 import { documentKey, uriToPath } from './uri'
 
 export type Severity = 'error' | 'warning' | 'info' | 'hint'
@@ -1231,6 +1232,11 @@ export class LanguageServers {
     )
   }
 
+  /** The blocks of a document of the editor's that can fold, by whole lines, as its server sees them. */
+  editorFoldingRanges(file: string, signal?: AbortSignal): Promise<EditorFoldRange[] | null> {
+    return this.editorAsk(file, 'foldingRange', 'textDocument/foldingRange', (doc) => ({ textDocument: { uri: doc.uri } }), (value) => readFoldingRanges(value), signal)
+  }
+
   /** The outline of a document of the editor's as a tree; a server that answers with a flat list has it nested by range. */
   editorSymbols(file: string, signal?: AbortSignal): Promise<EditorSymbol[] | null> {
     return this.editorAsk(
@@ -1444,6 +1450,7 @@ function describeFeature(feature: string): string {
     documentSymbol: 'a document outline',
     workspaceSymbol: 'symbol search',
     callHierarchy: 'call hierarchy',
+    foldingRange: 'folding',
     rename: 'renaming',
     codeAction: 'code actions',
   }

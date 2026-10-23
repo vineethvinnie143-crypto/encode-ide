@@ -6,6 +6,7 @@ import type { EditorLocation } from '@shared/types'
 import { api } from '../../api'
 import { docState } from '../../editor/docs'
 import { positionOf } from '../../editor/marks'
+import { useEditorLayout } from '../../stores/editor-layout'
 import { cx } from '../../ui/cx'
 import { ChevronDown, ChevronRight, X } from '../../ui/icons'
 
@@ -98,7 +99,15 @@ export function PeekPreview({ location, also }: { location: EditorLocation | und
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const view = new EditorView({ state: EditorState.create({ readOnly: true }), parent: host, ariaLabel: 'Preview', highlightActiveLine: false })
+    // A glimpse of a file: no folding, pinned lines or map, its brackets coloured as the editor's are.
+    const view = new EditorView({
+      state: EditorState.create({ readOnly: true }),
+      parent: host,
+      ariaLabel: 'Preview',
+      highlightActiveLine: false,
+      folding: false,
+      bracketColors: useEditorLayout.getState().bracketColors,
+    })
     viewRef.current = view
     return () => {
       view.destroy()

@@ -199,6 +199,10 @@ export const defaultBindings: readonly KeyBinding[] = [
   { key: 'Mod-d', command: 'selectNextOccurrence' },
   { key: 'Mod-Shift-l', command: 'selectAllOccurrences' },
   { key: 'Mod-Shift-\\', command: 'jumpToBracket' },
+  { key: 'Mod-Shift-[', mac: 'Meta-Alt-[', command: 'fold' },
+  { key: 'Mod-Shift-]', mac: 'Meta-Alt-]', command: 'unfold' },
+  { key: 'Mod-Alt-[', mac: 'Meta-Ctrl-[', command: 'foldAll' },
+  { key: 'Mod-Alt-]', mac: 'Meta-Ctrl-]', command: 'unfoldAll' },
 
   { key: 'Enter', command: 'insertNewlineAndIndent' },
   { key: 'Shift-Enter', command: 'insertNewlineAndIndent' },

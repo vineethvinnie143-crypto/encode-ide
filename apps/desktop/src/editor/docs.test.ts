@@ -13,6 +13,7 @@ import {
   hasDoc,
   indentLabel,
   eolOf,
+  foldsOf,
   isDirty,
   markSaved,
   matchesSaved,
@@ -20,6 +21,7 @@ import {
   recordState,
   renameDocs,
   revertServerEdits,
+  saveFolds,
   scrollOf,
   saveScroll,
   snapshotForSave,
@@ -90,6 +92,32 @@ describe('open documents', () => {
     assert.equal(scrollOf(path), null)
     saveScroll(path, { top: 120, left: 8 })
     assert.deepEqual(scrollOf(path), { top: 120, left: 8 })
+  })
+
+  it('remembers what was folded, moved with changes made while no view showed it', () => {
+    const state = openDoc(path, 'a {\n  b\n}\nc {\n  d\n}')
+    assert.deepEqual(foldsOf(path), [])
+    saveFolds(path, state.doc, [
+      { start: 1, end: 2 },
+      { start: 4, end: 5, kind: 'region' },
+    ])
+    assert.deepEqual(foldsOf(path), [
+      { start: 1, end: 2 },
+      { start: 4, end: 5 },
+    ])
+    // The agent writes a line at the top, then into the first block: the second block moves, the first opens.
+    applyExternal(path, 'top\na {\n  b\n}\nc {\n  d\n}')
+    assert.deepEqual(foldsOf(path), [
+      { start: 2, end: 3 },
+      { start: 5, end: 6 },
+    ])
+    applyExternal(path, 'top\na {\n  b2\n}\nc {\n  d\n}')
+    assert.deepEqual(foldsOf(path), [{ start: 5, end: 6 }])
+    // Text a view typed without saying what it folded: the folds kept are for another text, and are let go.
+    recordState(path, docState(path)!.update({ changes: { from: 0, insert: 'x\n' } }).state)
+    assert.deepEqual(foldsOf(path), [])
+    saveFolds(path, docState(path)!.doc, [])
+    assert.deepEqual(foldsOf(path), [])
   })
 })
 

@@ -199,6 +199,7 @@ export interface ServerCapabilities {
   documentSymbolProvider?: unknown
   workspaceSymbolProvider?: unknown
   callHierarchyProvider?: unknown
+  foldingRangeProvider?: unknown
   renameProvider?: boolean | { prepareProvider?: boolean }
   codeActionProvider?: boolean | { resolveProvider?: boolean; codeActionKinds?: string[] }
   diagnosticProvider?: { interFileDependencies?: boolean; workspaceDiagnostics?: boolean }

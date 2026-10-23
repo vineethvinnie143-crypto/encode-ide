@@ -486,6 +486,23 @@ describe('the language servers of a folder', () => {
     await bare.servers.dispose()
   })
 
+  it('gives the editor the blocks a document folds by, and nothing from a server that does not fold', async () => {
+    const dir = await project({})
+    const h = hub(dir)
+    const a = path.join(dir, 'a.fk')
+    h.servers.editorOpen(a, 'function add {\n  /* a\n  b */\n  if (x) {\n    y\n  }\n}\n', true)
+    assert.deepEqual(await h.servers.editorFoldingRanges(a), [
+      { startLine: 1, endLine: 2, kind: 'comment' },
+      { startLine: 3, endLine: 5, endCharacter: 3 },
+      { startLine: 0, endLine: 6, endCharacter: 1 },
+    ])
+    await h.servers.dispose()
+    const bare = hub(dir, { mode: 'bare' })
+    bare.servers.editorOpen(a, 'function add {\n}\n', true)
+    assert.equal(await bare.servers.editorFoldingRanges(a), null)
+    await bare.servers.dispose()
+  })
+
   it('opens a call hierarchy for the editor a level at a time, and refuses one that is out of date', async () => {
     const dir = await project({})
     const h = hub(dir)

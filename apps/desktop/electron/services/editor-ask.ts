@@ -1,7 +1,7 @@
 import type { CodeRange, EditorAsk, EditorChangeRequest, SignatureHelp } from '../../shared/types'
 
 /** The kinds of question the editor asks the language servers. */
-const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType', 'symbols', 'workspaceSymbols', 'callHierarchy', 'calls'])
+const KINDS = new Set<EditorAsk['kind']>(['complete', 'resolve', 'signature', 'hover', 'highlights', 'definition', 'typeDefinition', 'implementation', 'references', 'triggers', 'prepareRename', 'codeActions', 'format', 'formatOnType', 'symbols', 'folding', 'workspaceSymbols', 'callHierarchy', 'calls'])
 
 /** Lines and columns past these are not in any file the editor gives a server (8 MB at most). */
 const MAX_LINE = 10_000_000
@@ -66,7 +66,7 @@ export function readEditorAsk(value: unknown, relative: (path: string) => string
   }
   const path = relative(ask.path)
   if (!path) return null
-  if (kind === 'triggers' || kind === 'symbols') return { kind, path }
+  if (kind === 'triggers' || kind === 'symbols' || kind === 'folding') return { kind, path }
   if (kind === 'calls') {
     if (!isCount(ask.list, Number.MAX_SAFE_INTEGER) || !isCount(ask.id, MAX_CALL_ID) || (ask.direction !== 'incoming' && ask.direction !== 'outgoing')) return null
     return { kind, path, list: ask.list, id: ask.id, direction: ask.direction }

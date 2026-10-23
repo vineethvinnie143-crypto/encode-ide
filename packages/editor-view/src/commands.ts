@@ -27,13 +27,31 @@ function move(command: core.Command): ViewCommand {
   }
 }
 
-/** A page up or down: the view scrolls by a screen and the cursors move the same distance. */
+/** A page up or down: the view scrolls by a screen and the cursors move the same distance, folded blocks not counted. */
 function page(direction: 1 | -1, extend: boolean): ViewCommand {
   return (view) => {
     const lines = Math.max(1, view.lineCapacity - 1) * direction
-    const transaction = core.cursorPage(lines, extend)(view.state)
+    const transaction = core.cursorPage(lines, extend, view.folding.step)(view.state)
     view.scrollBy(lines * view.metrics.lineHeight)
     if (transaction) view.dispatch(transaction)
+    return true
+  }
+}
+
+/** The arrow keys: a line up or down, stepping over a folded block. */
+function vertical(lines: -1 | 1, extend: boolean): ViewCommand {
+  return (view) => move(core.cursorVertical(lines, extend, view.folding.step))(view)
+}
+
+function addCursor(direction: -1 | 1): ViewCommand {
+  return (view) => move(core.addCursorVertical(direction, view.folding.step))(view)
+}
+
+/** A folding command: it applies only where folding is on, and takes its key there even when there is nothing to fold. */
+function folding(run: (view: EditorView) => boolean): ViewCommand {
+  return (view) => {
+    if (!view.options.folding) return false
+    run(view)
     return true
   }
 }
@@ -52,10 +70,10 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   selectWordLeft: move(core.selectWordLeft),
   cursorWordRight: move(core.cursorWordRight),
   selectWordRight: move(core.selectWordRight),
-  cursorLineUp: move(core.cursorLineUp),
-  selectLineUp: move(core.selectLineUp),
-  cursorLineDown: move(core.cursorLineDown),
-  selectLineDown: move(core.selectLineDown),
+  cursorLineUp: vertical(-1, false),
+  selectLineUp: vertical(-1, true),
+  cursorLineDown: vertical(1, false),
+  selectLineDown: vertical(1, true),
   cursorLineStart: move(core.cursorLineStart),
   selectLineStart: move(core.selectLineStart),
   cursorLineEnd: move(core.cursorLineEnd),
@@ -70,8 +88,8 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   selectPageDown: page(1, true),
   scrollLineUp: (view) => (view.scrollBy(-view.metrics.lineHeight), true),
   scrollLineDown: (view) => (view.scrollBy(view.metrics.lineHeight), true),
-  addCursorAbove: move(core.addCursorAbove),
-  addCursorBelow: move(core.addCursorBelow),
+  addCursorAbove: addCursor(-1),
+  addCursorBelow: addCursor(1),
   moveLineUp: run(core.moveLineUp),
   moveLineDown: run(core.moveLineDown),
   copyLineUp: run(core.copyLineUp),
@@ -109,6 +127,21 @@ export const viewCommands: Readonly<Record<string, ViewCommand>> = {
   nextSnippetStop: (view) => view.snippet.next(),
   previousSnippetStop: (view) => view.snippet.previous(),
   exitSnippet: (view) => view.snippet.exit(),
+
+  fold: folding((view) => view.folding.fold()),
+  unfold: folding((view) => view.folding.unfold()),
+  toggleFold: folding((view) => view.folding.toggle()),
+  foldRecursively: folding((view) => view.folding.foldRecursively()),
+  unfoldRecursively: folding((view) => view.folding.unfoldRecursively()),
+  foldAll: folding((view) => view.folding.foldAll()),
+  unfoldAll: folding((view) => view.folding.unfoldAll()),
+  foldAllComments: folding((view) => view.folding.foldKind('comment')),
+  foldAllRegions: folding((view) => view.folding.foldKind('region')),
+  unfoldAllRegions: folding((view) => view.folding.unfoldKind('region')),
+  foldImports: folding((view) => view.folding.foldKind('imports')),
+  ...Object.fromEntries(
+    [1, 2, 3, 4, 5, 6, 7].map((level) => [`foldLevel${level}`, folding((view: EditorView) => view.folding.foldLevel(level))]),
+  ),
 
   reviewNextChange: (view) => view.review.next(),
   reviewPreviousChange: (view) => view.review.previous(),
