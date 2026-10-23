@@ -4,7 +4,7 @@ import { api } from '../../api'
 import { STATE_CHIPS, SCOPE_LABELS, approvalWarning, cardActions, environmentLine, offerLine, summaryLine, type McpCardAction } from '../../panels/mcp'
 import { shortPath } from '../../panels/permissions'
 import { useMcp } from '../../stores/mcp'
-import { useUi, type SettingsTab } from '../../stores/ui'
+import { useUi, type SettingsSection } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { AlertTriangle, RefreshCw } from '../../ui/icons'
@@ -17,7 +17,7 @@ const EXAMPLE = JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['
  * wait until the folder is trusted and you have read, and approved, exactly what each one starts. Every change is made
  * at once and the screen shows the servers as they stand afterwards; there is no Save for this tab.
  */
-export default function McpPane({ onOpenTab }: { onOpenTab(tab: SettingsTab): void }) {
+export default function McpPane({ onOpenTab }: { onOpenTab(section: SettingsSection): void }) {
   const report = useMcp((state) => state.report)
   const error = useMcp((state) => state.error)
   const refresh = useMcp((state) => state.refresh)
@@ -122,7 +122,7 @@ function useRun() {
   return { run, busy }
 }
 
-function ServerCard({ server, report, onOpenTab }: { server: McpServerView; report: McpReport; onOpenTab(tab: SettingsTab): void }) {
+function ServerCard({ server, report, onOpenTab }: { server: McpServerView; report: McpReport; onOpenTab(section: SettingsSection): void }) {
   const { run, busy } = useRun()
   const chip = STATE_CHIPS[server.state]
   const actions = cardActions(server, report)

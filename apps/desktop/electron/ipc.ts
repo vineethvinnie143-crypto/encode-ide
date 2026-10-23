@@ -1,5 +1,5 @@
 import { BrowserWindow, app, dialog, ipcMain, shell as osShell, type IpcMainInvokeEvent } from 'electron'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { isRpcError } from '@encode/protocol'
@@ -52,6 +52,8 @@ export interface IpcDeps {
   logs: LogService
   /** The text of a diagnostics report, made at the moment the user asks for one. */
   diagnostics: () => Promise<string>
+  /** Shows a notice the way a finished request would. */
+  testNotice: () => void
   /** A session was removed; whatever follows its events can let go of it. */
   onSessionRemoved?: (sessionId: string) => void
 }
@@ -79,7 +81,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics, testNotice } = deps
   const host = agent.client
 
   /**
@@ -116,6 +118,13 @@ export function registerIpc(deps: IpcDeps): void {
     } catch (error) {
       console.error('[agent-host] could not tell it the open folder:', error)
     }
+  }
+
+  /** The chats folder, made if it is missing: a chat opens it like a project. */
+  const chatsFolder = (): string => {
+    const folder = settings.chatsFolder()
+    mkdirSync(folder, { recursive: true })
+    return folder
   }
 
   const openWorkspaceAt = async (rootPath: string) => {
@@ -199,6 +208,15 @@ export function registerIpc(deps: IpcDeps): void {
     configureAgent()
     return saved
   })
+  // The chats folder is only ever chosen here, in the system's dialog: a path the window sends is not taken.
+  handle('settings:choose-chats-folder', async () => {
+    const win = getWindow()
+    const options = { title: 'Folder for chats', defaultPath: settings.chatsFolder(), properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> }
+    const result = win && !win.isDestroyed() ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return null
+    return settings.setChatsFolder(result.filePaths[0])
+  })
+  handle('settings:reset-chats-folder', () => settings.setChatsFolder(null))
   // A search key reaches the host only when a search is made: the host asks for it then, so nothing is told here.
   handle('settings:set-search-key', (provider: string, key: string) => settings.setSearchKey(provider as SearchProviderId, String(key ?? '')))
   handle('search:test', () => agent.searchCheck().catch((error) => Promise.reject(hostFailure(error))))
@@ -252,6 +270,8 @@ export function registerIpc(deps: IpcDeps): void {
     const projectRoot = options?.projectRoot
     return host.create(projectRoot === null || typeof projectRoot === 'string' ? { projectRoot } : undefined)
   })
+  handle('agent:chats-folder', () => chatsFolder())
+  handle('agent:create-chat', () => host.create({ projectRoot: chatsFolder() }))
   handle('agent:update', (sessionId: string, patch: SessionPatch) => host.update(String(sessionId), patch))
   handle('agent:statuses', () => host.statuses())
   handle('agent:history', (sessionId?: string) => host.history(sessionId ? String(sessionId) : undefined))
@@ -318,6 +338,7 @@ export function registerIpc(deps: IpcDeps): void {
     writeFileSync(picked.filePath, await diagnostics(), 'utf8')
     return picked.filePath
   })
+  handle('app:test-notification', () => testNotice())
   handle('app:open-logs', async () => {
     logs.flush()
     const failure = await osShell.openPath(logs.dir)

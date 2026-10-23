@@ -7,7 +7,8 @@ import { useSettings } from '../../stores/settings'
 import {
   activityGroups,
   buildSidebar,
-  projectName,
+  isChat,
+  placeName,
   rootKey,
   rowStatus,
   sameRoot,
@@ -129,12 +130,14 @@ function ActivityRow({
   session,
   active,
   status,
+  chatsFolder,
   onOpen,
   onContext,
 }: {
   session: SessionSummary
   active: boolean
   status: RowStatus
+  chatsFolder: string | undefined
   onOpen: () => void
   onContext: (event: MouseEvent, session: SessionSummary) => void
 }) {
@@ -149,7 +152,7 @@ function ActivityRow({
       <StatusSlot status={status} />
       <span className="sb-activity-text">
         <span className="title">{session.title}</span>
-        <span className="preview">{session.preview || (session.projectRoot ? projectName(session.projectRoot) : 'No messages yet')}</span>
+        <span className="preview">{session.preview || (session.projectRoot ? placeName(session.projectRoot, chatsFolder) : 'No messages yet')}</span>
       </span>
       <span className={cx('meta', status === 'approval' && 'warn')}>{status === 'approval' ? 'Approval' : shortAge(session.updatedAt)}</span>
     </button>
@@ -163,14 +166,15 @@ export default function SessionSidebar() {
   const statuses = useStatus((state) => state.statusById)
   const workspace = useWorkspace((state) => state.workspace)
   const recentRoots = useSettings((state) => state.settings?.recentWorkspaces)
+  const chatsFolder = useSettings((state) => state.settings?.chatsFolder)
   const mode = useUi((state) => state.sidebarMode)
   const collapsed = useUi((state) => state.collapsedProjects)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; session: SessionSummary } | null>(null)
 
   const model = useMemo(
-    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: recentRoots ?? [] }),
-    [sessions, workspace?.root, recentRoots],
+    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: recentRoots ?? [], chatsFolder }),
+    [sessions, workspace?.root, recentRoots, chatsFolder],
   )
   const groups = useMemo(() => activityGroups(sessions, statuses), [sessions, statuses])
   const archived = useMemo(() => sessions.filter((session) => session.archived).sort((a, b) => b.updatedAt - a.updatedAt), [sessions])
@@ -184,17 +188,18 @@ export default function SessionSidebar() {
 
   const contextEntries = (session: SessionSummary): MenuEntry[] => {
     const others = model.projects.filter((project) => !sameRoot(project.root, session.projectRoot)).slice(0, 8)
+    const toChats = chatsFolder && !isChat(session, chatsFolder) ? chatsFolder : null
     const entries: MenuEntry[] = [
       { id: 'rename', label: 'Rename', shortcut: 'F2', onSelect: () => setRenamingId(session.id) },
       { id: 'pin', label: session.pinned ? 'Unpin' : 'Pin', onSelect: () => void sessionActions.togglePin(session) },
       { id: 'unread', label: session.unread ? 'Mark as read' : 'Mark as unread', onSelect: () => void sessionActions.toggleUnread(session) },
     ]
-    if (others.length || session.projectRoot) {
+    if (others.length || toChats) {
       entries.push({ kind: 'separator', id: 'sep-move' }, { kind: 'group', id: 'g-move', label: 'Move to project' })
       for (const project of others) {
         entries.push({ id: `move-${rootKey(project.root)}`, label: project.name, onSelect: () => void sessionActions.moveToProject(session, project.root) })
       }
-      if (session.projectRoot) entries.push({ id: 'move-none', label: 'No project', onSelect: () => void sessionActions.moveToProject(session, null) })
+      if (toChats) entries.push({ id: 'move-chats', label: 'Chats', onSelect: () => void sessionActions.moveToProject(session, toChats) })
     }
     entries.push(
       { kind: 'separator', id: 'sep-copy' },
@@ -209,10 +214,11 @@ export default function SessionSidebar() {
 
   const switcherEntries = (): MenuEntry[] => {
     const roots = new Map<string, string>()
-    for (const root of [workspace?.root, ...(recentRoots ?? [])]) if (root && !roots.has(rootKey(root))) roots.set(rootKey(root), root)
+    // The chats folder is no project: New chat opens it.
+    for (const root of [workspace?.root, ...(recentRoots ?? [])]) if (root && !sameRoot(root, chatsFolder) && !roots.has(rootKey(root))) roots.set(rootKey(root), root)
     const entries: MenuEntry[] = [...roots.values()].map((root) => ({
       id: rootKey(root),
-      label: projectName(root),
+      label: placeName(root, chatsFolder),
       checked: sameRoot(root, workspace?.root),
       onSelect: () => void useWorkspace.getState().openPath(root),
     }))
@@ -236,7 +242,8 @@ export default function SessionSidebar() {
     },
   })
 
-  const empty = !model.pinned.length && !model.projects.length && !model.recents.length
+  const inChats = workspace ? sameRoot(workspace.root, chatsFolder) : false
+  const place = workspace ? (inChats ? 'Chats' : workspace.name) : null
 
   return (
     <aside className="session-sidebar" aria-label="Sessions">
@@ -247,8 +254,8 @@ export default function SessionSidebar() {
           entries={switcherEntries}
           trigger={(props) => (
             <button type="button" className="proj-switch" title={workspace?.root ?? 'Open a folder'} {...props}>
-              <span className="proj-mark">{(workspace?.name ?? 'e').slice(0, 1).toLowerCase()}</span>
-              <span className="proj-name">{workspace?.name ?? 'No folder open'}</span>
+              <span className="proj-mark">{(place ?? 'e').slice(0, 1).toLowerCase()}</span>
+              <span className="proj-name">{place ?? 'No folder open'}</span>
               <ChevronDown size={14} className="muted" />
             </button>
           )}
@@ -320,17 +327,18 @@ export default function SessionSidebar() {
               })}
             </section>
 
-            {model.recents.length > 0 && (
-              <section aria-label="Recents">
-                <div className="sb-label">
-                  <span>Recents</span>
-                </div>
-                {model.recents.map((session) => (
-                  <SessionRow key={session.id} {...rowProps(session)} />
-                ))}
-              </section>
-            )}
-            {empty && <div className="sb-empty">No sessions yet.</div>}
+            <section aria-label="Chats">
+              <div className="sb-label">
+                <span>Chats</span>
+                <IconButton label="New chat" shortcut={commandRegistry.shortcut('file.newChat')} size="sm" onClick={() => commandRegistry.run('file.newChat')}>
+                  <Plus size={14} />
+                </IconButton>
+              </div>
+              {model.chats.map((session) => (
+                <SessionRow key={session.id} {...rowProps(session)} />
+              ))}
+              {!model.chats.length && <div className="sb-empty-sub is-flat">No chats yet</div>}
+            </section>
           </>
         )}
 
@@ -347,6 +355,7 @@ export default function SessionSidebar() {
                     session={session}
                     active={session.id === activeId}
                     status={statusOf(session)}
+                    chatsFolder={chatsFolder}
                     onOpen={() => open(session)}
                     onContext={showMenu}
                   />

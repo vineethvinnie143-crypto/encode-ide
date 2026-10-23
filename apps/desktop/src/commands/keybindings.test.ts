@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { Keybindings } from '@shared/keybindings'
-import { addChord, assignChord, chordUse, filterSections, removeChords, resetChords, shortcutSections } from './keybindings'
+import { addChord, assignChord, chordUse, filterByChord, filterSections, removeChords, resetChords, shortcutSections } from './keybindings'
 import { chordId, chordKey, chordOfEvent, chordProblem, formatChord, parseChord, sameChords, type KeyEventLike } from './keys'
 import { CommandRegistry, type Command } from './registry'
 
@@ -302,5 +302,22 @@ describe('the list of shortcuts', () => {
     assert.equal(titles('  ').length, 7, 'white space alone finds everything')
     const kept = filterSections(sections, 'ctrl j', 'view.terminal').flatMap((section) => section.rows.map((row) => row.title))
     assert.deepEqual(kept, ['Toggle bottom panel', 'Show terminal'], 'the row being changed stays, whatever its keys are now')
+  })
+
+  it('finds the rows a pressed shortcut belongs to, ranges included', () => {
+    const sections = shortcutSections(app(), ['View', 'Session', 'Edit'])
+    const titles = (text: string, keep?: string) => filterByChord(sections, chord(text), keep).flatMap((section) => section.rows.map((row) => row.title))
+    assert.deepEqual(titles('Ctrl+Shift+S'), ['Toggle sidebar'], 'the second shortcut of a command counts too')
+    assert.deepEqual(titles('ctrl+j'), ['Toggle bottom panel'])
+    assert.deepEqual(titles('Ctrl+Shift+J'), [], 'an exact chord: Shift makes another one')
+    assert.deepEqual(titles('Ctrl+5'), ['Go to tab 1 to 9'])
+    assert.deepEqual(titles('Alt+9'), ['Go to session 1 to 9'])
+    assert.deepEqual(titles('Ctrl+Alt+5'), [], 'a range holds only its own modifiers')
+    assert.deepEqual(titles('Ctrl+C'), ['Copy'], 'the keys a field handles are found as well')
+    assert.deepEqual(titles('Ctrl+Q', 'session.fork'), ['Fork session'], 'the row being changed stays')
+    const searched = (query: string) => filterSections(sections, query).flatMap((section) => section.rows.map((row) => row.title))
+    assert.deepEqual(searched('"Ctrl+5"'), ['Go to tab 1 to 9'], 'a shortcut in quotes, as pressing the keys writes it, is found exactly')
+    assert.deepEqual(searched('"Ctrl+J"'), ['Toggle bottom panel'])
+    assert.deepEqual(searched('"no such chord+"'), [], 'quotes around text that is no shortcut search for the text')
   })
 })

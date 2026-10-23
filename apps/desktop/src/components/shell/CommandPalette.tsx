@@ -2,10 +2,13 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import { commandRegistry } from '../../commands/app'
 import { flatten, rankPalette, remember, type PaletteItem } from '../../palette/model'
 import { useSessions } from '../../stores/sessions'
-import { useUi, type SettingsTab } from '../../stores/ui'
+import { useSettings } from '../../stores/settings'
+import { isChat, projectName } from '../../stores/sidebar-model'
+import { useUi } from '../../stores/ui'
 import { cx } from '../../ui/cx'
 import { Bolt, Gear, MessageSquare, Search } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
+import { SECTIONS, SETTINGS, sectionInfo } from '../settings/sections'
 
 interface Entry extends PaletteItem {
   kind: 'session' | 'command' | 'settings'
@@ -13,17 +16,6 @@ interface Entry extends PaletteItem {
 }
 
 const RECENT_KEY = 'eNCode.palette.recent.v1'
-
-/** The settings pages, with the words people look for them by. */
-const SETTINGS_PAGES: readonly { tab: SettingsTab; title: string; keywords: string }[] = [
-  { tab: 'models', title: 'Models', keywords: 'providers api keys openrouter free connect' },
-  { tab: 'roles', title: 'Roles', keywords: 'builder reviewer tools small tasks model per role' },
-  { tab: 'agent', title: 'Agent', keywords: 'approval policy computer use steps limits steer queue follow-up enter' },
-  { tab: 'permissions', title: 'Permissions', keywords: 'rules trust protected folders allow deny' },
-  { tab: 'mcp', title: 'MCP servers', keywords: 'mcp tools servers' },
-  { tab: 'sandbox', title: 'Sandbox', keywords: 'isolation commands network' },
-  { tab: 'appearance', title: 'Appearance', keywords: 'theme dark light font size accent density motion' },
-]
 
 function loadRecent(): string[] {
   try {
@@ -42,11 +34,13 @@ function saveRecent(recent: readonly string[]): void {
   }
 }
 
-const folderName = (root: string | null) => (root ? (root.split(/[\\/]/).filter(Boolean).pop() ?? root) : 'No project')
-
-/** Everything the palette can find, read when it opens: the other open sessions, newest first, the commands that can run now, and the settings pages. */
+/**
+ * Everything the palette can find, read when it opens: the other open sessions, newest first, the commands that can
+ * run now, the settings sections and, once something is typed, each setting in them.
+ */
 function paletteEntries(): Entry[] {
   const { sessions, activeId } = useSessions.getState()
+  const chatsFolder = useSettings.getState().settings?.chatsFolder
   const chats: Entry[] = sessions
     .filter((session) => !session.archived && session.id !== activeId)
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -55,8 +49,11 @@ function paletteEntries(): Entry[] {
       group: 'Sessions',
       kind: 'session',
       title: session.title,
-      detail: folderName(session.projectRoot),
-      run: () => void useSessions.getState().select(session.id),
+      detail: isChat(session, chatsFolder) || !session.projectRoot ? 'Chat' : projectName(session.projectRoot),
+      run: () => {
+        useUi.getState().setSettingsOpen(false)
+        void useSessions.getState().select(session.id)
+      },
     }))
   const actions: Entry[] = commandRegistry
     .all()
@@ -71,16 +68,26 @@ function paletteEntries(): Entry[] {
       ...(commandRegistry.shortcut(command.id) ? { shortcut: commandRegistry.shortcut(command.id) } : {}),
       run: () => void commandRegistry.run(command.id),
     }))
-  const pages: Entry[] = SETTINGS_PAGES.map((page) => ({
-    id: `settings:${page.tab}`,
+  const pages: Entry[] = SECTIONS.map((section) => ({
+    id: `settings:${section.id}`,
     group: 'Settings',
     kind: 'settings',
-    title: page.title,
+    title: section.title,
     detail: 'Settings',
-    keywords: page.keywords,
-    run: () => useUi.getState().openSettings(page.tab),
+    keywords: section.keywords,
+    run: () => useUi.getState().openSettings(section.id),
   }))
-  return [...chats, ...actions, ...pages]
+  const settings: Entry[] = SETTINGS.map((setting) => ({
+    id: `setting:${setting.id}`,
+    group: 'Settings',
+    kind: 'settings',
+    title: setting.label,
+    detail: sectionInfo(setting.section).title,
+    ...(setting.keywords ? { keywords: setting.keywords } : {}),
+    searchOnly: true,
+    run: () => useUi.getState().openSettings(setting.section, setting.id),
+  }))
+  return [...chats, ...actions, ...pages, ...settings]
 }
 
 const ICONS: Record<Entry['kind'], ReactNode> = {

@@ -45,31 +45,43 @@ export interface ProjectGroup {
 export interface SidebarModel {
   pinned: SessionSummary[]
   projects: ProjectGroup[]
-  /** Sessions that belong to no project. */
-  recents: SessionSummary[]
+  /** Sessions that belong to no project: chats, which work in the chats folder, and older ones without a folder. */
+  chats: SessionSummary[]
 }
 
 const newestFirst = (a: SessionSummary, b: SessionSummary) => b.updatedAt - a.updatedAt
 
+/** A chat belongs to no project: it works in the chats folder (File > New chat), or, made before there was one, in none. */
+export function isChat(session: Pick<SessionSummary, 'projectRoot'>, chatsFolder: string | null | undefined): boolean {
+  return session.projectRoot === null || sameRoot(session.projectRoot, chatsFolder)
+}
+
+/** What the sidebar and the switcher call a folder: Chats for the chats folder, else the folder's name. */
+export function placeName(root: string, chatsFolder: string | null | undefined): string {
+  return sameRoot(root, chatsFolder) ? 'Chats' : projectName(root)
+}
+
 export function buildSidebar(
   sessions: readonly SessionSummary[],
-  options: { workspaceRoot: string | null; recentRoots: readonly string[]; filter?: string },
+  options: { workspaceRoot: string | null; recentRoots: readonly string[]; chatsFolder?: string | null; filter?: string },
 ): SidebarModel {
+  const { chatsFolder } = options
   const needle = (options.filter ?? '').trim().toLowerCase()
   const live = sessions.filter((session) => !session.archived)
   const matches = (session: SessionSummary) =>
     !needle ||
     session.title.toLowerCase().includes(needle) ||
-    (session.projectRoot !== null && projectName(session.projectRoot).toLowerCase().includes(needle))
+    (session.projectRoot !== null && placeName(session.projectRoot, chatsFolder).toLowerCase().includes(needle))
 
   const shown = live.filter(matches).sort(newestFirst)
   const pinned = shown.filter((session) => session.pinned)
   const unpinned = shown.filter((session) => !session.pinned)
 
-  // Projects: the open folder first, then by latest activity, then folders opened before without sessions.
+  // Projects: the open folder first, then by latest activity, then folders opened before without sessions. The chats
+  // folder is no project, even while it is the open folder.
   const roots = new Map<string, string>()
   const add = (root: string | null) => {
-    if (root && !roots.has(rootKey(root))) roots.set(rootKey(root), root)
+    if (root && !sameRoot(root, chatsFolder) && !roots.has(rootKey(root))) roots.set(rootKey(root), root)
   }
   add(options.workspaceRoot)
   for (const session of unpinned) add(session.projectRoot)
@@ -82,7 +94,7 @@ export function buildSidebar(
     projects.push({ root, name: projectName(root), sessions: inProject })
   }
 
-  return { pinned, projects, recents: unpinned.filter((session) => session.projectRoot === null) }
+  return { pinned, projects, chats: unpinned.filter((session) => isChat(session, chatsFolder)) }
 }
 
 /** Every session the sidebar lists, top to bottom, leaving out those in collapsed projects. */
@@ -92,7 +104,7 @@ export function visibleOrder(model: SidebarModel, collapsed: ReadonlySet<string>
     ...model.projects.flatMap((project) =>
       collapsed.has(rootKey(project.root)) ? [] : project.sessions.map((session) => session.id),
     ),
-    ...model.recents.map((session) => session.id),
+    ...model.chats.map((session) => session.id),
   ]
 }
 

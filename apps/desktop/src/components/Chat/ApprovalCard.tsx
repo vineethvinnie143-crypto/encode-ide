@@ -62,6 +62,8 @@ export default function ApprovalCard() {
       if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || modalOpen()) return
       const target = event.target as HTMLElement
       if (event.key === 'Escape') {
+        // An Esc that closed something first (the message box's picker, the Settings page) is not an answer.
+        if (event.defaultPrevented) return
         event.preventDefault()
         if (explaining) setExplaining(false)
         else if (remembering) setRemembering(false)

@@ -91,7 +91,7 @@ export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Pro
   mcp: () => ui().openSettings('mcp'),
   skills: () => ui().setPluginsOpen(true),
   settings: () => ui().setSettingsOpen(true),
-  shortcuts: () => ui().setShortcutsOpen(true),
+  shortcuts: () => ui().openSettings('shortcuts'),
   feedback: (args) => agentActions.feedback(args || undefined),
   stop: () => agentActions.stop(),
 }

@@ -1,0 +1,559 @@
+/* ============================================================
+   Settings: a page over the sheet. The sessions and the work area
+   stay laid out under it (hidden and inert), so nothing reflows or
+   restarts when it closes. Sections on the left in the sidebar's
+   colour, the section in a centred column on the canvas.
+   ============================================================ */
+
+.sheet-work {
+  display: contents;
+}
+/* Inherited by every child; the page draws over them. */
+.sheet-work.is-covered {
+  visibility: hidden;
+}
+
+.settings-page {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  background: var(--canvas);
+  animation: settings-in var(--dur-3) var(--ease-out);
+}
+@keyframes settings-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Navigation */
+.settings-nav {
+  flex: none;
+  width: 264px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.settings-back {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  margin: 9px 8px 6px;
+  padding: 0 10px;
+  border-radius: var(--r-10);
+  color: var(--text-2);
+  font-size: var(--fs-14);
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.settings-back:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.settings-back-text {
+  flex: 1;
+  min-width: 0;
+}
+.settings-back .ui-kbd-group {
+  color: var(--text-3);
+}
+
+.settings-search {
+  position: relative;
+  flex: none;
+  margin: 0 8px 8px;
+}
+.settings-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  translate: 0 -50%;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.settings-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  outline: none;
+  transition:
+    border-color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+.settings-search-input::placeholder {
+  color: var(--text-3);
+}
+.settings-search-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.settings-nav-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 8px 12px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  margin-bottom: 2px;
+  padding: 0 10px;
+  border-radius: var(--r-10);
+  color: var(--text-2);
+  font-size: var(--fs-14);
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.settings-nav-item .icon {
+  flex: none;
+  color: var(--text-3);
+  transition: color var(--dur-1) var(--ease-out);
+}
+.settings-nav-item:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.settings-nav-item.is-active {
+  background: var(--row-selected);
+  color: var(--text-1);
+}
+.settings-nav-item:hover .icon,
+.settings-nav-item.is-active .icon {
+  color: var(--text-1);
+}
+
+.settings-nav-sep {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--border-subtle);
+}
+
+/* While searching: each section found, and the settings in it under it. */
+.settings-nav-hit + .settings-nav-hit {
+  margin-top: 4px;
+}
+.settings-nav-sub {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin-bottom: 1px;
+  padding: 5px 10px 5px 36px;
+  border-radius: var(--r-8);
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  line-height: 18px;
+  text-align: left;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.settings-nav-sub:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.settings-nav-empty {
+  padding: 14px 10px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+
+/* The section */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.settings-column {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 32px 72px;
+}
+
+.settings-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-heading {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: 1.3;
+}
+.settings-description {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+
+.settings-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-group-title,
+.settings-page .section-title,
+.settings-page .roles-section-head h3 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.settings-group-description {
+  margin: -4px 0 2px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+/* A row with one wide control, such as the approval policies. */
+.settings-row-block {
+  display: block;
+  padding: 12px 14px;
+}
+.settings-row-block .policy-list {
+  margin-bottom: 0;
+}
+
+/* A setting found from the search: marked once where it is. */
+[data-setting].is-found {
+  border-radius: var(--r-10);
+  animation: settings-found 1.6s var(--ease-out);
+}
+@keyframes settings-found {
+  0%,
+  40% {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+.settings-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.settings-path .icon {
+  flex: none;
+}
+.settings-path code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: calc(var(--code-size) - 0.5px);
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: -14px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+
+.settings-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 14px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.settings-empty .icon {
+  flex: none;
+}
+
+/* Settings > Agent > Web search sits in a card like the other groups. */
+.settings-web-search {
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface-1);
+  gap: 10px;
+}
+
+/* Settings > Models: one row per connection, opened to change it */
+.conn + .conn,
+.conn-add {
+  border-top: 1px solid var(--border-subtle);
+}
+.conn-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border-radius: var(--r-10);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.conn-head:hover {
+  background: var(--hover);
+}
+.conn.is-open .conn-head {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.conn-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.conn-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  line-height: 20px;
+}
+.conn-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: calc(var(--code-size) - 0.5px);
+  line-height: 18px;
+}
+.conn-key {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.conn-key.is-missing {
+  color: var(--warning);
+}
+.conn-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: rotate var(--dur-2) var(--ease-out);
+}
+.conn-chevron.is-open {
+  rotate: 180deg;
+}
+.conn-body {
+  padding: 4px 14px 14px;
+}
+.conn-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.conn-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.conn-key-row {
+  gap: 8px;
+}
+.conn-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.conn-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+.conn-add-label {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.conn-add-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.conn-add-presets .preset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Settings > Keyboard shortcuts: the list flows with the page */
+.shortcuts-section .shortcuts-bar {
+  margin-bottom: 4px;
+}
+.shortcuts-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.shortcuts-search .shortcuts-filter {
+  width: 100%;
+  padding-right: 40px;
+}
+.shortcuts-search.is-recording .shortcuts-filter {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--accent-soft);
+  caret-color: transparent;
+}
+/* Inside the field at its end; the tooltip's wrapper has no box, so the button itself is placed. */
+.shortcuts-record {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-6);
+  color: var(--text-3);
+  transition:
+    background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+.shortcuts-record:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+.shortcuts-record.is-on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.settings-page .shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+.shortcuts-card {
+  padding: 4px 14px;
+}
+.settings-page .shortcuts-group,
+.settings-page .shortcuts-list section:first-child .shortcuts-group {
+  margin: 8px 0 2px;
+}
+.shortcuts-card .shortcuts-row:last-child {
+  border-bottom: 0;
+}
+
+/* Settings > Archived sessions */
+.archived-filter {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.archived-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 10px 8px 14px;
+}
+.archived-row + .archived-row {
+  border-top: 1px solid var(--border-subtle);
+}
+.archived-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.archived-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: var(--fs-14);
+  line-height: 20px;
+}
+.archived-meta {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
+/* The sections that were panes of the old dialog keep their own layout, without its padding and width. */
+.settings-page .settings-permissions,
+.settings-page .settings-mcp,
+.settings-page .settings-sandbox,
+.settings-page .settings-roles {
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+}
+.settings-page .settings-roles {
+  gap: 28px;
+}
+
+@media (max-width: 860px) {
+  .settings-nav {
+    width: 216px;
+  }
+  .settings-column {
+    padding: 28px 20px 56px;
+  }
+  .conn-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,11 +1,12 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
 import { cleanKeybindings } from '../../shared/keybindings'
 import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
-import type { AgentMode, ApprovalPolicy, FollowUp, ModelProfile, ProfileKind, Settings } from '../../shared/types'
+import type { AgentMode, ApprovalPolicy, FollowUp, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -14,10 +15,12 @@ interface StoredProfile extends Omit<ModelProfile, 'hasApiKey'> {
   apiKeyEnc?: string
 }
 
-interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'computerSupported' | 'searchKeys'> {
+interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'computerSupported' | 'searchKeys' | 'chatsFolder' | 'chatsFolderDefault'> {
   profiles: StoredProfile[]
   /** The keys of the search providers that need one, sealed like a profile's. */
   searchKeysEnc: Partial<Record<KeyedSearchProviderId, string>>
+  /** The folder the person chose for chats, or null for the default one. */
+  chatsFolder: string | null
 }
 
 /** The name a search key has in the vault; a profile's id is a UUID, so the two cannot meet. */
@@ -44,6 +47,12 @@ function defaults(): StoredSettings {
     lastWorkspace: null,
     agentMode: 'code',
     followUp: 'queue',
+    sendKey: 'enter',
+    keepAwake: true,
+    notifyDone: 'background',
+    notifyNeeds: 'background',
+    flashTaskbar: true,
+    chatsFolder: null,
     appearance: { ...DEFAULT_APPEARANCE },
     roles: {},
     efforts: {},
@@ -63,6 +72,17 @@ function normalizePolicy(value: unknown, fallback: ApprovalPolicy): ApprovalPoli
 }
 
 const isFollowUp = (value: unknown): value is FollowUp => value === 'queue' || value === 'steer'
+const isSendKey = (value: unknown): value is SendKey => value === 'enter' || value === 'ctrl-enter'
+const isNotifyWhen = (value: unknown): value is NotifyWhen => value === 'never' || value === 'background' || value === 'always'
+
+/** The longest folder path kept for chats; Windows' own limit for most programs is 260 characters. */
+const MAX_FOLDER_LENGTH = 1024
+
+/** A folder for chats as it can be kept: an absolute path of reasonable length, tidied; anything else is no choice. */
+export function chatsFolderOf(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim() || value.length > MAX_FOLDER_LENGTH || value.includes('\0')) return null
+  return path.isAbsolute(value) ? path.resolve(value) : null
+}
 
 function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
@@ -109,6 +129,24 @@ function freeProfileOf(value: unknown, profiles: StoredProfile[]): string | null
   return typeof value === 'string' && profiles.some((profile) => profile.id === value && profile.kind === 'openrouter') ? value : null
 }
 
+/** A folder's path as two are compared: slashes one way, none at the end, and on Windows any case. */
+function folderText(folder: string, platform: NodeJS.Platform): string {
+  const tidy = folder.replace(/[\\/]+/g, '/').replace(/\/+$/, '')
+  return platform === 'win32' ? tidy.toLowerCase() : tidy
+}
+
+/** Two folders are the same on Windows whatever their case and slashes. */
+export function sameFolder(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  return folderText(a, platform) === folderText(b, platform)
+}
+
+/** True when `folder` is `parent` or lies in it, judged on the path text. */
+function inFolder(folder: string, parent: string, platform: NodeJS.Platform): boolean {
+  const child = folderText(folder, platform)
+  const base = folderText(parent, platform)
+  return child === base || child.startsWith(`${base}/`)
+}
+
 export class SettingsService {
   private readonly file: string
   private readonly vault: KeyVault
@@ -116,10 +154,22 @@ export class SettingsService {
   /** Changes whenever a profile's key does, so the agent host can tell a new key from the old one without seeing either. */
   private readonly revisions = new Map<string, number>()
   private readonly platform: NodeJS.Platform
+  /** eNCode's own folder: settings, keys, sessions and checkpoints. */
+  private readonly dir: string
+  private readonly home: string
 
-  /** `cipher` is Electron's safeStorage; tests pass a fake. */
-  constructor(dir: string, cipher: Cipher, platform: NodeJS.Platform = process.platform) {
+  /** Where chats work when the person has not chosen a folder. */
+  private readonly defaultChatsFolder: string
+
+  /**
+   * `cipher` is Electron's safeStorage; tests pass a fake. `chatsFolder` is the default folder for chats, eNCode in
+   * Documents, and `home` the person's own folder.
+   */
+  constructor(dir: string, cipher: Cipher, platform: NodeJS.Platform = process.platform, options: { chatsFolder?: string; home?: string } = {}) {
     this.platform = platform
+    this.dir = path.resolve(dir)
+    this.home = options.home ?? os.homedir()
+    this.defaultChatsFolder = options.chatsFolder ?? path.join(this.home, 'Documents', 'eNCode')
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
     this.file = path.join(dir, 'eNCode-settings.json')
     this.vault = new KeyVault(cipher, platform)
@@ -196,6 +246,12 @@ export class SettingsService {
       lastWorkspace: typeof input.lastWorkspace === 'string' ? input.lastWorkspace : null,
       agentMode: input.agentMode === 'ask' || input.agentMode === 'plan' ? input.agentMode : 'code',
       followUp: isFollowUp(input.followUp) ? input.followUp : base.followUp,
+      sendKey: isSendKey(input.sendKey) ? input.sendKey : base.sendKey,
+      keepAwake: typeof input.keepAwake === 'boolean' ? input.keepAwake : base.keepAwake,
+      notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
+      notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
+      flashTaskbar: typeof input.flashTaskbar === 'boolean' ? input.flashTaskbar : base.flashTaskbar,
+      chatsFolder: this.fitForChats(chatsFolderOf(input.chatsFolder)),
       appearance: normalizeAppearance(input.appearance),
       roles: cleanRoles(input.roles, profiles),
       efforts: cleanEfforts(input.efforts),
@@ -233,6 +289,13 @@ export class SettingsService {
       lastWorkspace: this.data.lastWorkspace,
       agentMode: this.data.agentMode,
       followUp: this.data.followUp,
+      sendKey: this.data.sendKey,
+      keepAwake: this.data.keepAwake,
+      notifyDone: this.data.notifyDone,
+      notifyNeeds: this.data.notifyNeeds,
+      flashTaskbar: this.data.flashTaskbar,
+      chatsFolder: this.chatsFolder(),
+      chatsFolderDefault: this.defaultChatsFolder,
       appearance: { ...this.data.appearance },
       roles: structuredClone(this.data.roles),
       efforts: { ...this.data.efforts },
@@ -306,6 +369,12 @@ export class SettingsService {
       next.agentMode = patch.agentMode
     }
     if (isFollowUp(patch.followUp)) next.followUp = patch.followUp
+    if (isSendKey(patch.sendKey)) next.sendKey = patch.sendKey
+    if (typeof patch.keepAwake === 'boolean') next.keepAwake = patch.keepAwake
+    if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
+    if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds
+    if (typeof patch.flashTaskbar === 'boolean') next.flashTaskbar = patch.flashTaskbar
+    // The chats folder is not taken from a patch: only the folder dialog, in this process, chooses one.
     // A partial appearance changes only the fields it names.
     if (patch.appearance !== undefined) next.appearance = normalizeAppearance(patch.appearance, next.appearance)
 
@@ -375,8 +444,38 @@ export class SettingsService {
     return profile ? this.vault.get(profile.id, profile.apiKeyEnc) : ''
   }
 
+  /** The folder chats work in: the one the person chose, or the default. */
+  chatsFolder(): string {
+    return this.data.chatsFolder ?? this.defaultChatsFolder
+  }
+
+  /**
+   * A folder chats may work in, or null. The agent writes in a chat's folder without asking, so it is never a whole
+   * drive, the home folder, or a folder that holds eNCode's own files or lies in them, where a write could change its
+   * settings or keys.
+   */
+  private fitForChats(folder: string | null): string | null {
+    if (folder === null || path.parse(folder).root === folder || sameFolder(folder, this.home, this.platform)) return null
+    return inFolder(folder, this.dir, this.platform) || inFolder(this.dir, folder, this.platform) ? null : folder
+  }
+
+  /** Keeps `folder` (from the folder dialog) as the chats folder, or with null goes back to the default. */
+  setChatsFolder(folder: string | null): Settings {
+    const whole = folder === null ? null : chatsFolderOf(folder)
+    if (folder !== null && whole === null) throw new Error('Choose a folder on this computer for chats.')
+    const kept = this.fitForChats(whole)
+    if (whole !== null && kept === null) throw new Error('Choose a folder of its own for chats: not a whole drive, the home folder, or a folder that holds eNCode settings.')
+    // The default needs no entry, so a later change of the default reaches whoever never chose.
+    this.data.chatsFolder = kept !== null && path.resolve(kept) === path.resolve(this.defaultChatsFolder) ? null : kept
+    this.persist()
+    return this.get()
+  }
+
+  /** Remembers a folder that was opened. The chats folder is opened like a project but is not one, so it is not listed with them. */
   touchWorkspace(root: string): void {
-    this.data.recentWorkspaces = [root, ...this.data.recentWorkspaces.filter((r) => r !== root)].slice(0, 12)
+    if (!sameFolder(root, this.chatsFolder(), this.platform)) {
+      this.data.recentWorkspaces = [root, ...this.data.recentWorkspaces.filter((r) => r !== root)].slice(0, 12)
+    }
     this.data.lastWorkspace = root
     this.persist()
   }

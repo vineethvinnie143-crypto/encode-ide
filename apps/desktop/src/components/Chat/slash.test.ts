@@ -43,7 +43,8 @@ describe('slash commands', () => {
     await run('model')
     assert.deepEqual(useUi.getState().menuRequest, { menu: 'model', id: before + 1 })
     await run('shortcuts')
-    assert.equal(useUi.getState().shortcutsOpen, true)
+    assert.equal(useUi.getState().settingsOpen, true)
+    assert.equal(useUi.getState().settingsSection, 'shortcuts', 'the shortcuts are a section of the Settings page')
   })
 })
 

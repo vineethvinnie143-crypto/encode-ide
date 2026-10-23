@@ -1,4 +1,4 @@
-import { useMemo, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useMemo, useRef, type KeyboardEvent } from 'react'
 import {
   CODE_SIZES,
   FONT_ENCODE,
@@ -11,13 +11,16 @@ import {
   type Motion,
   type ThemeMode,
 } from '@shared/appearance'
-import { useInstalledFonts } from '../hooks/useInstalledFonts'
-import { Button } from '../ui/Button'
-import { cx } from '../ui/cx'
-import { Monitor, Moon, Sun } from '../ui/icons'
-import { keyToMove, moveIndex } from '../ui/nav'
-import { Segmented, type SegmentedOption } from '../ui/Segmented'
-import { Select, type SelectOption } from '../ui/Select'
+import type { Settings } from '@shared/types'
+import { useInstalledFonts } from '../../hooks/useInstalledFonts'
+import { useSettings } from '../../stores/settings'
+import { Button } from '../../ui/Button'
+import { cx } from '../../ui/cx'
+import { Monitor, Moon, Sun } from '../../ui/icons'
+import { keyToMove, moveIndex } from '../../ui/nav'
+import { Segmented, type SegmentedOption } from '../../ui/Segmented'
+import { Select, type SelectOption } from '../../ui/Select'
+import { SettingRow, SettingsGroup } from './Section'
 
 const MODES: SegmentedOption<ThemeMode>[] = [
   { value: 'system', label: 'System', icon: <Monitor size={14} /> },
@@ -56,18 +59,6 @@ function fontOptions(builtIn: SelectOption<string>[], installed: readonly string
   return [...builtIn, ...named.map((family) => ({ value: family, label: family }))]
 }
 
-function Row({ label, help, children }: { label: string; help: string; children: ReactNode }) {
-  return (
-    <div className="settings-row">
-      <div className="settings-row-text">
-        <div className="settings-row-label">{label}</div>
-        <div className="settings-row-help">{help}</div>
-      </div>
-      <div className="settings-row-control">{children}</div>
-    </div>
-  )
-}
-
 /** The accent as colour swatches: a radio group, so arrow keys move between them. */
 function AccentPicker({ value, onChange }: { value: Accent; onChange: (accent: Accent) => void }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
@@ -102,15 +93,13 @@ function AccentPicker({ value, onChange }: { value: Accent; onChange: (accent: A
   )
 }
 
-/** Settings › Appearance. Changes preview at once; Save keeps them, Cancel puts the old look back. */
-export default function AppearanceSettings({
-  value,
-  onChange,
-}: {
-  value: Appearance
-  onChange: (appearance: Appearance) => void
-}) {
-  const set = <K extends keyof Appearance>(key: K, next: Appearance[K]) => onChange({ ...value, [key]: next })
+/** Settings > Appearance: each change shows and is kept at once. */
+export function AppearanceSection({ settings }: { settings: Settings }) {
+  const value = settings.appearance
+  const save = useSettings((state) => state.save)
+  // From the store, not this render: two changes in a row (arrow keys over the swatches) each build on the last.
+  const set = <K extends keyof Appearance>(key: K, next: Appearance[K]) =>
+    void save({ appearance: { ...(useSettings.getState().settings?.appearance ?? value), [key]: next } })
   const installed = useInstalledFonts()
   const uiFonts = useMemo(
     () =>
@@ -137,72 +126,49 @@ export default function AppearanceSettings({
     [installed.fonts, value.codeFont],
   )
   return (
-    <div className="settings-appearance">
-      <div className="section-title">Theme</div>
-      <div className="settings-card">
-        <Row label="Mode" help="System follows Windows' light or dark setting.">
+    <>
+      <SettingsGroup title="Theme">
+        <SettingRow id="appearance.theme" label="Mode" help="System follows Windows' light or dark setting.">
           <Segmented label="Mode" value={value.mode} options={MODES} onChange={(mode) => set('mode', mode)} />
-        </Row>
-        <Row label="Accent" help="Links, focus rings, selection and the Send button.">
+        </SettingRow>
+        <SettingRow id="appearance.accent" label="Accent" help="Links, focus rings, selection and the Send button.">
           <AccentPicker value={value.accent} onChange={(accent) => set('accent', accent)} />
-        </Row>
-        <Row label="Contrast" help="High makes secondary text and borders stronger.">
-          <Segmented
-            label="Contrast"
-            value={value.contrast}
-            options={CONTRASTS}
-            onChange={(contrast) => set('contrast', contrast)}
-          />
-        </Row>
-      </div>
+        </SettingRow>
+        <SettingRow id="appearance.contrast" label="Contrast" help="High makes secondary text and borders stronger.">
+          <Segmented label="Contrast" value={value.contrast} options={CONTRASTS} onChange={(contrast) => set('contrast', contrast)} />
+        </SettingRow>
+      </SettingsGroup>
 
-      <div className="section-title">Fonts</div>
-      <div className="settings-card">
-        <Row label="Interface font" help="System is Windows' own font, the same as Codex. eNCode is Inter.">
+      <SettingsGroup title="Fonts">
+        <SettingRow id="appearance.uiFont" label="Interface font" help="System is Windows' own font. eNCode is Inter.">
           <Select label="Interface font" value={value.uiFont} options={uiFonts} onChange={(font) => set('uiFont', font)} />
-        </Row>
-        <Row label="Interface size" help="The size of text in the thread, the sidebar and menus; smaller text follows it. Codex uses 14.">
-          <Select
-            label="Interface size"
-            value={String(value.uiSize)}
-            options={sizeOptions(UI_SIZES)}
-            onChange={(size) => set('uiSize', Number(size))}
-          />
-        </Row>
-        <Row label="Code font" help="System is Consolas, the same as Codex. eNCode is JetBrains Mono.">
+        </SettingRow>
+        <SettingRow id="appearance.uiSize" label="Interface size" help="Text in the thread, the sidebar and menus; smaller text follows it. 14 is the default.">
+          <Select label="Interface size" value={String(value.uiSize)} options={sizeOptions(UI_SIZES)} onChange={(size) => set('uiSize', Number(size))} />
+        </SettingRow>
+        <SettingRow id="appearance.codeFont" label="Code font" help="System is Consolas. eNCode is JetBrains Mono.">
           <Select label="Code font" value={value.codeFont} options={codeFonts} onChange={(font) => set('codeFont', font)} />
-        </Row>
-        <Row label="Code size" help="Code in replies, diffs and tool output. Codex uses 12.">
-          <Select
-            label="Code size"
-            value={String(value.codeSize)}
-            options={sizeOptions(CODE_SIZES)}
-            onChange={(size) => set('codeSize', Number(size))}
-          />
-        </Row>
+        </SettingRow>
+        <SettingRow id="appearance.codeSize" label="Code size" help="Code in replies, diffs and tool output. 12 is the default.">
+          <Select label="Code size" value={String(value.codeSize)} options={sizeOptions(CODE_SIZES)} onChange={(size) => set('codeSize', Number(size))} />
+        </SettingRow>
         {installed.failed && (
-          <Row label="Installed fonts" help="Windows did not list them yet. Try again to choose any font on this PC.">
+          <SettingRow label="Installed fonts" help="Windows did not list them yet. Try again to choose any font on this PC.">
             <Button size="sm" onClick={installed.retry}>
               List installed fonts
             </Button>
-          </Row>
+          </SettingRow>
         )}
-      </div>
+      </SettingsGroup>
 
-      <div className="section-title">Layout and motion</div>
-      <div className="settings-card">
-        <Row label="Density" help="Compact fits more rows in lists and menus.">
-          <Segmented
-            label="Density"
-            value={value.density}
-            options={DENSITIES}
-            onChange={(density) => set('density', density)}
-          />
-        </Row>
-        <Row label="Reduce motion" help="On replaces animation with instant changes. System follows Windows.">
+      <SettingsGroup title="Layout and motion">
+        <SettingRow id="appearance.density" label="Density" help="Compact fits more rows in lists and menus.">
+          <Segmented label="Density" value={value.density} options={DENSITIES} onChange={(density) => set('density', density)} />
+        </SettingRow>
+        <SettingRow id="appearance.motion" label="Reduce motion" help="On replaces animation with instant changes. System follows Windows.">
           <Segmented label="Reduce motion" value={value.motion} options={MOTIONS} onChange={(motion) => set('motion', motion)} />
-        </Row>
-      </div>
-    </div>
+        </SettingRow>
+      </SettingsGroup>
+    </>
   )
 }

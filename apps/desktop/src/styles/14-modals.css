@@ -196,100 +196,6 @@
   overflow: hidden;
 }
 
-.settings-models {
-  display: flex;
-  width: 100%;
-  min-height: 0;
-}
-
-.profile-list {
-  width: 250px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border-subtle);
-  overflow: auto;
-  padding: 10px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.profile-list-label {
-  font-size: calc(11px + var(--ui-small));
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-3);
-  padding: 4px 6px 6px;
-}
-
-.profile-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 9px;
-  border-radius: 7px;
-  cursor: pointer;
-  color: var(--text-2);
-  border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
-}
-.profile-item:hover {
-  background: var(--pressed);
-}
-.profile-item.is-selected {
-  background: var(--border-strong);
-  border-color: var(--border-strong);
-  color: var(--text-1);
-}
-
-.profile-item-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.profile-item-name {
-  font-size: calc(12px + var(--ui-small));
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.profile-item-model {
-  font-size: calc(var(--code-size) - 1px);
-  color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-}
-
-.profile-active {
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.profile-add {
-  margin-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 10px;
-}
-
-.profile-add-label {
-  font-size: calc(11px + var(--ui-small));
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-3);
-  padding: 0 6px 6px;
-}
-
-.profile-add-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-}
-
 .preset-btn {
   text-align: left;
   padding: 6px 8px;
@@ -304,15 +210,6 @@
   border-color: var(--accent);
   color: var(--text-1);
   background: var(--pressed);
-}
-
-.profile-form {
-  flex: 1;
-  overflow: auto;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .form-row {
@@ -369,22 +266,6 @@ select.text-input:focus {
 }
 .model-row .text-input {
   flex: 1;
-}
-
-.key-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.key-row .text-input {
-  flex: 1;
-}
-.key-row .icon-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-1);
 }
 
 .checkbox-row {
@@ -463,27 +344,19 @@ select.text-input:focus {
   max-width: 640px;
 }
 
-/* Settings > Appearance: cards of rows, label and help on the left, control on the right */
-.settings-appearance {
-  padding: 20px 24px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  max-width: 760px;
-}
-
 .settings-card {
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-10);
   background: var(--surface-1);
 }
 
+/* A setting: its name and help on the left, the control on the right, and anything below (a path, a result) on a
+   line of its own. */
 .settings-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  column-gap: 16px;
   min-height: 60px;
   padding: 10px 14px;
 }
@@ -510,6 +383,11 @@ select.text-input:focus {
 
 .settings-row-control {
   flex-shrink: 0;
+}
+.settings-row-below {
+  flex-basis: 100%;
+  min-width: 0;
+  margin-top: 8px;
 }
 
 .accent-swatches {
@@ -562,23 +440,4 @@ select.text-input:focus {
   letter-spacing: 0.8px;
   color: var(--text-3);
   margin-top: 6px;
-}
-
-.settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.settings-hint {
-  font-size: calc(11px + var(--ui-small));
-  color: var(--text-3);
-}
-
-.settings-footer-actions {
-  display: flex;
-  gap: 8px;
 }

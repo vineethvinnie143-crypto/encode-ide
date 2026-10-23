@@ -37,7 +37,7 @@ function RailButton({
 export default function IconRail() {
   useShortcuts()
   const settingsOpen = useUi((state) => state.settingsOpen)
-  const settingsTab = useUi((state) => state.settingsTab)
+  const settingsSection = useUi((state) => state.settingsSection)
   const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const sidebarMode = useUi((state) => state.sidebarMode)
@@ -52,6 +52,7 @@ export default function IconRail() {
   const ui = useUi.getState
   const waiting = attentionCount(sessions, statuses)
   const modalOpen = settingsOpen || pluginsOpen || automationOpen
+  const modelsShown = settingsOpen && (settingsSection === 'models' || settingsSection === 'roles')
   const shortcut = (id: string) => commandRegistry.shortcut(id)
 
   const run = (id: string) => () => commandRegistry.run(id)
@@ -92,13 +93,21 @@ export default function IconRail() {
       <RailButton label="Automations" active={automationOpen} onClick={() => ui().setAutomationOpen(true)}>
         <Clock size={20} />
       </RailButton>
-      <RailButton label="Review" shortcut={shortcut('view.review')} active={reviewOpen} onClick={() => usePanels.getState().open('review')}>
+      <RailButton
+        label="Review"
+        shortcut={shortcut('view.review')}
+        active={reviewOpen && !settingsOpen}
+        onClick={() => {
+          ui().setSettingsOpen(false)
+          usePanels.getState().open('review')
+        }}
+      >
         <GitPullRequest size={20} />
       </RailButton>
       <RailButton label="Plugins and skills" active={pluginsOpen} onClick={() => ui().setPluginsOpen(true)}>
         <Puzzle size={20} />
       </RailButton>
-      <RailButton label="Models and roles" active={settingsOpen && settingsTab === 'models'} onClick={() => ui().openSettings('models')}>
+      <RailButton label="Models and roles" active={modelsShown} onClick={() => ui().openSettings('models')}>
         <Bot size={20} />
       </RailButton>
       <Menu
@@ -116,7 +125,7 @@ export default function IconRail() {
 
       <div className="rail-spacer" />
 
-      <RailButton label="Settings" shortcut={shortcut('app.settings')} active={settingsOpen && settingsTab !== 'models'} onClick={run('app.settings')}>
+      <RailButton label="Settings" shortcut={shortcut('app.settings')} active={settingsOpen && !modelsShown} onClick={run('app.settings')}>
         <Gear size={20} />
       </RailButton>
       <Menu

@@ -45,6 +45,8 @@ const api: EncodeApi = {
     feedback: (text: string) => invoke('app:feedback', text),
     exportDiagnostics: () => invoke('app:export-diagnostics'),
     openLogs: () => invoke('app:open-logs'),
+    testNotification: () => invoke('app:test-notification'),
+    onOpenSession: (callback) => on<string>('app:open-session', callback),
   },
   window: {
     minimize: () => invoke('window:minimize'),
@@ -77,6 +79,8 @@ const api: EncodeApi = {
     save: (patch: Partial<Settings>) => invoke('settings:save', patch),
     setProfileKey: (id: string, key: string) => invoke('settings:set-key', id, key),
     setSearchKey: (provider: SearchProviderId, key: string) => invoke('settings:set-search-key', provider, key),
+    chooseChatsFolder: () => invoke('settings:choose-chats-folder'),
+    resetChatsFolder: () => invoke('settings:reset-chats-folder'),
   },
   search: {
     test: () => invoke('search:test'),
@@ -148,6 +152,8 @@ const api: EncodeApi = {
   agent: {
     sessions: () => invoke('agent:sessions'),
     createSession: (options?: { projectRoot?: string | null }) => invoke('agent:create', options),
+    createChat: () => invoke('agent:create-chat'),
+    chatsFolder: () => invoke('agent:chats-folder'),
     update: (sessionId: string, patch: SessionPatch) => invoke('agent:update', sessionId, patch),
     statuses: () => invoke('agent:statuses'),
     history: (sessionId?: string) => invoke('agent:history', sessionId),

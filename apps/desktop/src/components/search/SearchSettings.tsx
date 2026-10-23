@@ -9,10 +9,12 @@ export interface SearchSettingsProps {
   /** The providers that have a key stored. */
   storedKeys: readonly SearchProviderId[]
   keyStorage?: KeyStorage
-  /** What was typed into the key field for the chosen provider; nothing is stored until Save. */
+  /** What was typed into the key field for the chosen provider; nothing is stored until it is saved. */
   keyInput: string
   onProvider(provider: SearchProviderId): void
   onKeyInput(value: string): void
+  /** Stores the typed key now, from its button or Enter in the field. */
+  onSaveKey(): void
   /** Takes the stored key of the chosen provider away at once. */
   onRemoveKey(): void
   onTest(): void
@@ -21,7 +23,7 @@ export interface SearchSettingsProps {
 }
 
 /** Settings > Agent > Web search: who answers the agent's searches, their key if they need one, and a test. */
-export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onProvider, onKeyInput, onRemoveKey, onTest, testing, result }: SearchSettingsProps) {
+export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onProvider, onKeyInput, onSaveKey, onRemoveKey, onTest, testing, result }: SearchSettingsProps) {
   const info = searchProviderInfo(provider)
   const stored = storedKeys.includes(provider)
   return (
@@ -57,6 +59,7 @@ export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onP
             key={provider}
             value={keyInput}
             onChange={onKeyInput}
+            onSubmit={onSaveKey}
             label={`${info.name} API key`}
             placeholder={stored ? (keyStorage?.mode === 'session' ? 'Held for this session. Type to replace.' : 'Stored. Type to replace.') : 'Paste the key'}
             provider={info.name}
@@ -73,6 +76,11 @@ export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onP
       )}
 
       <div className="search-test">
+        {info.needsKey && keyInput.trim() && (
+          <button className="btn primary sm" onClick={onSaveKey} disabled={testing}>
+            Save key
+          </button>
+        )}
         <button className="btn ghost sm" onClick={onTest} disabled={testing}>
           {testing && <Loader2 size={13} className="spin" />}
           Test search

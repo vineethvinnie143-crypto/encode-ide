@@ -1,0 +1,124 @@
+import { useState } from 'react'
+import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
+import type { Settings } from '@shared/types'
+import { api } from '../../api'
+import { errorText } from '../../ipc-error'
+import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
+import { useSettings } from '../../stores/settings'
+import { useUi } from '../../stores/ui'
+import { cx } from '../../ui/cx'
+import { Toggle } from '../../ui/Toggle'
+import { SearchSettings } from '../search/SearchSettings'
+import { CommitInput, SettingRow, SettingsGroup } from './Section'
+
+/** Settings > Agent: what it may do without asking, the computer, web search and its limits. */
+export function AgentSection({ settings }: { settings: Settings }) {
+  const save = useSettings((state) => state.save)
+  const setSearchKey = useSettings((state) => state.setSearchKey)
+  const [searchKey, setSearchKeyInput] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<SearchCheckResult | null>(null)
+
+  const chooseProvider = (searchProvider: SearchProviderId) => {
+    setSearchKeyInput('')
+    setResult(null)
+    void save({ searchProvider })
+  }
+
+  /** The key typed for the provider chosen, stored now; false when it was refused. */
+  const storeKey = async (): Promise<boolean> => {
+    const provider = settings.searchProvider
+    if (!searchKey.trim() || !isKeyedSearchProvider(provider)) return true
+    if (!(await setSearchKey(provider, searchKey.trim()))) return false
+    setSearchKeyInput('')
+    return true
+  }
+
+  const removeKey = async () => {
+    const provider = settings.searchProvider
+    if (!(await setSearchKey(provider, ''))) return
+    setSearchKeyInput('')
+    setResult(null)
+    useUi.getState().notify('success', `Removed the ${searchProviderInfo(provider).name} key.`)
+  }
+
+  /** The agent's own way of searching, with what was typed stored first. */
+  const test = async () => {
+    setResult(null)
+    setTesting(true)
+    try {
+      if (!(await storeKey())) return
+      setResult(await api.search.test())
+    } catch (error) {
+      setResult({ ok: false, message: errorText(error) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingsGroup title="Approvals" description={`${ALWAYS_ASKS_NOTE} Ask and Plan modes never edit files or run commands.`}>
+        <div className="settings-row settings-row-block" data-setting="agent.policy">
+          <div className="policy-list" role="radiogroup" aria-label="Approval policy">
+            {POLICY_OPTIONS.map((option) => (
+              <label key={option} className={cx('policy-option', settings.policy === option && 'is-selected')}>
+                <input type="radio" name="approval-policy" value={option} checked={settings.policy === option} onChange={() => void save({ policy: option })} />
+                <span className="policy-option-text">
+                  <span className="policy-option-label">{POLICY_LABELS[option]}</span>
+                  <span className="policy-option-description">{POLICY_DESCRIPTIONS[option]}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </SettingsGroup>
+
+      {settings.computerSupported && (
+        <SettingsGroup title="Computer">
+          <SettingRow
+            id="agent.computer"
+            htmlFor="computer-use"
+            label="Let the agent use this computer"
+            help="It can look at an application and use the mouse and keyboard in it, one application at a time, and only after you allow that application. A banner shows while it works. Stop it with the banner's Stop button, with Ctrl+Alt+Esc, or by using the mouse or keyboard yourself. eNCode's own windows and password fields are never shown to it."
+          >
+            <Toggle id="computer-use" checked={settings.computer} onChange={(computer) => void save({ computer })} />
+          </SettingRow>
+        </SettingsGroup>
+      )}
+
+      <section className="settings-group settings-web-search" data-setting="agent.search">
+        <SearchSettings
+          provider={settings.searchProvider}
+          storedKeys={settings.searchKeys}
+          keyStorage={settings.keyStorage}
+          keyInput={searchKey}
+          onProvider={chooseProvider}
+          onKeyInput={setSearchKeyInput}
+          onSaveKey={() => void storeKey()}
+          onRemoveKey={() => void removeKey()}
+          onTest={() => void test()}
+          testing={testing}
+          result={result}
+        />
+      </section>
+
+      <SettingsGroup title="Limits">
+        <SettingRow id="agent.limits" htmlFor="max-steps" label="Max agent steps" help="How many steps one request may take before the agent stops and asks you to go on. 1 to 100.">
+          <CommitInput
+            id="max-steps"
+            className="narrow"
+            type="number"
+            min={1}
+            max={100}
+            value={String(settings.maxSteps)}
+            onCommit={(text) => {
+              const steps = Math.round(Number(text))
+              if (text.trim() && Number.isFinite(steps)) void save({ maxSteps: Math.max(1, Math.min(100, steps)) })
+            }}
+          />
+        </SettingRow>
+      </SettingsGroup>
+    </>
+  )
+}

@@ -251,6 +251,10 @@
   font-size: var(--fs-12);
   line-height: 20px;
 }
+/* Under a label of its own, such as Chats, the hint lines up with the rows' text. */
+.sb-empty-sub.is-flat {
+  padding-left: calc(var(--sb-pad) + 14px + var(--sb-gap));
+}
 
 /* Activity view: the title, and the start of the last reply under it */
 .sb-activity-row {

@@ -16,7 +16,7 @@ import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
 import { agentActions } from './agent'
 import { buildCommands, type AppActions } from './commands'
-import { CommandRegistry } from './registry'
+import { CommandRegistry, type Command } from './registry'
 
 const ui = () => useUi.getState()
 const panels = () => usePanels.getState()
@@ -47,6 +47,7 @@ function sidebarOrder(): string[] {
   const model = buildSidebar(sessions().sessions, {
     workspaceRoot: useWorkspace.getState().workspace?.root ?? null,
     recentRoots: useSettings.getState().settings?.recentWorkspaces ?? [],
+    chatsFolder: useSettings.getState().settings?.chatsFolder,
   })
   return visibleOrder(model, new Set(ui().collapsedProjects))
 }
@@ -60,7 +61,7 @@ export const sessionActions = {
   togglePin: (session: SessionSummary) => sessions().update(session.id, { pinned: !session.pinned }),
   async archive(session: SessionSummary): Promise<void> {
     await sessions().update(session.id, { archived: true })
-    ui().notify('info', `Archived “${session.title}”. Restore it from the Archived view.`)
+    ui().notify('info', `Archived “${session.title}”.`, { label: 'Undo', run: () => void sessionActions.restore(session) })
   },
   restore: (session: SessionSummary) => sessions().update(session.id, { archived: false }),
   async toggleUnread(session: SessionSummary): Promise<void> {
@@ -117,9 +118,14 @@ function createAppActions(): AppActions {
     canGoForward: () => sessions().canGoForward(),
 
     newSession: () => void sessions().newSession(),
+    newChat: () => void sessions().newChat(),
     openFolder: () => void useWorkspace.getState().openDialog(),
     quickOpen: () => ui().setQuickOpenOpen(true),
-    save: () => void useEditor.getState().saveActive(),
+    save: () => {
+      // Out of habit, on the Settings page: it keeps each change as it is made.
+      if (ui().settingsOpen) ui().notify('info', 'Settings are kept as you change them.')
+      else void useEditor.getState().saveActive()
+    },
     openSettings: () => ui().setSettingsOpen(true),
     quit: () => void api.window.close(),
 
@@ -131,9 +137,16 @@ function createAppActions(): AppActions {
       }
     },
     searchInFiles: () => panels().open('files', { view: 'search' }),
-    canFind: () => panels().side.layout !== 'full',
+    canFind: () => ui().settingsOpen || panels().side.layout !== 'full',
     isFinding: () => useFind.getState().open,
-    find: () => useFind.getState().show(threadSelection()),
+    find: () => {
+      // On the Settings page, Ctrl+F goes to its search.
+      const search = ui().settingsOpen ? document.querySelector<HTMLInputElement>('.settings-search-input') : null
+      if (search) {
+        search.focus()
+        search.select()
+      } else useFind.getState().show(threadSelection())
+    },
     findStep: (direction) => useFind.getState().move(direction),
 
     toggleSidebar: () => ui().toggleSidebar(),
@@ -214,7 +227,7 @@ function createAppActions(): AppActions {
     cyclePanelLayout: () => panels().cycleLayout(),
     toggleFullPanel: () => panels().toggleFull(),
 
-    showShortcuts: () => ui().setShortcutsOpen(true),
+    showShortcuts: () => ui().openSettings('shortcuts'),
     showAbout: () => ui().setAboutOpen(true),
     feedback: () => void agentActions.feedback(),
     saveDiagnostics: () => void helpActions.saveDiagnostics(),
@@ -222,8 +235,25 @@ function createAppActions(): AppActions {
   }
 }
 
+/**
+ * Commands that run over the Settings page: the palette, the page itself, the window (zoom, full screen, theme, quit),
+ * the field that has the focus (Edit) and Help. Every other one closes the page first, so what it does shows.
+ */
+const OVER_SETTINGS = /^(app\.(palette|settings|quit)|file\.save|view\.(zoom|fullScreen|theme)|edit\.|help\.)/
+
+function closingSettings(command: Command): Command {
+  if (OVER_SETTINGS.test(command.id)) return command
+  return {
+    ...command,
+    run: () => {
+      if (ui().settingsOpen) ui().setSettingsOpen(false)
+      return command.run()
+    },
+  }
+}
+
 export const commandRegistry = new CommandRegistry()
-commandRegistry.register(...buildCommands(createAppActions()))
+commandRegistry.register(...buildCommands(createAppActions()).map(closingSettings))
 
 // The person's own shortcuts apply as soon as the settings load, and whenever they change.
 let appliedKeybindings: Settings['keybindings'] | undefined
