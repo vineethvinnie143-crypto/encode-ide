@@ -2181,7 +2181,9 @@ async function runEditorSymbolChecks(markerLines) {
   await pressKey('h', { shift: true, alt: true })
   const callsAre = (title, rows, label) =>
     waitFor(`(() => { const now = ${CALLS}; return now.title === ${JSON.stringify(title)} && JSON.stringify(now.rows) === ${JSON.stringify(JSON.stringify(rows))} })()`, 10000, label).catch(async (error) => {
-      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CALLS))}`)
+      // Where the cursor and the keys were, what the editor said, and what the server was asked: a miss names its cause.
+      const around = await evaluate(`({ footer: document.querySelector('.editor-footer-side')?.textContent ?? '', focus: document.activeElement?.className ?? '', notices: [...document.querySelectorAll('.toast, .editor-message, [role=status]')].map((node) => node.textContent).filter(Boolean).slice(-3) })`)
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(CALLS))} ${JSON.stringify(around)}; the server last heard: ${JSON.stringify((await markerLines()).slice(-6))}`)
     })
   await callsAre('Callers of area', ['area@1', 'describe@2', 'report@2'], 'the callers of area')
   await waitFor("document.activeElement?.classList.contains('calls-list')", 4000, 'the call hierarchy has the keys')
@@ -2199,6 +2201,7 @@ async function runEditorSymbolChecks(markerLines) {
   // And the other way: what report calls, a level further opened with Right.
   await clickAt(await wordSpot('export function report(', 'report'))
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 })
+  await cursorAt(11, undefined, 'the cursor on report')
   await pressKey('h', { shift: true, alt: true })
   await callsAre('Callers of report', ['report@1', 'printAll@2'], 'the callers of report, in a file not open')
   await click('.calls-peek .calls-switch-item', 'Calls')
