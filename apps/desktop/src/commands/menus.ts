@@ -12,7 +12,7 @@ export interface MenuSpec {
 }
 
 export const MENUS: readonly MenuSpec[] = [
-  { label: 'File', items: ['file.newSession', 'file.openFolder', 'file.quickOpen', 'file.save', '-', 'app.settings', '-', 'app.quit'] },
+  { label: 'File', items: ['file.newSession', 'file.newChat', 'file.openFolder', 'file.quickOpen', 'file.save', '-', 'app.settings', '-', 'app.quit'] },
   {
     label: 'Edit',
     items: [

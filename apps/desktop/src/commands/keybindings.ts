@@ -127,12 +127,33 @@ export function shortcutSections(registry: CommandRegistry, groups: readonly str
 /** Text and keys folded so "ctrl j", "Ctrl+J" and "ctrl+j" all find Ctrl+J. */
 const searchable = (text: string) => text.toLowerCase().replace(/\s*\+\s*|\s+/g, '+')
 
-/** The rows whose title or keys hold what was typed, and row `keep`, which a new shortcut must not hide while it is changed. */
+/**
+ * The rows whose title or keys hold what was typed, and row `keep`, which a new shortcut must not hide while it is
+ * changed. A shortcut in quotes, as pressing the keys writes it ("Ctrl+J"), finds only the rows with that one.
+ */
 export function filterSections(sections: readonly ShortcutSection[], query: string, keep?: string | null): ShortcutSection[] {
   const needle = query.trim().toLowerCase()
   if (!needle) return [...sections]
+  const quoted = /^"(.+)"$/.exec(query.trim())
+  const exact = quoted ? parseChord(quoted[1]) : null
+  if (exact) return filterByChord(sections, exact, keep)
   const keysNeedle = searchable(needle)
   const matches = (row: ShortcutRow) =>
     row.id === keep || row.title.toLowerCase().includes(needle) || row.keys.some((key) => searchable(key).includes(keysNeedle))
+  return sections.map((section) => ({ group: section.group, rows: section.rows.filter(matches) })).filter((section) => section.rows.length)
+}
+
+/**
+ * The rows a pressed shortcut belongs to: those with that chord, or with a range that holds it (Alt+5 is one of Alt+1
+ * to Alt+9), and row `keep`, as above.
+ */
+export function filterByChord(sections: readonly ShortcutSection[], chord: Chord, keep?: string | null): ShortcutSection[] {
+  const id = chordId(chord)
+  const inRange = (row: ShortcutRow) => {
+    if (!row.range || row.keys.length !== 2 || chord.key.length !== 1) return false
+    const [from, to] = row.keys.map(parseChord)
+    return Boolean(from && to && from.key.length === 1 && to.key.length === 1 && chordId({ ...from, key: chord.key }) === id && from.key <= chord.key && chord.key <= to.key)
+  }
+  const matches = (row: ShortcutRow) => row.id === keep || row.keys.some((key) => chordKey(key) === id) || inRange(row)
   return sections.map((section) => ({ group: section.group, rows: section.rows.filter(matches) })).filter((section) => section.rows.length)
 }

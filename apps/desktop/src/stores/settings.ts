@@ -29,6 +29,15 @@ interface SettingsStore {
   activeProfile(): Settings['profiles'][number] | null
 }
 
+/** Each save is numbered: only the answer to the latest one is shown, as the main process applies them in order. */
+let saves = 0
+
+/** The settings as a patch will leave them, shown before the main process answers so a switch moves at once. */
+function patched(settings: Settings, patch: Partial<Settings>): Settings {
+  const { appearance, ...rest } = patch
+  return { ...settings, ...rest, ...(appearance ? { appearance: { ...settings.appearance, ...appearance } } : {}) }
+}
+
 export const useSettings = create<SettingsStore>((set, get) => ({
   settings: null,
   loading: false,
@@ -45,12 +54,18 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   },
 
   save: async (patch) => {
+    const turn = ++saves
+    const before = get().settings
+    if (before) set({ settings: patched(before, patch) })
     try {
       const settings = await api.settings.save(patch)
-      set({ settings })
+      if (turn === saves) set({ settings })
       return true
     } catch (error) {
       useUi.getState().notify('error', `Could not save settings: ${(error as Error).message}`)
+      // What shows must be what is saved: read it again rather than guess what a failed save left.
+      const settings = await api.settings.get().catch(() => before)
+      if (turn === saves) set({ settings })
       return false
     }
   },

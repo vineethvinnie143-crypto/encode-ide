@@ -1,11 +1,11 @@
 import type { ModelAlert } from '@shared/types'
-import type { SettingsTab } from '../../stores/ui'
+import type { SettingsSection } from '../../stores/ui'
 
 export interface AlertToast {
   kind: 'info' | 'error'
   text: string
-  /** The Settings tab that helps, when one does. */
-  tab?: SettingsTab
+  /** The Settings section that helps, when one does. */
+  tab?: SettingsSection
 }
 
 /** A notice from the model router as the toast says it: problems with a key or with payment are errors that point to the fix. */

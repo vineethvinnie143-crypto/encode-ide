@@ -210,13 +210,13 @@ export function ModelStatusBlock() {
   )
 }
 
-/** Settings → Roles: only free models or not, which model does which job, and how the connections are doing. */
+/** Settings > Roles: only free models or not, which model does which job, and how the connections are doing. Each change is kept at once. */
 export default function RolesSettings({ draft, onChange, onConnect }: { draft: Settings; onChange: (patch: Partial<Settings>) => void; onConnect: () => void }) {
   const openRouter = draft.profiles.filter((profile) => profile.kind === 'openrouter')
   const serving = freeProfile(draft)
   return (
     <div className="settings-roles">
-      <section className="roles-section" data-section="free">
+      <section className="roles-section" data-section="free" data-setting="roles.free">
         <header className="roles-section-head">
           <h3>Free models</h3>
         </header>
@@ -260,7 +260,7 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
         )}
       </section>
 
-      <section className="roles-section" data-section="roles">
+      <section className="roles-section" data-section="roles" data-setting="roles.list">
         <header className="roles-section-head">
           <h3>Which model does what</h3>
         </header>

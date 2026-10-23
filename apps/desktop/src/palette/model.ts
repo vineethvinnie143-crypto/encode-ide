@@ -15,6 +15,8 @@ export interface PaletteItem {
   /** More words that find it, such as "theme" for Appearance. */
   keywords?: string
   shortcut?: string
+  /** Listed only when a query finds it, such as a single setting: before anything is typed there would be too many. */
+  searchOnly?: boolean
 }
 
 export interface PaletteSection<T extends PaletteItem> {
@@ -133,8 +135,8 @@ const GROUP_ORDER: readonly PaletteItem['group'][] = ['Sessions', 'Actions', 'Se
 
 /**
  * The palette's sections for a query. Before anything is typed: recent picks, the latest sessions, every action and
- * every settings page. With a query: what matches, best first, sections in the order of their best match; recent
- * picks get a small lift.
+ * every settings page, but no item that is only for searches. With a query: what matches, best first, sections in the
+ * order of their best match; recent picks get a small lift.
  */
 export function rankPalette<T extends PaletteItem>(items: readonly T[], query: string, recent: readonly string[]): PaletteSection<T>[] {
   if (!normalize(query)) {
@@ -143,7 +145,7 @@ export function rankPalette<T extends PaletteItem>(items: readonly T[], query: s
     const shown = new Set(recents.map((item) => item.id))
     const sections: PaletteSection<T>[] = recents.length ? [{ group: 'Recent', items: recents }] : []
     for (const group of GROUP_ORDER) {
-      const members = items.filter((item) => item.group === group && !shown.has(item.id))
+      const members = items.filter((item) => item.group === group && !shown.has(item.id) && !item.searchOnly)
       const capped = group === 'Sessions' ? members.slice(0, SESSIONS_SHOWN) : members
       if (capped.length) sections.push({ group, items: capped })
     }

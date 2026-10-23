@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, protocol, safeStorage, screen, shell as osShell } from 'electron'
+import { app, BrowserWindow, Menu, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell as osShell } from 'electron'
+import { appendFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { hostConfigOf } from './agent-host/config'
@@ -9,6 +10,7 @@ import { aboutInfo, currentEnvironment } from './build-info'
 import { Banner, electronShortcuts } from './computer-overlay'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
+import { Attention, type Notice } from './services/attention'
 import { ComputerControl } from './services/computer-control'
 import { ComputerWatch } from './services/computer-watch'
 import { diagnosticsReport } from './services/diagnostics'
@@ -68,7 +70,9 @@ if (!gotLock) {
     const home = (!app.isPackaged && process.env.ENCODE_HOME) || os.homedir()
     const userDir = path.join(home, '.encode')
 
-    const settings = new SettingsService(userData, safeStorage)
+    // Chats work in the eNCode folder in Documents unless the person chooses another; a test run keeps it in its home.
+    const documents = !app.isPackaged && process.env.ENCODE_HOME ? path.join(home, 'Documents') : app.getPath('documents')
+    const settings = new SettingsService(userData, safeStorage, process.platform, { chatsFolder: path.join(documents, 'eNCode'), home })
 
     // What this process prints is kept in userData/logs, without keys or the user's name, for a diagnostics report.
     // Decrypting the keys is not free, so the list the log scrubs against is read again every few seconds only.
@@ -124,6 +128,62 @@ if (!gotLock) {
     // Only while the setting offers the tool: a model that invents a Computer call without it has touched nothing.
     let computerOn = false
 
+    // Notices, the taskbar button and sleep follow what the agents do (services/attention.ts). A test run writes the
+    // notices to a file instead of showing them; a packaged build never does.
+    const noticeLog = app.isPackaged ? undefined : process.env.ENCODE_NOTICES_FILE
+    const shownNotices = new Set<Notification>()
+    let sleepBlocker: number | null = null
+    const showNotice = (notice: Notice) => {
+      if (noticeLog) {
+        appendFileSync(noticeLog, `${JSON.stringify(notice)}\n`)
+        return
+      }
+      if (!Notification.isSupported()) return
+      const shown = new Notification({ title: notice.title, body: notice.body })
+      // Held until Windows closes it, so a click still reaches the handler; at most a few at a time.
+      shownNotices.add(shown)
+      if (shownNotices.size > 20) {
+        const oldest = shownNotices.values().next().value
+        if (oldest) {
+          shownNotices.delete(oldest)
+          oldest.close()
+        }
+      }
+      shown.on('click', () => {
+        const target = mainWindow
+        if (target && !target.isDestroyed()) {
+          if (target.isMinimized()) target.restore()
+          target.focus()
+        }
+        if (notice.sessionId) send('app:open-session', notice.sessionId)
+      })
+      shown.on('close', () => shownNotices.delete(shown))
+      shown.show()
+    }
+    const attention = new Attention(() => settings.raw(), {
+      focused: () => {
+        const target = mainWindow
+        return Boolean(target && !target.isDestroyed() && target.isFocused() && !target.isMinimized())
+      },
+      titleOf: async (sessionId) => (await agentHost.client.sessions().catch(() => [])).find((session) => session.id === sessionId)?.title,
+      notify: showNotice,
+      flash: (on) => {
+        const target = mainWindow
+        if (target && !target.isDestroyed()) target.flashFrame(on)
+      },
+      keepAwake: (on) => {
+        if (on && sleepBlocker === null) sleepBlocker = powerSaveBlocker.start('prevent-app-suspension')
+        else if (!on && sleepBlocker !== null) {
+          powerSaveBlocker.stop(sleepBlocker)
+          sleepBlocker = null
+        }
+      },
+      setTimer: (run, ms) => setTimeout(run, ms),
+      clearTimer: (timer) => clearTimeout(timer as NodeJS.Timeout),
+    })
+    win.on('focus', () => attention.focusChanged(true))
+    win.on('blur', () => attention.focusChanged(false))
+
     // The agent runs in a utility process; this side hands it the settings it needs and the keys it asks for.
     const agentHost = new AgentHostService({
       spawn: () => spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => console.error(`[agent-host] ${line}`)),
@@ -146,6 +206,7 @@ if (!gotLock) {
       searchKey: (provider) => settings.searchKeyFor(provider),
       onEvent: (event) => {
         send('agent:event', event)
+        attention.see(event)
         if (computerOn) computerWatch.see(event)
       },
       onJobs: (jobs) => send('jobs:changed', jobs),
@@ -158,6 +219,7 @@ if (!gotLock) {
       computerOn = current.computer && current.computerSupported
       if (!computerOn) computerWatch.reset()
       agentHost.configure(hostConfigOf(current, (profileId) => settings.keyRevision(profileId)))
+      attention.settingsChanged()
     }
     configureAgent()
 
@@ -256,7 +318,11 @@ if (!gotLock) {
       configureAgent,
       logs,
       diagnostics,
-      onSessionRemoved: (sessionId) => computerWatch.forget(sessionId),
+      testNotice: () => attention.test(),
+      onSessionRemoved: (sessionId) => {
+        computerWatch.forget(sessionId)
+        attention.forget(sessionId)
+      },
     })
 
     // Close the sessions and their commands before the process goes: the host is asked, then ended.
@@ -265,6 +331,7 @@ if (!gotLock) {
       if (closing) return
       closing = true
       event.preventDefault()
+      attention.dispose()
       computerControl.dispose()
       banner.dispose()
       void agentHost.dispose().finally(() => {

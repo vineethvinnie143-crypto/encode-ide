@@ -238,7 +238,7 @@ mean to stop.
 
 While the agent works on something long, type a correction and press `Ctrl+Enter`: it should show as **Steering**,
 then appear in the conversation where the agent took it, and the agent should change course at its next step. `Enter`
-instead queues the message for after the turn (Settings → Agent swaps the two keys). Set **Effort** with the chip under
+instead queues the message for after the turn (Settings → General swaps the two keys). Set **Effort** with the chip under
 the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High.
 
 `Ctrl+F` finds words in the session, inside folded steps and long command output too; `Enter` and `Shift+Enter` move
@@ -248,6 +248,22 @@ why not), then **Reset all**.
 
 What is most useful to hear: a steering message the agent ignored or answered twice, a word find misses or marks in the
 wrong place, a shortcut that does nothing or two things, and a key your keyboard layout makes hard to record.
+
+## Settings, chats and notices
+
+`Ctrl+,` opens Settings over the app. Type a few letters of what you want to change in its search ("sleep", "font",
+"api key") and press `Enter`: it should land on that setting. Change something and leave with `Esc`: there is no Save,
+and the change should still be there after a restart. Under **General**, choose `Ctrl+Enter` to send and check that
+`Enter` starts a new line in the message box. Under **Notifications**, press **Test**, then set **When a request
+finishes** to **In the background**, ask the agent for something, and switch to another window: a notice should name
+the session and say it finished, without what the agent wrote. Clicking it should open that session.
+
+`Ctrl+Alt+O` starts a chat, a session with no project. It works in `Documents\eNCode` (or the folder you choose in
+**General**), so ask it to make a file there and find the file in Explorer. Archive a chat, then find it under
+**Settings → Archived sessions** and restore it.
+
+What is most useful to hear: a setting the search does not find by the word you would use, a change that did not stick,
+a notice that did not show (and whether Windows' Focus assist was on), and the computer sleeping while the agent worked.
 
 ## What to try
 
@@ -277,6 +293,7 @@ text: read it before you send it. **Help → Show log files** opens the folder t
 | Sessions | `%APPDATA%\eNCode\sessions\` |
 | Logs | `%APPDATA%\eNCode\logs\` |
 | Your instructions, skills and agents | `%USERPROFILE%\.encode\` |
+| The files chats make | `Documents\eNCode\`, or the folder chosen in Settings → General |
 | The sandbox's helper, its temp and cache folders, and the folders it prepared | `%APPDATA%\eNCode\sandbox\` |
 
 Updating means installing the next build over the last one: everything above stays.

@@ -15,13 +15,11 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 /** True while a dialog, the quick opener or the palette is open: shortcuts leave the keyboard to it. */
-export function modalOpen(): boolean {
+export function dialogOpen(): boolean {
   const ui = useUi.getState()
   return (
-    ui.settingsOpen ||
     ui.pluginsOpen ||
     ui.automationOpen ||
-    ui.shortcutsOpen ||
     ui.aboutOpen ||
     ui.statusOpen ||
     ui.quickOpenOpen ||
@@ -29,6 +27,14 @@ export function modalOpen(): boolean {
     ui.confirm !== null ||
     ui.prompt !== null
   )
+}
+
+/**
+ * True while something covers the thread: a dialog, or the Settings page. Keys meant for the thread, such as Enter and
+ * Esc on an approval, do nothing then. App shortcuts still work on the Settings page (see app.ts).
+ */
+export function modalOpen(): boolean {
+  return useUi.getState().settingsOpen || dialogOpen()
 }
 
 /**
@@ -71,7 +77,7 @@ export function useKeymap(): void {
       }
       // A field that used the key itself (Ctrl+Enter in a comment, Ctrl+Z in the Review tab) keeps it.
       if (event.defaultPrevented) return
-      const command = commandRegistry.forEvent(event, isTyping(event.target), modalOpen())
+      const command = commandRegistry.forEvent(event, isTyping(event.target), dialogOpen())
       if (!command) return
       event.preventDefault()
       void command.run()

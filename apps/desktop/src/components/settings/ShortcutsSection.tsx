@@ -9,8 +9,7 @@ import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Dialog } from '../../ui/Dialog'
-import { Lock, Plus, Undo2, X } from '../../ui/icons'
+import { Keyboard, Lock, Plus, Undo2, X } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import { Tooltip } from '../../ui/Tooltip'
 
@@ -26,41 +25,27 @@ const save = (next: Keybindings) => useSettings.getState().save({ keybindings: n
 const heldKeys = (event: KeyboardEvent) =>
   [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Win'].filter(Boolean).join('+')
 
-/** Ctrl+/ : every shortcut, searchable by name or key, and changed by pressing the new one. */
-export function ShortcutsDialog() {
-  const open = useUi((state) => state.shortcutsOpen)
-  const [editing, setEditing] = useState(false)
-  return (
-    <Dialog
-      open={open}
-      onClose={() => useUi.getState().setShortcutsOpen(false)}
-      title="Keyboard shortcuts"
-      description="Click a shortcut to change it."
-      width={600}
-      className="shortcuts-dialog"
-      escapeCloses={!editing}
-    >
-      <ShortcutList onEditing={setEditing} />
-    </Dialog>
-  )
-}
-
-function ShortcutList({ onEditing }: { onEditing: (editing: boolean) => void }) {
+/**
+ * Settings > Keyboard shortcuts (Ctrl+/): every shortcut by menu, found by its name, by typing its keys or by pressing
+ * them, and changed by pressing the new ones.
+ */
+export function ShortcutsSection() {
   useShortcuts()
   const custom = useSettings((state) => Object.keys(state.settings?.keybindings ?? {}).length > 0)
   const [query, setQuery] = useState('')
+  /** True while the search field takes the keys pressed as the shortcut to find. */
+  const [recording, setRecording] = useState(false)
   const [editing, setEditing] = useState<Editing | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   /** The row last changed, listed until the search changes even when its new keys no longer match it. */
   const [kept, setKept] = useState<string | null>(null)
+  const bar = useRef<HTMLDivElement>(null)
+  const filter = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   /** The row whose shortcut button takes the focus once the change shows. */
   const refocus = useRef<string | null>(null)
 
   const sections = filterSections(shortcutSections(commandRegistry, GROUPS), query, kept)
-
-  useEffect(() => onEditing(editing !== null), [editing, onEditing])
-  useEffect(() => () => onEditing(false), [onEditing])
 
   const stop = useCallback((id: string, focus: boolean) => {
     refocus.current = focus ? id : null
@@ -72,7 +57,35 @@ function ShortcutList({ onEditing }: { onEditing: (editing: boolean) => void }) 
     void save(next).then((ok) => ok && setSaved(id))
   }, [])
 
-  // While listening, every key is the new shortcut's: none reaches the dialog, the list or the app. Esc stops, and so
+  // Searching by keys: what is pressed goes into the field, in quotes, as the one shortcut to find. No key reaches the
+  // page or the app meanwhile; Esc, the button again or a click elsewhere goes back to typing.
+  useEffect(() => {
+    if (!recording) return
+    filter.current?.focus({ preventScroll: true })
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.repeat) return
+      const chord = chordOfEvent(event)
+      if (event.key === 'Escape' && !heldKeys(event)) setRecording(false)
+      else if (chord) {
+        setQuery(`"${formatChord(chord)}"`)
+        setKept(null)
+      }
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !bar.current?.contains(event.target)) setRecording(false)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [recording])
+
+  // While listening, every key is the new shortcut's: none reaches the page, the list or the app. Esc stops, and so
   // does a click anywhere but the row.
   useEffect(() => {
     if (!editing) return
@@ -148,6 +161,7 @@ function ShortcutList({ onEditing }: { onEditing: (editing: boolean) => void }) 
   }, [saved])
 
   const listen = (id: string, add: boolean) => {
+    setRecording(false)
     setKept(id)
     setEditing({ id, add, phase: 'listening', shown: '', refused: null })
   }
@@ -165,27 +179,53 @@ function ShortcutList({ onEditing }: { onEditing: (editing: boolean) => void }) 
   }
 
   return (
-    <>
-      <div className="shortcuts-bar">
-        <input
-          className="text-input shortcuts-filter"
-          data-autofocus
-          type="search"
-          placeholder="Search by name or key"
-          aria-label="Search shortcuts"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value)
-            setKept(null)
-          }}
-        />
+    <div className="settings-group shortcuts-section" data-setting="shortcuts.list">
+      <div ref={bar} className="shortcuts-bar">
+        <div className={cx('shortcuts-search', recording && 'is-recording')}>
+          <input
+            ref={filter}
+            className="text-input shortcuts-filter"
+            data-autofocus
+            type="search"
+            readOnly={recording}
+            placeholder={recording ? 'Press the keys of a shortcut' : 'Search by name or key'}
+            aria-label={recording ? 'Press the keys of the shortcut to find. Esc goes back to typing.' : 'Search shortcuts'}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+              setKept(null)
+            }}
+            onKeyDown={(event) => {
+              // Esc empties the search first, and leaves the page only once it is empty.
+              if (event.key === 'Escape' && query && !recording) {
+                event.preventDefault()
+                setQuery('')
+                setKept(null)
+              }
+            }}
+          />
+          <Tooltip label={recording ? 'Type instead' : 'Find a shortcut by pressing it'}>
+            <button
+              type="button"
+              className={cx('shortcuts-record', recording && 'is-on')}
+              aria-pressed={recording}
+              aria-label="Find by pressing the keys"
+              onClick={() => {
+                setRecording((current) => !current)
+                if (recording) filter.current?.focus({ preventScroll: true })
+              }}
+            >
+              <Keyboard size={15} />
+            </button>
+          </Tooltip>
+        </div>
         <Button variant="ghost" icon={<Undo2 size={14} />} disabled={!custom} onClick={resetAll}>
           Reset all
         </Button>
       </div>
       <div ref={list} className="shortcuts-list">
         {sections.map((section) => (
-          <section key={section.group}>
+          <section key={section.group} className="settings-card shortcuts-card">
             <h3 className="shortcuts-group">{section.group}</h3>
             {section.rows.map((row) => (
               <ShortcutRowView
@@ -208,9 +248,9 @@ function ShortcutList({ onEditing }: { onEditing: (editing: boolean) => void }) 
             ))}
           </section>
         ))}
-        {!sections.length && <div className="shortcuts-empty">No shortcut matches “{query}”.</div>}
+        {!sections.length && <div className="shortcuts-empty">No shortcut matches {query.startsWith('"') ? query : `“${query.trim()}”`}.</div>}
       </div>
-    </>
+    </div>
   )
 }
 

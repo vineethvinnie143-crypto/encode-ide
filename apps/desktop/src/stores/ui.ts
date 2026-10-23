@@ -1,7 +1,19 @@
 import { create } from '../store'
 
 export type SidebarView = 'explorer' | 'search' | 'git'
-export type SettingsTab = 'models' | 'roles' | 'agent' | 'permissions' | 'mcp' | 'sandbox' | 'appearance'
+/** The sections of the Settings page; see components/settings/sections.ts. */
+export type SettingsSection =
+  | 'general'
+  | 'notifications'
+  | 'appearance'
+  | 'shortcuts'
+  | 'models'
+  | 'roles'
+  | 'agent'
+  | 'permissions'
+  | 'mcp'
+  | 'sandbox'
+  | 'archived'
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'
 
@@ -46,8 +58,14 @@ interface UiStore {
   sidebarVisible: boolean
   sidebarMode: SidebarMode
   collapsedProjects: string[]
+  /** The Settings page covers the sessions and the work area (they stay mounted under it). */
   settingsOpen: boolean
-  settingsTab: SettingsTab
+  settingsSection: SettingsSection
+  /**
+   * Where the page puts the focus, asked for each time something opens it: a setting chosen from its search (scrolled
+   * to and marked), or with `setting` null the section's own start. `id` grows with each request.
+   */
+  settingsFocus: { setting: string | null; id: number } | null
   /** The "Connect a model" dialog, opened from the model menu; a first start opens it by itself. */
   connectOpen: boolean
   pluginsOpen: boolean
@@ -55,7 +73,6 @@ interface UiStore {
   quickOpenOpen: boolean
   /** The command palette (Ctrl+K). */
   paletteOpen: boolean
-  shortcutsOpen: boolean
   aboutOpen: boolean
   /** The session's status: model, permissions, context and tokens (/status). */
   statusOpen: boolean
@@ -72,13 +89,15 @@ interface UiStore {
   /** Folds or unfolds a project in the sidebar; `key` is rootKey(folder). */
   toggleProject(key: string): void
   setSettingsOpen(open: boolean): void
-  openSettings(tab: SettingsTab): void
+  /** Opens the Settings page on a section, and on one of its settings when `setting` names one. */
+  openSettings(section: SettingsSection, setting?: string): void
+  /** Another section of the open page, from its list of sections. */
+  setSettingsSection(section: SettingsSection): void
   setConnectOpen(open: boolean): void
   setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean): void
   setPaletteOpen(open: boolean): void
-  setShortcutsOpen(open: boolean): void
   setAboutOpen(open: boolean): void
   setStatusOpen(open: boolean): void
   requestMenu(menu: ComposerMenu): void
@@ -131,13 +150,13 @@ export const useUi = create<UiStore>((set, get) => ({
   ...savedLayout(),
   sidebarMode: 'projects',
   settingsOpen: false,
-  settingsTab: 'models',
+  settingsSection: 'general',
+  settingsFocus: null,
   connectOpen: false,
   pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
   paletteOpen: false,
-  shortcutsOpen: false,
   aboutOpen: false,
   statusOpen: false,
   menuRequest: null,
@@ -157,14 +176,16 @@ export const useUi = create<UiStore>((set, get) => ({
     set({ collapsedProjects: folded.includes(key) ? folded.filter((item) => item !== key) : [...folded, key] })
     saveLayout(layoutOf(get()))
   },
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
-  openSettings: (tab) => set({ settingsTab: tab, settingsOpen: true }),
+  setSettingsOpen: (open) =>
+    set((state) => (open ? { settingsOpen: true, settingsFocus: { setting: null, id: (state.settingsFocus?.id ?? 0) + 1 } } : { settingsOpen: false })),
+  openSettings: (section, setting) =>
+    set((state) => ({ settingsSection: section, settingsOpen: true, settingsFocus: { setting: setting ?? null, id: (state.settingsFocus?.id ?? 0) + 1 } })),
+  setSettingsSection: (section) => set({ settingsSection: section }),
   setConnectOpen: (open) => set({ connectOpen: open }),
   setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open) => set({ quickOpenOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setAboutOpen: (open) => set({ aboutOpen: open }),
   setStatusOpen: (open) => set({ statusOpen: open }),
   requestMenu: (menu) => set((state) => ({ menuRequest: { menu, id: (state.menuRequest?.id ?? 0) + 1 } })),

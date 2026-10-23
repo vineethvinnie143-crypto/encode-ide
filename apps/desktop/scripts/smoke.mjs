@@ -127,7 +127,7 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13 }
+const KEY_CODES = { End: 35, Home: 36, Escape: 27, Enter: 13, ArrowUp: 38, ArrowDown: 40 }
 
 /** A key chord through the browser's own input path, to whatever has focus. */
 async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) {
@@ -139,6 +139,33 @@ async function pressKey(key, { ctrl = false, shift = false, alt = false } = {}) 
   }
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...common })
+}
+
+/** Opens the Settings page (the rail's Settings button) on a section, by its title in the page's navigation. */
+async function openSettings(section) {
+  if (!(await evaluate("!!document.querySelector('.settings-page')"))) {
+    if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
+    await waitFor("!!document.querySelector('.settings-page .settings-nav-item')", 8000, 'the Settings page')
+  }
+  if (!section) return
+  if (!(await click('.settings-nav-item', section))) throw new Error(`no ${section} in the Settings navigation`)
+  await waitFor(`document.querySelector('.settings-heading')?.textContent === ${JSON.stringify(section)}`, 6000, `Settings > ${section}`)
+}
+
+/** Back to the app from the Settings page. */
+async function closeSettings() {
+  if (!(await click('.settings-back'))) throw new Error('no way back from the Settings page')
+  await waitFor("!document.querySelector('.settings-page')", 4000, 'the Settings page closed')
+}
+
+/** A setting kept as it is made: true once the main process has it. */
+async function settingIs(expression, label, timeoutMs = 4000) {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (await evaluate(`window.eNCode.settings.get().then((settings) => Boolean(${expression}))`)) return
+    await sleep(100)
+  }
+  throw new Error(`${label}: not saved`)
 }
 
 async function focusEditor() {
@@ -420,7 +447,7 @@ async function runFirstStartChecks() {
   await click('.model-chip')
   await waitFor("!!document.querySelector('.model-picker-footer')", 8000, 'the model menu')
   if (!(await click('.model-picker-link', 'Roles'))) throw new Error('no way to the Roles settings')
-  await waitFor("!!document.querySelector('.settings-modal .settings-roles')", 8000, 'the Roles settings')
+  await waitFor("!!document.querySelector('.settings-page .settings-roles')", 8000, 'the Roles settings')
   const roles = await evaluate("[...document.querySelectorAll('.role-row')].map((node) => node.dataset.role)")
   if (roles.join() !== 'main,explore,planner,reviewer,summarizer,utility') throw new Error(`the Roles settings list ${roles.join()}`)
   await waitFor("document.querySelectorAll('[data-section=\"status\"] .status-row').length >= 1", 30000, 'the connections report')
@@ -428,8 +455,7 @@ async function runFirstStartChecks() {
   if (!report.includes('Custom')) throw new Error(`the connections report reads "${report}"`)
   if ((await evaluate("document.querySelector('#free-only').getAttribute('aria-checked')")) !== 'true') throw new Error('"Only use free models" should be on')
   await screenshot('01-roles.png')
-  if (!(await click('.settings-footer .btn', 'Cancel'))) throw new Error('no Cancel in settings')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
+  await closeSettings()
 
   // Back to a plain install for the checks that follow.
   const keep = demoSettings.profiles.filter((profile) => profile.id !== connection.id)
@@ -726,9 +752,7 @@ async function runSearchChecks() {
   await askedBy('duckduckgo', 'html.duckduckgo.com')
 
   // Settings > Agent: pick Brave Search. Its key field shows, and the test says there is no key without sending anything.
-  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
-  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
-  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await openSettings('Agent')
   await waitFor("!!document.querySelector('input[name=\"search-provider\"]')", 4000, 'the search providers')
   const options = await evaluate(`[...document.querySelectorAll('.policy-option')].filter((node) => node.querySelector('input[name="search-provider"]')).map((node) => node.querySelector('.policy-option-label')?.textContent ?? '')`)
   console.log('[smoke] search providers:', JSON.stringify(options))
@@ -741,18 +765,22 @@ async function runSearchChecks() {
   const noteOk = /sent only to Brave Search/.test(field.note) || /Kept in memory until eNCode closes/.test(field.note)
   if (field.label !== 'Brave Search API key' || !noteOk || field.link !== 'https://brave.com/search/api/') throw new Error(`The key field reads ${JSON.stringify(field)}`)
   if (!(await click('.search-test .btn', 'Test search'))) throw new Error('No Test search button')
-  await waitFor("!!document.querySelector('.settings-agent [role=\"status\"].error-text')", 20000, 'the test to answer')
-  const noKey = await evaluate("document.querySelector('.settings-agent [role=\"status\"]').textContent")
+  await waitFor("!!document.querySelector('.settings-web-search [role=\"status\"].error-text')", 20000, 'the test to answer')
+  const noKey = await evaluate("document.querySelector('.settings-web-search [role=\"status\"]').textContent")
   if (noKey !== 'There is no API key for Brave Search. Paste one above, then press Test search.') throw new Error(`The test without a key says ${JSON.stringify(noKey)}`)
-  await evaluate("document.querySelector('.settings-agent [role=\"status\"]')?.scrollIntoView({ block: 'end' })")
+  await evaluate("document.querySelector('.settings-web-search [role=\"status\"]')?.scrollIntoView({ block: 'end' })")
   await sleep(250)
   await screenshot('15-search-settings.png')
 
-  // Type a key and save: the page learns only that one is stored, and the disk holds it sealed.
+  // Type a key and save it: the page learns only that one is stored, and the disk holds it sealed. The provider was
+  // kept when it was picked.
   const secret = `brave-smoke-${Date.now().toString(36)}`
   if (!(await typeInto('.search-key .text-input', secret))) throw new Error('No key field')
-  await click('.settings-footer .btn.primary')
-  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  await waitFor("!!document.querySelector('.search-test .btn.primary')", 4000, 'a Save key button once a key is typed')
+  if (!(await click('.search-test .btn.primary', 'Save key'))) throw new Error('No Save key button')
+  await settingIs("settings.searchKeys.includes('brave')", 'the Brave Search key', 8000)
+  await waitFor("!document.querySelector('.search-test .btn.primary')", 4000, 'the field emptied once the key is stored')
+  await closeSettings()
   const saved = await evaluate('window.eNCode.settings.get()')
   if (saved.searchProvider !== 'brave' || saved.searchKeys.join() !== 'brave') throw new Error(`Brave Search was not saved with its key: ${JSON.stringify([saved.searchProvider, saved.searchKeys])}`)
   if (JSON.stringify(saved).includes(secret)) throw new Error('Settings handed the search key to the page')
@@ -862,8 +890,7 @@ async function runPermissionChecks() {
   // Trust is taken back, and the agent can no longer use what the folder grants.
   await click('.perm-folder-actions .btn', 'Stop trusting this folder')
   await waitFor("document.querySelector('.perm-folder .ui-chip')?.textContent === 'Not trusted'", 8000, 'trust is taken back')
-  await click('.settings-footer .btn.primary')
-  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  await closeSettings()
   await fs.rm(path.join(demoPath, '.encode'), { recursive: true, force: true })
   console.log('[smoke] permissions: ok')
 }
@@ -1265,7 +1292,7 @@ async function runMcpChecks() {
   await waitFor("!!document.querySelector('.settings-permissions .perm-folder')", 8000, 'the Permissions tab')
   await click('.perm-folder-actions .btn', 'Trust this folder')
   await waitFor("document.querySelector('.perm-folder .ui-chip')?.textContent === 'Trusted'", 8000, 'the folder is trusted')
-  await click('.settings-tabs button', 'MCP')
+  await openSettings('MCP servers')
   await waitFor("!!document.querySelector('.settings-mcp .mcp-card')", 8000, 'the MCP screen again')
   await until(async () => (await card('fake'))?.buttons.some((button) => button.text === 'Approve and start' && !button.disabled), 'the approval to be possible')
   if ((await card('fake')).approval.includes('Trust this folder first')) throw new Error('The card still asks for trust')
@@ -1289,8 +1316,7 @@ async function runMcpChecks() {
   if (!(await clickIn('mine', 'Turn on'))) throw new Error('Could not turn the server on')
   await cardIs('mine', 'Connected')
 
-  await click('.settings-footer .btn.primary')
-  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  await closeSettings()
   if (await evaluate("!!document.querySelector('.trust-banner')")) throw new Error('The banner should be gone once nothing waits')
 
   // The agent gets the tools of both servers, and what the servers say about themselves, as outside notes.
@@ -1403,16 +1429,14 @@ async function runComputerChecks() {
   const initial = await evaluate('window.eNCode.settings.get()')
   if (initial.computerSupported !== true) throw new Error('Windows should offer computer use')
   if (initial.computer !== false) throw new Error('Computer use must be off until the person turns it on')
-  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
-  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
-  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  await openSettings('Agent')
   await waitFor("!!document.querySelector('#computer-use')", 4000, 'the computer switch')
   await screenshot('computer-settings.png')
   await click('#computer-use')
   if ((await evaluate("document.querySelector('#computer-use').getAttribute('aria-checked')")) !== 'true') throw new Error('The computer switch did not turn on')
-  await click('.settings-footer .btn.primary')
+  // Kept as it is switched, with no Save.
   await waitFor('window.eNCode.settings.get().then((value) => value.computer === true)', 8000, 'the computer setting is saved')
-  await waitFor("!document.querySelector('.settings-modal')", 8000, 'settings close')
+  await closeSettings()
   if ((await bannerTargets()).length) throw new Error('A banner is up with nothing using the computer')
 
   for (const [label, stop] of [
@@ -1586,15 +1610,13 @@ async function runSteerChecks() {
   }
   await screenshot('ui-dark-steered-turn.png')
 
-  // Steer as the default: Enter steers and Ctrl+Enter queues; a queued message is steered with its button.
-  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
-  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
-  if (!(await click('.settings-tabs button', 'Agent'))) throw new Error('Agent tab not found')
+  // Steer as the default: Enter steers and Ctrl+Enter queues; a queued message is steered with its button. The choice
+  // is in Settings > General and is kept as it is made.
+  await openSettings('General')
   await waitFor("!!document.querySelector('[aria-label=\"What Enter does while the agent works\"]')", 4000, 'the follow-up choice')
   await click('[aria-label="What Enter does while the agent works"] .ui-segment', 'Steer')
-  await click('.settings-footer .btn.primary', 'Save')
   await waitFor("window.eNCode.settings.get().then((settings) => settings.followUp === 'steer')", 4000, 'Steer is saved')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
+  await closeSettings()
 
   await sendPrompt('[scenario:steer-check] Run it again.')
   await waitFor("!!document.querySelector('.approval-card')", 30000, 'the command asks again')
@@ -1666,15 +1688,14 @@ async function runEffortChecks() {
   await click('.effort-chip')
   await waitFor(menuOpen('Effort'), 4000, 'the effort menu again')
   if (!(await pick('Effort for each role…'))) throw new Error('no way from the effort menu to the roles')
-  await waitFor("!!document.querySelector('.settings-modal .settings-roles .role-effort')", 8000, 'the Roles settings with an effort for each role')
+  await waitFor("!!document.querySelector('.settings-page .settings-roles .role-effort')", 8000, 'the Roles settings with an effort for each role')
   const shown = await evaluate("[...document.querySelectorAll('.role-row')].map((row) => row.dataset.role + '=' + row.querySelector('.role-effort select').value).join()")
   if (shown !== 'main=low,explore=default,planner=default,reviewer=default,summarizer=default,utility=default') throw new Error(`the roles show ${shown}`)
   await selectOption('.role-row[data-role="explore"] .role-effort select', 'max')
   await sleep(250)
   await screenshot('ui-dark-role-efforts.png')
-  await click('.settings-footer .btn.primary', 'Save')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings close on Save')
-  if ((await efforts()) !== '{"main":"low","explore":"max"}') throw new Error(`the efforts are ${await efforts()} after Save`)
+  await until(async () => (await efforts()) === '{"main":"low","explore":"max"}', 4000, 'the effort kept as it is chosen')
+  await closeSettings()
 
   // A model with a thinking dial is sent the main role's level, not Explore's.
   const before = await evaluate('window.eNCode.settings.get().then((settings) => settings.roles)')
@@ -1796,10 +1817,8 @@ async function screenshotSizes(name) {
 }
 
 async function openAppearanceSettings() {
-  if (!(await click('.rail-btn[aria-label="Settings"]'))) throw new Error('Settings button not found')
-  await waitFor("!!document.querySelector('.settings-modal .settings-tabs')", 8000, 'settings')
-  if (!(await click('.settings-tabs button', 'Appearance'))) throw new Error('Appearance tab not found')
-  await waitFor("!!document.querySelector('.settings-appearance')", 4000, 'appearance settings')
+  await openSettings('Appearance')
+  await waitFor("!!document.querySelector('.settings-page [data-setting=\"appearance.theme\"]')", 4000, 'appearance settings')
 }
 
 const key = (init) =>
@@ -1951,9 +1970,8 @@ async function runPaletteChecks() {
   await typeInto('.palette-input', 'isolation')
   await waitFor(`${activeRow} === 'Sandbox'`, 4000, '"isolation" finds the Sandbox settings')
   await paletteKey('Enter')
-  await waitFor("document.querySelector('.settings-modal .settings-tabs button.is-on')?.textContent === 'Sandbox'", 6000, 'the settings open on that page')
-  await click('.settings-header .icon-btn')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'the settings close')
+  await waitFor("document.querySelector('.settings-heading')?.textContent === 'Sandbox'", 6000, 'the settings open on that page')
+  await closeSettings()
 
   // Slash commands: / lists them, more letters narrow the list, Enter runs the chosen one and empties the box.
   await typeInto('.composer-input', '/')
@@ -1989,6 +2007,223 @@ async function runPaletteChecks() {
   await evaluate("document.querySelector('.model-picker').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))")
   await waitFor("!document.querySelector('.model-picker')", 4000, 'Esc closes the model list')
   console.log('[smoke] palette and slash command checks passed')
+}
+
+/** A folder as the sidebar compares them: slashes one way, no slash at the end, any case. */
+const folderKey = (root) => root.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+/** The sidebar row of the session with this title: in one section of the sidebar, or anywhere in it. */
+const sessionRow = (title, section = '') =>
+  `[...document.querySelectorAll('.session-sidebar ${section && `section[aria-label="${section}"] `}.sb-row')].find((row) => row.querySelector('.sb-row-main')?.title === ${JSON.stringify(title)})`
+
+/** The notices eNCode would have shown on Windows: e2e.mjs has them written to a file, one JSON line each. */
+async function windowsNotices() {
+  const file = process.env.ENCODE_NOTICES_FILE
+  if (!file) return []
+  const text = await fs.readFile(file, 'utf8').catch(() => '')
+  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+}
+
+/**
+ * The Settings page. Ctrl+, opens it over the app, where it was left and on its search; the app stays as it was under
+ * it, and an app shortcut leaves it. The search finds one setting and gives it the focus, and each change is kept as it
+ * is made: keeping awake, the send key, the notices. Then a chat, a session with no project: Ctrl+Alt+O starts one in
+ * the chats folder, listed under Chats and never as a project; Enter and Esc on the page leave the approval under it
+ * alone; the notice that the request finished names the chat and holds nothing the agent wrote; and Settings > Archived
+ * sessions restores the chat, then deletes it.
+ */
+async function runSettingsPageChecks() {
+  console.log('[smoke] --- settings page ---')
+  const heading = "document.querySelector('.settings-heading')?.textContent"
+  const projectName = path.basename(demoPath)
+  const firstSession = await activeTitle()
+  const { chatsFolder } = await evaluate('window.eNCode.settings.get()')
+  const noticesKept = Boolean(process.env.ENCODE_NOTICES_FILE)
+  if (!noticesKept) console.log('[smoke] ENCODE_NOTICES_FILE is not set: the notices are not read')
+  // Back to the session the checks began in, and to the project: a session of the project opens it, and one that
+  // belongs to no folder (the imported one) stays in the folder that is open, so the project is picked from the switcher.
+  const backInProject = async (label) => {
+    if (!(await evaluate(`(() => { const row = ${sessionRow(firstSession)}; row?.querySelector('.sb-row-main').click(); return Boolean(row) })()`))) throw new Error(`no ${firstSession} in the sidebar`)
+    await waitFor(`document.querySelector('.session-sidebar .sb-row.is-active .title')?.textContent === ${JSON.stringify(firstSession)}`, 8000, `${firstSession} open again`)
+    if ((await evaluate("document.querySelector('.proj-name')?.textContent")) !== projectName) {
+      await click('.proj-switch')
+      await waitFor(menuOpen('Projects'), 4000, 'the project switcher')
+      const listed = await evaluate("[...document.querySelectorAll('.ui-menu [role^=\"menuitem\"]')].map((node) => node.textContent)")
+      if (listed.some((text) => text.includes('Chats'))) throw new Error(`the project switcher lists the chats folder: ${listed}`)
+      if (!(await click('.ui-menu [role^="menuitem"]', projectName))) throw new Error(`no ${projectName} in the project switcher: ${listed}`)
+    }
+    await waitFor(`document.querySelector('.proj-name')?.textContent === ${JSON.stringify(projectName)} && document.querySelectorAll('.tree-row').length > 0`, 15000, label)
+    const projects = await evaluate("[...document.querySelectorAll('.session-sidebar section[aria-label=\"Projects\"] .sb-project > .sb-row')].map((node) => node.title)")
+    if (projects.some((root) => folderKey(root) === folderKey(chatsFolder))) throw new Error('the chats folder is listed as a project')
+  }
+  const archiveChat = async (title, label) => {
+    if (!(await evaluate(`(() => { const button = ${sessionRow(title, 'Chats')}?.querySelector('[aria-label="Archive"]'); button?.click(); return Boolean(button) })()`))) throw new Error(`no ${title} under Chats`)
+    await waitFor(`!${sessionRow(title)}`, 6000, label)
+  }
+
+  // Ctrl+, in the message box: the page opens where it was left (the palette opened Sandbox), on its search. The app
+  // under it stays mounted, hidden and inert.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: ',', code: 'Comma', ctrlKey: true })
+  await waitFor(`${heading} === 'Sandbox' && document.activeElement?.classList.contains('settings-search-input') === true`, 6000, 'Ctrl+, opens the page where it was left, on its search')
+  const under = await evaluate(`({
+    inert: document.querySelector('.sheet-work')?.inert === true,
+    hidden: getComputedStyle(document.querySelector('.session-sidebar')).visibility === 'hidden',
+    tree: document.querySelectorAll('.tree-row').length,
+  })`)
+  if (!under.inert || !under.hidden || !under.tree) throw new Error(`the app under the page: ${JSON.stringify(under)}`)
+
+  // The arrows go from the search to the sections and on through them.
+  await pressKey('ArrowDown')
+  await waitFor("document.activeElement?.dataset.section === 'general'", 4000, 'ArrowDown goes from the search to the first section')
+  await pressKey('ArrowDown')
+  await waitFor("document.activeElement?.dataset.section === 'notifications'", 4000, 'ArrowDown goes to the next section')
+  await openSettings('General')
+  await sleep(300)
+  await screenshot('ui-dark-settings.png')
+
+  // The search finds a setting by the start of its words. Enter goes to the first one found, marks it and gives it the
+  // focus; Esc empties the search before it leaves the page.
+  await typeInto('.settings-search-input', 'qzxq')
+  await waitFor("document.querySelector('.settings-nav-empty')?.textContent === 'No setting matches “qzxq”.'", 4000, 'the search says when nothing matches')
+  await typeInto('.settings-search-input', 'keep aw')
+  await waitFor("[...document.querySelectorAll('.settings-nav-sub')].map((node) => node.textContent).join() === 'Keep the computer awake while the agent works'", 4000, '"keep aw" finds the one setting')
+  await sleep(200)
+  await screenshot('ui-dark-settings-search.png')
+  await evaluate("document.querySelector('.settings-search-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await waitFor("!!document.querySelector('[data-setting=\"general.keepAwake\"].is-found') && document.activeElement?.id === 'keep-awake'", 4000, 'Enter goes to the setting, marked, with the focus on it')
+  await evaluate("document.querySelector('.settings-search-input').focus()")
+  await pressKey('Escape')
+  await waitFor("document.querySelector('.settings-search-input')?.value === '' && document.querySelectorAll('.settings-nav-sub').length === 0", 4000, 'the first Esc empties the search')
+  if (!(await evaluate("!!document.querySelector('.settings-page')"))) throw new Error('the Esc that emptied the search left the page')
+
+  // Kept as it is switched, with no Save.
+  await click('#keep-awake')
+  await settingIs('settings.keepAwake === false', 'keeping the computer awake off')
+  await click('#keep-awake')
+  await settingIs('settings.keepAwake === true', 'keeping the computer awake on')
+
+  // Ctrl+Enter to send: the help and the follow-up choice say so.
+  await click('[aria-label="Send messages with"] .ui-segment', 'Ctrl+Enter')
+  await settingIs("settings.sendKey === 'ctrl-enter'", 'Ctrl+Enter to send')
+  await waitFor("(document.querySelector('[data-setting=\"general.send\"]')?.textContent ?? '').includes('Enter starts a new line, as in an editor')", 4000, 'the help says what Enter does now')
+  if (!(await evaluate("!!document.querySelector('[aria-label=\"What Ctrl+Enter does while the agent works\"]')"))) throw new Error('the follow-up choice does not name Ctrl+Enter')
+
+  // Notifications: Test shows one whatever the settings say; Always tells of every finished request.
+  await openSettings('Notifications')
+  if (!(await click('[data-setting="notifications.test"] .btn', 'Test'))) throw new Error('no Test button')
+  await waitFor("(document.querySelector('[data-setting=\"notifications.test\"] [role=status]')?.textContent ?? '').startsWith('Sent.')", 4000, 'the test notice is sent')
+  if (noticesKept) await until(async () => (await windowsNotices()).some((notice) => notice.kind === 'test' && notice.title === 'eNCode' && notice.sessionId === ''), 4000, 'the test notice')
+  await click('[aria-label="Notice when a request finishes"] .ui-segment', 'Always')
+  await settingIs("settings.notifyDone === 'always'", 'a notice for every finished request')
+  await sleep(200)
+  await screenshot('ui-dark-settings-notifications.png')
+
+  // Esc leaves the page, and the focus goes back to the message box; the Send button names the new keys.
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.settings-page') && document.activeElement?.classList.contains('composer-input') === true", 4000, 'Esc leaves the page and gives the focus back to the message box')
+  if ((await evaluate("document.querySelector('.composer-send')?.title")) !== 'Send (Ctrl+Enter)') throw new Error('the Send button does not name Ctrl+Enter')
+
+  // An app shortcut works on the page, and goes back to the app to do it.
+  await composerKey({ key: ',', code: 'Comma', ctrlKey: true })
+  await waitFor("!!document.querySelector('.settings-page')", 4000, 'Ctrl+, opens the page again')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!document.querySelector('.settings-page') && !document.querySelector('.session-sidebar')", 4000, 'Ctrl+B on the page goes back to the app and hides the sessions')
+  await key({ key: 'b', ctrlKey: true })
+  await waitFor("!!document.querySelector('.session-sidebar')", 4000, 'Ctrl+B shows the sessions again')
+
+  // Ctrl+Alt+O starts a chat: the chats folder opens as the work folder, the sidebar says Chats, and the chat is listed
+  // under Chats.
+  await key({ key: 'o', code: 'KeyO', ctrlKey: true, altKey: true })
+  await waitFor(`document.querySelector('.proj-name')?.textContent === 'Chats' && document.querySelector('.proj-switch')?.title === ${JSON.stringify(chatsFolder)}`, 15000, 'Ctrl+Alt+O opens the chats folder')
+  await waitFor("!!document.querySelector('.session-sidebar section[aria-label=\"Chats\"] .sb-row.is-active')", 6000, 'the new chat is listed under Chats, open')
+  const chatId = await evaluate("localStorage.getItem('eNCode.activeSession')")
+  const projects = await evaluate("[...document.querySelectorAll('.session-sidebar section[aria-label=\"Projects\"] .sb-project > .sb-row')].map((node) => node.title)")
+  if (projects.some((root) => folderKey(root) === folderKey(chatsFolder))) throw new Error('the chats folder is listed as a project')
+
+  // Enter only starts a line now; Ctrl+Enter sends.
+  const prompt = 'Leave a note in the chats folder'
+  await typeInto('.composer-input', prompt)
+  await sleep(200)
+  const messages = await count('.chat-list .msg')
+  await composerKey({ key: 'Enter' })
+  await sleep(500)
+  if ((await composerValue()) !== prompt || (await count('.chat-list .msg')) !== messages) throw new Error('Enter sent the message with Ctrl+Enter chosen')
+  await composerKey({ key: 'Enter', ctrlKey: true })
+
+  // The page opens while the agent works, and the approval that comes up waits under it: Enter there approves
+  // nothing, and the Esc that leaves the page denies nothing.
+  await key({ key: ',', code: 'Comma', ctrlKey: true })
+  await waitFor("!!document.querySelector('.settings-page')", 4000, 'the page while the agent works')
+  const early = await evaluate("!!document.querySelector('.approval-card')")
+  await waitFor("!!document.querySelector('.approval-card')", 30000, 'the approval under the page')
+  await evaluate("document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
+  await sleep(300)
+  if (!(await evaluate("!!document.querySelector('.approval-card')"))) throw new Error('Enter on the Settings page answered the approval under it')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.settings-page')", 4000, 'Esc leaves the page')
+  await sleep(300)
+  if (!(await evaluate("!!document.querySelector('.approval-card')"))) throw new Error('the Esc that left the Settings page answered the approval')
+  console.log('[smoke] the approval came up', early ? 'before the page opened' : 'while the page was open')
+  await driveAgent('settings-chat')
+  await sleep(300)
+  const chatTitle = await activeTitle()
+  await screenshot('ui-dark-chat.png')
+
+  // The notice names the chat and says it finished, in eNCode's words only.
+  if (noticesKept) {
+    const done = () => windowsNotices().then((list) => list.find((notice) => notice.kind === 'done' && notice.sessionId === chatId))
+    await until(async () => Boolean(await done()), 10000, 'a notice that the chat finished')
+    const notice = await done()
+    if (notice.title !== chatTitle || notice.body !== 'Finished.') throw new Error(`the notice reads ${JSON.stringify(notice)}`)
+    if (JSON.stringify(await windowsNotices()).includes('offline demo')) throw new Error('a notice holds what the agent wrote')
+  }
+
+  // Archived from the sidebar while the project is open, the chat is under Settings > Archived sessions as a chat.
+  // Restore brings it back, and the notice's Open goes to it, in its folder.
+  await backInProject('the project open again')
+  await archiveChat(chatTitle, 'the archived chat leaves the sidebar')
+  await openSettings('Archived sessions')
+  const archivedRow = `[...document.querySelectorAll('.archived-row')].find((row) => row.dataset.session === ${JSON.stringify(chatId)})`
+  await waitFor(`!!${archivedRow}`, 6000, 'the chat under Archived sessions')
+  const meta = await evaluate(`${archivedRow}.querySelector('.archived-meta').textContent`)
+  if (!meta.startsWith('Chat · ')) throw new Error(`the archived chat is described as ${meta}`)
+  await sleep(200)
+  await screenshot('ui-dark-settings-archived.png')
+  await evaluate(`${archivedRow}.querySelector('.btn').click()`)
+  await waitFor(`!${archivedRow} && [...document.querySelectorAll('.toast-text')].some((node) => node.textContent === ${JSON.stringify(`Restored “${chatTitle}”.`)})`, 6000, 'Restore takes the chat off the list and says so')
+  if (!(await click('.toast-action', 'Open'))) throw new Error('the notice of the restore offers no Open')
+  await waitFor("!document.querySelector('.settings-page') && document.querySelector('.proj-name')?.textContent === 'Chats' && !!document.querySelector('.session-sidebar section[aria-label=\"Chats\"] .sb-row.is-active')", 15000, 'Open goes to the chat, in its folder')
+
+  // The palette finds a single setting by its words and opens the page on it, marked, with the focus on it.
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await composerKey({ key: 'k', code: 'KeyK', ctrlKey: true })
+  await waitFor("!!document.querySelector('.palette')", 4000, 'the palette')
+  await typeInto('.palette-input', 'send messages')
+  await waitFor("document.querySelector('.palette-row.is-active .palette-title')?.textContent === 'Send messages with'", 4000, '"send messages" finds the setting')
+  await paletteKey('Enter')
+  await waitFor(`${heading} === 'General' && !!document.querySelector('[data-setting="general.send"].is-found') && !!document.activeElement?.closest('[data-setting="general.send"]')`, 6000, 'the page opens on the setting, marked, with the focus on it')
+
+  // Back as the checks that follow expect: Enter sends, notices in the background, the project open, and the chat
+  // archived again and then deleted from the page.
+  await click('[aria-label="Send messages with"] .ui-segment', 'Enter')
+  await settingIs("settings.sendKey === 'enter'", 'Enter to send')
+  await openSettings('Notifications')
+  await click('[aria-label="Notice when a request finishes"] .ui-segment', 'In the background')
+  await settingIs("settings.notifyDone === 'background'", 'notices in the background')
+  await closeSettings()
+  if ((await evaluate("document.querySelector('.composer-send')?.title")) !== 'Send (Enter)') throw new Error('the Send button does not name Enter again')
+  await backInProject('the project open once more')
+  await archiveChat(chatTitle, 'the chat archived again')
+  await openSettings('Archived sessions')
+  await waitFor(`!!${archivedRow}`, 6000, 'the chat under Archived sessions again')
+  await evaluate(`${archivedRow}.querySelector('[aria-label="Delete…"]').click()`)
+  await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 4000, 'Delete asks first')
+  await click('.ui-dialog-foot .btn.danger')
+  await waitFor(`!document.querySelector('.ui-dialog') && !${archivedRow}`, 6000, 'Delete removes the chat')
+  await closeSettings()
+  if ((await activeTitle()) !== firstSession) throw new Error(`the open session is ${await activeTitle()}, not ${firstSession}`)
+  console.log('[smoke] settings page checks passed')
 }
 
 /** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
@@ -2431,9 +2666,10 @@ async function runReviewerChecks() {
 }
 
 /**
- * Changing shortcuts in Help > Keyboard shortcuts: a chord that cannot be one is refused with the reason, a free one
- * works at once, in the menus and after a restart, one another command has asks first, Esc stops listening without
- * closing the list, and Reset all puts every shortcut back, with an Undo that can be pressed over the dialog.
+ * Changing shortcuts in Settings > Keyboard shortcuts: a shortcut is found by name, by its keys typed or pressed, a
+ * chord that cannot be one is refused with the reason, a free one works at once, in the menus and after a restart, one
+ * another command has asks first, Esc stops listening without leaving the page, and Reset all puts every shortcut
+ * back, with an Undo that can be pressed over the page.
  */
 async function runShortcutChecks() {
   console.log('[smoke] --- changing shortcuts ---')
@@ -2452,8 +2688,10 @@ async function runShortcutChecks() {
     })()`)
   const openList = async () => {
     await key({ key: '/', code: 'Slash', ctrlKey: true })
-    await waitFor("!!document.querySelector('.shortcuts-dialog .shortcuts-row')", 4000, 'Ctrl+/ opens the shortcuts')
+    await waitFor("!!document.querySelector('.settings-page .shortcuts-row') && document.querySelector('.settings-heading')?.textContent === 'Keyboard shortcuts'", 4000, 'Ctrl+/ opens the shortcuts')
+    await waitFor("document.activeElement?.classList.contains('shortcuts-filter') === true", 4000, 'the search of the shortcuts has the focus')
   }
+  const pageOpen = () => evaluate("!!document.querySelector('.settings-page .shortcuts-row')")
   const listen = async (id) => {
     await click(`${row(id)} .shortcuts-keys`)
     await waitFor(`document.activeElement?.matches('${row(id)} .shortcuts-recorder') === true`, 4000, `the ${id} row listens for a new shortcut`)
@@ -2464,10 +2702,24 @@ async function runShortcutChecks() {
   await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'the list finds the row by name')
   await typeInto('.shortcuts-filter', 'ctrl j')
   await waitFor(`document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'and by its keys')
+
+  // Or by pressing them: the field takes the keys as the one shortcut to find, and Esc goes back to typing.
+  await typeInto('.shortcuts-filter', '')
+  const panelBefore = await evaluate(bottomShown)
+  await click('.shortcuts-record')
+  await waitFor("document.querySelector('.shortcuts-record')?.getAttribute('aria-pressed') === 'true' && document.activeElement?.classList.contains('shortcuts-filter') === true", 4000, 'the search listens for keys')
+  await pressKey('j', { ctrl: true })
+  await waitFor(`document.querySelector('.shortcuts-filter')?.value === '"Ctrl+J"' && document.querySelectorAll('.shortcuts-row').length === 1 && !!document.querySelector('${row('view.bottomPanel')}')`, 4000, 'pressing Ctrl+J finds the bottom panel')
+  if ((await evaluate(bottomShown)) !== panelBefore) throw new Error('Ctrl+J pressed into the search toggled the bottom panel')
+  await sleep(250)
+  await screenshot('ui-dark-shortcuts-pressed.png')
+  await pressKey('Escape')
+  await waitFor("document.querySelector('.shortcuts-record')?.getAttribute('aria-pressed') === 'false'", 4000, 'Esc goes back to typing')
+  if (!(await pageOpen())) throw new Error('Esc while the search listened left the page')
   await listen('view.bottomPanel')
   await pressKey('c', { ctrl: true })
   await waitFor("/copies/.test(document.querySelector('.shortcuts-note.is-refused')?.textContent ?? '')", 4000, 'Ctrl+C is refused, and the row says why')
-  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('a refused chord closed the list')
+  if (!(await pageOpen())) throw new Error('a refused chord closed the list')
   await pressKey('j', { ctrl: true, shift: true })
   await waitFor(`!document.querySelector('.shortcuts-recorder') && !!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Ctrl+Shift+J is taken')
   if ((await keysOf('view.bottomPanel')) !== 'Ctrl Shift J') throw new Error(`the bottom panel shows ${await keysOf('view.bottomPanel')}`)
@@ -2489,15 +2741,15 @@ async function runShortcutChecks() {
   if ((await keysOf('view.sidebar')) !== 'Ctrl Shift S') throw new Error(`the sidebar shows ${await keysOf('view.sidebar')}, not just Ctrl+Shift+S`)
   if (!(await evaluate(`!!document.querySelector('${row('view.sidebar')} .shortcuts-changed')`))) throw new Error('the sidebar does not show that it changed')
 
-  // Esc stops listening and leaves the list open; a second Esc closes it.
+  // Esc stops listening and leaves the page open; a second Esc leaves the page.
   await listen('view.sidebar')
   await pressKey('Escape')
   await waitFor(`!document.querySelector('.shortcuts-recorder') && document.activeElement?.matches('${row('view.sidebar')} .shortcuts-keys') === true`, 4000, 'Esc stops listening')
-  if (!(await evaluate('!!document.querySelector(".shortcuts-dialog")'))) throw new Error('Esc while listening closed the list')
+  if (!(await pageOpen())) throw new Error('Esc while listening closed the list')
   await sleep(300)
   await screenshot('ui-dark-shortcuts-changed.png')
   await pressKey('Escape')
-  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'a second Esc closes the list')
+  await waitFor("!document.querySelector('.settings-page')", 4000, 'a second Esc leaves the page')
 
   // The new shortcut works, the old one is gone, and the sidebar keeps the one it has left.
   let shown = await evaluate(bottomShown)
@@ -2533,7 +2785,7 @@ async function runShortcutChecks() {
   await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all clears every change')
   if ((await keysOf('view.bottomPanel')) !== 'Ctrl J' || (await keysOf('view.sidebar')) !== 'Ctrl B or Ctrl Shift S') throw new Error('Reset all did not bring the shipped shortcuts back')
   await waitFor("!!document.querySelector('.toast .toast-action')", 4000, 'Reset all offers Undo')
-  if (!(await onTop('.toast .toast-action'))) throw new Error('the Undo of Reset all is under the dialog')
+  if (!(await onTop('.toast .toast-action'))) throw new Error('the Undo of Reset all is under the page')
   await click('.toast .toast-action')
   await waitFor(`!!document.querySelector('${row('view.bottomPanel')} .shortcuts-changed')`, 4000, 'Undo brings the changes back')
   if ((await keysOf('view.bottomPanel')) !== 'Ctrl B') throw new Error('Undo did not bring Ctrl+B back')
@@ -2541,7 +2793,7 @@ async function runShortcutChecks() {
   await waitFor(`!document.querySelector('.shortcuts-changed')`, 4000, 'Reset all again')
   if ((await saved()) !== '{}') throw new Error(`the settings still keep ${await saved()}`)
   await pressKey('Escape')
-  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Esc closes the list')
+  await waitFor("!document.querySelector('.settings-page')", 4000, 'Esc leaves the page')
   await evaluate("document.querySelector('.toast-close')?.click()")
   shown = await evaluate(bottomShown)
   await key({ key: 'j', ctrlKey: true })
@@ -2602,15 +2854,15 @@ async function runShellChecks() {
   await key({ key: '0', code: 'Digit0', ctrlKey: true })
   await waitFor(`window.devicePixelRatio === ${ratioBefore}`, 4000, 'Ctrl+0 resets the zoom')
 
-  // The shortcuts list.
+  // The shortcuts list, a section of the Settings page.
   await key({ key: '/', code: 'Slash', ctrlKey: true })
-  await waitFor("!!document.querySelector('.shortcuts-dialog')", 4000, 'Ctrl+/ opens the shortcuts')
+  await waitFor("!!document.querySelector('.settings-page .shortcuts-row')", 4000, 'Ctrl+/ opens the shortcuts')
   const rows = await count('.shortcuts-row')
   if (rows < 30) throw new Error(`the shortcuts list has only ${rows} rows`)
   await sleep(400)
   await screenshot('ui-dark-shortcuts.png')
   await key({ key: 'Escape' })
-  await waitFor("!document.querySelector('.shortcuts-dialog')", 4000, 'Escape closes the shortcuts')
+  await waitFor("!document.querySelector('.settings-page')", 4000, 'Escape leaves the shortcuts')
 
   // Sessions: a new one, then Back and Forward over the ones you opened.
   const firstTitle = await activeTitle()
@@ -2734,8 +2986,8 @@ async function runAboutChecks() {
 }
 
 /**
- * Settings > Appearance: a choice previews at once, Cancel puts the saved look back, Save
- * keeps it across a reload. Captures the main window and the Appearance page in both themes.
+ * Settings > Appearance: a choice shows at once and is kept as it is made, across a reload. Captures the main window
+ * and the Appearance section in both themes.
  */
 async function runAppearanceChecks() {
   console.log('[smoke] --- appearance ---')
@@ -2744,20 +2996,16 @@ async function runAppearanceChecks() {
 
   await openAppearanceSettings()
   await screenshotSizes('ui-dark-appearance')
-  await click('.settings-appearance [role="radio"]', 'Light')
-  await waitFor("document.documentElement.dataset.theme === 'light'", 4000, 'light preview')
-  await click('.settings-footer .btn', 'Cancel')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
-  if ((await theme()) !== 'dark') throw new Error('Cancel did not put the dark theme back')
-
-  await openAppearanceSettings()
-  await click('.settings-appearance [role="radio"]', 'Light')
+  await click('[data-setting="appearance.theme"] [role="radio"]', 'Light')
+  await waitFor("document.documentElement.dataset.theme === 'light'", 4000, 'light at once')
+  await settingIs("settings.appearance.mode === 'light'", 'Light')
   await click('.accent-swatch[aria-label="Jade"]')
-  await waitFor("document.documentElement.dataset.accent === 'jade'", 4000, 'jade preview')
+  await waitFor("document.documentElement.dataset.accent === 'jade'", 4000, 'jade at once')
+  await settingIs("settings.appearance.accent === 'jade'", 'Jade')
   await click('.accent-swatch[aria-label="Signal blue"]')
+  await settingIs("settings.appearance.accent === 'blue'", 'Signal blue')
   await screenshotSizes('ui-light-appearance')
-  await click('.settings-footer .btn.primary')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
+  await closeSettings()
   const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
   console.log('[smoke] saved appearance:', JSON.stringify(saved))
   if (saved.mode !== 'light' || saved.accent !== 'blue') throw new Error('Light was not saved')
@@ -2789,9 +3037,9 @@ const bodyFont = () => evaluate('getComputedStyle(document.body).fontFamily')
 const sizeOf = (selector) => evaluate(`parseFloat(getComputedStyle(document.querySelector(${JSON.stringify(selector)})).fontSize)`)
 
 /**
- * Settings > Appearance > Fonts: Windows' own fonts at Codex's sizes by default, Inter and JetBrains Mono
- * one choice away, the installed fonts listed, sizes that move the whole interface, Cancel putting
- * the old fonts back, and a saved choice drawn right from the first frame after a reload.
+ * Settings > Appearance > Fonts: Windows' own fonts at Codex's sizes by default, Inter and JetBrains Mono one choice
+ * away, the installed fonts listed, sizes that move the whole interface, each choice kept as it is made, and a saved
+ * choice drawn right from the first frame after a reload.
  */
 async function runFontChecks() {
   console.log('[smoke] --- fonts ---')
@@ -2811,35 +3059,29 @@ async function runFontChecks() {
   if (options.length < 4) throw new Error('the installed fonts are not listed')
   await screenshotSizes('ui-dark-fonts')
 
-  // Inter: the same sizes minus the pixel Windows' font gets on small text.
+  // Inter: the same sizes minus the pixel Windows' font gets on small text. The sidebar is under the page, so its
+  // sizes are read once the page closes.
   if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
-  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('Inter')", 4000, 'Inter preview')
+  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('Inter')", 4000, 'Inter at once')
   await waitFor("document.documentElement.style.getPropertyValue('--ui-small').trim() === '0px'", 4000, 'Inter takes no extra pixel')
+  await closeSettings()
   const smallInter = await sizeOf('.session-sidebar .sb-row .meta')
   if (smallInter !== smallSystem - 1) throw new Error(`Inter's small text is ${smallInter} px, the system font's is ${smallSystem} px`)
   if ((await sizeOf('.composer-input')) !== inputSystem) throw new Error('Inter changed the size of the thread text')
 
   // The sizes move the whole interface.
-  if (!(await chooseOption('Interface size', '16 px'))) throw new Error('no 16 px choice')
-  await waitFor("document.documentElement.style.getPropertyValue('--ui-delta').trim() === '2px'", 4000, '16 px preview')
-  if ((await sizeOf('.composer-input')) !== 16) throw new Error('the thread text did not follow the interface size')
-  if (!(await chooseOption('Code size', '14 px'))) throw new Error('no 14 px choice')
-  await waitFor("document.documentElement.style.getPropertyValue('--code-size').trim() === '14px'", 4000, 'code size preview')
-  if (!(await chooseOption('Code font', 'eNCode (JetBrains Mono)'))) throw new Error('no JetBrains Mono choice')
-  await waitFor("document.documentElement.style.getPropertyValue('--font-mono').trim().startsWith(\"'JetBrains Mono'\")", 4000, 'JetBrains Mono preview')
-
-  // Cancel puts Windows' fonts back.
-  await click('.settings-footer .btn', 'Cancel')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings closed')
-  await waitFor("getComputedStyle(document.body).fontFamily.startsWith('system-ui') && parseFloat(getComputedStyle(document.querySelector('.composer-input')).fontSize) === 14", 4000, 'Cancel puts the fonts back')
-
-  // Saved, Inter is there from the first frame of the next load.
   await openAppearanceSettings()
-  if (!(await chooseOption('Interface font', 'eNCode (Inter)'))) throw new Error('no eNCode (Inter) choice')
-  await click('.settings-footer .btn.primary')
-  await waitFor("!document.querySelector('.settings-modal')", 4000, 'settings saved')
-  const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
-  if (saved.uiFont !== '@encode' || saved.uiSize !== 14) throw new Error(`the fonts were not saved: ${JSON.stringify(saved)}`)
+  if (!(await chooseOption('Interface size', '16 px'))) throw new Error('no 16 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--ui-delta').trim() === '2px'", 4000, '16 px at once')
+  if (!(await chooseOption('Code size', '14 px'))) throw new Error('no 14 px choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--code-size').trim() === '14px'", 4000, 'code size at once')
+  if (!(await chooseOption('Code font', 'eNCode (JetBrains Mono)'))) throw new Error('no JetBrains Mono choice')
+  await waitFor("document.documentElement.style.getPropertyValue('--font-mono').trim().startsWith(\"'JetBrains Mono'\")", 4000, 'JetBrains Mono at once')
+  await settingIs("settings.appearance.uiFont === '@encode' && settings.appearance.uiSize === 16 && settings.appearance.codeSize === 14 && settings.appearance.codeFont === '@encode'", 'the fonts and sizes')
+  await closeSettings()
+  if ((await sizeOf('.composer-input')) !== 16) throw new Error('the thread text did not follow the interface size')
+
+  // Kept, Inter is there from the first frame of the next load.
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload with Inter')
   if (!(await bodyFont()).startsWith('Inter')) throw new Error('Inter did not survive a reload')
@@ -3075,10 +3317,10 @@ try {
   if (await evaluate("!!document.querySelector('.ui-dialog')")) throw new Error('a file the editor wrote last was reported as changed')
   if ((await readDisk()) !== readme) throw new Error('the file was not put back')
 
-  // Settings modal.
+  // The Plugins and skills dialog.
   if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
-  await waitFor("!!document.querySelector('.settings-modal')", 8000, 'settings modal')
-  await screenshot('07-settings.png')
+  await waitFor("!!document.querySelector('.settings-modal')", 8000, 'the Plugins and skills dialog')
+  await screenshot('07-plugins.png')
   await click('.settings-header .icon-btn')
   await sleep(300)
 
@@ -3112,6 +3354,7 @@ try {
   await runFindChecks()
   await runComposerChecks()
   await runPaletteChecks()
+  await runSettingsPageChecks()
 
   console.log(
     '[smoke] demo file bytes:',

@@ -15,6 +15,16 @@ export type AgentMode = 'code' | 'ask' | 'plan'
  * to the running request, which reads it after the step it is on. Ctrl+Enter does the other one.
  */
 export type FollowUp = 'queue' | 'steer'
+
+/**
+ * The key that sends a message: `enter` (Shift+Enter starts a new line) or `ctrl-enter` (Enter starts a new line, as in
+ * an editor). While the agent works, the other follow-up takes Ctrl+Enter with `enter` and Ctrl+Shift+Enter with
+ * `ctrl-enter`.
+ */
+export type SendKey = 'enter' | 'ctrl-enter'
+
+/** When Windows is asked to show a notice: never, only while eNCode is not the window in front, or every time. */
+export type NotifyWhen = 'never' | 'background' | 'always'
 export type AgentStatus =
   | 'idle'
   | 'thinking'
@@ -68,6 +78,23 @@ export interface Settings {
   agentMode: AgentMode
   /** What Enter does with a message while the agent works; see FollowUp. Default `queue`. */
   followUp: FollowUp
+  /** The key that sends a message; see SendKey. Default `enter`. */
+  sendKey: SendKey
+  /** Keeps the computer from sleeping while an agent works (not while it waits for you). Default on. */
+  keepAwake: boolean
+  /** A notice when a request finishes. Default `background`. */
+  notifyDone: NotifyWhen
+  /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */
+  notifyNeeds: NotifyWhen
+  /** The taskbar button flashes while the agent needs you and eNCode is not in front. Default on. */
+  flashTaskbar: boolean
+  /**
+   * Read only: the folder chats (sessions that belong to no project) work in, with the default filled in. Changed with
+   * settings.chooseChatsFolder, which asks with the system's folder dialog, and settings.resetChatsFolder.
+   */
+  chatsFolder: string
+  /** Read only: the folder chats work in when the person has not chosen one. */
+  chatsFolderDefault: string
   /** Theme, accent, contrast, density and motion; see shared/appearance.ts. */
   appearance: Appearance
   /**
@@ -845,6 +872,10 @@ export interface EncodeApi {
     exportDiagnostics(): Promise<string | null>
     /** Shows the folder the log files are in. */
     openLogs(): Promise<void>
+    /** Shows a notice the way a finished request would, so the person sees whether Windows lets eNCode show them. */
+    testNotification(): Promise<void>
+    /** A notice was clicked: open that session. */
+    onOpenSession(cb: (sessionId: string) => void): () => void
   }
   window: {
     minimize(): Promise<void>
@@ -880,6 +911,10 @@ export interface EncodeApi {
     setProfileKey(id: string, key: string): Promise<Settings>
     /** Stores, replaces or (with an empty key) removes the API key of a search provider that needs one. */
     setSearchKey(provider: SearchProviderId, key: string): Promise<Settings>
+    /** Asks for the chats folder with the system's folder dialog; null when the dialog was cancelled. */
+    chooseChatsFolder(): Promise<Settings | null>
+    /** Puts the chats folder back to the eNCode folder in Documents. */
+    resetChatsFolder(): Promise<Settings>
   }
   search: {
     /** One search through the provider in use, the way the agent makes it: the answer says whether it works. */
@@ -926,6 +961,10 @@ export interface EncodeApi {
     sessions(): Promise<SessionSummary[]>
     /** In the open project by default; `projectRoot: null` makes a standalone session. */
     createSession(options?: { projectRoot?: string | null }): Promise<SessionSummary>
+    /** A chat: a session in the chats folder (see Settings.chatsFolder), which is made if it is missing. */
+    createChat(): Promise<SessionSummary>
+    /** Makes the chats folder if it is missing, so a chat can open it; resolves to the folder. */
+    chatsFolder(): Promise<string>
     update(sessionId: string, patch: SessionPatch): Promise<SessionSummary | null>
     /** The sessions that are running or waiting right now, by id. */
     statuses(): Promise<Record<string, AgentStatus>>

@@ -11,12 +11,11 @@ import PluginsModal from './components/PluginsModal'
 import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
 import SessionHeader from './components/SessionHeader'
-import SettingsModal from './components/SettingsModal'
+import { SettingsPage } from './components/settings/SettingsPage'
 import { CommandPalette } from './components/shell/CommandPalette'
 import { AboutDialog, ConfirmDialog } from './components/shell/Dialogs'
 import IconRail from './components/shell/IconRail'
 import SessionSidebar from './components/shell/SessionSidebar'
-import { ShortcutsDialog } from './components/shell/ShortcutsDialog'
 import TitleBar from './components/shell/TitleBar'
 import Toasts from './components/Toasts'
 import { api } from './api'
@@ -129,10 +128,17 @@ export default function App() {
       useUi.getState().notify(kind, text, tab ? { label: 'Open Settings', run: () => useUi.getState().openSettings(tab) } : undefined)
     })
 
+    // A click on a Windows notice opens the session it is about.
+    const offOpen = api.app.onOpenSession((id) => {
+      useUi.getState().setSettingsOpen(false)
+      void useSessions.getState().select(id)
+    })
+
     return () => {
       offAgent()
       offFiles()
       offAlert()
+      offOpen()
       refresh.cancel()
     }
   }, [])
@@ -145,45 +151,49 @@ export default function App() {
         <IconRail />
 
         <div className="sheet">
-          {sidebarVisible && (
-            <>
-              <div className="sidebar-wrap" ref={sidebarRef} style={{ width: sidebar.size }}>
-                <SessionSidebar />
-              </div>
-              <div className="resizer resizer-v" onPointerDown={sidebar.onPointerDown} />
-            </>
-          )}
-
-          <div className="workarea">
-            <div className="workrow">
-              {/* The thread stays mounted under a full-width panel, so a draft in the composer survives. */}
-              <main className={cx('app-main', layout === 'full' && 'is-covered')}>
-                <SessionHeader />
-                <div className="main-body">
-                  <ChatPanel />
+          {/* Settings is a page over the sessions and the work area; they stay mounted and laid out under it, so a
+              draft, a terminal or a browser page is as it was when the page closes. */}
+          <div className={cx('sheet-work', settingsOpen && 'is-covered')} inert={settingsOpen}>
+            {sidebarVisible && (
+              <>
+                <div className="sidebar-wrap" ref={sidebarRef} style={{ width: sidebar.size }}>
+                  <SessionSidebar />
                 </div>
-              </main>
+                <div className="resizer resizer-v" onPointerDown={sidebar.onPointerDown} />
+              </>
+            )}
 
-              {/* The panel stays mounted while hidden, so a browser keeps its page and a terminal its shells. */}
-              {layout === 'split' && <div className="resizer resizer-v" onPointerDown={side.onPointerDown} />}
-              <div ref={sideRef} className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
-                <SidePanel />
+            <div className="workarea">
+              <div className="workrow">
+                {/* The thread stays mounted under a full-width panel, so a draft in the composer survives. */}
+                <main className={cx('app-main', layout === 'full' && 'is-covered')}>
+                  <SessionHeader />
+                  <div className="main-body">
+                    <ChatPanel />
+                  </div>
+                </main>
+
+                {/* The panel stays mounted while hidden, so a browser keeps its page and a terminal its shells. */}
+                {layout === 'split' && <div className="resizer resizer-v" onPointerDown={side.onPointerDown} />}
+                <div ref={sideRef} className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
+                  <SidePanel />
+                </div>
               </div>
-            </div>
 
-            {bottomTabs > 0 && <BottomPanel panelRef={bottomRef} open={bottomOpen} height={bottom.size} onResizeStart={bottom.onPointerDown} />}
+              {bottomTabs > 0 && <BottomPanel panelRef={bottomRef} open={bottomOpen} height={bottom.size} onResizeStart={bottom.onPointerDown} />}
+            </div>
           </div>
+
+          {settingsOpen && <SettingsPage />}
         </div>
       </div>
 
       {quickOpenOpen && <QuickOpen />}
-      {settingsOpen && <SettingsModal />}
       {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
       <ConnectModelDialog />
       <RewindDialog />
       <PromptDialog />
-      <ShortcutsDialog />
       <StatusDialog />
       <CommandPalette />
       <AboutDialog />

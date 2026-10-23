@@ -39,6 +39,13 @@ const settings: Settings = {
   lastWorkspace: 'C:\\Users\\ana\\private-project',
   agentMode: 'code',
   followUp: 'queue',
+  sendKey: 'ctrl-enter',
+  keepAwake: true,
+  notifyDone: 'background',
+  notifyNeeds: 'always',
+  flashTaskbar: false,
+  chatsFolder: 'C:\\Users\\ana\\Documents\\eNCode',
+  chatsFolderDefault: 'C:\\Users\\ana\\Documents\\eNCode',
   appearance: { ...DEFAULT_APPEARANCE },
   roles: { reviewer: ['paid:big-model'] },
   efforts: {},
@@ -90,6 +97,14 @@ describe('diagnostics report', () => {
     const missing = diagnosticsReport(input({ settings: { ...settings, searchKeys: [] } }))
     assert.match(missing, /Web search +Brave Search, NO KEY/)
     assert.match(diagnosticsReport(input({ settings: { ...settings, searchProvider: 'duckduckgo', searchKeys: [] } })), /Web search +DuckDuckGo, needs no key/)
+  })
+
+  it('says how messages are sent, when notices show and whether the computer is kept awake, without the chats folder', () => {
+    const text = diagnosticsReport(input())
+    assert.match(text, /Sends with +Ctrl\+Enter/)
+    assert.match(text, /Notices +finished background, needs you always, taskbar still/)
+    assert.match(text, /Keeps awake +while an agent works/)
+    assert.ok(!text.includes('Documents'), 'a folder path is the person\'s own')
   })
 
   it('lists each model with whether a key is stored, and marks the one in use', () => {

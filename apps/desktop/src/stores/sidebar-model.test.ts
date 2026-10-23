@@ -8,7 +8,9 @@ import {
   buildSidebar,
   canSwitchProject,
   isBusy,
+  isChat,
   nextAttention,
+  placeName,
   projectName,
   rootKey,
   rowStatus,
@@ -78,12 +80,12 @@ describe('sidebar', () => {
   it('groups sessions by project, newest first, with pinned and project-less ones apart', () => {
     const model = buildSidebar(sessions, { workspaceRoot: 'C:\\work\\app', recentRoots: ['E:\\old\\thing'] })
     assert.deepEqual(model.pinned.map((item) => item.id), ['pinned'])
-    assert.deepEqual(model.recents.map((item) => item.id), ['loose'])
+    assert.deepEqual(model.chats.map((item) => item.id), ['loose'])
     assert.deepEqual(model.projects.map((project) => project.name), ['app', 'site', 'thing'])
     assert.deepEqual(model.projects[0].sessions.map((item) => item.id), ['new', 'same folder, other spelling', 'old'])
     assert.deepEqual(model.projects[2].sessions, [], 'a folder opened before shows even without sessions')
     assert.equal(
-      [...model.pinned, ...model.recents, ...model.projects.flatMap((project) => project.sessions)].some((item) => item.id === 'archived'),
+      [...model.pinned, ...model.chats, ...model.projects.flatMap((project) => project.sessions)].some((item) => item.id === 'archived'),
       false,
     )
   })
@@ -106,6 +108,32 @@ describe('sidebar', () => {
     const model = buildSidebar(sessions, { workspaceRoot: 'C:\\work\\app', recentRoots: [] })
     assert.deepEqual(visibleOrder(model), ['pinned', 'new', 'same folder, other spelling', 'old', 'other', 'loose'])
     assert.deepEqual(visibleOrder(model, new Set([rootKey('C:\\work\\app')])), ['pinned', 'other', 'loose'])
+  })
+
+  it('lists chats apart: the chats folder is never a project, even while it is the open folder', () => {
+    const chats = 'C:\\Users\\me\\Documents\\eNCode'
+    const withChats = [
+      ...sessions,
+      session('chat', { projectRoot: 'c:/users/me/documents/encode/', updatedAt: NOW - HOUR / 2 }),
+      session('pinned chat', { projectRoot: chats, pinned: true }),
+    ]
+    const model = buildSidebar(withChats, { workspaceRoot: chats, recentRoots: [chats, 'E:\\old\\thing'], chatsFolder: chats })
+    assert.deepEqual(model.projects.map((project) => project.name), ['app', 'site', 'thing'])
+    assert.deepEqual(model.chats.map((item) => item.id), ['chat', 'loose'], 'newest first, older ones without a folder too')
+    assert.deepEqual(model.pinned.map((item) => item.id), ['pinned chat', 'pinned'], 'a pinned chat stays with the pinned ones')
+    assert.deepEqual(visibleOrder(model).slice(-2), ['chat', 'loose'])
+    const found = buildSidebar(withChats, { workspaceRoot: null, recentRoots: [], chatsFolder: chats, filter: 'chats' })
+    assert.deepEqual(found.chats.map((item) => item.id), ['chat'], 'the chats folder is found by the name the sidebar gives it')
+  })
+
+  it('tells a chat from a session in a project, and names the chats folder', () => {
+    const chats = 'C:\\Users\\me\\Documents\\eNCode'
+    assert.equal(isChat({ projectRoot: null }, chats), true)
+    assert.equal(isChat({ projectRoot: 'c:/users/me/documents/encode' }, chats), true)
+    assert.equal(isChat({ projectRoot: 'C:\\work\\app' }, chats), false)
+    assert.equal(isChat({ projectRoot: 'C:\\work\\app' }, null), false, 'before the settings load, only a session without a folder is a chat')
+    assert.equal(placeName(chats, chats), 'Chats')
+    assert.equal(placeName('C:\\work\\app', chats), 'app')
   })
 })
 

@@ -474,3 +474,106 @@ describe('SettingsService models', () => {
     assert.ok(settings.keyRevision('oa') > second)
   })
 })
+
+describe('SettingsService general and notices', () => {
+  it('starts with Enter sending, the computer kept awake while an agent works, and notices while eNCode is in the back', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.equal(settings.sendKey, 'enter')
+    assert.equal(settings.keepAwake, true)
+    assert.equal(settings.notifyDone, 'background')
+    assert.equal(settings.notifyNeeds, 'background')
+    assert.equal(settings.flashTaskbar, true)
+  })
+
+  it('saves each one, reads it back after a restart, and takes only the values it knows', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    settings.save({ sendKey: 'ctrl-enter', keepAwake: false, notifyDone: 'always', notifyNeeds: 'never', flashTaskbar: false })
+    const strange = settings.save({
+      sendKey: 'shift-enter' as unknown as Settings['sendKey'],
+      keepAwake: 'yes' as unknown as boolean,
+      notifyDone: 'sometimes' as unknown as Settings['notifyDone'],
+      notifyNeeds: 1 as unknown as Settings['notifyNeeds'],
+      flashTaskbar: null as unknown as boolean,
+    })
+    assert.deepEqual(
+      [strange.sendKey, strange.keepAwake, strange.notifyDone, strange.notifyNeeds, strange.flashTaskbar],
+      ['ctrl-enter', false, 'always', 'never', false],
+      'a value that is not one of the choices changes nothing',
+    )
+    const restarted = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.deepEqual([restarted.sendKey, restarted.keepAwake, restarted.notifyDone, restarted.notifyNeeds, restarted.flashTaskbar], ['ctrl-enter', false, 'always', 'never', false])
+    fs.writeFileSync(file(), JSON.stringify({ sendKey: 'tab', keepAwake: 0, notifyDone: [], notifyNeeds: {}, flashTaskbar: 'false' }))
+    const damaged = new SettingsService(dir, new FakeCipher(), 'win32').get()
+    assert.deepEqual([damaged.sendKey, damaged.keepAwake, damaged.notifyDone, damaged.notifyNeeds, damaged.flashTaskbar], ['enter', true, 'background', 'background', true])
+  })
+})
+
+describe('SettingsService chats folder', () => {
+  // Chats live outside eNCode's own folder, which is `dir` here.
+  let place = ''
+  beforeEach(() => {
+    place = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-chats-'))
+  })
+  afterEach(() => {
+    fs.rmSync(place, { recursive: true, force: true })
+  })
+  const chats = () => path.join(place, 'Documents', 'eNCode')
+  const home = () => path.join(place, 'home')
+  const make = () => new SettingsService(dir, new FakeCipher(), process.platform, { chatsFolder: chats(), home: home() })
+
+  it('works in the default folder until the person chooses one, and hands the renderer the folder in use', () => {
+    const settings = make()
+    assert.equal(settings.get().chatsFolder, chats())
+    assert.equal(settings.get().chatsFolderDefault, chats())
+    settings.save({ keepAwake: false })
+    assert.doesNotMatch(onDisk(), /Documents/, 'the default is not written down, so a later default reaches whoever never chose')
+  })
+
+  it('keeps a folder chosen in the dialog across restarts, and goes back to the default', () => {
+    const chosen = path.join(place, 'My chats')
+    assert.equal(make().setChatsFolder(chosen).chatsFolder, chosen)
+    assert.equal(make().get().chatsFolder, chosen)
+    assert.equal(make().setChatsFolder(null).chatsFolder, chats())
+    assert.equal(make().get().chatsFolder, chats())
+    make().setChatsFolder(chats())
+    assert.doesNotMatch(onDisk(), /Documents/, 'choosing the default folder is the same as not choosing')
+  })
+
+  it('never takes the folder from a save, which the window could send with any path in it', () => {
+    const settings = make()
+    const saved = settings.save({ chatsFolder: path.join(place, 'elsewhere') } as Partial<Settings>)
+    assert.equal(saved.chatsFolder, chats())
+  })
+
+  it('refuses a folder that is not a whole path on this computer, and reads such a file as no choice', () => {
+    const settings = make()
+    assert.throws(() => settings.setChatsFolder('relative/chats'), /Choose a folder/)
+    assert.throws(() => settings.setChatsFolder(`${place}\0x`), /Choose a folder/)
+    assert.throws(() => settings.setChatsFolder(path.join(place, 'x'.repeat(1100))), /Choose a folder/)
+    assert.equal(settings.get().chatsFolder, chats())
+    fs.writeFileSync(file(), JSON.stringify({ chatsFolder: 'chats' }))
+    assert.equal(make().get().chatsFolder, chats())
+  })
+
+  it("refuses a whole drive, the home folder, and a folder that holds eNCode's own files or lies in them, from the file too", () => {
+    const settings = make()
+    for (const folder of [path.parse(place).root, home(), dir, path.join(dir, 'chats'), path.dirname(dir)]) {
+      assert.throws(() => settings.setChatsFolder(folder), /of its own/, folder)
+    }
+    assert.equal(settings.get().chatsFolder, chats())
+    for (const folder of [dir, home(), path.parse(place).root]) {
+      fs.writeFileSync(file(), JSON.stringify({ chatsFolder: folder }))
+      assert.equal(make().get().chatsFolder, chats(), `${folder} in the file is no choice`)
+    }
+  })
+
+  it('opens the chats folder like a project without listing it with the projects', () => {
+    const settings = make()
+    const project = path.join(place, 'project')
+    settings.touchWorkspace(project)
+    settings.touchWorkspace(chats())
+    const after = settings.get()
+    assert.deepEqual(after.recentWorkspaces, [project])
+    assert.equal(after.lastWorkspace, chats(), 'it is still where eNCode opens next time')
+  })
+})

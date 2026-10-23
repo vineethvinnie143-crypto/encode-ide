@@ -4,7 +4,8 @@ import { api } from '../api'
 import { setActiveSessionId } from './active'
 import { useChat } from './chat'
 import { canGoBack, canGoForward, emptyHistory, forget, goBack, goForward, visit, type History } from './history'
-import { sameRoot } from './sidebar-model'
+import { useSettings } from './settings'
+import { isChat, sameRoot } from './sidebar-model'
 import { useStatus } from './status'
 import { useWorkspace } from './workspace'
 
@@ -18,6 +19,8 @@ interface SessionsStore {
   refresh(): Promise<void>
   /** A session in the open folder. */
   newSession(): Promise<void>
+  /** A chat: a session that belongs to no project and works in the chats folder, which opens for it (File > New chat). */
+  newChat(): Promise<void>
   /** Opens a session, switching the open folder to its project first. False when that was refused. */
   select(id: string, options?: { remember?: boolean }): Promise<boolean>
   fork(id: string): Promise<void>
@@ -59,6 +62,8 @@ export const useSessions = create<SessionsStore>((set, get) => {
   const openProjectOf = async (session: SessionSummary): Promise<boolean> => {
     const workspace = useWorkspace.getState()
     if (!session.projectRoot || sameRoot(session.projectRoot, workspace.workspace?.root)) return true
+    // The chats folder is made again if it was removed since.
+    if (isChat(session, useSettings.getState().settings?.chatsFolder)) await api.agent.chatsFolder().catch(() => undefined)
     // openPath refuses while a session runs, and reports a folder it cannot open.
     await workspace.openPath(session.projectRoot)
     // A session must not run in the wrong folder.
@@ -114,6 +119,20 @@ export const useSessions = create<SessionsStore>((set, get) => {
 
     newSession: async () => {
       const created = await api.agent.createSession()
+      set((state) => ({ history: visit(state.history, created.id) }))
+      set({ sessions: await api.agent.sessions() })
+      await activate(created.id)
+    },
+
+    newChat: async () => {
+      const folder = await api.agent.chatsFolder()
+      // The folder opens first, as for a session in another project, so nothing is made when that is refused (while
+      // an agent works) or put off (an unsaved file).
+      if (!sameRoot(folder, useWorkspace.getState().workspace?.root)) {
+        await useWorkspace.getState().openPath(folder)
+        if (!sameRoot(useWorkspace.getState().workspace?.root, folder)) return
+      }
+      const created = await api.agent.createChat()
       set((state) => ({ history: visit(state.history, created.id) }))
       set({ sessions: await api.agent.sessions() })
       await activate(created.id)

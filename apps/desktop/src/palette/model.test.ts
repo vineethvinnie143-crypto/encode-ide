@@ -50,7 +50,8 @@ describe('the palette list', () => {
   const sessions = Array.from({ length: 14 }, (_, index) => session(index + 1))
   const actions = [action('file.newSession', 'New session', { shortcut: 'Ctrl+N' }), action('view.sidebar', 'Toggle sidebar'), action('app.settings', 'Settings…')]
   const pages = [page('models', 'Models', 'providers keys'), page('appearance', 'Appearance', 'theme dark light')]
-  const items = [...sessions, ...actions, ...pages]
+  const awake = { ...page('general.keepAwake', 'Keep the computer awake while the agent works', 'sleep power'), searchOnly: true }
+  const items = [...sessions, ...actions, ...pages, awake]
 
   it('shows recent picks, the latest sessions, then every action and settings page before anything is typed', () => {
     const sections = rankPalette(items, '', ['command:view.sidebar', 'session:3', 'gone:1'])
@@ -70,6 +71,12 @@ describe('the palette list', () => {
     const ids = flatten(sections).map((item) => item.id)
     assert.equal(new Set(ids).size, ids.length, 'a recent pick is not listed twice')
     assert.equal(ids.includes('session:3'), true)
+    assert.equal(ids.includes(awake.id), false, 'a single setting waits for a query')
+  })
+
+  it('finds a single setting by its words once something is typed', () => {
+    assert.equal(flatten(rankPalette(items, 'sleep', []))[0].id, awake.id)
+    assert.equal(flatten(rankPalette(items, 'keep awake', []))[0].id, awake.id)
   })
 
   it('lists matches best first, in sections ordered by their best match', () => {

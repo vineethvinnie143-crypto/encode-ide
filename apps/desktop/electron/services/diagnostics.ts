@@ -88,6 +88,9 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['What the agent may do', settings.policy],
     ['Agent mode', settings.agentMode],
     ['Enter while it works', settings.followUp],
+    ['Sends with', settings.sendKey === 'ctrl-enter' ? 'Ctrl+Enter' : 'Enter'],
+    ['Notices', `finished ${settings.notifyDone}, needs you ${settings.notifyNeeds}, taskbar ${settings.flashTaskbar ? 'flashes' : 'still'}`],
+    ['Keeps awake', settings.keepAwake ? 'while an agent works' : 'no'],
     ['Effort', Object.entries(settings.efforts).map(([role, effort]) => `${role} ${effort}`).join(', ') || 'left to the models'],
     [
       'Shortcuts',

@@ -18,6 +18,7 @@ import EffortButton from '../models/EffortButton'
 import ModelButton from '../models/ModelButton'
 import { ComposerPicker } from './ComposerPicker'
 import { fileMention, fileOptions, findSlash, indexFiles, parseSlash, replaceTrigger, skillOptions, slashOptions, triggerAt, type FileIndex, type PickerOption, type SkillLike } from './picker'
+import { sendAction, sendKeys } from './send-key'
 import { runSlash } from './slash'
 import { conversationStats } from './stats'
 
@@ -205,6 +206,7 @@ export default function Composer() {
   const policy = settings?.policy ?? 'workspace-write'
   const mode = settings?.agentMode ?? 'code'
   const followUp = settings?.followUp ?? 'queue'
+  const keys = sendKeys(settings?.sendKey ?? 'enter')
   const stats = useMemo(() => conversationStats(entries, usageTotals), [entries, usageTotals])
 
   /** Replaces the draft and puts the caret at `at`. */
@@ -283,7 +285,7 @@ export default function Composer() {
     write(`${before}${lead}${sign}${draft.slice(at)}`, at + lead.length + 1)
   }
 
-  /** Sends the draft. While the agent works, Enter does what the follow-up setting says and `other` (Ctrl+Enter) the other one. */
+  /** Sends the draft. While the agent works, the send key does what the follow-up setting says and `other` the other one. */
   const submit = (other = false) => {
     const text = draft.trim()
     if (!text) return
@@ -307,7 +309,7 @@ export default function Composer() {
       if (skill) message = `$${skill.name}${slash.args ? ` ${slash.args}` : ''}`
       else if (unknownSlash.current !== text) {
         unknownSlash.current = text
-        notify('info', `/${slash.name} is not a command. Press Enter again to send it as a message.`)
+        notify('info', `/${slash.name} is not a command. Press ${keys.send} again to send it as a message.`)
         return
       }
     }
@@ -357,8 +359,8 @@ export default function Composer() {
       ? "Answer the agent's question…"
       : running
         ? followUp === 'steer'
-          ? 'Steer the agent now. Ctrl+Enter queues it for later'
-          : 'Queue a follow-up. Ctrl+Enter steers the agent now'
+          ? `Steer the agent now. ${keys.other} queues it for later`
+          : `Queue a follow-up. ${keys.other} steers the agent now`
         : 'Message or run a task. / commands, @ files, $ skills'
 
   const lastPrompt = [...entries].reverse().find((entry) => entry.kind === 'user' || entry.kind === 'steer')?.text
@@ -479,9 +481,10 @@ export default function Composer() {
                 return
               }
             }
-            if (event.key === 'Enter' && !event.shiftKey) {
+            const action = sendAction(event, settings?.sendKey ?? 'enter')
+            if (action) {
               event.preventDefault()
-              submit(event.ctrlKey || event.metaKey)
+              submit(action === 'other')
             } else if (event.key === 'Tab' && event.shiftKey) {
               event.preventDefault()
               agentActions.togglePlan()
@@ -530,7 +533,7 @@ export default function Composer() {
                   type="button"
                   className="composer-send is-follow-up"
                   onClick={() => submit()}
-                  title={followUp === 'steer' ? 'Steer now (Enter) · Queue (Ctrl+Enter)' : 'Queue (Enter) · Steer now (Ctrl+Enter)'}
+                  title={followUp === 'steer' ? `Steer now (${keys.send}) · Queue (${keys.other})` : `Queue (${keys.send}) · Steer now (${keys.other})`}
                   aria-label={followUp === 'steer' ? 'Steer now' : 'Queue'}
                 >
                   {followUp === 'steer' ? <CornerDownRight size={16} /> : <ArrowUp size={16} />}
@@ -541,7 +544,7 @@ export default function Composer() {
               </button>
             </>
           ) : (
-            <button type="button" className="composer-send" onClick={() => submit()} disabled={!draft.trim() || (!workspace && !parseSlash(draft))} title="Send (Enter)" aria-label="Send">
+            <button type="button" className="composer-send" onClick={() => submit()} disabled={!draft.trim() || (!workspace && !parseSlash(draft))} title={`Send (${keys.send})`} aria-label="Send">
               <ArrowUp size={16} />
             </button>
           )}
