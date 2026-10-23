@@ -530,13 +530,15 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
       `emoji ${String.fromCodePoint(0x1f600)} done`,
       'The quick brown fox jumps over the lazy dog. '.repeat(14),
     ].join('\n')
+    // The box keeps a new line as \r\n, so the whole text is longer there than here: wait for all of it.
+    const expected = text.replace(/\n/g, '\r\n')
     await clearNotes(window, notes.ref)
     await desktop.act(actOf(window, [{ kind: 'type', text }], { settleMs: 400 }), SIGNAL)
     const typed = await eventually(async () => {
       const state = await a.state()
-      return state.notes.length >= text.length ? state : undefined
+      return state.notes.length >= expected.length ? state : undefined
     }, 'the text to arrive')
-    assert.equal(typed.notes, text.replace(/\n/g, '\r\n'))
+    assert.equal(typed.notes, expected)
   })
 
   it('presses key combinations, and refuses the ones that leave the window', async () => {
