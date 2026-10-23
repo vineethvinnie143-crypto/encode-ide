@@ -1632,27 +1632,51 @@ async function runInstallOfferChecks() {
 
 /** The middle of the first `word` on the editor's drawn line that holds `lineText`, on screen. */
 async function wordSpot(lineText, word) {
-  const spot = await evaluate(`(() => {
-    const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => !node.closest('.enc-zone') && node.textContent.includes(${JSON.stringify(lineText)}))
-    const at = line ? line.textContent.indexOf(${JSON.stringify(word)}) : -1
-    if (at < 0) return null
-    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
-    let offset = 0
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      const length = node.textContent.length
-      if (at < offset + length) {
-        const range = document.createRange()
-        range.setStart(node, at - offset)
-        range.setEnd(node, Math.min(length, at - offset + ${word.length}))
-        const rect = range.getBoundingClientRect()
-        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  // Where the word is once the view has settled, and only if a click there reaches its line: right after a jump the
+  // view may still scroll, or a peek or a bar may be going away, and a click on a spot that moves goes elsewhere.
+  const found = await evaluate(`(async () => {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()))
+    const measure = () => {
+      const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => !node.closest('.enc-zone') && node.textContent.includes(${JSON.stringify(lineText)}))
+      const at = line ? line.textContent.indexOf(${JSON.stringify(word)}) : -1
+      if (at < 0) return null
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+      let offset = 0
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const length = node.textContent.length
+        if (at < offset + length) {
+          const range = document.createRange()
+          range.setStart(node, at - offset)
+          range.setEnd(node, Math.min(length, at - offset + ${word.length}))
+          const rect = range.getBoundingClientRect()
+          return { line, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        }
+        offset += length
       }
-      offset += length
+      return null
     }
-    return null
+    let last = null
+    let hit = ''
+    const started = performance.now()
+    while (performance.now() - started < 4000) {
+      const spot = measure()
+      if (spot) {
+        const over = document.elementFromPoint(spot.x, spot.y)
+        hit = over ? over.className || over.tagName : 'nothing'
+        const steady = last && Math.abs(last.x - spot.x) < 0.5 && Math.abs(last.y - spot.y) < 0.5
+        // What the editor's own pointer handling leaves alone (a peek, a widget, a button) does not count.
+        const reaches = !!over?.closest('.code-editor') && !over.closest('.enc-zone, .enc-widgets, button, input, textarea')
+        if (steady && reaches) return { x: spot.x, y: spot.y }
+      }
+      last = spot
+      await frame()
+      await frame()
+    }
+    return { missing: !last, hit }
   })()`)
-  if (!spot) throw new Error(`"${word}" is not on screen in "${lineText}": ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
-  return spot
+  if (!found || found.missing) throw new Error(`"${word}" is not on screen in "${lineText}": ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  if (found.hit !== undefined) throw new Error(`"${word}" in "${lineText}" cannot be clicked: ${found.hit} is over it`)
+  return found
 }
 
 /** A click of the mouse's main button; `command` holds Ctrl (Cmd on macOS) down. */
