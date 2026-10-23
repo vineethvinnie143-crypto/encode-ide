@@ -91,6 +91,8 @@ const env = {
   ENCODE_FAKE_PROVIDER_PORT: String(providerPort),
   // Where "Save diagnostics" writes without asking, so the smoke can read the report.
   ENCODE_DIAGNOSTICS_FILE: path.join(sandbox, 'diagnostics.txt'),
+  // Where Report editor issue writes without asking.
+  ENCODE_EDITOR_ISSUE_FILE: path.join(sandbox, 'editor-issue.json'),
   // Where the Windows notices go instead of the screen, one JSON line each, so the smoke can read them.
   ENCODE_NOTICES_FILE: path.join(sandbox, 'notices.jsonl'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',

@@ -8,6 +8,8 @@ import { rewindRequestOf } from './agent-host/rewind-request'
 import { HOST_STOPPED_MESSAGE, type AgentHostService } from './agent-host/service'
 import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
+import { editorIssueFile } from './services/editor-issue'
+import { editorIssueFileName, readEditorIssueDraft } from '../shared/editor-issue'
 import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
 import { InlineRequests, readInlineRequest } from './services/inline-suggest'
 import { exportSessionZip } from './services/export'
@@ -37,6 +39,7 @@ import type {
   SearchOptions,
   SessionGoal,
   SessionPatch,
+  EditorIssueSaved,
   Settings,
   ShellCreateOptions,
   TodoItem,
@@ -60,6 +63,8 @@ export interface IpcDeps {
   diagnostics: () => Promise<string>
   /** Shows a notice the way a finished request would. */
   testNotice: () => void
+  /** What a log line goes through, for the text a person writes in a report. */
+  redactReport: (text: string) => string
   /** A session was removed; whatever follows its events can let go of it. */
   onSessionRemoved?: (sessionId: string) => void
 }
@@ -90,7 +95,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics, testNotice } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
   const host = agent.client
   /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
   const inline = new InlineRequests()
@@ -461,6 +466,29 @@ export function registerIpc(deps: IpcDeps): void {
     if (picked.canceled || !picked.filePath) return null
     writeFileSync(picked.filePath, await diagnostics(), 'utf8')
     return picked.filePath
+  })
+  // A report of an editor issue (ADR 0088): checked again here, and written where the user says, like diagnostics.
+  handle('app:save-editor-issue', async (value: unknown): Promise<EditorIssueSaved> => {
+    const draft = readEditorIssueDraft(value)
+    if (!draft) return { refused: 'The report could not be made from what the editor recorded.' }
+    const made = editorIssueFile(draft, { about: aboutInfo(currentEnvironment(app.isPackaged)), now: Date.now(), redact: redactReport })
+    if (!made.ok) return { refused: made.reason }
+    const answered = app.isPackaged ? undefined : process.env.ENCODE_EDITOR_ISSUE_FILE
+    if (answered) {
+      writeFileSync(answered, made.text, 'utf8')
+      return { saved: answered }
+    }
+    const win = getWindow()
+    const options = {
+      title: 'Save the editor report',
+      defaultPath: join(app.getPath('downloads'), editorIssueFileName(Date.now())),
+      filters: [{ name: 'eNCode editor report', extensions: ['json'] }],
+    }
+    const picked = win && !win.isDestroyed() ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return { canceled: true }
+    writeFileSync(picked.filePath, made.text, 'utf8')
+    console.log(`[eNCode] editor report saved (${draft.trace.steps.length} steps, ${draft.scrambled ? 'words replaced' : 'words kept'})`)
+    return { saved: picked.filePath }
   })
   handle('app:test-notification', () => testNotice())
   handle('app:screen-reader', () => app.isAccessibilitySupportEnabled())

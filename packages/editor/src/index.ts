@@ -95,3 +95,4 @@ export {
   type TraceProblem,
   type TraceStep,
 } from './trace'
+export { EDIT_RECORD_LIMITS, EditRecorder, actionsOf, type EditRecordLimits, type NoTrace } from './trace-live'

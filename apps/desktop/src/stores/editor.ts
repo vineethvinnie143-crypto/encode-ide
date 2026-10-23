@@ -1,10 +1,9 @@
 import { create } from '../store'
 import { api } from '../api'
-import { applyExternal, closeDoc, closeDocsUnder, docState, hasDoc, isDirty, markSaved, matchesSaved, openDoc, renameDocs, snapshotForSave } from '../editor/docs'
+import { closeFile, closeFilesUnder, formatBeforeSave, isOpen, isUnsaved, languageOf, markSaved, matchesSaved, openFile, renameFile, snapshotForSave, takeExternal } from '../editor/surface'
 import { useUi } from './ui'
 import { useSettings } from './settings'
 import { errorText } from '../ipc-error'
-import { FORMAT_ON_SAVE_MS, formatDoc } from '../editor/assist/format'
 import type { CodeRange } from '@shared/types'
 
 export interface Tab {
@@ -95,7 +94,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     const tab = get().tabs.find((item) => item.path === path)
     if (!tab) return
     if (!(await confirmDiscard(tab.dirty ? [tab] : []))) return
-    closeDoc(path)
+    closeFile(path)
     set((state) => ({
       tabs: state.tabs.filter((item) => item.path !== path),
       activePath: state.activePath === path ? neighbour(state.tabs, path) : state.activePath,
@@ -109,7 +108,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     if (!keep) return
     const others = get().tabs.filter((tab) => tab.path !== path)
     if (!(await confirmDiscard(others.filter((tab) => tab.dirty)))) return
-    for (const tab of others) closeDoc(tab.path)
+    for (const tab of others) closeFile(tab.path)
     set({ tabs: [keep], activePath: keep.path, revealLine: null, revealRange: null })
   },
 
@@ -120,14 +119,14 @@ export const useEditor = create<EditorStore>((set, get) => ({
   confirmDiscardAll: () => confirmDiscard(get().tabs.filter((tab) => tab.dirty)),
 
   dropAll: () => {
-    for (const tab of get().tabs) closeDoc(tab.path)
+    for (const tab of get().tabs) closeFile(tab.path)
     set({ tabs: [], activePath: null, revealLine: null, revealRange: null })
   },
 
   closeTabsUnder: (prefix) => {
-    closeDocsUnder(prefix)
+    closeFilesUnder(prefix)
     set((state) => {
-      const tabs = state.tabs.filter((tab) => hasDoc(tab.path))
+      const tabs = state.tabs.filter((tab) => isOpen(tab.path))
       const activePath = tabs.some((tab) => tab.path === state.activePath)
         ? state.activePath
         : tabs[tabs.length - 1]?.path ?? null
@@ -136,13 +135,13 @@ export const useEditor = create<EditorStore>((set, get) => ({
   },
 
   renamePath: (from, to) => {
-    renameDocs(from, to)
+    renameFile(from, to)
     const moved = (path: string) => (path === from ? to : path.startsWith(`${from}/`) ? to + path.slice(from.length) : path)
     set((state) => ({
       tabs: state.tabs.map((tab) => {
         const path = moved(tab.path)
         if (path === tab.path) return tab
-        return { ...tab, path, name: nameOf(path), language: docState(path)?.config.language.id ?? tab.language }
+        return { ...tab, path, name: nameOf(path), language: languageOf(path) ?? tab.language }
       }),
       activePath: state.activePath === null ? null : moved(state.activePath),
     }))
@@ -158,8 +157,8 @@ export const useEditor = create<EditorStore>((set, get) => ({
 
   applyExternalContent: (path, content) => {
     // Typing since the file was read wins; the next save is the user's call.
-    if (!hasDoc(path) || isDirty(path)) return
-    applyExternal(path, content)
+    if (!isOpen(path) || isUnsaved(path)) return
+    takeExternal(path, content)
   },
 
   saveActive: async () => {
@@ -198,11 +197,11 @@ async function open(path: string, reveal: Reveal): Promise<void> {
       useUi.getState().notify('error', `${path} is a binary file and cannot be opened as text.`)
       return
     }
-    const state = openDoc(path, file.content)
+    const opened = openFile(path, file.content)
     useEditor.setState((current) => ({
       tabs: current.tabs.some((tab) => tab.path === path)
         ? current.tabs
-        : [...current.tabs, { path, name: nameOf(path), language: state.config.language.id, dirty: false }],
+        : [...current.tabs, { path, name: nameOf(path), language: opened.language, dirty: false }],
       activePath: path,
       ...reveal,
     }))
@@ -236,9 +235,9 @@ async function confirmOverwrite(tab: Tab): Promise<boolean> {
 }
 
 async function save(tab: Tab): Promise<void> {
-  if (!isDirty(tab.path)) return
+  if (!isUnsaved(tab.path)) return
   // Formatted first, so what is written is formatted; a server that is slow or has none leaves the file as it is.
-  if (useSettings.getState().settings?.formatOnSave) await formatDoc(tab.path, undefined, { waitMs: FORMAT_ON_SAVE_MS }).catch(() => undefined)
+  if (useSettings.getState().settings?.formatOnSave) await formatBeforeSave(tab.path)
   const snapshot = snapshotForSave(tab.path)
   if (!snapshot) return
   try {
@@ -246,7 +245,7 @@ async function save(tab: Tab): Promise<void> {
     await api.workspace.write(tab.path, snapshot.text)
     markSaved(tab.path, snapshot)
     // Typing may have gone on while the file was written.
-    useEditor.getState().setDirty(tab.path, isDirty(tab.path))
+    useEditor.getState().setDirty(tab.path, isUnsaved(tab.path))
     useUi.getState().notify('success', `Saved ${tab.name}`)
   } catch (error) {
     useUi.getState().notify('error', `Save failed: ${errorText(error)}`)

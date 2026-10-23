@@ -1686,3 +1686,63 @@ What is new:
   request holds the cursor, no secret and no tools; Tab takes it and Ctrl+Z undoes it; Alt+\ draws the kept answer
   without a new request; Esc puts it away; Ctrl+Right takes a word; an empty line gets two lines; a `secrets.json`
   file asks nothing; turned off, nothing is asked and the button is gone.
+
+## Report editor issue, dogfood and the fixed editor interface (Editor and language intelligence 9b)
+
+Written with the pull request that records what happens to each open file and lets a tester save it as a report
+([0088](../adr/0088-report-editor-issue-replays-what-was-recorded-and-the-app-reaches-the-editor-through-a-fixed-interface.md)).
+
+What is new:
+
+- every open file's edits and cursor moves are kept in memory as a replayable trace;
+- Help → Report editor issue saves that trace, with what the person writes, to a JSON file they send;
+- a new IPC call, `app:save-editor-issue`;
+- `pnpm editor-issue`, which a developer runs on a report they were sent.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| Q1 | A report carries the file's code, or a secret in it, to whoever gets the report | The words of the file are replaced by default: each word becomes another of the same shape with a seed per report, while keywords, spaces and punctuation stay. A file that holds secrets by its name is always scrambled; the page will not turn that off, and the main process refuses it unscrambled. With the words kept, the main process reads every text the trace carries (the start, every insertion, every reload) and refuses the report when the credential patterns of 0087 match any of it. The path is never written, only the extension. | Mitigated (by pattern when the words are kept; see the residual risks) |
+| Q2 | What the person writes, or a problem's text, carries a key or their user folder | The description and the problems go through the log's redaction (home folder, the keys in Settings, the provider patterns) and the credential patterns of 0087. With words replaced, the characters a problem quotes are left out. | Mitigated |
+| Q3 | The page, or code running in it, has the main process write something else, or somewhere else | `app:save-editor-issue` rebuilds the draft from known fields within limits. `readTrace` takes only the four kinds of step the recorder writes, with every range inside the text and every size within limits. The file goes only where the person picks in a save dialog (a fixed path from the environment only in a build that is not packaged, for the smoke). It is written as JSON, never run. | Mitigated |
+| Q4 | The record leaves the machine without the person knowing | It stays in memory, per open file, and goes with the file. It is not in the log, in Diagnostics, in a session or in anything sent to a model. Only *Save report…* writes it, to the file the person picks; eNCode never sends it. | Mitigated |
+| Q5 | Recording makes typing slow or memory grow without end | A step is a change or a selection, not a copy of the text. A trace starts again past 20,000 steps or 4 million characters, and a file over 2 million characters is not recorded. The replay check runs only when the dialog opens, sampled to about 60 million characters of checking. | Mitigated |
+| Q6 | A report crafted to attack the developer who replays it, through the terminal or the repository | `scripts/editor-issue.mjs` reads it as data: `JSON.parse`, the kind and the version, then the same `readTrace` as the app. A replay changes text in memory only. Text from the report is cut to size, and control and direction characters are printed as `?`, so escape sequences never reach the terminal. `--keep` writes only `packages/editor/test/traces/issue-<name>.json`, with a name of lower-case letters, digits and dashes, and never over a file that exists. | Mitigated |
+| Q7 | Code outside the editor reaches into it and goes around its checks (a selection outside the text, a save without a snapshot) | The rest of the app reaches the editor only through `surface.ts` and `surface-view.ts`. `surface.test.ts` fails on any other import of the editor's modules or packages, and on any change to what the surface exports. | Mitigated |
+
+### Residual risks
+
+- With the words kept, credentials are found by their shape, as for suggestions (0087). A short password with a plain
+  name in an ordinary file can go into the report. The dialog says to keep words only for a file you would share as it
+  is.
+- Words replaced still keep the structure of the code: the shape of each line, the keywords and the numbers of lines.
+  Someone who knows the code well may recognise it.
+- A report holds the editor's options, the build and the system, as Diagnostics does.
+
+### Verification
+
+- Recorder tests (`trace-live.test.ts`):
+  - a property test replays every state of random sessions, typing, pasting, undo and selections included;
+  - origins and times are kept;
+  - a change the recorder did not see, and a new language, start the trace again;
+  - the limits start it again, and a file too large is not recorded;
+  - a read-only file's change becomes a reload;
+  - a scrambled trace still replays.
+- Report tests (`report.test.ts`):
+  - edits from the view, from servers, from the disk and without a view replay to the text shown;
+  - a rename follows the file;
+  - a replay that misses the text shown is named;
+  - words are replaced unless kept, and always for a secret file.
+- File tests (`shared/editor-issue.test.ts`, `services/editor-issue.test.ts`):
+  - the strict trace reader, and the draft rebuilt from known fields;
+  - no path in the file, and the trace last;
+  - secret files and credential-shaped text refused unscrambled, typed in later included;
+  - the description and the problems redacted.
+- `surface.test.ts`: the list of exports, and no import around the surface anywhere in the desktop app.
+- The desktop smoke:
+  - Report editor issue opens from the context menu, and the replay finds no problem;
+  - unscrambled, a key in the file is refused;
+  - scrambled, the saved file has the kind, the extension, the description and the origins, and none of the file's
+    words;
+  - the dogfood phase opens six of eNCode's own files of different kinds and edits each, then reports one of them.

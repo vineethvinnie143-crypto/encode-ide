@@ -14,15 +14,14 @@ import SessionHeader from './components/SessionHeader'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { CommandPalette } from './components/shell/CommandPalette'
 import { AboutDialog, ConfirmDialog } from './components/shell/Dialogs'
-import { InstallServerDialog } from './components/code/InstallServerDialog'
 import IconRail from './components/shell/IconRail'
 import SessionSidebar from './components/shell/SessionSidebar'
 import TitleBar from './components/shell/TitleBar'
 import Toasts from './components/Toasts'
 import { api } from './api'
 import { useKeymap } from './commands/useKeymap'
-import { startLanguageSync } from './editor/language'
-import { clearMarks, setMarks } from './editor/marks'
+import { clearMarks, setMarks, startLanguageSync } from './editor/surface'
+import { EditorIssueDialog, InstallServerDialog } from './editor/surface-view'
 import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useCode } from './stores/code'
@@ -226,6 +225,7 @@ export default function App() {
       <CommandPalette />
       <AboutDialog />
       <InstallServerDialog />
+      <EditorIssueDialog />
       <ConfirmDialog />
       <Toasts />
     </div>

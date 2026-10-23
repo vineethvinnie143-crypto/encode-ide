@@ -341,6 +341,7 @@ if (!gotLock) {
       logs,
       diagnostics,
       testNotice: () => attention.test(),
+      redactReport: (text) => redact(text, { home, secrets: settings.secrets() }),
       onSessionRemoved: (sessionId) => {
         computerWatch.forget(sessionId)
         attention.forget(sessionId)

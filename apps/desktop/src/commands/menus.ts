@@ -151,7 +151,7 @@ export const MENUS: readonly MenuSpec[] = [
       'session.attention',
     ],
   },
-  { label: 'Help', items: ['help.shortcuts', '-', 'help.feedback', 'help.diagnostics', 'help.logs', '-', 'help.about'] },
+  { label: 'Help', items: ['help.shortcuts', '-', 'help.feedback', 'help.diagnostics', 'help.editorIssue', 'help.logs', '-', 'help.about'] },
 ]
 
 /** The entries of one menu as the Menu component draws them. */

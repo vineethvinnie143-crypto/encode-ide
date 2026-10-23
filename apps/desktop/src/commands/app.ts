@@ -6,7 +6,7 @@
 import { inlineState } from '@shared/inline'
 import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
-import { hasActiveEditor, runEditorCommand } from '../editor/active'
+import { canReportIssue, hasShownEditor, runEditorCommand } from '../editor/surface'
 import { useEditor } from '../stores/editor'
 import { focusBreadcrumbs, useEditorLayout } from '../stores/editor-layout'
 import { useFind } from '../stores/find'
@@ -140,7 +140,7 @@ function createAppActions(): AppActions {
         /* the focused element may not support it */
       }
     },
-    hasEditor: () => hasActiveEditor(),
+    hasEditor: () => hasShownEditor(),
     editorCommand: (name) => void runEditorCommand(name),
     editorLayout: () => useEditorLayout.getState(),
     toggleEditorPart: (part) => {
@@ -264,6 +264,11 @@ function createAppActions(): AppActions {
     showAbout: () => ui().setAboutOpen(true),
     feedback: () => void agentActions.feedback(),
     saveDiagnostics: () => void helpActions.saveDiagnostics(),
+    canReportEditorIssue: () => canReportIssue(useEditor.getState().activePath),
+    reportEditorIssue: () => {
+      const path = useEditor.getState().activePath
+      if (canReportIssue(path)) ui().setEditorIssueFor(path)
+    },
     showLogs: () => void helpActions.showLogs(),
   }
 }

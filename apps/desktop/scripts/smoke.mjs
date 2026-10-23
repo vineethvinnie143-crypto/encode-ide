@@ -650,6 +650,7 @@ async function runProviderPhase() {
   await runMcpChecks()
   await runLanguageServerChecks()
   await runInlineSuggestionChecks()
+  await runEditorIssueChecks()
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
@@ -772,6 +773,65 @@ async function runInlineSuggestionChecks() {
   await settingIs("settings.inlineSuggest === 'auto'", 'suggestions as you type back to Auto')
   await closeSettings()
   console.log(`[smoke] suggestions as you type: ${(await asked()) - before} requests`)
+}
+
+/**
+ * Report editor issue (ADR 0088): from the editor's own menu, what was recorded of the file is replayed and found
+ * sound; a file with a credential in it goes only with its words replaced; the report written holds the trace with
+ * the file's words replaced, what the person said, and nothing of the file's path or text.
+ */
+async function runEditorIssueChecks() {
+  console.log('[smoke] --- report editor issue ---')
+  await quickOpen('src/ghost-check.ts', 'export function add(a: number, b: number): number {')
+  await clickAt(await wordSpot('  return', 'return'))
+  await pressKey('End')
+  await send('Input.insertText', { text: ' a - b' })
+  await pressKey('Escape')
+  await pressKey('Enter')
+  await send('Input.insertText', { text: '// edited for the report' })
+  await pressKey('z', { ctrl: true })
+
+  await evaluate(`(() => {
+    const scroller = document.querySelector('.code-editor .enc-scroller')
+    const rect = scroller.getBoundingClientRect()
+    scroller.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left + 140, clientY: rect.top + 40 }))
+  })()`)
+  await waitFor("[...document.querySelectorAll('[role=menuitem]')].some((item) => item.textContent.includes('Report editor issue'))", 6000, 'Report editor issue in the editor menu')
+  await click('[role=menuitem]', 'Report editor issue')
+  await waitFor("!!document.querySelector('.editor-issue-dialog')", 6000, 'the report dialog')
+  const facts = () => evaluate("[...document.querySelectorAll('.editor-issue-dialog .install-server-facts dd')].map((node) => node.textContent)")
+  await waitFor("[...document.querySelectorAll('.editor-issue-dialog .install-server-facts dd')].map((node) => node.textContent)[2] === 'No problem found'", 10000, 'the record replayed without a problem').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await facts())}`)
+  })
+  const [name, recorded] = await facts()
+  if (name !== 'ghost-check.ts' || !/^\d+ steps over /.test(recorded)) throw new Error(`The report dialog does not say what it holds: ${JSON.stringify(await facts())}`)
+  await screenshot('57-editor-issue.png')
+
+  // With its words kept, a file with a credential in it is refused, in words.
+  await click('#editor-issue-scramble')
+  await waitFor("document.querySelector('#editor-issue-scramble')?.getAttribute('aria-checked') === 'false'", 4000, 'the words kept')
+  await click('.editor-issue-dialog .ui-dialog-foot .btn', 'Save report')
+  await waitFor("(document.querySelector('.editor-issue-refused')?.textContent ?? '').includes('looks like a key or a password')", 6000, 'a file with a credential kept as it is is refused')
+
+  // Words replaced, with what went wrong: written where the test said.
+  await click('#editor-issue-scramble')
+  await typeInto('#editor-issue-description', 'Undo after Enter put the cursor back one line too far')
+  await click('.editor-issue-dialog .ui-dialog-foot .btn', 'Save report')
+  await waitFor("!document.querySelector('.editor-issue-dialog')", 6000, 'the dialog closes once the report is saved')
+  await waitFor("[...document.querySelectorAll('.ui-toast, .toast')].some((node) => node.textContent.includes('Saved the editor report'))", 6000, 'a note that the report was saved')
+  const file = process.env.ENCODE_EDITOR_ISSUE_FILE
+  if (!file) throw new Error('ENCODE_EDITOR_ISSUE_FILE is not set (pnpm e2e sets it)')
+  const text = await fs.readFile(file, 'utf8')
+  const issue = JSON.parse(text)
+  if (issue.kind !== 'encode-editor-issue' || issue.scrambled !== true || issue.extension !== '.ts' || issue.language !== 'typescript') throw new Error(`The report does not say what it is: ${text.slice(0, 400)}`)
+  if (issue.description !== 'Undo after Enter put the cursor back one line too far') throw new Error(`The report does not hold what was said: ${issue.description}`)
+  if (issue.problems.length) throw new Error(`The report found problems: ${JSON.stringify(issue.problems)}`)
+  const origins = issue.trace.steps.filter((step) => step.changes).map((step) => step.origin)
+  if (!origins.includes('input.type') || !origins.includes('undo')) throw new Error(`The trace does not hold the typing and the undo: ${JSON.stringify(origins)}`)
+  for (const word of ['ghost-check', 'client_secret', 'ghost-check-value-0123', 'edited for the report', 'number']) {
+    if (text.includes(word)) throw new Error(`The report holds "${word}" though the words were to be replaced`)
+  }
+  console.log(`[smoke] editor report: ${issue.trace.steps.length} steps, ${(text.length / 1024).toFixed(1)} KB`)
 }
 
 /** Once its first turn is over a session is named by the model in a few words, and the name is kept. */
@@ -4844,7 +4904,7 @@ async function runAboutChecks() {
   if (!(await click('.tb-menu', 'Help'))) throw new Error('Help menu not found')
   await waitFor(menuOpen('Help'), 4000, 'Help menu')
   const items = await evaluate("[...document.querySelectorAll('.ui-menu .ui-menu-label')].map((node) => node.textContent)")
-  for (const label of ['Keyboard shortcuts', 'Save diagnostics…', 'Show log files', 'About eNCode']) {
+  for (const label of ['Keyboard shortcuts', 'Save diagnostics…', 'Report editor issue…', 'Show log files', 'About eNCode']) {
     if (!items.includes(label)) throw new Error(`Help menu is missing ${label}: ${items}`)
   }
   await click('.ui-menu [role^="menuitem"]', 'About eNCode')
@@ -4876,6 +4936,119 @@ async function runAboutChecks() {
   await key({ key: 'Escape' })
   await waitFor("!document.querySelector('.about-dialog')", 4000, 'Escape closes About')
   console.log('[smoke] about and diagnostics checks passed')
+}
+
+/** eNCode's own files the dogfood phase works in: its largest code, prose, styles and data. */
+const DOGFOOD_FILES = [
+  { file: 'apps/desktop/scripts/smoke.mjs', word: 'await' },
+  { file: 'packages/editor-view/src/view.ts', word: 'this.' },
+  { file: 'apps/desktop/src/components/CodeEditor.tsx', word: 'const' },
+  { file: 'docs/security/threat-model.md', word: 'the' },
+  { file: 'apps/desktop/src/styles/42-code.css', word: 'var(' },
+  { file: 'pnpm-lock.yaml', word: 'integrity' },
+]
+
+/** Generous: the runner is slower than a person's computer, and this guards against a step that hangs. */
+const DOGFOOD_OPEN_MS = 6000
+
+/**
+ * Dogfood (ADR 0088): eNCode edits eNCode. A copy of the repository's own files is opened as a folder; in its largest
+ * files the editor draws and colours the text, reaches the last line, finds what a plain count finds, takes an edit
+ * back to the bytes it had, and records it all so a report of it replays without a problem. Find in files searches
+ * the whole copy. The copy is the files git tracks, so the run cannot change the checkout.
+ */
+async function runDogfoodChecks() {
+  console.log('[smoke] --- dogfood: eNCode edits eNCode ---')
+  const repo = path.resolve(root, '..', '..')
+  let tracked
+  try {
+    tracked = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean)
+  } catch (error) {
+    throw new Error(`The dogfood phase needs a git checkout of eNCode: ${error.message}`)
+  }
+  const copy = path.join(path.dirname(demoPath), 'encode-copy')
+  let copied = 0
+  for (const relative of tracked) {
+    const from = path.join(repo, relative)
+    const stat = await fs.stat(from).catch(() => null)
+    if (!stat?.isFile() || stat.size > 2 * 1024 * 1024) continue
+    await fs.mkdir(path.dirname(path.join(copy, relative)), { recursive: true })
+    await fs.copyFile(from, path.join(copy, relative))
+    copied++
+  }
+  const opened = await evaluate(`window.eNCode.workspace.openPath(${JSON.stringify(copy)})`)
+  if (opened?.name !== 'encode-copy') throw new Error(`The copy of eNCode did not open: ${JSON.stringify(opened)}`)
+  // The page follows the folder the main process opened, as at the start of the run.
+  await send('Page.reload')
+  await waitFor("[...document.querySelectorAll('.tree-row')].some((row) => row.textContent.includes('packages'))", 30000, 'the copy of eNCode in the explorer')
+  console.log(`[smoke] dogfood folder: ${copied} files`)
+
+  const measures = []
+  for (const { file, word } of DOGFOOD_FILES) {
+    const text = (await fs.readFile(path.join(copy, file), 'utf8')).replace(/\r\n/g, '\n')
+    const lines = text.split('\n')
+    // A piece of the first line with text that is drawn as it is (no tab before it).
+    const firstLine = lines.find((line) => line.trim()) ?? ''
+    const shownFirst = firstLine.slice(firstLine.lastIndexOf('\t') + 1).trim().slice(0, 40)
+    const started = Date.now()
+    await quickOpen(file, shownFirst)
+    const openMs = Date.now() - started
+    if (openMs > DOGFOOD_OPEN_MS) throw new Error(`${file} took ${openMs} ms to open`)
+    await sleep(300)
+    const coloured = await evaluate("document.querySelectorAll('.code-editor .enc-line [class*=\"tok-\"]').length")
+    if (!file.endsWith('.md') && coloured < 5) throw new Error(`${file} is not coloured: ${coloured} tokens`)
+
+    // Ctrl+End reaches the last line, Ctrl+Home the first.
+    await focusEditor()
+    await pressKey('End', { ctrl: true })
+    const lastLine = [...lines].reverse().find((line) => line.trim()) ?? ''
+    const shownLast = lastLine.slice(lastLine.lastIndexOf('\t') + 1).trim().slice(0, 40)
+    await waitFor(`${RENDERED_LINES}.some((line) => line.includes(${JSON.stringify(shownLast)}))`, 6000, `the end of ${file}`)
+    await pressKey('Home', { ctrl: true })
+    await waitFor(`${RENDERED_LINES}.join('\\n').includes(${JSON.stringify(shownFirst)})`, 6000, `the start of ${file}`)
+
+    // Find counts what a plain count counts (case does not matter by default).
+    const lower = text.toLowerCase()
+    let expected = 0
+    for (let at = lower.indexOf(word); at >= 0; at = lower.indexOf(word, at + word.length)) expected++
+    await pressKey('f', { ctrl: true })
+    await waitFor("!!document.querySelector('.enc-find')", 6000, 'find in ' + file)
+    await send('Input.insertText', { text: word })
+    await waitFor(`/ of \\d|found|No results/.test(document.querySelector('.enc-find-count')?.textContent ?? '')`, 6000, 'the count in ' + file)
+    await sleep(300)
+    const count = await evaluate("document.querySelector('.enc-find-count')?.textContent ?? ''")
+    const found = Number((count.match(/(\d+)\+? found|of (\d+)/) ?? []).slice(1).find(Boolean) ?? NaN)
+    if (found !== expected) throw new Error(`Find in ${file} says ${JSON.stringify(count)} for ${JSON.stringify(word)}; a plain count finds ${expected}`)
+    await pressKey('Escape')
+    await waitFor("!document.querySelector('.enc-find')", 4000, 'find closed')
+
+    // An edit, then Ctrl+Z: the document has its bytes again and is not unsaved.
+    await focusEditor()
+    await send('Input.insertText', { text: 'dogfood' })
+    // Whatever the word brought up (the list of suggestions) goes, so the keys after it are the editor's.
+    await pressKey('Escape')
+    await waitFor("!!document.querySelector('.editor-tab.is-dirty')", 4000, `${file} edited`)
+    for (let undo = 0; undo < 4 && (await evaluate("!!document.querySelector('.editor-tab.is-dirty')")); undo++) {
+      await pressKey('z', { ctrl: true })
+      await sleep(150)
+    }
+    await waitFor("!document.querySelector('.editor-tab.is-dirty')", 6000, `${file} back to its bytes after Ctrl+Z`)
+    measures.push(`${file.split('/').pop()} ${lines.length} lines ${openMs} ms`)
+  }
+
+  // What was recorded of the last of them replays without a problem.
+  await runFromPalette('Report editor issue…')
+  await waitFor("[...document.querySelectorAll('.editor-issue-dialog .install-server-facts dd')].map((node) => node.textContent)[2] === 'No problem found'", 20000, 'the record of a large real file replayed without a problem').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate("[...document.querySelectorAll('.editor-issue-dialog .install-server-facts dd')].map((node) => node.textContent)"))}`)
+  })
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.editor-issue-dialog')", 4000, 'the report dialog closed')
+
+  // Find in files over the whole copy: a name defined once and used in several files.
+  const hits = await evaluate("window.eNCode.workspace.search({ query: 'EditRecorder', caseSensitive: true }).then((result) => ({ files: new Set(result.matches.map((match) => match.path)).size, matches: result.matches.length }))").catch((error) => ({ error: String(error) }))
+  if (hits.error || hits.files < 3) throw new Error(`Find in files over eNCode's own code: ${JSON.stringify(hits)}`)
+  await screenshot('58-dogfood.png')
+  console.log(`[smoke] dogfood: ${measures.join('; ')}; EditRecorder in ${hits.files} files`)
 }
 
 /**
@@ -5315,6 +5488,7 @@ try {
   await runReviewChecks()
   await runFontChecks()
   await runAppearanceChecks()
+  await runDogfoodChecks()
 
   if (errors.length) {
     console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))

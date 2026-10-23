@@ -1,5 +1,5 @@
 import { create } from '../store'
-import type { OutlineSort } from '../editor/symbols'
+import type { OutlineSort } from '../editor/surface'
 
 const KEY = 'eNCode.editorLayout.v1'
 

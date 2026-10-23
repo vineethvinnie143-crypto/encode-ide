@@ -46,6 +46,7 @@ const api: EncodeApi = {
     user: () => invoke('app:user'),
     feedback: (text: string) => invoke('app:feedback', text),
     exportDiagnostics: () => invoke('app:export-diagnostics'),
+    saveEditorIssue: (draft) => invoke('app:save-editor-issue', draft),
     openLogs: () => invoke('app:open-logs'),
     testNotification: () => invoke('app:test-notification'),
     onOpenSession: (callback) => on<string>('app:open-session', callback),

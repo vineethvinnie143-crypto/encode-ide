@@ -386,3 +386,56 @@
   font-family: inherit;
   font-size: var(--fs-12);
 }
+
+/* Report editor issue (ADR 0088) */
+.editor-issue-body .install-server-facts dd.editor-issue-found {
+  color: var(--warning);
+}
+.editor-issue-checking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.editor-issue-note {
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.editor-issue-label {
+  display: block;
+  margin: 16px 0 6px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.editor-issue-description {
+  display: block;
+}
+.editor-issue-scramble {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+}
+.editor-issue-scramble label {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.editor-issue-scramble p {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.editor-issue-refused {
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--r-8);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}

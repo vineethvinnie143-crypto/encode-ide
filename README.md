@@ -332,7 +332,9 @@ apps/desktop/                 the Electron app (@encode/desktop)
     editor/                   the open documents: text, history and what is on disk; the language servers' marks, and
                               (assist/) suggestions, parameter hints, the symbol's places and the history of jumps,
                               rename, code actions and formatting, the outline; the Problems list and F8, the
-                              symbols' ranking and the call hierarchy's rows
+                              symbols' ranking and the call hierarchy's rows; the record of each file's edits for
+                              Report editor issue. The rest of the app reaches all of it through surface.ts and
+                              surface-view.ts only (ADR 0088)
     palette/                  the command palette's and Go to file's ranking and modes, as pure functions
     panels/                   which tabs are open and how the panel is laid out, as pure functions
     theme/                    design tokens, appearance, bundled fonts and their licences
@@ -427,7 +429,11 @@ run 200 cases each on a fresh seed (`ENCODE_PROPERTY_RUNS`, `ENCODE_PROPERTY_SEE
 before it is reported, with the seed that replays it. `pnpm fuzz` runs them for longer and lists each one's case count
 and failures. The editor's regression suite replays real edits (`packages/editor/test/traces`), and the browser tests'
 random use takes `ENCODE_MONKEY_STEPS` and `ENCODE_MONKEY_SEED`; the end-to-end run's random editing takes
-`ENCODE_SMOKE_SEED`.
+`ENCODE_SMOKE_SEED`, and it also opens and edits eNCode's own files.
+
+A tester's **Help → Report editor issue…** file replays with `pnpm editor-issue report.json`, every invariant checked
+after every step ([ADR 0088](docs/adr/0088-report-editor-issue-replays-what-was-recorded-and-the-app-reaches-the-editor-through-a-fixed-interface.md)).
+Once the bug is fixed, `pnpm editor-issue report.json --keep <name>` adds its trace to the regression suite.
 
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not

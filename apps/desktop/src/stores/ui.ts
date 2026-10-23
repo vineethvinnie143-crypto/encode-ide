@@ -80,6 +80,8 @@ interface UiStore {
   /** The command palette (Ctrl+K). */
   paletteOpen: boolean
   aboutOpen: boolean
+  /** The file a report of an editor issue is being made of (Help, Report editor issue), or null. */
+  editorIssueFor: string | null
   /** The session's status: model, permissions, context and tokens (/status). */
   statusOpen: boolean
   /** The latest request to open a menu of the message box; `id` grows with each request. */
@@ -105,6 +107,7 @@ interface UiStore {
   setQuickOpenOpen(open: boolean, query?: string): void
   setPaletteOpen(open: boolean): void
   setAboutOpen(open: boolean): void
+  setEditorIssueFor(path: string | null): void
   setStatusOpen(open: boolean): void
   requestMenu(menu: ComposerMenu): void
   setStopArmed(armed: boolean): void
@@ -166,6 +169,7 @@ export const useUi = create<UiStore>((set, get) => ({
   quickOpenId: 0,
   paletteOpen: false,
   aboutOpen: false,
+  editorIssueFor: null,
   statusOpen: false,
   menuRequest: null,
   stopArmed: false,
@@ -196,6 +200,7 @@ export const useUi = create<UiStore>((set, get) => ({
     set((state) => (open ? { quickOpenOpen: true, quickOpenQuery: query, quickOpenId: state.quickOpenId + 1 } : { quickOpenOpen: false })),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setAboutOpen: (open) => set({ aboutOpen: open }),
+  setEditorIssueFor: (path) => set({ editorIssueFor: path }),
   setStatusOpen: (open) => set({ statusOpen: open }),
   requestMenu: (menu) => set((state) => ({ menuRequest: { menu, id: (state.menuRequest?.id ?? 0) + 1 } })),
   setStopArmed: (armed) => set({ stopArmed: armed }),

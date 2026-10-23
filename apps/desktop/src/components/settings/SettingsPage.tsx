@@ -8,7 +8,7 @@ import { Archive, ArrowLeft, Bell, Bot, Code2, FileCode2, Gear, Keyboard, Layers
 import { Kbd } from '../../ui/Kbd'
 import { keyToMove, moveIndex } from '../../ui/nav'
 import { Spinner } from '../../ui/Spinner'
-import LanguageServersSection from '../code/LanguageServersSection'
+import { LanguageServersSection } from '../../editor/surface-view'
 import McpPane from '../mcp/McpPane'
 import RolesSettings from '../models/RolesSettings'
 import PermissionsPane from '../permissions/PermissionsPane'
