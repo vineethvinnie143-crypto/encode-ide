@@ -116,3 +116,32 @@ describe('messages handed to the running request', () => {
     assert.equal(useChat.getState().draft, 'half typed')
   })
 })
+
+describe('cards a subagent in the background waits on', () => {
+  const card = (id: string, background?: boolean) => ({ id, entryId: 'e', tool: 'Bash', title: `Run ${id}`, detail: id, input: {}, ...(background ? { background: true } : {}) })
+  const ids = () => useChat.getState().approvals.map((item) => item.id)
+
+  it('stay when the turn ends, and the turn\'s own leave with it', () => {
+    useChat.setState({ approvals: [], ask: null })
+    apply({ type: 'approval-request', request: card('own') })
+    apply({ type: 'approval-request', request: card('sub', true) })
+    apply({ type: 'ask', id: 'q', entryId: 'e', question: 'Which one?', background: true })
+    apply({ type: 'done', summary: '' })
+    assert.deepEqual(ids(), ['sub'])
+    assert.equal(useChat.getState().ask?.id, 'q')
+    apply({ type: 'status', status: 'awaiting-approval' })
+    assert.equal(useChat.getState().running, true)
+    apply({ type: 'error', message: 'x', entryId: 'e' })
+    assert.deepEqual(ids(), ['sub'])
+    apply({ type: 'status', status: 'idle' })
+    assert.deepEqual(ids(), ['sub'])
+  })
+
+  it('leave with the conversation when it starts over, and a turn\'s own question leaves with its turn', () => {
+    apply({ type: 'session-reset' })
+    assert.deepEqual(ids(), [])
+    apply({ type: 'ask', id: 'q2', entryId: 'e', question: 'Which one?' })
+    apply({ type: 'status', status: 'running-tool' })
+    assert.equal(useChat.getState().ask, null)
+  })
+})

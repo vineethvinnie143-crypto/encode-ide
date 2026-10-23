@@ -42,6 +42,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.approval-tag {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-style: normal;
+  font-weight: 500;
+  line-height: 18px;
+}
+.ask-head .approval-tag {
+  margin-top: 2px;
+}
 .approval-step {
   flex-shrink: 0;
   display: flex;
