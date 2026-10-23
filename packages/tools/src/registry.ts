@@ -4,7 +4,7 @@
  * and an executor. Every call is checked against the schema before it runs,
  * and the error reads as something the model can fix.
  */
-import { validationMessage } from '@encode/protocol'
+import { repairInput, validationMessage, type Repaired } from '@encode/protocol'
 import type { ToolDefinition } from '@encode/providers'
 import type { AgentMode, Tool } from './types'
 
@@ -112,6 +112,15 @@ export class ToolRegistry {
       this.deferredNames = new Set(deferred.map((tool) => tool.definition.name))
     }
     return this.deferredNames
+  }
+
+  /**
+   * The call's input mended where it can mean one thing only (a number sent as text, `path` for `file_path`), with
+   * what was changed (ADR 0089). An input that passes, or a tool that is not known, comes back as it is.
+   */
+  repair(name: string, input: Record<string, unknown>): Repaired {
+    const tool = this.tools.get(name)
+    return tool ? repairInput(input, tool.definition.inputSchema) : { value: input, fixes: [] }
   }
 
   /**

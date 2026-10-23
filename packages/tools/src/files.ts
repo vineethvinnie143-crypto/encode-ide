@@ -453,12 +453,13 @@ async function runEdits(file: string, edits: EditSpec[], ctx: ToolContext): Prom
   }
 }
 
-function finishedEdit(file: string, name: string, loaded: Loaded, outcome: { text: string; replacements: number }, ctx: ToolContext): ToolOutcome {
+function finishedEdit(file: string, name: string, loaded: Loaded, outcome: { text: string; replacements: number; notes?: string[] }, ctx: ToolContext): ToolOutcome {
   const replaced = outcome.replacements > 1 ? ` (${outcome.replacements} replacements)` : ''
   const lines = snippet(loaded.text, outcome.text)
+  const notes = outcome.notes?.length ? `\n${outcome.notes.join('\n')}` : ''
   return {
     ok: true,
-    content: `Edited ${name}${replaced}.${lines ? ` The changed part now reads:\n${lines}` : ''}`,
+    content: `Edited ${name}${replaced}.${notes}${lines ? ` The changed part now reads:\n${lines}` : ''}`,
     display: { diff: buildDiff(file, loaded.text, outcome.text) },
     changed: [file],
   }

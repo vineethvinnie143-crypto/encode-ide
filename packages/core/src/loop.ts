@@ -13,6 +13,7 @@
  *    drops thinking after the first changed message.
  *  - Calls that only read run together; everything else runs in order.
  */
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   isEmptyReply,
@@ -83,9 +84,11 @@ import type { AgentHooks, HookEvent } from './hooks'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { describeError, detailsOf, plainError } from './problems'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
+import { FailedCalls, mendedNote } from './repeats'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, scanHunks, scanText, warningNote } from './scan'
+import { recoverTextCalls } from './text-calls'
 import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
 import type { ConversationEntry, ToolReview } from './ui'
 
@@ -177,6 +180,8 @@ interface Prepared {
   block: ToolUseBlock
   tool: Tool
   input: Record<string, unknown>
+  /** What eNCode changed in the call's input before running it (repair.ts), told to the model with the result. */
+  fixes: string[]
   entry: ConversationEntry
   parallel: boolean
   access: ToolAccess
@@ -245,6 +250,21 @@ function failed(toolUseId: string, text: string): ToolResultBlock {
   return { type: 'tool-result', toolUseId, content: [textBlock(text || '(no output)')], isError: true }
 }
 
+/**
+ * Whether `text` is in something the model was given to read: a tool's result or a message of the user's side. Read's
+ * line numbers and the spacing are left aside, so markup a file holds over several lines is still found.
+ */
+function wasRead(messages: readonly Message[], text: string): boolean {
+  const plain = (value: string) => value.replace(/^ *\d+\t/gm, '').replace(/\s+/g, ' ')
+  const needle = plain(text).trim()
+  const has = (value: string) => plain(value).includes(needle)
+  return messages.some(
+    (message) =>
+      message.role === 'user' &&
+      message.content.some((block) => (block.type === 'text' ? has(block.text) : block.type === 'tool-result' && block.content.some((part) => part.type === 'text' && has(part.text)))),
+  )
+}
+
 function hasImages(messages: readonly Message[]): boolean {
   return messages.some((message) =>
     (message.content as UserBlock[]).some((block) => block.type === 'image' || (block.type === 'tool-result' && block.content.some((part) => part.type === 'image'))),
@@ -299,6 +319,8 @@ export class AgentLoop {
   private fixed = 0
   private contextKey = ''
   private readonly inflight = new Set<ConversationEntry>()
+  /** Calls that failed this turn, so one sent again and again is told to change course. */
+  private readonly failures = new FailedCalls()
   private readonly approvedApps: Set<string>
   /** Errors after every edit, and the gate at the end of a turn; only where language servers run. */
   private readonly edits: EditDiagnostics | undefined
@@ -357,6 +379,7 @@ export class AgentLoop {
     let lengthRetries = 0
     let stopRounds = 0
     this.edits?.startTurn()
+    this.failures.clear()
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -477,7 +500,7 @@ export class AgentLoop {
         sticky: o.services.sessionId,
         signal: turn.signal,
         onEvent,
-        validateToolCall: (name, input) => o.registry.check(name, input),
+        validateToolCall: (name, input) => o.registry.check(name, o.registry.repair(name, input).value),
       })
 
       if (outcome.kind === 'paused') {
@@ -497,7 +520,18 @@ export class AgentLoop {
         continue
       }
 
-      const { message, usage, finish } = outcome
+      const { usage, finish } = outcome
+      // A call the model wrote in its text, in its own markup, is made a call (text-calls.ts).
+      // Not markup the model only copied from what it read: that is a file's or a page's words, not a call.
+      const message =
+        (tools.length &&
+          recoverTextCalls(
+            outcome.message,
+            (name) => tools.some((tool) => tool.name === name),
+            () => `call_text_${randomUUID().slice(0, 8)}`,
+            (markup) => wasRead(o.conversation.messages(), markup),
+          )) ||
+        outcome.message
       o.surface.usage(usage)
       if (isEmptyReply(message)) {
         if (finish === 'content_filter') return { kind: 'end', end: { kind: 'failed', code: 'refused', message: "The provider's safety system stopped the reply." } }
@@ -733,7 +767,8 @@ export class AgentLoop {
     this.inflight.add(entry)
     const refuse = (shown: string, ui: 'error' | 'rejected', told = shown, review?: ToolReview): undefined => {
       this.settleEntry(entry, { state: ui, ok: false, output: shown, ...(review ? { review } : {}) })
-      state.results.set(block.id, failed(block.id, told))
+      const again = this.failures.record(block.name, block.input, told)
+      state.results.set(block.id, failed(block.id, again ? `${told}\n\n${again}` : told))
       return undefined
     }
 
@@ -742,13 +777,16 @@ export class AgentLoop {
       return refuse(`Not run: ${block.invalid.error}`, 'error', `Not run: ${block.invalid.error}${hint}`)
     }
     if (o.tools && !o.tools.includes(block.name)) return refuse(`${block.name} is not available to this agent.`, 'error')
-    const problem = o.registry.check(block.name, block.input, turn.mode)
+    // A value sent in the wrong shape that can mean one thing only ("50" for 50, `path` for `file_path`) is read as meant.
+    const { value: repaired, fixes } = o.registry.repair(block.name, block.input)
+    const problem = o.registry.check(block.name, repaired, turn.mode)
     if (problem) return refuse(problem, 'error')
     const tool = o.registry.get(block.name)!
+    if (fixes.length) entry.tool = { ...entry.tool!, input: trimInput(repaired) }
     // The user may have changed a rule, or the folder's settings, since the last call.
     await o.refresh?.().catch(() => undefined)
 
-    let input = block.input
+    let input = repaired
     const pre = await this.hook('preToolUse', { ...this.event(turn), tool: block.name, toolUseId: block.id, input })
     if (pre?.decision === 'deny') return refuse(pre.reason || 'A hook refused this call.', 'rejected', `A hook refused this call: ${pre.reason || 'no reason given'}`)
     if (pre?.input) {
@@ -854,7 +892,7 @@ export class AgentLoop {
     // Allowing an application covers the rest of the session, also when a hook did the allowing.
     if (access.type === 'desktop' && verdict.kind === 'ask') this.approvedApps.add(access.app)
 
-    return { block, tool, input, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent', access }
+    return { block, tool, input, fixes, entry, parallel: (tool.readOnly && tool.kind !== 'interaction') || tool.kind === 'agent', access }
   }
 
   /** The fixed checks, then the Reviewer, for one command. Nothing here ever allows more than the checks do. */
@@ -950,6 +988,9 @@ export class AgentLoop {
       isError = true
     }
     if (post?.context) state.context.push(post.context)
+    if (prepared.fixes.length) content = [...content, textBlock(mendedNote(prepared.fixes))]
+    const again = this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
+    if (again) content = [...content, textBlock(again)]
 
     state.results.set(block.id, { type: 'tool-result', toolUseId: block.id, content, ...(isError ? { isError: true } : {}) })
     this.settleEntry(entry, {
