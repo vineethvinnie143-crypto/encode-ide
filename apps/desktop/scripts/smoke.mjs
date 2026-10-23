@@ -1750,12 +1750,22 @@ async function runEditorAssistChecks(markerLines) {
   await waitFor(`${RENDERED_LINES}[0] === "import { greet } from './greet'" && ${RENDERED_LINES}.includes('greet')`, 8000, 'the import the item brings').catch(async (error) => {
     throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
   })
+  // An item taken while the server is still filling it in, and typed after at once: its import still comes, above,
+  // with the typing where it was.
+  await pressKey('Enter')
+  await send('Input.insertText', { text: 'farew' })
+  await waitFor(`${SUGGESTIONS}?.selected === 'farewell'`, 8000, 'the item filled in slowly')
+  await pressKey('Enter')
+  await send('Input.insertText', { text: ' // bye' })
+  await waitFor(`${RENDERED_LINES}[0] === "import { farewell } from './farewell'" && ${RENDERED_LINES}[1] === "import { greet } from './greet'" && ${RENDERED_LINES}.includes('farewell // bye')`, 8000, 'the import that came after the typing').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate(RENDERED_LINES))}`)
+  })
 
   // Tidy up: kept, closed, and the server lets the file go.
   await pressKey('s', { ctrl: true })
   await waitFor("!document.querySelector('.editor-tab.is-dirty')", 8000, 'the file saved')
   const typed = await fs.readFile(path.join(demoPath, 'src', 'lsp-assist.ts'), 'utf8')
-  for (const line of ["import { greet } from './greet'", 'scaleBy(2,', 'console.log(42)', 'greet']) {
+  for (const line of ["import { farewell } from './farewell'", "import { greet } from './greet'", 'scaleBy(2,', 'console.log(42)', 'greet', 'farewell // bye']) {
     if (!typed.split('\n').some((text) => text.startsWith(line))) throw new Error(`The file does not have "${line}":\n${typed}`)
   }
   await click('.editor-tab.is-active .tab-close')

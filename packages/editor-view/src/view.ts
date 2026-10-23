@@ -409,7 +409,16 @@ export class EditorView {
   /** @internal */
   emit<K extends keyof ViewEvents>(name: K, ...args: Parameters<ViewEvents[K]>): void {
     const set = this.listeners.get(name)
-    if (set) for (const listener of [...set]) (listener as (...a: Parameters<ViewEvents[K]>) => void)(...args)
+    if (!set) return
+    for (const listener of [...set]) {
+      // A listener that fails is reported, and the others still hear the event: a language server's copy of the
+      // document and the file's saved mark stay in step even when another feature has a fault.
+      try {
+        ;(listener as (...a: Parameters<ViewEvents[K]>) => void)(...args)
+      } catch (error) {
+        reportError(error)
+      }
+    }
   }
 
   /** @internal */

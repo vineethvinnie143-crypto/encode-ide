@@ -72,6 +72,19 @@ describe('accepting a suggestion', () => {
     assert.deepEqual(plan.ranges, [{ from: 4, to: 7 }])
   })
 
+  it('refuses a change that does not follow from the text as the changes before it left it', () => {
+    const asked = ts('obj.le', 6)
+    const since = new Since(asked.doc)
+    const taken = asked.update({ changes: { from: 4, to: 6, insert: 'length' }, selection: EditorSelection.cursor(10) })
+    const typed = taken.state.update({ changes: { from: 10, insert: ';' }, selection: EditorSelection.cursor(11) })
+    // The item's own text, missed: what was typed after it cannot be followed from the asked-of text.
+    assert.throws(() => since.add(typed.changes), /one was missed/)
+    since.add(taken.changes)
+    assert.throws(() => since.add(taken.changes), /one was missed/)
+    since.add(typed.changes)
+    assert.equal(since.map(6, 1), 11)
+  })
+
   it('goes in at every cursor that has the same text before it', () => {
     const state = ts('a.pu\nb.pu\nc.po', [4, 9, 14])
     const plan = planCompletion(state, entry('push'), new Since(state.doc), 2)

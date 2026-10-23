@@ -10,6 +10,28 @@ const cursorBox = () => {
 
 export const basic = [
   {
+    name: 'a listener that fails is reported, and the others still hear the transaction',
+    async run({ mount, ev, type, assert, page }) {
+      await mount({ text: 'hello', path: 'a.txt' })
+      await ev(() => {
+        window.heard = []
+        window.view.on('transaction', () => window.heard.push('first'))
+        window.view.on('transaction', () => {
+          throw new Error('a faulty feature')
+        })
+        window.view.on('transaction', (tr) => window.heard.push(tr.state.doc.toString()))
+      })
+      await type('a')
+      await type('b')
+      assert.deepEqual(await ev(() => window.heard), ['first', 'ahello', 'first', 'abhello'])
+      assert.equal(await ev(() => window.view.state.doc.toString()), 'abhello')
+      // Still an error of the page, as one thrown anywhere else is.
+      assert.equal(page.errors.length, 2, page.errors.join('\n'))
+      assert.ok(page.errors.every((error) => error.includes('a faulty feature')), page.errors.join('\n'))
+      page.errors.length = 0
+    },
+  },
+  {
     name: 'renders the first lines',
     async run({ mount, ev, lineTexts, assert, shot }) {
       await mount({ text: sample(100), path: 'a.ts' })
