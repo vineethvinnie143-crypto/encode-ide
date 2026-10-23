@@ -45,6 +45,8 @@ export interface ServerTools {
   cacheDir: string
   /** eNCode's own Node.js: the program, and what makes it run as Node. */
   node: { file: string; env?: Record<string, string> }
+  /** Where eNCode's own servers are (`weblang-server.cjs`, ADR 0085). */
+  builtinDir?: string
   arch?: string
   /** For tests. */
   fetch?: typeof fetch
@@ -332,7 +334,8 @@ export function folderLanguageServers(config: WorkspaceConfig, platform: NodeJS.
       const env = environment()
       const which = (name: string) => searchPath(name, env, platform)
       const tools = options.tools ? { dir: options.tools.dir, context: launchContext(options.tools, config.root, platform, env) } : undefined
-      return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}) })
+      const builtin = options.tools?.builtinDir ? { dir: options.tools.builtinDir, node: options.tools.node } : undefined
+      return discover(spec, config.root, { platform, projectBins: true, which, ...(tools ? { tools } : {}), ...(builtin ? { builtin } : {}) })
     },
     spawn: (plan, cwd) => (options.spawn ?? start)(plan, cwd, environment()),
     ...(options.tools ? { tools: { dir: options.tools.dir, cacheDir: options.tools.cacheDir } } : {}),

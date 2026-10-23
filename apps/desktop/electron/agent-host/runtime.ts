@@ -332,7 +332,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       // One set of language servers per folder, for the agent and the editor; read at every start, so Settings applies at once.
       languageServers: {
         // eNCode's own Node.js runs the servers it installs from npm, so Node.js need not be installed.
-        ...(init.toolsDir ? { tools: { dir: init.toolsDir, cacheDir: init.serverCacheDir ?? path.join(init.toolsDir, '..', 'server-cache'), node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } } } } : {}),
+        ...(init.toolsDir ? { tools: { dir: init.toolsDir, cacheDir: init.serverCacheDir ?? path.join(init.toolsDir, '..', 'server-cache'), node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }, ...(typeof __dirname === 'string' ? { builtinDir: __dirname } : {}) } } : {}),
         ...options.languageServers,
         enabled: () => config?.languageServers ?? true,
         onDiagnostics: (root, file, diagnostics) => {

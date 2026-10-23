@@ -1557,3 +1557,31 @@ download becoming code the server runs, and the walk for resources reaching too 
 - Workspace tests list the natives under the Lua server where the folder wants them, install and remove them, and
   restart the server; desktop tests check the editor's offer; the end-to-end run checks Settings and the dialog.
 
+## JSON, CSS and HTML (Editor and language intelligence 8c)
+
+Written with the pull request that adds eNCode's own server for these languages
+([0085](../adr/0085-json-css-and-html-are-read-by-encodes-own-language-server.md)).
+
+What is new is a language server that is eNCode's own code, started from the app's files, which reads whatever
+documents the editor sends it. For JSON it may also read one schema file the document names. The concerns are:
+
+- a hostile document using up the server;
+- a document's `$schema` reaching outside the folder or the network;
+- data taken from npm becoming code;
+- another program being run in the server's place.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| W1 | A document's `$schema` makes the server read a file outside the folder or fetch an address | Only a `.json` file inside a folder the server was started for is read. The path is checked as written and again after links are resolved. The file must be under 1 MB. An address with a scheme other than `file:` is never fetched. | Mitigated |
+| W2 | A hostile document or schema hangs or exhausts the server | Documents over 5 MB are not read. JSON nesting stops at 512 levels and CSS at 64. HTML depth is capped at 512. Schema checks stop at 64 levels and 500 problems, and `$ref` chains stop at 32 hops. Patterns over 1,000 characters are not compiled. Completion answers carry at most 2,000 items and symbols stop at 5,000. Problems are checked 150 ms after typing stops. | Mitigated |
+| W3 | A schema's pattern is slow on a crafted value | Patterns run with JavaScript's regular expressions in the server's own process, so a slow one stalls only that server, never the editor. The hub's request time limit applies. | Residual, bounded |
+| W4 | Text from the data packages becomes code | `scripts/web-data.mjs` pins each package by version and sha512 and checks it before reading. It reads only JSON and literal lists, writes them out with `JSON.stringify`, and runs nothing from them. The generated files are reviewed in the diff. | Mitigated |
+| W5 | A program named like eNCode's server, on the PATH or in the project, is run instead | A built-in server is never looked for on the PATH or in `node_modules/.bin`. It is run only from the folder of the app's own scripts, and is reported missing if it is not there. | Mitigated |
+| W6 | Markdown in a hover runs or loads something | Hovers are built from eNCode's own data and the schema's words, and the editor escapes all of it before adding only its own Markdown tags (as for every server). | Mitigated |
+
+### Residual risks
+
+- A schema inside the folder is the project's own text. Its descriptions show in hovers as the project wrote them.
+

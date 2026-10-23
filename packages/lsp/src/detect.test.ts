@@ -37,6 +37,8 @@ describe('which languages a folder uses', () => {
         { id: 'lua', files: 3, markers: ['fxmanifest.lua'] },
         { id: 'python', files: 1, markers: [] },
         { id: 'typescript', files: 1, markers: ['package.json'] },
+        // package.json is JSON, which eNCode's own server reads (ADR 0085).
+        { id: 'web', files: 1, markers: [] },
       ])
     } finally {
       fs.rmSync(root, { recursive: true, force: true })

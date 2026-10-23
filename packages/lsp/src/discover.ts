@@ -32,6 +32,8 @@ export interface DiscoverOptions {
   projectBins?: boolean
   /** eNCode's tools folder, where it installs servers, looked in last. */
   tools?: { dir: string; context: LaunchContext }
+  /** Where eNCode's own servers are, and the Node.js that runs them. */
+  builtin?: { dir: string; node: { file: string; env?: Record<string, string> } }
 }
 
 function diskIsFile(file: string): boolean {
@@ -73,6 +75,12 @@ export function discover(spec: ServerSpec, root: string, options: DiscoverOption
   const read = options.readText ?? diskRead
   const windows = platform === 'win32'
   const api = windows ? path.win32 : path.posix
+  if (spec.builtin) {
+    if (!options.builtin) return { missing: `The ${spec.label} server comes with the eNCode app; it is not here.` }
+    const script = api.join(options.builtin.dir, spec.builtin.script)
+    if (!isFile(script)) return { missing: `The ${spec.label} server is missing from this copy of eNCode (${script}). Install eNCode again.` }
+    return { file: options.builtin.node.file, args: [script, ...spec.builtin.args], found: 'eNCode', command: spec.id, ...(options.builtin.node.env ? { env: options.builtin.node.env } : {}) }
+  }
   for (const candidate of spec.candidates) {
     const places: { file: string; found: string }[] = []
     if (options.projectBins) {

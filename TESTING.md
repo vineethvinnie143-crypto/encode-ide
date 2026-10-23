@@ -329,6 +329,18 @@ dialog that does not say clearly what will happen):
 - With no network, Install says why it failed and **Try again** retries.
 - For Go, C# or Rust without the toolchain, the dialog says what is needed instead of an Install button.
 
+JSON, CSS and HTML need no install: eNCode's own server reads them in a folder you trust (most useful to hear about: a
+mark on something that is right, or a slip it does not name):
+
+- In `package.json` or `tsconfig.json`, a wrong value is marked (`"type": "esm"`), keys complete with their notes, and
+  **Format Document** lays the file out again with its comments kept. In a `.json` file a comment is an error that says
+  to name it `.jsonc`.
+- In CSS, SCSS or Less, `colr: red` is marked with "Did you mean color?", and so are a pseudo-class slip (`a:hovr`) and
+  a missing semicolon. Tailwind's `@tailwind` and `@apply` are not marked. Values complete after `display: `, and
+  `var(--` lists the custom properties in the file.
+- In HTML, an element left open, an end tag that closes nothing and an `<img>` with no `alt` are named. `</` completes
+  the open element, and the CSS inside `<style>` is checked like a CSS file.
+
 FiveM resources (most useful to hear about: a red mark on code that runs fine in FiveM, a native or runtime function
 the editor does not know, or a hover that says something wrong):
 

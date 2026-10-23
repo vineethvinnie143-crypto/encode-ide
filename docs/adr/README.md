@@ -74,6 +74,7 @@ say so.
 | [0082](0082-the-editor-is-held-to-its-invariants-by-shrinking-properties-timed-fuzzing-real-edits-replayed-and-random-use-of-the-browser-and-the-app.md) | The editor is held to its invariants by shrinking properties, timed fuzzing, real edits replayed, and random use of the browser and the app | Accepted, builds on 0033, 0079 and 0081 |
 | [0083](0083-a-language-server-is-installed-on-request-from-pinned-sources-unpacked-by-encode-and-run-from-its-own-folder.md) | A language server is installed on request, from pinned sources, unpacked by eNCode, and run from its own folder | Accepted, builds on 0072 and 0073 |
 | [0084](0084-fivem-lua-is-read-through-encodes-own-plugin-runtime-definitions-and-natives-written-from-cfx-re-typings.md) | FiveM's Lua is read through eNCode's own plugin, runtime definitions, and natives written from Cfx.re's typings | Accepted, builds on 0072, 0073 and 0083 |
+| [0085](0085-json-css-and-html-are-read-by-encodes-own-language-server.md) | JSON, CSS and HTML are read by eNCode's own language server | Accepted, builds on 0072 and 0083 |
 
 ## Template
 

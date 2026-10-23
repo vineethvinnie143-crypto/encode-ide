@@ -1527,6 +1527,8 @@ async function runLanguageServerChecks() {
   }
   await screenshot('ui-dark-settings-language-servers.png')
   await closeSettings()
+  // After the screen above, which counts the one server running.
+  await runWebLanguageChecks()
   await runInstallOfferChecks()
 
   // The agent: told what its edit broke, sent back once when it wants to finish, and it fixes the file.
@@ -1563,6 +1565,32 @@ async function runLanguageServerChecks() {
   await fs.rm(modules, { recursive: true, force: true })
   await evaluate('window.eNCode.agent.reset()')
   console.log('[smoke] language servers: ok')
+}
+
+/**
+ * eNCode's own JSON, CSS and HTML server (ADR 0085), the real one, started from the app's own files with its Node.js:
+ * package.json is checked against eNCode's schema, a CSS slip is named with the likely property, and the server is
+ * shown as eNCode's in the footer.
+ */
+async function runWebLanguageChecks() {
+  console.log('[smoke] --- JSON, CSS and HTML ---')
+  const marks = async (want, label) =>
+    waitFor(`(() => { const now = ${EDITOR_MARKS}; return now.warnings === ${want} && now.server.startsWith('JSON, CSS and HTML') })()`, 20000, label).catch(async (error) => {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate(EDITOR_MARKS))}`)
+    })
+  await evaluate(`window.eNCode.workspace.write('web-check/package.json', ${JSON.stringify('{\n  "name": "web-check",\n  "type": "esm"\n}\n')})`)
+  await quickOpen('web-check/package.json', '"type": "esm"')
+  await marks(1, 'the schema check of package.json')
+  const counts = await evaluate(EDITOR_MARKS)
+  await evaluate(`window.eNCode.workspace.write('web-check/site.css', ${JSON.stringify('a {\n  colr: red;\n  display: flex;\n}\n')})`)
+  await quickOpen('web-check/site.css', 'colr: red')
+  await marks(1, 'the unknown CSS property')
+  await screenshot('25-web-languages.png')
+  for (const name of ['site.css', 'package.json']) {
+    if (!(await click(`.editor-tab[title$="web-check/${name}"] .tab-close, .editor-tab[title$="web-check\\\\${name}"] .tab-close`))) throw new Error(`no tab for web-check/${name}`)
+    await evaluate(`window.eNCode.workspace.delete('web-check/${name}').catch(() => null)`)
+  }
+  console.log(`[smoke] JSON, CSS and HTML: ok (${JSON.stringify(counts)})`)
 }
 
 /**

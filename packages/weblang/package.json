@@ -1,0 +1,22 @@
+{
+  "name": "@encode/weblang",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's own language server for JSON (with JSON Schema), CSS, SCSS, Less and HTML: parsing with recovery, checks, completion, hovers, symbols, folding and JSON formatting.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/lsp": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

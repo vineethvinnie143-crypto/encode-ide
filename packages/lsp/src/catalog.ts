@@ -74,6 +74,8 @@ export interface ServerSpec {
   installer?: ServerInstall
   /** What the folder adds to its settings and arguments, as it starts; null for nothing. Bounded and synchronous. */
   prepare?(context: PrepareContext): Prepared | null
+  /** A server that is part of eNCode (ADR 0085): its script beside eNCode's own, run with eNCode's Node.js. */
+  builtin?: { script: string; args: string[] }
 }
 
 const ts = { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' }
@@ -279,6 +281,16 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     install: 'npm install -g yaml-language-server',
     installer: { kind: 'npm', lock: 'yaml', script: 'node_modules/yaml-language-server/bin/yaml-language-server', args: ['--stdio'] },
     settings: { yaml: { validate: true, hover: true, completion: true, schemaStore: { enable: false } } },
+  },
+  {
+    // eNCode's own (ADR 0085): nothing to install, and nothing from VS Code.
+    id: 'web',
+    label: 'JSON, CSS and HTML',
+    extensions: { '.json': 'json', '.jsonc': 'jsonc', '.css': 'css', '.scss': 'scss', '.less': 'less', '.html': 'html', '.htm': 'html' },
+    fileNames: { '.babelrc': 'jsonc', '.eslintrc': 'jsonc', '.swcrc': 'jsonc' },
+    candidates: [],
+    builtin: { script: 'weblang-server.cjs', args: ['--stdio'] },
+    install: 'it comes with the eNCode app',
   },
 ]
 

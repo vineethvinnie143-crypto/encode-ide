@@ -236,4 +236,19 @@ describe('finding a server', () => {
     const plan = discover(spec, 'C:\\p', { platform: 'win32', which: (name) => (name === 'fake-ls' ? 'C:\\bin\\fake-ls.ps1' : name === 'other-ls' ? 'C:\\bin\\other-ls.exe' : null), isFile: (file) => files.has(file) })
     assert.deepEqual(plan, { file: 'C:\\bin\\other-ls.exe', args: [], found: 'the PATH', command: 'other-ls' })
   })
+
+  it("runs eNCode's own server with eNCode's Node.js, and says so when this copy has none", () => {
+    const web = LANGUAGE_SERVERS.find((item) => item.id === 'web')!
+    const node = { file: 'C:\\eNCode\\eNCode.exe', env: { ELECTRON_RUN_AS_NODE: '1' } }
+    const builtin = { dir: 'C:\\eNCode\\resources\\app.asar\\dist\\electron', node }
+    const script = 'C:\\eNCode\\resources\\app.asar\\dist\\electron\\weblang-server.cjs'
+    // Never looked for on the PATH or in the project: a program there with its name is not eNCode's.
+    const which = () => 'C:\\bin\\web.exe'
+    assert.deepEqual(discover(web, 'C:\\p', { platform: 'win32', which, projectBins: true, builtin, isFile: (file) => file === script }), { file: node.file, args: [script, '--stdio'], found: 'eNCode', command: 'web', env: node.env })
+    assert.match((discover(web, 'C:\\p', { platform: 'win32', which, builtin, isFile: () => false }) as { missing: string }).missing, /missing from this copy of eNCode/)
+    assert.match((discover(web, '/p', { which }) as { missing: string }).missing, /comes with the eNCode app/)
+    assert.equal(serverFor('C:\\p\\ui\\index.html')?.spec.id, 'web')
+    assert.equal(serverFor('/p/tsconfig.json')?.languageId, 'json')
+    assert.equal(serverFor('/p/.babelrc')?.languageId, 'jsonc')
+  })
 })
