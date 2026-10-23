@@ -299,6 +299,12 @@ the tools you use now.
 
 ## When something goes wrong
 
+A request that fails ends on a card in the chat: what happened in a sentence, and buttons for what can be done
+(**Retry**, **Switch model**, **Open Settings**, **Save diagnostics**). **Retry** runs the same request on from where it
+stopped. **Details** under the card shows what the provider or the system said, without keys; copy it into your report.
+A sentence that does not tell you what to do, or raw text anywhere in the window (a status code, JSON, a word like
+`TypeError`), is a bug worth reporting.
+
 1. **Help → Save diagnostics…** and pick a place for the file.
 2. Send that file with what you did, what you expected and what happened. A screenshot helps.
 

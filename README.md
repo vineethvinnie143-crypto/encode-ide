@@ -30,6 +30,10 @@ primary platform; the code stays cross-platform.
   of the step it came in during (`Ctrl+Enter`, or **Steer now** on a waiting message); `Enter` queues it for after the
   turn. **Settings → General** swaps the two. A steering message goes through your hooks and brings what it mentions,
   like any request.
+- **Problems in plain words.** A request that fails ends on one sentence that says what happened, with what can be
+  done about it: **Retry** (the same request runs on from where it stopped), **Switch model**, **Open Settings** or
+  **Save diagnostics**. What the provider or the system said is folded under **Details**, without keys. Toasts and
+  Settings checks speak the same way, and a test keeps raw error text out of the window.
 - **Chats.** `Ctrl+Alt+O` (**File → New chat**) starts a session that belongs to no project. It works in a folder of
   its own, `Documents\eNCode` unless you choose another under **Settings → General**, so the files it makes are kept,
   and its tools follow the same rules as in a project. Chats are listed under **Chats** in the sidebar.

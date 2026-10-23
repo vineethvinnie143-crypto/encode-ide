@@ -943,3 +943,43 @@ scripts run when the agent waits or a session ends, and a tool that writes insid
   plan card, a refusal with a note, and a session grant.
 - The end-to-end run shows the plan card with its own buttons and goes ahead on the person's word, reads page 2 of a
   PDF and changes a notebook cell from the fake provider's scenario, and checks the row that says so.
+
+## Problems in plain words (Clean errors)
+
+Written with the pull request that says every failure in a sentence with what can be done, and folds what the
+provider or the system said under Details
+([0070](../adr/0070-a-problem-is-said-in-a-sentence-with-what-can-be-done-and-what-the-provider-said-is-folded-under-it.md)).
+The new paths are provider text kept in the session log and shown in the window, a Retry that runs a request again,
+and renderer errors written to the log.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| C1 | A provider echoes the key back in an error, and it reaches the chat, a toast, the session log or a report | The router redacts the keys it sent from every message and detail; `redactSecrets()` also takes out anything shaped like a key or a credential before details are stored or shown; the log's own redaction runs again on write. The smoke checks a refused key's Details hold `[redacted]` and not the key. | Mitigated |
+| C2 | Details give away the person's user name or folders when a tester shares a screenshot or a report | The home folder becomes `~` in details, as in the log and Diagnostics. | Mitigated |
+| C3 | A provider's error text is crafted to look like an instruction from eNCode | It never makes the sentence: the sentence comes from the kind of failure, and the text sits in a Details fold in the code font, shown as text. | Mitigated |
+| C4 | Details grow without bound in the session log | Cut at 4,000 characters, with the stack at 12 frames. | Mitigated |
+| C5 | Retry runs something the person did not ask for | It runs only the request that did not finish, under the same mode, rules and approvals, and refuses when the last request finished or the session is busy. Nothing new is sent as the person. | Mitigated |
+| C6 | A raw error slips into the interface through new code | One filter, `errorText()`, for every failure the window shows, and a test that fails the build when a renderer file reads an error's message or stack, or makes text of a caught error. | Mitigated |
+| C7 | Renderer errors written to the log carry secrets | Renderer console errors go to the main process log, which redacts keys and the home folder as for every line. | Mitigated |
+
+### Residual risks
+
+- **A key in a form no pattern knows** and not one eNCode sent (another service's token pasted into a prompt) can
+  reach details. The patterns cover the common shapes; the keys eNCode holds are always removed.
+- **The sentence can be less precise than the provider's text.** A provider that reports a new kind of failure is said
+  as "not available right now" until eNCode learns it; the Details fold keeps the original.
+
+### Verification
+
+- The router's test makes every failure kind and skip reason a sentence that names the model or the provider and has
+  no status, JSON or class name in it; a refused key's alert has a plain message and a redacted detail.
+- The core tests run eight pauses through a session and check the entry's sentence, actions, retry time and redacted
+  details, a thrown error's internal problem with its stack in the details and the log, the empty and context ends,
+  switch and wait notices, hook failures, and Retry (one user entry, the problem resolved, kept after reopening).
+- The renderer's test scans every source for raw error text; `errorText()` and `shownError()` tests cover the IPC
+  wrapper, stacks, key shapes and faults.
+- The end-to-end run makes the fake provider refuse the key with a key-shaped string in its JSON, checks the card's
+  sentence, its Open Settings and Switch model buttons and its redacted Details, then sends empty replies, presses
+  Retry once the provider answers again, and checks the answer arrives with the request sent once.
