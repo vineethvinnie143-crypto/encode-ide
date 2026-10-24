@@ -395,6 +395,30 @@ Opening a folder, or a session from another project, is refused while any sessio
 waits for you: the agent works in the open folder, so switching would point its edits at the
 wrong project. Stop it or let it finish first.
 
+## The command line
+
+`encode` is the same agent in a terminal (ADR 0108): the app's tools, approvals, folder trust and settings, hooks,
+MCP servers, checks and sandbox, with its own sessions in `~/.encode/cli`. The Windows build ships it as
+`bin\encode.cmd` in the install folder (`%LOCALAPPDATA%\Programs\eNCode\bin`); put that folder on PATH. From a
+checkout it is `pnpm encode`.
+
+```bash
+encode -m openrouter:<model id>              # the prompt, in this folder; /help lists the commands
+encode -m @free "explain the build"          # start with a request; OpenRouter's free models (they may keep what they are sent)
+encode -p -m anthropic:<model id> "why does the test fail?"   # one answer on standard output, then exit
+git diff | encode -p -m ollama:qwen2.5-coder "review this"     # a request on a pipe is print mode too
+encode -p --output-format json -m demo "look around"           # one result object; stream-json gives every event
+encode -c                                    # carry on with this folder's latest session; encode sessions lists them
+```
+
+Keys come from the environment only (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`,
+or `ENCODE_API_KEY` with `--base-url` for any OpenAI-compatible server), are never printed, and never reach the
+agent's commands. `ENCODE_MODEL` sets the model for every run. At the prompt an approval is answered with Enter, `y`,
+`s` (this session), `a` (always), `n`, or words that say what to do instead; a line typed while the agent works
+steers it; Ctrl+C stops a request. In print mode nobody is asked: what the approval policy does not allow is refused,
+and the agent is told so. Exit status is 0 when the request finished, 1 when it ended on an error and 2 when it could
+not start.
+
 ## Repository layout
 
 ```
@@ -422,6 +446,7 @@ apps/desktop/                 the Electron app (@encode/desktop)
   public/brand/               the logo's renders the app shows (title bar, empty chat, About)
   scripts/                    build, dev, e2e harness, smoke, fake provider
   test/fixtures/              the workspace the smoke opens (copied, never edited)
+apps/cli/                     the command line: the app's agent host behind a prompt and print mode (@encode/cli)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
 packages/bench/               the agent's benchmark: tasks with hidden checks, runs on the app's agent host, reports and their comparison, and the replay of a reported request (@encode/bench)
@@ -461,6 +486,7 @@ pnpm traces                   # the editor's regression traces, made again from 
 pnpm build                    # renderer with Vite, main and preload with esbuild
 pnpm e2e                      # the full smoke against the built app, in a throwaway sandbox
 pnpm perf                     # how smooth the interface is: frames while a long answer streams, scrolls and a panel is dragged
+pnpm encode -m demo           # the command line from the checkout, with the offline demo agent
 ```
 
 `pnpm e2e` copies `apps/desktop/test/fixtures/demo-project` to a temporary folder, gives

@@ -19,6 +19,7 @@
     "editor-issue": "node scripts/editor-issue.mjs",
     "bench": "node scripts/bench.mjs",
     "turn-report": "node scripts/bench.mjs replay",
+    "encode": "node scripts/encode.mjs",
     "e2e": "pnpm --filter @encode/desktop e2e",
     "perf": "pnpm --filter @encode/desktop perf",
     "dist": "pnpm --filter @encode/desktop dist",

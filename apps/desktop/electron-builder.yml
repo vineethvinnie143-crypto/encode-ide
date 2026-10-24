@@ -15,6 +15,11 @@ extraResources:
     to: bench-tasks
     filter:
       - '**/*'
+# The command line (ADR 0108): bin/encode.cmd runs the app's own program as Node on the CLI bundle in the asar. It is
+# in a folder of its own so that putting that folder on PATH never makes `encode` start eNCode.exe instead.
+extraFiles:
+  - from: build/encode.cmd
+    to: bin/encode.cmd
 # No native modules are bundled: the shell and terminal are hand-written.
 npmRebuild: false
 # Unsigned: the builds are for the owner and a few testers (see TESTING.md), and Windows SmartScreen says so.

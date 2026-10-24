@@ -12,6 +12,37 @@ importers:
         specifier: ^0.28.2
         version: 0.28.2
 
+  apps/cli:
+    dependencies:
+      '@encode/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@encode/git':
+        specifier: workspace:*
+        version: link:../../packages/git
+      '@encode/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      '@encode/router':
+        specifier: workspace:*
+        version: link:../../packages/router
+      '@encode/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
+      '@encode/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
+      '@encode/workspace':
+        specifier: workspace:*
+        version: link:../../packages/workspace
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   apps/desktop:
     devDependencies:
       '@encode/bench':

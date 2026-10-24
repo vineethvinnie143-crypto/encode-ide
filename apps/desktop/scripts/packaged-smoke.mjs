@@ -83,6 +83,34 @@ if (path.basename(exe).toLowerCase() === 'encode.exe' || !isWindows) {
   console.log(`[packaged] runs as Node.js ${answer.node}`)
 }
 
+// The command line (ADR 0108): bin/encode.cmd beside the program runs the CLI bundle in the asar. It answers its
+// version, and a print-mode request on the offline demo agent, which nobody is there to approve.
+const launcher = path.join(path.dirname(exe), 'bin', 'encode.cmd')
+if (isWindows && path.basename(exe).toLowerCase() === 'encode.exe') {
+  if (!fs.existsSync(launcher)) fail(`${launcher} is missing`)
+  // As a person types it at a prompt: cmd.exe's /s takes the quoted line as it is.
+  const quote = (arg) => (/[\s"]/.test(arg) ? `"${arg.replace(/"/g, '""')}"` : arg)
+  const cli = (args, cwd) =>
+    spawnSync('cmd.exe', ['/d', '/s', '/c', `"${[launcher, ...args].map(quote).join(' ')}"`], { cwd, env, encoding: 'utf8', timeout: 120000, windowsHide: true, windowsVerbatimArguments: true })
+  const version = cli(['--version'])
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, '..', 'cli', 'package.json'), 'utf8'))
+  if (version.status !== 0 || version.stdout.trim() !== `eNCode ${pkg.version}`) fail(`encode --version: exit ${version.status}, ${JSON.stringify(`${version.stdout}${version.stderr}`).slice(0, 400)}`)
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-cli-'))
+  fs.writeFileSync(path.join(project, 'a.txt'), 'hello\n')
+  const demo = cli(['-p', '--model', 'demo', '--output-format', 'json', 'look around'], project)
+  fs.rmSync(project, { recursive: true, force: true })
+  let result = null
+  try {
+    result = JSON.parse(demo.stdout)
+  } catch {
+    // Reported below.
+  }
+  if (demo.status !== 0 || result?.type !== 'result' || result.ok !== true || !result.result) {
+    fail(`encode -p on the demo agent: exit ${demo.status}, ${JSON.stringify(`${demo.stdout}${demo.stderr}`).slice(0, 600)}`)
+  }
+  console.log(`[packaged] the command line answers (${version.stdout.trim()}, ${result.usage.calls} demo calls)`)
+}
+
 const app = spawn(command, args, { env, stdio: ['ignore', log, log], detached: !isWindows })
 let exited = false
 app.on('exit', () => {

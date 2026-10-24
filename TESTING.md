@@ -740,6 +740,25 @@ and you see each click; it never types into a password field, and a link to a si
 the chat said and from reading the project, changes nothing, and nothing in it goes back to the chat. Close the tab to
 delete it.
 
+## The command line
+
+The installed build has `encode`, the same agent in a terminal, in `%LOCALAPPDATA%\Programs\eNCode\bin` (or the
+`bin` folder of the folder you installed to). Add that folder to your PATH (**Settings → System → About → Advanced
+system settings → Environment Variables**, your user's `Path`), open a new terminal, and in a project folder:
+
+```powershell
+$env:OPENROUTER_API_KEY = "<your key>"      # this terminal only; or ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY
+encode -m openrouter:<model id>              # the prompt: type requests, /help lists the commands
+encode -p -m openrouter:<model id> "what does this project do?"   # one answer, then back to the shell
+git diff | encode -p -m openrouter:<model id> "review this"
+encode -m demo                               # the offline demo agent, no key
+```
+
+Try an approval (Enter, `y`, `s`, `a`, `n`, or type what to do instead), a line typed while it works, Ctrl+C in the
+middle of a request, `/mode plan` and carrying out the plan, `encode -c` the next day, and `-p --output-format json`.
+The command line's sessions are its own: they do not show in the app. Keys come only from the terminal's environment,
+and none is ever printed. It is not in the portable build.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
@@ -812,6 +831,8 @@ sent by itself.
 | The agent's worktrees of a project | `.encode-worktrees\` in the project |
 | The files chats make | `Documents\eNCode\`, or the folder chosen in Settings → General |
 | The sandbox's helper, its temp and cache folders, and the folders it prepared | `%APPDATA%\eNCode\sandbox\` |
+| The command line (`encode.cmd`) | `bin\` in the install folder |
+| The command line's sessions, checkpoints and sandbox | `%USERPROFILE%\.encode\cli\` |
 
 Updating means installing the next build over the last one: everything above stays.
 

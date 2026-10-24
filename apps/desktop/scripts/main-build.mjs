@@ -56,6 +56,8 @@ export function mainBuildOptions({ production = true } = {}) {
       'overlay-preload': path.join(root, 'electron/computer-overlay-preload.ts'),
       // eNCode's own JSON, CSS and HTML language server, run by the agent host as Node (ADR 0085).
       'weblang-server': path.join(root, '../../packages/weblang/src/main.ts'),
+      // The command line (ADR 0108), run by bin/encode.cmd on the app's own program as Node.
+      'encode-cli': path.join(root, '../../apps/cli/src/bin.ts'),
     },
     outdir: path.join(root, 'dist/electron'),
     outExtension: { '.js': '.cjs' },

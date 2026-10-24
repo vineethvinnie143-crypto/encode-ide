@@ -2529,3 +2529,47 @@ What is new:
   `config.test.ts` (a link refused for a folder's file and followed for the person's, a 5 MB file, a folder and a
   named pipe refused without blocking), `renderer-crash.test.ts`.
 - The desktop's end-to-end run ends by crashing the window's page: the window reports it and the app comes back.
+
+## The command line (CLI)
+
+Written with the pull request that adds it ([0108](../adr/0108-the-command-line-runs-the-apps-agent-host-in-its-own-process-with-its-own-sessions.md)).
+
+What is new:
+
+- `encode`, a terminal in front of the app's agent host: a prompt, and print mode for scripts and CI;
+- keys read from the environment, for one model on every role;
+- its own sessions in `~/.encode/cli`;
+- `bin\encode.cmd` in the Windows build, which runs the app's program as Node on the bundled command line.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| CL1 | A key in the environment reaches the agent's commands, or a command prints it | The agent's shell starts without every variable named like a key (`*_API_KEY` and the rest of 0011's list); keys are read once, in `model.ts`, and nowhere else. | Mitigated |
+| CL2 | A key is written to the terminal, a JSON result or an error | Everything the command line writes goes through the providers' redaction with the keys in use, including the model list error at start and errors from a model chosen later with `/model`. | Mitigated |
+| CL3 | A reply, a command's output or a file name rewrites the terminal: escape sequences that move the cursor, retitle the window, write to the clipboard or hide text, or direction characters that reorder a line | Every text from a session is made plain before it is written: C0 and C1 controls, ESC and the reordering and invisible characters become `?`. JSON output escapes the reordering characters and U+2028 and U+2029. | Mitigated |
+| CL4 | A script runs print mode in a folder it does not control, and the folder's settings, hooks or MCP servers take over | A folder is untrusted until the person trusts it (`--trust` or the prompt's question); until then its own settings, hooks, MCP servers and language servers stay off. Print mode never asks. | Mitigated |
+| CL5 | Print mode runs something no one approved | An approval the policy leaves to the person is refused, with a note to the agent; only what the policy allows runs. `--policy full-access` is the person's explicit choice. | Mitigated |
+| CL6 | The agent reads the command line's sessions, or the app's, through the other | Both profiles are off limits to the agent in the command line and the app, and hidden from sandboxed commands where the sandbox hides reads (0106). | Partial (HD-R1) |
+| CL7 | ELECTRON_RUN_AS_NODE, set by `encode.cmd`, makes an Electron app the agent runs start as Node | The command line deletes it from its own environment before anything starts. | Mitigated |
+| CL8 | A huge pipe fills memory | At most 4 MB is read from standard input; more is refused with a pointer to give the file's path. | Mitigated |
+| CL9 | Code goes to OpenRouter's free models, which may keep what they are sent | `@free` is only used when named; the prompt and print mode both warn when it is. | Mitigated |
+
+### Residual risks
+
+- A key in the environment is readable by every other program the person runs from that shell; the command line does
+  not widen that, and cannot narrow it.
+- `encode.cmd` passes its arguments through cmd.exe, which treats `%` and `!` in them as it does for any batch file.
+
+### Verification
+
+- `apps/cli/src/cli.test.ts`: options and their errors, plain text (escape sequences, C1, direction and invisible
+  characters, CRLF), safe JSON, colour rules, model presets, `@free`, `--base-url`, missing keys named without values,
+  the rows a session's events become.
+- `apps/cli/src/run.test.ts`: print mode on a scripted model (only the reply on standard output, an approval refused
+  with its note reaching the model, a question told to choose, a key and an escape sequence kept out of the reply, the
+  JSON result, stream JSON, a failing request's status and details, `--continue`); the `encode` command (version,
+  help, status 2 for wrong options, a missing folder or no model, a request on a pipe, `sessions`, the pipe limit);
+  the prompt (trust asked first, commands, an approval answered in words, a proposed plan carried out).
+- The packaged smoke runs `bin\encode.cmd --version` and a print-mode request on the demo agent from the installed
+  layout.
