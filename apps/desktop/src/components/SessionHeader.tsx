@@ -12,6 +12,7 @@ import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
 import { useUi } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
+import { copyText } from '../copy'
 import { IconButton } from '../ui/Button'
 import { cx } from '../ui/cx'
 import { Activity, ChevronDown, ExternalLink, GitBranch, GitFork, MoreHorizontal, PanelRight, ShieldCheck, Sparkles, ScrollText } from '../ui/icons'
@@ -79,7 +80,7 @@ export default function SessionHeader() {
 
   const openInEntries = (): MenuEntry[] => [
     { id: 'explorer', label: 'File Explorer', disabled: !workspace, onSelect: () => void api.workspace.reveal('') },
-    { id: 'copy-path', label: 'Copy folder path', disabled: !workspace, onSelect: () => void navigator.clipboard.writeText(workspace?.root ?? '') },
+    { id: 'copy-path', label: 'Copy folder path', disabled: !workspace, onSelect: () => void copyText(workspace?.root ?? '') },
   ]
 
   const summaryEntries = (): MenuEntry[] => [

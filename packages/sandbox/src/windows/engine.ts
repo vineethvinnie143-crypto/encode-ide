@@ -49,6 +49,22 @@ interface State {
 
 const MAX_PROTECT_KEPT = 64
 
+/**
+ * The helper could not open or change the folder itself: Windows lets only an account that may change a folder's
+ * owner put the integrity mark on it, and plain Modify rights do not include that.
+ */
+const ACCESS_DENIED = /\(error 5\)\s*$/
+
+/** Why commands cannot be confined in a folder Windows does not let this account mark, for the person and the agent alike. */
+export function noPermission(folder: string): string {
+  return (
+    `Windows does not let this account change the security settings of ${folder}, which the sandbox needs: it marks the folder so that sandboxed commands may write there. ` +
+    'A folder made by an administrator or by an earlier Windows installation is often like this. ' +
+    'Commands in this folder cannot run inside the sandbox: run them with unsandboxed true (the person is asked, unless they chose Full access), ' +
+    'or work in a copy of the folder inside the user folder. Settings > Sandbox says the same.'
+  )
+}
+
 /** A folder's name for comparing: absolute, without a trailing separator, in one case. "C:" alone is the drive, not the folder last used on it. */
 const key = (folder: string) => (/^[a-z]:[\\/]*$/i.test(folder) ? folder.slice(0, 2) : path.win32.resolve(folder).replace(/[\\/]+$/, '')).toLowerCase()
 
@@ -194,7 +210,7 @@ export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngin
       return serial(async () => {
         for (const folder of policy.writable) {
           const why = tooBroad(folder, { env, home, keep })
-          if (why) throw new SandboxError('failed', `${folder} cannot be prepared for the sandbox: it is ${why}, and every command could change everything in it. Open a folder inside it instead, run the command outside the sandbox (you are asked), or turn the sandbox off in the settings.`)
+          if (why) throw new SandboxError('failed', `${folder} cannot be prepared for the sandbox: it is ${why}, and every command could change everything in it. Open a folder inside it instead, run the command outside the sandbox (you are asked, unless you chose Full access), or turn the sandbox off in the settings.`)
         }
         const build = await built()
         const value = await current()
@@ -211,7 +227,9 @@ export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngin
               onProgress: (done) => onProgress?.(`Preparing ${folder} for the sandbox (${done.toLocaleString('en-US')} items so far)`),
             })
           } catch (error) {
-            throw new SandboxError('failed', `${folder} could not be prepared for the sandbox: ${error instanceof Error ? error.message : String(error)}`)
+            const message = error instanceof Error ? error.message : String(error)
+            if (ACCESS_DENIED.test(message)) throw new SandboxError('no-permission', noPermission(folder), folder)
+            throw new SandboxError('failed', `${folder} could not be prepared for the sandbox: ${message}`)
           }
           if (result.failed > 0) {
             const first = result.failures[0] ? ` (the first: ${result.failures[0]})` : ''

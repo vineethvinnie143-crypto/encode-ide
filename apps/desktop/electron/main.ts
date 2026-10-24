@@ -3,6 +3,7 @@ import { appendFileSync, existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { hostConfigOf } from './agent-host/config'
+import { hostLogLine } from './agent-host/host-log'
 import { spawnAgentHost } from './agent-host/electron'
 import { AgentHostService } from './agent-host/service'
 import { applyNativeAppearance, followSystemTheme } from './appearance'
@@ -224,7 +225,11 @@ if (!gotLock) {
 
     // The agent runs in a utility process; this side hands it the settings it needs and the keys it asks for.
     const agentHost = new AgentHostService({
-      spawn: () => spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => console.error(`[agent-host] ${line}`)),
+      spawn: () =>
+        spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => {
+          const { level, text } = hostLogLine(line)
+          console[level](text)
+        }),
       init: () => ({
         dir: path.join(userData, 'sessions'),
         home,

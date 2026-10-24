@@ -210,10 +210,28 @@ describe('the Windows engine', () => {
   it('turns a failed walk into a message about the folder', async () => {
     const client = fakeClient({
       async label() {
-        throw new SandboxError('failed', 'SetKernelObjectSecurity(\\\\?\\C:\\work\\p) failed: Access is denied. (error 5)')
+        throw new SandboxError('failed', 'SetKernelObjectSecurity(\\\\?\\C:\\work\\p) failed: The parameter is incorrect. (error 87)')
       },
     })
-    await assert.rejects(make(client).prepare(policy()), (error: unknown) => error instanceof SandboxError && /^C:\\work\\p could not be prepared for the sandbox: SetKernelObjectSecurity/.test(error.message))
+    await assert.rejects(make(client).prepare(policy()), (error: unknown) => error instanceof SandboxError && error.code === 'failed' && /^C:\\work\\p could not be prepared for the sandbox: SetKernelObjectSecurity/.test(error.message))
+  })
+
+  it('says plainly when Windows does not let this account mark the folder, and names it', async () => {
+    for (const said of ['CreateFile(\\\\?\\D:\\TEST SERVEr) failed: Access is denied. (error 5)', 'SetKernelObjectSecurity(\\\\?\\D:\\TEST SERVEr) failed: Access is denied. (error 5)']) {
+      const client = fakeClient({
+        async label() {
+          throw new SandboxError('failed', said)
+        },
+      })
+      await assert.rejects(make(client).prepare(policy({ writable: ['D:\\TEST SERVEr'] })), (error: unknown) => {
+        assert.ok(error instanceof SandboxError)
+        assert.equal(error.code, 'no-permission')
+        assert.equal(error.folder, 'D:\\TEST SERVEr')
+        assert.match(error.message, /^Windows does not let this account change the security settings of D:\\TEST SERVEr/)
+        assert.match(error.message, /unsandboxed true \(the person is asked, unless they chose Full access\)/)
+        return true
+      })
+    }
   })
 
   it('starts the program through the helper, with the protected paths and the sandbox’s variables', async () => {

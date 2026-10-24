@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { copyText } from '../copy'
 import { Check, ChevronDown, Copy } from './icons'
 import { Collapse } from './Collapse'
 import { cx } from './cx'
@@ -26,7 +27,8 @@ export function Details({ text }: { text: string }) {
               aria-label={copied ? 'Copied' : 'Copy the details'}
               title={copied ? 'Copied' : 'Copy'}
               onClick={() => {
-                void navigator.clipboard.writeText(text).then(() => {
+                void copyText(text).then((done) => {
+                  if (!done) return
                   setCopied(true)
                   window.setTimeout(() => setCopied(false), 1500)
                 })

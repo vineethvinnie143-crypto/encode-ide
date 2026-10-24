@@ -4,6 +4,7 @@ import { aboutText, shortCommit } from '@shared/about'
 import { api } from '../../api'
 import { helpActions } from '../../commands/app'
 import { useUi } from '../../stores/ui'
+import { copyText } from '../../copy'
 import { Button, IconButton } from '../../ui/Button'
 import { Dialog } from '../../ui/Dialog'
 import { Copy } from '../../ui/icons'
@@ -25,7 +26,7 @@ export function AboutDialog() {
 
   const copy = () => {
     if (!info) return
-    void navigator.clipboard.writeText(aboutText(info)).then(() => notify('success', 'Build information copied.'))
+    void copyText(aboutText(info)).then((copied) => copied && notify('success', 'Build information copied.'))
   }
   const saveDiagnostics = async () => {
     setSaving(true)

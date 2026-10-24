@@ -8,6 +8,7 @@ import { useSandbox } from '../../stores/sandbox'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
+import { copyText } from '../../copy'
 import { useWorkspace } from '../../stores/workspace'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
@@ -86,7 +87,7 @@ export function StatusDialog() {
 
   const copy = () => {
     const text = facts.map((fact) => `${fact.label}: ${fact.value}`).join('\n')
-    void navigator.clipboard.writeText(text).then(() => useUi.getState().notify('success', 'Status copied.'))
+    void copyText(text).then((copied) => copied && useUi.getState().notify('success', 'Status copied.'))
   }
 
   return (

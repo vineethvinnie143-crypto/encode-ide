@@ -120,6 +120,31 @@ describe('the sandbox', () => {
     assert.equal(engine.prepared.length, 2)
   })
 
+  it('keeps the folders the system does not let it prepare, until one prepares or the machine is checked again', async () => {
+    const engine = fakeEngine()
+    let refuse = true
+    engine.prepare = async (policy) => {
+      engine.prepared.push(policy)
+      if (refuse) throw new SandboxError('no-permission', `Windows does not let this account change the security settings of ${project}.`, project)
+    }
+    const sandbox = make(engine)
+    let changes = 0
+    sandbox.onChange(() => changes++)
+    const session = sandbox.session({ roots: () => [project], settings: () => settings() })
+    await assert.rejects(session.wrapSpawn(spec()), (error: unknown) => error instanceof SandboxError && error.code === 'no-permission')
+    assert.deepEqual(sandbox.blocked(), [project])
+    assert.ok(changes > 0, 'the screen hears of it')
+    refuse = false
+    await session.wrapSpawn(spec())
+    assert.deepEqual(sandbox.blocked(), [], 'a folder that prepares is no longer listed')
+    refuse = true
+    await sandbox.refresh()
+    await assert.rejects(session.wrapSpawn(spec()))
+    assert.deepEqual(sandbox.blocked(), [project])
+    await sandbox.refresh()
+    assert.deepEqual(sandbox.blocked(), [], 'checking again starts over')
+  })
+
   it('picks up an extra folder the person allows later', async () => {
     const engine = fakeEngine()
     const extra: string[] = []

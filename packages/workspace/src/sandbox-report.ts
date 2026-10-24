@@ -27,6 +27,8 @@ export interface SandboxReport {
   file: string
   /** Folders the sandbox changed so that it can confine commands there (Windows: the integrity marks). */
   marked: string[]
+  /** Folders the system does not let this account prepare (Windows: change their security settings): commands there run only outside the sandbox. */
+  blocked: string[]
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -97,5 +99,6 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
     ...(working ? { working } : {}),
     file: settingsFiles(home, '', platform === 'win32' ? path.win32 : path.posix).user,
     marked: [],
+    blocked: sandbox?.blocked() ?? [],
   }
 }

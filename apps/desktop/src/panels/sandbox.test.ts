@@ -12,6 +12,7 @@ const report = (patch: Partial<SandboxReport> = {}): SandboxReport => ({
   problems: [],
   file: '/home/u/.encode/settings.json',
   marked: [],
+  blocked: [],
   ...patch,
 })
 
@@ -22,6 +23,18 @@ describe('what the screen says first', () => {
     assert.match(active.detail, /bubblewrap/)
     assert.match(headline(report({ engine: 'integrity-level' })).detail, /low integrity level of Windows/)
     assert.match(headline(report({ engine: 'seatbelt' })).detail, /Seatbelt/)
+  })
+
+  it('says when Windows does not let the account prepare the folder, what that means for commands, and what helps', () => {
+    const blocked = headline(report({ engine: 'integrity-level', blocked: ['D:\\TEST SERVEr'] }))
+    assert.equal(blocked.tone, 'warning')
+    assert.equal(blocked.title, 'The sandbox cannot be used in this folder')
+    assert.match(blocked.detail, /security settings of D:\\TEST SERVEr, which the sandbox needs/)
+    assert.match(blocked.detail, /you are asked each time, unless you chose Full access/)
+    assert.match(blocked.detail, /copy of the folder inside your user folder/)
+    const strict = headline(report({ blocked: ['D:\\a', 'E:\\b'], settings: { ...report().settings, allowUnsandboxed: false } }))
+    assert.match(strict.detail, /2 folders \(D:\\a, E:\\b\)/)
+    assert.match(strict.detail, /Commands there do not run/)
   })
 
   it('says plainly when commands run with the person’s full access, and why', () => {

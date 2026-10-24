@@ -22,18 +22,23 @@ interface Options {
  * `invert` flips the delta for panels anchored to the right/bottom edge.
  */
 export function useResizable({ initial, min, max, axis, invert = false, persistKey, measure, element }: Options) {
-  const [size, setSizeState] = useState(() => {
+  const [stored] = useState(() => {
     try {
       const raw = localStorage.getItem(persistKey)
       const parsed = raw ? Number(raw) : Number.NaN
-      return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : initial
+      return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : undefined
     } catch {
-      return initial
+      return undefined
     }
   })
+  const [size, setSizeState] = useState(stored ?? initial)
+  /** The person has set this size with the divider (now or on an earlier run); a size left as shipped may give way to other panels. */
+  const [chosen, setChosen] = useState(stored !== undefined)
 
   const sizeRef = useRef(size)
   sizeRef.current = size
+  const chosenRef = useRef(chosen)
+  chosenRef.current = chosen
   const measureRef = useRef(measure)
   measureRef.current = measure
   const elementRef = useRef(element)
@@ -58,6 +63,11 @@ export function useResizable({ initial, min, max, axis, invert = false, persistK
       const startPos = axis === 'x' ? event.clientX : event.clientY
       const shown = measureRef.current?.()
       const startSize = shown !== undefined && Number.isFinite(shown) && shown > 0 ? shown : sizeRef.current
+      // From the first touch of the divider the size is the person's: it starts from what they see, and nothing holds it smaller.
+      if (!chosenRef.current) {
+        setChosen(true)
+        setSizeState(Math.min(max, Math.max(min, startSize)))
+      }
 
       const target = elementRef.current?.()
       const handle = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
@@ -94,5 +104,5 @@ export function useResizable({ initial, min, max, axis, invert = false, persistK
     [axis, invert, max, min, setSize],
   )
 
-  return { size, onPointerDown }
+  return { size, chosen, onPointerDown }
 }

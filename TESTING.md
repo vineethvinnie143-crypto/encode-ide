@@ -156,6 +156,11 @@ should have, and any message you could not understand.
 - A command that cannot work inside (pushing over SSH, or a git hook while a Git Bash window is open) asks to run
   outside, each time, under every approval policy but **Full access**, where it runs outside without a card. Turn off
   **Let a command ask to leave the sandbox** and no command runs outside it, Full access included.
+- A folder Windows does not let your account change the security settings of (often one on a second drive that an
+  administrator or an earlier Windows installation made) cannot be prepared. **Settings → Sandbox** then says so and
+  names the folder; commands there run only outside the sandbox, asked about once each (not at all under Full access).
+  Working in a copy inside your user folder, or giving your account Full control of the folder (Properties →
+  Security), then **Check again**, brings the sandbox back.
 - Turn off **Run commands in PowerShell** to go back to Git Bash. Commands then run outside the sandbox, and the screen
   says so.
 

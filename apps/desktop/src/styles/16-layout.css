@@ -14,6 +14,18 @@
   background: var(--chrome);
 }
 
+/*
+ * Room for the thread: on a small screen (1366 x 768) the side panel, then the sessions list, give up width before the
+ * thread's column drops under this, while their widths are as shipped (.fits). A width the person sets with a divider
+ * is theirs and is kept.
+ */
+.sheet-work {
+  --thread-room: 720px;
+}
+.sheet-work.has-side .sidebar-wrap.fits {
+  max-width: max(220px, calc(100vw - 52px - 360px - var(--thread-room)));
+}
+
 .sheet {
   position: relative;
   flex: 1 1 0;

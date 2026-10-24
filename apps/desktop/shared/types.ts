@@ -689,6 +689,8 @@ export interface SandboxReport {
   file: string
   /** Folders the sandbox changed so that it can confine commands there (Windows: the integrity marks). */
   marked: string[]
+  /** Folders Windows does not let your account prepare (change their security settings): commands there run only outside the sandbox. */
+  blocked: string[]
 }
 
 /** What the Sandbox screen can do: change a switch in your own settings, or check the machine again. */
