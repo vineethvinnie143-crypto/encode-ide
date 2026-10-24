@@ -339,23 +339,16 @@ export function formatClock(ms: number): string {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`
 }
 
-/** Added and removed lines across a turn's edits, and the files they touch. */
+/** Added and removed lines across a turn's edits, and the files they touch: each file's net change (editedFiles). */
 export function editTotals(entries: readonly ConversationEntry[]): { files: number; additions: number; deletions: number } {
-  const files = new Set<string>()
+  const keyed = netChanges(entries, (entry) => (entry.tool && toolPath(entry.tool.input)) || entry.id)
   let additions = 0
   let deletions = 0
-  for (const entry of entries) {
-    const diff = entry.tool?.diff
-    if (!diff?.length) continue
-    files.add((entry.tool && toolPath(entry.tool.input)) ?? entry.id)
-    for (const hunk of diff) {
-      for (const line of hunk.lines) {
-        if (line.type === 'add') additions += 1
-        else if (line.type === 'del') deletions += 1
-      }
-    }
+  for (const file of keyed) {
+    additions += file.additions
+    deletions += file.deletions
   }
-  return { files: files.size, additions, deletions }
+  return { files: keyed.length, additions, deletions }
 }
 
 export interface EditedFile {
@@ -366,20 +359,61 @@ export interface EditedFile {
 
 /** The files a set of entries changed, in order of first change, with their added and removed lines. */
 export function editedFiles(entries: readonly ConversationEntry[]): EditedFile[] {
-  const files = new Map<string, EditedFile>()
+  return netChanges(entries, (entry) => (entry.tool && toolPath(entry.tool.input)) ?? '')
+}
+
+/** A line of a file as edits leave it: its place in the file before the first edit, or NEW for a line an edit added. */
+const NEW = -1
+
+/**
+ * Each file's change from before its first edit to after its last, from the edits' own hunks: a line added and then
+ * removed again counts for nothing, and a line rewritten twice counts once. Hunks place their lines in the file as it
+ * was before that edit (`oldStart` is the first old line, also for an empty side), so the edits are replayed on a list
+ * of where each line came from. A file whose hunks do not fit what came before is summed edit by edit instead.
+ */
+function netChanges(entries: readonly ConversationEntry[], keyOf: (entry: ConversationEntry) => string): EditedFile[] {
+  const files = new Map<string, { lines: number[]; nextOld: number; deletions: number; summed: EditedFile; fits: boolean }>()
   for (const entry of entries) {
     const diff = entry.tool?.diff
     if (!diff?.length) continue
-    const path = (entry.tool && toolPath(entry.tool.input)) ?? ''
+    const path = keyOf(entry)
     if (!path) continue
-    const current = files.get(path) ?? { path, additions: 0, deletions: 0 }
+    let file = files.get(path)
+    if (!file) {
+      file = { lines: [], nextOld: 0, deletions: 0, summed: { path, additions: 0, deletions: 0 }, fits: true }
+      files.set(path, file)
+    }
     for (const hunk of diff) {
       for (const line of hunk.lines) {
-        if (line.type === 'add') current.additions += 1
-        else if (line.type === 'del') current.deletions += 1
+        if (line.type === 'add') file.summed.additions += 1
+        else if (line.type === 'del') file.summed.deletions += 1
       }
     }
-    files.set(path, current)
+    if (file.fits) file.fits = replay(file, diff)
   }
-  return [...files.values()]
+  return [...files.values()].map((file) =>
+    file.fits ? { path: file.summed.path, additions: file.lines.filter((line) => line === NEW).length, deletions: file.deletions } : file.summed,
+  )
+}
+
+/** Applies one edit's hunks to the lines of a file, last hunk first so the earlier places still hold; false when they do not fit. */
+function replay(file: { lines: number[]; nextOld: number; deletions: number }, diff: NonNullable<NonNullable<ConversationEntry['tool']>['diff']>): boolean {
+  const hunks = [...diff].sort((a, b) => b.oldStart - a.oldStart)
+  for (const hunk of hunks) {
+    const at = hunk.oldStart - 1
+    const taken = hunk.lines.filter((line) => line.type !== 'add').length
+    if (at < 0 || taken !== hunk.oldLines) return false
+    // Lines past what the edits have touched are the file's own, in order.
+    while (file.lines.length < at + taken) file.lines.push(file.nextOld++)
+    const before = file.lines.slice(at, at + taken)
+    const after: number[] = []
+    let next = 0
+    for (const line of hunk.lines) {
+      if (line.type === 'add') after.push(NEW)
+      else if (line.type === 'ctx') after.push(before[next++]!)
+      else if (before[next++]! !== NEW) file.deletions += 1
+    }
+    file.lines = file.lines.slice(0, at).concat(after, file.lines.slice(at + taken))
+  }
+  return true
 }
