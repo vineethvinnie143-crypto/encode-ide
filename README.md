@@ -78,6 +78,12 @@ primary platform; the code stays cross-platform.
   or a case no test covers, goes back to the agent once. It reads a plan before you do, too
   (**Settings → Agent → Reviewer**: smaller models, always or never).
 
+  A command that cannot easily be undone (a recursive delete, `git reset --hard`, a push, a publish, a deploy, a
+  dropped table) that would run without you seeing it, under Full access or a rule that allows it, is put to the
+  agent's model once more with only your requests; if it does not confirm, you decide. Bigger work in a project with
+  tests starts from the tests. When you set a rule ("always use pnpm") or a command failed and another worked, eNCode
+  offers lines for the project's instructions file below the answer, written only when you click Add.
+
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
   range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
   The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars

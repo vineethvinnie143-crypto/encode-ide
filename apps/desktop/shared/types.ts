@@ -78,6 +78,12 @@ export type CheckGate = 'auto' | 'on' | 'off'
  */
 export type ReviewWork = 'auto' | 'on' | 'off'
 
+/** Before a command that is hard to undo runs without you seeing it: `on` asks the agent's model about it once more, and leaves it to you when the answers differ (ADR 0097). */
+export type AskAgain = 'on' | 'off'
+
+/** After a request where you set a rule or a command failed and another worked: `on` offers lines for the project's instructions file, added only when you click Add (ADR 0097). */
+export type LearnConventions = 'on' | 'off'
+
 /**
  * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
  * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
@@ -131,6 +137,10 @@ export interface Settings {
   checkGate: CheckGate
   /** See ReviewWork. Default `auto`. */
   reviewWork: ReviewWork
+  /** See AskAgain. Default `on`. */
+  askAgain: AskAgain
+  /** See LearnConventions. Default `on`. */
+  learnConventions: LearnConventions
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */
@@ -474,7 +484,7 @@ export interface ApprovalRequest {
   /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
   always?: { label: string; rules: string[] }
   /** Under Auto review: why the Reviewer passed the question to the person. */
-  review?: { by: 'floor' | 'reviewer'; reason: string }
+  review?: { by: 'floor' | 'reviewer' | 'second-look'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
   /** Asked by a subagent in the background: the card stays when the turn ends, or shows when no turn runs. */
@@ -1205,8 +1215,22 @@ export interface ConversationEntry {
   details?: string
   /** On your message: what its request has cost so far. */
   usage?: RequestUsage
+  /** On a notice: lines eNCode suggests keeping in the project's instructions file (ADR 0097). */
+  suggestion?: EntrySuggestion
   createdAt: number
 }
+
+/** What a request taught, offered for the instructions file the agent reads at the start of every session (ADR 0097). */
+export interface EntrySuggestion {
+  /** The file, relative to the workspace: the instructions file the agent reads, or ENCODE.md when there is none. */
+  file: string
+  lines: string[]
+  /** `open` until the person adds the lines or dismisses them. */
+  state: 'open' | 'saved' | 'dismissed'
+}
+
+/** What answering an offered suggestion did: where Add wrote the lines, or why it could not. */
+export type SuggestionOutcome = { ok: true; file?: string } | { ok: false; error: string }
 
 /** The model calls of one request together: the agent's, its subagents' and the reviewer's. */
 export interface RequestUsage {
@@ -1220,9 +1244,9 @@ export interface RequestUsage {
   cost?: number
 }
 
-/** What Auto review made of a call: who looked (the Reviewer model, or the fixed checks before it), and the verdict. */
+/** Who looked at a call before it ran (the Reviewer model, the fixed checks before it, or the agent's model asked again before a hard-to-undo command), and the verdict. */
 export interface ToolReview {
-  by: 'reviewer' | 'floor'
+  by: 'reviewer' | 'floor' | 'second-look'
   /** `approved`: it ran on this review. `declined`: it did not run. `asked`: the person was asked. */
   verdict: 'approved' | 'declined' | 'asked'
   risk?: 'low' | 'medium' | 'high'
@@ -1537,6 +1561,8 @@ export interface EncodeApi {
     rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome>
     /** Goes back in the conversation to just before a request, which comes back as text to edit; the files stay as they are. */
     rewindConversation(sessionId: string, entryId: string): Promise<{ text: string }>
+    /** Adds the lines a request taught to the project's instructions file (`accept`), or dismisses them (ADR 0097). */
+    answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome>
     approve(requestId: string, answer: boolean | ApprovalAnswer): Promise<void>
     answer(requestId: string, answer: string): Promise<void>
     onEvent(cb: (e: AgentEvent) => void): () => void

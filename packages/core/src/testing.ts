@@ -41,8 +41,8 @@ import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOp
 import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
 import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry } from './ui'
 
-/** The Reviewer would take a scripted step of its own; the tests of it turn it on (ADR 0096). */
-const HARNESS_SETTINGS: AgentSettings = { ...DEFAULT_SETTINGS, review: 'off' }
+/** The Reviewer, the second look and the conventions offer would each take a scripted step of their own; their tests turn them on (ADRs 0096, 0097). */
+const HARNESS_SETTINGS: AgentSettings = { ...DEFAULT_SETTINGS, review: 'off', askAgain: 'off', learnConventions: 'off' }
 
 export class RecordingSurface implements Surface {
   readonly statuses: AgentStatus[] = []
@@ -205,6 +205,8 @@ export interface HarnessOptions {
   /** Answers the commands the assessor cannot prove read-only, under Auto review. */
   reviewer?: AutoReviewer
   requests?: () => readonly string[]
+  /** Lines already offered for the instructions file (ADR 0097). */
+  suggested?: () => readonly string[]
 }
 
 export async function loopHarness(options: HarnessOptions): Promise<Harness> {
@@ -238,6 +240,7 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     ...(options.preface ? { preface: options.preface } : {}),
     ...(options.reviewer ? { reviewer: options.reviewer } : {}),
     ...(options.requests ? { requests: options.requests } : {}),
+    ...(options.suggested ? { suggested: options.suggested } : {}),
     services: {
       root,
       home: os.homedir(),

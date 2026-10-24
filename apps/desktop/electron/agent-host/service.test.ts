@@ -18,6 +18,8 @@ const config: HostConfig = {
   guide: 'auto',
   checkGate: 'auto',
   reviewWork: 'auto',
+  askAgain: 'on',
+  learnConventions: 'on',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

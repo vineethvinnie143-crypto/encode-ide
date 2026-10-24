@@ -105,6 +105,8 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Language servers', `${settings.languageServers ? 'on' : 'off'}, errors before finishing ${settings.errorGate}`],
     ['Checks before finishing', settings.checkGate],
     ['Reviewer before finishing', settings.reviewWork],
+    ['Hard-to-undo commands asked again', settings.askAgain],
+    ['Offer what a request taught', settings.learnConventions],
     ['Suggestions as you type', `${settings.inlineSuggest}, ${inlineState(settings).on ? 'on' : 'off'}`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],

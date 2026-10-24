@@ -19,4 +19,9 @@ describe('what Auto review says about a step', () => {
     assert.equal(reviewLine({ by: 'reviewer', verdict: 'approved', reason: '  ' }), 'Approved by the Reviewer')
     assert.equal(reviewLine({ by: 'reviewer', verdict: 'asked', reason: '' }), 'The Reviewer leaves this to you')
   })
+
+  it('says when the agent\'s model was asked again before a hard-to-undo command', () => {
+    assert.equal(reviewLine({ by: 'second-look', verdict: 'approved', reason: 'You asked to delete the old build.' }), 'Checked again before it ran: You asked to delete the old build.')
+    assert.equal(reviewLine({ by: 'second-look', reason: 'Nothing you asked needs a force push.' }), 'Asked again before it ran, the model did not confirm it: Nothing you asked needs a force push.')
+  })
 })

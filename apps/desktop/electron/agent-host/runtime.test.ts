@@ -79,6 +79,8 @@ function config(patch: { model?: HostConfig['model']; keyRevision?: number | nul
     guide: 'auto',
     checkGate: 'auto',
     reviewWork: 'auto',
+    askAgain: 'on',
+    learnConventions: 'on',
     model: patch.model ?? 'router',
     router: {
       providers: { 'p-local': { type: 'openai-compatible', baseUrl, needsKey: patch.keyRevision !== null, free: patch.free ?? true } },

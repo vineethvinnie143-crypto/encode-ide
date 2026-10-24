@@ -7,7 +7,7 @@ import { cleanKeybindings } from '../../shared/keybindings'
 import { isInlineSuggest } from '../../shared/inline'
 import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
-import type { AgentMode, ApprovalPolicy, CheckGate, ErrorGate, FollowUp, Guide, ModelProfile, NotifyWhen, ProfileKind, ReviewWork, SendKey, Settings } from '../../shared/types'
+import type { AgentMode, ApprovalPolicy, AskAgain, CheckGate, LearnConventions, ErrorGate, FollowUp, Guide, ModelProfile, NotifyWhen, ProfileKind, ReviewWork, SendKey, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -58,6 +58,8 @@ function defaults(): StoredSettings {
     guide: 'auto',
     checkGate: 'auto',
     reviewWork: 'auto',
+    askAgain: 'on',
+    learnConventions: 'on',
     notifyDone: 'background',
     notifyNeeds: 'background',
     flashTaskbar: true,
@@ -87,6 +89,8 @@ const isErrorGate = (value: unknown): value is ErrorGate => value === 'auto' || 
 const isGuide = (value: unknown): value is Guide => value === 'auto' || value === 'full'
 const isCheckGate = (value: unknown): value is CheckGate => value === 'auto' || value === 'on' || value === 'off'
 const isReviewWork = (value: unknown): value is ReviewWork => value === 'auto' || value === 'on' || value === 'off'
+const isAskAgain = (value: unknown): value is AskAgain => value === 'on' || value === 'off'
+const isLearnConventions = (value: unknown): value is LearnConventions => value === 'on' || value === 'off'
 
 /** The longest folder path kept for chats; Windows' own limit for most programs is 260 characters. */
 const MAX_FOLDER_LENGTH = 1024
@@ -269,6 +273,8 @@ export class SettingsService {
       guide: isGuide(input.guide) ? input.guide : base.guide,
       checkGate: isCheckGate(input.checkGate) ? input.checkGate : base.checkGate,
       reviewWork: isReviewWork(input.reviewWork) ? input.reviewWork : base.reviewWork,
+      askAgain: isAskAgain(input.askAgain) ? input.askAgain : base.askAgain,
+      learnConventions: isLearnConventions(input.learnConventions) ? input.learnConventions : base.learnConventions,
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
       flashTaskbar: typeof input.flashTaskbar === 'boolean' ? input.flashTaskbar : base.flashTaskbar,
@@ -320,6 +326,8 @@ export class SettingsService {
       guide: this.data.guide,
       checkGate: this.data.checkGate,
       reviewWork: this.data.reviewWork,
+      askAgain: this.data.askAgain,
+      learnConventions: this.data.learnConventions,
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
       flashTaskbar: this.data.flashTaskbar,
@@ -408,6 +416,8 @@ export class SettingsService {
     if (isGuide(patch.guide)) next.guide = patch.guide
     if (isCheckGate(patch.checkGate)) next.checkGate = patch.checkGate
     if (isReviewWork(patch.reviewWork)) next.reviewWork = patch.reviewWork
+    if (isAskAgain(patch.askAgain)) next.askAgain = patch.askAgain
+    if (isLearnConventions(patch.learnConventions)) next.learnConventions = patch.learnConventions
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds
     if (typeof patch.flashTaskbar === 'boolean') next.flashTaskbar = patch.flashTaskbar

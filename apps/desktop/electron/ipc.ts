@@ -441,6 +441,9 @@ export function registerIpc(deps: IpcDeps): void {
   handle('agent:rewind-conversation', (sessionId: string, entryId: string) =>
     host.rewind(String(sessionId), String(entryId)).catch((error) => Promise.reject(hostFailure(error))),
   )
+  handle('agent:answer-suggestion', (sessionId: string, entryId: string, accept: boolean) =>
+    host.answerSuggestion(String(sessionId), String(entryId), accept === true).catch((error) => Promise.reject(hostFailure(error))),
+  )
   // The host writes the transcript; the save dialog and the file are the main process's.
   handle('agent:export', async (sessionId: string, targetPath?: string) =>
     exportSessionZip(await host.exportData(String(sessionId)), targetPath ? String(targetPath) : undefined),

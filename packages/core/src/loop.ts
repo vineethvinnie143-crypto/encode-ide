@@ -35,7 +35,7 @@ import {
   type ToolUseBlock,
   type UserBlock,
 } from '@encode/providers'
-import { screenCommand, type Screened } from '@encode/permissions'
+import { hardToUndo, screenCommand, type Screened } from '@encode/permissions'
 import {
   excerpt,
   isInsideReal,
@@ -43,6 +43,7 @@ import {
   realPathOf,
   loadedTools,
   truncateMiddle,
+  type AgentMode,
   type AgentShell,
   type BackgroundWork,
   type DesktopServices,
@@ -98,13 +99,15 @@ import {
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
-import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, type ProjectCheck, type ProjectChecks } from './checks'
+import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
+import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
+import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
 import { FailedCalls, mendedNote } from './repeats'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
@@ -215,6 +218,8 @@ export interface LoopOptions {
   reviewer?: AutoReviewer
   /** What the user asked recently, in their words, for the Reviewer. A subagent is given its parent's: its own prompt was written by a model. */
   requests?: () => readonly string[]
+  /** The lines already offered for the instructions file in this session, added or not (ADR 0097). */
+  suggested?: () => readonly string[]
   /** Messages the user sends while the turn runs; the main agent's only. */
   steers?: Steers
 }
@@ -247,10 +252,17 @@ interface FitOptions {
   instructions?: string
 }
 
-/** A command stopped for its time limit or interrupted: it says nothing of the code. */
 /** How long the Reviewer may take over a request's changes, and over a plan (ADR 0096). */
 const REVIEW_TIMEOUT_MS = 4 * 60_000
 const PLAN_TIMEOUT_MS = 2 * 60_000
+/** The second look before a hard-to-undo command: an answer of a line, and not long to wait for (ADR 0097). */
+const SECOND_LOOK_TIMEOUT_MS = 60_000
+const SECOND_LOOK_TOKENS = 4_000
+/** What a request taught (ADR 0097): a few lines from the Small jobs model, after the answer. */
+const CONVENTIONS_TIMEOUT_MS = 30_000
+const CONVENTIONS_TOKENS = 2_000
+const MAX_LESSONS = 5
+/** A command stopped for its time limit or interrupted: it says nothing of the code. */
 const ENDED_EARLY = /The command ran longer than \d+ s and was stopped\.|The command was interrupted\./
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
@@ -407,6 +419,13 @@ export class AgentLoop {
   private reviewed = false
   private planCritiqued = false
   private scanNotes: ScanFinding[] = []
+  /** Once a request (ADR 0097): the agent was told to write the tests first; the request wrote a test file. */
+  private testsFirstSaid = false
+  private wroteTest = false
+  /** What the request taught (ADR 0097): commands that failed and what worked after; whether it ended on an answer and was offered. */
+  private lessons: Lesson[] = []
+  private answered = false
+  private offered = false
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
@@ -467,6 +486,11 @@ export class AgentLoop {
     this.reviewed = false
     this.planCritiqued = false
     this.scanNotes = []
+    this.testsFirstSaid = false
+    this.wroteTest = false
+    this.lessons = []
+    this.offered = false
+    this.answered = false
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -502,6 +526,7 @@ export class AgentLoop {
           continue
         }
         if (await steered()) continue
+        this.answered = true
         return { kind: 'done', reply }
       }
 
@@ -530,7 +555,10 @@ export class AgentLoop {
         await o.conversation.add({ role: 'user', content }, { turnId: turn.turnId })
       }
       if (state.mode) mode = state.mode
-      if (state.stop !== undefined) return { kind: 'stopped', summary: state.stop }
+      if (state.stop !== undefined) {
+        if (state.stopBy === 'attempt_completion') this.answered = true
+        return { kind: 'stopped', summary: state.stop }
+      }
     }
     return { kind: 'max-steps', steps: maxSteps }
   }
@@ -971,6 +999,7 @@ export class AgentLoop {
     let grant: string | undefined
     let always: AlwaysAllow | undefined
     let passedOn: ApprovalPrompt['review']
+    let byReviewer = false
     if (verdict.kind === 'ask') {
       ask = pre?.decision === 'allow' ? undefined : verdict.reason
       // A hook that asked wants to see each call.
@@ -995,6 +1024,7 @@ export class AgentLoop {
       const reviewed = await this.review(access, { tool: block.name, reason: verdict.reason, grant }, entry, turn)
       if (reviewed.outcome === 'approved') {
         ask = undefined
+        byReviewer = true
         entry.tool = { ...entry.tool!, state: 'running', review: { by: 'reviewer', verdict: 'approved', risk: 'low', reason: reviewed.reason } }
         o.surface.update(entry)
       } else if (reviewed.outcome === 'declined') {
@@ -1003,6 +1033,15 @@ export class AgentLoop {
       } else {
         passedOn = { by: reviewed.by, reason: reviewed.reason }
         entry.tool = { ...entry.tool!, review: { by: reviewed.by, verdict: 'asked', reason: reviewed.reason } }
+      }
+    }
+
+    // A command that is hard to undo and would run unseen: the agent's model is asked about it once more (ADR 0097).
+    if (ask === undefined && !byReviewer && !own && access.type === 'command') {
+      const doubted = await this.secondLook(access, entry, turn)
+      if (doubted) {
+        ask = doubted.ask
+        passedOn = doubted.review
       }
     }
 
@@ -1098,6 +1137,53 @@ export class AgentLoop {
     return { outcome: 'person', by: 'reviewer', reason: review.reason }
   }
 
+  /**
+   * Once more before a command that is hard to undo runs unseen: the agent's model, asked in other words with only the
+   * person's requests, must say again that it should run. When it does not, or cannot be read, the person decides.
+   */
+  private async secondLook(
+    access: Extract<ToolAccess, { type: 'command' }>,
+    entry: ConversationEntry,
+    turn: Turn,
+  ): Promise<{ ask: string; review: NonNullable<ApprovalPrompt['review']> } | null> {
+    const { o } = this
+    if ((o.settings().askAgain ?? 'on') === 'off') return null
+    const root = o.services.root
+    const why = hardToUndo(access.command, {
+      root,
+      cwd: access.cwd,
+      home: o.services.home,
+      dialect: o.services.shell.state().dialect,
+      platform: o.services.platform === 'win32' ? 'win32' : 'posix',
+      extraRoots: o.extraRoots?.() ?? [],
+    })
+    if (!why) return null
+    entry.tool = { ...entry.tool!, state: 'reviewing' }
+    o.surface.update(entry)
+    const answer = await askReviewer(o.client, {
+      system: SECOND_LOOK_SYSTEM,
+      prompt: secondLookPrompt({ requests: o.requests?.() ?? [], command: access.command, cwd: access.cwd === root ? '.' : relativeToRoot(root, access.cwd, o.services.platform), why }),
+      tool: 'SecondLook',
+      role: o.role,
+      maxOutputTokens: SECOND_LOOK_TOKENS,
+      ...(o.services.sessionId ? { sticky: o.services.sessionId } : {}),
+      signal: turn.signal,
+      timeoutMs: SECOND_LOOK_TIMEOUT_MS,
+    })
+    entry.tool = { ...entry.tool!, state: 'running' }
+    if (answer.ok) o.surface.usage(answer.usage)
+    const looked = answer.ok ? parseSecondLook(answer.text) : undefined
+    if (looked?.run) {
+      entry.tool = { ...entry.tool!, review: { by: 'second-look', verdict: 'approved', reason: looked.reason || `it ${why}, and the request asks for it` } }
+      o.surface.update(entry)
+      return null
+    }
+    const reason = looked ? looked.reason || 'The model would not run it.' : answer.ok ? "eNCode could not read the model's answer." : `The model could not be asked: ${lowerFirst(answer.why.replace(/\.$/, ''))}.`
+    entry.tool = { ...entry.tool!, review: { by: 'second-look', verdict: 'asked', reason } }
+    o.surface.update(entry)
+    return { ask: `This command ${why}. Asked again before it ran, the agent's model did not confirm it.`, review: { by: 'second-look', reason } }
+  }
+
   /** What the person should know before approving: hidden or look-alike characters in what the call adds or runs. */
   private warningsFor(access: ToolAccess, preview: DiffHunk[] | undefined): string[] | undefined {
     const lines: string[] = []
@@ -1170,6 +1256,7 @@ export class AgentLoop {
       o.services.codeMap?.changed?.(file)
     }
     this.noteForChecks(block.name, input, outcome, output)
+    if (!own && block.name === 'Bash' && typeof input.command === 'string') this.noteLesson(input.command, outcome.ok, output)
     if (this.edits) {
       if (outcome.changed?.length) await this.edits.after(outcome.changed, existed ?? new Set())
       else if (outcome.ok && block.name === 'Read' && access.type === 'read') this.edits.read(access.paths)
@@ -1180,7 +1267,68 @@ export class AgentLoop {
       if (block.name === 'attempt_completion') o.surface.settle(o.surface.entry({ kind: 'assistant', text: outcome.stop.summary }))
     }
     if (outcome.mode) state.mode = outcome.mode
+    if (!own && outcome.ok) {
+      const first = await this.testsFirst(block.name, input, outcome, state.mode ?? turn.mode)
+      if (first) state.context.push(first)
+    }
     this.checkAbort(turn.signal)
+  }
+
+  /** A command that failed is kept with its error, and the next one that works is what the agent learned from it. */
+  private noteLesson(command: string, ok: boolean, output: string): void {
+    if (!ok) {
+      if (this.lessons.length < MAX_LESSONS && !this.lessons.some((lesson) => lesson.command === command)) this.lessons.push({ command, error: output.slice(-600) })
+      return
+    }
+    const open = [...this.lessons].reverse().find((lesson) => !lesson.then)
+    if (open && open.command !== command) open.then = command
+  }
+
+  /**
+   * Once a request, after the answer, when it set a rule for later ("always use pnpm") or a command failed and another
+   * worked after it: the Small jobs model writes what that taught, and the person may add it to the project's
+   * instructions file (ADR 0097). Nothing is written here. The session calls it once the turn is over, so nobody waits
+   * on it, and stops it when the next request starts.
+   */
+  async offerConventions(signal: AbortSignal): Promise<void> {
+    const { o } = this
+    if (o.agentId !== 'main' || !this.answered || this.offered || signal.aborted || (o.settings().learnConventions ?? 'on') === 'off') return
+    const messages = (o.requests?.() ?? []).slice(-1)
+    const lessons = this.lessons.filter((lesson) => lesson.then)
+    if (!messages.some(teaches) && !lessons.length) return
+    this.offered = true
+    const { file, text } = await instructionsAt(o.services.root)
+    const answer = await askReviewer(o.client, {
+      system: CONVENTIONS_SYSTEM,
+      prompt: conventionsPrompt({ messages, lessons, file, instructions: text }),
+      tool: 'Conventions',
+      role: 'utility',
+      maxOutputTokens: CONVENTIONS_TOKENS,
+      ...(o.services.sessionId ? { sticky: o.services.sessionId } : {}),
+      signal,
+      timeoutMs: CONVENTIONS_TIMEOUT_MS,
+    })
+    if (!answer.ok || signal.aborted) return
+    o.surface.usage(answer.usage)
+    const offered = new Set((o.suggested?.() ?? []).map((line) => line.toLowerCase()))
+    const lines = parseConventions(answer.text, text)?.filter((line) => !offered.has(line.toLowerCase()))
+    if (!lines?.length || signal.aborted) return
+    o.surface.settle(o.surface.entry({ kind: 'notice', text: `Keep what this request taught in ${file}?`, suggestion: { file, lines, state: 'open' } }))
+  }
+
+  /**
+   * Once a request, when bigger work starts (a plan the person approved, or a task list of three steps or more) in a
+   * project with tests and before any test changed: the agent is told to write the tests first (ADR 0097).
+   */
+  private async testsFirst(name: string, input: Record<string, unknown>, outcome: ToolOutcome, mode: AgentMode): Promise<string | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.testsFirstSaid || this.wroteTest || mode !== 'code' || (o.settings().checkGate ?? 'auto') === 'off') return null
+    const bigger = (name === 'ExitPlanMode' && outcome.mode === 'code') || (name === 'TodoWrite' && Array.isArray(input.todos) && input.todos.length >= 3)
+    if (!bigger || !o.services.checks) return null
+    const test = (await o.services.checks.list().catch(() => [] as ProjectCheck[])).find((check) => check.kind === 'test')
+    if (!test) return null
+    this.testsFirstSaid = true
+    return testsFirstReminder(test.command)
   }
 
   /** Live output of a long call, shown on its card at most every 80 ms. */
@@ -1282,6 +1430,7 @@ export class AgentLoop {
     const ledger = this.o.services.checks?.ledger
     if (!ledger) return
     if (outcome.changed?.length) ledger.wrote()
+    if (outcome.changed?.some(isTestPath)) this.wroteTest = true
     if (outcome.changed?.some(isCodePath)) ledger.changed()
     if (name === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && !ENDED_EARLY.test(output)) ledger.ran(input.command, outcome.ok, output)
   }

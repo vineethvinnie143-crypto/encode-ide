@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
-import type { CheckGate, ReviewWork, Settings } from '@shared/types'
+import type { AskAgain, CheckGate, LearnConventions, ReviewWork, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
@@ -21,6 +21,16 @@ const CHECK_GATES: SegmentedOption<CheckGate>[] = [
 const REVIEW_WORK: SegmentedOption<ReviewWork>[] = [
   { value: 'auto', label: 'Smaller models' },
   { value: 'on', label: 'Always' },
+  { value: 'off', label: 'Never' },
+]
+
+const ASK_AGAIN: SegmentedOption<AskAgain>[] = [
+  { value: 'on', label: 'Ask the model again' },
+  { value: 'off', label: 'Run as allowed' },
+]
+
+const LEARN: SegmentedOption<LearnConventions>[] = [
+  { value: 'on', label: 'Offer to keep' },
   { value: 'off', label: 'Never' },
 ]
 
@@ -85,6 +95,13 @@ export function AgentSection({ settings }: { settings: Settings }) {
             ))}
           </div>
         </div>
+        <SettingRow
+          id="agent.askAgain"
+          label="Before a command that is hard to undo"
+          help="When a command that deletes recursively, discards uncommitted work, pushes, publishes, deploys or drops data would run without you seeing it (Full access, or a rule allows it), the agent's model is asked about it once more, with only your requests to go on. If it does not confirm, you decide. Each check is one short call to that model."
+        >
+          <Segmented label="Before a command that is hard to undo" value={settings.askAgain} options={ASK_AGAIN} onChange={(askAgain) => void save({ askAgain })} />
+        </SettingRow>
       </SettingsGroup>
 
       {settings.computerSupported && (
@@ -120,7 +137,7 @@ export function AgentSection({ settings }: { settings: Settings }) {
         <SettingRow
           id="agent.checks"
           label="Check the agent's work before it finishes"
-          help="When a request changed code, eNCode runs the project's typecheck and tests (from package.json, Cargo.toml, go.mod or pytest's settings, or the checks list in .encode/settings.json) and sends the agent back for what its changes broke; failures that were there before are left alone. Each run needs what the agent's own command would. It also reads the lines the agent added for common security bugs (keys in code, SQL or commands built from values, FiveM events that trust what the client sends) and checks the reply: a claim that the tests pass with no passing run, a file that is not there, or a name a file does not hold sends the agent back once."
+          help="When a request changed code, eNCode runs the project's typecheck and tests (from package.json, Cargo.toml, go.mod or pytest's settings, or the checks list in .encode/settings.json) and sends the agent back for what its changes broke; failures that were there before are left alone. Each run needs what the agent's own command would. It also reads the lines the agent added for common security bugs (keys in code, SQL or commands built from values, FiveM events that trust what the client sends) and checks the reply: a claim that the tests pass with no passing run, a file that is not there, or a name a file does not hold sends the agent back once. When bigger work starts in a project with tests, the agent is told to write the tests first."
         >
           <Segmented label="Check the agent's work before it finishes" value={settings.checkGate} options={CHECK_GATES} onChange={(checkGate) => void save({ checkGate })} />
         </SettingRow>
@@ -130,6 +147,13 @@ export function AgentSection({ settings }: { settings: Settings }) {
           help="The model of the Review role reads each finished change against your request, and each plan, before you do. What holds up the work, and cases no test covers when the project has tests, go back to the agent once. Smaller models: for models that need the full guide, or whenever the Review role has a model of its own. It sends the change to that model, and its answer adds to what the request costs."
         >
           <Segmented label="Have the Reviewer read the agent's work" value={settings.reviewWork} options={REVIEW_WORK} onChange={(reviewWork) => void save({ reviewWork })} />
+        </SettingRow>
+        <SettingRow
+          id="agent.learnConventions"
+          label="Keep what a request taught"
+          help="After a request where you set a rule (“always use pnpm”) or a command failed and another worked, the model of the Small jobs role writes up to three lines for the project's instructions file: ENCODE.md, or the AGENTS.md or CLAUDE.md the project already has. They show below the answer, and nothing is written until you click Add. Each offer is one short call to that model, with your messages and the failed commands."
+        >
+          <Segmented label="Keep what a request taught" value={settings.learnConventions} options={LEARN} onChange={(learnConventions) => void save({ learnConventions })} />
         </SettingRow>
       </SettingsGroup>
 

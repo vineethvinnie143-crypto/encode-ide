@@ -317,6 +317,17 @@ export interface ProjectChecks {
 const shown = (items: readonly string[], most = 8) =>
   items.length > most ? `${items.slice(0, most).join('; ')}; and ${items.length - most} more` : items.join('; ')
 
+/** What the agent is told when bigger work starts in a project with tests, before any test changed (ADR 0097). */
+export function testsFirstReminder(command: string): string {
+  return [
+    `This is bigger work, and the project has tests (\`${command}\`). Write the tests first:`,
+    '- add or change tests for what this work adds or fixes, the edge cases with it;',
+    '- run them, and see the new ones fail for the reason you expect;',
+    '- then change the code until they pass, and run the whole suite once at the end.',
+    'Leave out a part that cannot be tested, and say so in your reply.',
+  ].join('\n')
+}
+
 /**
  * How a failing check compares with its last run before the request: what is new is the agent's to fix. Undefined
  * when every failure was there before, so the agent is not sent back for them.

@@ -71,6 +71,7 @@ import type { AgentHooks, NotificationKind, SessionEndEvent } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import type { OutputStore } from './outputs'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
+import { saveConventions } from './conventions'
 import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
@@ -105,6 +106,7 @@ import {
   type RuleScope,
   type SessionGoal,
   type SessionSummary,
+  type SuggestionOutcome,
   type TodoItem,
   type TurnChangeSet,
   type ChangeVersion,
@@ -406,6 +408,10 @@ export class AgentSession {
   private provisionalTitle: string | null = null
   private naming: Promise<void> = Promise.resolve()
   private readonly namingController = new AbortController()
+  /** What a request taught, offered after it in the background (ADR 0097); the next request or the close stops it. */
+  private learning: Promise<void> = Promise.resolve()
+  private learningController = new AbortController()
+  private readonly answering = new Set<string>()
   private goalState: SessionGoal | null = null
   private todoList: TodoItem[] = []
   private planState: PlanRequest | null = null
@@ -1286,7 +1292,8 @@ export class AgentSession {
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
       refresh: this.refreshRules,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
-      ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
+      ...(this.reviewer ? { reviewer: this.reviewer } : {}),
+      requests: this.recentRequests,
       pool: this.pool,
     })
     // A subagent the agent stops itself (KillShell) needs no notice that it stopped.
@@ -1318,6 +1325,7 @@ export class AgentSession {
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
       ...(this.reviewer ? { reviewer: this.reviewer } : {}),
       requests: this.recentRequests,
+      suggested: this.suggestedLines,
       preface: this.preface,
       steers: this.steering,
     })
@@ -1365,6 +1373,9 @@ export class AgentSession {
   }
 
   /** What the user last asked, in their own words: what the Reviewer measures a command against. */
+  /** Every line offered for the instructions file in this conversation, so none is offered twice (ADR 0097). */
+  private readonly suggestedLines = (): string[] => this.entries.flatMap((entry) => entry.suggestion?.lines ?? [])
+
   private readonly recentRequests = (): string[] => {
     const requests: string[] = []
     for (let index = this.messages.length - 1; index >= 0 && requests.length < 3; index--) {
@@ -1603,6 +1614,7 @@ export class AgentSession {
     const controller = new AbortController()
     this.controller = controller
     this.stopIdleTimer()
+    this.learningController.abort()
     // The shell is back in the worktree the log names before the first command runs.
     const running = this.worktreeSettled.then(() => run(controller))
     this.current = running.catch(() => undefined)
@@ -1662,7 +1674,10 @@ export class AgentSession {
       const end = await loop.run({ turnId, mode, signal })
       this.finishStreaming()
       this.conclude(end)
-      if (end.kind === 'done' || end.kind === 'stopped') this.naming = this.nameSession(text).catch(() => undefined)
+      if (end.kind === 'done' || end.kind === 'stopped') {
+        this.naming = this.nameSession(text).catch(() => undefined)
+        this.learnFrom(loop)
+      }
       return end
     } catch (error) {
       return this.broken(error, signal)
@@ -1681,10 +1696,17 @@ export class AgentSession {
       const end = await loop.run({ turnId, mode, signal })
       this.finishStreaming()
       this.conclude(end)
+      if (end.kind === 'done' || end.kind === 'stopped') this.learnFrom(loop)
       return end
     } catch (error) {
       return this.broken(error, signal)
     }
+  }
+
+  private learnFrom(loop: AgentLoop): void {
+    const controller = new AbortController()
+    this.learningController = controller
+    this.learning = loop.offerConventions(controller.signal).catch(() => undefined)
   }
 
   /** A request that ended on something thrown: the person stopped it, or a fault the chat shows plainly. */
@@ -1783,6 +1805,7 @@ export class AgentSession {
 
   private abortTurn(): void {
     this.controller?.abort()
+    this.learningController.abort()
     // Stopping hands the mouse and keyboard back at once; the next call takes them again.
     this.desktop?.backend.dispose().catch(() => undefined)
   }
@@ -2172,6 +2195,7 @@ export class AgentSession {
   private async holding<T>(work: () => Promise<T>): Promise<T> {
     const hold = new AbortController()
     this.controller = hold
+    this.learningController.abort()
     try {
       return await work()
     } finally {
@@ -2385,6 +2409,37 @@ export class AgentSession {
     return this.naming
   }
 
+  /**
+   * The person's answer to lines offered for the project's instructions file (ADR 0097): Add writes them under its
+   * Conventions heading, Dismiss only closes the card. Either way the card keeps its lines, so they are not offered again.
+   */
+  async answerSuggestion(entryId: string, accept: boolean): Promise<SuggestionOutcome> {
+    const entry = this.entries.find((candidate) => candidate.id === entryId)
+    const suggestion = entry?.suggestion
+    if (!entry || suggestion?.state !== 'open' || this.answering.has(entryId)) return { ok: false, error: 'This suggestion was already answered.' }
+    if (!accept) {
+      entry.suggestion = { ...suggestion, state: 'dismissed' }
+      this.settleEntry(entry)
+      return { ok: true }
+    }
+    if (!this.env.root) return { ok: false, error: 'This chat has no project folder to keep it in.' }
+    this.answering.add(entryId)
+    try {
+      const saved = await saveConventions(this.env.root, suggestion.lines)
+      if (!saved.ok) return saved
+      entry.suggestion = { ...suggestion, file: saved.file, state: 'saved' }
+      this.settleEntry(entry)
+      return { ok: true, file: saved.file }
+    } finally {
+      this.answering.delete(entryId)
+    }
+  }
+
+  /** Resolves once what the last request taught was offered, or found nothing to offer (ADR 0097); for tests. */
+  learned(): Promise<void> {
+    return this.learning
+  }
+
   /** Stops the session and closes its log. Everyone who asks waits for the same close; the first says why it ends. */
   dispose(ending: SessionEnding = 'closed'): Promise<void> {
     this.disposing ??= this.shutdown(ending)
@@ -2394,6 +2449,8 @@ export class AgentSession {
   private async shutdown(ending: SessionEnding): Promise<void> {
     this.abortTurn()
     this.namingController.abort()
+    this.learningController.abort()
+    await this.learning
     this.stopIdleTimer()
     await this.stopBackground(true)
     await this.idle()
