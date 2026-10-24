@@ -5052,6 +5052,58 @@ async function runReviewChecks() {
 }
 
 /**
+ * A worktree from the chat (ADR 0105), on the repository the review checks made: /worktree moves the session into one,
+ * its chip's menu brings what it changed into the project and removes it, after asking, with the work in it; /local
+ * takes the session back and leaves the worktree where it is.
+ */
+async function runChatWorktreeChecks() {
+  console.log('[smoke] --- worktrees from the chat ---')
+  const git = (...args) => execFileSync('git', args, { cwd: demoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
+  const chip = "document.querySelector('.session-header .ui-chip.tone-accent')?.textContent ?? ''"
+  const folder = (name) => path.join(demoPath, '.encode-worktrees', name)
+  // Run on its own (ENCODE_SMOKE_ONLY=worktree), the folder is not a repository yet.
+  if (!(await fs.stat(path.join(demoPath, '.git')).catch(() => null))) {
+    git('init', '-q')
+    git('config', 'user.name', 'eNCode smoke')
+    git('config', 'user.email', 'smoke@example.com')
+    git('config', 'commit.gpgsign', 'false')
+    git('add', '-A')
+    git('commit', '-q', '--no-verify', '-m', 'Baseline')
+  }
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('/worktree chat-a')
+  await waitFor(`(${chip}).includes('chat-a')`, 20000, 'the header shows the worktree')
+  if (!(await fs.stat(folder('chat-a')).catch(() => null))) throw new Error('/worktree made no worktree')
+  // What the agent would have done there: a new file, not committed.
+  await fs.writeFile(path.join(folder('chat-a'), 'src', 'from-worktree.ts'), 'export const fromWorktree = true\n')
+  const chooseFromChip = async (item) => {
+    if (!(await click('.session-header .ui-chip.tone-accent'))) throw new Error('The worktree chip is not a button')
+    await waitFor(menuOpen('Worktree'), 4000, 'the worktree menu')
+    if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`The worktree menu has no ${item}`)
+  }
+  await chooseFromChip('Bring changes into the project')
+  await until(async () => (await fs.readFile(path.join(demoPath, 'src', 'from-worktree.ts'), 'utf8').catch(() => '')).includes('fromWorktree'), 10000, 'the change is in the project')
+  await screenshot('ui-dark-chat-worktree.png')
+  await chooseFromChip('Remove the worktree…')
+  await waitFor("!!document.querySelector('.confirm-body')", 6000, 'removing asks first, since the worktree holds work')
+  if (!(await click('.btn.danger', 'Remove'))) throw new Error('The confirm dialog has no Remove')
+  await waitFor(`!(${chip}).includes('chat-a')`, 20000, 'the chip goes')
+  if (await fs.stat(folder('chat-a')).catch(() => null)) throw new Error('The worktree folder is still there')
+  if (git('branch', '--list', 'encode/chat-a').trim()) throw new Error('The worktree left its branch')
+
+  await sendPrompt('/worktree chat-b')
+  await waitFor(`(${chip}).includes('chat-b')`, 20000, 'the second worktree')
+  await sendPrompt('/local')
+  await waitFor(`!(${chip}).includes('chat-b')`, 20000, '/local takes the session back')
+  if (!(await fs.stat(folder('chat-b')).catch(() => null))) throw new Error('/local removed the worktree')
+  // Left as the review and best-of checks expect the repository: no worktree, and the brought file gone.
+  git('worktree', 'remove', '--force', folder('chat-b'))
+  git('branch', '-D', 'encode/chat-b')
+  await fs.rm(path.join(demoPath, 'src', 'from-worktree.ts'), { force: true })
+  console.log('[smoke] worktrees from the chat: entered, brought in, removed after asking, left with /local')
+}
+
+/**
  * Best of N (ADR 0098), on the repository the review checks made, their uncommitted change still in it: `/best 2`
  * makes two attempts in worktrees that hold that change too, each writes src/best.ts its own way and runs the demo's
  * tests, asked for under the card by attempt; the Reviewer picks the second; the project changes only on Keep, and
@@ -5734,7 +5786,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, panels: runPanelChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')
@@ -6053,6 +6105,7 @@ try {
   await runPanelChecks()
   await runReviewChecks()
   await runBestOfChecks()
+  await runChatWorktreeChecks()
   await runFontChecks()
   await runAppearanceChecks()
   await runDogfoodChecks()

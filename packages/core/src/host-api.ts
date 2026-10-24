@@ -28,6 +28,8 @@ import type {
   SessionUsage,
   SuggestionOutcome,
   BestOutcome,
+  WorktreeOutcome,
+  WorktreeRequest,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -66,6 +68,7 @@ export type HostRequests = {
   answerSuggestion: { params: { sessionId: string; entryId: string; accept: boolean }; result: SuggestionOutcome }
   /** `keep`: the attempt to keep, from 1; 0 discards them all (ADR 0098). */
   answerBest: { params: { sessionId: string; entryId: string; keep: number; force?: boolean }; result: BestOutcome }
+  worktree: { params: { sessionId: string; request: WorktreeRequest }; result: WorktreeOutcome }
   checkpoints: { params: { sessionId: string }; result: CheckpointInfo }
   rewindPlan: { params: { sessionId: string; turn: string }; result: RewindPlan }
   redoPlan: { params: { sessionId: string }; result: RewindPlan | null }
@@ -236,6 +239,16 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   rewind: object({ ...sessionId, entryId: id }, ['sessionId', 'entryId']),
   answerSuggestion: object({ ...sessionId, entryId: id, accept: { type: 'boolean' } }, ['sessionId', 'entryId', 'accept']),
   answerBest: object({ ...sessionId, entryId: id, keep: { type: 'integer', minimum: 0, maximum: 4 }, force: { type: 'boolean' } }, ['sessionId', 'entryId', 'keep']),
+  worktree: object(
+    {
+      ...sessionId,
+      request: object(
+        { action: { enum: ['enter', 'leave', 'remove', 'bring'] }, name: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, discard: { type: 'boolean' }, force: { type: 'boolean' } },
+        ['action'],
+      ),
+    },
+    ['sessionId', 'request'],
+  ),
   checkpoints: object(sessionId, ['sessionId']),
   rewindPlan: object({ ...sessionId, turn: id }, ['sessionId', 'turn']),
   redoPlan: object(sessionId, ['sessionId']),
@@ -287,6 +300,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('rewind', ({ sessionId, entryId }) => host.rewind(sessionId, entryId))
   on('answerSuggestion', ({ sessionId, entryId, accept }) => host.answerSuggestion(sessionId, entryId, accept))
   on('answerBest', ({ sessionId, entryId, keep, force }) => host.answerBest(sessionId, entryId, keep, force === true))
+  on('worktree', ({ sessionId, request }) => host.worktree(sessionId, request))
   on('checkpoints', ({ sessionId }) => host.checkpointInfo(sessionId))
   on('rewindPlan', ({ sessionId, turn }) => host.rewindPlan(sessionId, turn))
   on('redoPlan', ({ sessionId }) => host.redoPlan(sessionId))
@@ -343,6 +357,7 @@ export interface HostClient {
   rewind(sessionId: string, entryId: string): Promise<{ text: string }>
   answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome>
   answerBest(sessionId: string, entryId: string, keep: number, force?: boolean): Promise<BestOutcome>
+  worktree(sessionId: string, request: WorktreeRequest): Promise<WorktreeOutcome>
   checkpoints(sessionId: string): Promise<CheckpointInfo>
   rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
   redoPlan(sessionId: string): Promise<RewindPlan | null>
@@ -388,6 +403,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     rewind: (sessionId, entryId) => caller.request('rewind', { sessionId, entryId }),
     answerSuggestion: (sessionId, entryId, accept) => caller.request('answerSuggestion', { sessionId, entryId, accept }),
     answerBest: (sessionId, entryId, keep, force) => caller.request('answerBest', { sessionId, entryId, keep, ...(force ? { force: true } : {}) }),
+    worktree: (sessionId, request) => caller.request('worktree', { sessionId, request }),
     checkpoints: (sessionId) => caller.request('checkpoints', { sessionId }),
     rewindPlan: (sessionId, turn) => caller.request('rewindPlan', { sessionId, turn }),
     redoPlan: (sessionId) => caller.request('redoPlan', { sessionId }),

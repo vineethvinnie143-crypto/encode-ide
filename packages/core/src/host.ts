@@ -63,6 +63,8 @@ import type {
   SessionUsage,
   SuggestionOutcome,
   BestOutcome,
+  WorktreeOutcome,
+  WorktreeRequest,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -568,6 +570,11 @@ export class AgentHost {
   }
 
   /** Keeps one attempt of a best-of-N request (`keep` from 1), or discards them all (`keep` 0) (ADR 0098). */
+  /** What the person asks of a session's worktree from the chat (ADR 0105). */
+  async worktree(sessionId: string, request: WorktreeRequest): Promise<WorktreeOutcome> {
+    return (await this.open(sessionId)).worktreeAction(request)
+  }
+
   async answerBest(sessionId: string, entryId: string, keep: number, force = false): Promise<BestOutcome> {
     return (await this.open(sessionId)).answerBest(entryId, keep >= 1 ? Math.floor(keep) : 'discard', force)
   }

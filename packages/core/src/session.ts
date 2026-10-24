@@ -70,6 +70,7 @@ import {
   ATTEMPT_EXCLUDED,
   hasSeeding,
   keepAttempt,
+  copyChanges,
   onlyInside,
   removeAttempts,
   runBest,
@@ -115,6 +116,8 @@ import {
   type AskRequest,
   type BackgroundJob,
   type BestOutcome,
+  type WorktreeOutcome,
+  type WorktreeRequest,
   type CheckpointInfo,
   type ConversationEntry,
   type EntryBest,
@@ -2685,6 +2688,61 @@ export class AgentSession {
     } finally {
       this.keeping.delete(entryId)
     }
+  }
+
+  /**
+   * What the person asks of the session's worktree from the chat (ADR 0105): the same git work as the agent's
+   * EnterWorktree and ExitWorktree, and bringing the worktree's changes into the project folder. Not while a request
+   * runs: the shell would move under it. The model hears of it with the next request.
+   */
+  async worktreeAction(request: WorktreeRequest): Promise<WorktreeOutcome> {
+    if (this.controller) return { ok: false, error: 'eNCode is working on this session. Wait for it to finish, or stop it, first.' }
+    if (!this.env.worktrees || !this.env.root) return { ok: false, error: 'Worktrees are not available in this session: it has no project folder.' }
+    await this.worktreeSettled
+    const signal = AbortSignal.timeout(5 * 60_000)
+    const told = this.turn.worktree
+    if (request.action === 'enter') {
+      const name = request.name?.trim()
+      const entered = await this.worktreeTools.enter(name ? { name } : {}, signal)
+      if (!entered.ok) return { ok: false, error: entered.reason }
+      // The person did this, not the model: the next request tells the model where it works now.
+      this.turn.worktree = told
+      return { ok: true, worktree: this.shownWorktree() }
+    }
+    const worktree = this.worktree
+    if (!worktree) return { ok: false, error: 'This session works in the project folder, not in a worktree.' }
+    if (request.action === 'bring') {
+      const git = this.env.worktrees
+      if (!git.changes || !git.original) return { ok: false, error: 'This build cannot copy a worktree’s changes.' }
+      const copied = await copyChanges({
+        root: this.env.root,
+        git: { changes: git.changes, original: git.original },
+        worktree,
+        seed: { base: worktree.base, linked: [] },
+        force: request.force === true,
+        who: `the worktree ${worktree.name}`,
+        since: 'the worktree was made',
+        failed: 'The changes could not be brought in',
+        tag: 'worktree-bring',
+        turnId: 'worktree-bring',
+        signal,
+      })
+      if (!copied.ok) return copied
+      for (const file of copied.files) this.send({ type: 'file-changed', path: path.join(this.env.root, ...file.split('/')) })
+      if (copied.files.length) {
+        const list = copied.files.length > 20 ? `${copied.files.slice(0, 20).join(', ')} and ${copied.files.length - 20} more` : copied.files.join(', ')
+        this.deliver({
+          text: `The user copied what the worktree ${worktree.name} changed into the project folder ${this.env.root}: ${list}. You still work in the worktree.`,
+          line: `You brought ${copied.files.length === 1 ? 'one file' : `${copied.files.length} files`} into the project`,
+          wake: false,
+        })
+      }
+      return { ok: true, worktree: this.shownWorktree(), files: copied.files }
+    }
+    const left = await this.worktreeTools.exit({ action: request.action === 'remove' ? 'remove' : 'keep', discard: request.action === 'remove' && request.discard === true }, signal)
+    if (!left.ok) return { ok: false, error: left.reason, ...(left.work ? { work: left.work } : {}) }
+    this.turn.worktree = told
+    return { ok: true, worktree: null }
   }
 
   /** Resolves once what the last request taught was offered, or found nothing to offer (ADR 0097); for tests. */

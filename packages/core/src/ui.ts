@@ -133,6 +133,21 @@ export interface BestFile {
 /** What answering a best-of-N card did: the files the kept attempt changed, or why it could not. */
 export type BestOutcome = { ok: true; files?: string[] } | { ok: false; error: string; conflicts?: string[] }
 
+/** What the person asks of a session's worktree from the chat (ADR 0105). */
+export type WorktreeRequest =
+  /** Work in a new worktree of the project, named or not. */
+  | { action: 'enter'; name?: string }
+  /** Work in the project folder again; the worktree stays. */
+  | { action: 'leave' }
+  /** Work in the project folder again and remove the worktree; one with work in it only when `discard`. */
+  | { action: 'remove'; discard?: boolean }
+  /** Copy what the worktree changed into the project folder; files the project changed meanwhile only when `force`. */
+  | { action: 'bring'; force?: boolean }
+
+export type WorktreeOutcome =
+  | { ok: true; worktree: { name: string; branch: string; path: string } | null; files?: string[] }
+  | { ok: false; error: string; conflicts?: string[]; work?: { changed: string[]; commits: number } }
+
 /** What a request taught, offered for the instructions file the agent reads at the start of every session (ADR 0097). */
 export interface EntrySuggestion {
   /** The file, relative to the workspace: the instructions file the agent reads, or ENCODE.md when there is none. */

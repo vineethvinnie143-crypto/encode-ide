@@ -98,6 +98,75 @@ export const sessionActions = {
   },
 }
 
+const files = (count: number) => (count === 1 ? 'one file' : `${count} files`)
+
+/**
+ * A session's worktree from the chat (ADR 0105): work in a new one, in the project folder again, remove it, or copy
+ * what it changed into the project folder. Each says what happened, or why not.
+ */
+export const worktreeActions = {
+  async enter(session: SessionSummary, name?: string): Promise<void> {
+    try {
+      const outcome = await api.agent.worktree(session.id, { action: 'enter', ...(name ? { name } : {}) })
+      if (!outcome.ok) ui().notify('error', outcome.error)
+      else if (outcome.worktree) ui().notify('success', `This session works in the worktree ${outcome.worktree.name} now, on the branch ${outcome.worktree.branch}. Your checkout stays as it is.`)
+    } catch (error) {
+      ui().notify('error', errorText(error))
+    }
+  },
+  async leave(session: SessionSummary): Promise<void> {
+    try {
+      const outcome = await api.agent.worktree(session.id, { action: 'leave' })
+      if (!outcome.ok) ui().notify('error', outcome.error)
+      else ui().notify('success', `This session works in the project folder again. The worktree ${session.worktree ?? ''} stays; /worktree makes a new one.`.replace('  ', ' '))
+    } catch (error) {
+      ui().notify('error', errorText(error))
+    }
+  },
+  async remove(session: SessionSummary): Promise<void> {
+    try {
+      let outcome = await api.agent.worktree(session.id, { action: 'remove' })
+      if (!outcome.ok && outcome.work) {
+        const { changed, commits } = outcome.work
+        const holds = [changed.length ? `${files(changed.length)} not committed` : '', commits ? `${commits === 1 ? 'one commit' : `${commits} commits`} no other branch has` : ''].filter(Boolean).join(' and ')
+        const ok = await ui().askConfirm({
+          title: 'Remove the worktree with its work?',
+          body: `The worktree ${session.worktree ?? ''} holds ${holds}. Removing it deletes them. Bring its changes into the project first to keep them.`,
+          confirmLabel: 'Remove',
+          danger: true,
+        })
+        if (!ok) return
+        outcome = await api.agent.worktree(session.id, { action: 'remove', discard: true })
+      }
+      if (!outcome.ok) ui().notify('error', outcome.error)
+      else ui().notify('success', 'The worktree was removed. This session works in the project folder again.')
+    } catch (error) {
+      ui().notify('error', errorText(error))
+    }
+  },
+  async bring(session: SessionSummary): Promise<void> {
+    try {
+      let outcome = await api.agent.worktree(session.id, { action: 'bring' })
+      if (!outcome.ok && outcome.conflicts?.length) {
+        const shown = outcome.conflicts.slice(0, 5).join(', ') + (outcome.conflicts.length > 5 ? ` and ${outcome.conflicts.length - 5} more` : '')
+        const ok = await ui().askConfirm({
+          title: 'Write over your changes?',
+          body: `You changed ${shown} in the project after the worktree was made. Bringing the worktree's changes in writes over yours.`,
+          confirmLabel: 'Write over them',
+          danger: true,
+        })
+        if (!ok) return
+        outcome = await api.agent.worktree(session.id, { action: 'bring', force: true })
+      }
+      if (!outcome.ok) ui().notify('error', outcome.error)
+      else if (!outcome.files?.length) ui().notify('info', 'The worktree has no change the project folder does not have already.')
+      else ui().notify('success', `Brought ${files(outcome.files.length)} into the project folder. The worktree keeps its own copy.`)
+    } catch (error) {
+      ui().notify('error', errorText(error))
+    }
+  },
+}
+
 /** Words selected in the thread, which Ctrl+F looks for: one line, and not a whole page. */
 function threadSelection(): string | undefined {
   const selection = window.getSelection()

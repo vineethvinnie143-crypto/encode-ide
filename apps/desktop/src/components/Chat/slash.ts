@@ -5,7 +5,7 @@
 import { EFFORT_INFO, isEffort } from '@shared/models'
 import type { ReasoningEffort } from '@shared/types'
 import { agentActions } from '../../commands/agent'
-import { commandRegistry, sessionActions } from '../../commands/app'
+import { commandRegistry, sessionActions, worktreeActions } from '../../commands/app'
 import type { ScopeKind } from '../../stores/review'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
@@ -13,6 +13,10 @@ import { useUi } from '../../stores/ui'
 import type { SlashCommand } from './picker'
 
 const ui = () => useUi.getState()
+const activeSession = () => {
+  const { sessions, activeId } = useSessions.getState()
+  return sessions.find((session) => session.id === activeId)
+}
 const run = (id: string) => void commandRegistry.run(id)
 
 /** The effort `/effort` names: a level, as written or by its label ("extra high"); null for the model's default; undefined for words it does not know. */
@@ -99,10 +103,22 @@ export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Pro
   new: () => run('file.newSession'),
   fork: () => run('session.fork'),
   side: async (args) => {
-    const { sessions, activeId } = useSessions.getState()
-    const current = sessions.find((session) => session.id === activeId)
+    const current = activeSession()
     if (current) await sessionActions.side(current, args || undefined)
     else ui().notify('info', 'Open a session to start a side chat of it.')
+  },
+  worktree: async (args) => {
+    const current = activeSession()
+    if (!current) return ui().notify('info', 'Open a session to work in a worktree.')
+    if (current.worktree) return ui().notify('info', `This session works in the worktree ${current.worktree} already. /local takes it back to the project folder.`)
+    if (agentActions.isRunning()) return ui().notify('info', 'Wait until eNCode is done, then move it to a worktree.')
+    await worktreeActions.enter(current, args.trim() || undefined)
+  },
+  local: async () => {
+    const current = activeSession()
+    if (!current?.worktree) return ui().notify('info', 'This session works in the project folder already.')
+    if (agentActions.isRunning()) return ui().notify('info', 'Wait until eNCode is done, then take it back to the project folder.')
+    await worktreeActions.leave(current)
   },
   rename: async (args) => {
     const { activeId, rename } = useSessions.getState()

@@ -30,6 +30,7 @@ import type {
   ShellCreateOptions,
   ShellPromptInfo,
   TodoItem,
+  WorktreeRequest,
   ZoomAction,
 } from '../shared/types'
 
@@ -223,6 +224,7 @@ const api: EncodeApi = {
     remove: (sessionId: string) => invoke('agent:remove', sessionId),
     fork: (sessionId: string) => invoke('agent:fork', sessionId),
     side: (sessionId: string) => invoke('agent:side', sessionId),
+    worktree: (sessionId: string, request: WorktreeRequest) => invoke('agent:worktree', sessionId, request),
     rename: (sessionId: string, title: string) => invoke('agent:rename', sessionId, title),
     goal: (sessionId: string) => invoke('agent:goal', sessionId),
     setGoal: (sessionId: string, goal: SessionGoal | null) => invoke('agent:set-goal', sessionId, goal),
