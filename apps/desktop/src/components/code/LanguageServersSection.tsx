@@ -134,7 +134,10 @@ function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo
       )}
       {server.installed && !server.installing && (
         <div className="lsp-server-actions">
-          <span className="lsp-server-owned">Installed by eNCode, {server.installed}</span>
+          <span className="lsp-server-owned">
+            Installed by eNCode, {server.installed}
+            {server.runtime ? `, with its own ${server.runtime}` : ''}
+          </span>
           <Button size="sm" variant="ghost" icon={<Trash2 size={12} />} onClick={() => void useCode.getState().remove(server.id)}>
             Remove
           </Button>

@@ -123,8 +123,9 @@ function jdtlsLaunch(dir: string, context: LaunchContext): { file: string; args:
   const windows = context.platform === 'win32'
   const home = context.env.JAVA_HOME
   const fromHome = home ? path.join(home, 'bin', windows ? 'java.exe' : 'java') : null
-  const java = fromHome && fs.existsSync(fromHome) ? fromHome : context.which('java')
-  if (!java) return { missing: 'The Java language server needs Java 21 or newer, which was not found (JAVA_HOME, or java on the PATH). Install a JDK, such as Eclipse Temurin.' }
+  // eNCode's own copy first, when it fetched one (ADR 0114): it is known to be new enough.
+  const java = context.runtime?.program ?? (fromHome && fs.existsSync(fromHome) ? fromHome : context.which('java'))
+  if (!java) return { missing: "The Java language server needs Java 21 or newer, which was not found (JAVA_HOME, or java on the PATH). Choose Install in Settings > Language servers to have eNCode fetch it, or install a JDK such as Eclipse Temurin (adoptium.net)." }
   let launcher: string | undefined
   try {
     launcher = fs.readdirSync(path.join(dir, 'plugins')).find((name) => /^org\.eclipse\.equinox\.launcher_.*\.jar$/.test(name))
@@ -203,7 +204,29 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     candidates: [{ command: 'rust-analyzer', args: [] }],
     install: 'rustup component add rust-analyzer',
     markers: ['cargo.toml'],
-    installer: { kind: 'toolchain', program: 'rustup', args: ['component', 'add', 'rust-analyzer'], version: 'rustup', needs: 'Rust (rustup)' },
+    installer: {
+      kind: 'toolchain',
+      program: 'rustup',
+      args: ['component', 'add', 'rust-analyzer'],
+      version: 'rustup',
+      needs: 'Rust (rustup)',
+      // Without rustup, the server's own build from its releases, as editors bundle it (ADR 0114).
+      otherwise: {
+        kind: 'download',
+        from: 'github.com/rust-lang/rust-analyzer',
+        release: { github: 'rust-lang/rust-analyzer' },
+        assets: {
+          'win32-x64': { name: 'rust-analyzer-x86_64-pc-windows-msvc.zip', archive: 'zip', bin: 'rust-analyzer.exe' },
+          'win32-arm64': { name: 'rust-analyzer-aarch64-pc-windows-msvc.zip', archive: 'zip', bin: 'rust-analyzer.exe' },
+          'linux-x64': { name: 'rust-analyzer-x86_64-unknown-linux-gnu.gz', archive: 'gz', bin: 'rust-analyzer' },
+          'linux-arm64': { name: 'rust-analyzer-aarch64-unknown-linux-gnu.gz', archive: 'gz', bin: 'rust-analyzer' },
+          'darwin-x64': { name: 'rust-analyzer-x86_64-apple-darwin.gz', archive: 'gz', bin: 'rust-analyzer' },
+          'darwin-arm64': { name: 'rust-analyzer-aarch64-apple-darwin.gz', archive: 'gz', bin: 'rust-analyzer' },
+        },
+        args: [],
+        needs: 'cargo to read a whole Cargo project, which comes with Rust (https://rustup.rs)',
+      },
+    },
   },
   {
     id: 'go',
@@ -213,7 +236,7 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     candidates: [{ command: 'gopls', args: [] }],
     install: 'go install golang.org/x/tools/gopls@latest',
     markers: ['go.mod', 'go.work'],
-    installer: { kind: 'toolchain', program: 'go', args: ['install', 'golang.org/x/tools/gopls@v0.24.0'], env: { GOBIN: '{dir}' }, version: '0.24.0', needs: 'Go', bin: 'gopls' },
+    installer: { kind: 'toolchain', program: 'go', args: ['install', 'golang.org/x/tools/gopls@v0.24.0'], env: { GOBIN: '{dir}' }, version: '0.24.0', needs: 'Go', bin: 'gopls', runtime: 'go' },
     // gopls gives semantic tokens and hints only when asked to.
     settings: { gopls: { semanticTokens: true, hints: { assignVariableTypes: true, compositeLiteralFields: true, constantValues: true, functionTypeParameters: true, parameterNames: true, rangeVariableTypes: true } } },
   },
@@ -274,7 +297,7 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
       release: { version: '1.63.0', base: 'https://download.eclipse.org/jdtls/milestones/1.63.0/', sha256: { [JDTLS]: 'b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4' } },
       assets: Object.fromEntries(['win32-x64', 'win32-arm64', 'linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'].map((key) => [key, { name: JDTLS, archive: 'tar', bin: 'plugins' }])),
       args: [],
-      needs: 'Java 21 or newer',
+      runtime: 'java',
       launch: jdtlsLaunch,
     },
   },
@@ -285,7 +308,17 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     candidates: [{ command: 'csharp-ls', args: [] }],
     install: 'dotnet tool install --global csharp-ls',
     markers: ['*.csproj', '*.sln', '*.slnx', 'global.json'],
-    installer: { kind: 'toolchain', program: 'dotnet', args: ['tool', 'install', 'csharp-ls', '--version', '0.28.0', '--tool-path', '{dir}'], version: '0.28.0', needs: 'the .NET SDK', bin: 'csharp-ls' },
+    installer: {
+      kind: 'toolchain',
+      program: 'dotnet',
+      args: ['tool', 'install', 'csharp-ls', '--version', '0.28.0', '--tool-path', '{dir}'],
+      version: '0.28.0',
+      needs: 'the .NET SDK',
+      bin: 'csharp-ls',
+      runtime: 'dotnet',
+      // csharp-ls 0.28 is built for .NET 10: on a computer with only a newer .NET, it runs on that one.
+      launchEnv: { DOTNET_ROLL_FORWARD: 'Major', DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' },
+    },
   },
   {
     id: 'bash',

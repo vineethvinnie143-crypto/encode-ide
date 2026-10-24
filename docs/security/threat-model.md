@@ -1484,7 +1484,7 @@ the person not knowing what is about to happen.
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| I1 | A downloaded server is swapped on the way or at its source | npm packages are checked against the sha512 pinned when eNCode was built, from the registry's own integrity; JDT LS against a pinned sha256. A mismatch refuses the install and leaves nothing. Only `https`, only six named hosts, redirects followed by hand and each checked against the same list. | Mitigated |
+| I1 | A downloaded server is swapped on the way or at its source | npm packages are checked against the sha512 pinned when eNCode was built, from the registry's own integrity; JDT LS against a pinned sha256. A mismatch refuses the install and leaves nothing. Only `https`, only named hosts, each under the path it is used for (ADR 0114), redirects followed by hand and each checked against the same list. | Mitigated |
 | I2 | A GitHub release (Lua, clangd) is replaced by its own maintainers' compromised account | The file must match the sha256 GitHub publishes for it, and a release without one is refused; this proves the file is the one the release holds, not that the release is good. | Accepted (residual) |
 | I3 | An archive writes outside its folder (zip slip), through a link, or as a Windows device name | eNCode reads zip and tar itself and refuses the whole archive for an absolute path, a drive letter, `..`, `:`, a reserved device name, a trailing dot or space, control characters, a link or device entry, or two entries differing only in case. Files are written with `wx` into a new folder that must not exist, and each resolved path is checked to stay under it. Unit tests and a property over random trees and random damage check it. | Mitigated |
 | I4 | An archive or response exhausts the disk or memory (zip bomb, endless stream) | At most 400 MB downloaded (the declared length and the bytes counted), 40,000 files and 1 GB unpacked; inflate and gunzip stop at the limit; Zip64 and encrypted entries are refused. | Mitigated |
@@ -1516,6 +1516,39 @@ the person not knowing what is about to happen.
   runs however often it is asked, and a stopped one is not reported as a failure.
 - Desktop tests check the editor's offer, progress and labels. The packaged-program check in CI runs the built
   program as Node.js over stdin and stdout.
+
+## Toolchains a language server needs (ADR 0114)
+
+When the computer has no new enough .NET SDK, Go or Java, eNCode fetches one into `<tools>/runtimes/` after the person
+agrees, builds or starts the server with it, and removes it with the server. Rust without rustup takes rust-analyzer's
+own build. Assets: the person's computer (what runs, what is written where), the integrity of the toolchain that builds
+and runs a server, and the person's home folder and PATH.
+
+### Threats and controls
+
+| # | Threat | Control | Status |
+| --- | --- | --- | --- |
+| TC1 | A toolchain is swapped on the way or at its source | Go is pinned by version and sha256 per system. The .NET SDK must match the SHA-512 in Microsoft's release list and come from `builds.dotnet.microsoft.com/dotnet/`; Temurin must match the sha256 in Adoptium's list and its link must be Adoptium's own GitHub releases. A mismatch refuses the install and leaves nothing; the archive is hashed as it is written and checked before it is unpacked. | Mitigated |
+| TC2 | The release list itself is replaced (the maker's own service compromised) | The hash proves the file is the one the list names, not that the list is good, as for GitHub's digest (I2). Only `https`, and each host only under the path it is used for (`storage.googleapis.com` only under the Go proxy's own bucket). | Accepted (residual) |
+| TC3 | A huge or hostile archive exhausts memory or disk, or writes outside its folder | Downloads stream to a file with a per-toolchain cap (600 MB at most); a zip is unpacked from disk entry by entry, with the directory checked first against the path rules of I3, a file count and an unpacked size cap, and each entry's length and CRC checked; Zip64 and encryption are refused. A failure removes the partial folder and the download. | Mitigated |
+| TC4 | Checking the computer's toolchain runs something the project chose | The version checks (`dotnet --list-sdks`, `go env GOVERSION` with `GOTOOLCHAIN=local`, `java -version`) run the program found on the PATH (absolute entries only) or JAVA_HOME, without a shell, in eNCode's tools folder, never the project, with a 20-second limit and the agent's environment without secrets. They run when the person opens the install dialog. | Mitigated |
+| TC5 | eNCode's copy changes the computer beyond eNCode | Nothing is installed system-wide, no administrator is asked for, the PATH and the registry are not changed. Installer caches go to a folder removed when the install ends. Only the server's own process gets the toolchain's home and folder on its PATH. | Mitigated |
+| TC6 | A server runs on a toolchain other than the one it was built with, or on a missing one | The install marker names the toolchain copy; the server starts with it, and says to install again when it is gone instead of falling back to an unknown one. | Mitigated |
+| TC7 | The person agrees without knowing the size or source | The dialog names the toolchain, version, size (asked of the host when the list gives none), source and check, and that it is for the language server alone. | Mitigated |
+
+### Residual risks
+
+- **The .NET SDK and Java follow their makers' newest release** of a line, trusted through the hash published beside
+  it (TC2).
+- **A toolchain is a program like any other** once it runs: `go install` and `dotnet tool install` fetch packages from
+  their own registries (the Go proxy and checksum database, NuGet), as they would on the person's own toolchain (I5).
+
+### Verification
+
+- `runtimes.test.ts` covers TC1 (mismatch, a list naming another host), TC3 (nothing left after a refusal), TC4 (checks run
+  in the tools folder, `GOTOOLCHAIN=local`), TC5 (one `Path` key, caches removed), TC6 (the marker, the missing copy) and
+  TC7 (the plan's words and sizes). `archive.test.ts` covers `unpackZip` and `readGzip`. A real Go install from the
+  Go module proxy was run once from the build machine (ADR 0114).
 
 ## FiveM's Lua (Editor and language intelligence 8b)
 

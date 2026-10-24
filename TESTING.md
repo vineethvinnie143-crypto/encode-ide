@@ -521,8 +521,10 @@ one request, and anything left in `.encode-worktrees` afterwards.
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries
 none of them, but installs one with a click when you ask: TypeScript and JavaScript, Python (pyright), Bash and YAML
-need nothing else (no Node.js); Java needs Java 21 or newer; Lua and C/C++ come from their newest release; Go, C# and
-Rust use their own toolchain (`go`, `dotnet`, `rustup`), which must be installed. You can still install a server
+need nothing else (no Node.js); Lua and C/C++ come from their newest release. Go, C# and Java use their own toolchain
+(Go 1.21 or newer, the .NET SDK 10 or newer, Java 21 or newer): when the computer has none new enough, eNCode fetches one
+into its own folder for the server alone, after you say yes, with no administrator prompt and no change to the PATH.
+Rust uses `rustup` when it is there, and rust-analyzer's own build when it is not. You can still install a server
 yourself; one on the PATH or in the project wins over eNCode's.
 
 **Settings → Language servers** lists every language eNCode knows, the ones this folder uses first (with how many of its
@@ -541,7 +543,19 @@ dialog that does not say clearly what will happen):
 - In Settings, a server eNCode installed says "Installed by eNCode" with its version and **Remove**, which asks first.
   After Remove the server stops and the file shows "not installed" again.
 - With no network, Install says why it failed and **Try again** retries.
-- For Go, C# or Rust without the toolchain, the dialog says what is needed instead of an Install button.
+- **Toolchains (C#, Go, Java, Rust)** on a computer without them: open Settings → Language servers and click
+  **Install…** on C#. The dialog says it downloads the .NET SDK (about 300 MB) from Microsoft, checked against the hash
+  Microsoft publishes, then runs `dotnet tool install`, and that nothing is installed for the whole computer. Click
+  **Install**: no administrator prompt, a progress bar, then "Installed by eNCode, 0.28.0, with its own .NET SDK
+  10.0.x". Open a `.cs` file in a project with a `.csproj`: marks and completion appear (the first load of a project
+  takes a while). Go (Go 1.27.3, about 73 MB) and Java (Temurin, about 55 MB) work the same way. Java that was
+  installed earlier but says it needs Java 21: **Install…** again fetches only Java. Rust without rustup downloads
+  rust-analyzer itself (a whole Cargo project still needs Rust's cargo).
+- **Remove** on one of those servers removes eNCode's copy of its toolchain too. `dotnet`, `go` and `java` typed in a
+  terminal are unchanged throughout.
+- With an older toolchain on the computer (.NET 8 only, Java 8 or 17), Install fetches eNCode's own copy instead of
+  failing; with a new enough one it uses yours. On a system eNCode cannot fetch a toolchain for, the dialog says where
+  to get it instead of an Install button.
 
 JSON, CSS and HTML need no install: eNCode's own server reads them in a folder you trust (most useful to hear about: a
 mark on something that is right, or a slip it does not name):
@@ -914,7 +928,10 @@ Updating means installing the next build over the last one: everything above sta
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
 - Language servers: a server eNCode installed is not updated by itself; a newer one comes with a newer eNCode and is
-  installed when you click Install again. Tailwind's classes are not offered in `.ts` or `.js` files without JSX, nor in
+  installed when you click Install again. eNCode's copy of a toolchain (the .NET SDK, Go, Java) is for its language
+  server only: `dotnet build` or `go run` in the terminal or from the agent still needs the toolchain installed on the
+  computer. eNCode's tools folder is in the roaming profile (`%APPDATA%\eNCode\tools`), so on a computer whose profile
+  roams, the toolchains roam with it. Tailwind's classes are not offered in `.ts` or `.js` files without JSX, nor in
   Vue files, which have no server in eNCode yet. A Lua server
   that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.

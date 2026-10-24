@@ -110,6 +110,39 @@ describe('installing language servers', () => {
     assert.deepEqual(s.rediscovered, [])
   })
 
+  it("builds a server with eNCode's own copy of its toolchain, starts it with that copy, and removes both together", async () => {
+    const tools = await tempWorkspace()
+    // eNCode fetched Go before (ADR 0114); the computer has none.
+    const home = path.join(tools, 'runtimes', 'go', '1.27.3')
+    fs.mkdirSync(path.join(home, 'bin'), { recursive: true })
+    fs.writeFileSync(path.join(home, 'bin', exe('go')), 'go')
+    fs.writeFileSync(path.join(home, 'encode-install.json'), JSON.stringify({ id: 'go', version: '1.27.3', kind: 'runtime' }))
+    const spec: ServerSpec = { ...toolchain, installer: { ...(toolchain.installer as Extract<NonNullable<ServerSpec['installer']>, { kind: 'toolchain' }>), runtime: 'go' } }
+    const calls: { program: string; env: Record<string, string> }[] = []
+    const subject = new ServerInstalls({
+      tools: { dir: tools, cacheDir: path.join(tools, '.cache'), node: { file: process.execPath } },
+      platform: process.platform,
+      catalog: [spec],
+      env: { PATH: path.join(tools, 'nothing-here') },
+      rediscover: async () => undefined,
+      run: async (program, _args, options) => {
+        calls.push({ program, env: options.env })
+        fs.writeFileSync(path.join(options.env.GOBIN!, exe('gopls')), 'gopls')
+        return { code: 0, output: '' }
+      },
+    })
+    const plan = await subject.plan('go-ish', tools)
+    assert.ok('steps' in plan && plan.steps[0]!.endsWith("with eNCode's own copy of Go (1.27.3)."), JSON.stringify(plan))
+    const result = await subject.install('go-ish', tools)
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.equal(calls[0]!.program, path.join(home, 'bin', exe('go')))
+    assert.equal(calls[0]!.env.GOROOT, home)
+    assert.equal(calls[0]!.env.GOTOOLCHAIN, 'local')
+    assert.deepEqual(await subject.remove('go-ish'), { ok: true, dir: '' })
+    assert.deepEqual(fs.readdirSync(path.join(tools, 'go-ish')), [])
+    assert.deepEqual(fs.readdirSync(path.join(tools, 'runtimes', 'go')), [], "eNCode's Go goes with the only server that ran on it")
+  })
+
   it('says what it does not know or cannot do', async () => {
     const s = await installs(undefined)
     assert.deepEqual(await s.subject.plan('nope', s.tools), { unavailable: 'eNCode does not know that language server.' })

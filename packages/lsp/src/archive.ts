@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import zlib from 'node:zlib'
 
 export interface ArchiveFile {
@@ -69,38 +70,54 @@ const EOCD = 0x06054b50
 const CENTRAL = 0x02014b50
 const LOCAL = 0x04034b50
 
-/** The files in a zip archive. Only stored and deflated entries without encryption; no Zip64. */
-export function readZip(archive: Buffer, limits: ArchiveLimits): ArchiveFile[] {
-  let end = -1
-  for (let at = archive.length - 22; at >= Math.max(0, archive.length - 22 - 0xffff); at--) {
-    if (archive.readUInt32LE(at) === EOCD) {
-      end = at
+interface ZipEntry {
+  raw: string
+  name: string
+  method: number
+  crc: number
+  packed: number
+  unpacked: number
+  local: number
+  executable: boolean
+}
+
+/** Where the directory is, from the archive's last 64 KB (`tail`, which starts at `tailStart`). */
+function findDirectory(tail: Buffer, tailStart: number): { offset: number; size: number; count: number } {
+  let found = -1
+  for (let at = tail.length - 22; at >= 0; at--) {
+    if (tail.readUInt32LE(at) === EOCD) {
+      found = at
       break
     }
   }
-  if (end < 0) refuse('it is not a zip archive')
-  const count = archive.readUInt16LE(end + 10)
-  const size = archive.readUInt32LE(end + 12)
-  const offset = archive.readUInt32LE(end + 16)
+  if (found < 0) refuse('it is not a zip archive')
+  const count = tail.readUInt16LE(found + 10)
+  const size = tail.readUInt32LE(found + 12)
+  const offset = tail.readUInt32LE(found + 16)
   if (count === 0xffff || size === 0xffffffff || offset === 0xffffffff) refuse('it is a Zip64 archive')
-  if (offset + size > end) refuse('its directory is out of place')
+  if (offset + size > tailStart + found) refuse('its directory is out of place')
+  return { offset, size, count }
+}
+
+/** The zip's entries, every one checked against the rules and the limits before a byte of any is unpacked. */
+function parseDirectory(directory: Buffer, count: number, limits: ArchiveLimits): ZipEntry[] {
   const budget = new Budget(limits)
-  const files: ArchiveFile[] = []
-  let at = offset
+  const entries: ZipEntry[] = []
+  let at = 0
   for (let index = 0; index < count; index++) {
-    if (at + 46 > end || archive.readUInt32LE(at) !== CENTRAL) refuse('its directory is broken')
-    const madeBy = archive.readUInt16LE(at + 4) >> 8
-    const flags = archive.readUInt16LE(at + 8)
-    const method = archive.readUInt16LE(at + 10)
-    const crc = archive.readUInt32LE(at + 16)
-    const packed = archive.readUInt32LE(at + 20)
-    const unpacked = archive.readUInt32LE(at + 24)
-    const nameLength = archive.readUInt16LE(at + 28)
-    const extraLength = archive.readUInt16LE(at + 30)
-    const commentLength = archive.readUInt16LE(at + 32)
-    const external = archive.readUInt32LE(at + 38)
-    const local = archive.readUInt32LE(at + 42)
-    const raw = archive.subarray(at + 46, at + 46 + nameLength).toString(flags & 0x800 ? 'utf8' : 'latin1')
+    if (at + 46 > directory.length || directory.readUInt32LE(at) !== CENTRAL) refuse('its directory is broken')
+    const madeBy = directory.readUInt16LE(at + 4) >> 8
+    const flags = directory.readUInt16LE(at + 8)
+    const method = directory.readUInt16LE(at + 10)
+    const crc = directory.readUInt32LE(at + 16)
+    const packed = directory.readUInt32LE(at + 20)
+    const unpacked = directory.readUInt32LE(at + 24)
+    const nameLength = directory.readUInt16LE(at + 28)
+    const extraLength = directory.readUInt16LE(at + 30)
+    const commentLength = directory.readUInt16LE(at + 32)
+    const external = directory.readUInt32LE(at + 38)
+    const local = directory.readUInt32LE(at + 42)
+    const raw = directory.subarray(at + 46, at + 46 + nameLength).toString(flags & 0x800 ? 'utf8' : 'latin1')
     at += 46 + nameLength + extraLength + commentLength
     // Made on a Unix system: the upper half of the external attributes is the file's mode.
     const mode = madeBy === 3 ? external >>> 16 : 0
@@ -114,20 +131,100 @@ export function readZip(archive: Buffer, limits: ArchiveLimits): ArchiveFile[] {
     if (method !== 0 && method !== 8) refuse(`${raw} is packed in a way eNCode does not read`)
     if (!name) continue
     budget.take(unpacked)
-    if (local + 30 > archive.length || archive.readUInt32LE(local) !== LOCAL) refuse(`${raw} is out of place`)
-    const start = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28)
-    if (start + packed > archive.length) refuse(`${raw} is cut short`)
-    const body = archive.subarray(start, start + packed)
+    entries.push({ raw, name, method, crc, packed, unpacked, local, executable: (mode & 0o111) !== 0 })
+  }
+  return entries
+}
+
+/** Where an entry's packed bytes start, from its local header; `size` is the archive's. */
+function entryStart(header: Buffer, entry: ZipEntry, size: number): number {
+  if (header.length < 30 || header.readUInt32LE(0) !== LOCAL) refuse(`${entry.raw} is out of place`)
+  const start = entry.local + 30 + header.readUInt16LE(26) + header.readUInt16LE(28)
+  if (start + entry.packed > size) refuse(`${entry.raw} is cut short`)
+  return start
+}
+
+/** An entry's bytes, checked against the length and the CRC the directory gives. */
+function checked(entry: ZipEntry, data: Buffer): Buffer {
+  if (data.length !== entry.unpacked || zlib.crc32(data) !== entry.crc) refuse(`${entry.raw} does not match its checksum`)
+  return data
+}
+
+/** The files in a zip archive. Only stored and deflated entries without encryption; no Zip64. */
+export function readZip(archive: Buffer, limits: ArchiveLimits): ArchiveFile[] {
+  const tailStart = Math.max(0, archive.length - 22 - 0xffff)
+  const { offset, size, count } = findDirectory(archive.subarray(tailStart), tailStart)
+  return parseDirectory(archive.subarray(offset, offset + size), count, limits).map((entry) => {
+    const start = entryStart(archive.subarray(entry.local, entry.local + 30), entry, archive.length)
+    const body = archive.subarray(start, start + entry.packed)
     let data: Buffer
     try {
-      data = method === 0 ? Buffer.from(body) : zlib.inflateRawSync(body, { maxOutputLength: Math.max(1, unpacked) })
+      data = entry.method === 0 ? Buffer.from(body) : zlib.inflateRawSync(body, { maxOutputLength: Math.max(1, entry.unpacked) })
     } catch {
-      refuse(`${raw} does not unpack`)
+      refuse(`${entry.raw} does not unpack`)
     }
-    if (data.length !== unpacked || zlib.crc32(data) !== crc) refuse(`${raw} does not match its checksum`)
-    files.push({ path: name, data, executable: (mode & 0o111) !== 0 })
+    return { path: entry.name, data: checked(entry, data), executable: entry.executable }
+  })
+}
+
+const inflateRaw = promisify(zlib.inflateRaw) as (buffer: Buffer, options: zlib.ZlibOptions) => Promise<Buffer>
+
+/**
+ * Unpacks a zip archive on disk into `dir`, which must not exist yet, one entry at a time and without holding up the
+ * program: a toolchain's archive of hundreds of megabytes never sits unpacked in memory. The rules and limits are
+ * those of `readZip` and `writeFiles`, and every entry is checked before the first is written; an entry that turns out
+ * broken while unpacking stops it, and the caller removes the folder.
+ */
+export async function unpackZip(file: string, dir: string, limits: ArchiveLimits): Promise<void> {
+  const handle = await fs.promises.open(file, 'r')
+  try {
+    const size = (await handle.stat()).size
+    const read = async (offset: number, length: number): Promise<Buffer> => {
+      const buffer = Buffer.alloc(Math.max(0, Math.min(length, size - offset)))
+      let done = 0
+      while (done < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, done, buffer.length - done, offset + done)
+        if (bytesRead === 0) break
+        done += bytesRead
+      }
+      return buffer.subarray(0, done)
+    }
+    const tailStart = Math.max(0, size - 22 - 0xffff)
+    const { offset, size: length, count } = findDirectory(await read(tailStart, size - tailStart), tailStart)
+    const entries = parseDirectory(await read(offset, length), count, limits)
+    const root = newFolder(
+      dir,
+      entries.map((entry) => entry.name),
+    )
+    for (const entry of entries) {
+      const start = entryStart(await read(entry.local, 30), entry, size)
+      const body = await read(start, entry.packed)
+      let data: Buffer
+      try {
+        data = entry.method === 0 ? body : await inflateRaw(body, { maxOutputLength: Math.max(1, entry.unpacked) })
+      } catch {
+        refuse(`${entry.raw} does not unpack`)
+      }
+      const target = targetIn(root, entry.name)
+      await fs.promises.mkdir(path.dirname(target), { recursive: true })
+      await fs.promises.writeFile(target, checked(entry, data), { flag: 'wx', mode: entry.executable ? 0o755 : 0o644 })
+    }
+  } finally {
+    await handle.close()
   }
-  return files
+}
+
+/** A program packed alone with gzip (rust-analyzer's builds for Linux and macOS), as one file named `name`. */
+export function readGzip(archive: Buffer, name: string, limits: ArchiveLimits): ArchiveFile[] {
+  const file = safeEntryPath(name)
+  if (!file) refuse(`${name} is not a file name eNCode writes`)
+  let data: Buffer
+  try {
+    data = zlib.gunzipSync(archive, { maxOutputLength: limits.maxBytes })
+  } catch {
+    refuse('it does not unpack, or unpacks to too much')
+  }
+  return [{ path: file, data, executable: true }]
 }
 
 // ---------------------------------------------------------------------------------------------------------------- tar
@@ -234,18 +331,32 @@ function pax(data: Buffer): { key: string; value: string }[] {
  * and a folder, refuse the archive. Executable files keep their mode on systems that have one.
  */
 export function writeFiles(files: readonly ArchiveFile[], dir: string): void {
-  const root = path.resolve(dir)
-  const seen = new Set<string>()
+  const root = newFolder(
+    dir,
+    files.map((file) => file.path),
+  )
   for (const file of files) {
-    const key = file.path.toLowerCase()
-    if (seen.has(key)) refuse(`${file.path} is in it twice`)
-    seen.add(key)
-  }
-  fs.mkdirSync(root, { recursive: false })
-  for (const file of files) {
-    const target = path.resolve(root, ...file.path.split('/'))
-    if (!target.startsWith(root + path.sep)) refuse(`it would write outside its folder (${file.path})`)
+    const target = targetIn(root, file.path)
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.writeFileSync(target, file.data, { flag: 'wx', mode: file.executable ? 0o755 : 0o644 })
   }
+}
+
+/** Creates `dir`, which must not exist yet, once every path to be written in it is known to be there once (in any case). */
+function newFolder(dir: string, paths: readonly string[]): string {
+  const root = path.resolve(dir)
+  const seen = new Set<string>()
+  for (const file of paths) {
+    const key = file.toLowerCase()
+    if (seen.has(key)) refuse(`${file} is in it twice`)
+    seen.add(key)
+  }
+  fs.mkdirSync(root, { recursive: false })
+  return root
+}
+
+function targetIn(root: string, file: string): string {
+  const target = path.resolve(root, ...file.split('/'))
+  if (!target.startsWith(root + path.sep)) refuse(`it would write outside its folder (${file})`)
+  return target
 }
