@@ -50,7 +50,7 @@ Out of scope for v1:
  (repo, web, output)    (confused deputy)       (decideApproval)      (main process)
 
  renderer (sandboxed) ──IPC, sender-checked──► main process ──► keychain, files, child processes
- browser panel iframe ──✕ no preload, IPC refused
+ browser tab <webview> ──✕ own process, no preload, IPC refused (0103)
 ```
 
 1. **Model output to tools.** Every tool call passes `decideApproval`
@@ -90,7 +90,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T9 | A key sent to another server by an edited base URL | Keys are bound to the server origin, and changing the origin drops the key (0008) | Mitigated |
 | T10 | A key reaches the renderer, a log or a session file | The renderer learns only whether a key exists. Keys are never persisted outside the vault. | Partial (R6) |
 | T11 | Model output injects script into the renderer | Hand-written markdown renderer that escapes everything and allows only a list of tags and protocols. CSP without inline script or eval (0010). | Partial (R7) |
-| T12 | A page in the browser panel calls the bridge | No preload in frames, and IPC sender checks refuse child frames and foreign URLs (0010) | Mitigated |
+| T12 | A page in a Browser tab calls the bridge | A tab is a `<webview>` in its own process with no preload, whatever the window asked for (0103), and IPC sender checks refuse every contents but the main window's top frame (0010) | Mitigated |
 | T13 | An environment variable points the installed app at a hostile page | `VITE_DEV_SERVER_URL` is ignored when packaged (0010) | Mitigated |
 | T14 | eNCode's binary is used to run arbitrary code (`ELECTRON_RUN_AS_NODE`, `--inspect`, `NODE_OPTIONS`) | None yet | Planned, M6 (R8) |
 | T15 | A broken transcript makes providers refuse every request | Pairing invariant, repair on load, every call answered (0009) | Mitigated |
@@ -107,7 +107,7 @@ Status: **Mitigated** in M0, **Partial** (a residual risk is listed below), or *
 | T26 | The agent's shell finds credentials in its environment | Commands run with the user's environment minus variables that look like keys or tokens, with programs found only in absolute `PATH` entries, and the command travels in a private script file (0005, 0011). On Linux and macOS the sandbox also hides the usual credential folders and takes out the variables that lead to the person's agents and keyrings (0063). | Partial (R1, RP12) |
 | T27 | Text in a file or a web page poses as an instruction from eNCode | The system prompt is fixed. What changes arrives as reminders added by the host, and web results are labelled untrusted with a closing tag neutralised (0032). Labels are advisory. | Partial (R2) |
 | T28 | Conversation logs expose secrets the agent read | Logs live in an owner-only folder, are never uploaded, and nothing may send one without asking (0031). | Partial (R12) |
-| T29 | A page in the Browser tab reaches the app, or the tab drops a protection the page relied on | The page is another origin, in a frame sandboxed without top navigation, and it has no bridge. Only the responses of the main window's own sub-frames lose X-Frame-Options and `frame-ancestors`, so the tab can show them; every other header and directive stays, and no other request is touched. | Partial (R13) |
+| T29 | A page in a Browser tab reaches the app, or the tab drops a protection the page relied on | Since 0103 a tab is a page in its own process and session, not a frame of the window: no response header is rewritten, framing rules stand, and the page has no bridge. See the UI-7 section below. | Mitigated (R13 closed) |
 | T30 | The agent clicks and types in a program that runs commands or holds credentials: a terminal, an editor's terminal, a password manager, a system tool | The Computer tool never operates them. `decideApproval` refuses them under every policy, Full access included, and the backend marks eNCode's own window (by process id and program path) and programs running as administrator, and never works on them (0050, 0053). | Partial (R14) |
 | T31 | Text on screen steers the model into input the user did not want, or into sending what cannot be taken back | The first use of each application asks, with a warning for browsers, chat and mail. Screen text arrives inside `<screen_content>` marked as data. Keys that leave the window and typing into password fields are refused, a turn is capped at 150 inputs, and moving the mouse or typing stops the agent until the user speaks (0050). | Partial (R2, R14) |
 | T32 | Screenshots are kept or sent where they should not be | Images are marked transient: no log ever holds one, only the newest is kept and sent, and a model that cannot read images gets none. The picture the helper takes paints over every window of another program in front of the window and every password field (0050, 0053). | Mitigated |
@@ -196,12 +196,8 @@ Each item names what remains, why it is acceptable for now, and who closes it.
   anything the user typed, secrets included, and nothing prunes it (0031). It is as exposed as
   the user's own files, and same-user malware reads those too (R5).
   - Owner: M1, a storage view with explicit deletion.
-- **R13. The Browser tab is a frame of the app window.** A site that forbids framing is shown
-  anyway (T29), which also lets it be framed by a page it did not choose to be framed by,
-  inside this window only. The frame keeps `allow-same-origin` with scripts, as any site
-  needs, so a page can read its own cookies and storage, and it can still open pop-ups.
-  - Owner: the browser view of UI-7, which is its own surface with its own session, permission
-    denial and no header rewriting.
+- **R13. The Browser tab was a frame of the app window.** Closed by 0103: a tab is a `<webview>` in a process
+  and session of its own, and nothing lifts a site's framing rules any more.
 - **R14. Desktop control is as strong as the user's own hands.** Under Full access nothing asks
   before a program is used, and under the other policies one click allows a program for the whole
   session. A browser the user is signed in to can send, buy or delete in their name, and a click
@@ -2436,3 +2432,56 @@ What is new:
 - The desktop's end-to-end run: Usage after real requests, the context size, instructions saved into ENCODE.md, an
   agent made from the form, a theme made, changed, exported and imported, and an MCP server added from the form and
   removed.
+
+## Browser tabs, the agent's tab, side chats and worktrees from the chat (UI-7)
+
+Written with the pull request that adds them
+([0103](../adr/0103-browser-tabs-are-pages-in-their-own-process-and-each-chat-has-an-agent-tab-the-browser-tool-drives.md),
+[0104](../adr/0104-a-side-chat-is-a-copy-of-a-chat-to-ask-about-it-on-the-side-read-only-unlisted-and-deleted-when-closed.md),
+[0105](../adr/0105-a-chat-moves-into-a-worktree-and-back-from-the-chat-and-brings-the-worktrees-changes-into-the-project.md)).
+
+What is new:
+
+- the window hosts `<webview>` tabs: any site, in a process of its own, with a session kept on disk for the person's
+  tabs and one in memory per chat for the agent's;
+- the agent drives its tab over the DevTools protocol of that tab's contents, from requests the agent host sends to
+  the main process;
+- a side chat is a copy of a session's records, sent to a model with the conversation;
+- the person moves a session into a worktree and back, removes it, and copies its files into the project folder.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| BW1 | The window's page, or a compromised renderer, asks for a tab with a preload, Node or a partition of its choosing | `will-attach-webview` sets every preference itself (no preload, no Node, sandbox, context isolation, web security, no plugins, no nested `<webview>`, no drop navigation) and refuses any partition but the person's and `encode-agent-<16 hex>`, and a first address that is not http, https or `about:blank`. A tab of a session the guard did not prepare is closed. | Mitigated |
+| BW2 | A page asks for the camera, location, notifications, USB or similar | The person's tabs get full screen and writing the clipboard only; the agent's get nothing; device permission is refused for both, and the check handler answers the same. | Mitigated |
+| BW3 | A page takes the agent somewhere the person did not allow (a link, a redirect, a new window, `location =`) | An agent tab follows navigation on its own only to this computer or a host it opened (`www.` aside); anything else is stopped in `will-navigate`/`will-redirect` and the next answer says where the page tried to go. New windows from an agent tab are held the same way. `open` of a host not on this computer is a web access under the approval policy and the `WebFetch(domain:...)` rules. | Mitigated |
+| BW4 | Page text steers the model (prompt injection) | The outline, text and console reach the model wrapped as untrusted web content, like WebFetch's. A step that leaves the allowed hosts is held (BW3); a password field is never typed into and its value never read; the agent's tab is signed in to nothing, so a click cannot act in the person's name. | Partial (R2) |
+| BW5 | The agent's browsing reads or uses the person's sign-ins | Agent tabs use an in-memory partition per chat, keyed by a hash of the session id; the person's partition is never given to an agent tab, and a second tab of the same chat's partition is the person's to look at, not driven. | Mitigated |
+| BW6 | A page saves files through the agent's tab | Downloads in an agent tab are cancelled and the agent is told; nothing is written to disk. | Mitigated |
+| BW7 | A malformed request from the agent host drives the tab out of bounds | `parseBrowserRequest` checks each field (types, lengths, ranges, key and ref patterns) in the main process and drops unknown steps; steps run one at a time per tab with timeouts. | Mitigated |
+| BW8 | Keys pressed in a page are taken by the app, or the app's keys reach the page | Only the browser keys listed in 0103 are taken, before the page sees them, and Ctrl+W and Ctrl+T only in the person's tabs; everything else is the page's. | Mitigated |
+| SC1 | A side chat changes files or runs commands the person did not ask for in the chat | A side chat always runs in Ask mode, which the tool registry enforces (no edits, no commands, no Browser); its model is told it is a side chat. | Mitigated |
+| SC2 | Side chats pile up, or outlive the chat they copy | Closing the tab deletes one, deleting the chat deletes its side chats, and the agent host deletes any left from before when it starts. Lists never show one. | Mitigated |
+| WT1 | Bringing a worktree's changes in writes over the person's work | A file the project changed since the worktree was made (line ends aside) stops the copy, and nothing is written, until the person confirms writing over theirs. | Mitigated |
+| WT2 | Bringing in writes outside the project, or through a link | Paths with `..` or `.git` are refused; only plain files are copied, never over a link in the project; a path whose nearest real folder leaves the project is refused. | Mitigated |
+| WT3 | Removing a worktree loses work | Removal with uncommitted files or commits no other branch has asks first and names them. | Mitigated |
+| WT4 | The shell moves under a running request | Every worktree action is refused while a request runs. | Mitigated |
+
+### Residual risks
+
+- The Browser tool reaches any host the person allows; a page there can still try to talk the model into actions on
+  that same host. The approval of the host is the boundary, as for WebFetch.
+- A worktree action is not a checkpoint: Undo and Rewind do not take back a copy into the project.
+
+### Verification
+
+- `rules.test.ts` (partitions, web addresses, hosts followed, permissions, user agent, keys), `contract` and tool tests
+  (request parsing, answers), `browser-url.test.ts`, `model.test.ts` (agent tabs and side chats are not saved or
+  reopened), `host.test.ts` (side chats unlisted, told what they are, removed with their chat and at start),
+  `worktrees.test.ts` (enter and leave from the chat, the model told after, bringing in with a conflict, forced, and
+  line ends), `best-of.test.ts` (the shared copy).
+- The desktop's end-to-end run: the agent drives a local page through a form, a select, a confirm, a password field
+  (refused), a link to another host (held) and one on the same host (followed), reads the console, and its tab is not
+  saved; a person's tab shows a failed load; `/side` answers in its own tab without adding to the chat; `/worktree`,
+  bringing a file in, removing with confirmation, and `/local`.
