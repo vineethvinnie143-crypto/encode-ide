@@ -643,6 +643,17 @@ export class ModelRouter implements ModelClient {
     return match ? modelKey(candidate.provider.id, match) : candidate.info.key
   }
 
+  /**
+   * A model no catalog lists that OpenRouter answered as a listed one (a preset names its model only in its replies)
+   * is described as that one from now on: its window, what it can read, its price (ADR 0117).
+   */
+  private learnServedBy(candidate: Candidate, served: string | undefined): void {
+    const { provider, info } = candidate
+    if (provider.type !== 'openrouter' || !served || served === info.model) return
+    if (this.registry.listed(provider.id, info.model) || !this.registry.listed(provider.id, served)) return
+    this.registry.learn(info.key, { servedBy: served })
+  }
+
   // ---------------------------------------------------------------- replies
 
   private onReply(
@@ -664,6 +675,7 @@ export class ModelRouter implements ModelClient {
     const empty = normalEnd && isEmptyReply(reply.message)
 
     if (!unreadable && !empty) {
+      this.learnServedBy(candidate, result.servedModel)
       this.health.success(servedKey, { ttftMs: result.ttftMs })
       if (servedKey !== key) this.health.soft(key)
       if (candidate.fromPool && request.requirements.tools && reply.message.content.some((block) => block.type === 'tool-use' && !block.invalid)) {

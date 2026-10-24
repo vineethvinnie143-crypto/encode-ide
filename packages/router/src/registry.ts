@@ -53,6 +53,16 @@ export interface LearnedFacts {
   documents?: false
   /** The provider billed a request to this model although it was listed as free. */
   free?: false
+  /**
+   * The listed model that answered for this one, which no catalog lists: an OpenRouter preset (`@preset/<slug>`)
+   * names its model only in its replies. The model is described as that one, the latest answer winning (ADR 0117).
+   */
+  servedBy?: string
+}
+
+/** An OpenRouter preset: its settings, the model among them, live on openrouter.ai, and no catalog lists it. */
+export function isPreset(model: string): boolean {
+  return model.startsWith('@preset/')
 }
 
 export interface RegistrySnapshot {
@@ -97,6 +107,22 @@ export function defaultModel(provider: Pick<ProviderConfig, 'type' | 'baseUrl'>,
     price: { input: 0, output: 0 },
     free: false,
   }
+}
+
+/**
+ * A preset before any reply has said which model it uses: it is sent pictures, which the provider refuses when that
+ * model cannot read them, so the next call sends notes in their place (ADR 0117). Without this a preset of a model
+ * that sees could never be shown a picture until it had answered once.
+ */
+function presetDefaults(provider: Pick<ProviderConfig, 'type'>, model: string, entry: CatalogEntry): CatalogEntry {
+  if (provider.type !== 'openrouter' || !isPreset(model)) return entry
+  return { ...entry, capabilities: { ...entry.capabilities, images: true } }
+}
+
+/** The listed model's description under the preset's id. Its retirement date stays its own: the preset can be moved on. */
+function describedBy(served: CatalogEntry, model: string): CatalogEntry {
+  const { expiresAt: _retired, ...rest } = served
+  return { ...rest, model }
 }
 
 function applyOverride(info: ModelInfo, override: ModelOverride | undefined): ModelInfo {
@@ -204,6 +230,16 @@ export class ModelRegistry {
     if (facts.images === false) current.images = false
     if (facts.documents === false) current.documents = false
     if (facts.free === false) current.free = false
+    if (typeof facts.servedBy === 'string' && facts.servedBy && facts.servedBy.length <= 200) {
+      // Another model answers for the preset now: what failures taught was about the one before.
+      if (current.servedBy && current.servedBy !== facts.servedBy) {
+        delete current.contextWindow
+        delete current.tools
+        delete current.images
+        delete current.documents
+      }
+      current.servedBy = facts.servedBy
+    }
     this.learned.set(key, current)
   }
 
@@ -220,19 +256,24 @@ export class ModelRegistry {
   /** Everything known about a model; models nobody listed get defaults. */
   get(provider: string, model: string): ModelInfo {
     const key = modelKey(provider, model)
-    const entry = this.catalogs.get(provider)?.models.get(model)
+    const catalog = this.catalogs.get(provider)?.models
+    const entry = catalog?.get(model)
+    const learned = this.learned.get(key)
+    // A model no catalog lists that a listed one answered for (a preset) is described as that one, under its own id.
+    const served = !entry && learned?.servedBy ? catalog?.get(learned.servedBy) : undefined
     const config = this.providers[provider] ?? { type: 'openai-compatible', baseUrl: '', free: false }
-    const fallback = defaultModel(config, model)
+    const fallback = served ? describedBy(served, model) : presetDefaults(config, model, defaultModel(config, model))
     const base: ModelInfo = {
       ...(entry ?? fallback),
-      // A provider that charges nothing makes every model free, listed or not.
+      // A provider that charges nothing makes every model free, listed or not. A preset is never free by what answered
+      // for it: the preset may send the next request to another model.
       free: (entry?.free ?? false) || Boolean(config.free),
       key,
       provider,
       scores: { ...this.scores.get(key) },
-      known: Boolean(entry) || Boolean(this.overrides[key]),
+      known: Boolean(entry) || Boolean(served) || Boolean(this.overrides[key]),
     }
-    return applyOverride(applyLearned(base, this.learned.get(key)), this.overrides[key])
+    return applyOverride(applyLearned(base, learned), this.overrides[key])
   }
 
   /** Every model a provider's catalog lists, merged with what was learned and overridden. */

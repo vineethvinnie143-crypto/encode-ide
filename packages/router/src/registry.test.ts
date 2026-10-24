@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { defaultModel, inferEditFormat, inferFamily, inferReasoning, ModelRegistry } from './registry'
+import { defaultModel, inferEditFormat, inferFamily, inferReasoning, isPreset, ModelRegistry } from './registry'
 import { catalogEntry } from './testing'
 
 const remote = { type: 'openai-compatible' as const, baseUrl: 'https://api.example.com/v1', free: false }
@@ -80,6 +80,68 @@ describe('ModelRegistry', () => {
     assert.deepEqual(damaged.list('openrouter').map((model) => model.model), ['ok:free'])
     damaged.restore({ version: 2 })
     damaged.restore(null)
+  })
+
+  describe('an OpenRouter preset (ADR 0117)', () => {
+    const P = '@preset/deepseek-v4-1-1017'
+    const D = 'deepseek/deepseek-v4.1-flash-1017'
+    const sees = { tools: true, parallelTools: true, images: true, documents: false, reasoning: true, promptCache: false }
+    const listed = () => {
+      const value = registry()
+      value.setCatalog('openrouter', [catalogEntry(D, { name: 'DeepSeek: DeepSeek V4.1 Flash 1017', contextWindow: 1_000_000, capabilities: sees, price: { input: 0.02, output: 1 }, expiresAt: 5 }), catalogEntry('vendor/text-only')], 1)
+      return value
+    }
+
+    it('is told apart by its id', () => {
+      assert.equal(isPreset(P), true)
+      assert.equal(isPreset('deepseek/deepseek-v4.1-flash-1017'), false)
+    })
+
+    it('is sent pictures until a reply says which model it is', () => {
+      const value = listed()
+      assert.equal(value.get('openrouter', P).capabilities.images, true)
+      assert.equal(value.get('openrouter', P).known, false)
+      assert.equal(value.get('remote', P).capabilities.images, false, 'only on OpenRouter is an @preset id a preset')
+      assert.equal(value.get('openrouter', 'vendor/unlisted').capabilities.images, false, 'any other unlisted model is not')
+    })
+
+    it('is described as the listed model that answered for it, under its own id, and is never free by it', () => {
+      const value = listed()
+      value.learn(`openrouter:${P}`, { servedBy: D })
+      const info = value.get('openrouter', P)
+      assert.deepEqual(
+        { model: info.model, name: info.name, window: info.contextWindow, images: info.capabilities.images, reasoning: info.capabilities.reasoning, price: info.price, known: info.known },
+        { model: P, name: 'DeepSeek: DeepSeek V4.1 Flash 1017', window: 1_000_000, images: true, reasoning: true, price: { input: 0.02, output: 1 }, known: true },
+      )
+      assert.equal(info.expiresAt, undefined, 'the model behind it retiring does not retire the preset, which can be moved on')
+      value.setCatalog('openrouter', [catalogEntry('vendor/free-one:free')], 2)
+      value.learn(`openrouter:${P}`, { servedBy: 'vendor/free-one:free' })
+      assert.equal(value.get('openrouter', P).free, false, 'the preset may send the next request to a paid model')
+    })
+
+    it('keeps what a failure taught while the same model answers, and forgets it when another does', () => {
+      const value = listed()
+      const key = `openrouter:${P}`
+      value.learn(key, { images: false, contextWindow: 64_000 })
+      value.learn(key, { servedBy: D })
+      assert.equal(value.get('openrouter', P).capabilities.images, false)
+      assert.equal(value.get('openrouter', P).contextWindow, 64_000)
+      value.learn(key, { servedBy: D })
+      assert.equal(value.get('openrouter', P).capabilities.images, false, 'the same model again: still learned')
+      value.learn(key, { servedBy: 'vendor/text-only' })
+      assert.equal(value.get('openrouter', P).contextWindow, 131_072, 'another model: what was taught about the one before goes')
+      assert.equal(value.get('openrouter', P).capabilities.images, false, 'and this one cannot read pictures by its own listing')
+    })
+
+    it('keeps the model that answered across a restart', () => {
+      const value = listed()
+      value.learn(`openrouter:${P}`, { servedBy: D })
+      const restored = registry()
+      restored.restore(JSON.parse(JSON.stringify(value.snapshot())))
+      assert.equal(restored.get('openrouter', P).contextWindow, 1_000_000)
+      restored.restore({ version: 1, catalogs: {}, learned: { [`openrouter:${P}`]: { servedBy: 42 } } })
+      assert.equal(restored.get('openrouter', P).contextWindow, 1_000_000, 'a malformed name is skipped')
+    })
   })
 
   it("does not take a snapshot's word that a model with a price is free", () => {

@@ -106,6 +106,7 @@ say so.
 | [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083 |
 | [0115](0115-a-finished-task-list-folds-away-and-the-thread-follows-until-you-scroll-up.md) | A finished task list folds away, and the thread follows until you scroll up | Accepted, builds on 0017 |
 | [0116](0116-the-dice-rolls-under-the-latest-step.md) | The dice rolls under the latest step | Accepted, builds on 0112 and 0115 |
+| [0117](0117-a-preset-is-known-by-the-model-that-answers-for-it.md) | A preset is known by the model that answers for it | Accepted, builds on 0035 and 0113 |
 
 ## Template
 

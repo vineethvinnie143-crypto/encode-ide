@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { TransportError, type ClientEvent, type CompletionOutcome, type ToolUseBlock } from '@encode/providers'
+import { TransportError, userText, type ClientEvent, type CompletionOutcome, type ToolUseBlock } from '@encode/providers'
 import { staticKeys, type KeySource } from './keys'
 import { nextUtcMidnight } from './openrouter'
 import { catalogEntry, faults, TestWorld, type TestWorldOptions } from './testing'
@@ -789,6 +789,50 @@ describe('ModelRouter: sessions, abort and budget', () => {
     assert.deepEqual(await world.router.budget('main', { images: true }).then(({ model, images }) => ({ model, images })), { model: B, images: true })
     const blind = freeWorld()
     assert.deepEqual(await blind.router.budget('main', { images: true }).then(({ model, images }) => ({ model, images })), { model: A, images: false }, 'none sees them: the best model, which is told they are there')
+  })
+})
+
+describe('ModelRouter: OpenRouter presets (ADR 0117)', () => {
+  const P = '@preset/deepseek-v4-1-1017'
+  const D = 'deepseek/deepseek-v4.1-flash-1017'
+  const sees = { tools: true, parallelTools: true, images: true, documents: false, reasoning: true, promptCache: false }
+  const settings = { providers: { openrouter: { type: 'openrouter' } }, roles: { main: [`openrouter:${P}`] } }
+  const catalogs = { openrouter: [catalogEntry(D, { contextWindow: 1_000_000, capabilities: sees, price: { input: 0.02, output: 1 }, free: false }), catalogEntry('vendor/text-only', { free: false })] }
+  const picture = { ...userText('What is wrong here?'), content: [{ type: 'image' as const, mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' }, { type: 'text' as const, text: 'What is wrong here?' }] }
+
+  it('learns the model behind a preset from its first reply: its window, that it reads pictures, its price', async () => {
+    const world = new TestWorld({ settings, catalogs, behavior: { [P]: faults.servedBy(D, 'hello') } })
+    const before = await world.router.budget('main')
+    assert.equal(before.model, P)
+    assert.equal(before.images, true, 'not yet known: sent pictures, which the provider refuses if it must')
+    assert.equal((await world.complete()).text, 'hello')
+    const after = await world.router.budget('main')
+    assert.deepEqual({ window: after.contextWindow, images: after.images, price: after.price, free: after.free }, { window: 1_000_000, images: true, price: { input: 0.02, output: 1 }, free: false })
+  })
+
+  it('a listed model or another provider learns nothing from the name a reply gives', async () => {
+    const world = freeWorld({ behavior: { [A]: faults.servedBy('vendor/elsewhere') } })
+    await world.complete()
+    assert.equal(world.router.registry.get('openrouter', A).contextWindow, 131_072)
+    const other = new TestWorld({
+      settings: { providers: { local: { type: 'openai-compatible', baseUrl: 'http://127.0.0.1:1234/v1' } }, roles: { main: [`local:${P}`] } },
+      catalogs: { local: [catalogEntry(D, { capabilities: sees, contextWindow: 1_000_000 })] },
+      keys: {},
+      behavior: { [P]: faults.servedBy(D) },
+    })
+    await other.complete()
+    assert.notEqual(other.router.registry.get('local', P).contextWindow, 1_000_000)
+  })
+
+  it('a preset that refuses pictures is known not to read them, and the request is not sent on to a model of another role', async () => {
+    const world = new TestWorld({ settings, catalogs, behavior: { [P]: faults.noImages() } })
+    const { outcome } = await world.complete({
+      payload: { system: [{ text: 'You are eNCode.' }], messages: [picture], tools: [] },
+      requirements: { promptTokens: 1_000, maxOutputTokens: 4_096, tools: false, images: true },
+    })
+    assert.equal(outcome.kind, 'paused')
+    assert.equal(world.callsTo(P).length, 1)
+    assert.equal((await world.router.budget('main', { images: true })).images, false, 'so the next call sends notes in their place')
   })
 })
 
