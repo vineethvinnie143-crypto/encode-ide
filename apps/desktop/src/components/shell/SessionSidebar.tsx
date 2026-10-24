@@ -23,7 +23,7 @@ import { useUi } from '../../stores/ui'
 import { useWorkspace } from '../../stores/workspace'
 import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Archive, Bell, ChevronDown, ChevronRight, Folder, FolderOpen, Pin, PenSquare, Plus, Search, Server, Trash2, Undo2 } from '../../ui/icons'
+import { Archive, Bell, ChevronDown, ChevronRight, Folder, FolderOpen, Pin, PenSquare, Plus, Search, Trash2, Undo2 } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import { ContextMenu, Menu, type MenuEntry } from '../../ui/Menu'
 import { Spinner } from '../../ui/Spinner'
@@ -274,7 +274,8 @@ export default function SessionSidebar() {
           entries={switcherEntries}
           trigger={(props) => (
             <button type="button" className="proj-switch" title={switchTitle} {...props}>
-              <span className={cx('proj-mark', machine && 'is-remote')}>{machine ? <Server size={13} /> : (place ?? 'e').slice(0, 1).toLowerCase()}</span>
+              {/* On another machine the machine's chip says where instead, so a narrow sidebar keeps the folder's name. */}
+              {!machine && <span className="proj-mark">{(place ?? 'e').slice(0, 1).toLowerCase()}</span>}
               <span className="proj-name">{place ?? 'No folder open'}</span>
               {machine && (
                 <span className={cx('proj-machine', linkState && `is-${linkState}`)}>

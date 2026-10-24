@@ -309,9 +309,6 @@
 }
 
 /* A folder on another machine (ADR 0111): the machine beside the folder's name, with how the connection stands. */
-.proj-mark.is-remote {
-  color: var(--text-1);
-}
 .proj-machine {
   /* The folder's name keeps its room; the machine gives way first. */
   flex: 0 100 auto;
@@ -319,7 +316,8 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: 45%;
+  /* In px: a share of the switcher would be a share of a width that is itself the content's. */
+  max-width: 150px;
   height: 20px;
   padding: 0 7px;
   overflow: hidden;
