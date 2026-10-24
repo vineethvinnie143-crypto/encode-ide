@@ -51,6 +51,10 @@ describe('Fix this folder, on Windows', { skip: !windows }, () => {
     console.log(`[grant] owner set to SYSTEM: ${owner.code === 0 ? 'yes' : `no (${owner.out})`}`)
     const narrowed = await exec(icacls, [folder, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', `*${sid}:(OI)(CI)M`])
     assert.equal(narrowed.code, 0, narrowed.out)
+    // The runner's programs run as an administrator, which a Full control entry for Administrators would let mark the
+    // folder anyway; eNCode on a person's computer runs without it.
+    const admins = await exec(icacls, [folder, '/remove:g', '*S-1-5-32-544'])
+    assert.equal(admins.code, 0, admins.out)
     console.log(`[grant] before: ${(await exec(icacls, [folder])).out.replace(/\s+/g, ' ')}`)
   })
 
