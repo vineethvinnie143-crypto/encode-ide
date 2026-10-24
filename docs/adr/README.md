@@ -96,6 +96,7 @@ say so.
 | [0104](0104-a-side-chat-is-a-copy-of-a-chat-to-ask-about-it-on-the-side-read-only-unlisted-and-deleted-when-closed.md) | A side chat is a copy of a chat to ask about it on the side: read-only, unlisted, and deleted when closed | Accepted, builds on 0015, 0030 and 0031 |
 | [0105](0105-a-chat-moves-into-a-worktree-and-back-from-the-chat-and-brings-the-worktrees-changes-into-the-project.md) | A chat moves into a worktree and back from the chat, and brings the worktree's changes into the project | Accepted, builds on 0073 and 0098 |
 | [0106](0106-encode-profile-is-off-limits-to-the-agent-and-files-a-folder-brings-are-read-with-care.md) | eNCode's profile is off limits to the agent, and the files a folder brings are read with care | Accepted, builds on 0061, 0063 and 0093 |
+| [0107](0107-the-chrome-dice-is-the-logo-and-the-theme-is-black-and-silver-from-it.md) | The chrome dice is the logo, and the theme is black and silver from it | Accepted, supersedes the logo and default colours of 0013 |
 
 ## Template
 

@@ -57,53 +57,56 @@ export const THEME_COLORS: readonly { key: ThemeColor; label: string; hint: stri
   { key: 'comment', label: 'Comments', hint: 'Comments.', group: 'Code' },
 ]
 
-/** The built-in themes as these colours, with the Signal blue accent: the values of tokens.css. */
+/** The built-in themes as these colours, with the Mono accent: the values of tokens.css. */
 export const BUILT_IN_COLORS: Readonly<Record<ThemeBase, Readonly<Record<ThemeColor, string>>>> = {
   dark: {
-    chrome: '#0b0c10',
-    sidebar: '#0d0f13',
-    canvas: '#0f1116',
-    surface: '#151820',
-    border: '#2a2f3b',
-    text: '#eceff4',
-    accent: '#6b98ff',
+    chrome: '#050505',
+    sidebar: '#080808',
+    canvas: '#0b0b0b',
+    surface: '#121212',
+    border: '#262626',
+    text: '#f2f2f2',
+    accent: '#d4d4d4',
     success: '#3ccb7f',
     warning: '#f5b54a',
     danger: '#ff6b6b',
-    bubble: '#1d2a48',
+    bubble: '#1c1c1c',
     keyword: '#ff8fb1',
     function: '#7fd1ff',
     string: '#9be38f',
     number: '#f7b267',
     type: '#c5a3ff',
-    comment: '#7c859a',
+    comment: '#858585',
   },
   light: {
-    chrome: '#edeff3',
-    sidebar: '#f4f5f8',
+    chrome: '#efefef',
+    sidebar: '#f6f6f6',
     canvas: '#ffffff',
-    surface: '#f7f8fa',
-    border: '#e0e3e9',
-    text: '#11141a',
-    accent: '#2f5fe0',
+    surface: '#f8f8f8',
+    border: '#e2e2e2',
+    text: '#0a0a0a',
+    accent: '#111111',
     success: '#1a8f52',
     warning: '#9a5b00',
     danger: '#d64545',
-    bubble: '#e8eeff',
+    bubble: '#f2f2f2',
     keyword: '#c2185b',
     function: '#0b6bcb',
     string: '#2e7d32',
     number: '#b45309',
     type: '#6d28d9',
-    comment: '#6e7687',
+    comment: '#6e6e6e',
   },
 }
 
 /** The accents of the built-in choices, by theme (tokens.css, data-accent). */
-export const ACCENT_COLORS: Readonly<Record<ThemeBase, Readonly<Record<'blue' | 'cyan' | 'jade' | 'amber', string>>>> = {
-  dark: { blue: '#6b98ff', cyan: '#5ccff2', jade: '#4edba0', amber: '#f7be5c' },
-  light: { blue: '#2f5fe0', cyan: '#0b6e8f', jade: '#0f7a51', amber: '#8f5200' },
+export const ACCENT_COLORS: Readonly<Record<ThemeBase, Readonly<Record<'mono' | 'blue' | 'cyan' | 'jade' | 'amber', string>>>> = {
+  dark: { mono: '#d4d4d4', blue: '#6b98ff', cyan: '#5ccff2', jade: '#4edba0', amber: '#f7be5c' },
+  light: { mono: '#111111', blue: '#2f5fe0', cyan: '#0b6e8f', jade: '#0f7a51', amber: '#8f5200' },
 }
+
+/** Text on a light, colourless fill: the logo's black. */
+const INK = '#0a0a0a'
 
 export const MAX_THEMES = 12
 export const MAX_THEME_NAME = 40
@@ -149,11 +152,22 @@ export function contrastRatio(a: string, b: string): number {
   return (light! + 0.05) / (dark! + 0.05)
 }
 
-/** A fill for buttons with white text on it: the accent, darkened until the text reads (4.5:1), at most 70% of the way to black. */
-function fillFor(accent: string): string {
+/** Whether a colour is a grey: silver, white or black, with no hue to speak of. */
+function colourless(hex: string): boolean {
+  const rgb = rgbOf(hex)
+  return Math.max(...rgb) - Math.min(...rgb) < 24
+}
+
+/**
+ * A fill for buttons and the colour of the text on it. A light grey accent (silver, as the Mono accent) fills
+ * halfway to white under the logo's black, as the built-in Mono buttons do; any other accent takes white text and
+ * is darkened until that reads (4.5:1), at most 70% of the way to black.
+ */
+function fillFor(accent: string): { fill: string; on: string } {
+  if (colourless(accent) && contrastRatio(INK, accent) >= 7) return { fill: mix(accent, '#ffffff', 0.5), on: INK }
   let fill = accent
   for (let step = 1; step <= 14 && contrastRatio('#ffffff', fill) < 4.5; step++) fill = mix(accent, '#000000', step * 0.05)
-  return fill
+  return { fill, on: '#ffffff' }
 }
 
 // ------------------------------------------------------------ themes
@@ -213,7 +227,7 @@ export function themeVariables(theme: CustomTheme, highContrast = false): Record
   const dark = theme.base === 'dark'
   // Fitted to the built-in themes: each step reads against the background about as the built-in one does.
   const [text2, text3] = highContrast ? (dark ? [0.16, 0.29] : [0.15, 0.27]) : dark ? [0.27, 0.42] : [0.28, 0.39]
-  const fill = fillFor(c.accent)
+  const { fill, on } = fillFor(c.accent)
   const line = highContrast ? mix(c.border, c.text, dark ? 0.08 : 0.12) : c.border
   return {
     '--chrome': c.chrome,
@@ -229,10 +243,11 @@ export function themeVariables(theme: CustomTheme, highContrast = false): Record
     '--text-2': mix(c.text, c.canvas, text2),
     '--text-3': mix(c.text, c.canvas, text3),
     '--text-disabled': mix(c.text, c.canvas, dark ? 0.62 : 0.64),
-    '--on-accent': '#ffffff',
+    '--on-accent': on,
     '--accent': c.accent,
     '--accent-fill': fill,
-    '--accent-fill-hover': mix(fill, dark ? '#ffffff' : '#000000', 0.08),
+    // A light fill brightens toward white, a dark one moves toward the theme's text.
+    '--accent-fill-hover': on === INK ? mix(fill, '#ffffff', 0.6) : mix(fill, dark ? '#ffffff' : '#000000', 0.08),
     '--bubble': c.bubble,
     '--bubble-text': c.text,
     '--bubble-border': mix(c.bubble, c.text, 0.1),
@@ -251,7 +266,7 @@ export function themeVariables(theme: CustomTheme, highContrast = false): Record
 /** Every variable themeVariables sets, to take them off again. */
 export const THEME_VARIABLES: readonly string[] = Object.keys(themeVariables(newTheme('theme-x', 'x', 'dark')))
 
-/** What reads poorly in a theme: text on its surfaces and white text on its buttons, under 4.5:1. */
+/** What reads poorly in a theme: text on its surfaces and the text on its buttons, under 4.5:1. */
 export function contrastProblems(theme: CustomTheme): { label: string; ratio: number }[] {
   const vars = themeVariables(theme)
   const checks: [string, string, string][] = [
@@ -259,7 +274,7 @@ export function contrastProblems(theme: CustomTheme): { label: string; ratio: nu
     ['Text on cards', vars['--text-1']!, vars['--surface-3']!],
     ['Secondary text on the background', vars['--text-2']!, vars['--canvas']!],
     ['Quiet text on cards', vars['--text-3']!, vars['--surface-1']!],
-    ['Button text', '#ffffff', vars['--accent-fill']!],
+    ['Button text', vars['--on-accent']!, vars['--accent-fill']!],
   ]
   return checks.map(([label, a, b]) => ({ label, ratio: contrastRatio(a, b) })).filter((check) => check.ratio < 4.5)
 }

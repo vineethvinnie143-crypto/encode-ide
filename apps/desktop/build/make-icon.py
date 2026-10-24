@@ -1,109 +1,89 @@
-"""Render the eNCode app icon, "Trace N", from the same geometry as build/icon.svg.
+"""Render eNCode's app icon and in-app marks from the logo, the chrome dice in build/logo-source.png.
 
-    python build/make-icon.py          (from apps/desktop; needs Pillow)
+    python build/make-icon.py          (from apps/desktop; needs Pillow and NumPy)
 
-Writes build/icon.png (512 px) and build/icon.ico (16, 20, 24, 32, 40, 48, 64
-and 256 px). Sizes under 20 px use the one-colour glyph without the tile, which
-stays legible where the tile would turn to mush.
+The source is the dice on a black square. The black around it is taken out so the icon sits on any taskbar or
+background: the background is everything dark that joins the edge of the picture, and the soft pixels where the
+chrome rim meets it are kept as partly see-through rim rather than as a dark fringe. The dice's own black faces are
+inside the rim, so they stay.
+
+Writes build/icon.png (512 px, the window icon), build/icon.ico (16, 20, 24, 32, 40, 48, 64 and 256 px) and
+public/brand/mark-{64,128,256}.png, which src/ui/Logo.tsx shows in the title bar, the empty chat and About.
 """
-from PIL import Image, ImageChops, ImageDraw
+from pathlib import Path
 
-SCALE = 8  # draw at 8 x 256 = 2048 px, then scale down
-S = 256 * SCALE
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
 
-TILE_TOP, TILE_BOTTOM = (0x1D, 0x23, 0x30), (0x0B, 0x0C, 0x10)
-LINE_START, LINE_END = (0x5B, 0x8C, 0xFF), (0x3F, 0xD6, 0xEE)
-GLYPH = (0x5B, 0x8C, 0xFF)
+HERE = Path(__file__).resolve().parent
+SOURCE = HERE / 'logo-source.png'
+PUBLIC = HERE.parent / 'public' / 'brand'
 
-# The N: one line from the bottom-left node to the top-right node.
-PATH = [(80, 180), (80, 76), (176, 180), (176, 76)]
-START_NODE, END_NODE = (80, 180), (176, 76)
-
-
-def px(value):
-    return value * SCALE
-
-
-def ramp(length, value_at):
-    """A 1 x length strip whose pixel i holds value_at(i) (0..255)."""
-    strip = Image.new('L', (length, 1))
-    strip.putdata([max(0, min(255, round(value_at(i)))) for i in range(length)])
-    return strip
-
-
-def stroke_mask(width, node_radius=None):
-    """The N as a mask: round joins and round caps, optionally with node dots."""
-    mask = Image.new('L', (S, S), 0)
-    draw = ImageDraw.Draw(mask)
-    points = [(px(x), px(y)) for x, y in PATH]
-    draw.line(points, fill=255, width=px(width), joint='curve')
-    for x, y in (points[0], points[-1]):
-        r = px(width) / 2
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=255)
-    if node_radius:
-        for x, y in (START_NODE, END_NODE):
-            r = px(node_radius)
-            draw.ellipse([px(x) - r, px(y) - r, px(x) + r, px(y) + r], fill=255)
-    return mask
-
-
-def solid(color):
-    return Image.new('RGB', (S, S), color)
-
-
-def tile_icon():
-    icon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-
-    # Graphite tile, lighter at the top.
-    vertical = ramp(S, lambda i: 255 * i / (S - 1)).rotate(-90, expand=True).resize((S, S), Image.NEAREST)
-    tile = Image.composite(solid(TILE_BOTTOM), solid(TILE_TOP), vertical)
-    shape = Image.new('L', (S, S), 0)
-    ImageDraw.Draw(shape).rounded_rectangle([0, 0, S - 1, S - 1], radius=px(58), fill=255)
-    icon.paste(tile, (0, 0), shape)
-
-    # A faint light edge, so the tile holds on a dark taskbar.
-    edge = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(
-        [0, 0, S - 1, S - 1], radius=px(58), outline=(255, 255, 255, round(0.14 * 255)), width=px(3)
-    )
-    icon.alpha_composite(edge)
-
-    # The line's gradient runs along the diagonal of the N's box, as in the SVG.
-    across = ramp(S, lambda i: 255 * (i / SCALE - 80) / 96).resize((S, S), Image.NEAREST)
-    up = ramp(S, lambda i: 255 * (180 - i / SCALE) / 104).rotate(-90, expand=True).resize((S, S), Image.NEAREST)
-    along = ImageChops.add(across, up, scale=2.0)
-    line = Image.composite(solid(LINE_END), solid(LINE_START), along).convert('RGBA')
-    line.putalpha(stroke_mask(22))
-    icon.alpha_composite(line)
-
-    # The two nodes: the request and the working code.
-    draw = ImageDraw.Draw(icon)
-    for (x, y), color in ((START_NODE, LINE_START), (END_NODE, LINE_END)):
-        r = px(17)
-        draw.ellipse([px(x) - r, px(y) - r, px(x) + r, px(y) + r], fill=color + (255,))
-    return icon
-
-
-def glyph_icon():
-    glyph = solid(GLYPH).convert('RGBA')
-    glyph.putalpha(stroke_mask(26, node_radius=20))
-    return glyph
-
-
-def scaled(image, size):
-    return image.resize((size, size), Image.LANCZOS)
-
-
-tile = tile_icon()
-glyph = glyph_icon()
-
-scaled(tile, 512).save('build/icon.png')
-
+# Darker than this and joined to the edge of the picture is background. 40 takes in the soft edge of the rim;
+# at 60 the fill would leak through the rim into the black faces.
+BACKGROUND_MAX = 40
+# At or under this the background is pure black: fully see-through.
+BLACK_MAX = 4
+# How much of the square the dice fills, top to bottom.
+FILL = 0.9
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
-frames = [scaled(glyph if size < 20 else tile, size) for size in ICO_SIZES]
-frames[-1].save(
-    'build/icon.ico',
-    sizes=[(size, size) for size in ICO_SIZES],
-    append_images=frames[:-1],
-)
-print('wrote build/icon.png and build/icon.ico (Trace N)')
+MARK_SIZES = [64, 128, 256]
+
+
+def extract(source: Image.Image) -> Image.Image:
+    """The dice alone, as RGBA, cropped to its bounds."""
+    rgb = source.convert('RGB')
+    lum = rgb.convert('L')
+
+    background = lum.point(lambda v: 0 if v <= BACKGROUND_MAX else 255)
+    ImageDraw.floodfill(background, (0, 0), 128)
+    outside = np.asarray(background) == 128
+
+    pixels = np.asarray(rgb).astype(np.float32)
+    light = np.asarray(lum).astype(np.float32)
+
+    # The colour of the rim next to each soft edge pixel: the brightest dice pixel nearby.
+    inside_only = np.where(outside[..., None], 0, pixels).astype(np.uint8)
+    rim = np.asarray(Image.fromarray(inside_only).filter(ImageFilter.MaxFilter(7))).astype(np.float32)
+    rim_light = np.maximum(rim @ np.array([0.299, 0.587, 0.114], dtype=np.float32), 1.0)
+
+    # A soft edge pixel is the rim over black: its share of the rim's brightness is how much of it is rim.
+    edge_alpha = np.clip((light - BLACK_MAX) / np.maximum(rim_light - BLACK_MAX, 1.0), 0.0, 1.0)
+    alpha = np.where(outside, edge_alpha, 1.0)
+    color = np.where(outside[..., None], rim, pixels)
+
+    rgba = np.dstack([color, alpha * 255.0]).round().clip(0, 255).astype(np.uint8)
+    image = Image.fromarray(rgba, 'RGBA')
+    return image.crop(image.getbbox())
+
+
+def square(dice: Image.Image, size: int, fill: float = FILL) -> Image.Image:
+    """The dice centred on a clear square of `size` px, `fill` of its height."""
+    scale = fill * size / dice.height
+    width, height = max(1, round(dice.width * scale)), max(1, round(dice.height * scale))
+    # Scaled with the colour premultiplied by alpha, so the clear background does not darken the edge.
+    small = dice.convert('RGBa').resize((width, height), Image.LANCZOS, reducing_gap=3.0).convert('RGBA')
+    if size <= 48:
+        small = small.filter(ImageFilter.UnsharpMask(radius=0.6, percent=60, threshold=1))
+    canvas = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(small, ((size - width) // 2, (size - height) // 2))
+    return canvas
+
+
+def main() -> None:
+    dice = extract(Image.open(SOURCE))
+
+    square(dice, 512).save(HERE / 'icon.png', optimize=True)
+
+    frames = [square(dice, size) for size in ICO_SIZES]
+    frames[-1].save(HERE / 'icon.ico', format='ICO', sizes=[(size, size) for size in ICO_SIZES], append_images=frames[:-1])
+
+    PUBLIC.mkdir(parents=True, exist_ok=True)
+    for size in MARK_SIZES:
+        square(dice, size, fill=1.0).save(PUBLIC / f'mark-{size}.png', optimize=True)
+
+    print('wrote build/icon.png, build/icon.ico and public/brand/mark-*.png from build/logo-source.png')
+
+
+if __name__ == '__main__':
+    main()

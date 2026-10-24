@@ -4221,7 +4221,7 @@ async function runBackgroundAgentCheck() {
 
 const DEFAULT_APPEARANCE = {
   mode: 'dark',
-  accent: 'blue',
+  accent: 'mono',
   contrast: 'standard',
   density: 'comfortable',
   motion: 'system',
@@ -5670,6 +5670,16 @@ async function runDogfoodChecks() {
 async function runAppearanceChecks() {
   console.log('[smoke] --- appearance ---')
   if ((await theme()) !== 'dark') throw new Error(`eNCode should start dark, not ${await theme()}`)
+  // The logo's black and chrome: the Mono accent, silver buttons with black text, and the dice in the title bar.
+  const look = await evaluate(`(() => {
+    const style = getComputedStyle(document.documentElement)
+    const logo = document.querySelector('.titlebar-logo')
+    return { accent: document.documentElement.dataset.accent, onAccent: style.getPropertyValue('--on-accent').trim(), canvas: style.getPropertyValue('--canvas').trim(), logo: logo ? { complete: logo.complete, width: logo.naturalWidth, src: logo.currentSrc.replace(/^.*\\/brand\\//, 'brand/') } : null }
+  })()`)
+  console.log('[smoke] look:', JSON.stringify(look))
+  if (look.accent !== 'mono' || look.onAccent !== '#0a0a0a' || look.canvas !== '#0b0b0b') throw new Error(`eNCode should start black with the Mono accent: ${JSON.stringify(look)}`)
+  // naturalWidth is in CSS px (a 64w render at 22 px reads 22), so a loaded picture is any width at all.
+  await waitFor("(() => { const logo = document.querySelector('.titlebar-logo'); return !!logo && logo.complete && logo.naturalWidth > 0 && /\\/brand\\/mark-\\d+\\.png$/.test(logo.currentSrc) })()", 8000, 'the dice in the title bar')
   await screenshotSizes('ui-dark-main')
 
   await openAppearanceSettings()
@@ -5682,11 +5692,15 @@ async function runAppearanceChecks() {
   await settingIs("settings.appearance.accent === 'jade'", 'Jade')
   await click('.accent-swatch[aria-label="Signal blue"]')
   await settingIs("settings.appearance.accent === 'blue'", 'Signal blue')
+  await click('.accent-swatch[aria-label="Mono"]')
+  await settingIs("settings.appearance.accent === 'mono'", 'Mono')
+  // Mono on light is the logo's black: ink buttons with white text. The built stylesheet writes #111111 as #111.
+  await waitFor("['#111', '#111111'].includes(getComputedStyle(document.documentElement).getPropertyValue('--accent-fill').trim()) && ['#fff', '#ffffff'].includes(getComputedStyle(document.documentElement).getPropertyValue('--on-accent').trim())", 4000, 'ink buttons on light')
   await screenshotSizes('ui-light-appearance')
   await closeSettings()
   const saved = await evaluate('window.eNCode.settings.get().then((settings) => settings.appearance)')
   console.log('[smoke] saved appearance:', JSON.stringify(saved))
-  if (saved.mode !== 'light' || saved.accent !== 'blue') throw new Error('Light was not saved')
+  if (saved.mode !== 'light' || saved.accent !== 'mono') throw new Error('Light was not saved')
 
   await send('Page.reload')
   await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'reload in light')
@@ -5824,7 +5838,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

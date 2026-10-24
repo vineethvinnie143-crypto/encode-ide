@@ -151,11 +151,11 @@ describe('SettingsService context size', () => {
 })
 
 describe('SettingsService appearance', () => {
-  it('starts dark with the Signal blue accent, in the system fonts', () => {
+  it('starts dark with the Mono accent, in the system fonts', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
     assert.deepEqual(settings.get().appearance, DEFAULT_APPEARANCE)
     assert.equal(settings.get().appearance.mode, 'dark')
-    assert.equal(settings.get().appearance.accent, 'blue')
+    assert.equal(settings.get().appearance.accent, 'mono')
   })
 
   it('saves a change, keeps the fields a patch leaves out, and reads it back after a restart', () => {

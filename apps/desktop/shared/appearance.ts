@@ -9,7 +9,7 @@ import { normalizeThemes, sameTheme, type CustomTheme } from './themes'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
-export type Accent = 'blue' | 'cyan' | 'jade' | 'amber'
+export type Accent = 'mono' | 'blue' | 'cyan' | 'jade' | 'amber'
 export type Contrast = 'standard' | 'high'
 export type Density = 'comfortable' | 'compact'
 /** system follows Windows' animation setting; reduce always cuts motion; full never does. */
@@ -40,7 +40,7 @@ export interface Appearance {
 }
 
 export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
-export const ACCENTS: readonly Accent[] = ['blue', 'cyan', 'jade', 'amber']
+export const ACCENTS: readonly Accent[] = ['mono', 'blue', 'cyan', 'jade', 'amber']
 export const CONTRASTS: readonly Contrast[] = ['standard', 'high']
 export const DENSITIES: readonly Density[] = ['comfortable', 'compact']
 export const MOTIONS: readonly Motion[] = ['system', 'reduce', 'full']
@@ -49,12 +49,12 @@ export const UI_SIZES: readonly number[] = [12, 13, 14, 15, 16]
 export const CODE_SIZES: readonly number[] = [11, 12, 13, 14, 15, 16]
 
 /**
- * Dark Graphite with the Signal blue accent, in Windows' own fonts at Codex's sizes (14 px text,
+ * Dark Obsidian with the Mono accent (the logo's black and chrome), in Windows' own fonts at Codex's sizes (14 px text,
  * 12 px code). Inter and JetBrains Mono stay one setting away.
  */
 export const DEFAULT_APPEARANCE: Appearance = {
   mode: 'dark',
-  accent: 'blue',
+  accent: 'mono',
   contrast: 'standard',
   density: 'comfortable',
   motion: 'system',
@@ -68,8 +68,8 @@ export const DEFAULT_APPEARANCE: Appearance = {
 
 /** --chrome of each theme: the window shows it before the first frame, so a light theme never flashes dark. */
 export const WINDOW_BACKGROUND: Record<ResolvedTheme, string> = {
-  dark: '#0b0c10',
-  light: '#edeff3',
+  dark: '#050505',
+  light: '#efefef',
 }
 
 /**
@@ -84,8 +84,8 @@ export const WINDOW_BORDER: Record<ResolvedTheme, string> = {
 
 /** The glyphs of the native window buttons (Windows draws them over the title bar), chosen to stand out from `WINDOW_BACKGROUND`. */
 export const CAPTION_SYMBOL: Record<ResolvedTheme, string> = {
-  dark: '#d3d8e2',
-  light: '#3a4152',
+  dark: '#d6d6d6',
+  light: '#3a3a3a',
 }
 
 /** The title bar's height in px, which is also the height of the native window buttons. `.titlebar` in 01-titlebar.css says the same. */
