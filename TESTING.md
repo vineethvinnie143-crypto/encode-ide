@@ -771,6 +771,30 @@ middle of a request, `/mode plan` and carrying out the plan, `encode -c` the nex
 The command line's sessions are its own: they do not show in the app. Keys come only from the terminal's environment,
 and none is ever printed. It is not in the portable build.
 
+## A folder on another machine (SSH)
+
+eNCode opens a folder on a Linux or macOS machine you reach with `ssh` (a VM, a server, WSL with its SSH server on):
+the agent works there, its commands run there, and the Review tab shows the changes made there. Your API keys stay on
+this PC: the agent there gets stand-ins, and its model requests go out from this PC.
+
+Before the first try, check that a plain `ssh you@machine` works from a terminal on this PC **without a password
+prompt** (a key in `~\.ssh`, or ssh-agent), and that you have accepted the machine's host key once. eNCode uses the
+`ssh` that comes with Windows and never types a password.
+
+1. **File → Open folder on another machine (SSH)…**, or the project switcher at the top of the sidebar.
+2. The machine as you give it to ssh (`devbox`, `you@10.0.0.7`, `you@host:2222`; names from `~\.ssh\config` are
+   suggested), and the folder there (`~/project` or `/srv/app`).
+3. **Connect.** The first time for each eNCode version it sends its program (about 2 MB) to `~/.encode-server` there.
+
+The machine needs Node.js 22 or newer. Without it, the dialog offers to install Node.js 24 into `~/.encode-server`
+(no root, nothing else changes; the download is checked against a checksum built into eNCode). The machine name shows
+beside the folder's name in the sidebar, with a dot: green when connected, amber while connecting, red when the
+connection is lost (hover for why). Choose a folder of this PC in the project switcher to come back.
+
+Try: a request that edits files and runs a command there, the Review tab and a commit, the terminal, a language
+server installed there, and pulling the network cable for a moment (the next request connects again). Save
+diagnostics while the folder is open: the report says a folder is open on another machine, never which one.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
@@ -863,6 +887,11 @@ Updating means installing the next build over the last one: everything above sta
 - Not signed, so SmartScreen warns on first start, and some antivirus programs look closely at a new program.
 - No automatic updates: a new build is a new download.
 - A network that needs a proxy does not work yet for model requests.
+- A folder on another machine: signing in by key or ssh-agent only (no password or one-time code prompts); Linux and
+  macOS machines only; a dropped connection ends what was running there (the conversation stays, ask again); such a
+  folder is not reopened by itself at start; while it is open, the sidebar lists that machine's sessions only, and
+  schedules and background work of this PC's folders do not run until you come back. The Browser tool cannot reach the machine's own
+  `localhost` yet, and opens nothing on this PC's network while that folder is open.
 - The free models run on an OpenRouter key of your own; eNCode has no free service of its own yet.
 - PDFs: no OCR, so a scanned page without a text layer is readable only by a model that reads PDFs; PDFs that need a
   password are refused.

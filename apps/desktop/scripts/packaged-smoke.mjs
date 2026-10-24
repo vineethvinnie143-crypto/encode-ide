@@ -94,7 +94,10 @@ if (isWindows && path.basename(exe).toLowerCase() === 'encode.exe') {
     spawnSync('cmd.exe', ['/d', '/s', '/c', `"${[launcher, ...args].map(quote).join(' ')}"`], { cwd, env, encoding: 'utf8', timeout: 120000, windowsHide: true, windowsVerbatimArguments: true })
   const version = cli(['--version'])
   const pkg = JSON.parse(fs.readFileSync(path.join(root, '..', 'cli', 'package.json'), 'utf8'))
-  if (version.status !== 0 || version.stdout.trim() !== `eNCode ${pkg.version}`) fail(`encode --version: exit ${version.status}, ${JSON.stringify(`${version.stdout}${version.stderr}`).slice(0, 400)}`)
+  // The version, then the build's channel and commit, as the About box says them; CI names the commit it built.
+  const named = (process.env.ENCODE_COMMIT ?? '').toLowerCase().slice(0, 7)
+  const versionOk = new RegExp(`^eNCode ${pkg.version.replace(/\./g, '\\.')} [a-z]+, commit ${named || '[0-9a-f]{7}'}$`).test(version.stdout.trim())
+  if (version.status !== 0 || !versionOk) fail(`encode --version: exit ${version.status}, ${JSON.stringify(`${version.stdout}${version.stderr}`).slice(0, 400)}`)
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-cli-'))
   fs.writeFileSync(path.join(project, 'a.txt'), 'hello\n')
   const demo = cli(['-p', '--model', 'demo', '--output-format', 'json', 'look around'], project)

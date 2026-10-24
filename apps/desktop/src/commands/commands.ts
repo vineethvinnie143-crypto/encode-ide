@@ -19,6 +19,8 @@ export interface AppActions {
   /** A session that belongs to no project, in the chats folder. */
   newChat(): void
   openFolder(): void
+  /** A folder on another machine over SSH (ADR 0111). */
+  openRemote(): void
   /** Go to file; '@' starts it on the file's symbols, '#' on the folder's. */
   quickOpen(query?: string): void
   save(): void
@@ -223,6 +225,7 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'file.newSession', title: 'New session', group: 'File', keys: ['Ctrl+N'], run: () => a.newSession() },
     { id: 'file.newChat', title: 'New chat', group: 'File', keys: ['Ctrl+Alt+O'], keywords: 'standalone session without a project conversation', run: () => a.newChat() },
     { id: 'file.openFolder', title: 'Open folder…', group: 'File', keys: ['Ctrl+O'], run: () => a.openFolder() },
+    { id: 'file.openRemote', title: 'Open folder on another machine (SSH)…', group: 'File', run: () => a.openRemote() },
     { id: 'file.quickOpen', title: 'Go to file…', group: 'File', keys: ['Ctrl+P'], enabled: () => a.hasWorkspace(), run: () => a.quickOpen() },
     { id: 'file.save', title: 'Save', group: 'File', keys: ['Ctrl+S'], run: () => a.save() },
     { id: 'app.settings', title: 'Settings…', group: 'File', keys: ['Ctrl+,'], run: () => a.openSettings() },

@@ -14,7 +14,9 @@ import {
   projectName,
   rootKey,
   rowStatus,
+  placeRecents,
   sameRoot,
+  shownRecents,
   visibleOrder,
 } from './sidebar-model'
 
@@ -207,5 +209,18 @@ describe('switching project', () => {
       assert.equal(check.ok, false, status)
       assert.match(check.reason ?? '', /still working/)
     }
+  })
+})
+
+describe('folders on other machines in the sidebar', () => {
+  it('names one with its machine, and the open machine’s by their paths there', () => {
+    assert.equal(projectName('ssh://me@vm:2222/home/me/app'), 'app (vm)')
+    assert.equal(projectName('ssh://vm/~/site'), 'site (vm)')
+    const recents = ['ssh://me@vm/home/me/app', 'ssh://other/srv/api', 'C:\\work\\local']
+    assert.deepEqual(shownRecents(recents, null), recents)
+    assert.deepEqual(shownRecents(recents, { remote: { label: 'me@vm', uri: 'ssh://me@vm/home/me/app' } }), ['/home/me/app', 'ssh://other/srv/api', 'C:\\work\\local'])
+    // The sessions list groups only the open place's folders: that place's agent holds only their sessions.
+    assert.deepEqual(placeRecents(recents, null), ['C:\\work\\local'])
+    assert.deepEqual(placeRecents(recents, { remote: { label: 'me@vm', uri: 'ssh://me@vm/home/me/app' } }), ['/home/me/app'])
   })
 })

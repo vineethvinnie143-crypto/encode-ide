@@ -7,7 +7,7 @@ import { canGoBack, canGoForward, emptyHistory, forget, goBack, goForward, visit
 import { useSettings } from './settings'
 import { isChat, sameRoot } from './sidebar-model'
 import { useStatus } from './status'
-import { useWorkspace } from './workspace'
+import { useWorkspace, whenPlaceChanges } from './workspace'
 
 interface SessionsStore {
   sessions: SessionSummary[]
@@ -16,6 +16,8 @@ interface SessionsStore {
   /** The sessions you have opened, for Back and Forward. */
   history: History<string>
   init(): Promise<void>
+  /** The agent moved to another machine or back (ADR 0111): its sessions are others, so the list starts again there. */
+  reload(): Promise<void>
   refresh(): Promise<void>
   /** A session in the open folder. */
   newSession(): Promise<void>
@@ -110,6 +112,21 @@ export const useSessions = create<SessionsStore>((set, get) => {
       set({ sessions, ready: true, history: visit(emptyHistory<string>(), active) })
       // A window that reopens while the agent works still shows who is running or waiting.
       useStatus.getState().replace(await api.agent.statuses().catch(() => ({})))
+      await activate(active)
+    },
+
+    reload: async () => {
+      let sessions = await api.agent.sessions().catch(() => [] as SessionSummary[])
+      useStatus.getState().replace(await api.agent.statuses().catch(() => ({})))
+      const root = useWorkspace.getState().workspace?.root ?? null
+      // A session of the folder that opened there, or a new one in it.
+      let active = sessions.find((session) => !session.archived && sameRoot(session.projectRoot, root))?.id
+      if (!active) {
+        const created = await api.agent.createSession(root ? { projectRoot: root } : undefined)
+        sessions = await api.agent.sessions().catch(() => [created])
+        active = created.id
+      }
+      set({ sessions, history: visit(emptyHistory<string>(), active) })
       await activate(active)
     },
 
@@ -242,3 +259,5 @@ export const useSessions = create<SessionsStore>((set, get) => {
     },
   }
 })
+
+whenPlaceChanges(() => useSessions.getState().reload())

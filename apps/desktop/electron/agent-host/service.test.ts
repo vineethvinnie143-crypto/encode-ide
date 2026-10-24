@@ -223,6 +223,19 @@ describe('the agent host service', () => {
     assert.deepEqual(seen, ['close here a.ts', 'open /elsewhere c.ts three', 'close /elsewhere c.ts'])
   })
 
+  it('starts another host when asked, after closing the one that runs, and counts no failure', async () => {
+    const f = await fixture({ script: [{ text: 'done' }] })
+    await f.service.start()
+    await f.service.restart()
+    assert.equal(f.processes.length, 2)
+    assert.equal(f.processes[0].killed, true)
+    assert.equal(f.processes[0].runtime.host(), undefined, 'the first host was shut down, not only ended')
+    assert.equal(f.processes[1].killed, false)
+    assert.ok(Array.isArray(await f.service.client.sessions()))
+    assert.deepEqual(f.service.health(), { running: true, failures: 0, working: 0 })
+    assert.ok(!f.events.some((event) => event.type === 'error'), 'nothing was reported as stopped')
+  })
+
   it('shuts the host down in order', async () => {
     const f = await fixture({ script: [{ text: 'done' }] })
     const [session] = await f.service.client.sessions()

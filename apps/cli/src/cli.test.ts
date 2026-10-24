@@ -8,7 +8,7 @@ import { NO_MODEL, chooseModel, modelConfig } from './model'
 import { Renderer, describeTool, shownPath, toolOutcome, usageLine } from './render'
 import { ago } from './session'
 import { COLOR, NO_COLOR, firstLine, plain, safeJson, styleFor } from './text'
-import { VERSION } from './version'
+import { VERSION, versionLine } from './version'
 import { requestText } from './main'
 
 const ESC = String.fromCharCode(0x1b)
@@ -91,6 +91,14 @@ describe('arguments', () => {
   it('has the version of its package', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'apps', 'cli', 'package.json'), 'utf8')) as { version: string }
     assert.equal(VERSION, pkg.version)
+  })
+
+  it('says the build’s commit with its version, as the About box does', () => {
+    const commit = '502645ee4cfcac52646f6e6e2acc0bd9cabf7dce'
+    assert.equal(versionLine({ commit, dirty: false, channel: 'tester' }), `eNCode ${VERSION} tester, commit 502645e`)
+    assert.equal(versionLine({ commit, dirty: true, channel: 'dev' }), `eNCode ${VERSION} dev, commit 502645e + local changes`)
+    assert.equal(versionLine({ commit: '', channel: 'dev' }), `eNCode ${VERSION}`)
+    assert.equal(versionLine(undefined), `eNCode ${VERSION}`)
   })
 })
 

@@ -204,6 +204,8 @@ export const Sun = icon(
   </>,
 )
 export const Moon = icon('Moon', <path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z" />)
+/** A machine reached over SSH (ADR 0111): two units of a rack, each with its light. */
+export const Server = icon('Server', <><rect x="4" y="4.5" width="16" height="6.5" rx="2" /><rect x="4" y="13" width="16" height="6.5" rx="2" />{dot(7.75, 7.75)}{dot(7.75, 16.25)}</>)
 export const Monitor = icon('Monitor', <><rect x="3.5" y="4.5" width="17" height="11.5" rx="2" /><path d="M9 20h6 M12 16v4" /></>)
 export const Contrast = icon('Contrast', <>{ring()}<path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor" stroke="none" /></>)
 export const Rows = icon('Rows', <path d="M4.5 6.5h15 M4.5 12h15 M4.5 17.5h15" />)

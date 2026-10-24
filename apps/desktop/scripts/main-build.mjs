@@ -58,6 +58,8 @@ export function mainBuildOptions({ production = true } = {}) {
       'weblang-server': path.join(root, '../../packages/weblang/src/main.ts'),
       // The command line (ADR 0108), run by bin/encode.cmd on the app's own program as Node.
       'encode-cli': path.join(root, '../../apps/cli/src/bin.ts'),
+      // eNCode's program for a folder on another machine, sent there over SSH and run by its Node (ADR 0111).
+      'encode-server': path.join(root, 'electron/remote/server.ts'),
     },
     outdir: path.join(root, 'dist/electron'),
     outExtension: { '.js': '.cjs' },

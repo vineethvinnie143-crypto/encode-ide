@@ -15,7 +15,7 @@ import { runRepl } from './repl'
 import { openRuntime } from './runtime'
 import { folderSessions, sessionLine, settingsFor } from './session'
 import { plain, styleFor } from './text'
-import { VERSION } from './version'
+import { versionLine } from './version'
 
 export interface MainIo {
   argv: readonly string[]
@@ -111,7 +111,7 @@ export async function main(io: MainIo): Promise<number> {
     return 0
   }
   if (options.command === 'version') {
-    io.stdout.write(`eNCode ${VERSION}\n`)
+    io.stdout.write(`${versionLine()}\n`)
     return 0
   }
 

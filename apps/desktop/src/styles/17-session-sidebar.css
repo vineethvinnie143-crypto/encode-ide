@@ -307,3 +307,47 @@
   font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
 }
+
+/* A folder on another machine (ADR 0111): the machine beside the folder's name, with how the connection stands. */
+.proj-mark.is-remote {
+  color: var(--text-1);
+}
+.proj-machine {
+  /* The folder's name keeps its room; the machine gives way first. */
+  flex: 0 100 auto;
+  min-width: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 45%;
+  height: 20px;
+  padding: 0 7px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  color: var(--text-2);
+  font: 500 var(--fs-11)/1 var(--font-mono);
+  white-space: nowrap;
+}
+.proj-machine-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proj-machine-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+.proj-machine.is-connecting .proj-machine-dot {
+  background: var(--warning);
+}
+.proj-machine.is-lost {
+  color: var(--danger);
+}
+.proj-machine.is-lost .proj-machine-dot {
+  background: var(--danger);
+}

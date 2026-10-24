@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell as osShell } from 'electron'
-import { appendFileSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { hostConfigOf } from './agent-host/config'
@@ -13,6 +14,11 @@ import { aboutInfo, currentEnvironment } from './build-info'
 import { Banner, electronShortcuts } from './computer-overlay'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
+import { installNode } from './remote/connection'
+import { RemoteMachine } from './remote/machine'
+import { Places } from './remote/places'
+import { configHosts, isRemoteRoot } from './remote/target'
+import type { TunnelOptions } from './remote/tunnel'
 import { CrashCounter, crashPrompt, isCrash } from './renderer-crash'
 import { Attention, type Notice } from './services/attention'
 import { ComputerControl } from './services/computer-control'
@@ -33,6 +39,8 @@ import { SkillService, migrateLegacySkills } from './services/skills'
 import { WorkspaceService } from './services/workspace'
 import { createMainWindow } from './window'
 import { buildLine } from '../shared/about'
+import { SEARCH_ENDPOINTS } from '@encode/tools'
+import type { SearchProviderId } from '../shared/search'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -108,20 +116,21 @@ if (!gotLock) {
     const about = aboutInfo(currentEnvironment(app.isPackaged))
     console.info(`[eNCode] ${buildLine(about)} on ${about.os} ${about.arch}`)
 
-    const workspace = new WorkspaceService()
+    const workspace = new WorkspaceService({ trash: (abs) => osShell.trashItem(abs), reveal: (abs) => osShell.showItemInFolder(abs) })
     const models = new ModelsService(settings)
     const git = new GitService(workspace)
     const shell = new ShellService()
 
     migrateLegacySkills(path.join(userData, 'skills'), path.join(userDir, 'skills'))
+    // A folder on another machine keeps its own skills and instructions there, where its agent reads them.
     const skills = new SkillService(
-      () => workspace.current?.root ?? null,
+      () => (places?.remote ? null : (workspace.current?.root ?? null)),
       userDir,
       (dir) => osShell.openPath(dir),
       (file) => osShell.showItemInFolder(file),
       (target) => osShell.trashItem(target),
     )
-    const instructions = new InstructionsService(userDir, () => workspace.current?.root ?? null)
+    const instructions = new InstructionsService(userDir, () => (places?.remote ? null : (workspace.current?.root ?? null)))
 
     applyNativeAppearance(settings.get().appearance, null)
     const win = createMainWindow(settings.get().appearance)
@@ -147,6 +156,7 @@ if (!gotLock) {
     guardBrowserTabs(win, agentBrowser, {
       openTab: (url) => send('browser:open-tab', url),
       key: (contentsId, action) => send('browser:key', { contentsId, action }),
+      remote: () => places?.remote != null,
       log: (message) => console.warn(`[browser] ${message}`),
     })
 
@@ -223,14 +233,26 @@ if (!gotLock) {
     win.on('focus', () => attention.focusChanged(true))
     win.on('blur', () => attention.focusChanged(false))
 
-    // The agent runs in a utility process; this side hands it the settings it needs and the keys it asks for.
+    // The open folder's place (remote/places.ts), made once the services it switches between are.
+    let places: Places | undefined
+    // A key goes only to the server it was entered for: the host names the address it is about to call.
+    const modelKey = (profileId: string, baseUrl: string): string => {
+      const profile = settings.raw().profiles.find((candidate) => candidate.id === profileId)
+      const server = serverOf(baseUrl)
+      return profile && server && serverOf(profile.baseUrl) === server ? settings.keyFor(profileId) : ''
+    }
+
+    // The agent runs in a utility process, or on the other machine whose folder is open; this side hands it the
+    // settings it needs and the keys it asks for. The other machine is given stand-ins for the keys, which this PC
+    // swaps for them on the way to the right server (remote/tunnel.ts).
     const agentHost = new AgentHostService({
       spawn: () =>
+        places?.remote?.hostProcess() ??
         spawnAgentHost(path.join(__dirname, 'agent-host.cjs'), (line) => {
           const { level, text } = hostLogLine(line)
           console[level](text)
         }),
-      init: () => ({
+      init: () => places?.remote?.hostInit() ?? ({
         dir: path.join(userData, 'sessions'),
         home,
         workspace: workspace.current?.root ?? null,
@@ -243,14 +265,17 @@ if (!gotLock) {
         serverCacheDir: path.join(userData, 'server-cache'),
         ...(benchTasksDir() ? { benchTasksDir: benchTasksDir() } : {}),
       }),
-      // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {
-        const profile = settings.raw().profiles.find((candidate) => candidate.id === profileId)
-        const server = serverOf(baseUrl)
-        return profile && server && serverOf(profile.baseUrl) === server ? settings.keyFor(profileId) : ''
+        const key = modelKey(profileId, baseUrl)
+        const machine = places?.remote
+        return machine && key ? machine.tokens.token({ kind: 'model', profileId }) : key
       },
       // A search key has no address to check: where a search goes is fixed in the code, not a setting.
-      searchKey: (provider) => settings.searchKeyFor(provider),
+      searchKey: (provider) => {
+        const key = settings.searchKeyFor(provider)
+        const machine = places?.remote
+        return machine && key ? machine.tokens.token({ kind: 'search', provider }) : key
+      },
       browser: (sessionId, request, signal) => agentBrowser.call(sessionId, request, signal),
       onEvent: (event) => {
         send('agent:event', event)
@@ -263,20 +288,24 @@ if (!gotLock) {
       onSandbox: () => send('sandbox:changed', undefined),
       onCode: () => send('code:changed', undefined),
       onModelTest: (progress) => send('models:test-progress', progress),
-      // The host names files by their real paths; the editor knows them by their paths in the open folder.
+      // The host names files by their real paths; the editor knows them by their paths in the open folder. Those of
+      // another machine are POSIX paths.
       onDiagnostics: (root, file, diagnostics) => {
-        const real = workspace.rootRealPath
-        if (!real || path.relative(real, root) !== '') return
-        const relative = path.relative(real, file)
-        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return
-        send('code:marks', { path: relative.split(path.sep).join('/'), diagnostics })
+        const paths = places?.remote ? path.posix : path
+        const real = places ? places.workspace.rootRealPath : workspace.rootRealPath
+        if (!real || paths.relative(real, root) !== '') return
+        const relative = paths.relative(real, file)
+        if (!relative || relative === '..' || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative)) return
+        send('code:marks', { path: relative.split(paths.sep).join('/'), diagnostics })
       },
     })
     const configureAgent = () => {
       const current = settings.get()
       computerOn = current.computer && current.computerSupported
       if (!computerOn) computerWatch.reset()
-      agentHost.configure(hostConfigOf(current, (profileId) => settings.keyRevision(profileId)))
+      const config = hostConfigOf(current, (profileId) => settings.keyRevision(profileId))
+      // The agent on another machine has no screen of this PC to use.
+      agentHost.configure(places?.remote ? { ...config, computer: false } : config)
       attention.settingsChanged()
     }
     configureAgent()
@@ -288,8 +317,9 @@ if (!gotLock) {
     })
 
     // Restore the most recently opened folder before the renderer asks for it.
+    // A folder on another machine is not connected to by itself at start: it waits in the recent folders.
     const last = settings.get().lastWorkspace
-    if (last) {
+    if (last && !isRemoteRoot(last)) {
       try {
         await workspace.open(last)
       } catch {
@@ -309,7 +339,7 @@ if (!gotLock) {
     app.on('accessibility-support-changed', accessibility)
     win.on('closed', () => {
       app.removeListener('accessibility-support-changed', accessibility)
-      shell.disposeAll()
+      places?.shell.disposeAll()
       schedules.dispose()
       // The banner is a window too; left up, it would keep eNCode from quitting.
       computerControl.dispose()
@@ -340,7 +370,7 @@ if (!gotLock) {
 
     const diagnostics = async (): Promise<string> => {
       const sessions = await agentHost.client.sessions().catch(() => null)
-      const root = workspace.current?.root
+      const root = places?.workspace.current?.root
       const languageServers = root ? await agentHost.codeReport(root, { logs: 15 }).catch(() => null) : null
       const cpus = os.cpus()
       const primary = screen.getPrimaryDisplay().id
@@ -358,7 +388,13 @@ if (!gotLock) {
         settings: settings.get(),
         agentHost: agentHost.health(),
         sessions: sessions ? { total: sessions.length, archived: sessions.filter((session) => session.archived).length } : null,
-        workspaceOpen: workspace.current !== null,
+        workspaceOpen: places?.workspace.current != null,
+        remote: places?.remote
+          ? {
+              status: places.remote.current.status,
+              ...(places.remote.about ? { node: places.remote.about.node, system: `${places.remote.about.platform} ${places.remote.about.arch}` } : {}),
+            }
+          : null,
         languageServers,
         environment: Object.keys(process.env).filter((name) => name.startsWith('ENCODE_')).sort(),
         logLines: logs.tail(400),
@@ -387,18 +423,99 @@ if (!gotLock) {
       },
     })
 
+    // A folder on another machine (ADR 0111): its program is the one built beside this file, sent there on first use.
+    let server: { bytes: Buffer; sha256: string } | null = null
+    const serverProgram = () => {
+      if (!server) {
+        const bytes = readFileSync(path.join(__dirname, 'encode-server.cjs'))
+        server = { bytes, sha256: createHash('sha256').update(bytes).digest('hex') }
+      }
+      return server
+    }
+    const sshProgram = () => {
+      // A test run names a stand-in; a packaged build never does.
+      const named = app.isPackaged ? undefined : process.env.ENCODE_SSH_PROGRAM
+      if (named) return named
+      const system = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe') : null
+      return (system && isFile(system) ? system : searchPath('ssh', process.env)) ?? 'ssh'
+    }
+    const searchOrigins = new Map(Object.entries(SEARCH_ENDPOINTS).map(([provider, url]) => [provider, new URL(url).origin]))
+    const searchServers = new Set(searchOrigins.values())
+    const originOf = (url: string) => {
+      try {
+        return new URL(url).origin
+      } catch {
+        return null
+      }
+    }
+    const tunnel: TunnelOptions = {
+      // The servers of the model profiles and the search providers; nothing else is reached through this PC.
+      allowed: (origin) => searchServers.has(origin) || settings.raw().profiles.some((profile) => originOf(profile.baseUrl) === origin),
+      keyFor: (binding, url) =>
+        binding.kind === 'model'
+          ? modelKey(binding.profileId, url)
+          : searchOrigins.get(binding.provider) === originOf(url)
+            ? settings.searchKeyFor(binding.provider as SearchProviderId)
+            : '',
+    }
+    places = new Places({
+      local: { workspace, git, shell, review },
+      platform: process.platform,
+      localFolders: () => [settings.chatsFolder(), ...settings.get().recentWorkspaces.filter((root) => !isRemoteRoot(root))],
+      machine: (target) => {
+        // What the program there asks back goes to the agent host, so it is answered only while the agent host runs
+        // there: not before the folder has moved, and not from a machine the folder has left, whose requests would
+        // otherwise reach the agent host of this PC or of the next machine.
+        const hosting = <A, R>(run: (input: A) => Promise<R>) => (input: A): Promise<R> =>
+          places?.remote === machine ? run(input) : Promise.reject(new Error('That machine’s folder is not open.'))
+        const machine: RemoteMachine = new RemoteMachine({
+          target,
+          ssh: sshProgram(),
+          server: serverProgram,
+          tunnel,
+          main: {
+            draftCommit: hosting((input) => agentHost.draftCommit(input)),
+            reviewCode: hosting((input) => agentHost.codeReview(input)),
+            turnChanges: hosting(({ sessionId, turn }) => agentHost.client.turnChanges(sessionId, turn)),
+            turnWrite: hosting(({ sessionId, write }) => agentHost.client.turnWrite(sessionId, write)),
+          },
+          onState: (state) => send('remote:state', state),
+          onChanged: (paths) => {
+            if (places?.remote === machine) send('workspace:file-changed', paths)
+          },
+          log: (line) => console.info(line),
+        })
+        return machine
+      },
+      moved: async () => {
+        configureAgent()
+        await agentHost.restart()
+      },
+    })
+
     registerIpc({
       getWindow: () => mainWindow,
       settings,
-      workspace,
-      shell,
+      workspace: places.workspace,
+      shell: places.shell,
       schedules,
       skills,
       instructions,
       models,
-      git,
-      review,
+      git: places.git,
+      review: places.review,
       agent: agentHost,
+      places,
+      remote: {
+        hosts: () => {
+          try {
+            return configHosts(readFileSync(path.join(home, '.ssh', 'config'), 'utf8'))
+          } catch {
+            return []
+          }
+        },
+        installNode: (target, platform) => installNode({ target, ssh: sshProgram(), platform, log: (line) => console.info(`[ssh] ${line}`) }),
+      },
       modelTests: new ModelTestStore(path.join(userData, 'eNCode-model-tests.json')),
       configureAgent,
       logs,
@@ -421,6 +538,7 @@ if (!gotLock) {
       computerControl.dispose()
       banner.dispose()
       void agentHost.dispose().finally(() => {
+        places?.dispose()
         logs.flush()
         app.quit()
       })

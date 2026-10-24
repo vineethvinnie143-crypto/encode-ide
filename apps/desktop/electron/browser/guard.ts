@@ -11,7 +11,7 @@
 import { Menu, clipboard, session as sessions, type BrowserWindow, type ContextMenuParams, type MenuItemConstructorOptions, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { BrowserKeyAction } from '../../shared/types'
 import type { AgentBrowser } from './agent-browser'
-import { PERSON_PARTITION, agentKeyOf, isWebUrl, permits, plainUserAgent } from './rules'
+import { PERSON_PARTITION, agentKeyOf, heldOnRemote, isWebUrl, permits, plainUserAgent } from './rules'
 
 
 export interface BrowserGuardOptions {
@@ -19,6 +19,8 @@ export interface BrowserGuardOptions {
   openTab(url: string): void
   /** A key the app answers to was pressed in the page of `contentsId`. */
   key(contentsId: number, action: BrowserKeyAction): void
+  /** Whether the open folder is on another machine (ADR 0111): the agent's tab then loads nothing of this PC's network. */
+  remote(): boolean
   log(message: string): void
 }
 
@@ -72,6 +74,7 @@ export function guardBrowserTabs(win: BrowserWindow, agents: AgentBrowser, optio
       event.preventDefault()
       agents.hold(contents, `a download of ${item.getFilename() || 'a file'} was not kept`)
     })
+    if (agent) holdThisNetworkWhenRemote(session, agents, options)
   }
 
   win.webContents.on('will-attach-webview', (event, preferences, params) => {
@@ -125,6 +128,44 @@ export function guardBrowserTabs(win: BrowserWindow, agents: AgentBrowser, optio
         if (isWebUrl(url) && url !== 'about:blank') options.openTab(url)
         return { action: 'deny' }
       })
+  })
+}
+
+/** How long a name's addresses are trusted for the check below. */
+const RESOLVED_FOR_MS = 60_000
+
+/**
+ * Every request of an agent tab, while the folder is on another machine: one to this PC or its network is cancelled
+ * (rules.ts, heldOnRemote), and a page that was held tells the agent why. The check is here, on this PC, because the
+ * agent host there is not this PC's to trust with it. A name is resolved as the tab's own session resolves it.
+ */
+function holdThisNetworkWhenRemote(session: Session, agents: AgentBrowser, options: BrowserGuardOptions): void {
+  const resolved = new Map<string, { at: number; addresses: Promise<string[]> }>()
+  const resolve = (host: string): Promise<string[]> => {
+    const known = resolved.get(host)
+    if (known && Date.now() - known.at < RESOLVED_FOR_MS) return known.addresses
+    if (resolved.size > 500) resolved.clear()
+    const addresses = session.resolveHost(host).then(
+      (answer) => answer.endpoints.map((endpoint) => endpoint.address),
+      () => [],
+    )
+    resolved.set(host, { at: Date.now(), addresses })
+    return addresses
+  }
+  session.webRequest.onBeforeRequest((details, callback) => {
+    if (!options.remote()) {
+      callback({})
+      return
+    }
+    void heldOnRemote(details.url, resolve).then(
+      (host) => {
+        if (host && details.resourceType === 'mainFrame' && details.webContents) {
+          agents.hold(details.webContents, `${host} was not opened: while the folder is on another machine, the browser tab opens nothing on this PC or its network, and that machine's own servers are not reachable from here yet`)
+        }
+        callback(host ? { cancel: true } : {})
+      },
+      () => callback({ cancel: true }),
+    )
   })
 }
 

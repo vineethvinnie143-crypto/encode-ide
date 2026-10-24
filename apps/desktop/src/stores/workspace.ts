@@ -6,6 +6,16 @@ import { SWITCH_BLOCKED, canSwitchProject, sameRoot } from './sidebar-model'
 import { useStatus } from './status'
 import { useUi } from './ui'
 import { errorText } from '../ipc-error'
+import { remoteParts } from '@shared/remote'
+
+/** Where a folder is: this PC, or the machine of a folder elsewhere (ADR 0111). */
+const placeOf = (workspace: OpenWorkspace | null): string => (workspace?.remote ? (remoteParts(workspace.remote.uri)?.machine ?? 'remote') : 'local')
+
+/** What follows the open folder to another machine and back: the agent there has its own sessions (stores/sessions.ts). */
+let placeChanged: (() => Promise<void>) | null = null
+export function whenPlaceChanges(run: () => Promise<void>): void {
+  placeChanged = run
+}
 
 interface WorkspaceStore {
   workspace: OpenWorkspace | null
@@ -17,6 +27,8 @@ interface WorkspaceStore {
   init(): Promise<void>
   openDialog(): Promise<void>
   openPath(path: string): Promise<void>
+  /** A folder the main process opened (one on another machine, from the Open dialog): it is shown, as openPath would. */
+  adopt(workspace: OpenWorkspace): Promise<void>
   close(): Promise<void>
   loadDir(rel: string): Promise<void>
   toggleDir(rel: string): Promise<void>
@@ -62,9 +74,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
     try {
       const workspace = await api.workspace.openDialog()
       if (!workspace) return
-      if (!sameRoot(workspace.root, get().workspace?.root)) useEditor.getState().dropAll()
-      set({ workspace, children: {}, expanded: {}, selected: null })
-      await get().loadDir('')
+      await get().adopt(workspace)
     } catch (error) {
       useUi.getState().notify('error', errorText(error))
     }
@@ -80,13 +90,18 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
     const switching = !sameRoot(path, get().workspace?.root)
     if (switching && !(await useEditor.getState().confirmDiscardAll())) return
     try {
-      const workspace = await api.workspace.openPath(path)
-      if (!sameRoot(workspace.root, get().workspace?.root)) useEditor.getState().dropAll()
-      set({ workspace, children: {}, expanded: {}, selected: null })
-      await get().loadDir('')
+      await get().adopt(await api.workspace.openPath(path))
     } catch (error) {
       useUi.getState().notify('error', errorText(error))
     }
+  },
+
+  adopt: async (workspace) => {
+    const before = get().workspace
+    if (!sameRoot(workspace.root, before?.root) || placeOf(workspace) !== placeOf(before)) useEditor.getState().dropAll()
+    set({ workspace, children: {}, expanded: {}, selected: null })
+    if (placeOf(workspace) !== placeOf(before)) await placeChanged?.()
+    await get().loadDir('')
   },
 
   close: async () => {
@@ -97,7 +112,10 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => ({
       /* ignore */
     }
     useEditor.getState().dropAll()
+    const before = get().workspace
     set({ workspace: null, children: {}, expanded: {}, selected: null })
+    // Closing a folder elsewhere brings the agent back to this PC.
+    if (placeOf(before) !== 'local') await placeChanged?.()
   },
 
   loadDir: async (rel: string) => {

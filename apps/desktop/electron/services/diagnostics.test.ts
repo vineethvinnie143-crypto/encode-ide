@@ -177,6 +177,13 @@ describe('diagnostics report', () => {
     assert.match(text, /ERROR rejected \[redacted\]/)
   })
 
+  it('says how a folder on another machine is connected and what runs there, without naming the machine', () => {
+    const text = diagnosticsReport(input({ workspaceOpen: true, remote: { status: 'lost', node: '22.22.0', system: 'linux x64' } }))
+    assert.match(text, /one open on another machine/)
+    assert.match(text, /Other machine\s+lost, Node 22\.22\.0 on linux x64/)
+    assert.doesNotMatch(diagnosticsReport(input({ workspaceOpen: true })), /Other machine/)
+  })
+
   it('copes with what it was not told', () => {
     const text = diagnosticsReport(input({ agentHost: null, sessions: null, environment: [], logLines: [], about: { ...about, commit: '', builtAt: '', packaged: false } }))
     assert.match(text, /eNCode 0\.1\.0 tester, no commit recorded\n/)

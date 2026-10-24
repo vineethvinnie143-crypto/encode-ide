@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { parseBrowserRequest } from '@encode/tools'
-import { agentKey, agentKeyOf, agentPartition, followsOnItsOwn, isWebUrl, keyStroke, permits, plainUserAgent } from './rules'
+import { agentKey, agentKeyOf, agentPartition, followsOnItsOwn, heldOnRemote, isWebUrl, keyStroke, permits, plainUserAgent } from './rules'
 
 describe('Browser tabs', () => {
   it('give each chat an agent partition of its own that does not give the chat away', () => {
@@ -65,5 +65,17 @@ describe('Browser tabs', () => {
       { step: { type: 'evaluate', code: 'alert(1)' }, image: false },
     ])
       assert.equal(parseBrowserRequest(bad), null, JSON.stringify(bad)?.slice(0, 80))
+  })
+
+  it('hold this PC and its network from the agent’s tab while the folder is on another machine', async () => {
+    const names: Record<string, string[]> = { 'example.com': ['93.184.215.14'], 'router.example.com': ['192.168.1.1'], 'both.example.com': ['93.184.215.14', '10.0.0.5'] }
+    const resolve = async (host: string) => names[host] ?? []
+    for (const url of ['http://localhost:3000/', 'http://127.0.0.1:8080', 'http://127.1/', 'http://0x7f000001/', 'http://[::1]:5173', 'http://[::ffff:127.0.0.1]/', 'http://192.168.1.1/admin', 'http://169.254.169.254/latest', 'http://10.0.0.5', 'ws://localhost:24678', 'http://nas.local/', 'http://printer/', 'http://app.localhost/', 'https://router.example.com/', 'https://both.example.com/', 'http://localhost./']) {
+      assert.notEqual(await heldOnRemote(url, resolve), null, url)
+    }
+    for (const url of ['https://example.com/', 'http://93.184.215.14/', 'https://unknown.example.org/', 'about:blank', 'data:text/html,hi', 'blob:https://example.com/1', 'not a url']) {
+      assert.equal(await heldOnRemote(url, resolve), null, url)
+    }
+    assert.equal(await heldOnRemote('https://router.example.com/', resolve), 'router.example.com')
   })
 })

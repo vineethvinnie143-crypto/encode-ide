@@ -92,6 +92,13 @@ const api: EncodeApi = {
     search: (options: SearchOptions) => invoke('workspace:search', options),
     onFileChanged: (callback) => on('workspace:file-changed', callback),
   },
+  remote: {
+    hosts: () => invoke('remote:hosts'),
+    open: (host: string, folder: string) => invoke('remote:open', host, folder),
+    installNode: (host: string, platform: string) => invoke('remote:install-node', host, platform),
+    state: () => invoke('remote:state'),
+    onState: (callback) => on('remote:state', callback),
+  },
   settings: {
     get: () => invoke('settings:get'),
     save: (patch: Partial<Settings>) => invoke('settings:save', patch),

@@ -343,3 +343,29 @@ button.shortcuts-keys:hover {
   font-size: var(--fs-14);
   line-height: 22px;
 }
+
+/* Open a folder on another machine (ADR 0111) */
+.remote-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+}
+.remote-install {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding-left: 32px;
+}
+.remote-install .form-help {
+  margin: 0;
+}
+.remote-install-icon {
+  vertical-align: -2px;
+  color: var(--text-2);
+}
