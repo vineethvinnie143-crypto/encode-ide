@@ -76,7 +76,7 @@
   .sheet-work.has-side .sidebar-wrap.fits {
     max-width: none;
   }
-  .right-wrap.fits {
+  .right-wrap.fits:not(.is-full) {
     max-width: 60%;
   }
   .right-wrap:not(.is-full):not(.is-hidden) {
