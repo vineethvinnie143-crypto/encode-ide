@@ -13,6 +13,11 @@ export interface PanelTab {
   title: string
   /** The page a Browser tab shows, so it comes back after Reopen and after a restart. */
   url?: string
+  /**
+   * A chat's agent tab (ADR 0103): the key of its partition. It is the agent's while the window lives; it is not saved,
+   * not reopened, and its page never moves to one of the person's tabs.
+   */
+  agent?: string
 }
 
 export interface Strip {
@@ -127,6 +132,27 @@ export function visitSide(state: PanelsState, id: string, url: string, title: st
   return { ...state, side: { ...state.side, tabs } }
 }
 
+/**
+ * Shows a chat's agent tab: the one open for `key`, or a new one beside the others (never in place of a New tab page,
+ * which is the person's). The panel comes back if it was hidden. A strip that is full stays as it is.
+ */
+export function showAgentSide(state: PanelsState, key: string, id: string): PanelsState {
+  const existing = state.side.tabs.find((tab) => tab.agent === key)
+  const layout = state.side.layout === 'hidden' ? 'split' : state.side.layout
+  if (existing) return { ...state, side: { ...state.side, activeId: existing.id, layout } }
+  if (state.side.tabs.length >= MAX_TABS) return state
+  const tab: PanelTab = { id, kind: 'browser', title: 'Agent', agent: key }
+  return { ...state, side: { ...state.side, tabs: [...state.side.tabs, tab], activeId: id, layout } }
+}
+
+/** The tabs as they are saved: without the agent tabs, which belong to this run of the window. */
+export function savedPanels(state: PanelsState): PanelsState {
+  const keep = (tabs: PanelTab[]) => tabs.filter((tab) => !tab.agent)
+  const tabs = keep(state.side.tabs)
+  const activeId = tabs.some((tab) => tab.id === state.side.activeId) ? state.side.activeId : (tabs[0]?.id ?? null)
+  return { ...state, side: { ...state.side, tabs, activeId, closed: keep(state.side.closed) } }
+}
+
 /** Closes a tab and remembers it for Reopen. Closing the last tab hides the panel. */
 export function closeSide(state: PanelsState, id: string): PanelsState {
   const index = state.side.tabs.findIndex((tab) => tab.id === id)
@@ -134,8 +160,8 @@ export function closeSide(state: PanelsState, id: string): PanelsState {
   const closed = state.side.tabs[index]
   const tabs = state.side.tabs.filter((tab) => tab.id !== id)
   const activeId = state.side.activeId === id ? neighbourAfterClose(state.side.tabs, index) : state.side.activeId
-  // A New tab page is not worth reopening.
-  const remembered = closed.kind === 'new' ? state.side.closed : [closed, ...state.side.closed].slice(0, MAX_CLOSED)
+  // A New tab page is not worth reopening, and an agent tab is the agent's.
+  const remembered = closed.kind === 'new' || closed.agent ? state.side.closed : [closed, ...state.side.closed].slice(0, MAX_CLOSED)
   return {
     ...state,
     side: { ...state.side, tabs, activeId, closed: remembered, layout: tabs.length ? state.side.layout : 'hidden' },

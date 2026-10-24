@@ -15,7 +15,9 @@ import {
   openBottom,
   openSide,
   reopenSide,
+  savedPanels,
   setLayout,
+  showAgentSide,
   stepSide,
   toggleBottom,
   toggleFull,
@@ -297,5 +299,31 @@ describe('saved panels', () => {
     const empty = normalizePanels({ side: { tabs: [], layout: 'split' }, bottom: { open: true, tabs: [] } })
     assert.equal(empty.side.layout, 'hidden')
     assert.equal(empty.bottom.open, false)
+  })
+})
+
+describe('agent tabs', () => {
+  it('opens beside the others, never in place of a New tab page, and shows the one already open', () => {
+    let state = setLayout(openSide(defaultPanels(), 'new', id()), 'hidden')
+    state = showAgentSide(state, 'aaaa', 'agent-1')
+    assert.deepEqual(kinds(state), ['files', 'new', 'browser'])
+    assert.equal(state.side.activeId, 'agent-1')
+    assert.equal(state.side.layout, 'split', 'the panel comes back')
+    state = activateSide(state, 'files')
+    state = showAgentSide(state, 'aaaa', 'agent-2')
+    assert.equal(state.side.tabs.length, 3, 'one tab per chat')
+    assert.equal(state.side.activeId, 'agent-1')
+    assert.equal(showAgentSide(state, 'bbbb', 'agent-3').side.tabs.at(-1)?.agent, 'bbbb')
+  })
+
+  it('is not saved, not reopened, and its page is no tab of the person’s', () => {
+    let state = showAgentSide(defaultPanels(), 'aaaa', 'agent-1')
+    state = visitSide(state, 'agent-1', 'http://localhost:5173/', 'localhost:5173')
+    const saved = savedPanels(state)
+    assert.deepEqual(kinds(saved), ['files'])
+    assert.equal(saved.side.activeId, 'files')
+    const closed = closeSide(state, 'agent-1')
+    assert.deepEqual(closed.side.closed, [])
+    assert.deepEqual(kinds(reopenSide(closed, id())), ['files'])
   })
 })

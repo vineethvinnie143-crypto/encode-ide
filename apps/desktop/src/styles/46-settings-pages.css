@@ -574,6 +574,7 @@
 .theme-editor {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 14px;
 }
 .theme-editor-head {
@@ -589,6 +590,7 @@
 .theme-base {
   flex: 1;
   min-width: 120px;
+  white-space: nowrap;
   color: var(--text-3);
   font-size: var(--fs-12);
 }

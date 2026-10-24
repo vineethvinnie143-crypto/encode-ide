@@ -4,6 +4,8 @@ import type { ModelTestProgress } from '../shared/model-tests'
 import type { CustomTheme } from '../shared/themes'
 import type {
   AgentCreateInput,
+  AgentTabRequest,
+  BrowserKeyAction,
   AgentMode,
   AgentEvent,
   ApprovalAnswer,
@@ -56,6 +58,11 @@ const api: EncodeApi = {
     onOpenSession: (callback) => on<string>('app:open-session', callback),
     screenReader: () => invoke('app:screen-reader'),
     onScreenReader: (callback) => on<boolean>('app:screen-reader', callback),
+  },
+  browser: {
+    onOpenTab: (callback) => on<string>('browser:open-tab', callback),
+    onAgentTab: (callback) => on<AgentTabRequest>('browser:agent', callback),
+    onKey: (callback) => on<{ contentsId: number; action: BrowserKeyAction }>('browser:key', callback),
   },
   window: {
     minimize: () => invoke('window:minimize'),

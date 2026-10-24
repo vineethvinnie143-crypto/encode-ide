@@ -1573,6 +1573,12 @@ export interface AboutInfo {
 /** How saving a report of an editor issue ended. */
 export type EditorIssueSaved = { saved: string } | { canceled: true } | { refused: string }
 
+/** What a key pressed in a Browser tab's page asks of the tab (browser/guard.ts in the main process). */
+export type BrowserKeyAction = 'address' | 'reload' | 'back' | 'forward' | 'close' | 'new-tab' | 'zoom-in' | 'zoom-out' | 'zoom-reset'
+
+/** The main process asks for a chat's agent tab (ADR 0103): show it (opening it when it is not open) or close it. */
+export type AgentTabRequest = { type: 'show' | 'close'; key: string }
+
 export interface EncodeApi {
   app: {
     about(): Promise<AboutInfo>
@@ -1597,6 +1603,14 @@ export interface EncodeApi {
     screenReader(): Promise<boolean>
     /** A screen reader started or stopped. */
     onScreenReader(cb: (active: boolean) => void): () => void
+  }
+  browser: {
+    /** A page in one of the person's tabs opened a window: it becomes a new Browser tab. */
+    onOpenTab(cb: (url: string) => void): () => void
+    /** The agent of a chat wants its tab shown, or closed. */
+    onAgentTab(cb: (request: AgentTabRequest) => void): () => void
+    /** A key the app answers to was pressed in the page of a tab, named by its web contents. */
+    onKey(cb: (event: { contentsId: number; action: BrowserKeyAction }) => void): () => void
   }
   window: {
     minimize(): Promise<void>

@@ -20,6 +20,7 @@ import {
   type CodeIndex,
   type NativeDoc,
   type CodeIntelligence,
+  type BrowserBackend,
   type DesktopBackend,
   type DesktopBroker,
   type DesktopOptions,
@@ -141,6 +142,8 @@ export interface HostOptions {
    */
   desktop?: DesktopBackend
   desktopOptions?: Partial<DesktopOptions>
+  /** A Browser tab of each session's own, for the Browser tool (ADR 0103); absent outside the desktop app. */
+  browser?: (sessionId: string) => BrowserBackend
   reviewPlan?(plan: string, signal: AbortSignal): Promise<PlanVerdict>
   system?: SystemPart[]
   warn?(message: string): void
@@ -260,6 +263,7 @@ export class AgentHost {
       ...(beforeWrite ? { beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
       ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
+      ...(o.browser ? { browser: o.browser } : {}),
       ...(o.reviewPlan ? { reviewPlan: o.reviewPlan } : {}),
       ...(o.system ? { system: o.system } : {}),
       ...(o.warn ? { warn: o.warn } : {}),

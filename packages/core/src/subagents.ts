@@ -82,7 +82,8 @@ export interface SubagentDefinition extends SubagentType {
 
 /**
  * What a subagent never gets: it must not start more agents, or touch what only the main agent owns. The Computer
- * tool is one of those: up to four subagents run side by side, and there is one mouse. Monitor, ScheduleWakeup and
+ * tool is one of those: up to four subagents run side by side, and there is one mouse; so is the Browser, whose tab is
+ * the chat's one. Monitor, ScheduleWakeup and
  * SendMessage report back through notices only the main agent reads. A subagent works where the main agent works, so
  * it does not enter or leave worktrees either.
  */
@@ -99,6 +100,7 @@ export const SUBAGENT_EXCLUDED: readonly string[] = [
   'TodoWrite',
   'attempt_completion',
   'Computer',
+  'Browser',
   'EnterWorktree',
   'ExitWorktree',
 ]

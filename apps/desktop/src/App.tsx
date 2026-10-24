@@ -154,6 +154,13 @@ export default function App() {
       void useSessions.getState().select(id)
     })
 
+    // Browser tabs: a page of the person's opened a window, or a chat's agent wants its tab shown or closed (ADR 0103).
+    const offPopup = api.browser.onOpenTab((url) => usePanels.getState().openPage(url))
+    const offAgentTab = api.browser.onAgentTab((request) => {
+      if (request.type === 'show') usePanels.getState().showAgent(request.key)
+      else usePanels.getState().closeAgent(request.key)
+    })
+
     // Whether a screen reader is running, for the editor's screen reader mode set to Auto.
     const running = (active: boolean) => useScreenReaderRunning.setState({ running: active })
     void api.app.screenReader().then(running, () => {})
@@ -164,6 +171,8 @@ export default function App() {
       offFiles()
       offAlert()
       offOpen()
+      offPopup()
+      offAgentTab()
       offReader()
       refresh.cancel()
     }

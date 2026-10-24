@@ -212,6 +212,15 @@
 .panel-pane.is-active {
   display: flex;
 }
+/* A Browser tab behind another stays laid out at the panel's size, unseen: its page keeps what it shows and stays
+   readable for the agent. */
+.panel-pane.is-kept:not(.is-active) {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 .panel-pane > .terminal-panel {
   flex: 1;
   height: auto;

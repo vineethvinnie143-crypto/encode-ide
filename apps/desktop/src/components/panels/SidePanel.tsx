@@ -37,7 +37,8 @@ export function PaneFor({ tab }: { tab: PanelTab }) {
 
 /**
  * The side panel: a strip of tabs, and under it every tab's page. Pages that are not in front
- * stay mounted, so a browser keeps its page and a terminal its shells.
+ * stay mounted, so a browser keeps its page and a terminal its shells. A Browser tab behind
+ * another keeps its size too (`is-kept`), so its page stays laid out for the agent to read.
  */
 export default function SidePanel() {
   const tabs = usePanels((state) => state.side.tabs)
@@ -70,7 +71,7 @@ export default function SidePanel() {
 
       <div className="panel-panes">
         {tabs.map((tab) => (
-          <div key={tab.id} role="tabpanel" aria-label={tab.title} className={cx('panel-pane', tab.id === activeId && 'is-active')}>
+          <div key={tab.id} role="tabpanel" aria-label={tab.title} className={cx('panel-pane', tab.id === activeId && 'is-active', tab.kind === 'browser' && 'is-kept')}>
             <PaneFor tab={tab} />
           </div>
         ))}

@@ -40,6 +40,7 @@ import {
   type CodeIndex,
   type NativeDoc,
   type CodeIntelligence,
+  type BrowserBackend,
   type DesktopServices,
   type FileStateTracker,
   type Goals,
@@ -227,6 +228,8 @@ export interface SessionEnv {
    * sessions must hand out a view whose `dispose` lets go without stopping the desktop (see createDesktopBroker).
    */
   desktop?: (sessionId: string) => DesktopServices
+  /** The agent's Browser tab of a session, opened at its first use (ADR 0103); absent outside the desktop app. */
+  browser?: (sessionId: string) => BrowserBackend
   /** Every event, tagged with the session. */
   emit(event: AgentEvent): void
   /** A session's background jobs changed. */
@@ -445,6 +448,8 @@ export class AgentSession {
   /** The settings the loop's tools were chosen by; a change builds a new loop between turns. */
   private loopKey = ''
   private desktop: DesktopServices | undefined
+  /** The session's Browser tab, kept across turns and closed with the session. */
+  private browser: BrowserBackend | undefined
   private messages: Message[] = []
   private records: MessageRecord[] = []
   private entries: ConversationEntry[] = []
@@ -1187,6 +1192,7 @@ export class AgentSession {
         skills: this.env.skills.list().slice(0, 20),
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
+        browser: this.env.browser !== undefined,
         background: true,
         worktrees: Boolean(this.env.worktrees),
         code: Boolean(this.env.code?.()),
@@ -1304,6 +1310,7 @@ export class AgentSession {
       goals,
       background: this.background,
       ...(this.desktop ? { desktop: this.desktop } : {}),
+      ...(env.browser ? { browser: () => (this.browser ??= env.browser!(this.id)) } : {}),
       ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}),
       summarize: this.summarizePage,
       cwd: this.workdir,
@@ -2697,6 +2704,8 @@ export class AgentSession {
     await this.jobsManager.dispose().catch(() => undefined)
     await this.shell.dispose().catch(() => undefined)
     this.letGoOfDesktop()
+    await this.browser?.dispose().catch(() => undefined)
+    this.browser = undefined
     await this.env.release?.().catch(() => undefined)
     await this.log.close().catch(() => undefined)
   }

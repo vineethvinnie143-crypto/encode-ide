@@ -11,7 +11,9 @@ import {
   openBottom,
   openSide,
   reopenSide,
+  savedPanels,
   setLayout,
+  showAgentSide,
   stepSide,
   toggleBottom,
   toggleFull,
@@ -46,7 +48,8 @@ function loadRecent(): string[] {
 
 function save(state: PanelsState): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ side: { ...state.side, closed: undefined }, bottom: state.bottom }))
+    const saved = savedPanels(state)
+    localStorage.setItem(KEY, JSON.stringify({ side: { ...saved.side, closed: undefined }, bottom: saved.bottom }))
   } catch {
     /* storage may be unavailable */
   }
@@ -59,6 +62,10 @@ interface PanelsStore extends PanelsState {
   openPage(url: string): void
   /** A Browser tab went to an address: it keeps it, takes the site's name, and the page joins the recent ones. */
   visit(id: string, url: string, title: string): void
+  /** Shows a chat's agent tab, opening it if it is not open. */
+  showAgent(key: string): void
+  /** Closes a chat's agent tab. */
+  closeAgent(key: string): void
   /** Shows a tab of this kind in the side panel; for Files, which view (Explorer, Search or Source control) to show. */
   open(kind: PanelTabKind, options?: { view?: SidebarView }): void
   close(id: string): void
@@ -112,7 +119,14 @@ export const usePanels = create<PanelsStore>((set, get) => {
     },
     visit: (id, url, title) => {
       apply(visitSide(snapshot(), id, url, title))
-      get().rememberPage(url)
+      // The agent's pages are not the person's recent pages.
+      if (!get().side.tabs.find((tab) => tab.id === id)?.agent) get().rememberPage(url)
+    },
+
+    showAgent: (key) => apply(showAgentSide(snapshot(), key, newId())),
+    closeAgent: (key) => {
+      const tab = get().side.tabs.find((candidate) => candidate.agent === key)
+      if (tab) apply(closeSide(snapshot(), tab.id))
     },
 
     open: (kind, options) => {

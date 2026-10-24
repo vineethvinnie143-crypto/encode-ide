@@ -92,6 +92,8 @@ const SEARCH_CHECK_TIMEOUT_MS = 20_000
 const DRAFT_TIMEOUT_MS = 90_000
 /** A review reads a large change and thinks it over: it gets longer than a commit message. */
 const REVIEW_TIMEOUT_MS = 5 * 60_000
+/** The longest browser step (a wait, a slow page, a picture) and its margin. */
+const BROWSER_TIMEOUT_MS = 60_000
 /** A suggestion later than this is no use to someone typing. */
 const INLINE_TIMEOUT_MS = 10_000
 
@@ -376,6 +378,11 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       // git by absolute path, looked up at each use: a bare `git` could be a git.exe in the project on Windows.
       worktrees: createWorktreeGit({ git: () => searchPath('git', process.env) }),
       web: createWebAccess({ searchProvider }),
+      // The Browser tool drives the chat's agent tab in the window; the main process holds the tabs.
+      browser: (sessionId) => ({
+        call: (request, signal) => peer.request('browser', { session: sessionId, request }, { signal, timeoutMs: BROWSER_TIMEOUT_MS }),
+        dispose: async () => undefined,
+      }),
       ...options.hostOptions,
     })
     if (init.legacySessionsFile) {

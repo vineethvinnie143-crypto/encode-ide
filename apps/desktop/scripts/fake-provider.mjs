@@ -182,6 +182,19 @@ const SCENARIOS = {
     { text: 'Now a command.', call: { name: 'Bash', args: { command: 'echo computer-check-ok' } } },
     { text: 'Computer check finished.' },
   ],
+  // The Browser tool in the chat's own tab (ADR 0103): a form filled and sent, a confirm dialog answered by itself, a
+  // password field refused, a link to another site held back, a link on the same host followed, and the console read.
+  'browser-check': [
+    { text: 'Opening the app.', call: { name: 'Browser', args: { action: 'open', url: `http://127.0.0.1:${port}/__browser/app` } } },
+    { text: 'Typing a name.', call: { name: 'Browser', args: { action: 'type', ref: 'e1', text: 'Ada' } } },
+    { text: 'Choosing a size.', call: { name: 'Browser', args: { action: 'select', ref: 'e2', value: 'Large' } } },
+    { text: 'Greeting.', call: { name: 'Browser', args: { action: 'click', ref: 'e3' } } },
+    { text: 'Trying the secret field.', call: { name: 'Browser', args: { action: 'type', ref: 'e6', text: 'hunter2' } } },
+    { text: 'Following the link elsewhere.', call: { name: 'Browser', args: { action: 'click', ref: 'e5' } } },
+    { text: 'Following the next link.', call: { name: 'Browser', args: { action: 'click', ref: 'e4' } } },
+    { text: 'Reading the console.', call: { name: 'Browser', args: { action: 'console' } } },
+    { text: 'Browser check finished.' },
+  ],
   // A tool of an MCP server asks like any tool. "Always allow" saves a rule for that tool alone: the same tool then runs
   // without asking, and the server's other tool still asks.
   'mcp-check': [
@@ -685,6 +698,34 @@ const server = http.createServer(async (request, response) => {
       response.end(
         '<!doctype html><title>Framed page</title><body style="margin:0;padding:24px;background:#0b3d5c;color:#fff;font:28px sans-serif">Framed page<script>document.title = "Script ran"</script></body>',
       )
+      return
+    }
+    // The app the Browser check drives: its outline lists the name field (e1), the size list (e2), Greet (e3), the next
+    // page (e4), the link elsewhere (e5) and the secret field (e6), in that order.
+    if (request.url === '/__browser/app') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      response.end(`<!doctype html><title>Greeter</title>
+<body style="font:15px sans-serif;padding:16px">
+<h1>Greeter</h1>
+<label>Name <input id="name"></label>
+<select id="size" aria-label="Size"><option value="s">Small</option><option value="l">Large</option></select>
+<button id="greet">Greet</button>
+<p id="out"></p>
+<p><a href="/__browser/next">Next page</a> <a href="https://example.com/elsewhere">Elsewhere</a></p>
+<label>Secret <input type="password" id="secret"></label>
+<script>
+console.error('smoke: a console error')
+document.getElementById('greet').addEventListener('click', () => {
+  const sure = confirm('Greet them?')
+  document.getElementById('out').textContent = (sure ? 'Hello, ' : 'Not greeted, ') + document.getElementById('name').value + ' (' + document.getElementById('size').value + ')'
+})
+</script>
+</body>`)
+      return
+    }
+    if (request.url === '/__browser/next') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      response.end('<!doctype html><title>Second page</title><body style="font:15px sans-serif;padding:16px"><h1>Second page</h1><p>Reached by a link.</p></body>')
       return
     }
     if (request.url?.endsWith('/models')) {

@@ -47,6 +47,7 @@ import {
   type AgentMode,
   type AgentShell,
   type BackgroundWork,
+  type BrowserBackend,
   type DesktopServices,
   type DiffHunk,
   type FileStateTracker,
@@ -165,6 +166,8 @@ export interface LoopServices {
   background?: BackgroundWork
   /** The desktop the Computer tool works on; absent when the session has none. */
   desktop?: DesktopServices
+  /** The session's Browser tab, made at its first use; absent outside the desktop app. */
+  browser?: () => BrowserBackend
   beforeWrite?: ToolContext['beforeWrite']
   summarize?: ToolContext['summarize']
   /** Where relative paths and searches start, asked at each call: the root, or the worktree the agent works in. */
@@ -1451,6 +1454,7 @@ export class AgentLoop {
             },
           }
         : {}),
+      ...(s.browser ? { browser: { get backend() { return s.browser!() }, vision: () => this.vision === true } } : {}),
       readsDocuments: () => this.documents === true,
       ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
