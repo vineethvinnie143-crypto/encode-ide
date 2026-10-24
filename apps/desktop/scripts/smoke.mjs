@@ -3834,18 +3834,6 @@ async function runWideLineChecks() {
   console.log('[smoke] wide lines:', JSON.stringify(sizes))
   await screenshotSizes('ui-dark-wide-lines')
 
-  // A 1366 x 768 screen with the side panel open: the panels give up width before the thread's column drops under 720 px.
-  await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false })
-  await sleep(400)
-  const small = await evaluate(`(() => ({
-    side: Math.round(document.querySelector('.right-wrap:not(.is-hidden):not(.is-full)')?.getBoundingClientRect().width ?? 0),
-    sidebar: Math.round(document.querySelector('.sidebar-wrap')?.getBoundingClientRect().width ?? 0),
-    main: Math.round(document.querySelector('.app-main').getBoundingClientRect().width),
-  }))()`)
-  await send('Emulation.clearDeviceMetricsOverride')
-  await sleep(200)
-  console.log('[smoke] 1366 x 768:', JSON.stringify(small))
-  if (small.side && small.main < 700) throw new Error(`On a 1366 x 768 screen the thread's column is ${small.main} px: the panels took the rest`)
   if (sizes.steps < 4) throw new Error(`Expected four steps in the thread, found ${sizes.steps}`)
   if (sizes.boxes.filter((box) => box.scroll > box.client + 1).length < 2) throw new Error('The long diff line and the wide table do not each scroll in their own box')
   if (sizes.list.scroll > sizes.list.client + 1) throw new Error(`The chat scrolls sideways: ${sizes.list.scroll} px of content in ${sizes.list.client} px`)
@@ -3861,6 +3849,26 @@ async function runWideLineChecks() {
   await waitFor("document.querySelector('.composer-input').value.includes('begin_segment00')", 4000, 'the copied reply pastes back')
   await typeInto('.composer-input', '')
   await fs.rm(path.join(demoPath, 'wide.txt'), { force: true })
+
+  // A 1366 x 768 screen with the side panel open: the panels give up width before the thread's column drops under 720 px,
+  // while their widths are as shipped. A part that dragged a divider made a width the person's, so it is put back first.
+  if (await evaluate("!document.querySelector('.right-wrap.fits') || !document.querySelector('.sidebar-wrap.fits')")) {
+    await evaluate("localStorage.removeItem('eNCode.sidepanel.v1'); localStorage.removeItem('eNCode.sidebar.v1')")
+    await send('Page.reload')
+    await waitFor("!!document.querySelector('.right-wrap.fits') && !!document.querySelector('.sidebar-wrap.fits')", 30000, 'the panels at their shipped widths')
+  }
+  await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false })
+  await sleep(400)
+  const small = await evaluate(`(() => ({
+    side: Math.round(document.querySelector('.right-wrap:not(.is-hidden):not(.is-full)')?.getBoundingClientRect().width ?? 0),
+    sidebar: Math.round(document.querySelector('.sidebar-wrap')?.getBoundingClientRect().width ?? 0),
+    main: Math.round(document.querySelector('.app-main').getBoundingClientRect().width),
+  }))()`)
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+  console.log('[smoke] 1366 x 768:', JSON.stringify(small))
+  if (!small.side) throw new Error('The side panel is not open beside the thread for the 1366 x 768 check')
+  if (small.main < 700) throw new Error(`On a 1366 x 768 screen the thread's column is ${small.main} px: the panels took the rest`)
   console.log('[smoke] wide lines and copy: ok')
 }
 

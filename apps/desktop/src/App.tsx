@@ -195,7 +195,7 @@ export default function App() {
           >
             {sidebarVisible && (
               <>
-                <div className="sidebar-wrap" ref={sidebarRef} style={{ width: sidebar.size }}>
+                <div className={cx('sidebar-wrap', !sidebar.chosen && 'fits')} ref={sidebarRef} style={{ width: sidebar.size }}>
                   <SessionSidebar />
                 </div>
                 <div className="resizer resizer-v" onPointerDown={sidebar.onPointerDown} />
@@ -214,7 +214,7 @@ export default function App() {
 
                 {/* The panel stays mounted while hidden, so a browser keeps its page and a terminal its shells. */}
                 {layout === 'split' && <div className="resizer resizer-v" onPointerDown={side.onPointerDown} />}
-                <div ref={sideRef} className={cx('right-wrap', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
+                <div ref={sideRef} className={cx('right-wrap', !side.chosen && 'fits', layout === 'full' && 'is-full', layout === 'hidden' && 'is-hidden')} style={layout === 'split' ? { width: side.size } : undefined}>
                   <SidePanel />
                 </div>
               </div>

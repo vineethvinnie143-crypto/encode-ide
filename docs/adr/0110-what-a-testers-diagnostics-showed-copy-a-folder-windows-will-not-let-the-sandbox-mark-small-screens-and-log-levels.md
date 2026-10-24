@@ -42,8 +42,9 @@ The first tester sent Help > Save diagnostics from their PC, running the 0.1.0 t
   - A one-click fix with administrator rights (a UAC prompt for icacls) was written up and refused by the coding
     agent's own safety check, because it changes a folder's permissions. It is not built and waits for the owner's call.
 - **Room for the thread.** On a small screen the side panel gives up width, down to 360 px, and then the sessions list,
-  down to 220 px, before the thread's column drops under 720 px. Their saved widths come back on a bigger window. Below
-  1100 px the side panel still floats over the thread, and the sessions list keeps its width. The smoke takes its
+  down to 220 px, before the thread's column drops under 720 px. That holds while their widths are as shipped: from the
+  first touch of a divider the width is the person's and is kept, as before. Below 1100 px the side panel still floats
+  over the thread, and the sessions list keeps its width. The smoke takes its
   screenshots at 1366 x 768 too, and checks that the thread's column stays at 700 px or more with the side panel open.
 - **The host's lines keep their level.** The main process reads a line from the agent host as the router's level for
   `router <level>:`, as info for a request that ended done or was stopped by the person, and as a warning for one that
