@@ -1,0 +1,27 @@
+{
+  "name": "@encode/bench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's benchmark: fixed tasks the agent runs on the real agent host, with checks that say whether it did them and what it spent.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/core": "workspace:*",
+    "@encode/permissions": "workspace:*",
+    "@encode/providers": "workspace:*",
+    "@encode/router": "workspace:*",
+    "@encode/sandbox": "workspace:*",
+    "@encode/tools": "workspace:*",
+    "@encode/workspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

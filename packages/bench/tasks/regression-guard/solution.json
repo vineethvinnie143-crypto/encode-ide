@@ -1,0 +1,47 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/slug.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "test/slug.test.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Punctuation must go, but / separates folders and has to stay.",
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/slug.js",
+            "old_string": "    .replace(/\\s+/g, '-')\n}",
+            "new_string": "    .split('/')\n    .map((part) =>\n      part\n        .replace(/[^a-z0-9\\s-]/g, '')\n        .trim()\n        .replace(/[\\s-]+/g, '-'),\n    )\n    .join('/')\n}"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node --test test/slug.test.js",
+            "description": "Run every slug test"
+          }
+        }
+      ]
+    },
+    {
+      "text": "`slug` now drops punctuation within each folder of the path, keeps the `/` between them and folds runs of spaces and dashes into one dash. All three tests pass."
+    }
+  ]
+}

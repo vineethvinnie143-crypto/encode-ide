@@ -576,6 +576,21 @@ becomes another of the same shape, so the report shows the shape of your code an
 only for a file you would share as it is; eNCode refuses to keep them in a file named like `.env`, or in one that holds
 something shaped like a key or a password. The report never holds the file's path, only its extension.
 
+When the agent goes wrong (it edits the wrong place, a call keeps failing, it says it did something it did not, it
+uses a function that does not exist), report that request:
+
+1. Point at your message that started it and click the flag, **Report a problem with this request** (or **Help →
+   Report a problem with the last request…**). Stop the agent first if it is still working.
+2. Write what you asked for, what you expected and what it did instead, and **Save report…**.
+3. Send that file.
+
+The report holds the request as the agent worked it: each step and call, what each tool answered (shortened), and the
+files it read or changed as they were before the request. Paths start at the project folder, and anything that looks
+like a key is taken out. **Replace the words** is on by default, as for the editor: the steps still replay, and your
+code and request do not travel. Turn it off for a project you would share as it is, so the request can also be tried
+again on a model; eNCode keeps the words only when the request touched no file named like `.env` or a key. Nothing is
+sent by itself.
+
 ## Where things are
 
 | What | Where |
@@ -614,6 +629,8 @@ Updating means installing the next build over the last one: everything above sta
   Vue files, which have no server in eNCode yet. A Lua server
   that was running before a `fxmanifest.lua` was added reads the folder as FiveM's the next time it starts. Folds are kept while a file is open, not after you close it or the app. Inlay hints show their label only: hovering
   one shows nothing yet, and a part of a label cannot be clicked to go to a type.
+- A report of a request holds at most 40 files of 512 KB each, the tools' answers cut to 2,000 characters, and none of
+  what commands changed on disk. Its replay does not run commands.
 - Report editor issue records a file only while it is open, and only a file under 2 million characters; after a long
   session it holds the newest steps. A problem only of drawing (a line drawn in the wrong place, a cursor that blinks
   where it should not) replays as "No problem found", so say what you saw and add a screenshot.

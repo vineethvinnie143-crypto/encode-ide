@@ -1,0 +1,29 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "inventory.py"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "inventory.py",
+            "old_string": "    def remove(self, sku, quantity):\n        current = self._stock.get(sku, 0)\n        self._stock[sku] = current - quantity\n",
+            "new_string": "    def remove(self, sku, quantity):\n        if quantity <= 0:\n            raise ValueError(\"quantity must be positive\")\n        current = self._stock.get(sku, 0)\n        if quantity > current:\n            raise ValueError(f\"only {current} of {sku} in stock\")\n        self._stock[sku] = current - quantity\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "`remove` now raises `ValueError` for a quantity of zero or less and when there is not enough stock, and leaves the stock unchanged in both cases."
+    }
+  ]
+}

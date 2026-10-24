@@ -17,3 +17,5 @@ screenshots/
 .wrangler/
 .DS_Store
 Thumbs.db
+# Benchmark reports (scripts/bench.mjs): each machine its own.
+bench-results/

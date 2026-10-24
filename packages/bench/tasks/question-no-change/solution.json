@@ -1,0 +1,35 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "timeout|TIMEOUT",
+            "-i": true,
+            "output_mode": "content"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "config/session.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/sessions.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "45 minutes without a request. It is `SESSION_TIMEOUT_MINUTES` in config/session.js, which src/sessions.js uses to set each session's expiry. The README still says 30 minutes, which is out of date. I changed nothing."
+    }
+  ]
+}

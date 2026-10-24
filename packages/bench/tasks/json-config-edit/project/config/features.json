@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "features": {
+    "darkMode": { "enabled": true, "rollout": 100 },
+    "newCheckout": { "enabled": false, "rollout": 0 },
+    "betaSearch": { "enabled": true, "rollout": 25 }
+  },
+  "owners": ["web", "payments"]
+}

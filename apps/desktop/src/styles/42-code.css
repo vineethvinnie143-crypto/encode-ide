@@ -387,49 +387,49 @@
   font-size: var(--fs-12);
 }
 
-/* Report editor issue (ADR 0088) */
-.editor-issue-body .install-server-facts dd.editor-issue-found {
+/* Report editor issue (ADR 0088) and Report a problem with a request (ADR 0092) */
+.report-body .install-server-facts dd.report-found {
   color: var(--warning);
 }
-.editor-issue-checking {
+.report-checking {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.editor-issue-note {
+.report-note {
   margin: 10px 0 0;
   color: var(--text-2);
   font-size: var(--fs-12);
   line-height: 18px;
 }
-.editor-issue-label {
+.report-label {
   display: block;
   margin: 16px 0 6px;
   color: var(--text-1);
   font-size: var(--fs-13);
   font-weight: 500;
 }
-.editor-issue-description {
+.report-description {
   display: block;
 }
-.editor-issue-scramble {
+.report-scramble {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-top: 14px;
 }
-.editor-issue-scramble label {
+.report-scramble label {
   color: var(--text-1);
   font-size: var(--fs-13);
 }
-.editor-issue-scramble p {
+.report-scramble p {
   margin: 2px 0 0;
   color: var(--text-3);
   font-size: var(--fs-12);
   line-height: 18px;
 }
-.editor-issue-refused {
+.report-refused {
   margin: 12px 0 0;
   padding: 8px 10px;
   border-radius: var(--r-8);

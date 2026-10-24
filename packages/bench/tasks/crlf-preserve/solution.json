@@ -1,0 +1,29 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/legacy.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/legacy.js",
+            "old_string": "export const RETRY_LIMIT = 3\nexport const RETRY_DELAY_MS = 1000",
+            "new_string": "export const RETRY_LIMIT = 5\nexport const RETRY_DELAY_MS = 2500"
+          }
+        }
+      ]
+    },
+    {
+      "text": "RETRY_LIMIT is 5 and RETRY_DELAY_MS is 2500; the file keeps its CRLF line ends."
+    }
+  ]
+}

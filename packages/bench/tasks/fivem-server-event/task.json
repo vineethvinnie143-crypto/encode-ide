@@ -1,0 +1,31 @@
+{
+  "id": "fivem-server-event",
+  "title": "FiveM: a server event that trusts the client",
+  "prompt": "The shop's buy event in server/main.lua trusts the price and the amount the client sends, so a modded client can buy anything for nothing. Make the server charge its own price from config.lua, and refuse items that are not in Config.Items and amounts that are not whole numbers from 1 to Config.MaxAmount.",
+  "tags": [
+    "lua",
+    "fivem",
+    "security"
+  ],
+  "maxSteps": 20,
+  "allow": [],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "the server sells only at its own prices",
+      "run": [
+        "{{lua}}",
+        "{{checks}}/shop_test.lua"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the config and the bridge are left alone",
+      "paths": [
+        "config.lua",
+        "server/bridge.lua",
+        "fxmanifest.lua"
+      ]
+    }
+  ]
+}

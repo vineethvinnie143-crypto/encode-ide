@@ -8,6 +8,7 @@ import type { Keybindings } from './keybindings'
 import type { Appearance } from './appearance'
 import type { SearchCheckResult, SearchProviderId } from './search'
 import type { EditorIssueDraft } from './editor-issue'
+import type { TurnReportDraft, TurnReportSaved } from './turn-report'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
 
@@ -1356,6 +1357,8 @@ export interface EncodeApi {
     exportDiagnostics(): Promise<string | null>
     /** Asks where to save a report of an editor issue (ADR 0088) and writes it; the reason when it may not go as it is. */
     saveEditorIssue(draft: EditorIssueDraft): Promise<EditorIssueSaved>
+    /** Asks where to save a report of one request (ADR 0092) and writes it; the reason when it may not go as it is. */
+    saveTurnReport(draft: TurnReportDraft): Promise<TurnReportSaved>
     /** Shows the folder the log files are in. */
     openLogs(): Promise<void>
     /** Shows a notice the way a finished request would, so the person sees whether Windows lets eNCode show them. */

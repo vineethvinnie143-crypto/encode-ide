@@ -1,0 +1,46 @@
+{
+  "id": "installed-version-api",
+  "title": "Use the version of a library the project has",
+  "prompt": "Make validateSignup in src/signup.js check the form with the tidyvalid library the project already depends on: the email must be an email address, and the password must be at least 8 characters. Return { ok: false, errors } with one message per problem, or { ok: true, errors: [] }.",
+  "tags": [
+    "javascript",
+    "dependencies",
+    "api-version"
+  ],
+  "maxSteps": 25,
+  "allow": [
+    "Bash(node --test:*)",
+    "Bash(node -e:*)"
+  ],
+  "rename": {
+    "_node_modules": "node_modules"
+  },
+  "checks": [
+    {
+      "kind": "search",
+      "name": "it uses tidyvalid",
+      "paths": [
+        "src/signup.js"
+      ],
+      "pattern": "from ['\\\"]tidyvalid['\\\"]",
+      "expect": "some"
+    },
+    {
+      "kind": "unchanged",
+      "name": "the library is left alone",
+      "paths": [
+        "node_modules",
+        "package.json"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the form is checked as asked",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/signup.hidden.test.mjs"
+      ]
+    }
+  ]
+}

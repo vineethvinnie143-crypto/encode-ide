@@ -63,6 +63,7 @@ import type {
   TurnFileWrite,
   TurnWriteOutcome,
 } from './ui'
+import type { TurnRecordOutcome } from './turn-report'
 
 /**
  * The parts of a session's environment that depend on the folder it works in and on the settings found there:
@@ -531,6 +532,11 @@ export class AgentHost {
   }
 
   /** Writes a file the agent changed, for the person, while it holds what they saw. */
+  /** What a report of a request holds (ADR 0092), from the session it was made in. */
+  async turnRecord(sessionId: string, turn: string | undefined, options: { scramble: boolean }): Promise<TurnRecordOutcome> {
+    return (await this.open(sessionId)).turnRecord(turn, options)
+  }
+
   async turnWrite(sessionId: string, write: TurnFileWrite): Promise<TurnWriteOutcome> {
     return (await this.open(sessionId)).turnWrite(write)
   }

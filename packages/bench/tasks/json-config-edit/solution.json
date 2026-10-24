@@ -1,0 +1,29 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "config/features.json"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "config/features.json",
+            "old_string": "    \"newCheckout\": { \"enabled\": false, \"rollout\": 0 },\n    \"betaSearch\": { \"enabled\": true, \"rollout\": 25 }\n",
+            "new_string": "    \"newCheckout\": { \"enabled\": true, \"rollout\": 10 },\n    \"betaSearch\": { \"enabled\": true, \"rollout\": 25 },\n    \"fastShipping\": { \"enabled\": false, \"rollout\": 0 }\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "newCheckout is on for 10%, and fastShipping is added, off with a rollout of 0, on a line of its own like the others."
+    }
+  ]
+}

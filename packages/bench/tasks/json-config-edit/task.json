@@ -1,0 +1,30 @@
+{
+  "id": "json-config-edit",
+  "title": "Edit a JSON file and keep its layout",
+  "prompt": "In config/features.json, turn newCheckout on for 10% of users, and add a flag called fastShipping that is off with a rollout of 0. Keep the file laid out as it is, one flag a line.",
+  "tags": [
+    "json",
+    "config",
+    "edit"
+  ],
+  "maxSteps": 12,
+  "allow": [],
+  "checks": [
+    {
+      "kind": "file",
+      "name": "the file is valid JSON",
+      "path": "config/features.json",
+      "json": true,
+      "eol": "lf"
+    },
+    {
+      "kind": "command",
+      "name": "the flags are as asked, one a line",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/features.hidden.test.mjs"
+      ]
+    }
+  ]
+}

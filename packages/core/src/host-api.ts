@@ -30,6 +30,7 @@ import type {
   TurnFileWrite,
   TurnWriteOutcome,
 } from './ui'
+import type { TurnRecordOutcome } from './turn-report'
 
 export type HostRequests = {
   sessions: { params: undefined; result: SessionSummary[] }
@@ -62,6 +63,8 @@ export type HostRequests = {
   rewindApply: { params: { sessionId: string; request: RewindRequest }; result: RewindOutcome }
   turnChanges: { params: { sessionId: string; turn?: string; limits?: { maxFileBytes?: number; maxTotalBytes?: number } }; result: TurnChangeSet }
   turnWrite: { params: { sessionId: string; write: TurnFileWrite }; result: TurnWriteOutcome }
+  /** What a report of a request holds (ADR 0092). */
+  turnRecord: { params: { sessionId: string; turn?: string; scramble: boolean }; result: TurnRecordOutcome }
   exportData: { params: { sessionId: string }; result: { title: string; transcript: string; json: string } }
   approve: { params: { requestId: string; answer: Exclude<ApprovalAnswer, boolean> }; result: boolean }
   answer: { params: { requestId: string; text: string }; result: boolean }
@@ -226,6 +229,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   rewindApply: object({ ...sessionId, request: REWIND_REQUEST }, ['sessionId', 'request']),
   turnChanges: object({ ...sessionId, turn: id, limits: LIMITS }, ['sessionId']),
   turnWrite: object({ ...sessionId, write: FILE_WRITE }, ['sessionId', 'write']),
+  turnRecord: object({ ...sessionId, turn: id, scramble: { type: 'boolean' } }, ['sessionId', 'scramble']),
   exportData: object(sessionId, ['sessionId']),
   approve: object({ requestId: id, answer: ANSWER }, ['requestId', 'answer']),
   answer: object({ requestId: id, text: text(100_000) }, ['requestId', 'text']),
@@ -277,6 +281,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
     if (next && 'bytes' in next && !(next.bytes instanceof ArrayBuffer)) throw new TypeError('write.next.bytes must be an ArrayBuffer')
     return host.turnWrite(sessionId, write)
   })
+  on('turnRecord', ({ sessionId, turn, scramble }) => host.turnRecord(sessionId, turn, { scramble }))
   on('exportData', ({ sessionId }) => host.exportData(sessionId))
   on('approve', ({ requestId, answer }) => host.approve(requestId, answer))
   on('answer', ({ requestId, text: answer }) => host.answer(requestId, answer))
@@ -323,6 +328,7 @@ export interface HostClient {
   rewindApply(sessionId: string, request: RewindRequest): Promise<RewindOutcome>
   turnChanges(sessionId: string, turn?: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<TurnChangeSet>
   turnWrite(sessionId: string, write: TurnFileWrite): Promise<TurnWriteOutcome>
+  turnRecord(sessionId: string, turn: string | undefined, options: { scramble: boolean }): Promise<TurnRecordOutcome>
   exportData(sessionId: string): Promise<{ title: string; transcript: string; json: string }>
   approve(requestId: string, answer: ApprovalAnswer): Promise<boolean>
   answer(requestId: string, text: string): Promise<boolean>
@@ -363,6 +369,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     rewindApply: (sessionId, request) => caller.request('rewindApply', { sessionId, request }),
     turnChanges: (sessionId, turn, limits) => caller.request('turnChanges', { sessionId, ...(turn ? { turn } : {}), ...(limits ? { limits } : {}) }),
     turnWrite: (sessionId, write) => caller.request('turnWrite', { sessionId, write }),
+    turnRecord: (sessionId, turn, options) => caller.request('turnRecord', { sessionId, ...(turn ? { turn } : {}), scramble: options.scramble }),
     exportData: (sessionId) => caller.request('exportData', { sessionId }),
     approve: (requestId, answer) => caller.request('approve', { requestId, answer: typeof answer === 'boolean' ? { approved: answer } : answer }),
     answer: (requestId, answer) => caller.request('answer', { requestId, text: answer }),

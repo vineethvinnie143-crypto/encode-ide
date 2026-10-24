@@ -81,6 +81,7 @@ say so.
 | [0089](0089-a-weaker-models-tool-calls-are-read-as-meant-mended-inputs-calls-written-as-text-and-closer-edit-matches.md) | A weaker model's tool calls are read as meant: mended inputs, calls written as text, and closer Edit matches | Accepted, builds on 0032, 0062 and 0073 |
 | [0090](0090-the-agent-knows-where-things-are-a-code-index-of-its-own-a-ranked-map-in-the-first-message-and-codemap.md) | The agent knows where things are: a code index of its own, a ranked map in the first message, and CodeMap | Accepted, builds on 0062, 0073 and 0089 |
 | [0091](0091-the-agent-writes-for-the-versions-installed-their-names-in-the-first-message-and-their-api-through-codemap.md) | The agent writes for the versions installed: their names in the first message, and their API through CodeMap | Accepted, builds on 0084 and 0090 |
+| [0092](0092-the-agent-is-measured-by-a-benchmark-of-its-own-and-a-reported-request-replays-into-it.md) | The agent is measured by a benchmark of its own, and a reported request replays into it | Accepted, builds on 0062, 0088, 0089, 0090 and 0091 |
 
 ## Template
 

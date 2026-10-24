@@ -119,6 +119,9 @@ export interface AppActions {
   /** Opens Report editor issue for the file the editor shows; false when it shows none. */
   canReportEditorIssue(): boolean
   reportEditorIssue(): void
+  /** Opens Report a problem for the session's last request; false while it runs or before it has one. */
+  canReportTurn(): boolean
+  reportTurn(): void
   showLogs(): void
 }
 
@@ -467,6 +470,14 @@ export function buildCommands(a: AppActions): Command[] {
       keywords: 'bug editor trace replay report problem typing cursor wrong',
       enabled: () => a.canReportEditorIssue(),
       run: () => a.reportEditorIssue(),
+    },
+    {
+      id: 'help.turnReport',
+      title: 'Report a problem with the last request…',
+      group: 'Help',
+      keywords: 'bug agent wrong mistake replay report benchmark request turn',
+      enabled: () => a.canReportTurn(),
+      run: () => a.reportTurn(),
     },
     { id: 'help.logs', title: 'Show log files', group: 'Help', run: () => a.showLogs() },
     { id: 'help.about', title: 'About eNCode', group: 'Help', run: () => a.showAbout() },

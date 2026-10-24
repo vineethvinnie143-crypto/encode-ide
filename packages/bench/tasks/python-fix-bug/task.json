@@ -1,0 +1,44 @@
+{
+  "id": "python-fix-bug",
+  "title": "Python: stock that can go below zero",
+  "prompt": "Inventory.remove in inventory.py lets the stock go below zero. It must raise ValueError when there is not enough stock, leaving the stock as it was, and also refuse quantities of zero or less.",
+  "tags": [
+    "python",
+    "debugging"
+  ],
+  "maxSteps": 20,
+  "allow": [
+    "Bash(python -m unittest:*)",
+    "Bash(python3 -m unittest:*)",
+    "Bash(py -m unittest:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "the project tests pass",
+      "run": [
+        "{{python}}",
+        "-B",
+        "-m",
+        "unittest",
+        "test_inventory"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the hidden tests pass",
+      "run": [
+        "{{python}}",
+        "-B",
+        "{{checks}}/hidden_test.py"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the tests are left alone",
+      "paths": [
+        "test_inventory.py"
+      ]
+    }
+  ]
+}

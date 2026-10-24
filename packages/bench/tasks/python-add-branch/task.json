@@ -1,0 +1,25 @@
+{
+  "id": "python-add-branch",
+  "title": "Python: a branch in nested code",
+  "prompt": "Add Canada to shipping_cost in shipping.py: orders to \"CA\" cost 7.0 up to 1 kg, 12.0 up to 5 kg, and 12.0 plus 1.5 per kg above 5 kg, rounded to cents. Express makes no difference for Canada. Leave the other countries as they are.",
+  "tags": [
+    "python",
+    "edit"
+  ],
+  "maxSteps": 15,
+  "allow": [
+    "Bash(python -c:*)",
+    "Bash(python3 -c:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "costs are as asked",
+      "run": [
+        "{{python}}",
+        "-B",
+        "{{checks}}/hidden_test.py"
+      ]
+    }
+  ]
+}

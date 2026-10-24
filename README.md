@@ -30,6 +30,9 @@ primary platform; the code stays cross-platform.
   of the step it came in during (`Ctrl+Enter`, or **Steer now** on a waiting message); `Enter` queues it for after the
   turn. **Settings → General** swaps the two. A steering message goes through your hooks and brings what it mentions,
   like any request.
+- **Report a request that went wrong.** The flag on any of your messages saves that request to a file you send: its
+  steps, what the tools answered and the files as they were, with keys taken out and, by default, every word replaced.
+  The person who gets it replays it call by call and keeps it as a test.
 - **Problems in plain words.** A request that fails ends on one sentence that says what happened, with what can be
   done about it: **Retry** (the same request runs on from where it stopped), **Switch model**, **Open Settings** or
   **Save diagnostics**. What the provider or the system said is folded under **Details**, without keys. Toasts and
@@ -350,6 +353,7 @@ apps/desktop/                 the Electron app (@encode/desktop)
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
+packages/bench/               the agent's benchmark: tasks with hidden checks, runs on the app's agent host, reports and their comparison, and the replay of a reported request (@encode/bench)
 packages/checkpoints/         what the file tools changed, saved before each change, and put back on request (the Rewind dialog's engine)
 packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
@@ -438,6 +442,16 @@ random use takes `ENCODE_MONKEY_STEPS` and `ENCODE_MONKEY_SEED`; the end-to-end 
 A tester's **Help → Report editor issue…** file replays with `pnpm editor-issue report.json`, every invariant checked
 after every step ([ADR 0088](docs/adr/0088-report-editor-issue-replays-what-was-recorded-and-the-app-reaches-the-editor-through-a-fixed-interface.md)).
 Once the bug is fixed, `pnpm editor-issue report.json --keep <name>` adds its trace to the regression suite.
+
+The agent has a benchmark of its own (`packages/bench`,
+[ADR 0092](docs/adr/0092-the-agent-is-measured-by-a-benchmark-of-its-own-and-a-reported-request-replays-into-it.md)):
+small projects with a request and hidden checks, run on the app's own agent host. `pnpm bench run --reference` proves
+the tasks without a model; `pnpm bench run --model openrouter:<id>` (or `@free`, `anthropic:<id>`, `openai:<id>`,
+`--base-url <url>`) runs them on one, with the key from `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+or `ENCODE_BENCH_API_KEY`, and writes a report to `bench-results/`: pass rate, calls, tokens, cost, tool failures.
+`pnpm bench compare before.json after.json` sets two side by side. A tester's **Report a problem with this request**
+file replays with `pnpm turn-report report.json`, call by call against what the tools did for the tester, without
+running its commands; `--save <name>` keeps it as a task whose replay the tests then hold to.
 
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not

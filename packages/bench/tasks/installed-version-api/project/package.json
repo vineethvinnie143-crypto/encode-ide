@@ -1,0 +1,9 @@
+{
+  "name": "signup",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tidyvalid": "^2.1.0"
+  }
+}
