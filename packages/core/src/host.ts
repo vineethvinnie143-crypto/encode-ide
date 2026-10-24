@@ -94,6 +94,8 @@ export interface SessionScope {
   codeIndex?: () => CodeIndex | undefined
   /** FiveM's natives, when eNCode installed them (ADR 0091). */
   natives?: () => readonly NativeDoc[] | undefined
+  /** The commands the folder's settings name as its checks (ADR 0095); undefined to have eNCode find them. */
+  checks?: () => readonly string[] | undefined
   /** The session closed: let go of what was held for it. */
   release?: () => Promise<void>
 }
@@ -242,6 +244,7 @@ export class AgentHost {
       ...(scope?.code ? { code: scope.code } : {}),
       ...(scope?.codeIndex ? { codeIndex: scope.codeIndex } : {}),
       ...(scope?.natives ? { natives: scope.natives } : {}),
+      ...(scope?.checks ? { checks: scope.checks } : {}),
       ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),

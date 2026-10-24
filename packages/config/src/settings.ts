@@ -47,6 +47,11 @@ export interface EncodeSettings {
   disabledMcpjsonServers?: string[]
   /** Sandbox configuration, checked by @encode/sandbox. */
   sandbox?: unknown
+  /**
+   * The project's checks, run when the agent ends a turn that changed code, in place of those eNCode finds; an empty
+   * list runs none. Each still needs what the agent's own command would (ADR 0095).
+   */
+  checks?: string[]
   /** Every other key, kept for the features that read them. */
   [key: string]: unknown
 }
@@ -163,6 +168,13 @@ export function validateSettings(raw: unknown): ParsedSettings {
         if (typeof value === 'boolean') settings.enableAllProjectMcpServers = value
         else problems.push('enableAllProjectMcpServers must be true or false')
         break
+      case 'checks': {
+        const list = stringList(value, key, problems)
+        if (list && list.length > 4) problems.push('checks may name at most 4 commands; the first 4 are used')
+        if (list?.some((command) => command.length > 500 || /[\r\n]/.test(command))) problems.push('checks entries must be single lines of at most 500 characters')
+        else if (list) settings.checks = list.slice(0, 4)
+        break
+      }
       case 'enabledMcpjsonServers':
       case 'disabledMcpjsonServers': {
         const list = stringList(value, key, problems)
@@ -270,6 +282,8 @@ export interface EffectiveSettings {
   /** Hook configurations in precedence order, each with its source. */
   hooks: Array<{ scope: SettingsScope; config: unknown }>
   model?: string
+  /** The project's checks, from the last source that names them (ADR 0095). */
+  checks?: string[]
   mcp: { enableAll: boolean; enabled: string[]; disabled: string[] }
   /** The `sandbox` key of every source that has one, folder sources included: the sandbox takes only what tightens it from those. */
   sandbox: Array<{ scope: SettingsScope; config: unknown }>
@@ -324,6 +338,7 @@ export function resolveSettings(sources: readonly SettingsSource[], options: { f
     Object.assign(out.env, settings.env ?? {})
     if (settings.hooks !== undefined) out.hooks.push({ scope: source.scope, config: settings.hooks })
     if (settings.model) out.model = settings.model
+    if (settings.checks) out.checks = settings.checks
     if (settings.enableAllProjectMcpServers !== undefined) out.mcp.enableAll = settings.enableAllProjectMcpServers
     out.mcp.enabled.push(...(settings.enabledMcpjsonServers ?? []))
   }

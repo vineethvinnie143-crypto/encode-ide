@@ -95,6 +95,9 @@ export interface Turn {
   active: boolean
 }
 
+/** A call eNCode made itself, not the agent. */
+const isOwn = (entry: ConversationEntry) => entry.kind === 'tool' && entry.tool?.by === 'encode'
+
 /** The parts of a turn's entries after your request: a message sent while the agent worked starts the next one. */
 function partsOf(id: string, startedAt: number, body: readonly ConversationEntry[], active: boolean): TurnPart[] {
   const chunks: { steer: ConversationEntry | null; entries: ConversationEntry[] }[] = [{ steer: null, entries: [] }]
@@ -103,18 +106,20 @@ function partsOf(id: string, startedAt: number, body: readonly ConversationEntry
     else chunks[chunks.length - 1].entries.push(entry)
   }
   return chunks.map(({ steer, entries }, index) => {
+    // The reply follows the agent's last step. eNCode's own checks after it (ADR 0095) belong to the work, not the reply.
     let lastTool = -1
     entries.forEach((entry, position) => {
-      if (entry.kind === 'tool') lastTool = position
+      if (entry.kind === 'tool' && !isOwn(entry)) lastTool = position
     })
+    const after = entries.slice(lastTool + 1)
     const start = steer?.createdAt ?? startedAt
     // A part ended when the next message was taken: that is right after its last step.
     const end = chunks[index + 1]?.steer?.createdAt ?? entries[entries.length - 1]?.createdAt ?? start
     return {
       id: steer?.id ?? id,
       steer,
-      log: entries.slice(0, lastTool + 1),
-      reply: entries.slice(lastTool + 1),
+      log: [...entries.slice(0, lastTool + 1), ...after.filter(isOwn)],
+      reply: after.filter((entry) => !isOwn(entry)),
       startedAt: start,
       endedAt: end,
       active: active && index === chunks.length - 1,
@@ -135,10 +140,11 @@ export function buildTurns(entries: readonly ConversationEntry[], running: boole
     const active = running && index === groups.length - 1
     const parts = partsOf(group[0].id, group[0].createdAt, body, active)
     const reply = parts[parts.length - 1].reply
+    const replied = new Set(reply)
     return {
       id: group[0].id,
       user,
-      log: body.slice(0, body.length - reply.length),
+      log: body.filter((entry) => !replied.has(entry)),
       reply,
       parts,
       startedAt: group[0].createdAt,

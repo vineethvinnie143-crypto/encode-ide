@@ -6,6 +6,7 @@
 import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, UserBlock } from '@encode/providers'
 import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
+import type { CheckGate } from './checks'
 import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
@@ -29,6 +30,12 @@ export interface AgentSettings {
    * it back once, `on` up to three times, `off` lets it end. Default `auto`.
    */
   errorGate?: ErrorGate
+  /**
+   * When the agent wants to end a turn that changed code: `auto` runs the project's typecheck and tests and sends it
+   * back up to twice for what its changes broke, `on` up to four times, `off` neither runs them nor checks its reply.
+   * Default `auto` (ADR 0095).
+   */
+  checkGate?: CheckGate
   /** `auto` (the default): a model that needs no guide gets the short instructions and tool descriptions (ADR 0094). `full`: every model gets the full guide. */
   guide?: GuideSetting
 }

@@ -54,6 +54,22 @@ describe('turns', () => {
     assert.equal(turns[0].id, user1.id)
   })
 
+  it("keeps the answer as the reply when eNCode's own check runs after it", () => {
+    const user = entry('user', { text: 'swap them' })
+    const read = tool('read', { path: 'a.ts' })
+    const answer = entry('assistant', { text: 'Swapped them.' })
+    const check = tool('Bash', { command: 'npm test' }, { by: 'encode' })
+    const [turn] = buildTurns([user, read, answer, check], false)
+    assert.deepEqual(turn.log.map((item) => item.id), [read.id, check.id])
+    assert.deepEqual(turn.reply.map((item) => item.id), [answer.id])
+    // Sent back by a failing check, the agent's later steps make its first answer part of the work.
+    const fix = tool('edit', { path: 'a.ts' })
+    const final = entry('assistant', { text: 'Fixed the test too.' })
+    const [again] = buildTurns([user, read, answer, check, fix, final], false)
+    assert.deepEqual(again.log.map((item) => item.id), [read.id, answer.id, check.id, fix.id])
+    assert.deepEqual(again.reply.map((item) => item.id), [final.id])
+  })
+
   it('times a turn from your message to its last entry, and marks only the last one live', () => {
     const user = entry('user')
     const reply = entry('assistant', { text: 'x' })

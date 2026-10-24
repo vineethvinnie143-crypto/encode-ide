@@ -488,7 +488,9 @@ async function runProviderPhase() {
     profiles: ${JSON.stringify(profiles)},
     activeProfileId: 'local-mock',
     policy: 'workspace-write',
-    maxSteps: 12
+    maxSteps: 12,
+    // Off until runCheckGateChecks: a check asks to run npm test after every code edit, which the other steps do not expect.
+    checkGate: 'off'
   })`)
   const secret = await checkKeyStorage()
 
@@ -636,6 +638,7 @@ async function runProviderPhase() {
   if (!featureCheck.jobsArray || !featureCheck.planNull) throw new Error('jobs/plan surface failed')
 
   await runMentionChecks()
+  await runCheckGateChecks()
   await runStopChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3290,6 +3293,32 @@ async function runComputerChecks() {
 
   // Turned off again, so nothing later depends on it.
   await evaluate("window.eNCode.settings.save({ computer: false })")
+}
+
+/**
+ * The checks before the agent finishes (ADR 0095): after a code change the demo's npm test, found in its package.json,
+ * is asked for like any command, runs once allowed, and backs the reply's "all tests pass".
+ */
+async function runCheckGateChecks() {
+  console.log('[smoke] --- checks before the agent finishes ---')
+  const utilsFile = path.join(demoPath, 'src', 'utils.ts')
+  const original = await fs.readFile(utilsFile, 'utf8')
+  await evaluate("window.eNCode.settings.save({ checkGate: 'auto' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:check-gate] Swap the operands of multiply in src/utils.ts')
+  const approvals = await driveAgent('15b-check-gate')
+  if (approvals.length !== 1 || !approvals[0].title.includes('Check the changes: tests') || !approvals[0].detail.includes('npm test')) {
+    throw new Error(`The check should be asked for once, as eNCode's: ${JSON.stringify(approvals)}`)
+  }
+  const ran = (await toolOutputs()).filter((entry) => entry.name === 'Bash')
+  console.log('[smoke] the check:', JSON.stringify(ran))
+  if (ran.length !== 1 || ran[0].state !== 'done' || !ran[0].output.includes('ok')) throw new Error('npm test did not run and pass')
+  const entries = await evaluate("window.eNCode.agent.history().then((history) => history.entries.map((entry) => ({ kind: entry.kind, text: entry.text ?? '' })))")
+  if (!entries.some((entry) => entry.kind === 'assistant' && entry.text.includes('all tests pass'))) throw new Error(`The reply did not reach the person: ${JSON.stringify(entries).slice(0, 400)}`)
+  if (entries.some((entry) => entry.kind === 'notice' && /could not confirm|checks failed/.test(entry.text))) throw new Error('A passing check sent the agent back')
+  await screenshot('15b-check-gate.png')
+  await evaluate("window.eNCode.settings.save({ checkGate: 'off' })")
+  await fs.writeFile(utilsFile, original)
 }
 
 /** The tool entries of the active session, with their outputs. */

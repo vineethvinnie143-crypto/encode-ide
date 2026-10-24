@@ -4,7 +4,7 @@
  * own; the main process answers one, for keys. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
-import type { ErrorGate, GuideSetting, HostEvents, HostRequests } from '@encode/core'
+import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests } from '@encode/core'
 import type { CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
@@ -39,6 +39,7 @@ export interface HostConfig {
   languageServers: boolean
   errorGate: ErrorGate
   guide: GuideSetting
+  checkGate: CheckGate
 }
 
 export interface HostInit {

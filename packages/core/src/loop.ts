@@ -98,13 +98,15 @@ import {
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
+import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, type ProjectCheck, type ProjectChecks } from './checks'
+import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
 import { FailedCalls, mendedNote } from './repeats'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
-import { formatFindings, scanHunks, scanText, warningNote } from './scan'
+import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
 import type { OutputStore } from './outputs'
 import { recoverTextCalls } from './text-calls'
 import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
@@ -168,6 +170,8 @@ export interface LoopServices {
   codeMap?: CodeMapSource
   /** Where results too long for the model are kept whole (ADR 0093); without it their middle is left out. */
   outputs?: OutputStore
+  /** The project's typecheck and tests, run before the turn ends (ADR 0095); the main agent's only. */
+  checks?: ProjectChecks
 }
 
 export interface LoopOptions {
@@ -236,6 +240,9 @@ interface FitOptions {
   window?: number
   instructions?: string
 }
+
+/** A command stopped for its time limit or interrupted: it says nothing of the code. */
+const ENDED_EARLY = /The command ran longer than \d+ s and was stopped\.|The command was interrupted\./
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
 
@@ -381,6 +388,11 @@ export class AgentLoop {
   private vision: boolean | undefined
   /** Whether it reads PDFs as documents. */
   private documents: boolean | undefined
+  /** Times the checks sent the agent back this turn (ADR 0095); the person refused a check this turn; the reply was checked. */
+  private checkRounds = 0
+  private checksRefused = false
+  private claimChecked = false
+  private checkRuns = 0
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
@@ -433,6 +445,10 @@ export class AgentLoop {
     let stopRounds = 0
     this.edits?.startTurn()
     this.failures.clear()
+    if (o.agentId === 'main') o.services.checks?.ledger.startRequest()
+    this.checkRounds = 0
+    this.checksRefused = false
+    this.claimChecked = false
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -463,7 +479,20 @@ export class AgentLoop {
           await o.conversation.add(userText(reminder(left)), { turnId: turn.turnId })
           continue
         }
+        // Then the project's own checks, and then what the reply says that eNCode can test (ADR 0095).
+        const checked = mode === 'code' ? await this.checkGate(turn) : null
+        if (checked) {
+          o.surface.settle(o.surface.entry({ kind: 'notice', text: "The project's checks failed after the agent's changes, so it goes on to fix them." }))
+          await o.conversation.add(userText(reminder(checked)), { turnId: turn.turnId })
+          continue
+        }
         const reply = messageText(message)
+        const claims = await this.claimCheck(reply)
+        if (claims) {
+          o.surface.settle(o.surface.entry({ kind: 'notice', text: "eNCode could not confirm something the agent's reply says, so it checks it." }))
+          await o.conversation.add(userText(reminder(claims)), { turnId: turn.turnId })
+          continue
+        }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
           await o.conversation.add(userText(stop.continue), { turnId: turn.turnId })
@@ -881,13 +910,14 @@ export class AgentLoop {
    * Checks a call, runs the hooks and asks for approval. Returns the call to
    * run, or nothing when it was settled here (refused, invalid or rejected).
    */
-  private async prepare(block: ToolUseBlock, turn: Turn, state: StepState): Promise<Prepared | undefined> {
+  private async prepare(block: ToolUseBlock, turn: Turn, state: StepState, own = false): Promise<Prepared | undefined> {
     const { o } = this
-    const entry = o.surface.entry({ kind: 'tool', tool: { name: block.name, input: trimInput(block.input), state: 'running' } })
+    const entry = o.surface.entry({ kind: 'tool', tool: { name: block.name, input: trimInput(block.input), state: 'running', ...(own ? { by: 'encode' as const } : {}) } })
     this.inflight.add(entry)
     const refuse = (shown: string, ui: 'error' | 'rejected', told = shown, review?: ToolReview): undefined => {
       this.settleEntry(entry, { state: ui, ok: false, output: shown, ...(review ? { review } : {}) })
-      const again = this.failures.record(block.name, block.input, told)
+      // eNCode's own call (a check) is not the model's to be told it repeats.
+      const again = own ? undefined : this.failures.record(block.name, block.input, told)
       state.results.set(block.id, failed(block.id, again ? `${told}\n\n${again}` : told))
       return undefined
     }
@@ -1075,7 +1105,7 @@ export class AgentLoop {
     return { note: warningNote(relativeToRoot(this.o.services.root, file, this.o.services.platform), result), lines: formatFindings(result) }
   }
 
-  private async execute(prepared: Prepared, turn: Turn, state: StepState): Promise<void> {
+  private async execute(prepared: Prepared, turn: Turn, state: StepState, own = false): Promise<void> {
     const { o } = this
     const { block, tool, input, entry } = prepared
     o.surface.status('running-tool')
@@ -1111,7 +1141,7 @@ export class AgentLoop {
     }
     if (post?.context) state.context.push(post.context)
     if (prepared.fixes.length) content = [...content, textBlock(mendedNote(prepared.fixes))]
-    const again = this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
+    const again = own ? undefined : this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
     if (again) content = [...content, textBlock(again)]
 
     state.results.set(block.id, { type: 'tool-result', toolUseId: block.id, content, ...(isError ? { isError: true } : {}) })
@@ -1126,6 +1156,7 @@ export class AgentLoop {
       o.surface.fileChanged(relativeToRoot(o.services.root, file, o.services.platform))
       o.services.codeMap?.changed?.(file)
     }
+    this.noteForChecks(block.name, input, outcome, output)
     if (this.edits) {
       if (outcome.changed?.length) await this.edits.after(outcome.changed, existed ?? new Set())
       else if (outcome.ok && block.name === 'Read' && access.type === 'read') this.edits.read(access.paths)
@@ -1228,6 +1259,130 @@ export class AgentLoop {
       ...(s.codeMap ? { codeMap: s.codeMap } : {}),
       ...(progress ? { progress } : {}),
     }
+  }
+
+  // ------------------------------------------------------------ checks (ADR 0095)
+
+  /** A call's part in the checks' record: code it changed, and a command that ran to its end. */
+  private noteForChecks(name: string, input: Record<string, unknown>, outcome: ToolOutcome, output: string): void {
+    const ledger = this.o.services.checks?.ledger
+    if (!ledger) return
+    if (outcome.changed?.some(isCodePath)) ledger.changed()
+    if (name === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && !ENDED_EARLY.test(output)) ledger.ran(input.command, outcome.ok, output)
+  }
+
+  /**
+   * When the main agent ends a turn that changed code: the project's checks, in order, each run unless it ran since the
+   * last change, up to the first that fails. A failure the request did not cause is not sent back; a new one is, with
+   * what it says. Null to let the turn end.
+   */
+  private async checkGate(turn: Turn): Promise<string | null> {
+    const { o } = this
+    const checks = o.services.checks
+    if (o.agentId !== 'main' || !checks?.ledger.changedInRequest || this.checksRefused) return null
+    if (this.checkRounds >= CHECK_ROUNDS[o.settings().checkGate ?? 'auto']) return null
+    const list = await checks.list().catch(() => [] as ProjectCheck[])
+    const passed: ProjectCheck[] = []
+    for (const [index, check] of list.entries()) {
+      let output: string | undefined
+      if (!checks.ledger.current(check.command)) {
+        const ran = await this.runCheck(check, turn)
+        if (ran.kind === 'refused') {
+          this.checksRefused = true
+          return null
+        }
+        if (ran.kind === 'unfinished') {
+          o.surface.settle(o.surface.entry({ kind: 'notice', text: `\`${check.command}\` did not finish, so eNCode does not wait for it.` }))
+          continue
+        }
+        output = ran.output
+      }
+      const run = checks.ledger.current(check.command)
+      if (!run || run.ok) {
+        passed.push(check)
+        continue
+      }
+      const compared = regression(run, checks.ledger.before(check.command))
+      if (!compared) {
+        o.surface.settle(o.surface.entry({ kind: 'notice', text: `\`${check.command}\` fails as it did before this request.` }))
+        continue
+      }
+      this.checkRounds++
+      return checksReminder({ check, ...(output !== undefined ? { output } : {}), compared: compared.text }, passed, list.slice(index + 1))
+    }
+    return null
+  }
+
+  /** Runs one check as a Bash call of eNCode's own: the same rules, approval, sandbox and hooks as the agent's commands. */
+  private async runCheck(check: ProjectCheck, turn: Turn): Promise<{ kind: 'refused' } | { kind: 'unfinished' } | { kind: 'ran'; output: string }> {
+    const block: ToolUseBlock = {
+      type: 'tool-use',
+      id: `encode_check_${++this.checkRuns}`,
+      name: 'Bash',
+      input: { command: check.command, description: `Check the changes: ${check.kind === 'typecheck' ? 'typecheck' : 'tests'}`, timeout: CHECK_TIMEOUT_MS },
+    }
+    const state: StepState = { results: new Map(), context: [] }
+    const prepared = await this.prepare(block, turn, state, true)
+    if (!prepared) return { kind: 'refused' }
+    await this.execute(prepared, turn, state, true)
+    const output = textOf(state.results.get(block.id)?.content ?? [])
+    return ENDED_EARLY.test(output) ? { kind: 'unfinished' } : { kind: 'ran', output }
+  }
+
+  /** Once a turn, the main agent's last reply: claims eNCode can test, and the ones that do not hold. */
+  private async claimCheck(reply: string): Promise<string | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.claimChecked || (o.settings().checkGate ?? 'auto') === 'off' || !reply.trim()) return null
+    this.claimChecked = true
+    const found: string[] = []
+    const ledger = o.services.checks?.ledger
+    const claimed = successClaims(reply)
+    if (ledger && claimed.length && !ledger.verified) found.push(unrunClaim(claimed[0]))
+
+    const roots = [...new Set([o.services.cwd?.() ?? o.services.root, o.services.root])]
+    // What the session saw: a path the person or a tool named is the agent's to talk about, there or not.
+    const seen = this.sessionText()
+    // Only where the agent may read without asking: a reply is no way to learn what is in a file it may not read.
+    const testable = async (file: string) => {
+      const out: string[] = []
+      for (const candidate of resolveIn(file, roots)) if (await this.readableQuietly(candidate).catch(() => false)) out.push(candidate)
+      return out
+    }
+    const missing: string[] = []
+    for (const file of pathsIn(reply)) {
+      if (seen.includes(file) || seen.includes(file.replace(/\\/g, '/'))) continue
+      const candidates = await testable(file)
+      if (!candidates.length || (await firstExisting(candidates))) continue
+      missing.push(file)
+    }
+    if (missing.length) found.push(missingFiles(missing))
+    for (const claim of nameClaims(reply)) {
+      const files: string[] = []
+      for (const file of claim.files) {
+        const real = await firstExisting(await testable(file))
+        if (real) files.push(real)
+      }
+      if (!files.length) continue
+      for (const name of claim.names) {
+        let held = false
+        for (const file of files) if ((held = await fileHolds(file, name))) break
+        if (!held) found.push(missingName(name, claim.files))
+      }
+    }
+    return found.length ? claimsReminder(found.slice(0, 6)) : null
+  }
+
+  /** Every message's text but the reply's (the last message): what was asked, called and returned. */
+  private sessionText(): string {
+    const parts: string[] = []
+    for (const message of this.o.conversation.messages().slice(0, -1)) {
+      for (const block of message.content) {
+        if (block.type === 'text') parts.push(block.text)
+        else if (block.type === 'tool-use') parts.push(JSON.stringify(block.input))
+        else if (block.type === 'tool-result') parts.push(textOf(block.content))
+      }
+    }
+    return parts.join('\n')
   }
 
   // ------------------------------------------------------------ hooks

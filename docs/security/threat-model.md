@@ -2031,3 +2031,55 @@ No new IPC call or permission.
 - `config.test.ts` (router) and `router-settings.test.ts` (desktop): no role reaches the free models with a billed
   Main unless it names them.
 - `small-roles.test.ts`: the suggestion's model for each family, and none for a free, local, small or toolless model.
+
+## The project's checks before the agent finishes, and its reply's claims (Accuracy 2a)
+
+Written with the pull request that runs the project's typecheck and tests when the agent ends a request that changed
+code, tells failures from before the request apart, and tests what the agent's reply says against the project
+([0095](../adr/0095-before-the-agent-finishes-the-projects-checks-run-and-what-its-reply-claims-is-tested.md)).
+
+What is new:
+
+- commands eNCode runs on its own at the end of a request: at most four, found in the project's manifests
+  (`package.json`, `tsconfig.json`, `Cargo.toml`, `go.mod`, Python's configuration) or named by a settings file's
+  `checks` list, each as a Bash call through the agent's own permission check, approval, sandbox and hooks;
+- files eNCode reads that the agent did not ask for: those manifests, at most 1 MB each, from the shell's folder up to
+  the workspace; and, for the claim check, whether a file the reply names exists and holds a name;
+- a setting, `checkGate` (`auto`, `on`, `off`), under Settings → Agent → Checks, and the settings key `checks`.
+
+No new IPC call or permission.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| X1 | A cloned project's test script is code the person did not write, and eNCode runs it without the agent asking | A check runs exactly as the agent's own command would: the rules decide, Workspace Write asks before each, Auto review puts it to the Reviewer, the sandbox of 0063 holds it, hooks see it. Only the project's manifests name it, never the model. Settings → Agent → Checks → Never turns it off. Under Full access it runs unasked, as the agent's `npm test` would. | Mitigated |
+| X2 | A folder's own settings name a harmful check (`curl … \| sh`) that runs at the end of the next request | `checks` in a folder's settings is a grant: held back, and listed as such, until the person trusts the folder and approves its settings; then it still passes the permission check and approval like any command. At most four single lines of 500 characters. | Mitigated |
+| X3 | A check hangs or watches, and the request never ends, or the gate sends the agent round and round | Watching scripts and npm's placeholder are left out; each check stops after ten minutes and one that does not finish is passed over; at most two rounds a request by default (four at most); Stop ends a check like any command; a refused check ends the checks for the request. | Mitigated |
+| X4 | A check's output carries instructions to the model that it did not ask for | It is the project's own output, the same the agent's own run would return, bounded and kept in a file when long as 0093; the reminder says eNCode ran the project's checks. | Accepted |
+| X5 | The claim check is used to learn whether a file the agent may not read exists, or holds a word | Only a file the agent may read without asking is tested (the person's rules allow it, or it is in the workspace, a folder added to it or a read root, by its real path); any other is neither there nor missing. Nothing of a file's text is sent, only that it does not hold the name. | Mitigated |
+| X6 | A false alarm from the claim check sends a correct answer back, costs a round, and talks the model out of something true | Once a request; hedged, planned, conditional, negated and removal sentences claim nothing; a path needs a folder and an extension, and one the session named passes; a name is tested only in a file that exists and is readable under 2 MB, as a whole word. The reminder asks the agent to check or correct, not to take back. Never turns it off. | Accepted |
+| X7 | Detection reads outside the workspace, or a huge or hostile manifest | It starts in the shell's folder only when that is inside the workspace and stops at the workspace's top; each file is read up to 1 MB; a manifest that does not parse gives no check. | Mitigated |
+| X8 | An old failure is called new (or a new one old), so the agent "fixes" tests it was not asked to touch, or leaves one it broke | Failures are compared by test or by error, with the run before the request's first change; with no run from before, or an output it cannot read by test, eNCode says it cannot tell and the agent is sent back; the agent is told to say so when a failure is not its own. | Accepted |
+
+### Residual risks
+
+- Under Full access a project's test script runs at the end of every request that changed code, where before it ran
+  only when the agent chose to; that is the access the person gave, and the setting turns it off.
+- A change made through a command is not seen as a change, so the checks do not run for it alone.
+
+### Verification
+
+- `checks.test.ts`: the checks found for each package manager, TypeScript, Rust, Go and Python, the placeholder and
+  watch scripts left out, the nearest project within the workspace and never above it, the settings list in their
+  place; the failures read from each tool's output; the ledger's baseline; old and new failures told apart.
+- `claims.test.ts`: claims that the checks pass, and hedges that are none; the paths and names a reply puts in files,
+  and the sentences that name none.
+- `check-gate.test.ts`: the loop sends a new failure back and runs the check again after the fix, typechecks first, no
+  run for a change to prose, an old failure not sent back, the agent's own passing run not repeated, a refused check
+  ends the checks, the rounds, a check that does not finish, the setting off; the claim check for each claim, once a
+  request, quiet for subagents and when off, and blind to files the agent may not read without asking; a session finds
+  the checks where its shell is.
+- `config.test.ts`: the `checks` key's limits, and a folder's list held back until it is approved.
+- The desktop's end-to-end run: a request that changes code ends with an approval for `npm test`, the run in the work
+  log as eNCode's, and the agent's reply shown as the reply.

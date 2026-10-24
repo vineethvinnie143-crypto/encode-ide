@@ -66,6 +66,8 @@ export interface ConversationEntry {
     review?: ToolReview
     /** Hidden or look-alike characters found in what the call wrote, one line each. */
     warnings?: string[]
+    /** `encode`: a call eNCode made itself, such as a check before the agent finishes (ADR 0095), not the model. */
+    by?: 'encode'
   }
   /** The model that wrote an assistant entry. */
   model?: string

@@ -84,6 +84,7 @@ say so.
 | [0092](0092-the-agent-is-measured-by-a-benchmark-of-its-own-and-a-reported-request-replays-into-it.md) | The agent is measured by a benchmark of its own, and a reported request replays into it | Accepted, builds on 0062, 0088, 0089, 0090 and 0091 |
 | [0093](0093-a-long-result-is-kept-whole-in-a-file-and-the-model-reads-its-ends-and-reads-on-by-range.md) | A long result is kept whole in a file, and the model reads its ends and reads on by range | Accepted, builds on 0062 and 0092 |
 | [0094](0094-old-results-are-shortened-early-and-seldom-strong-models-get-a-short-guide-and-small-jobs-a-small-model.md) | Old results are shortened early and seldom, strong models get a short guide, and small jobs a small model | Accepted, builds on 0062 and 0093 |
+| [0095](0095-before-the-agent-finishes-the-projects-checks-run-and-what-its-reply-claims-is-tested.md) | Before the agent finishes, the project's checks run, and what its reply claims is tested | Accepted, builds on 0073 and 0093 |
 
 ## Template
 

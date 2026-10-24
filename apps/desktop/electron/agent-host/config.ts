@@ -29,5 +29,6 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     languageServers: settings.languageServers,
     errorGate: settings.errorGate,
     guide: settings.guide,
+    checkGate: settings.checkGate,
   }
 }
