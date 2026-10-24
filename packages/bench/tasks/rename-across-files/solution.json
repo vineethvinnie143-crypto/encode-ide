@@ -1,0 +1,110 @@
+{
+  "steps": [
+    {
+      "text": "I'll find every use first.",
+      "calls": [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "\\bgetUserName\\b",
+            "output_mode": "content"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/users.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/profile.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/email.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/admin/report.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/index.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/users.js",
+            "old_string": "export function getUserName(user) {",
+            "new_string": "export function getDisplayName(user) {"
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/profile.js",
+            "old_string": "getUserName",
+            "new_string": "getDisplayName",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/email.js",
+            "old_string": "getUserName",
+            "new_string": "getDisplayName",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/admin/report.js",
+            "old_string": "users.getUserName(user)",
+            "new_string": "users.getDisplayName(user)"
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/index.js",
+            "old_string": "export { getUserName } from './users.js'",
+            "new_string": "export { getDisplayName } from './users.js'"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "\\bgetUserName\\b",
+            "output_mode": "content"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Renamed `getUserName` to `getDisplayName` in its definition, both imports, the report and the index. `getUserNameLegacy` is unchanged."
+    }
+  ]
+}

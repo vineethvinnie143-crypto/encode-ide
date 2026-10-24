@@ -1888,3 +1888,50 @@ No new IPC call, setting or permission. Nothing found is run: files are read as 
 - `fivem.test.ts`: `natives.json` written with the natives' install, read back, and gone after they are removed.
 - `session.test.ts`: the first message names the installed versions; CodeMap answers from a package and from the
   natives in a session.
+
+## The benchmark and reports of a request (Accuracy 1d)
+
+Written with the pull request that adds the benchmark (`packages/bench`), **Report a problem with this request** and
+`pnpm turn-report`
+([0092](../adr/0092-the-agent-is-measured-by-a-benchmark-of-its-own-and-a-reported-request-replays-into-it.md)).
+
+What is new:
+
+- the IPC call `app:save-turn-report`, from the app's own page only, and the agent host's `turnRecord` request;
+- a file a tester saves and sends: one request's steps, tool answers and files, redacted;
+- a command-line program that runs the agent host on tasks, with a model key from the environment, and replays a
+  report from someone else.
+
+No new setting or permission in the app.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| O1 | A report carries the person's keys or passwords, from a file the agent read, a command's output or what they typed | Every string goes through the log redaction (the keys the settings hold, the home folder) and the credential shapes of suggestions (0087): key prefixes, private keys, URLs with a password, Discord webhooks, Cfx.re keys, assignments to names like a secret, settings files' secret lines, and long runs of mixed letters and digits. A request that read or edited a file named like a secret goes only with its words replaced. Words are replaced by default. | Mitigated |
+| O2 | A report names the person's folders, their user name among them | The project folder is taken out of every path and text, matched without case on Windows and never inside a longer name; the home folder is redacted as in a log. Paths outside the project that the agent used stay, under the home folder's redaction. | Mitigated |
+| O3 | The page asks for a record of another session's request, or sends a crafted draft | The draft is rebuilt from known fields (ids of a fixed shape, a description of at most 4,000 characters, a yes or no), and the handler is refused to any frame but the app's own. The record comes from the agent host, from the session's own messages; the page sends nothing of it. | Mitigated |
+| O4 | A report someone sends runs commands on the computer that replays it | A replay plays the model's steps on the benchmark's host: every command asks for an approval, which the benchmark declines, and the web is off. A kept task allows no command. The files are written under the task's folder only, from paths checked to be inside it (no `..`, no drive, no `.git`). | Mitigated |
+| O5 | A crafted report stalls or fills the disk of the computer that replays it | The report is read up to 64 MB and checked field by field: at most 200 steps of 20 calls, 600,000 characters per call, 40 files of 512 KB and 4 MB in all. A kept task is never written over one that is there. | Mitigated |
+| O6 | A replayed call reads a file of the replaying computer by an absolute path | It reads it into the replay's own run, which sends nothing anywhere (the model is the report's steps) and is removed after; a write outside the replay's folder asks and is declined. | Accepted |
+| O7 | A benchmark run leaks the model key | The key is read from the environment only, never printed, taken out of the agent's commands' environment (`agentEnvironment`) and out of the report before it is written. The checks run with the agent's environment too. | Mitigated |
+
+### Residual risks
+
+- Credentials are found by their shape. A short password in an ordinary file, read by the agent and kept with its
+  words, can be in a report; the dialog says that keys are taken out, and words are replaced unless the person turns it
+  off.
+- A tool's answer is cut to 2,000 characters and redacted, but it can still hold the names of files and folders inside
+  the project.
+
+### Verification
+
+- `turn-report.test.ts` (core): the record of a session's request holds its steps, its tools' answers and its files as
+  before, with the folder out of every path, and leaves out a file the rules deny; words replaced alike in files and
+  calls; a report rebuilt from its known fields only.
+- `turn-report.test.ts` (desktop): redaction everywhere, the same in a file and the call that edits it; a request that
+  read `.env` refused unless its words are replaced; the draft refused when it is not one.
+- `replay.test.ts`: a request recorded on the real host and checkpoints replays call for call, with its words kept and
+  replaced; its command is declined; a kept task is written once and caught when a call changes.
+- The end-to-end run saves a report of a request through the dialog and checks that it holds the file as it was and
+  never names the project folder.

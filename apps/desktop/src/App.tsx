@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
 import RewindDialog from './components/Chat/RewindDialog'
+import TurnReportDialog from './components/Chat/TurnReportDialog'
 import { StatusDialog } from './components/Chat/StatusDialog'
 import { alertGate, toastOf } from './components/models/alerts'
 import ConnectModelDialog from './components/models/ConnectModelDialog'
@@ -226,6 +227,7 @@ export default function App() {
       <AboutDialog />
       <InstallServerDialog />
       <EditorIssueDialog />
+      <TurnReportDialog />
       <ConfirmDialog />
       <Toasts />
     </div>

@@ -1,0 +1,28 @@
+{
+  "id": "question-no-change",
+  "title": "Answer a question, change nothing",
+  "prompt": "How long is a user's session before it times out, and where is that set? Don't change anything.",
+  "tags": [
+    "question",
+    "read-only"
+  ],
+  "maxSteps": 12,
+  "allow": [],
+  "checks": [
+    {
+      "kind": "unchanged",
+      "name": "nothing changed",
+      "paths": []
+    },
+    {
+      "kind": "reply",
+      "name": "it gives the value the code uses",
+      "matches": "\\b45\\b"
+    },
+    {
+      "kind": "reply",
+      "name": "it names where it is set",
+      "matches": "config/session\\.js|SESSION_TIMEOUT_MINUTES"
+    }
+  ]
+}

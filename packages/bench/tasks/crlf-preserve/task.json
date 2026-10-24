@@ -1,0 +1,33 @@
+{
+  "id": "crlf-preserve",
+  "title": "Change a file with Windows line ends",
+  "prompt": "In src/legacy.js, raise RETRY_LIMIT to 5 and RETRY_DELAY_MS to 2500.",
+  "tags": [
+    "javascript",
+    "line-endings",
+    "edit"
+  ],
+  "maxSteps": 10,
+  "allow": [],
+  "checks": [
+    {
+      "kind": "file",
+      "name": "the values are changed",
+      "path": "src/legacy.js",
+      "includes": [
+        "RETRY_LIMIT = 5",
+        "RETRY_DELAY_MS = 2500"
+      ],
+      "eol": "crlf"
+    },
+    {
+      "kind": "command",
+      "name": "the module still works",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/legacy.hidden.test.mjs"
+      ]
+    }
+  ]
+}

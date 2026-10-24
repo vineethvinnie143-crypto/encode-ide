@@ -1,0 +1,41 @@
+{
+  "id": "regression-guard",
+  "title": "Fix one test without breaking another",
+  "prompt": "The \"drops punctuation\" test in test/slug.test.js fails. Fix slug so that it passes.",
+  "tags": [
+    "javascript",
+    "regression"
+  ],
+  "maxSteps": 15,
+  "allow": [
+    "Bash(node --test:*)",
+    "Bash(npm test)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "all the project tests pass",
+      "run": [
+        "{{node}}",
+        "--test",
+        "test/slug.test.js"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the hidden tests pass",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/slug.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the tests are left alone",
+      "paths": [
+        "test"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node scripts/check-rules.js",
+            "description": "Run the pricing checks"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/pricing.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Discounts over 50% get through: applyDiscount caps at 75 instead of the 50 the file states.",
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/pricing.js",
+            "old_string": "  const capped = Math.min(Math.max(percent, 0), 75)",
+            "new_string": "  const capped = Math.min(Math.max(percent, 0), MAX_DISCOUNT_PERCENT)"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node scripts/check-rules.js",
+            "description": "Run the pricing checks again"
+          }
+        }
+      ]
+    },
+    {
+      "text": "`applyDiscount` capped discounts at 75% instead of `MAX_DISCOUNT_PERCENT` (50). It uses the constant now, and every case passes."
+    }
+  ]
+}

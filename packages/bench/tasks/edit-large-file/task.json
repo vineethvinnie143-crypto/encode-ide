@@ -1,0 +1,25 @@
+{
+  "id": "edit-large-file",
+  "title": "Change one function in a long file of near-copies",
+  "prompt": "In src/handlers.js, handleRefundRequested must refuse a refund of zero or less: throw a RangeError with the message 'refund amount must be positive'. Leave every other handler as it is.",
+  "tags": [
+    "javascript",
+    "large-file",
+    "edit"
+  ],
+  "maxSteps": 20,
+  "allow": [
+    "Bash(node --test:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "the refund handler refuses what it must, and nothing else changed",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/handlers.hidden.test.mjs"
+      ]
+    }
+  ]
+}

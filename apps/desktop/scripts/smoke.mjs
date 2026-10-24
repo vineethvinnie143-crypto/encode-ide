@@ -811,7 +811,7 @@ async function runEditorIssueChecks() {
   await click('#editor-issue-scramble')
   await waitFor("document.querySelector('#editor-issue-scramble')?.getAttribute('aria-checked') === 'false'", 4000, 'the words kept')
   await click('.editor-issue-dialog .ui-dialog-foot .btn', 'Save report')
-  await waitFor("(document.querySelector('.editor-issue-refused')?.textContent ?? '').includes('looks like a key or a password')", 6000, 'a file with a credential kept as it is is refused')
+  await waitFor("(document.querySelector('.report-refused')?.textContent ?? '').includes('looks like a key or a password')", 6000, 'a file with a credential kept as it is is refused')
 
   // Words replaced, with what went wrong: written where the test said.
   await click('#editor-issue-scramble')
@@ -1247,6 +1247,7 @@ async function runRewindChecks() {
   if (!changedUtils.includes('return b + a')) throw new Error('The agent did not change src/utils.ts')
   await expectFile(createdFile, 'created by the hooks check\n', 'the agent created a file')
 
+  await runTurnReportCheck({ original, read })
   await runTurnReviewChecks({ utilsFile, createdFile, original, changedUtils, read, expectFile, toastIs })
 
   // Undo on the latest change card opens the dialog on the files alone. It lists what this request changed, and nothing
@@ -1319,6 +1320,44 @@ async function runRewindChecks() {
  * changed. One change is reverted on its own and the file the request created is deleted; the notices' Undo brings each
  * back, so the files end as the agent left them and the rewind that follows finds nothing of the person's in its way.
  */
+/**
+ * Report a problem with a request (ADR 0092): the request just run saves with its steps and what the tools answered,
+ * src/utils.ts as it was before the request changed it, and the project folder taken out of every path.
+ */
+async function runTurnReportCheck({ original, read }) {
+  const file = process.env.ENCODE_TURN_REPORT_FILE
+  if (!file) throw new Error('ENCODE_TURN_REPORT_FILE is not set (pnpm e2e sets it)')
+  await fs.rm(file, { force: true })
+  const opened = await evaluate(`(() => {
+    const button = [...document.querySelectorAll('.turn-user')][1]?.querySelector('button[aria-label="Report a problem with this request"]')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  if (!opened) throw new Error('The request has no Report button')
+  await waitFor("!!document.querySelector('.turn-report-dialog')", 6000, 'the report dialog')
+  const named = await evaluate("document.querySelector('.turn-report-dialog .install-server-facts dd')?.textContent ?? ''")
+  if (!named.startsWith('[scenario:hooks-check]')) throw new Error(`The dialog names the request ${JSON.stringify(named)}`)
+  // The picture shows the dialog once it has faded in.
+  await waitFor("document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)", 4000, 'the dialog has opened')
+  await screenshot('18-turn-report.png')
+  await click('#turn-report-scramble')
+  await waitFor("document.querySelector('#turn-report-scramble')?.getAttribute('aria-checked') === 'false'", 4000, 'the words kept')
+  await typeInto('#turn-report-description', 'It ran a command the guard refuses')
+  await click('.turn-report-dialog .ui-dialog-foot .btn', 'Save report')
+  await waitFor("!document.querySelector('.turn-report-dialog')", 10000, 'the dialog closes once the report is saved')
+  await waitFor("[...document.querySelectorAll('.ui-toast, .toast')].some((node) => node.textContent.includes('Saved the report to'))", 6000, 'a note that the report was saved')
+  const text = await read(file)
+  const report = JSON.parse(text ?? 'null')
+  if (report?.kind !== 'encode-turn-report' || report.scrambled !== false) throw new Error(`The report does not say what it is: ${String(text).slice(0, 400)}`)
+  if (report.description !== 'It ran a command the guard refuses' || !report.prompt.startsWith('[scenario:hooks-check]')) throw new Error(`The report does not hold the request: ${String(text).slice(0, 400)}`)
+  const utils = report.files.find((entry) => entry.path === 'src/utils.ts')
+  if (utils?.text !== original) throw new Error(`The report should hold src/utils.ts as it was before the request: ${JSON.stringify(report.files.map((entry) => entry.path))}`)
+  if (!report.results.some((result) => result.tool === 'Bash' && !result.ok)) throw new Error(`The report should hold the refused command: ${JSON.stringify(report.results)}`)
+  const forms = [demoPath, demoPath.replace(/\\/g, '/'), JSON.stringify(demoPath).slice(1, -1)].map((form) => form.toLowerCase())
+  if (forms.some((form) => text.toLowerCase().includes(form))) throw new Error('The report names the project folder')
+  console.log(`[smoke] turn report: ${report.steps.length} steps, ${report.files.length} files, ${(text.length / 1024).toFixed(1)} KB`)
+}
+
 async function runTurnReviewChecks({ utilsFile, createdFile, original, changedUtils, read, expectFile, toastIs }) {
   console.log('[smoke] --- review of a turn ---')
   const heads = "document.querySelectorAll('.review-pane .rv-file-head:not(.is-pinned)').length"

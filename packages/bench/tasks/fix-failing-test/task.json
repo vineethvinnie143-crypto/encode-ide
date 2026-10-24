@@ -1,0 +1,13 @@
+{
+  "id": "fix-failing-test",
+  "title": "Fix the code a failing test points at",
+  "prompt": "The cart tests fail. Find out why and fix the code, not the tests.",
+  "tags": ["javascript", "debugging"],
+  "maxSteps": 20,
+  "allow": ["Bash(node --test:*)", "Bash(npm test)"],
+  "checks": [
+    { "kind": "command", "name": "the project's tests pass", "run": ["{{node}}", "--test", "test/cart.test.js"] },
+    { "kind": "command", "name": "the hidden tests pass", "run": ["{{node}}", "--test", "{{checks}}/cart.hidden.test.mjs"] },
+    { "kind": "unchanged", "name": "the tests are left alone", "paths": ["test"] }
+  ]
+}

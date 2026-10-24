@@ -1,0 +1,31 @@
+{
+  "id": "long-output-command",
+  "title": "Find the failure in a long output",
+  "prompt": "node scripts/check-rules.js says some pricing cases fail. Find out why and fix the pricing code, not the checker.",
+  "tags": [
+    "javascript",
+    "long-output",
+    "debugging"
+  ],
+  "maxSteps": 15,
+  "allow": [
+    "Bash(node scripts/check-rules.js:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "every case passes",
+      "run": [
+        "{{node}}",
+        "scripts/check-rules.js"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the checker is left alone",
+      "paths": [
+        "scripts"
+      ]
+    }
+  ]
+}

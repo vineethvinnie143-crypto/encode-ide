@@ -1,0 +1,54 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "server/main.lua"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "config.lua"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "client/main.lua"
+          }
+        }
+      ]
+    },
+    {
+      "text": "The handler multiplies the price the client sent. The server should look the price up itself and check both arguments first.",
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "server/main.lua",
+            "old_string": "RegisterNetEvent('shop:buy', function(item, amount, price)\n  local src = source\n  local cost = price * amount\n",
+            "new_string": "-- The client sends only what it wants to buy; the price is the server's, from Config.Items.\nRegisterNetEvent('shop:buy', function(item, amount)\n  local src = source\n  local entry = type(item) == 'string' and Config.Items[item] or nil\n  if not entry then\n    TriggerClientEvent('shop:result', src, false, 'That is not sold here')\n    return\n  end\n  if math.type(amount) ~= 'integer' or amount < 1 or amount > Config.MaxAmount then\n    TriggerClientEvent('shop:result', src, false, 'That amount cannot be bought')\n    return\n  end\n  local cost = entry.price * amount\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "client/main.lua",
+            "old_string": "  TriggerServerEvent('shop:buy', item, amount, Config.Items[item].price)",
+            "new_string": "  TriggerServerEvent('shop:buy', item, amount)"
+          }
+        }
+      ]
+    },
+    {
+      "text": "The server now charges `Config.Items[item].price` and ignores any price from the client. It refuses items not in `Config.Items` and amounts that are not whole numbers from 1 to `Config.MaxAmount`, and tells the client why. The client no longer sends a price."
+    }
+  ]
+}

@@ -10,6 +10,8 @@ import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
 import { editorIssueFile } from './services/editor-issue'
 import { editorIssueFileName, readEditorIssueDraft } from '../shared/editor-issue'
+import { readTurnReportDraft, turnReportFileName, type TurnReportSaved } from '../shared/turn-report'
+import { turnReportFile } from './services/turn-report'
 import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
 import { InlineRequests, readInlineRequest } from './services/inline-suggest'
 import { exportSessionZip } from './services/export'
@@ -489,6 +491,33 @@ export function registerIpc(deps: IpcDeps): void {
     writeFileSync(picked.filePath, made.text, 'utf8')
     console.log(`[eNCode] editor report saved (${draft.trace.steps.length} steps, ${draft.scrambled ? 'words replaced' : 'words kept'})`)
     return { saved: picked.filePath }
+  })
+  // A report of a request (ADR 0092): the agent host makes the record, this side redacts it and writes it like the others.
+  handle('app:save-turn-report', async (value: unknown): Promise<TurnReportSaved> => {
+    const draft = readTurnReportDraft(value)
+    if (!draft) return { refused: 'The report could not be made for this request.' }
+    const outcome = await host.turnRecord(draft.sessionId, draft.turn, { scramble: draft.scramble }).catch((error: unknown) => {
+      throw hostFailure(error)
+    })
+    if (!outcome.ok) return { refused: outcome.reason }
+    const made = turnReportFile(outcome.record, draft, { about: aboutInfo(currentEnvironment(app.isPackaged)), now: Date.now(), redact: redactReport })
+    if (!made.ok) return { refused: made.reason }
+    const answered = app.isPackaged ? undefined : process.env.ENCODE_TURN_REPORT_FILE
+    if (answered) {
+      writeFileSync(answered, made.text, 'utf8')
+      return { saved: answered, redacted: made.redacted }
+    }
+    const win = getWindow()
+    const options = {
+      title: 'Save the report of this request',
+      defaultPath: join(app.getPath('downloads'), turnReportFileName(Date.now())),
+      filters: [{ name: 'eNCode request report', extensions: ['json'] }],
+    }
+    const picked = win && !win.isDestroyed() ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (picked.canceled || !picked.filePath) return { canceled: true }
+    writeFileSync(picked.filePath, made.text, 'utf8')
+    console.log(`[eNCode] request report saved (${outcome.record.steps.length} steps, ${outcome.record.files.length} files, ${draft.scramble ? 'words replaced' : 'words kept'})`)
+    return { saved: picked.filePath, redacted: made.redacted }
   })
   handle('app:test-notification', () => testNotice())
   handle('app:screen-reader', () => app.isAccessibilitySupportEnabled())

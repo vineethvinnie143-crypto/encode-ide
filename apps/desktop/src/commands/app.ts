@@ -7,6 +7,8 @@ import { inlineState } from '@shared/inline'
 import type { SessionSummary, Settings } from '@shared/types'
 import { api } from '../api'
 import { canReportIssue, hasShownEditor, runEditorCommand } from '../editor/surface'
+import { getActiveSessionId } from '../stores/active'
+import { useChat } from '../stores/chat'
 import { useEditor } from '../stores/editor'
 import { focusBreadcrumbs, useEditorLayout } from '../stores/editor-layout'
 import { useFind } from '../stores/find'
@@ -15,7 +17,7 @@ import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
 import { useStatus } from '../stores/status'
 import { adjacentRecent, buildSidebar, nextAttention, visibleOrder } from '../stores/sidebar-model'
-import { useUi } from '../stores/ui'
+import { useUi, type TurnReportTarget } from '../stores/ui'
 import { useWorkspace } from '../stores/workspace'
 import { agentActions } from './agent'
 import { buildCommands, type AppActions } from './commands'
@@ -269,8 +271,25 @@ function createAppActions(): AppActions {
       const path = useEditor.getState().activePath
       if (canReportIssue(path)) ui().setEditorIssueFor(path)
     },
+    canReportTurn: () => lastRequest() !== null,
+    reportTurn: () => {
+      const target = lastRequest()
+      if (target) ui().setTurnReportFor(target)
+    },
     showLogs: () => void helpActions.showLogs(),
   }
+}
+
+/** The shown session's last request, unless it is still running. */
+function lastRequest(): TurnReportTarget | null {
+  const { entries, running } = useChat.getState()
+  const sessionId = getActiveSessionId()
+  if (running || !sessionId) return null
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!
+    if (entry.kind === 'user') return { sessionId, turn: entry.id, text: entry.text ?? '' }
+  }
+  return null
 }
 
 /**

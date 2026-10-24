@@ -1,0 +1,46 @@
+{
+  "steps": [
+    {
+      "text": "I'll check how the installed tidyvalid works before writing against it.",
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/signup.js"
+          }
+        },
+        {
+          "name": "CodeMap",
+          "input": {
+            "package": "tidyvalid"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "node_modules/tidyvalid/index.d.ts"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/signup.js",
+            "old_string": "/**\n * Checks a sign-up form before an account is made. Returns { ok, errors }, one message for each problem.\n */\nexport function validateSignup(form) {\n  return { ok: true, errors: [] }\n}\n",
+            "new_string": "import { schema, string } from 'tidyvalid'\n\nconst signup = schema({\n  email: string().email('email must be an email address'),\n  password: string().min(8, 'password must be at least 8 characters'),\n})\n\n/**\n * Checks a sign-up form before an account is made. Returns { ok, errors }, one message for each problem.\n */\nexport function validateSignup(form) {\n  const result = signup.check(form)\n  return result.ok ? { ok: true, errors: [] } : { ok: false, errors: result.issues.map((issue) => issue.message) }\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "`validateSignup` now checks the form with tidyvalid 2 (`schema` and `.check`, as installed) and returns one message per problem."
+    }
+  ]
+}

@@ -12,3 +12,6 @@
 *.gif binary
 *.woff binary
 *.woff2 binary
+
+# A benchmark task about a file with Windows line ends: it must reach every checkout with them.
+packages/bench/tasks/crlf-preserve/project/src/legacy.js text eol=crlf

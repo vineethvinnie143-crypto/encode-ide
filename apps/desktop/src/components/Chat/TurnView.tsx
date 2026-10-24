@@ -1,5 +1,5 @@
 import { memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, CornerDownRight, GitFork, Pencil, Undo2 } from '../../ui/icons'
+import { Check, ChevronDown, Copy, CornerDownRight, Flag, GitFork, Pencil, Undo2 } from '../../ui/icons'
 import type { ConversationEntry } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
@@ -7,6 +7,7 @@ import { useChat } from '../../stores/chat'
 import { useReview } from '../../stores/review'
 import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
+import { useUi } from '../../stores/ui'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
 import { foldText } from '../../find/text'
 import { Button, IconButton } from '../../ui/Button'
@@ -54,6 +55,21 @@ function RewindButton({ entry }: { entry: ConversationEntry }) {
   )
 }
 
+/** Opens Report a problem for this request: its steps and the files it read, saved to a file to send (ADR 0092). */
+function ReportButton({ entry }: { entry: ConversationEntry }) {
+  const working = useChat((state) => state.running)
+  return (
+    <IconButton
+      label={working ? 'Stop the agent to report this request' : 'Report a problem with this request'}
+      size="sm"
+      disabled={working}
+      onClick={() => useUi.getState().setTurnReportFor({ sessionId: getActiveSessionId(), turn: entry.id, text: entry.text ?? '' })}
+    >
+      <Flag size={14} />
+    </IconButton>
+  )
+}
+
 function UserMessage({ entry }: { entry: ConversationEntry }) {
   return (
     <div className="turn-user">
@@ -64,6 +80,7 @@ function UserMessage({ entry }: { entry: ConversationEntry }) {
         <span className="msg-time">{timeOf(entry.createdAt)}</span>
         <CopyButton text={entry.text ?? ''} label="Copy message" />
         <RewindButton entry={entry} />
+        <ReportButton entry={entry} />
       </div>
     </div>
   )

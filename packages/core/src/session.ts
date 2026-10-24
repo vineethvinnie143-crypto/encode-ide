@@ -64,6 +64,7 @@ import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
 import type { RuleJudge } from './approval'
+import { filesNamed, gatherFiles, turnRecord, TURN_REPORT_LIMITS, type TurnRecordOutcome } from './turn-report'
 import type { AgentHooks, NotificationKind, SessionEndEvent } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
@@ -2144,6 +2145,25 @@ export class AgentSession {
     } catch (error) {
       return { ...base, turn: chosen, problem: errorMessage(error) }
     }
+  }
+
+  /**
+   * What a report of a request holds (ADR 0092): the main agent's steps and what its tools answered, and the files its
+   * calls named as they were before the request. Only once the request has finished, so that the record is whole.
+   */
+  async turnRecord(turn: string | undefined, options: { scramble: boolean }): Promise<TurnRecordOutcome> {
+    if (this.controller) return { ok: false, reason: 'eNCode is working on this session. Report the request once it has finished.' }
+    const users = this.entries.filter((entry) => entry.kind === 'user')
+    const entry = turn ? users.find((candidate) => candidate.id === turn) : users.at(-1)
+    if (!entry) return { ok: false, reason: turn ? 'That request is not in this conversation any more.' : 'There is no request to report yet.' }
+    const records = this.log.snapshot().messages.filter((record) => record.turnId === entry.id)
+    if (!records.some((record) => record.message.role === 'assistant')) {
+      return { ok: false, reason: 'Nothing the agent did for that request is left to replay: the conversation was summarized since, or it never answered.' }
+    }
+    const { root } = this.env
+    const changes = this.env.checkpoints?.changes ? await this.turnChanges(entry.id, { maxFileBytes: TURN_REPORT_LIMITS.fileBytes, maxTotalBytes: TURN_REPORT_LIMITS.totalBytes }) : undefined
+    const { files, left } = await gatherFiles(filesNamed(records, root), { root, ...(this.env.rules ? { rules: this.env.rules } : {}), changes: changes?.files ?? [] })
+    return { ok: true, record: turnRecord({ root, prompt: entry.text ?? '', policy: this.env.settings().policy, records, files, left }, options) }
   }
 
   /** Writes a file the agent changed, for the person; only while nothing runs, so that no tool writes under it. */

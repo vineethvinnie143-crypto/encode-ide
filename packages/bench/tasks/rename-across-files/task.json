@@ -1,0 +1,41 @@
+{
+  "id": "rename-across-files",
+  "title": "Rename a function everywhere, and not its look-alike",
+  "prompt": "Rename getUserName to getDisplayName everywhere in the project. getUserNameLegacy is a different function: leave it as it is.",
+  "tags": [
+    "javascript",
+    "refactor",
+    "multi-file"
+  ],
+  "maxSteps": 25,
+  "allow": [
+    "Bash(node --test:*)"
+  ],
+  "checks": [
+    {
+      "kind": "search",
+      "name": "no getUserName is left",
+      "paths": [
+        "src"
+      ],
+      "pattern": "\\bgetUserName\\b",
+      "expect": "none"
+    },
+    {
+      "kind": "unchanged",
+      "name": "the legacy function is left alone",
+      "paths": [
+        "src/legacy.js"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "everything still works under the new name",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/rename.hidden.test.mjs"
+      ]
+    }
+  ]
+}

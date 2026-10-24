@@ -108,7 +108,7 @@ export function EditorIssueDialog() {
         </>
       }
     >
-      <div className="editor-issue-body">
+      <div className="report-body">
         <p className="install-server-lead">
           eNCode keeps a record of what happened in this file since it was opened: each edit and where the cursor went, nothing else. The report saves it to a file
           you send, so the issue can be replayed step by step and kept as a test. Nothing is sent by itself.
@@ -126,9 +126,9 @@ export function EditorIssueDialog() {
           </div>
           <div>
             <dt>Replayed</dt>
-            <dd className={ready && check.problems.length ? 'editor-issue-found' : undefined} title={ready ? foundText(check) : undefined}>
+            <dd className={ready && check.problems.length ? 'report-found' : undefined} title={ready ? foundText(check) : undefined}>
               {check === null ? (
-                <span className="editor-issue-checking">
+                <span className="report-checking">
                   <Spinner size={12} />
                   Checking it here…
                 </span>
@@ -140,13 +140,13 @@ export function EditorIssueDialog() {
             </dd>
           </div>
         </dl>
-        {typeof check === 'string' && <p className="editor-issue-note">{check}</p>}
-        <label className="editor-issue-label" htmlFor="editor-issue-description">
+        {typeof check === 'string' && <p className="report-note">{check}</p>}
+        <label className="report-label" htmlFor="editor-issue-description">
           What went wrong?
         </label>
         <textarea
           id="editor-issue-description"
-          className="approval-note editor-issue-description"
+          className="approval-note report-description"
           rows={4}
           maxLength={4000}
           value={description}
@@ -154,7 +154,7 @@ export function EditorIssueDialog() {
           onChange={(event) => setDescription(event.currentTarget.value)}
           data-autofocus
         />
-        <div className="editor-issue-scramble">
+        <div className="report-scramble">
           <div>
             <label htmlFor="editor-issue-scramble">Replace the words of the file</label>
             <p>
@@ -166,7 +166,7 @@ export function EditorIssueDialog() {
           <Toggle id="editor-issue-scramble" checked={scramble || forced} disabled={forced} onChange={setScramble} />
         </div>
         {refused && (
-          <p className="editor-issue-refused" role="alert">
+          <p className="report-refused" role="alert">
             {refused}
           </p>
         )}

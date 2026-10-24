@@ -19,6 +19,13 @@ export type SettingsSection =
 /** What the session sidebar lists: projects and their sessions, sessions by state, or archived ones. */
 export type SidebarMode = 'projects' | 'activity' | 'archived'
 
+/** One request of a session, by the message that started it. */
+export interface TurnReportTarget {
+  sessionId: string
+  turn: string
+  text: string
+}
+
 export interface PromptRequest {
   id: number
   title: string
@@ -82,6 +89,8 @@ interface UiStore {
   aboutOpen: boolean
   /** The file a report of an editor issue is being made of (Help, Report editor issue), or null. */
   editorIssueFor: string | null
+  /** The request a report is being made of (Report a problem with this request), or null. */
+  turnReportFor: TurnReportTarget | null
   /** The session's status: model, permissions, context and tokens (/status). */
   statusOpen: boolean
   /** The latest request to open a menu of the message box; `id` grows with each request. */
@@ -108,6 +117,7 @@ interface UiStore {
   setPaletteOpen(open: boolean): void
   setAboutOpen(open: boolean): void
   setEditorIssueFor(path: string | null): void
+  setTurnReportFor(target: TurnReportTarget | null): void
   setStatusOpen(open: boolean): void
   requestMenu(menu: ComposerMenu): void
   setStopArmed(armed: boolean): void
@@ -170,6 +180,7 @@ export const useUi = create<UiStore>((set, get) => ({
   paletteOpen: false,
   aboutOpen: false,
   editorIssueFor: null,
+  turnReportFor: null,
   statusOpen: false,
   menuRequest: null,
   stopArmed: false,
@@ -201,6 +212,7 @@ export const useUi = create<UiStore>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setAboutOpen: (open) => set({ aboutOpen: open }),
   setEditorIssueFor: (path) => set({ editorIssueFor: path }),
+  setTurnReportFor: (target) => set({ turnReportFor: target }),
   setStatusOpen: (open) => set({ statusOpen: open }),
   requestMenu: (menu) => set((state) => ({ menuRequest: { menu, id: (state.menuRequest?.id ?? 0) + 1 } })),
   setStopArmed: (armed) => set({ stopArmed: armed }),
