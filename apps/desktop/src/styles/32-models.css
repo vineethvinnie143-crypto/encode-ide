@@ -646,3 +646,161 @@
 .model-picker-search input::-webkit-search-cancel-button {
   display: none;
 }
+
+/* ---- Test this model (ADR 0101) ---------------------------------------- */
+.role-score,
+.model-score {
+  font-variant-numeric: tabular-nums;
+}
+.model-test-body {
+  display: grid;
+  gap: 12px;
+}
+.model-test-body > .install-server-facts {
+  margin: 0;
+}
+.model-test-skills {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.model-test-skills li {
+  display: flex;
+  gap: 12px;
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.model-test-skill-name {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.model-test-skill-what {
+  color: var(--text-2);
+}
+.model-test-cost,
+.model-test-note,
+.model-test-previous,
+.model-test-stopped {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+.model-test-note,
+.model-test-previous {
+  color: var(--text-3);
+}
+.model-test-stopped {
+  color: var(--warning);
+}
+.model-test-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.model-test-progress-text {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.model-test-items {
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.model-test-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--r-6);
+  font-size: var(--fs-13);
+  line-height: 18px;
+}
+.model-test-item.is-running {
+  background: var(--surface-1);
+}
+.model-test-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  color: var(--text-3);
+}
+.model-test-item.is-passed .model-test-item-icon {
+  color: var(--success);
+}
+.model-test-item.is-failed .model-test-item-icon {
+  color: var(--danger);
+}
+.model-test-item.is-error .model-test-item-icon {
+  color: var(--warning);
+}
+.model-test-item-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.model-test-item-title {
+  color: var(--text-1);
+}
+.model-test-item.is-waiting .model-test-item-title,
+.model-test-item.is-skipped .model-test-item-title {
+  color: var(--text-3);
+}
+.model-test-item-reason {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+.model-test-item-skill {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}
+.model-test-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.model-test-score {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-1);
+}
+.model-test-score-value {
+  color: var(--text-1);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 26px;
+}
+.model-test-score.is-good .model-test-score-value {
+  color: var(--success);
+}
+.model-test-score.is-poor .model-test-score-value {
+  color: var(--warning);
+}
+.model-test-score-label {
+  color: var(--text-1);
+  font-size: var(--fs-13);
+}
+.model-test-score-roles {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+}

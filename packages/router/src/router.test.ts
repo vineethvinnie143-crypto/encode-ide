@@ -847,3 +847,41 @@ describe('ModelRouter: key reads', () => {
     assert.equal(world.clock.pending, 0)
   })
 })
+
+describe('ModelRouter: a client pinned to one model (ADR 0101)', () => {
+  const pinnedRequest = (world: TestWorld, ref: string, role = 'explore') => {
+    const events: ClientEvent[] = []
+    const request = {
+      role,
+      payload: { system: [{ text: 'You are eNCode.' }], messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Say hello.' }] }], tools: [] },
+      requirements: { promptTokens: 1_000, maxOutputTokens: 4_096, tools: false, images: false },
+      signal: new AbortController().signal,
+      onEvent: (event: ClientEvent) => events.push(event),
+    }
+    return world.clock.run(world.router.pinned(ref).complete(request)).then((outcome) => ({ outcome, events }))
+  }
+
+  it('calls that model for every role, and fails over to no other', async () => {
+    const world = freeWorld({ behavior: { [B]: faults.serverError() } })
+    const ok = done((await pinnedRequest(world, `openrouter:${C}`, 'reviewer')).outcome)
+    assert.equal(ok.message.origin?.model, C)
+    assert.deepEqual(world.calls.map((call) => call.model), [C])
+    // B fails: the request ends there, where the role's list would have gone on to A or C.
+    const { outcome, events } = await pinnedRequest(world, `openrouter:${B}`, 'main')
+    assert.equal(outcome.kind, 'paused')
+    assert.ok(world.calls.every((call) => call.model === C || call.model === B), JSON.stringify(world.calls.map((call) => call.model)))
+    assert.equal(events.some((event) => event.type === 'switch'), false)
+    const budget = await world.router.pinned(`openrouter:${C}`).budget('summarizer')
+    assert.equal(budget.model, C)
+  })
+
+  it('keeps free-only mode: a billed model is refused, and nothing is sent', async () => {
+    const world = new TestWorld({
+      settings: { providers: { openrouter: { type: 'openrouter' } }, freeOnly: true },
+      catalogs: { openrouter: [catalogEntry(A), catalogEntry('vendor/paid')] },
+    })
+    const { outcome } = await pinnedRequest(world, 'openrouter:vendor/paid')
+    assert.equal(outcome.kind, 'paused')
+    assert.equal(world.callsTo('vendor/paid').length, 0)
+  })
+})

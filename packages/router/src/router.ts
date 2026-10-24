@@ -214,6 +214,8 @@ interface RequestState {
   previousKey?: string
   /** A finished but flawed reply (unreadable tool JSON, empty), committed if nothing better arrives. */
   fallback?: AssembledReply
+  /** The one model of a pinned client, whatever the role (ADR 0101). */
+  readonly pin?: string
 }
 
 type Step = { next: true } | { outcome: CompletionOutcome }
@@ -414,9 +416,25 @@ export class ModelRouter implements ModelClient {
   // ------------------------------------------------------------- completion
 
   async complete(request: CompletionRequest): Promise<CompletionOutcome> {
+    return this.completeOn(request)
+  }
+
+  /**
+   * A client of one model for every role, tool and subagent, with no other to fail over to (ADR 0101): what "Test this
+   * model" scores. Its calls go through everything else as any call does: the key bound to its server, free-only mode,
+   * the paid guards, the free tier's counts, health and what a provider refused.
+   */
+  pinned(ref: string): ModelClient {
+    return {
+      complete: (request) => this.completeOn(request, ref),
+      budget: (role, query) => this.budgetOn(role, query, ref),
+    }
+  }
+
+  private async completeOn(request: CompletionRequest, pin?: string): Promise<CompletionOutcome> {
     const { signal } = request
     if (signal.aborted) throw abortReason(signal)
-    const state: RequestState = { startedAt: this.clock.now(), attempts: 0, costly: 0, excluded: new Set(), retried: new Set() }
+    const state: RequestState = { startedAt: this.clock.now(), attempts: 0, costly: 0, excluded: new Set(), retried: new Set(), ...(pin !== undefined ? { pin } : {}) }
     let outcome: CompletionOutcome | undefined
     try {
       outcome = await this.run(request, state)
@@ -461,10 +479,15 @@ export class ModelRouter implements ModelClient {
     return { candidates: candidates.map((candidate) => candidate.info.key), skipped }
   }
 
+  /** The models a request may run on, in order: its role's list, or a pinned client's one model. */
+  private listOf(request: CompletionRequest, state: RequestState): { role: string; refs: string[] } {
+    return state.pin !== undefined ? { role: request.role, refs: [state.pin] } : resolveModelList(this.config, request)
+  }
+
   private async run(request: CompletionRequest, state: RequestState): Promise<CompletionOutcome> {
     const { signal } = request
     const emit = this.emitter(request)
-    const { role, refs } = resolveModelList(this.config, request)
+    const { role, refs } = this.listOf(request, state)
     await this.ensureCatalogs(refs, signal)
     const limits = this.config.limits
 
@@ -738,7 +761,7 @@ export class ModelRouter implements ModelClient {
     const limits = this.config.limits
     const elapsed = this.clock.now() - (state.firstProblemAt ?? state.startedAt)
     if (state.costly > limits.maxFailovers || elapsed >= limits.maxFailoverMs) {
-      const { role, refs } = resolveModelList(this.config, request)
+      const { role, refs } = this.listOf(request, state)
       return { outcome: this.giveUp(state, role, refs, request.requirements) }
     }
     return NEXT
@@ -919,7 +942,7 @@ export class ModelRouter implements ModelClient {
       const used = state.overflowUsed ?? request.requirements.promptTokens
       return { outcome: { kind: 'compact', window, ...(used ? { used } : {}) } }
     }
-    const { role, refs } = resolveModelList(this.config, request)
+    const { role, refs } = this.listOf(request, state)
     return { outcome: this.giveUp(state, role, refs, request.requirements, skipped) }
   }
 
@@ -1042,7 +1065,11 @@ export class ModelRouter implements ModelClient {
   // ----------------------------------------------------------------- budget
 
   async budget(role: ModelRole, query: BudgetQuery = {}): Promise<ModelBudget> {
-    const { role: resolved, refs } = resolveModelList(this.config, { role, tool: query.tool, agent: query.agent })
+    return this.budgetOn(role, query)
+  }
+
+  private async budgetOn(role: ModelRole, query: BudgetQuery = {}, pin?: string): Promise<ModelBudget> {
+    const { role: resolved, refs } = pin !== undefined ? { role, refs: [pin] } : resolveModelList(this.config, { role, tool: query.tool, agent: query.agent })
     const sticky = query.sticky !== undefined ? this.sessions.get(query.sticky) : undefined
     const requirements: Requirements = { promptTokens: 0, maxOutputTokens: 1, tools: false, images: false }
     const { candidates } = selectCandidates(this.selection, { role: resolved, refs, requirements, sticky })

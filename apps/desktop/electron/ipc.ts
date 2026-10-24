@@ -18,6 +18,7 @@ import { exportSessionZip } from './services/export'
 import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
 import type { ModelsService } from './services/models'
+import type { ModelTestStore } from './services/model-tests'
 import type { ReviewService } from './services/review'
 import { commitRequestOf, reviewActionOf, reviewOptionsOf, reviewScopeOf } from './services/review-input'
 import type { ScheduleService } from './services/schedules'
@@ -58,6 +59,8 @@ export interface IpcDeps {
   git: GitService
   review: ReviewService
   agent: AgentHostService
+  /** What Test this model scored, by model. */
+  modelTests: ModelTestStore
   /** Tells the agent host the settings changed. */
   configureAgent: () => void
   logs: LogService
@@ -97,7 +100,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
   const host = agent.client
   /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
   const inline = new InlineRequests()
@@ -364,6 +367,14 @@ export function registerIpc(deps: IpcDeps): void {
   })
   handle('models:status', () => agent.modelStatus().catch((error) => Promise.reject(hostFailure(error))))
   handle('models:recheck', () => agent.modelRecheck().catch((error) => Promise.reject(hostFailure(error))))
+  // Test this model (ADR 0101): what it will run and cost, the run itself, and the scores kept from earlier runs.
+  handle('models:test-plan', (profileId: string, model: string) => agent.modelTestPlan(String(profileId), String(model)).catch((error) => Promise.reject(hostFailure(error))))
+  handle('models:run-test', async (profileId: string, model: string) => {
+    const result = await agent.modelTest(String(profileId), String(model)).catch((error) => Promise.reject(hostFailure(error)))
+    return { result, results: modelTests.save(result) }
+  })
+  handle('models:stop-test', () => agent.modelTestStop().catch((error) => Promise.reject(hostFailure(error))))
+  handle('models:test-results', () => modelTests.all())
 
   handle('git:status', () => git.status())
 

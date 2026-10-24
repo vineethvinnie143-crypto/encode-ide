@@ -90,6 +90,7 @@ say so.
 | [0098](0098-several-attempts-at-one-request-run-side-by-side-in-worktrees-and-the-person-keeps-the-one-the-reviewer-picks.md) | Several attempts at one request run side by side in worktrees, and the person keeps the one the Reviewer picks | Accepted, builds on 0052, 0063, 0073, 0094, 0095, 0096 and 0097 |
 | [0099](0099-each-model-family-gets-its-own-reasoning-back-and-is-asked-in-its-own-terms.md) | Each model family gets its own reasoning back, and is asked in its own terms | Accepted, builds on 0009, 0035 and 0052 |
 | [0100](0100-smaller-models-get-help-and-a-strong-model-takes-the-hard-steps-when-the-person-says-so.md) | Smaller models get help, and a strong model takes the hard steps when the person says so | Accepted, builds on 0052, 0094, 0095, 0096 and 0099 |
+| [0101](0101-test-this-model-scores-a-model-on-the-benchmark-from-settings-before-it-takes-a-role.md) | Test this model scores a model on the benchmark from Settings, before it takes a role | Accepted, builds on 0052, 0092, 0094 and 0100 |
 
 ## Template
 

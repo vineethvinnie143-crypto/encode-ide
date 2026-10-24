@@ -95,6 +95,17 @@ What is most useful to hear: a plan before the first edit that was not worth the
 was doing fine (and what it said were the reasons), a card that never came while the model went round in circles, and
 whether the stronger model fixed what the smaller one could not. Both kinds of help turn off on **Settings → Roles**.
 
+## Test a model before you give it a role
+
+On **Settings → Roles**, press the gauge beside a model. The window says what it will run (writing, exploring,
+reviewing), how many requests and tokens it takes and what that costs at the model's price, and the limit it stops at.
+**Run the test** starts it; it takes a few minutes. You can close the window and it keeps going; **Stop** ends it. At
+the end it shows a score for each skill and what each task missed; the score then shows beside the model in Roles and
+in the model list when you add a model to a role. Try two models you are choosing between, and a free one.
+
+What is most useful to hear: a cost that came out far from what the window said, a score that does not match how the
+model does on your own work, a task that says it could not run, and how long it took.
+
 ## Stay safe
 
 - The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command

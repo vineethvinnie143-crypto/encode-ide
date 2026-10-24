@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell as osShell } from 'electron'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { hostConfigOf } from './agent-host/config'
@@ -16,6 +16,7 @@ import { ComputerWatch } from './services/computer-watch'
 import { diagnosticsReport } from './services/diagnostics'
 import { GitService } from './services/git'
 import { LogService } from './services/logs'
+import { ModelTestStore } from './services/model-tests'
 import { ModelsService } from './services/models'
 import { isFile, searchPath } from './services/programs'
 import { redact } from './services/redact'
@@ -38,6 +39,15 @@ protocol.registerSchemesAsPrivileged([
 // End-to-end tests run against a throwaway profile. A packaged build always
 // uses the real one. This must precede the lock, which lives in the profile.
 const testProfile = app.isPackaged ? undefined : process.env.ENCODE_USER_DATA_DIR
+
+/**
+ * The benchmark's tasks for Test this model (ADR 0101): beside the app in a packaged build, where electron-builder puts
+ * them outside the archive so their checks can run them; in the repository otherwise. Absent when neither is there.
+ */
+function benchTasksDir(): string | undefined {
+  const dir = app.isPackaged ? path.join(process.resourcesPath, 'bench-tasks') : path.resolve(__dirname, '..', '..', '..', '..', 'packages', 'bench', 'tasks')
+  return existsSync(dir) ? dir : undefined
+}
 if (testProfile) app.setPath('userData', path.resolve(testProfile))
 
 const gotLock = app.requestSingleInstanceLock()
@@ -197,6 +207,7 @@ if (!gotLock) {
         sandboxDir: path.join(userData, 'sandbox'),
         toolsDir: path.join(userData, 'tools'),
         serverCacheDir: path.join(userData, 'server-cache'),
+        ...(benchTasksDir() ? { benchTasksDir: benchTasksDir() } : {}),
       }),
       // A key goes only to the server it was entered for: the host names the address it is about to call.
       apiKey: (profileId, baseUrl) => {
@@ -216,6 +227,7 @@ if (!gotLock) {
       onMcp: () => send('mcp:changed', undefined),
       onSandbox: () => send('sandbox:changed', undefined),
       onCode: () => send('code:changed', undefined),
+      onModelTest: (progress) => send('models:test-progress', progress),
       // The host names files by their real paths; the editor knows them by their paths in the open folder.
       onDiagnostics: (root, file, diagnostics) => {
         const real = workspace.rootRealPath
@@ -337,6 +349,7 @@ if (!gotLock) {
       git,
       review,
       agent: agentHost,
+      modelTests: new ModelTestStore(path.join(userData, 'eNCode-model-tests.json')),
       configureAgent,
       logs,
       diagnostics,

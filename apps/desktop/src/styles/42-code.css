@@ -299,7 +299,8 @@
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--surface-3, var(--surface-2));
+  /* Dialogs are on --surface-3: the track needs a colour of its own to show. */
+  background: var(--border);
 }
 .install-server-bar > span {
   position: absolute;

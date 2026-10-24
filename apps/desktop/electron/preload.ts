@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { SearchProviderId } from '../shared/search'
+import type { ModelTestProgress } from '../shared/model-tests'
 import type {
   AgentMode,
   AgentEvent,
@@ -99,6 +100,11 @@ const api: EncodeApi = {
     status: () => invoke('models:status'),
     recheck: () => invoke('models:recheck'),
     onAlert: (callback) => on<ModelAlert>('models:alert', callback),
+    testPlan: (profileId: string, model: string) => invoke('models:test-plan', profileId, model),
+    runTest: (profileId: string, model: string) => invoke('models:run-test', profileId, model),
+    stopTest: () => invoke('models:stop-test'),
+    testResults: () => invoke('models:test-results'),
+    onTestProgress: (callback) => on<ModelTestProgress>('models:test-progress', callback),
   },
   git: {
     status: () => invoke('git:status'),

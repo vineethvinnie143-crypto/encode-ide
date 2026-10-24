@@ -179,6 +179,17 @@ describe('a run', () => {
     }
   })
 
+  test('a check whose program cannot start measures nothing: the run is an error, not a failure', async () => {
+    const dir = await makeTask({ ...base, checks: [{ kind: 'command', name: 'the tests pass', run: ['{{node}}', '--version'] }] })
+    const task = await readTask(dir)
+    const missing = await runTask(task, { client: createScriptedClient(idle), programs: {} })
+    assert.equal(missing.outcome, 'error')
+    assert.match(missing.reason ?? '', /A check could not run \(the tests pass\): node is not installed here/)
+    const broken = await runTask(task, { client: createScriptedClient(idle), programs: { node: [path.join(dir, 'no-such-node')] } })
+    assert.equal(broken.outcome, 'error')
+    assert.match(broken.reason ?? '', /could not start/)
+  })
+
   test('a model that cannot be reached is an error, not a failure', async () => {
     const task = await readTask(await makeTask(base))
     const run = await runTask(task, { client: createScriptedClient([{ outcome: { kind: 'paused', reason: 'auth', message: 'The key was refused.' } }]), programs: await findPrograms([]) })

@@ -15,6 +15,7 @@ import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi
 import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
 import type { CommitDraftInput } from './commit-message'
 import { HOST_STOPPED_MESSAGE } from '../../shared/problems'
+import type { ModelTestPlan, ModelTestProgress, ModelTestResult } from '../../shared/model-tests'
 
 export interface HostProcess {
   port: Port
@@ -44,6 +45,8 @@ export interface AgentHostServiceOptions {
   onCode?(root: string): void
   /** What a language server says of a file now, by real paths. */
   onDiagnostics?(root: string, file: string, diagnostics: CodeDiagnostic[]): void
+  /** How the model test that runs is going. */
+  onModelTest?(progress: ModelTestProgress): void
   log?(message: string): void
   /** The pause before the first restart, ms; it doubles with every failure. Default 400. */
   restartDelayMs?: number
@@ -58,6 +61,8 @@ export { HOST_STOPPED_MESSAGE }
 
 const REQUEST_TIMEOUT_MS = 60_000
 const LONG_REQUEST_TIMEOUT_MS = 10 * 60_000
+/** A model test runs eight items, each up to its own limit: a slow model takes long, but not this long. */
+const MODEL_TEST_TIMEOUT_MS = 3 * 60 * 60_000
 /** A language server's download or its toolchain's install, on a slow line. */
 const INSTALL_TIMEOUT_MS = 30 * 60_000
 /** A server that starts for the question (the first one in a big project) can take this long to answer. */
@@ -144,6 +149,21 @@ export class AgentHostService {
   /** A small tool call to one model, the way the agent will make it. */
   async modelCheck(profileId: string, model: string): Promise<ModelCheckResult> {
     return (await this.ready()).request('modelCheck', { profileId, model }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
+  }
+
+  /** What testing one model will run and may cost, or why it cannot be tested now (ADR 0101). */
+  async modelTestPlan(profileId: string, model: string): Promise<ModelTestPlan> {
+    return (await this.ready()).request('modelTestPlan', { profileId, model }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Tests one model on the benchmark's short run; answers when it ends. */
+  async modelTest(profileId: string, model: string): Promise<ModelTestResult> {
+    return (await this.ready()).request('modelTest', { profileId, model }, { timeoutMs: MODEL_TEST_TIMEOUT_MS })
+  }
+
+  /** Stops the model test that runs. */
+  async modelTestStop(): Promise<void> {
+    await (await this.ready()).request('modelTestStop', undefined, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
   /** Lifts what a refused key or a payment problem set, and reads the model lists again. */
@@ -326,6 +346,7 @@ export class AgentHostService {
     peer.on('sandbox', () => this.o.onSandbox?.())
     peer.on('code', ({ root }) => this.o.onCode?.(root))
     peer.on('diagnostics', ({ root, file, diagnostics }) => this.o.onDiagnostics?.(root, file, diagnostics))
+    peer.on('modelTest', (progress) => this.o.onModelTest?.(progress))
     peer.on('warn', (message) => this.log(message))
     child.onExit(() => this.exited(child, peer))
 

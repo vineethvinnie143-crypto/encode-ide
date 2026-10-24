@@ -33,6 +33,9 @@ if (!process.env.CI && process.env.ENCODE_PACKAGED_SMOKE_ANYWAY !== '1') {
   fail('A packaged build uses the real profile. Run this in CI, or set ENCODE_PACKAGED_SMOKE_ANYWAY=1 to use yours.')
 }
 if (!fs.existsSync(exe)) fail(`${exe} is missing. Run pnpm package first.`)
+// Test this model (ADR 0101) runs the benchmark's tasks, shipped beside the program; the portable one unpacks them when it starts.
+const resources = path.join(path.dirname(exe), 'resources')
+if (fs.existsSync(resources) && !fs.existsSync(path.join(resources, 'bench-tasks', 'fix-failing-test', 'task.json'))) fail(`The benchmark's tasks are missing from ${resources}`)
 
 const port = await new Promise((resolve, reject) => {
   const server = net.createServer()

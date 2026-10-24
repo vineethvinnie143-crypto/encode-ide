@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import type { ModelRole } from '@shared/types'
+import { useModelTests } from '../../stores/model-tests'
 import { useModels } from '../../stores/models'
 import { useSettings } from '../../stores/settings'
 import { cx } from '../../ui/cx'
@@ -28,15 +30,18 @@ export interface ModelPickerProps {
   label?: string
   /** Clicks inside this element do not close the picker; its owner handles them. */
   ignore?: { current: HTMLElement | null }
+  /** The role the model is chosen for, whose Test this model score each tested model shows. Default: Main. */
+  role?: ModelRole
 }
 
 /**
  * The list of models to choose from: what is in use, the free models, then each connection's models, narrowed by
  * what is typed. Arrow keys move, Enter chooses, Escape closes. It reads each connection's list when it opens.
  */
-export function ModelPicker({ anchor, onClose, onPick, selected, free = true, demo = false, footer, side = 'top', align = 'end', width = 420, label = 'Choose a model', ignore }: ModelPickerProps) {
+export function ModelPicker({ anchor, onClose, onPick, selected, free = true, demo = false, footer, side = 'top', align = 'end', width = 420, label = 'Choose a model', ignore, role = 'main' }: ModelPickerProps) {
   const settings = useSettings((state) => state.settings)
   const catalogs = useModels((state) => state.catalogs)
+  const tested = useModelTests((state) => state.results)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [spot, setSpot] = useState<{ left: number; top: number; side: Side } | null>(null)
@@ -47,6 +52,7 @@ export function ModelPicker({ anchor, onClose, onPick, selected, free = true, de
   useEffect(() => {
     const profiles = useSettings.getState().settings?.profiles ?? []
     void useModels.getState().loadAll(profiles.filter(isListed))
+    if (!useModelTests.getState().loaded) void useModelTests.getState().load()
   }, [])
 
   const groups = useMemo(() => (settings ? pickerGroups({ settings, catalogs, query, selected, free, demo }) : []), [settings, catalogs, query, selected, free, demo])
@@ -160,7 +166,7 @@ export function ModelPicker({ anchor, onClose, onPick, selected, free = true, de
                     <span className="model-picker-title">{item.title}</span>
                     {item.detail && <span className="model-picker-detail">{item.detail}</span>}
                   </span>
-                  <ModelBadges item={item} />
+                  <ModelBadges item={item} tested={item.kind === 'model' ? tested[item.ref] : undefined} role={role} />
                 </button>
               )
             })}
