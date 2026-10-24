@@ -48,6 +48,7 @@ const settings: Settings = {
   errorGate: 'auto',
   guide: 'auto',
   checkGate: 'auto',
+  reviewWork: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,

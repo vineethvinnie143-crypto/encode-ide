@@ -490,7 +490,9 @@ async function runProviderPhase() {
     policy: 'workspace-write',
     maxSteps: 12,
     // Off until runCheckGateChecks: a check asks to run npm test after every code edit, which the other steps do not expect.
-    checkGate: 'off'
+    checkGate: 'off',
+    // Off until runReviewGateChecks: the mock model needs the full guide, so the Reviewer would read every change.
+    reviewWork: 'off'
   })`)
   const secret = await checkKeyStorage()
 
@@ -639,6 +641,7 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runCheckGateChecks()
+  await runReviewGateChecks()
   await runStopChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3319,6 +3322,36 @@ async function runCheckGateChecks() {
   await screenshot('15b-check-gate.png')
   await evaluate("window.eNCode.settings.save({ checkGate: 'off' })")
   await fs.writeFile(utilsFile, original)
+}
+
+/**
+ * The Reviewer before the agent finishes (ADR 0096): it reads the request, the reply and the change before the person
+ * sees the reply, a P1 sends the agent back to fix it, and the reply the person sees is the one after the fix.
+ */
+async function runReviewGateChecks() {
+  console.log('[smoke] --- the Reviewer before the agent finishes ---')
+  const averageFile = path.join(demoPath, 'src', 'average.ts')
+  const before = await providerStats()
+  await evaluate("window.eNCode.settings.save({ reviewWork: 'on' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:review-gate] Add an average function in src/average.ts')
+  await driveAgent('15c-review-gate')
+  const after = await providerStats()
+  if (after.completionReviews - before.completionReviews !== 1) throw new Error(`The Reviewer was asked ${after.completionReviews - before.completionReviews} times, not once`)
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-completion-review`)).json()
+  console.log('[smoke] the Reviewer was asked:', JSON.stringify({ tools: seen.tools.length, user: seen.user.slice(0, 600) }))
+  if (seen.tools.length) throw new Error('The Reviewer was given tools')
+  if (!/<requests-[0-9a-f]+>[\s\S]*\[scenario:review-gate\] Add an average function/.test(seen.user)) throw new Error('The Reviewer did not see the request')
+  if (!/<reply-[0-9a-f]+>\nAdded average in src\/average\.ts\.\n/.test(seen.user)) throw new Error("The Reviewer did not see the agent's reply")
+  if (!seen.user.includes('+2 |   return values.reduce((sum, value) => sum + value, 0) / values.length')) throw new Error('The Reviewer did not see the change, numbered')
+  const shown = await notices()
+  if (!shown.includes("The Reviewer found a problem in the agent's changes, so it goes on to fix it.")) throw new Error(`No notice of the Reviewer: ${JSON.stringify(shown)}`)
+  const entries = await evaluate("window.eNCode.agent.history().then((history) => history.entries.filter((entry) => entry.kind === 'assistant').map((entry) => entry.text ?? ''))")
+  if (!entries.at(-1)?.includes('an empty list gives 0')) throw new Error(`The reply after the fix did not reach the person: ${JSON.stringify(entries)}`)
+  if (!(await fs.readFile(averageFile, 'utf8')).includes('if (values.length === 0) return 0')) throw new Error('The fix was not written')
+  await screenshot('15c-review-gate.png')
+  await evaluate("window.eNCode.settings.save({ reviewWork: 'off' })")
+  await fs.rm(averageFile, { force: true })
 }
 
 /** The tool entries of the active session, with their outputs. */

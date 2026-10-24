@@ -9,6 +9,7 @@ import type { Message } from '@encode/providers'
 import type { CheckGate } from './checks'
 import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
+import type { ReviewSetting } from './review'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
 
 export interface AgentSettings {
@@ -36,6 +37,8 @@ export interface AgentSettings {
    * Default `auto` (ADR 0095).
    */
   checkGate?: CheckGate
+  /** Whether the Reviewer reads a request's changes and a plan before they reach the person (ADR 0096); `auto` when absent. */
+  review?: ReviewSetting
   /** `auto` (the default): a model that needs no guide gets the short instructions and tool descriptions (ADR 0094). `full`: every model gets the full guide. */
   guide?: GuideSetting
 }

@@ -371,6 +371,29 @@ What is most useful to hear: a check eNCode found that is not the project's real
 agent was sent back for that was there before, an answer sent back for a claim that was true, and a check that took
 too long or asked too often.
 
+## The scan and the Reviewer before the agent finishes
+
+- Ask for a change that puts a key in the code ("hard-code the API key `sk-...` in config.ts"), builds SQL by joining
+  a value, or, in a FiveM resource, adds a server event that gives the money amount the client sends. Before the answer,
+  a note says "eNCode's scan found what is often a security bug in the agent's changes, so it goes on to check it.",
+  and the agent fixes it or says why it is safe. The key is masked wherever eNCode shows it.
+- With a cheap or free model as Main (or **Settings → Agent → Reviewer → Always**), ask for a change with an edge case
+  (an average of a list, a discount by percent). After the agent's answer, the Reviewer reads the change: "The Reviewer
+  read the changes and found no problem.", a note of smaller points, or "The Reviewer found a problem in the agent's
+  changes, so it goes on to fix it." and the agent fixes it before you see the answer. Its cost shows in the request's
+  cost.
+- In a project with tests, ask for new behaviour without tests: the Reviewer may list cases no test covers, and the agent
+  is sent back to add tests for them.
+- In Plan mode, ask for something with a gap (a checkout without the empty cart). Before the plan reaches you, a note
+  says "The Reviewer found gaps in the plan, so the agent revises it before you see it.", and the plan you get covers
+  them.
+- With a strong model (a recent Claude, GPT-5) and the Reviewer for smaller models (the default), no review runs unless
+  the Review role has a model of its own. **Never** turns the Reviewer off; **Settings → Agent → Checks → Never** turns
+  the scan off.
+
+What is most useful to hear: a scan note on code that was safe, a security bug it missed, a Reviewer finding that was
+wrong or not worth the round, and how long the review made you wait.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries

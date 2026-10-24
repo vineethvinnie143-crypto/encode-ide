@@ -85,6 +85,7 @@ say so.
 | [0093](0093-a-long-result-is-kept-whole-in-a-file-and-the-model-reads-its-ends-and-reads-on-by-range.md) | A long result is kept whole in a file, and the model reads its ends and reads on by range | Accepted, builds on 0062 and 0092 |
 | [0094](0094-old-results-are-shortened-early-and-seldom-strong-models-get-a-short-guide-and-small-jobs-a-small-model.md) | Old results are shortened early and seldom, strong models get a short guide, and small jobs a small model | Accepted, builds on 0062 and 0093 |
 | [0095](0095-before-the-agent-finishes-the-projects-checks-run-and-what-its-reply-claims-is-tested.md) | Before the agent finishes, the project's checks run, and what its reply claims is tested | Accepted, builds on 0073 and 0093 |
+| [0096](0096-before-the-agent-finishes-its-changes-are-scanned-and-read-by-the-reviewer-and-a-plan-is-read-before-the-person-sees-it.md) | Before the agent finishes, its changes are scanned and read by the Reviewer, and a plan is read before the person sees it | Accepted, builds on 0064, 0094 and 0095 |
 
 ## Template
 

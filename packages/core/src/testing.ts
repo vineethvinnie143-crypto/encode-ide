@@ -41,6 +41,9 @@ import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOp
 import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
 import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry } from './ui'
 
+/** The Reviewer would take a scripted step of its own; the tests of it turn it on (ADR 0096). */
+const HARNESS_SETTINGS: AgentSettings = { ...DEFAULT_SETTINGS, review: 'off' }
+
 export class RecordingSurface implements Surface {
   readonly statuses: AgentStatus[] = []
   /** Every entry created, live: later changes show in them. */
@@ -214,7 +217,7 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     options.extraTools ?? [],
   )
   addToolSearch(registry)
-  const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
+  const settings: AgentSettings = { ...HARNESS_SETTINGS, ...options.settings }
   const approvedHosts = new Set<string>()
   const approvedApps = new Set<string>()
   const loop = new AgentLoop({
@@ -326,7 +329,7 @@ export async function sessionHarness(options: SessionHarnessOptions = {}): Promi
   const store = createSessionStore({ dir, indexDelayMs: 0 })
   const events: AgentEvent[] = []
   const client = createScriptedClient(options.scriptFor ? options.scriptFor(root) : (options.script ?? []), options.client)
-  const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
+  const settings: AgentSettings = { ...HARNESS_SETTINGS, ...options.settings }
   const env: SessionEnv = {
     root,
     home,
@@ -403,7 +406,7 @@ export async function hostHarness(options: HostHarnessOptions = {}): Promise<Hos
   const events: AgentEvent[] = []
   const jobReports: BackgroundJob[][] = []
   const client = createScriptedClient(options.scriptFor ? options.scriptFor(root) : (options.script ?? []), options.client)
-  const settings: AgentSettings = { ...DEFAULT_SETTINGS, ...options.settings }
+  const settings: AgentSettings = { ...HARNESS_SETTINGS, ...options.settings }
   const host = new AgentHost({
     dir,
     client,

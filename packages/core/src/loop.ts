@@ -100,9 +100,11 @@ import type { AgentHooks, HookEvent } from './hooks'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
+import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
+import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
 import { FailedCalls, mendedNote } from './repeats'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
@@ -172,6 +174,8 @@ export interface LoopServices {
   outputs?: OutputStore
   /** The project's typecheck and tests, run before the turn ends (ADR 0095); the main agent's only. */
   checks?: ProjectChecks
+  /** What a request's file tools changed, as text: for the scan and the Reviewer before the turn ends (ADR 0096). */
+  changes?: (turnId: string) => Promise<ChangedText[]>
 }
 
 export interface LoopOptions {
@@ -231,6 +235,8 @@ interface StepState {
   /** Reminders hooks added while the step ran. */
   context: string[]
   stop?: string
+  /** The tool whose call ended the turn. */
+  stopBy?: string
   mode?: Turn['mode']
 }
 
@@ -242,6 +248,9 @@ interface FitOptions {
 }
 
 /** A command stopped for its time limit or interrupted: it says nothing of the code. */
+/** How long the Reviewer may take over a request's changes, and over a plan (ADR 0096). */
+const REVIEW_TIMEOUT_MS = 4 * 60_000
+const PLAN_TIMEOUT_MS = 2 * 60_000
 const ENDED_EARLY = /The command ran longer than \d+ s and was stopped\.|The command was interrupted\./
 
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
@@ -393,6 +402,11 @@ export class AgentLoop {
   private checksRefused = false
   private claimChecked = false
   private checkRuns = 0
+  /** Once a request each (ADR 0096): the scan of the changes, the Reviewer's reading of them, and of a plan. */
+  private scanned = false
+  private reviewed = false
+  private planCritiqued = false
+  private scanNotes: ScanFinding[] = []
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
@@ -449,6 +463,10 @@ export class AgentLoop {
     this.checkRounds = 0
     this.checksRefused = false
     this.claimChecked = false
+    this.scanned = false
+    this.reviewed = false
+    this.planCritiqued = false
+    this.scanNotes = []
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -472,25 +490,10 @@ export class AgentLoop {
           continue
         }
         if (await steered()) continue
-        // Errors the turn's changes left go back to the agent before it may finish.
-        const left = mode === 'code' ? await this.edits?.gate(o.settings().errorGate ?? 'auto', signal) : null
-        if (left) {
-          o.surface.settle(o.surface.entry({ kind: 'notice', text: 'The language servers still report errors in the files the agent changed, so it goes on to fix them.' }))
-          await o.conversation.add(userText(reminder(left)), { turnId: turn.turnId })
-          continue
-        }
-        // Then the project's own checks, and then what the reply says that eNCode can test (ADR 0095).
-        const checked = mode === 'code' ? await this.checkGate(turn) : null
-        if (checked) {
-          o.surface.settle(o.surface.entry({ kind: 'notice', text: "The project's checks failed after the agent's changes, so it goes on to fix them." }))
-          await o.conversation.add(userText(reminder(checked)), { turnId: turn.turnId })
-          continue
-        }
         const reply = messageText(message)
-        const claims = await this.claimCheck(reply)
-        if (claims) {
-          o.surface.settle(o.surface.entry({ kind: 'notice', text: "eNCode could not confirm something the agent's reply says, so it checks it." }))
-          await o.conversation.add(userText(reminder(claims)), { turnId: turn.turnId })
+        const sent = await this.beforeFinish({ ...turn, mode }, reply)
+        if (sent) {
+          await o.conversation.add(userText(reminder(sent)), { turnId: turn.turnId })
           continue
         }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
@@ -509,6 +512,14 @@ export class AgentLoop {
         ran = true
         const found = await this.edits?.collect(STEP_WAIT_MS, signal)
         if (found) state.context.push(found)
+        // A model that finishes with attempt_completion is held to what one that just stops talking is.
+        if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
+          const sent = await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)
+          if (sent) {
+            state.context.push(sent)
+            state.stop = undefined
+          }
+        }
       } finally {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
         const content: UserBlock[] = calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN))
@@ -1116,7 +1127,9 @@ export class AgentLoop {
 
     let outcome: ToolOutcome
     try {
-      outcome = await tool.run(input, ctx)
+      // A plan the Reviewer finds gaps in goes back to the agent before the person reads it (ADR 0096).
+      const gaps = block.name === 'ExitPlanMode' && !own ? await this.critiquePlan(input, entry, turn) : null
+      outcome = gaps ? { ok: true, content: gaps } : await tool.run(input, ctx)
     } catch (error) {
       progress.stop()
       if (turn.signal.aborted) {
@@ -1163,6 +1176,7 @@ export class AgentLoop {
     }
     if (outcome.stop) {
       state.stop = outcome.stop.summary
+      state.stopBy = block.name
       if (block.name === 'attempt_completion') o.surface.settle(o.surface.entry({ kind: 'assistant', text: outcome.stop.summary }))
     }
     if (outcome.mode) state.mode = outcome.mode
@@ -1267,6 +1281,7 @@ export class AgentLoop {
   private noteForChecks(name: string, input: Record<string, unknown>, outcome: ToolOutcome, output: string): void {
     const ledger = this.o.services.checks?.ledger
     if (!ledger) return
+    if (outcome.changed?.length) ledger.wrote()
     if (outcome.changed?.some(isCodePath)) ledger.changed()
     if (name === 'Bash' && typeof input.command === 'string' && input.run_in_background !== true && !ENDED_EARLY.test(output)) ledger.ran(input.command, outcome.ok, output)
   }
@@ -1370,6 +1385,132 @@ export class AgentLoop {
       }
     }
     return found.length ? claimsReminder(found.slice(0, 6)) : null
+  }
+
+  /**
+   * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), the project's
+   * checks (ADR 0095), the scan of the changes, what the reply claims, and the Reviewer (ADR 0096). The first that
+   * sends the agent back tells the person why, and gives the reminder for the agent; null lets the turn end.
+   */
+  private async beforeFinish(turn: Turn, reply: string): Promise<string | null> {
+    const { o } = this
+    const code = turn.mode === 'code'
+    const back = (notice: string, text: string) => {
+      o.surface.settle(o.surface.entry({ kind: 'notice', text: notice }))
+      return text
+    }
+    if (code) {
+      const left = await this.edits?.gate(o.settings().errorGate ?? 'auto', turn.signal)
+      if (left) return back('The language servers still report errors in the files the agent changed, so it goes on to fix them.', left)
+      const checked = await this.checkGate(turn)
+      if (checked) return back("The project's checks failed after the agent's changes, so it goes on to fix them.", checked)
+      const scanned = await this.scanGate(turn)
+      if (scanned) return back("eNCode's scan found what is often a security bug in the agent's changes, so it goes on to check it.", scanned)
+    }
+    const claims = await this.claimCheck(reply)
+    if (claims) return back("eNCode could not confirm something the agent's reply says, so it checks it.", claims)
+    if (code) {
+      const reviewed = await this.reviewGate(turn, reply)
+      if (reviewed) return back(reviewed.notice, reviewed.text)
+    }
+    return null
+  }
+
+  /** Once a request, unless checks are off: the lines the request added, read for what is often a security bug. */
+  private async scanGate(turn: Turn): Promise<string | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.scanned || !o.services.changes || (o.settings().checkGate ?? 'auto') === 'off') return null
+    if (o.services.checks && !o.services.checks.ledger.wroteInRequest) return null
+    this.scanned = true
+    const files = await o.services.changes(turn.turnId).catch(() => [] as ChangedText[])
+    this.scanNotes = scanChanges(files)
+    return this.scanNotes.length ? scanReminder(this.scanNotes) : null
+  }
+
+  /** The project's checks after the last change, in words, for the Reviewer. */
+  private async checksInWords(): Promise<{ text?: string; tests: boolean }> {
+    const checks = this.o.services.checks
+    const list = checks ? await checks.list().catch(() => [] as ProjectCheck[]) : []
+    if (!checks || !list.length) return { tests: false }
+    const said = list.map((check) => {
+      const run = checks.ledger.current(check.command)
+      return `\`${check.command}\` ${!run ? 'did not run' : run.ok ? 'passed' : 'failed'}`
+    })
+    return { text: `The project's checks after the agent's last change: ${said.join('; ')}.`, tests: list.some((check) => check.kind === 'test') }
+  }
+
+  /**
+   * Once a request that changed code, when the person wants it: the Reviewer reads the changes against the request and
+   * the reply. P0 and P1 findings go back to the agent, and so do the cases no test covers when the project has tests
+   * and the request added none. Anything else is only told to the person.
+   */
+  private async reviewGate(turn: Turn, reply: string): Promise<{ notice: string; text: string } | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.reviewed || !o.services.changes) return null
+    if (o.services.checks && !o.services.checks.ledger.changedInRequest) return null
+    if (!(await reviewWanted(o.settings().review, o.client, this.query()))) return null
+    const files = await o.services.changes(turn.turnId).catch(() => [] as ChangedText[])
+    if (!files.some((file) => isCodePath(file.path))) return null
+    this.reviewed = true
+    const notice = (text: string) => o.surface.settle(o.surface.entry({ kind: 'notice', text }))
+    const input = changeInput(files)
+    const checks = await this.checksInWords()
+    const answer = await askReviewer(o.client, {
+      system: COMPLETION_SYSTEM,
+      prompt: completionPrompt({ requests: o.requests?.() ?? [], reply, input, ...(checks.text ? { checks: checks.text } : {}), scan: this.scanNotes }),
+      tool: 'CompletionReview',
+      sticky: o.services.sessionId,
+      signal: turn.signal,
+      timeoutMs: REVIEW_TIMEOUT_MS,
+    })
+    if (!answer.ok) {
+      notice(`The Reviewer could not read the changes: ${lowerFirst(answer.why.replace(/\.$/, ''))}.`)
+      return null
+    }
+    o.surface.usage(answer.usage)
+    let review
+    try {
+      review = parseCompletion(answer.text, input.files.map((file) => file.path))
+    } catch {
+      notice("The Reviewer's answer about the changes could not be read.")
+      return null
+    }
+    const text = completionReminder(review, { tests: checks.tests && !files.some((file) => isTestPath(file.path)) })
+    if (!text) {
+      const small = review.findings.slice(0, 3).map((finding) => `\`${finding.path}:${finding.line}\` ${finding.title}`)
+      notice(small.length ? `The Reviewer read the changes; smaller points: ${small.join('; ')}.` : 'The Reviewer read the changes and found no problem.')
+      return null
+    }
+    const serious = review.findings.some((finding) => finding.priority === 'P0' || finding.priority === 'P1')
+    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : 'The Reviewer listed cases no test covers, so the agent adds tests for them.', text }
+  }
+
+  /** Once a request, when the person wants it: the Reviewer reads a plan before the person does. The gaps it finds, or null. */
+  private async critiquePlan(input: Record<string, unknown>, entry: ConversationEntry, turn: Turn): Promise<string | null> {
+    const { o } = this
+    const plan = typeof input.plan === 'string' ? input.plan : ''
+    if (o.agentId !== 'main' || this.planCritiqued || !plan.trim()) return null
+    if (!(await reviewWanted(o.settings().review, o.client, this.query()))) return null
+    this.planCritiqued = true
+    entry.tool = { ...entry.tool!, state: 'reviewing' }
+    o.surface.update(entry)
+    const answer = await askReviewer(o.client, { system: PLAN_SYSTEM, prompt: planPrompt({ requests: o.requests?.() ?? [], plan }), tool: 'PlanCritique', sticky: o.services.sessionId, signal: turn.signal, timeoutMs: PLAN_TIMEOUT_MS })
+    entry.tool = { ...entry.tool!, state: 'running' }
+    o.surface.update(entry)
+    const notice = (text: string) => o.surface.settle(o.surface.entry({ kind: 'notice', text }))
+    if (!answer.ok) {
+      notice(`The Reviewer could not read the plan (${lowerFirst(answer.why.replace(/\.$/, ''))}), so it comes to you as it is.`)
+      return null
+    }
+    o.surface.usage(answer.usage)
+    const gaps = parseGaps(answer.text)
+    if (gaps === undefined) {
+      notice("The Reviewer's answer about the plan could not be read, so it comes to you as it is.")
+      return null
+    }
+    if (!gaps.length) return null
+    notice('The Reviewer found gaps in the plan, so the agent revises it before you see it.')
+    return planReminder(gaps)
   }
 
   /** Every message's text but the reply's (the last message): what was asked, called and returned. */

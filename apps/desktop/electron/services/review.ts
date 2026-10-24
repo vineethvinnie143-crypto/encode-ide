@@ -16,7 +16,7 @@ import type {
   ReviewOptions,
   ReviewScope,
 } from '../../shared/types'
-import type { CodeReviewInput, CodeReviewResult } from '../agent-host/code-review'
+import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
 import type { CommitDraftInput } from '../agent-host/commit-message'
 import { codeReviewInput, REVIEW_CONTEXT } from './review-prompt'
 import { TurnReview, type TurnSource } from './turn-review'

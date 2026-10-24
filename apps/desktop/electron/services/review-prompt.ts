@@ -4,7 +4,7 @@
  * the budget are counted, not sent.
  */
 import type { ReviewFile, ReviewSnapshot } from '../../shared/types'
-import type { CodeReviewFile, CodeReviewInput } from '../agent-host/code-review'
+import type { CodeReviewFile, CodeReviewInput } from '@encode/core'
 
 /** About 30,000 tokens of change. */
 export const MAX_REVIEW_CHARS = 120_000

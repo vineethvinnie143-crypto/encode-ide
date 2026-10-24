@@ -12,7 +12,7 @@ import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
 import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, InlineSuggestAnswer, InlineSuggestRequest, LanguageServersReport, ServerInstallPlan, ServerInstallResult, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
-import type { CodeReviewInput, CodeReviewResult } from './code-review'
+import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
 import type { CommitDraftInput } from './commit-message'
 import { HOST_STOPPED_MESSAGE } from '../../shared/problems'
 
@@ -420,6 +420,7 @@ const NO_CONFIG: HostConfig = {
   errorGate: 'auto',
   guide: 'auto',
   checkGate: 'auto',
+  reviewWork: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

@@ -199,6 +199,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@encode/diff':
+        specifier: workspace:*
+        version: link:../diff
       '@encode/permissions':
         specifier: workspace:*
         version: link:../permissions
