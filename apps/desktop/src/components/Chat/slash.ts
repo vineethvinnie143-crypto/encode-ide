@@ -42,11 +42,29 @@ export function reviewKindOf(words: string): ScopeKind | undefined {
   return kinds[wanted]
 }
 
+/** How many attempts `/best` makes, and the request: "3 add a toggle", or the request alone for three (ADR 0098). */
+export function bestOf(words: string): { count: number; request: string } | { error: string } {
+  const text = words.trim()
+  const counted = /^(\d+)(?:\s+([\s\S]*))?$/.exec(text)
+  if (counted) {
+    const count = Number(counted[1])
+    if (count < 2 || count > 4) return { error: `/best makes 2 to 4 attempts, not ${counted[1]}.` }
+    const request = counted[2]?.trim() ?? ''
+    return request ? { count, request } : { error: `Write the request after /best ${count}.` }
+  }
+  return text ? { count: 3, request: text } : { error: 'Write the request after /best, as in /best 3 add a dark mode toggle.' }
+}
+
 export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Promise<void>>> = {
   plan: async (args) => {
     if (!args) return agentActions.togglePlan()
     await agentActions.setPlanMode(true)
     agentActions.send(args)
+  },
+  best: (args) => {
+    const best = bestOf(args)
+    if ('error' in best) return ui().notify('info', best.error)
+    agentActions.send(best.request, { best: best.count })
   },
   goal: (args) => (args.toLowerCase() === 'clear' ? agentActions.clearGoal() : agentActions.setGoal(args || undefined)),
   compact: () => agentActions.compact(),

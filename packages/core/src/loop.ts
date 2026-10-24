@@ -222,6 +222,11 @@ export interface LoopOptions {
   suggested?: () => readonly string[]
   /** Messages the user sends while the turn runs; the main agent's only. */
   steers?: Steers
+  /**
+   * Whether the checks, the claim check and the tests-first reminder hold this agent's work before it ends, as they
+   * hold the main agent's (ADR 0095, 0097). Default: the main agent only; an attempt of best of N has them too (0098).
+   */
+  gates?: boolean
 }
 
 interface Prepared {
@@ -426,9 +431,12 @@ export class AgentLoop {
   private lessons: Lesson[] = []
   private answered = false
   private offered = false
+  /** The finish gates hold this agent's work (LoopOptions.gates). */
+  private readonly gated: boolean
 
   constructor(private readonly o: LoopOptions) {
     this.approvedApps = o.approvedApps ?? new Set()
+    this.gated = o.gates ?? o.agentId === 'main'
     const s = o.services
     this.edits = s.code ? new EditDiagnostics(s.code, (file) => relativeToRoot(s.root, file, s.platform)) : undefined
   }
@@ -478,7 +486,7 @@ export class AgentLoop {
     let stopRounds = 0
     this.edits?.startTurn()
     this.failures.clear()
-    if (o.agentId === 'main') o.services.checks?.ledger.startRequest()
+    if (this.gated) o.services.checks?.ledger.startRequest()
     this.checkRounds = 0
     this.checksRefused = false
     this.claimChecked = false
@@ -1322,7 +1330,7 @@ export class AgentLoop {
    */
   private async testsFirst(name: string, input: Record<string, unknown>, outcome: ToolOutcome, mode: AgentMode): Promise<string | null> {
     const { o } = this
-    if (o.agentId !== 'main' || this.testsFirstSaid || this.wroteTest || mode !== 'code' || (o.settings().checkGate ?? 'auto') === 'off') return null
+    if (!this.gated || this.testsFirstSaid || this.wroteTest || mode !== 'code' || (o.settings().checkGate ?? 'auto') === 'off') return null
     const bigger = (name === 'ExitPlanMode' && outcome.mode === 'code') || (name === 'TodoWrite' && Array.isArray(input.todos) && input.todos.length >= 3)
     if (!bigger || !o.services.checks) return null
     const test = (await o.services.checks.list().catch(() => [] as ProjectCheck[])).find((check) => check.kind === 'test')
@@ -1443,7 +1451,7 @@ export class AgentLoop {
   private async checkGate(turn: Turn): Promise<string | null> {
     const { o } = this
     const checks = o.services.checks
-    if (o.agentId !== 'main' || !checks?.ledger.changedInRequest || this.checksRefused) return null
+    if (!this.gated || !checks?.ledger.changedInRequest || this.checksRefused) return null
     if (this.checkRounds >= CHECK_ROUNDS[o.settings().checkGate ?? 'auto']) return null
     const list = await checks.list().catch(() => [] as ProjectCheck[])
     const passed: ProjectCheck[] = []
@@ -1496,7 +1504,7 @@ export class AgentLoop {
   /** Once a turn, the main agent's last reply: claims eNCode can test, and the ones that do not hold. */
   private async claimCheck(reply: string): Promise<string | null> {
     const { o } = this
-    if (o.agentId !== 'main' || this.claimChecked || (o.settings().checkGate ?? 'auto') === 'off' || !reply.trim()) return null
+    if (!this.gated || this.claimChecked || (o.settings().checkGate ?? 'auto') === 'off' || !reply.trim()) return null
     this.claimChecked = true
     const found: string[] = []
     const ledger = o.services.checks?.ledger

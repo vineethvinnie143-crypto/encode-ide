@@ -106,14 +106,21 @@ export const agentActions = {
     else ui().notify('info', 'Connect a model first. Effort is how hard a model thinks, and the offline demo has no such dial.')
   },
 
-  /** Sends a request as the person's message, or queues it while the agent works. False when there is no folder. */
-  send(text: string): boolean {
+  /**
+   * Sends a request as the person's message, or queues it while the agent works. False when there is no folder.
+   * `best`: as that many attempts side by side (ADR 0098), which waits for nothing: the queue keeps plain messages.
+   */
+  send(text: string, options?: { best?: number }): boolean {
     if (!useWorkspace.getState().workspace) {
       ui().notify('info', 'Open a folder first so the agent has a project to work on.')
       return false
     }
+    if (options?.best && chat().running) {
+      ui().notify('info', 'Wait until eNCode is done, then send /best again.')
+      return false
+    }
     if (chat().running) chat().enqueue(text, { keepDraft: true })
-    else chat().send(text, undefined, { keepDraft: true })
+    else chat().send(text, undefined, { keepDraft: true, ...(options?.best ? { best: options.best } : {}) })
     return true
   },
 

@@ -107,6 +107,7 @@ export function sessionCheckpoints(service: CheckpointService, options: RewindOp
       const replacement = next === null ? null : 'kept' in next ? { kept: next.kept } : { bytes: Buffer.from(next.bytes) }
       return service.write(write.file, write.expected, replacement)
     },
+    wrote: (toolUseId) => service.afterTool(toolUseId),
   }
 }
 

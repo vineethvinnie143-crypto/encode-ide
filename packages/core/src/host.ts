@@ -60,6 +60,7 @@ import type {
   SessionGoal,
   SessionSummary,
   SuggestionOutcome,
+  BestOutcome,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -520,6 +521,11 @@ export class AgentHost {
   /** Adds the lines a request taught to the project's instructions file, or dismisses them (ADR 0097). */
   async answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome> {
     return (await this.open(sessionId)).answerSuggestion(entryId, accept)
+  }
+
+  /** Keeps one attempt of a best-of-N request (`keep` from 1), or discards them all (`keep` 0) (ADR 0098). */
+  async answerBest(sessionId: string, entryId: string, keep: number, force = false): Promise<BestOutcome> {
+    return (await this.open(sessionId)).answerBest(entryId, keep >= 1 ? Math.floor(keep) : 'discard', force)
   }
 
   /** The requests after which files changed, and whether a rewind can be undone. */

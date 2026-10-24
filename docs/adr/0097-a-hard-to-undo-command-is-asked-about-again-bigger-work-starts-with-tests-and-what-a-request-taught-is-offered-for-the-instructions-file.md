@@ -119,5 +119,6 @@ were scripted for, so both turn the second look and the offer off, as they do th
     read, and a delete through a language (`node -e "fs.rmSync(...)"`) is not seen.
   - The second look is the same model reading again; a model that is wrong both times is not caught. Auto review's
     Reviewer, a second model, is the stronger check when the person uses it.
-  - Best-of-N (several attempts at a risky change, the best kept) is the next step, opt-in, in its own record.
+  - Best of N (several attempts at one request, the best kept) is opt-in, with `/best`:
+    [0098](0098-several-attempts-at-one-request-run-side-by-side-in-worktrees-and-the-person-keeps-the-one-the-reviewer-picks.md).
   - The words that mark a rule are English.

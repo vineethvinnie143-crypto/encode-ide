@@ -87,6 +87,7 @@ say so.
 | [0095](0095-before-the-agent-finishes-the-projects-checks-run-and-what-its-reply-claims-is-tested.md) | Before the agent finishes, the project's checks run, and what its reply claims is tested | Accepted, builds on 0073 and 0093 |
 | [0096](0096-before-the-agent-finishes-its-changes-are-scanned-and-read-by-the-reviewer-and-a-plan-is-read-before-the-person-sees-it.md) | Before the agent finishes, its changes are scanned and read by the Reviewer, and a plan is read before the person sees it | Accepted, builds on 0064, 0094 and 0095 |
 | [0097](0097-a-hard-to-undo-command-is-asked-about-again-bigger-work-starts-with-tests-and-what-a-request-taught-is-offered-for-the-instructions-file.md) | A hard-to-undo command is asked about again, bigger work starts with tests, and what a request taught is offered for the instructions file | Accepted, builds on 0052, 0059, 0095 and 0096 |
+| [0098](0098-several-attempts-at-one-request-run-side-by-side-in-worktrees-and-the-person-keeps-the-one-the-reviewer-picks.md) | Several attempts at one request run side by side in worktrees, and the person keeps the one the Reviewer picks | Accepted, builds on 0052, 0063, 0073, 0094, 0095, 0096 and 0097 |
 
 ## Template
 

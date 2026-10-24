@@ -79,8 +79,59 @@ export interface ConversationEntry {
   usage?: RequestUsage
   /** On a notice: lines eNCode suggests keeping in the project's instructions file (ADR 0097). */
   suggestion?: EntrySuggestion
+  /** On a notice: the attempts of a best-of-N request, and which to keep (ADR 0098). */
+  best?: EntryBest
   createdAt: number
 }
+
+/**
+ * A request made several times side by side, each attempt in a git worktree of its own (ADR 0098). `running` while
+ * the attempts work, `judging` while the Reviewer reads them, `ready` until the person keeps one or discards them all;
+ * `failed` when the run could not start or finish, with what is left to remove.
+ */
+export interface EntryBest {
+  state: 'running' | 'judging' | 'ready' | 'kept' | 'discarded' | 'failed'
+  attempts: BestAttempt[]
+  /** The attempt the Reviewer, or eNCode by the checks, says to keep, counted from 1; and why. */
+  pick?: number
+  reason?: string
+  pickedBy?: 'reviewer' | 'checks'
+  /** The attempt the person kept. */
+  kept?: number
+  /** Why the run could not start or finish, for the person. */
+  error?: string
+}
+
+export interface BestAttempt {
+  /** Counted from 1. */
+  n: number
+  state: 'running' | 'done' | 'failed' | 'stopped'
+  /** Its last step, as one line. */
+  activity?: string
+  steps: number
+  reply?: string
+  /** What it changed, relative to the workspace with `/`. */
+  files: BestFile[]
+  /** What the project's checks said after its last change: `none` when there are none, or they did not run since. */
+  checks: 'passed' | 'failed' | 'none'
+  checksText?: string
+  /** The Reviewer's line on it. */
+  note?: string
+  error?: string
+  /** Where it worked, until the person decides; the commit it started from and the folders linked into it. */
+  worktree?: { name: string; path: string; branch: string; base: string; from?: string }
+  seed?: { base: string; linked: string[] }
+}
+
+export interface BestFile {
+  path: string
+  kind: 'added' | 'modified' | 'deleted'
+  added: number
+  removed: number
+}
+
+/** What answering a best-of-N card did: the files the kept attempt changed, or why it could not. */
+export type BestOutcome = { ok: true; files?: string[] } | { ok: false; error: string; conflicts?: string[] }
 
 /** What a request taught, offered for the instructions file the agent reads at the start of every session (ADR 0097). */
 export interface EntrySuggestion {
@@ -213,6 +264,8 @@ export function previewOf(entries: readonly ConversationEntry[], max = 140): str
 export interface AgentStartInput {
   text: string
   mode: AgentMode
+  /** Make this many attempts at the request side by side and keep the best (ADR 0098): 2 to 4, Code mode only. */
+  best?: number
   /** File context the user attached to the prompt. */
   attachments?: { path: string; content: string }[]
 }

@@ -23,4 +23,4 @@ export {
 export { GitError, GitRunner, failure, gitEnvironment, type GitErrorCode, type GitResult, type GitRunnerOptions, type RunOptions } from './runner'
 export { isNullOid, parseStatus, type Status, type StatusBranch, type StatusEntry } from './status'
 export { decode, dominantEnding, emptyText, encode, isBinary, splitLines, type Content, type LineEnding, type TextContent } from './text'
-export { createWorktreeGit, isWorktreeName, WORKTREE_BRANCH_PREFIX, WORKTREE_FOLDER, type WorktreeChanges, type WorktreeGit, type WorktreeGitOptions, type WorktreeRecord } from './worktrees'
+export { createWorktreeGit, isWorktreeName, WORKTREE_BRANCH_PREFIX, WORKTREE_FOLDER, type SeedChange, type WorktreeChanges, type WorktreeGit, type WorktreeGitOptions, type WorktreeRecord, type WorktreeSeed } from './worktrees'

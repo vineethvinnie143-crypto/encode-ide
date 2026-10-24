@@ -225,6 +225,12 @@ const SCENARIOS = {
   ],
   // A standing rule in the request: after the answer, lines for ENCODE.md are offered (ADR 0097).
   conventions: [{ text: 'Understood: pnpm from now on.' }],
+  // Best of N (ADR 0098): each attempt writes src/best.ts its own way, by the number in its instructions; the first
+  // subtracts, the second adds, and the Reviewer picks the second.
+  'best-of': [
+    { text: 'Writing it.', attempt: (n) => ({ name: 'Write', args: { file_path: 'src/best.ts', content: `export function sum(a: number, b: number): number {\n  return a ${n === 2 ? '+' : '-'} b\n}\n` } }) },
+    { text: 'Wrote sum in src/best.ts.' },
+  ],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
@@ -304,9 +310,10 @@ let lastCodeReview = null
 let lastCompletionReview = null
 let lastSecondLook = null
 let lastConventions = null
+let lastBestOf = null
 /** The latest suggestion asked for as you type, for the smoke to check what was sent. */
 let lastInline = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0 }
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0, bestOfRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -412,7 +419,8 @@ const BACKGROUND_NEWS = 'Background work you started reports (the user did not w
 
 function scenarioOf(messages) {
   const content = messages[lastUserIndex(messages)]?.content
-  const match = /\[scenario:([a-z-]+)\]/.exec(typeof content === 'string' ? content : '')
+  // In parts when eNCode put a note before the person's words (the environment, on a session's first request).
+  const match = /\[scenario:([a-z-]+)\]/.exec(textOf(content))
   if (match && SCENARIOS[match[1]]) return match[1]
   // A turn of background news continues the request before it.
   return textOf(content).includes(BACKGROUND_NEWS) && textOf(content).includes('background-report-ok') ? 'background-wake' : 'default'
@@ -430,6 +438,7 @@ function stepOf(messages) {
   if (script.at(-1)?.overflowUntilCompacted && compacted(messages)) return script.at(-1)
   const done = messages.slice(lastUserIndex(messages) + 1).filter((message) => message.role === 'tool').length
   const step = script[Math.min(done, script.length - 1)]
+  if (step.attempt) return { text: step.text, call: step.attempt(attemptOf(messages)) }
   // Sent back by the error gate: the step it has for that.
   const last = messages.at(-1)
   if (step.gated && last?.role === 'user' && textOf(last.content).includes(GATED)) return step.gated
@@ -538,6 +547,12 @@ function secondLookAnswer(user) {
 const CONVENTIONS = "You keep a project's instructions file"
 const isConventions = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(CONVENTIONS))
 
+/** Best of N's verdict (ADR 0098): every attempt's reply, checks and change, no tools. */
+const BEST_OF = 'A coding agent made several attempts at one request'
+const isBestOf = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(BEST_OF))
+/** The attempt a request comes from, by the note in its instructions; 0 for the main agent. */
+const attemptOf = (messages) => Number(/and this is attempt (\d+)\./.exec(messages.filter((message) => message.role === 'system').map((message) => textOf(message.content)).join('\n'))?.[1] ?? 0)
+
 /** The editor's call for a suggestion as you type (ADR 0087): no tools, the file with <cursor/> in it. */
 const INLINE_SYSTEM = 'You are the autocomplete of a code editor.'
 const isInline = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(INLINE_SYSTEM))
@@ -596,6 +611,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-conventions') {
       sendJson(response, 200, lastConventions)
+      return
+    }
+    if (request.url === '/__last-best-of') {
+      sendJson(response, 200, lastBestOf)
       return
     }
     if (request.url?.startsWith('/__fail/') && request.method === 'POST') {
@@ -679,6 +698,14 @@ const server = http.createServer(async (request, response) => {
       const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
       lastConventions = { model: body.model ?? null, tools: body.tools ?? [], user }
       await sendText(response, body, `\`\`\`json\n${JSON.stringify({ lines: ['Use `pnpm` for installs and scripts, never `npm`.'] })}\n\`\`\``)
+      return
+    }
+
+    if (isBestOf(messages)) {
+      stats.bestOfRequests += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastBestOf = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, `\`\`\`json\n${JSON.stringify({ best: 2, reason: 'Attempt 2 adds the numbers; attempt 1 subtracts them.', notes: { 1: 'Subtracts instead of adding.', 2: 'Adds, as asked.' } })}\n\`\`\``)
       return
     }
 

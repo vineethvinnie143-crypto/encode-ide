@@ -149,3 +149,70 @@ describe('worktrees of a project', () => {
     assert.equal(git(repo, 'worktree', 'list').split('\n').length, 1)
   })
 })
+
+describe('the seed of an attempt (best of N)', () => {
+  it('copies the uncommitted work in and commits it as the base, links dependencies and copies .env files', async () => {
+    const repo = makeRepo()
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.env\ndist/\n')
+    fs.writeFileSync(path.join(repo, 'gone.txt'), 'old\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'ignore')
+    // The person's work, not committed: a change, a new file in a new folder, a deletion.
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one, changed\n')
+    fs.mkdirSync(path.join(repo, 'src'))
+    fs.writeFileSync(path.join(repo, 'src', 'new.ts'), 'export const x = 1\n')
+    fs.rmSync(path.join(repo, 'gone.txt'))
+    // What git ignores: installed packages, the environment, a build.
+    fs.mkdirSync(path.join(repo, 'node_modules', 'left-pad'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1\n')
+    fs.writeFileSync(path.join(repo, '.env'), 'TOKEN=local\n')
+    fs.mkdirSync(path.join(repo, 'dist'))
+    fs.writeFileSync(path.join(repo, 'dist', 'out.js'), 'built\n')
+
+    const made = await worktrees.create(repo, 'best-1')
+    const seed = await worktrees.seed(repo, made)
+    assert.deepEqual(seed.linked, ['node_modules'])
+    assert.equal(fs.readFileSync(path.join(made.path, 'a.txt'), 'utf8'), 'one, changed\n')
+    assert.equal(fs.readFileSync(path.join(made.path, 'src', 'new.ts'), 'utf8'), 'export const x = 1\n')
+    assert.ok(!fs.existsSync(path.join(made.path, 'gone.txt')))
+    assert.equal(fs.readFileSync(path.join(made.path, 'node_modules', 'left-pad', 'index.js'), 'utf8'), 'module.exports = 1\n')
+    assert.equal(fs.readFileSync(path.join(made.path, '.env'), 'utf8'), 'TOKEN=local\n')
+    assert.ok(!fs.existsSync(path.join(made.path, 'dist')), 'a build is not copied')
+    assert.equal(git(made.path, 'rev-parse', 'HEAD'), seed.base)
+    assert.equal(git(made.path, 'log', '-1', '--format=%an'), 'eNCode')
+    assert.deepEqual(await worktrees.changes(made, seed), [], 'the seed is not the attempt\'s work, nor are its links')
+    const status = git(repo, 'status', '--porcelain').split('\n').map((line) => line.trim()).sort()
+    assert.deepEqual(status, ['?? src/', 'D gone.txt', 'M a.txt'], 'the project is untouched')
+
+    // The attempt's work: a change, a new file, a deletion, and a commit it should not have made.
+    fs.writeFileSync(path.join(made.path, 'a.txt'), 'one, by the attempt\n')
+    fs.writeFileSync(path.join(made.path, 'b.txt'), 'new\n')
+    fs.rmSync(path.join(made.path, 'src', 'new.ts'))
+    fs.writeFileSync(path.join(made.path, 'node_modules', 'left-pad', 'extra.js'), 'x\n')
+    git(made.path, 'add', 'b.txt')
+    git(made.path, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'attempt')
+    assert.deepEqual(await worktrees.changes(made, seed), [
+      { path: 'a.txt', kind: 'modified' },
+      { path: 'b.txt', kind: 'added' },
+      { path: 'src/new.ts', kind: 'deleted' },
+    ])
+    assert.equal((await worktrees.original(made, seed, 'a.txt'))?.toString('utf8'), 'one, changed\n')
+    assert.equal((await worktrees.original(made, seed, 'src/new.ts'))?.toString('utf8'), 'export const x = 1\n')
+    assert.equal(await worktrees.original(made, seed, 'b.txt'), null)
+
+    // Removing it never reaches through the link into the project's packages.
+    await worktrees.unlink(made, seed)
+    await worktrees.remove(repo, made, { force: true })
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'left-pad', 'index.js')))
+    assert.ok(fs.existsSync(path.join(repo, 'node_modules', 'left-pad', 'extra.js')), 'a write through the link lands in the project')
+  })
+
+  it('refuses more uncommitted work than an attempt copies', async () => {
+    const repo = makeRepo()
+    fs.mkdirSync(path.join(repo, 'many'))
+    for (let index = 0; index < 2_001; index++) fs.writeFileSync(path.join(repo, 'many', `f${index}.txt`), '')
+    const made = await worktrees.create(repo, 'best-big')
+    await assert.rejects(worktrees.seed(repo, made), /2001 files changed since the last commit; attempts copy at most 2000/)
+    await worktrees.remove(repo, made, { force: true })
+  })
+})

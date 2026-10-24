@@ -70,6 +70,7 @@ export interface SlashCommand {
 /** eNCode's slash commands, in the order the list shows them before anything is typed. */
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'plan', args: '[request]', description: 'Plan mode on or off; with a request, plan it first' },
+  { name: 'best', args: '[2-4] request', description: 'Make several attempts side by side and keep the best' },
   { name: 'goal', args: '[goal | clear]', description: "Set, see or clear the session's goal" },
   { name: 'compact', description: 'Compact older history to free context' },
   { name: 'model', description: 'Choose the model' },

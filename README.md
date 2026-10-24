@@ -84,6 +84,11 @@ primary platform; the code stays cross-platform.
   tests starts from the tests. When you set a rule ("always use pnpm") or a command failed and another worked, eNCode
   offers lines for the project's instructions file below the answer, written only when you click Add.
 
+  For a hard change, `/best 3 <request>` has the agent make up to four attempts side by side, each in a git worktree
+  of its own that starts from the project as it is, uncommitted work included. The Reviewer compares what each changed,
+  with its checks and scan, and picks one; nothing in the project changes until you click Keep on the attempt you
+  want, which Undo and Rewind can take back like any of the agent's changes. Discard all removes them.
+
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
   range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
   The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars

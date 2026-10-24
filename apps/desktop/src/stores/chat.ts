@@ -62,7 +62,8 @@ interface ChatStore {
   init(): Promise<void>
   load(sessionId: string): Promise<void>
   /** Starts a turn. `keepDraft`: the message comes from elsewhere (the Review tab), so what the composer holds stays. */
-  send(text: string, attachments?: { path: string; content: string }[], options?: { keepDraft?: boolean }): void
+  /** `best`: make that many attempts side by side, in Code mode (ADR 0098). */
+  send(text: string, attachments?: { path: string; content: string }[], options?: { keepDraft?: boolean; best?: number }): void
   /** Runs the last request again from where a problem stopped it. */
   retry(): void
   stop(): Promise<void>
@@ -222,8 +223,9 @@ export const useChat = create<ChatStore>((set, get) => ({
     void api.agent
       .start(sessionId, {
         text: trimmed,
-        mode: useSettings.getState().settings?.agentMode ?? 'code',
+        mode: options?.best ? 'code' : (useSettings.getState().settings?.agentMode ?? 'code'),
         attachments,
+        ...(options?.best ? { best: options.best } : {}),
       })
       .catch((error: Error) => {
         const text = errorText(error)
