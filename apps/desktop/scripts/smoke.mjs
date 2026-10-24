@@ -1483,7 +1483,7 @@ async function runMcpChecks() {
       detail: card.querySelector('.mcp-detail')?.textContent ?? '',
       approval: card.querySelector('.mcp-approval')?.textContent ?? '',
       tools: [...card.querySelectorAll('.mcp-tools code')].map((node) => node.textContent),
-      buttons: [...card.querySelectorAll('.mcp-actions .btn')].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
+      buttons: [...card.querySelectorAll('.mcp-actions .btn:not(.mcp-remove)')].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
     }))`)
   const card = async (name) => (await cards()).find((item) => item.name === name)
   const cardIs = (name, state) => until(async () => (await card(name))?.state === state, `${name} to read ${state}`)
