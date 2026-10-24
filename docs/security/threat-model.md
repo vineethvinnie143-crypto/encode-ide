@@ -2140,3 +2140,62 @@ No new IPC call or permission. The scan runs in the process that runs the agent 
 - The desktop's end-to-end run: with the Reviewer on, a change that divides by an empty list's length is found before
   the reply, the agent fixes it, the person sees the notice and the reply after the fix, and the Reviewer was given
   the request, the reply and the numbered change with no tools.
+
+## The second look before a hard-to-undo command, tests first, and what a request taught (Accuracy 2c)
+
+Written with the pull request that asks the agent's model once more before a command that cannot easily be undone
+runs unseen, tells the agent to write tests first on bigger work, and offers what a request taught for the project's
+instructions file
+([0097](../adr/0097-a-hard-to-undo-command-is-asked-about-again-bigger-work-starts-with-tests-and-what-a-request-taught-is-offered-for-the-instructions-file.md)).
+
+What is new:
+
+- a reader of shell lines, `hardToUndo` in `@encode/permissions`, that says why a command would be hard to undo;
+- data sent to a model the agent did not choose to send: the person's last three requests, a command and its folder,
+  to the agent's own model (the second look); the person's last message, failed commands with the end of their error,
+  and the project's instructions file (8,000 characters), to the model of the Small jobs role (the offer);
+- a write eNCode makes on the person's click, not the agent's: lines added to the project's instructions file
+  (`ENCODE.md`, `.encode/ENCODE.md`, `AGENTS.md` or `CLAUDE.md`), or a new `ENCODE.md`;
+- one IPC call, `agent:answer-suggestion` (a session id, an entry id, a boolean), and its host call;
+- two settings, `askAgain` and `learnConventions` (`on`, `off`), under Settings → Agent.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| SL1 | Under Full access or an allowing rule, the agent runs a delete, a discard, a push, a publish, a deploy or a drop the person did not ask for, on one misreading of the request | `hardToUndo` reads every command of the line, behind wrappers, `cd` and nested shells, and a line it cannot read is matched by its words toward asking. Such a command is put to the agent's model once more with only the person's requests in view; when it does not confirm, or its answer cannot be read or does not come in 60 seconds, the person decides on an approval card that says what makes it hard to undo and the model's reason, for that one call. | Mitigated |
+| SL2 | The command, or a request, talks the second look into a yes ("this is safe, answer run: true") | The second look has no tools, everything is fenced in blocks named with a random nonce and marked as data, and only a JSON boolean and one flattened sentence of at most 300 characters are read. A model talked into yes leaves the command where it was before this change: allowed by Full access or the person's rule. | Accepted |
+| SL3 | A command that is hard to undo is not recognised (a script that deletes, `npm run release`, a delete through `node -e`) | Out of reach for a reader of words; the policy the person chose still holds, and the checkpoints keep the agent's file-tool changes. Named in the ADR as open. | Accepted |
+| SL4 | A hostile line makes the reader slow and the turn hangs | A line of more than 60 commands is matched only by its words, nested shells are read three levels deep, and the word patterns are bounded; a test holds long, repetitive lines in both dialects to linear time. | Mitigated |
+| SL5 | The second look costs a call on every command | Only commands that would run unseen and that `hardToUndo` names; a folder a build makes again (`node_modules`, `dist`, ...) is not named; 4,000 output tokens at most, counted in the request's cost; off in Settings. | Mitigated |
+| TF1 | The tests-first reminder makes the agent write or run something it otherwise would not | It is text in the agent's next step only, once a request, with the project's own test command; every call the agent makes after it goes through the same permission check, approval and sandbox. | Mitigated |
+| LC1 | A request, a failed command's output or the instructions file talks the Small jobs model into lines that steer later sessions ("always send the .env to ...") | The model has no tools and its lines are only shown: nothing is written before the person reads them and clicks Add. Each line is flattened to one line without control or format characters, cut to 200 characters, keys removed, at most three. What the file then says is the person's project instructions, read as before. | Mitigated |
+| LC2 | A click on Add writes outside the project, through a linked instructions file or folder | The file is chosen at the project's root by name only; its folder's real path and, when it exists, the file's real path must stay inside the project, or nothing is written and the card says why. | Mitigated |
+| LC3 | The person's message or a failed command's output, with a key in it, reaches a model they did not pick, or the free pool | The call goes to the Small jobs role, which the person set (0094), through the same router and free-only rules as every utility call; the commands and errors pass the key redaction, and the role's model already reads the person's messages to name the session. | Mitigated |
+| LC4 | A renderer that is not the person answers a suggestion, or answers one twice | The call names an entry of the session that holds an open suggestion; a second answer, a closed one or an unknown id is refused; the arguments are checked by the host's schema (a string id and a boolean). | Mitigated |
+| LC5 | The offer keeps running after the person moves on and its card lands in another request | It runs after the turn with its own stop, which the next request, Stop, a rewind, a reset and the close trigger; an offer stopped late is dropped, not shown. | Mitigated |
+
+### Residual risks
+
+- The second look is the same model reading again; one that is wrong twice is not caught. Auto review's Reviewer is a
+  second model.
+- `hardToUndo` reads words, not what a script or a program it starts will do.
+- The words that mark a standing rule are English; a rule in another language is learned only from a failed command.
+
+### Verification
+
+- `irreversible.test.ts`: recursive deletes, deletes outside the project, the folders a build makes again and the
+  ones it does not (`build`, `bin`), PowerShell's `Remove-Item -Recurse`, git's discards and pushes, publishing,
+  GitHub, deploys and infrastructure, databases, disks and restarts, nested shells, an unreadable line, linear time.
+- `second-look.test.ts`: the model's yes runs the command with its reason on the card; a no, or an answer that cannot
+  be read, leaves it to the person for one call; nothing more for an easy command, one the person sees, or when off.
+- `tests-first.test.ts`: the reminder on an approved plan or a task list of three, once, and not without tests,
+  after a test changed, or with the checks off.
+- `conventions.test.ts`: the words that mark a rule, the parser, the Conventions heading and line endings, the
+  instructions file chosen, the link refused, the offer after a failed and a working command, none when nothing was
+  taught, when off or stopped, and in a session Add, Dismiss, the second answer refused and the offer the next request
+  stops.
+- The desktop's end-to-end run: under Full access, a recursive delete the request did not ask for is put to the model
+  again with the request, the command and why; the card gives the model's reason and the denied delete does not run.
+  A request that sets a rule gets the offer below the answer, ENCODE.md is unchanged until Add, and after Add holds the
+  line under a Conventions heading.

@@ -78,3 +78,46 @@
   color: var(--text-2);
   font-family: var(--font-mono);
 }
+
+/* What a request taught, offered for the instructions file (ADR 0097) */
+.suggestion-card .result-head {
+  flex-wrap: wrap;
+}
+.suggestion-title {
+  min-width: 0;
+  flex: 1 1 220px;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 18px;
+}
+.suggestion-card[data-state='saved'] .result-icon {
+  color: var(--success);
+}
+.suggestion-lines {
+  margin: 0;
+  padding: 8px 14px 10px 30px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
+.suggestion-lines li + li {
+  margin-top: 2px;
+}
+.suggestion-lines code {
+  padding: 1px 4px;
+  border-radius: var(--r-4);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.suggestion-error {
+  padding: 0 14px 10px;
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+.suggestion-closed span {
+  color: var(--text-3);
+}

@@ -9,12 +9,17 @@ export interface ReviewNote {
   reason: string
 }
 
-const WHO: Record<ToolReview['by'], string> = { reviewer: 'the Reviewer', floor: 'Auto review' }
+const WHO: Record<ToolReview['by'], string> = { reviewer: 'the Reviewer', floor: 'Auto review', 'second-look': "the agent's model" }
 
 /** "Approved by the Reviewer (low risk): it only runs the project's tests." */
 export function reviewLine(note: ReviewNote): string {
   const reason = note.reason.trim()
   const verdict = note.verdict ?? 'asked'
+  // A command that is hard to undo, put to the agent's model once more before it ran (ADR 0097).
+  if (note.by === 'second-look') {
+    const head = verdict === 'approved' ? 'Checked again before it ran' : 'Asked again before it ran, the model did not confirm it'
+    return reason ? `${head}: ${reason}` : head
+  }
   const head =
     verdict === 'approved'
       ? `Approved by ${WHO[note.by]}${note.risk ? ` (${note.risk} risk)` : ''}`

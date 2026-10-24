@@ -13,7 +13,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { diffHunks } from '@encode/diff'
-import { messageText, redactSecrets, textBlock, type BudgetQuery, type ModelClient, type ModelRequest, type Usage } from '@encode/providers'
+import { messageText, redactSecrets, textBlock, type BudgetQuery, type ModelClient, type ModelRequest, type ModelRole, type Usage } from '@encode/providers'
 import { MAX_FINDINGS, objectIn, parseReview, reviewPrompt, type CodeReviewFile, type CodeReviewInput, type CodeReviewResult, type ReviewFinding } from './code-review'
 import { estimateTokens } from './compaction'
 import type { ChangedText, ScanFinding } from './diff-scan'
@@ -234,16 +234,17 @@ const MAX_OUTPUT_TOKENS = 16_000
 
 export type ReviewerAnswer = { ok: true; text: string; usage: Usage } | { ok: false; why: string }
 
-/** One call to the Review role, without tools, given up after `timeoutMs`; a model that cannot answer says why. */
+/** One call to the Review role (or `role`), without tools, given up after `timeoutMs`; a model that cannot answer says why. */
 export async function askReviewer(
   client: ModelClient,
-  call: { system: string; prompt: string; tool: string; sticky?: string; signal: AbortSignal; timeoutMs: number },
+  call: { system: string; prompt: string; tool: string; sticky?: string; signal: AbortSignal; timeoutMs: number; role?: ModelRole; maxOutputTokens?: number },
 ): Promise<ReviewerAnswer> {
+  const most = call.maxOutputTokens ?? MAX_OUTPUT_TOKENS
   const payload: ModelRequest = {
     system: [{ text: call.system, cache: true }],
     messages: [{ role: 'user', content: [textBlock(call.prompt)] }],
     tools: [],
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxOutputTokens: most,
     // Enough thought to follow the code; the effort chosen for the Review role, if any, replaces it.
     reasoning: 'medium',
   }
@@ -251,10 +252,10 @@ export async function askReviewer(
   const timer = setTimeout(() => late.abort(new Error('The Reviewer did not answer in time.')), call.timeoutMs)
   try {
     const outcome = await client.complete({
-      role: 'reviewer',
+      role: call.role ?? 'reviewer',
       tool: call.tool,
       payload,
-      requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(call.system.length / 4), maxOutputTokens: MAX_OUTPUT_TOKENS, tools: false, images: false },
+      requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(call.system.length / 4), maxOutputTokens: most, tools: false, images: false },
       ...(call.sticky ? { sticky: call.sticky } : {}),
       signal: AbortSignal.any([call.signal, late.signal]),
     })

@@ -59,6 +59,7 @@ import type {
   RuleScope,
   SessionGoal,
   SessionSummary,
+  SuggestionOutcome,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -514,6 +515,11 @@ export class AgentHost {
   /** Goes back to before one of the user's requests; resolves to its text. */
   async rewind(sessionId: string, entryId: string): Promise<{ text: string }> {
     return (await this.open(sessionId)).rewind(entryId)
+  }
+
+  /** Adds the lines a request taught to the project's instructions file, or dismisses them (ADR 0097). */
+  async answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome> {
+    return (await this.open(sessionId)).answerSuggestion(entryId, accept)
   }
 
   /** The requests after which files changed, and whether a rewind can be undone. */

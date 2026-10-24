@@ -217,6 +217,14 @@ const SCENARIOS = {
     },
     { text: 'Added average in src/average.ts; an empty list gives 0.' },
   ],
+  // A recursive delete the request did not ask for, under Full access: the model's second look does not confirm it,
+  // so the person decides (ADR 0097). Detected the same in bash and PowerShell; the smoke denies it.
+  'second-look': [
+    { text: 'Clearing out the old folder first.', call: { name: 'Bash', args: { command: 'Remove-Item -Recurse -Force src/legacy', description: 'Delete the old folder' } } },
+    { text: 'Left src/legacy in place and tidied the README.' },
+  ],
+  // A standing rule in the request: after the answer, lines for ENCODE.md are offered (ADR 0097).
+  conventions: [{ text: 'Understood: pnpm from now on.' }],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
@@ -294,9 +302,11 @@ let lastReviewer = null
 /** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
 let lastCodeReview = null
 let lastCompletionReview = null
+let lastSecondLook = null
+let lastConventions = null
 /** The latest suggestion asked for as you type, for the smoke to check what was sent. */
 let lastInline = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0 }
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -514,6 +524,20 @@ function completionReviewAnswer(user) {
   })}\n\`\`\``
 }
 
+/** The second look before a hard-to-undo command (ADR 0097): the requests, the command and why, no tools. */
+const SECOND_LOOK = 'A coding agent is about to run a shell command that cannot easily be undone.'
+const isSecondLook = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(SECOND_LOOK))
+
+/** No to the smoke's recursive delete, which the request does not ask for; yes to anything else. */
+function secondLookAnswer(user) {
+  if (/<command-[0-9a-f]+>\n[^\n]*src\/legacy/.test(user)) return JSON.stringify({ run: false, reason: 'The request is to tidy the README; deleting src/legacy goes further than that.' })
+  return JSON.stringify({ run: true, reason: 'The request asks for it.' })
+}
+
+/** What a request taught, for the instructions file (ADR 0097): the messages, failed commands and the file now. */
+const CONVENTIONS = "You keep a project's instructions file"
+const isConventions = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(CONVENTIONS))
+
 /** The editor's call for a suggestion as you type (ADR 0087): no tools, the file with <cursor/> in it. */
 const INLINE_SYSTEM = 'You are the autocomplete of a code editor.'
 const isInline = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(INLINE_SYSTEM))
@@ -564,6 +588,14 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-completion-review') {
       sendJson(response, 200, lastCompletionReview)
+      return
+    }
+    if (request.url === '/__last-second-look') {
+      sendJson(response, 200, lastSecondLook)
+      return
+    }
+    if (request.url === '/__last-conventions') {
+      sendJson(response, 200, lastConventions)
       return
     }
     if (request.url?.startsWith('/__fail/') && request.method === 'POST') {
@@ -631,6 +663,22 @@ const server = http.createServer(async (request, response) => {
       const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
       lastCodeReview = { model: body.model ?? null, tools: body.tools ?? [], user }
       await sendText(response, body, codeReviewAnswer(user))
+      return
+    }
+
+    if (isSecondLook(messages)) {
+      stats.secondLooks += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastSecondLook = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, secondLookAnswer(user))
+      return
+    }
+
+    if (isConventions(messages)) {
+      stats.conventionRequests += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastConventions = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, `\`\`\`json\n${JSON.stringify({ lines: ['Use `pnpm` for installs and scripts, never `npm`.'] })}\n\`\`\``)
       return
     }
 

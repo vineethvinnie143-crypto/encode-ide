@@ -31,5 +31,7 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     guide: settings.guide,
     checkGate: settings.checkGate,
     reviewWork: settings.reviewWork,
+    askAgain: settings.askAgain,
+    learnConventions: settings.learnConventions,
   }
 }

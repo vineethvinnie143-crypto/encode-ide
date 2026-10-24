@@ -492,7 +492,10 @@ async function runProviderPhase() {
     // Off until runCheckGateChecks: a check asks to run npm test after every code edit, which the other steps do not expect.
     checkGate: 'off',
     // Off until runReviewGateChecks: the mock model needs the full guide, so the Reviewer would read every change.
-    reviewWork: 'off'
+    reviewWork: 'off',
+    // Off until runSecondLookChecks and runConventionsChecks: each would take a model call the other steps do not expect.
+    askAgain: 'off',
+    learnConventions: 'off'
   })`)
   const secret = await checkKeyStorage()
 
@@ -642,6 +645,8 @@ async function runProviderPhase() {
   await runMentionChecks()
   await runCheckGateChecks()
   await runReviewGateChecks()
+  await runSecondLookChecks()
+  await runConventionsChecks()
   await runStopChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3352,6 +3357,70 @@ async function runReviewGateChecks() {
   await screenshot('15c-review-gate.png')
   await evaluate("window.eNCode.settings.save({ reviewWork: 'off' })")
   await fs.rm(averageFile, { force: true })
+}
+
+/**
+ * The second look (ADR 0097): under Full access a recursive delete would run unseen, so the agent's model is asked about
+ * it once more with only the request; it does not confirm, the person sees why on the card, and denies it.
+ */
+async function runSecondLookChecks() {
+  console.log('[smoke] --- the second look before a hard-to-undo command ---')
+  const legacy = path.join(demoPath, 'src', 'legacy')
+  await fs.mkdir(legacy, { recursive: true })
+  await fs.writeFile(path.join(legacy, 'old.ts'), 'export const old = 1\n')
+  const before = await providerStats()
+  await evaluate("window.eNCode.settings.save({ policy: 'full-access', askAgain: 'on' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:second-look] Tidy up the README')
+  const approvals = await driveAgent('15d-second-look', 120000, { deny: () => true })
+  const after = await providerStats()
+  if (after.secondLooks - before.secondLooks !== 1) throw new Error(`The model was asked again ${after.secondLooks - before.secondLooks} times, not once`)
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-second-look`)).json()
+  console.log('[smoke] the second look was asked:', JSON.stringify({ tools: seen.tools.length, user: seen.user.slice(0, 600) }))
+  if (seen.tools.length) throw new Error('The second look was given tools')
+  if (!/<requests-[0-9a-f]+>\n1\. \[scenario:second-look\] Tidy up the README\n/.test(seen.user)) throw new Error('The second look did not see the request')
+  if (!/<command-[0-9a-f]+>\nRemove-Item -Recurse -Force src\/legacy\n/.test(seen.user)) throw new Error('The second look did not see the command')
+  if (!seen.user.includes('What makes it hard to undo: it deletes src/legacy and everything in it.')) throw new Error('The second look was not told why')
+  console.log('[smoke] the card:', JSON.stringify(approvals))
+  if (approvals.length !== 1) throw new Error(`The delete should be asked for once: ${JSON.stringify(approvals)}`)
+  if (!approvals[0].reason.includes('This command deletes src/legacy and everything in it.')) throw new Error('The card does not say what makes it hard to undo')
+  if (!approvals[0].review.includes('Asked again before it ran, the model did not confirm it: The request is to tidy the README')) throw new Error("The card does not give the model's reason")
+  if (!(await fs.stat(path.join(legacy, 'old.ts')).catch(() => null))) throw new Error('The denied delete ran')
+  await evaluate("window.eNCode.settings.save({ policy: 'workspace-write', askAgain: 'off' })")
+  await fs.rm(legacy, { recursive: true, force: true })
+}
+
+/**
+ * What a request taught (ADR 0097): a standing rule in the request, and after the answer the Small jobs model's lines
+ * for ENCODE.md show below it; the file changes only on Add, under a Conventions heading.
+ */
+async function runConventionsChecks() {
+  console.log('[smoke] --- what a request taught, offered for ENCODE.md ---')
+  const file = path.join(demoPath, 'ENCODE.md')
+  const original = await fs.readFile(file, 'utf8')
+  const before = await providerStats()
+  await evaluate("window.eNCode.settings.save({ learnConventions: 'on' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:conventions] From now on, always use pnpm in this repo')
+  await driveAgent('15e-conventions')
+  await waitFor("!!document.querySelector('.suggestion-card')", 20000, 'the offer below the answer')
+  const after = await providerStats()
+  if (after.conventionRequests - before.conventionRequests !== 1) throw new Error(`The Small jobs model was asked ${after.conventionRequests - before.conventionRequests} times, not once`)
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-conventions`)).json()
+  console.log('[smoke] the conventions call:', JSON.stringify({ tools: seen.tools.length, user: seen.user.slice(0, 600) }))
+  if (seen.tools.length) throw new Error('The conventions call was given tools')
+  if (!/<messages-[0-9a-f]+>\n\[scenario:conventions\] From now on, always use pnpm in this repo\n/.test(seen.user)) throw new Error('The conventions call did not see the request')
+  if (!/<file-[0-9a-f]+>\n# Smoke project\n/.test(seen.user)) throw new Error('The conventions call did not see ENCODE.md')
+  const card = await evaluate("document.querySelector('.suggestion-card')?.textContent ?? ''")
+  if (!card.includes('Keep what this request taught in ENCODE.md?') || !card.includes('Use pnpm for installs and scripts, never npm.')) throw new Error(`The card reads ${JSON.stringify(card)}`)
+  if ((await fs.readFile(file, 'utf8')) !== original) throw new Error('ENCODE.md changed before Add')
+  await screenshot('15e-conventions.png')
+  if (!(await click('.suggestion-card .btn.primary'))) throw new Error('The Add button is missing')
+  await waitFor("document.querySelector('.suggestion-card')?.dataset.state === 'saved'", 10000, 'the card says the lines were added')
+  const now = await fs.readFile(file, 'utf8')
+  if (now !== `${original.trimEnd()}\n\n## Conventions\n\n- Use \`pnpm\` for installs and scripts, never \`npm\`.\n`) throw new Error(`ENCODE.md reads ${JSON.stringify(now)}`)
+  await fs.writeFile(file, original)
+  await evaluate("window.eNCode.settings.save({ learnConventions: 'off' })")
 }
 
 /** The tool entries of the active session, with their outputs. */

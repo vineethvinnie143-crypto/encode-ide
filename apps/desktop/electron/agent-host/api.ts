@@ -41,6 +41,8 @@ export interface HostConfig {
   guide: GuideSetting
   checkGate: CheckGate
   reviewWork: ReviewSetting
+  askAgain: 'on' | 'off'
+  learnConventions: 'on' | 'off'
 }
 
 export interface HostInit {

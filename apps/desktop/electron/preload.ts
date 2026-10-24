@@ -202,6 +202,7 @@ const api: EncodeApi = {
     redoPlan: (sessionId: string) => invoke('agent:redo-plan', sessionId),
     rewindApply: (sessionId: string, request: RewindRequest) => invoke('agent:rewind-apply', sessionId, request),
     rewindConversation: (sessionId: string, entryId: string) => invoke('agent:rewind-conversation', sessionId, entryId),
+    answerSuggestion: (sessionId: string, entryId: string, accept: boolean) => invoke('agent:answer-suggestion', sessionId, entryId, accept),
     approve: (requestId: string, answer: boolean | ApprovalAnswer) => invoke('agent:approve', requestId, answer),
     answer: (requestId: string, answer: string) => invoke('agent:answer', requestId, answer),
     onEvent: (callback) => on<AgentEvent>('agent:event', callback),

@@ -23,8 +23,8 @@ export type ToolState = 'running' | 'waiting' | 'reviewing' | 'done' | 'rejected
 
 /** What Auto review made of a call. */
 export interface ToolReview {
-  /** Who looked: the Reviewer model, or the fixed checks that come before it. */
-  by: 'reviewer' | 'floor'
+  /** Who looked: the Reviewer model, the fixed checks that come before it, or the agent's model asked again (ADR 0097). */
+  by: 'reviewer' | 'floor' | 'second-look'
   /** `approved`: it ran on this review. `declined`: it did not run. `asked`: the person was asked. */
   verdict: 'approved' | 'declined' | 'asked'
   risk?: 'low' | 'medium' | 'high'
@@ -77,8 +77,22 @@ export interface ConversationEntry {
   details?: string
   /** On your message: what its request has cost so far. */
   usage?: RequestUsage
+  /** On a notice: lines eNCode suggests keeping in the project's instructions file (ADR 0097). */
+  suggestion?: EntrySuggestion
   createdAt: number
 }
+
+/** What a request taught, offered for the instructions file the agent reads at the start of every session (ADR 0097). */
+export interface EntrySuggestion {
+  /** The file, relative to the workspace: the instructions file the agent reads, or ENCODE.md when there is none. */
+  file: string
+  lines: string[]
+  /** `open` until the person adds the lines or dismisses them. */
+  state: 'open' | 'saved' | 'dismissed'
+}
+
+/** What answering an offered suggestion did: where Add wrote the lines, or why it could not. */
+export type SuggestionOutcome = { ok: true; file?: string } | { ok: false; error: string }
 
 /** The model calls of one request together: the agent's, its subagents' and the reviewer's (ADR 0093). */
 export interface RequestUsage {
@@ -108,7 +122,7 @@ export interface ApprovalRequest {
   /** The rules "Always allow" would save, shown as they will be written. Absent when no rule could vouch for the call. */
   always?: { label: string; rules: string[] }
   /** Under Auto review: why the Reviewer passed the question to the person. */
-  review?: { by: 'floor' | 'reviewer'; reason: string }
+  review?: { by: 'floor' | 'reviewer' | 'second-look'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
   /** Asked by a subagent in the background: it still waits when the turn ends, or when no turn runs. */

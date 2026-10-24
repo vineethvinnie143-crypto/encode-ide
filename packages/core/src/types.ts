@@ -39,6 +39,16 @@ export interface AgentSettings {
   checkGate?: CheckGate
   /** Whether the Reviewer reads a request's changes and a plan before they reach the person (ADR 0096); `auto` when absent. */
   review?: ReviewSetting
+  /**
+   * Before a command that is hard to undo runs without the person seeing it: `on` asks the agent's model about it once
+   * more and leaves it to the person when the answers differ, `off` runs it as allowed. Default `on` (ADR 0097).
+   */
+  askAgain?: 'on' | 'off'
+  /**
+   * After a request that set a standing rule or got past a failed command: `on` offers lines for the project's
+   * instructions file below the answer, added only on the person's click; `off` never does. Default `on` (ADR 0097).
+   */
+  learnConventions?: 'on' | 'off'
   /** `auto` (the default): a model that needs no guide gets the short instructions and tool descriptions (ADR 0094). `full`: every model gets the full guide. */
   guide?: GuideSetting
 }
@@ -65,7 +75,7 @@ export interface ApprovalPrompt {
   /** The rules "Always allow" would save for this call; absent when no rule could vouch for it. */
   always?: AlwaysAllow
   /** Under Auto review, why the Reviewer did not answer: the fixed checks' reason, or the Reviewer's own. */
-  review?: { by: 'floor' | 'reviewer'; reason: string }
+  review?: { by: 'floor' | 'reviewer' | 'second-look'; reason: string }
   /** Hidden or look-alike characters in what the call adds, one line each. */
   warnings?: string[]
   /** Asked by a subagent working in the background: it stays when the main agent's turn ends. */

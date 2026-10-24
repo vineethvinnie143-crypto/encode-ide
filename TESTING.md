@@ -394,6 +394,25 @@ too long or asked too often.
 What is most useful to hear: a scan note on code that was safe, a security bug it missed, a Reviewer finding that was
 wrong or not worth the round, and how long the review made you wait.
 
+## Hard-to-undo commands, tests first, and what a request taught
+
+- Under **Full access**, ask for something that leads the agent to a recursive delete, `git reset --hard` or a force
+  push you did not ask for ("start the folder over", "clean the branch"). Before it runs, the agent's model is asked
+  again with only your requests. If it agrees, the step says "Checked again before it ran: ..."; if not, you get an
+  approval card that says what makes it hard to undo and why the model did not confirm it. **Settings → Agent →
+  Approvals → Before a command that is hard to undo → Run as allowed** turns it off.
+- `rm -rf node_modules` or `dist` is not asked about; `rm -rf build` or `src` is.
+- In a project with tests, ask for bigger work in Plan mode and approve the plan, or ask for something the agent splits
+  into a task list of three steps or more: it should write and run the tests first, see them fail, then write the code.
+- Tell the agent a rule ("from now on, always use pnpm here", "we don't use default exports") or let a command fail and
+  another work after it. Below the answer: "Keep what this request taught in ENCODE.md?" (or your AGENTS.md or
+  CLAUDE.md) with up to three lines. Nothing is written until **Add**; the lines then sit under a `## Conventions`
+  heading, and the next chat reads them. **Dismiss** writes nothing. **Settings → Agent → Checks → Keep what a request
+  taught → Never** turns the offer off.
+
+What is most useful to hear: a dangerous command that ran without a second look, a harmless one that was asked about,
+a model that confirmed something it should not have, and lines offered that were wrong or not worth keeping.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries

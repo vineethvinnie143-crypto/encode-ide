@@ -25,6 +25,7 @@ import type {
   SessionGoal,
   SessionPatch,
   SessionSummary,
+  SuggestionOutcome,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -57,6 +58,7 @@ export type HostRequests = {
   setPlan: { params: { sessionId: string; plan: PlanRequest | null }; result: void }
   compact: { params: { sessionId: string; instructions?: string }; result: { removed: number } }
   rewind: { params: { sessionId: string; entryId: string }; result: { text: string } }
+  answerSuggestion: { params: { sessionId: string; entryId: string; accept: boolean }; result: SuggestionOutcome }
   checkpoints: { params: { sessionId: string }; result: CheckpointInfo }
   rewindPlan: { params: { sessionId: string; turn: string }; result: RewindPlan }
   redoPlan: { params: { sessionId: string }; result: RewindPlan | null }
@@ -223,6 +225,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   setPlan: object({ ...sessionId, plan: nullable(PLAN) }, ['sessionId', 'plan']),
   compact: object({ ...sessionId, instructions: text(8_000) }, ['sessionId']),
   rewind: object({ ...sessionId, entryId: id }, ['sessionId', 'entryId']),
+  answerSuggestion: object({ ...sessionId, entryId: id, accept: { type: 'boolean' } }, ['sessionId', 'entryId', 'accept']),
   checkpoints: object(sessionId, ['sessionId']),
   rewindPlan: object({ ...sessionId, turn: id }, ['sessionId', 'turn']),
   redoPlan: object(sessionId, ['sessionId']),
@@ -270,6 +273,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('setPlan', ({ sessionId, plan }) => host.setPlan(sessionId, plan))
   on('compact', ({ sessionId, instructions }) => host.compact(sessionId, instructions))
   on('rewind', ({ sessionId, entryId }) => host.rewind(sessionId, entryId))
+  on('answerSuggestion', ({ sessionId, entryId, accept }) => host.answerSuggestion(sessionId, entryId, accept))
   on('checkpoints', ({ sessionId }) => host.checkpointInfo(sessionId))
   on('rewindPlan', ({ sessionId, turn }) => host.rewindPlan(sessionId, turn))
   on('redoPlan', ({ sessionId }) => host.redoPlan(sessionId))
@@ -322,6 +326,7 @@ export interface HostClient {
   setPlan(sessionId: string, plan: PlanRequest | null): Promise<void>
   compact(sessionId: string, instructions?: string): Promise<{ removed: number }>
   rewind(sessionId: string, entryId: string): Promise<{ text: string }>
+  answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome>
   checkpoints(sessionId: string): Promise<CheckpointInfo>
   rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
   redoPlan(sessionId: string): Promise<RewindPlan | null>
@@ -363,6 +368,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     setPlan: (sessionId, plan) => caller.request('setPlan', { sessionId, plan }),
     compact: (sessionId, instructions) => caller.request('compact', { sessionId, ...(instructions ? { instructions } : {}) }),
     rewind: (sessionId, entryId) => caller.request('rewind', { sessionId, entryId }),
+    answerSuggestion: (sessionId, entryId, accept) => caller.request('answerSuggestion', { sessionId, entryId, accept }),
     checkpoints: (sessionId) => caller.request('checkpoints', { sessionId }),
     rewindPlan: (sessionId, turn) => caller.request('rewindPlan', { sessionId, turn }),
     redoPlan: (sessionId) => caller.request('redoPlan', { sessionId }),

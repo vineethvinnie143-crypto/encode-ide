@@ -37,8 +37,8 @@ export async function runBench(tasks: readonly BenchTask[], options: BenchOption
     for (let attempt = 1; attempt <= repeat; attempt++) {
       if (options.signal?.aborted) return report
       const client = options.client === 'reference' ? referenceClient(task) : options.client
-      // A script cannot answer the checks or the Reviewer before it finishes (ADR 0095, 0096): its steps are played as written.
-      const settings = options.client === 'reference' ? { ...options.settings, checkGate: 'off' as const, review: 'off' as const } : options.settings
+      // A script cannot answer the checks, the Reviewer, the second look or the conventions offer (ADRs 0095 to 0097): its steps are played as written.
+      const settings = options.client === 'reference' ? { ...options.settings, checkGate: 'off' as const, review: 'off' as const, askAgain: 'off' as const, learnConventions: 'off' as const } : options.settings
       const run = client ? await runTask(task, { ...options, ...(settings ? { settings } : {}), client, programs, attempt }) : skippedRun(task, 'it has no reference solution', attempt)
       report.runs.push(run)
       options.onRun?.(run, task)
