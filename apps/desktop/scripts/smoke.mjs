@@ -651,6 +651,7 @@ async function runProviderPhase() {
   await runSecondLookChecks()
   await runConventionsChecks()
   await runSmallerModelChecks()
+  await runModelTestChecks()
   await runStopChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3463,6 +3464,76 @@ async function runSmallerModelChecks() {
   const told = await noticesOf()
   if (!told.some((text) => text.includes('claude-sonnet-4.5 does the rest of this request: mock-model ran into trouble twice.'))) throw new Error(`No notice of the take-over: ${JSON.stringify(told)}`)
   await evaluate("window.eNCode.settings.save({ offerStronger: 'off', roles: {} })")
+}
+
+/**
+ * Test this model (ADR 0101): Roles offers it on a model; the dialog says what it will run before anything starts; the
+ * run plays the benchmark's tasks on the mock model, their checks on eNCode's own Node.js; the scores show beside the
+ * model in Roles and in the model lists.
+ */
+async function runModelTestChecks() {
+  console.log('[smoke] --- test this model ---')
+  const ref = 'local-mock:mock-model'
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'local-mock', roles: {} })")
+  await openSettings('Roles')
+  const button = `.role-row[data-role="main"] [data-test-model="${ref}"]`
+  await waitFor(`!!document.querySelector(${JSON.stringify(button)})`, 6000, 'Test this model beside Main’s model')
+  await click(button)
+  await waitFor("!!document.querySelector('.model-test-dialog .model-test-skills')", 20000, 'what the test will run')
+  const plan = await evaluate(`(() => {
+    const dialog = document.querySelector('.model-test-dialog')
+    return {
+      title: dialog.querySelector('.ui-dialog-title')?.textContent ?? '',
+      skills: [...dialog.querySelectorAll('.model-test-skill-name')].map((node) => node.textContent),
+      facts: dialog.querySelector('.install-server-facts')?.textContent ?? '',
+      cost: dialog.querySelector('.model-test-cost')?.textContent ?? '',
+      refused: dialog.querySelector('.install-server-failed')?.textContent ?? '',
+      run: [...dialog.querySelectorAll('.ui-dialog-foot .btn')].map((node) => node.textContent),
+    }
+  })()`)
+  console.log('[smoke] test plan:', JSON.stringify(plan))
+  if (plan.title !== 'Test mock-model') throw new Error(`The test dialog is titled ${JSON.stringify(plan.title)}`)
+  if (plan.skills.join(',') !== 'Writing,Exploring,Reviewing') throw new Error(`The plan names ${JSON.stringify(plan.skills)}`)
+  if (!plan.facts.includes('Requests') || !plan.cost.includes('free to call') || plan.refused) throw new Error(`The plan reads ${JSON.stringify(plan)}`)
+  if (!plan.run.includes('Run the test')) throw new Error(`No way to start the test: ${JSON.stringify(plan.run)}`)
+  await screenshot('58-model-test-plan.png')
+
+  await click('.model-test-dialog .ui-dialog-foot .btn', 'Run the test')
+  await waitFor("!!document.querySelector('.model-test-dialog .model-test-progress, .model-test-dialog .model-test-scores')", 20000, 'the test starts')
+  await screenshot('58-model-test-running.png')
+  await waitFor("!!document.querySelector('.model-test-dialog .model-test-scores')", 300000, 'the test ends')
+  const ended = await evaluate(`(() => {
+    const dialog = document.querySelector('.model-test-dialog')
+    return {
+      scores: Object.fromEntries([...dialog.querySelectorAll('.model-test-score')].map((node) => [node.dataset.skill, node.querySelector('.model-test-score-value').textContent])),
+      items: [...dialog.querySelectorAll('.model-test-item')].map((node) => ({ id: node.dataset.item, outcome: node.dataset.outcome, reason: node.querySelector('.model-test-item-reason')?.textContent ?? '' })),
+      facts: dialog.querySelector('.install-server-facts')?.textContent ?? '',
+    }
+  })()`)
+  console.log('[smoke] test result:', JSON.stringify(ended))
+  const outcome = (id) => ended.items.find((item) => item.id === id)
+  // The JSON task's check is a node --test run on eNCode's own Node.js: passing it shows the checks run without Node.js installed.
+  if (outcome('json-config-edit')?.outcome !== 'passed') throw new Error(`The task the mock does right did not pass: ${JSON.stringify(outcome('json-config-edit'))}`)
+  if (outcome('question-no-change')?.outcome !== 'passed' || outcome('trace-event-handler')?.outcome !== 'passed') throw new Error('The questions the mock answers right did not pass')
+  const missed = outcome('fix-failing-test')
+  if (missed?.outcome !== 'failed' || !missed.reason.startsWith('Not met:') || !missed.reason.includes("the project's tests pass")) throw new Error(`A task the mock gets wrong reads ${JSON.stringify(missed)}`)
+  if (ended.scores.writing !== '1/4' || ended.scores.exploring !== '2/2' || !/^[0-2]\/2$/.test(ended.scores.reviewing ?? '')) throw new Error(`The scores are ${JSON.stringify(ended.scores)}`)
+  if (!ended.facts.includes('free')) throw new Error(`The cost of a local model reads ${JSON.stringify(ended.facts)}`)
+  await screenshot('58-model-test-result.png')
+  await click('.model-test-dialog .ui-dialog-foot .btn', 'Done')
+  await waitFor("!document.querySelector('.model-test-dialog')", 4000, 'the test dialog closes')
+
+  // The score on the role's own skill, beside the model in Roles and in the list a model is added from.
+  await waitFor(`document.querySelector('.role-row[data-role="main"] .role-score')?.dataset.score === '1/4'`, 4000, 'Main’s writing score in Roles')
+  await waitFor(`document.querySelector('.role-row[data-role="explore"]') !== null`, 4000, 'the Explore role')
+  await click('[data-role-add="explore"]')
+  await waitFor(`document.querySelector('.model-picker-item[data-ref="${ref}"] .model-score')?.dataset.score === '2/2'`, 8000, 'Explore’s exploring score in the model list')
+  await screenshot('58-model-test-picker.png')
+  await pressKey('Escape')
+  await waitFor("!document.querySelector('.model-picker')", 4000, 'the model list closes')
+  const kept = await evaluate('window.eNCode.models.testResults()')
+  if (kept[ref]?.skills?.writing?.passed !== 1) throw new Error(`The result was not kept: ${JSON.stringify(kept[ref]?.skills)}`)
+  await closeSettings()
 }
 
 /** The tool entries of the active session, with their outputs. */

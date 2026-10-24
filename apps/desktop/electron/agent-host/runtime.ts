@@ -36,6 +36,7 @@ import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import { draftCommitMessage } from './commit-message'
 import { inlineInput, suggestInline } from './inline-suggest'
+import { createModelTester, type ModelTester } from './model-test'
 
 export interface HostRuntimeOptions {
   /** Lets a test replace pieces of the host (the shell, the web, the model). */
@@ -114,6 +115,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   let stateFile: string | undefined
   let stateTimer: NodeJS.Timeout | undefined
   let stateWritten = ''
+  let tester: ModelTester | undefined
 
   /** The router names a provider by an id of its own; people know it by the name they gave the profile. */
   const humanize = (text: string): string => {
@@ -383,6 +385,13 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       }
     }
     host = created
+    tester = createModelTester({
+      ...(init.benchTasksDir ? { tasksDir: init.benchTasksDir } : {}),
+      router: () => router,
+      config: () => config,
+      sandbox: () => sandbox,
+      node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+    })
     serveHost(peer, created)
     // A wake-up an agent set fires although nobody opens its session; one missed while eNCode was closed fires now.
     void created.resumeWakeups().catch((error) => log(`could not resume the wake-ups: ${describe(error)}`))
@@ -448,6 +457,28 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     const ok = result.ok && result.toolCall
     const message = result.ok && !result.toolCall ? 'The model answered, but it did not call the tool it was given, so it cannot drive the agent. Choose another model.' : result.message
     return { ok, message: humanize(message), ...(result.detail ? { detail: humanize(result.detail) } : {}), ...(result.ttftMs !== undefined ? { ms: result.ttftMs } : {}) }
+  })
+
+  peer.handle('modelTestPlan', async ({ profileId, model }) => {
+    if (!tester) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    const plan = await tester.plan(String(profileId), String(model))
+    return plan.refused ? { ...plan, refused: humanize(plan.refused) } : plan
+  })
+
+  peer.handle('modelTest', async ({ profileId, model }) => {
+    if (!tester) throw new RpcError('invalid-state', 'The agent host is not set up yet.')
+    const result = await tester.run(String(profileId), String(model), (progress) => {
+      try {
+        peer.notify('modelTest', progress)
+      } catch (error) {
+        log(`could not pass on how a model test goes: ${describe(error)}`)
+      }
+    })
+    return { ...result, items: result.items.map((item) => (item.reason ? { ...item, reason: humanize(item.reason) } : item)) }
+  })
+
+  peer.handle('modelTestStop', async () => {
+    tester?.stop()
   })
 
   peer.handle('modelRecheck', async () => {

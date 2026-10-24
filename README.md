@@ -223,6 +223,13 @@ a billed model from ever being tried after a free one or on another key
   model of its own, eNCode asks whether that model may do the rest of the request, with both prices. It is never
   switched unasked, and the next request starts on Main again. **Settings → Roles** suggests a strong model of the same
   connection for Plan and Review while Main is a smaller one, and turns both kinds of help off.
+- **Test this model** ([ADR 0101](docs/adr/0101-test-this-model-scores-a-model-on-the-benchmark-from-settings-before-it-takes-a-role.md)):
+  the gauge beside each model in **Settings → Roles** runs a short benchmark on it with your key: four tasks that change
+  code, two questions about a project and two changes to review, each in a temporary folder on a project of eNCode's
+  own, so none of your code is sent. It says beforehand how many requests and tokens it takes and what that costs at
+  the model's price, stops past twice that (never under $0.50), and has a Stop. The scores show beside the model in
+  Roles and in the model lists, by what each role does: writing for Main and Plan, exploring for Explore, reviewing for
+  Review.
 - **Settings → Models** edits the connections. Presets for the Connect window:
 
 | Preset | Base URL | Example model |

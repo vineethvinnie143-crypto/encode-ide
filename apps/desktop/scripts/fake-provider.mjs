@@ -46,6 +46,26 @@ const SCENARIOS = {
     },
     { text: 'Added src/lsp-gate.ts; the language server reports no errors in it.' },
   ],
+  // Test this model (ADR 0101) gives the benchmark's tasks, which carry no marker (see BENCH_PROMPTS): its two questions
+  // and one change are made as the tasks want; its other tasks get the default script, which their checks fail.
+  'bench-trace': [{ text: 'markPaid in orders/paid.js handles it; events/index.js hooks it up to order:paid.' }],
+  'bench-session': [{ text: 'A session times out after 45 minutes, set by SESSION_TIMEOUT_MINUTES in config/session.js.' }],
+  // One writing task done right, so a check runs on eNCode's own Node.js and passes.
+  'bench-json': [
+    { text: 'Reading the flags.', call: { name: 'Read', args: { file_path: 'config/features.json' } } },
+    {
+      text: 'Turning newCheckout on and adding fastShipping.',
+      call: {
+        name: 'Edit',
+        args: {
+          file_path: 'config/features.json',
+          old_string: '    "newCheckout": { "enabled": false, "rollout": 0 },\n    "betaSearch": { "enabled": true, "rollout": 25 }\n',
+          new_string: '    "newCheckout": { "enabled": true, "rollout": 10 },\n    "betaSearch": { "enabled": true, "rollout": 25 },\n    "fastShipping": { "enabled": false, "rollout": 0 }\n',
+        },
+      },
+    },
+    { text: 'newCheckout is on for 10%, and fastShipping is added, off with a rollout of 0.' },
+  ],
   // The smoke makes this one fail on purpose (see /__fail), then lets it through when the person tries again.
   'retry-check': [{ text: 'Answered after trying again.' }],
   // The agent asks to plan first; the person says to go ahead.
@@ -436,11 +456,20 @@ function lastSteer(messages) {
 /** What eNCode tells the model when background work it started reports in a turn of its own. */
 const BACKGROUND_NEWS = 'Background work you started reports (the user did not write this)'
 
+/** The benchmark's questions, by the start of their prompts, and the script that answers each. */
+const BENCH_PROMPTS = [
+  ['When an order:paid event fires, which function handles it', 'bench-trace'],
+  ["How long is a user's session before it times out", 'bench-session'],
+  ['In config/features.json, turn newCheckout on for 10% of users', 'bench-json'],
+]
+
 function scenarioOf(messages) {
   const content = messages[lastUserIndex(messages)]?.content
   // In parts when eNCode put a note before the person's words (the environment, on a session's first request).
   const match = /\[scenario:([a-z-]+)\]/.exec(textOf(content))
   if (match && SCENARIOS[match[1]]) return match[1]
+  const bench = BENCH_PROMPTS.find(([prompt]) => textOf(content).includes(prompt))
+  if (bench) return bench[1]
   // A turn of background news continues the request before it.
   return textOf(content).includes(BACKGROUND_NEWS) && textOf(content).includes('background-report-ok') ? 'background-wake' : 'default'
 }

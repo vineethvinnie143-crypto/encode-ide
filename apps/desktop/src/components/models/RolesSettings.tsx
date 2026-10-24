@@ -3,16 +3,19 @@ import { EFFORTS, EFFORT_INFO, FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO
 import { applySmallRoles, smallRoleSuggestion } from '@shared/small-roles'
 import { applyStrongRoles, strongRoleSuggestion } from '@shared/strong-roles'
 import type { ModelRole, ModelStatus, ReasoningEffort, Settings } from '@shared/types'
+import { useModelTests } from '../../stores/model-tests'
 import { useModels } from '../../stores/models'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { AlertTriangle, ArrowDown, ArrowUp, Plus, RefreshCw, X } from '../../ui/icons'
+import { AlertTriangle, ArrowDown, ArrowUp, Gauge, Plus, RefreshCw, X } from '../../ui/icons'
 import type { Rect } from '../../ui/place'
 import { Chip } from '../../ui/Pill'
 import { Select, type SelectOption } from '../../ui/Select'
 import { Spinner } from '../../ui/Spinner'
 import { Toggle } from '../../ui/Toggle'
+import { ScoreChip } from './ModelItem'
 import { ModelPicker } from './ModelPicker'
+import { TestModelDialog, type TestTarget } from './TestModelDialog'
 
 type Draft = Pick<Settings, 'profiles' | 'roles' | 'activeProfileId' | 'freeOnly' | 'freeProfileId' | 'efforts'>
 
@@ -63,6 +66,7 @@ function AddModel({ draft, role, onPick }: { draft: Draft; role: ModelRole; onPi
           side="bottom"
           align="end"
           ignore={trigger}
+          role={role}
           label={`Add a model for ${ROLE_INFO[role].label}`}
           onClose={(refocus) => {
             setAnchor(null)
@@ -75,9 +79,10 @@ function AddModel({ draft, role, onPick }: { draft: Draft; role: ModelRole; onPi
   )
 }
 
-function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onChange: (patch: Partial<Settings>) => void }) {
+function RoleRow({ draft, role, onChange, onTest }: { draft: Draft; role: ModelRole; onChange: (patch: Partial<Settings>) => void; onTest: (target: TestTarget) => void }) {
   const info = ROLE_INFO[role]
   const refs = refsOf(draft, role)
+  const tested = useModelTests((state) => state.results)
   const set = (next: string[]) => onChange(rolePatch(draft, role, next))
   const move = (index: number, by: -1 | 1) => {
     const next = [...refs]
@@ -115,6 +120,8 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
           {refs.map((ref, index) => {
             const free = isFreeRef(draft, ref)
             const skipped = draft.freeOnly && !free
+            const parsed = parseRef(ref, draft.profiles)
+            const model = parsed?.kind === 'model' ? parsed : null
             return (
               <li key={ref} className={cx('role-model', skipped && 'is-skipped')}>
                 <span className="role-order" aria-hidden="true">
@@ -123,6 +130,7 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
                 <span className="role-model-name" title={labelOfRef(draft, ref)}>
                   {labelOfRef(draft, ref)}
                 </span>
+                <ScoreChip result={tested[ref]} role={role} className="role-score" />
                 {free && <Chip tone="success">Free</Chip>}
                 {skipped && (
                   <Chip tone="warning" title="Billed models are skipped while only free models are allowed.">
@@ -130,6 +138,16 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
                   </Chip>
                 )}
                 <span className="role-model-actions">
+                  {model && (
+                    <IconButton
+                      label="Test this model"
+                      size="sm"
+                      data-test-model={ref}
+                      onClick={() => onTest({ ref, profileId: model.profileId, model: model.model, label: labelOfRef(draft, ref) })}
+                    >
+                      <Gauge size={13} />
+                    </IconButton>
+                  )}
                   <IconButton label="Try it earlier" size="sm" disabled={index === 0} onClick={() => move(index, -1)}>
                     <ArrowUp size={13} />
                   </IconButton>
@@ -274,6 +292,10 @@ export function ModelStatusBlock() {
 export default function RolesSettings({ draft, onChange, onConnect }: { draft: Settings; onChange: (patch: Partial<Settings>) => void; onConnect: () => void }) {
   const openRouter = draft.profiles.filter((profile) => profile.kind === 'openrouter')
   const serving = freeProfile(draft)
+  const [testing, setTesting] = useState<TestTarget | null>(null)
+  useEffect(() => {
+    void useModelTests.getState().load()
+  }, [])
   return (
     <div className="settings-roles">
       <section className="roles-section" data-section="free" data-setting="roles.free">
@@ -331,7 +353,7 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
         <SmallRolesHint draft={draft} onChange={onChange} />
         <StrongRolesHint draft={draft} onChange={onChange} />
         {MODEL_ROLES.map((role) => (
-          <RoleRow key={role} draft={draft} role={role} onChange={onChange} />
+          <RoleRow key={role} draft={draft} role={role} onChange={onChange} onTest={setTesting} />
         ))}
       </section>
 
@@ -378,6 +400,7 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
       </section>
 
       <ModelStatusBlock />
+      <TestModelDialog target={testing} onClose={() => setTesting(null)} />
     </div>
   )
 }

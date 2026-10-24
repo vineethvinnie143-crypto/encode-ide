@@ -8,6 +8,13 @@ files:
   - dist/**/*
   - package.json
 asar: true
+# The benchmark's tasks, for Test this model (ADR 0101): small projects the model works on in a temporary folder.
+# A task keeps its node_modules as _node_modules, which electron-builder does not leave out.
+extraResources:
+  - from: ../../packages/bench/tasks
+    to: bench-tasks
+    filter:
+      - '**/*'
 # No native modules are bundled: the shell and terminal are hand-written.
 npmRebuild: false
 # Unsigned: the builds are for the owner and a few testers (see TESTING.md), and Windows SmartScreen says so.

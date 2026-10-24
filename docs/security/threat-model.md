@@ -2351,3 +2351,44 @@ What is new:
 - `replay.test.ts`: a report with a held change makes a replay without it that plays the same as the request did.
 - The desktop's end-to-end run: a held write with the part and the held result sent to the model and one row for the
   write; the offer after two setbacks, approved, and the next call sent to the Plan role's model.
+
+## Test this model (Model families 3)
+
+Written with the pull request that adds Test this model to Settings > Roles
+([0101](../adr/0101-test-this-model-scores-a-model-on-the-benchmark-from-settings-before-it-takes-a-role.md)).
+
+What is new:
+
+- a run of eight benchmark items on one model, started from the window, on a connection's key, that costs money;
+- a router client pinned to one model;
+- the benchmark's tasks shipped with the app, and their checks run on eNCode's own Node.js
+  (`ELECTRON_RUN_AS_NODE=1`);
+- a file of results in the profile, read back into the window.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| MT1 | The test spends money the person did not expect, or without end | Nothing runs before the person reads the plan and presses Run the test: the items, the requests, the tokens and the cost at the catalog's price, or that the price is not known. The run stops past twice the highest estimate (never under $0.50) and after 300 requests whatever they cost; Stop ends it. One test at a time. A billed model is refused while only free models are allowed. | Mitigated |
+| MT2 | The person's code, files or other keys reach the tested model | Each task runs in a temporary folder on a copy of the benchmark's own project, with a home of its own (no ENCODE.md, skills or settings of the person's). Reads and writes outside the folder ask, and the benchmark declines every approval its task does not allow, web fetches included. Only the pinned model is called, on its own connection's key, sent only to that key's origin. | Mitigated |
+| MT3 | A task's commands harm the machine | The model's commands are only those the task allows (such as `node --test`), in the task's folder, under the OS sandbox when it is on; the rest are declined. The checks run eNCode's own Node.js on files that ship with eNCode, with an environment stripped of keys and secrets; `ELECTRON_RUN_AS_NODE` goes only to them. The temporary folders are removed after each task. | Mitigated |
+| MT4 | The pinned client skips the router's guards, or fails over so the score is another model's | `pinned` uses the router's one call path with a list of one model: free-only mode, key by origin, catalogs, retries on the same model and the cost all apply; there is no other model to fail over to. | Mitigated |
+| MT5 | A changed or broken results file shows wrong scores or breaks the window | The file is written private in the profile. It is read back field by field: scores must be whole numbers with passed no more than total, items must have a known skill and outcome, reasons are cut to 500 characters, at most 20 items and 100 models; anything else is left out, and an unreadable file starts afresh. The window shows it as text. | Mitigated |
+| MT6 | A score misleads the person into a worse model | It is a short sample, shown per skill with what each task missed; a stopped run says so and counts only what ran; a check that could not start is not counted as the model's failure. The score is only shown: it routes nothing and does not change which models count as strong. | Accepted |
+| MT7 | The shipped tasks are changed to run something else | They are files inside eNCode's install folder, like eNCode's own code; whoever can change them can change eNCode. | Accepted |
+
+### Residual risks
+
+- The estimate is from the tasks' sizes; a model that writes far more than they assume reaches the limit, not a cost
+  the person read.
+- A free model's provider may keep what it is sent: here that is the benchmark's projects, never the person's code.
+
+### Verification
+
+- `quick.test.ts`: the plan and its order, the estimate, the cost from the provider and from the price, the missed
+  checks, the limit and the stop. `router.test.ts`: one model whatever the role, no failover. `bench.test.ts`: a check
+  that cannot start is an error. `model-tests.test.ts`: kept results, a stopped run that scored nothing, the 100 kept,
+  an unreadable file, and the field-by-field read.
+- The desktop's end-to-end run: the plan from Roles, a run on the fake provider with a check passing on eNCode's own
+  Node.js, the scores, and the chips in Roles and the model list. The packaged smoke checks the tasks ship.
+

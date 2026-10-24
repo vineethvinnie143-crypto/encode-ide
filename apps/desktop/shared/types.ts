@@ -9,6 +9,7 @@ import type { Appearance } from './appearance'
 import type { SearchCheckResult, SearchProviderId } from './search'
 import type { EditorIssueDraft } from './editor-issue'
 import type { TurnReportDraft, TurnReportSaved } from './turn-report'
+import type { ModelTestPlan, ModelTestProgress, ModelTestResult } from './model-tests'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
 
@@ -1553,6 +1554,14 @@ export interface EncodeApi {
     /** Lifts what a refused key or a payment problem set, and asks again: after changing a key or adding credit. */
     recheck(): Promise<void>
     onAlert(cb: (alert: ModelAlert) => void): () => void
+    /** What testing a model will run and may cost (ADR 0101), or why it cannot be tested now. */
+    testPlan(profileId: string, model: string): Promise<ModelTestPlan>
+    /** Tests a model on the benchmark's short run; answers when it ends, with every model's latest scores. */
+    runTest(profileId: string, model: string): Promise<{ result: ModelTestResult; results: Record<string, ModelTestResult> }>
+    stopTest(): Promise<void>
+    /** Each tested model's latest result, by "<profile id>:<model id>". */
+    testResults(): Promise<Record<string, ModelTestResult>>
+    onTestProgress(cb: (progress: ModelTestProgress) => void): () => void
   }
   git: {
     status(): Promise<GitStatus>

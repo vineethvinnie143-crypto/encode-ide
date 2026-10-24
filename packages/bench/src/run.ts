@@ -15,7 +15,7 @@ import { Workspaces } from '@encode/workspace'
 import { benchEnvironment, runChecks, type CheckResult } from './checks'
 import { meteredClient, type MeteredClient, type ModelCall } from './meter'
 import { changesBetween, copyProject, snapshot, type FileChanges } from './project'
-import type { Programs } from './programs'
+import type { ProgramEnv, Programs } from './programs'
 import type { BenchTask, ReplayResult } from './task'
 
 export type RunOutcome = 'passed' | 'failed' | 'error' | 'skipped'
@@ -71,6 +71,7 @@ export interface TaskRun {
 export interface RunOptions {
   client: ModelClient
   programs: Programs
+  programEnv?: ProgramEnv
   attempt?: number
   /** Where the run's folders go. Default: the system's temporary folder. */
   workDir?: string
@@ -275,14 +276,33 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
   const checks =
     stopped === 'cancelled'
       ? []
-      : await runChecks(task, { root, checksDir: path.join(task.dir, 'checks'), programs: options.programs, before, reply, toolFailures: metrics.toolFailures, ...(options.signal ? { signal: options.signal } : {}) })
+      : await runChecks(task, {
+          root,
+          checksDir: path.join(task.dir, 'checks'),
+          programs: options.programs,
+          before,
+          reply,
+          toolFailures: metrics.toolFailures,
+          ...(options.programEnv ? { programEnv: options.programEnv } : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
   const notMeasured = problem?.code !== undefined && NOT_MEASURED.has(problem.code)
-  const outcome: RunOutcome = notMeasured || stopped === 'cancelled' ? 'error' : checks.every((check) => check.passed) ? 'passed' : 'failed'
+  // A check that could not start says nothing about the model.
+  const unrun = checks.find((check) => check.unrun)
+  const outcome: RunOutcome = notMeasured || stopped === 'cancelled' || unrun ? 'error' : checks.every((check) => check.passed) ? 'passed' : 'failed'
   return {
     task: task.id,
     attempt,
     outcome,
-    ...(notMeasured ? { reason: problem!.message } : stopped === 'cancelled' ? { reason: 'The run was stopped.' } : problem ? { reason: problem.message } : {}),
+    ...(notMeasured
+      ? { reason: problem!.message }
+      : stopped === 'cancelled'
+        ? { reason: 'The run was stopped.' }
+        : unrun
+          ? { reason: `A check could not run (${unrun.name}): ${unrun.detail}` }
+          : problem
+            ? { reason: problem.message }
+            : {}),
     ...(stopped ? { stopped } : {}),
     checks,
     changes: changesBetween(before, after),

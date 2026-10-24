@@ -7,7 +7,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { agentEnvironment } from '@encode/tools'
 import { changesBetween, snapshot, within, type Snapshot } from './project'
-import type { Programs } from './programs'
+import type { ProgramEnv, Programs } from './programs'
 import type { BenchTask, Check, Program } from './task'
 
 export interface CheckResult {
@@ -16,6 +16,8 @@ export interface CheckResult {
   passed: boolean
   /** Why it failed, briefly: the end of a test run's output, the text that was missing. */
   detail?: string
+  /** Its program could not be started, so it measured nothing about the model. */
+  unrun?: true
 }
 
 export interface CheckContext {
@@ -30,6 +32,8 @@ export interface CheckContext {
   reply: string
   /** Tool calls that failed, commands aside. */
   toolFailures?: number
+  /** What a program needs set to run as itself: eNCode's own Node.js is the app run as Node. */
+  programEnv?: ProgramEnv
   signal?: AbortSignal
 }
 
@@ -52,11 +56,12 @@ export function benchEnvironment(env: NodeJS.ProcessEnv = process.env): Record<s
 const tail = (text: string): string => (text.length > OUTPUT_KEPT ? `…${text.slice(-OUTPUT_KEPT)}` : text).trim()
 
 function runCommand(check: Extract<Check, { kind: 'command' }>, context: CheckContext): Promise<CheckResult> {
-  const program = context.programs[PROGRAM_WORDS[check.run[0]!]!]
-  if (!program) return Promise.resolve({ name: check.name, kind: 'command', passed: false, detail: `${check.run[0]} is not installed here` })
+  const name = PROGRAM_WORDS[check.run[0]!]!
+  const program = context.programs[name]
+  if (!program) return Promise.resolve({ name: check.name, kind: 'command', passed: false, detail: `${name} is not installed here`, unrun: true })
   const fill = (arg: string) => arg.split('{{root}}').join(context.root).split('{{checks}}').join(context.checksDir)
   const args = [...program.slice(1), ...check.run.slice(1).map(fill)]
-  const { env } = agentEnvironment(benchEnvironment(), { extra: { BENCH_ROOT: context.root, BENCH_CHECKS: context.checksDir, NO_COLOR: '1', FORCE_COLOR: '0' } })
+  const { env } = agentEnvironment(benchEnvironment(), { extra: { ...context.programEnv?.[name], BENCH_ROOT: context.root, BENCH_CHECKS: context.checksDir, NO_COLOR: '1', FORCE_COLOR: '0' } })
   return new Promise((resolve) => {
     let output = ''
     const take = (chunk: Buffer) => {
@@ -78,7 +83,7 @@ function runCommand(check: Extract<Check, { kind: 'command' }>, context: CheckCo
       context.signal?.removeEventListener('abort', stop)
       resolve(result)
     }
-    child.on('error', (error) => finish({ name: check.name, kind: 'command', passed: false, detail: `could not start: ${error.message}` }))
+    child.on('error', (error) => finish({ name: check.name, kind: 'command', passed: false, detail: `could not start: ${error.message}`, unrun: true }))
     child.on('close', (code) => {
       if (code === 0 && !timedOut) return finish({ name: check.name, kind: 'command', passed: true })
       const why = timedOut ? `stopped after ${check.timeoutMs / 1000} s` : `exit code ${code ?? 'none'}`

@@ -21,6 +21,7 @@
     "dist": "node scripts/build.mjs && electron-builder --win --x64"
   },
   "devDependencies": {
+    "@encode/bench": "workspace:*",
     "@encode/core": "workspace:*",
     "@encode/diff": "workspace:*",
     "@encode/editor": "workspace:*",

@@ -1,0 +1,29 @@
+{
+  "id": "trace-event-handler",
+  "title": "Find what handles an event, change nothing",
+  "prompt": "When an order:paid event fires, which function handles it, and in which file is that handler hooked up to the event? Don't change anything.",
+  "tags": [
+    "question",
+    "read-only",
+    "javascript"
+  ],
+  "maxSteps": 12,
+  "allow": [],
+  "checks": [
+    {
+      "kind": "unchanged",
+      "name": "nothing changed",
+      "paths": []
+    },
+    {
+      "kind": "reply",
+      "name": "it names the handler that runs",
+      "matches": "\\bmarkPaid\\b"
+    },
+    {
+      "kind": "reply",
+      "name": "it names where the handler is hooked up",
+      "matches": "events/index\\.js"
+    }
+  ]
+}

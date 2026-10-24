@@ -9,6 +9,9 @@ import type { Program } from './task'
 /** The words that start the program: `py -3` is one program on Windows. */
 export type Programs = Partial<Record<Program, string[]>>
 
+/** Variables a program needs to run as itself, such as ELECTRON_RUN_AS_NODE for the app's own Node.js. */
+export type ProgramEnv = Partial<Record<Program, Record<string, string>>>
+
 const CANDIDATES: Record<Exclude<Program, 'node'>, { win32: string[][]; other: string[][]; version: RegExp; flag: string }> = {
   // `python3` on Windows can be the Store's stand-in, which opens the Store: py and python come first there.
   python: { win32: [['py', '-3'], ['python'], ['python3']], other: [['python3'], ['python']], version: /^Python 3\.\d+/m, flag: '--version' },

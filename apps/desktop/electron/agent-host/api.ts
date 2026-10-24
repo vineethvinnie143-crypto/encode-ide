@@ -9,6 +9,7 @@ import type { CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
+import type { ModelTestPlan, ModelTestProgress, ModelTestResult } from '../../shared/model-tests'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, InlineSuggestAnswer, InlineSuggestRequest, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
@@ -66,6 +67,8 @@ export interface HostInit {
   /** Where eNCode installs language servers when asked, and where they keep their caches; without it none is installed. */
   toolsDir?: string
   serverCacheDir?: string
+  /** The benchmark's tasks, for Test this model (ADR 0101); without it no model can be tested. */
+  benchTasksDir?: string
 }
 
 /** The result of a test call to one model. */
@@ -90,6 +93,12 @@ export type DesktopHostRequests = HostRequests & {
   modelCheck: { params: { profileId: string; model: string }; result: ModelCheckResult }
   /** Lifts what a refused key or a payment problem set, reads the model lists again. */
   modelRecheck: { params: undefined; result: void }
+  /** What testing one model will run and may cost (ADR 0101), or why it cannot be tested now. */
+  modelTestPlan: { params: { profileId: string; model: string }; result: ModelTestPlan }
+  /** Tests one model on the benchmark's short run; answers when it ends. One test runs at a time. */
+  modelTest: { params: { profileId: string; model: string }; result: ModelTestResult }
+  /** Stops the test that runs; it answers with what it scored so far. */
+  modelTestStop: { params: undefined; result: void }
   /** One search through the provider in use, the way the agent makes it, for the Settings screen's test. */
   searchCheck: { params: undefined; result: SearchCheckResult }
   /** A folder's settings, trust and permission rules, for the Permissions screen. */
@@ -143,6 +152,8 @@ export type DesktopHostApi = {
     sandbox: { working: string | null }
     code: { root: string }
     diagnostics: { root: string; file: string; diagnostics: CodeDiagnostic[] }
+    /** How the model test that runs is going. */
+    modelTest: ModelTestProgress
   }
 }
 
