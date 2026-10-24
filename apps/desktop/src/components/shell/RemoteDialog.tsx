@@ -25,7 +25,8 @@ export function RemoteDialog() {
   const listId = useId()
   const remote = useRemote.getState()
   const busy = dialog !== null && dialog.phase !== 'edit'
-  const failure = dialog?.failure
+  // Why the last try did not open, in words main wrote for the person (ipc.ts, remote:open).
+  const problem = dialog?.failure
   const machine = dialog?.host.trim() || 'the machine'
   const canConnect = Boolean(dialog && !busy && dialog.host.trim() && dialog.folder.trim())
 
@@ -97,18 +98,18 @@ export function RemoteDialog() {
             </div>
           )}
 
-          {!busy && failure && (
+          {!busy && problem && (
             <div className="problem-card" role="alert">
               <div className="problem-head">
                 <span className="problem-icon">
                   <AlertTriangle size={14} />
                 </span>
-                <span className="problem-text">{failure.message}</span>
+                <span className="problem-text">{problem.message}</span>
               </div>
-              {failure.install && (
+              {problem.install && (
                 <div className="remote-install">
                   <p className="form-help">
-                    <ShieldCheck size={13} className="remote-install-icon" /> eNCode can put the official Node.js {failure.install.version} in
+                    <ShieldCheck size={13} className="remote-install-icon" /> eNCode can put the official Node.js {problem.install.version} in
                     ~/.encode-server on {machine}, checked against a checksum built into eNCode. Nothing else on the machine changes, and nothing
                     needs administrator rights.
                   </p>
@@ -117,9 +118,9 @@ export function RemoteDialog() {
                   </Button>
                 </div>
               )}
-              {failure.detail && (
+              {problem.detail && (
                 <div className="problem-foot">
-                  <Details text={failure.detail} />
+                  <Details text={problem.detail} />
                 </div>
               )}
             </div>
