@@ -1935,3 +1935,47 @@ No new setting or permission in the app.
   replaced; its command is declined; a kept task is written once and caught when a call changes.
 - The end-to-end run saves a report of a request through the dialog and checks that it holds the file as it was and
   never names the project folder.
+
+## Long results kept whole, reads by range, and what a request cost (Efficiency 1)
+
+Written with the pull request that keeps long tool results in files, shows a long file's start and outline, turns
+back a Write that is an edit, and shows what each request cost
+([0093](../adr/0093-a-long-result-is-kept-whole-in-a-file-and-the-model-reads-its-ends-and-reads-on-by-range.md)).
+
+What is new:
+
+- files the agent host writes: each long tool result, whole, in `outputs/<session>/` beside the session logs;
+- a read root for each session: its own folder of outputs, read without asking;
+- what each request cost, on the person's message in the session log.
+
+No new setting, IPC call or permission.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| D1 | A kept result holds what a command printed of the person's secrets, at rest on disk | The files are the owner's only (0600, folders 0700), in the profile folder beside the session logs that already hold what the model saw. They go with their session, and when nothing was kept in a folder for two weeks. They are never in a Diagnostics export or a report of a request (0092), which take nothing from outside the project. | Mitigated |
+| D2 | The model names a file to leave the folder: a call id like `../../x` | The name is the tool's and the call's with every character but letters, digits, `_`, `.` and `-` replaced, and no leading dot; the session id must be one of the store's own shape. A file is written with `wx`, never over another. | Mitigated |
+| D3 | The kept results fill the disk | 64 MB for one session and 512 MB for all, counted before each write; the folders kept in longest ago go first. A result larger than a session may hold is not kept, only its ends are shown. | Mitigated |
+| D4 | One session's agent reads what another session's commands printed, without asking | A session's read roots hold its own folder only; the root of all of them is outside the workspace like any folder, and a read there asks. A subagent shares its session's folder. | Mitigated |
+| D5 | A prompt injection in a kept result steers the model | The model reads the same text it read before, now in two parts: nothing new reaches it. What it reads of the file later is a tool's result, as any file's. | Accepted |
+| D6 | The Write guard keeps a needed change from landing | It turns a Write back once and says why; the same Write sent again goes through. A placeholder is only one the file did not have, in content 20 or more lines shorter. | Mitigated |
+
+### Residual risks
+
+- A secret a command printed stays on disk until its session is deleted or two weeks pass, where before it was gone
+  after the middle of the output was cut. The profile folder's access is the person's account's.
+- A Read of a kept output in a replay of a reported request fails: the replay never runs the command that made it.
+
+### Verification
+
+- `outputs.test.ts`: a result kept whole, its file the owner's only, a name from a hostile id kept in the folder,
+  never over another file; the ceilings for a session and for all, the oldest folders removed first; old folders and
+  a deleted session's folder removed; results arriving at once each in their own file.
+- `loop.test.ts`: a long result kept in a file with its start and end shown and its line numbers right; a bounded
+  tool's result left whole; with nowhere to keep it, the middle left out and the model told to narrow the call.
+- `host.test.ts`: a session reads its kept result by range without asking, and the folder goes with the session.
+- `files.test.ts`: a long file's start and outline; a range cut to 56,000 characters; a Write that is an edit turned
+  back once and let through after; a placeholder that would lose lines turned back, one the file had not.
+- `session.test.ts`: each step's prompt is the start of the next one's, across requests and modes; what a request
+  cost is added up on its message, live and stored, and a cost only when every call said one.

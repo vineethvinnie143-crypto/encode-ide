@@ -7,6 +7,7 @@ import {
   editedFiles,
   formatClock,
   formatDuration,
+  formatUsage,
   isCommandTool,
   isSubagentTool,
   logItems,
@@ -356,5 +357,18 @@ describe('edited files', () => {
       { path: 'src/utils.ts', additions: 1, deletions: 1 },
       { path: '/w/new.txt', additions: 1, deletions: 0 },
     ])
+  })
+})
+
+describe('formatUsage', () => {
+  it('says what a request cost in tokens, how much came from the cache, and in dollars when every call said', () => {
+    assert.equal(formatUsage(undefined), '')
+    assert.equal(formatUsage({ calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 }), '')
+    assert.equal(formatUsage({ calls: 1, inputTokens: 800, cachedTokens: 0, outputTokens: 40 }), '840 tokens')
+    assert.equal(formatUsage({ calls: 3, inputTokens: 18_000, cachedTokens: 13_000, outputTokens: 432 }), '18.4k tokens · 72% cached')
+    assert.equal(formatUsage({ calls: 3, inputTokens: 18_000, cachedTokens: 0, outputTokens: 432, cost: 0.03125 }), '18.4k tokens · $0.031')
+    assert.equal(formatUsage({ calls: 2, inputTokens: 9_000, cachedTokens: 0, outputTokens: 100, cost: 0 }), '9.1k tokens · free')
+    assert.equal(formatUsage({ calls: 2, inputTokens: 9_000, cachedTokens: 0, outputTokens: 100, cost: 0.004 }), '9.1k tokens · <$0.01')
+    assert.equal(formatUsage({ calls: 40, inputTokens: 1_250_000, cachedTokens: 1_000_000, outputTokens: 20_000, cost: 2.5 }), '1.3M tokens · 80% cached · $2.50')
   })
 })

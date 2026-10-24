@@ -4,7 +4,7 @@
  * while the agent worked starts a new part of the turn, with its own work log
  * and reply. Pure, so the rules are unit tested.
  */
-import type { ConversationEntry } from '@shared/types'
+import type { ConversationEntry, RequestUsage } from '@shared/types'
 
 export type StepKind = 'read' | 'search' | 'edit' | 'shell' | 'web' | 'subagent' | 'ask' | 'computer' | 'other'
 
@@ -310,6 +310,18 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(total / 60)
   if (minutes < 60) return `${minutes}m ${total % 60}s`
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+/** "18k tokens · 72% cached · $0.031": what a request cost, for the head of its work log. */
+export function formatUsage(usage: RequestUsage | undefined): string {
+  if (!usage?.calls) return ''
+  const tokens = usage.inputTokens + usage.outputTokens
+  const shown = tokens < 1_000 ? String(tokens) : tokens < 1_000_000 ? `${Math.round(tokens / 100) / 10}k` : `${Math.round(tokens / 100_000) / 10}M`
+  const parts = [`${shown} tokens`]
+  const cached = usage.inputTokens > 0 ? Math.round((usage.cachedTokens / usage.inputTokens) * 100) : 0
+  if (cached > 0) parts.push(`${cached}% cached`)
+  if (usage.cost !== undefined) parts.push(usage.cost === 0 ? 'free' : usage.cost < 0.01 ? '<$0.01' : `$${usage.cost < 1 ? usage.cost.toFixed(3) : usage.cost.toFixed(2)}`)
+  return parts.join(' · ')
 }
 
 /** "0:18", "12:05", "1:03:09": a running clock. */

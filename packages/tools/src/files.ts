@@ -10,22 +10,33 @@ import type { Stats } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { ImageBlock, ImageMediaType, TextBlock } from '@encode/providers'
+import { extract } from './codemap/extract'
+import { outline } from './codemap/rank'
 import { buildDiff } from './diff'
 import { applyEdit, applyEdits, changedRegion, type EditSpec } from './edit'
 import { stateOf, staleness } from './file-state'
 import { NOTEBOOK_MAX_BYTES, renderNotebook } from './notebook'
 import { PDF_MAX_BYTES, PDF_MAX_PAGES, readPdfFile } from './pdf-read'
 import { displayPath, realPathOf, resolveInputPath } from './paths'
-import { decodeText, encodeText, lineEndingOf, MAX_TEXT_FILE_BYTES, numberLines, plural, splitLines, UnencodableTextError, type TextEncodingName } from './text'
+import { decodeText, encodeText, lineEndingOf, MAX_TEXT_FILE_BYTES, numberLines, plural, sha256, splitLines, UnencodableTextError, type TextEncodingName } from './text'
 import type { DiffHunk, FileStateTracker, Tool, ToolContext, ToolOutcome } from './types'
 
 export const READ_DEFAULT_LIMIT = 2000
-/** What one Read puts in the conversation: about 25,000 tokens. Longer ranges are cut to fit. */
-const READ_MAX_CHARS = 100_000
+/** What one Read of a range puts in the conversation: about 16,000 tokens. Longer ranges are cut to fit. */
+const READ_MAX_CHARS = 56_000
+/**
+ * A Read that names no range shows a long file's start and an outline of the rest, with the lines where things are
+ * (ADR 0093): most work needs a part of a long file, and the model reads that part by range.
+ */
+const READ_WHOLE_CHARS = 28_000
+const READ_START_CHARS = 20_000
+const READ_OUTLINE_CHARS = 4_000
+/** The outline is read from files the code index would read too. */
+const OUTLINE_MAX_CHARS = 1_000_000
 /** A repeated Read is answered with a note only when what it would repeat is longer than the note. */
 const SEEN_MIN_CHARS = 600
-/** Longer output is cut before it reaches the model (the loop's own limit), so it cannot be pointed back to. */
-const SEEN_MAX_CHARS = 55_000
+/** No Read is longer, and the loop cuts nothing of Read's (it keeps its own size), so every Read can be pointed back to. */
+const SEEN_MAX_CHARS = READ_MAX_CHARS
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024
 const SNIPPET_MAX_LINES = 40
 
@@ -183,7 +194,7 @@ export const readTool: Tool<ReadInput> = {
       'Reads a file from the local filesystem.',
       '',
       '- file_path should be absolute; a relative path resolves from the workspace root.',
-      `- Reads up to ${READ_DEFAULT_LIMIT} lines from the start. For long files, pass offset (the 1-based line to start at) and limit (how many lines).`,
+      `- Reads up to ${READ_DEFAULT_LIMIT} lines from the start; of a long file, its start and an outline of the rest. Pass offset (the 1-based line to start at) and limit (how many lines) to read a part.`,
       '- Output is numbered like `cat -n`: spaces, the line number, a tab, then the line. The prefix is not part of the file; leave it out when you copy text into Edit.',
       '- Lines longer than 2000 characters are cut short.',
       '- PNG, JPEG, GIF and WebP images are returned as images you can see. Jupyter notebooks (.ipynb) are shown cell by cell with their outputs; for them offset is the index of the first cell and limit counts cells.',
@@ -206,6 +217,7 @@ export const readTool: Tool<ReadInput> = {
   },
   kind: 'read',
   readOnly: true,
+  bounded: true,
   async access(input, ctx) {
     return { type: 'read', paths: [await realPathOf(filePath(input, ctx))] }
   },
@@ -269,8 +281,14 @@ export const readTool: Tool<ReadInput> = {
     let end = Math.min(lines.length, offset - 1 + limit)
     let body = numberLines(lines.slice(offset - 1, end), offset)
     let cutForSize = false
-    while (body.length > READ_MAX_CHARS && end > offset) {
-      end = offset - 1 + Math.max(1, Math.floor((end - offset + 1) / 2))
+    let rest: string | undefined
+    if (input.offset === undefined && input.limit === undefined && body.length > READ_WHOLE_CHARS) {
+      end = linesWithin(body, READ_START_CHARS)
+      body = numberLines(lines.slice(0, end), 1)
+      rest = restOutline(file, decoded.text, end, lines.length)
+    }
+    if (body.length > READ_MAX_CHARS && end > offset) {
+      end = offset - 1 + linesWithin(body, READ_MAX_CHARS)
       body = numberLines(lines.slice(offset - 1, end), offset)
       cutForSize = true
     }
@@ -287,12 +305,40 @@ export const readTool: Tool<ReadInput> = {
       }
     }
     ctx.files.set(file, body.length >= SEEN_MIN_CHARS && body.length <= SEEN_MAX_CHARS ? { ...state, seen: { from: offset, to: end, chars: body.length } } : state)
-    const note = partial
-      ? `\n\n(Lines ${offset}-${end} of ${lines.length}${cutForSize ? ', shortened to fit' : ''}. Pass offset and limit to read other lines.)`
-      : ''
+    const note =
+      rest !== undefined
+        ? `\n\n(Lines 1-${end} of ${lines.length}: the start of a long file. ${rest ? `What the rest defines, by line; read there with offset and limit:\n${rest}` : 'Read on with offset and limit, or Grep it for what you need.'})`
+        : partial
+          ? `\n\n(Lines ${offset}-${end} of ${lines.length}${cutForSize ? ', shortened to fit' : ''}. Pass offset and limit to read other lines.)`
+          : ''
     const ansi = decoded.encoding === 'windows-1252' ? '\n\n(This is an older ANSI file, not UTF-8: it is shown as Windows-1252, and an edit writes it back the same way.)' : ''
     return { ok: true, content: body + note + ansi, display: { output: `${plural(end - offset + 1, 'line')}${partial ? ` of ${lines.length}` : ''}` } }
   },
+}
+
+/** How many of the numbered lines fit in `maxChars`; one at least. */
+function linesWithin(numbered: string, maxChars: number): number {
+  let count = 0
+  let at = -1
+  for (;;) {
+    const next = numbered.indexOf('\n', at + 1)
+    const lineEnd = next === -1 ? numbered.length : next
+    if (count && lineEnd > maxChars) return count
+    count++
+    if (next === -1) return count
+    at = next
+  }
+}
+
+/** The definitions after line `from` of a file in a language the code index reads, one a line, members under their class. */
+function restOutline(file: string, text: string, from: number, total: number): string {
+  if (text.length > OUTLINE_MAX_CHARS) return ''
+  const found = extract(file, text)
+  const definitions = found?.definitions.filter((definition) => definition.line > from && !definition.heading) ?? []
+  if (!found || !definitions.length) return ''
+  const { text: listed, shown } = outline({ path: file, language: found.language, definitions, names: new Map() }, READ_OUTLINE_CHARS)
+  const more = definitions.length - shown
+  return more > 0 ? `${listed}\n… and ${plural(more, 'more definition')} up to line ${total}; CodeMap or Grep finds them.` : listed
 }
 
 /** What an `@` mention in the user's message brings of a file: its first lines as Read numbers them, or word that they are unchanged. */
@@ -348,6 +394,66 @@ export async function currentText(file: string, maxBytes = MAX_TEXT_FILE_BYTES):
   }
 }
 
+/** A Write over a file this long that keeps most of its lines is an edit, and is turned back once (ADR 0093). */
+const REWRITE_MIN_LINES = 200
+const REWRITE_MAX_CHANGED = 0.2
+/** So many lines shorter, with a placeholder in their place, and a Write would lose them. */
+const PLACEHOLDER_MIN_LOST = 20
+const COMMENT = String.raw`(?:\/\/+|#+|--|;+|\/\*+|<!--|\{\/\*|\*)`
+/** A comment that stands for code left out: `// ... rest of the code unchanged`, `# ...existing code...`. */
+const PLACEHOLDER = new RegExp(
+  [
+    String.raw`^\s*${COMMENT}\s*(?:\.{3}|\u2026)?\s*[[(]?\s*(?:the\s+)?(?:rest|remainder)\s+of\b`,
+    String.raw`^\s*${COMMENT}\s*(?:\.{3}|\u2026)\s*[[(]?\s*(?:existing|previous|remaining|other|unchanged|original|same)\b`,
+    String.raw`^\s*${COMMENT}.*\b(?:unchanged|remains? the same|stays? the same|as before|omitted for brevity)\b`,
+  ].join('|'),
+  'i',
+)
+
+/** Writes turned back once, by agent (its file tracker), file and what it would have written. */
+const turnedBack = new WeakMap<FileStateTracker, Map<string, string>>()
+
+/**
+ * Why a Write over an existing file should be an Edit, when it should: it keeps nearly every line of a long file (all
+ * of it sent to change a few lines), or a placeholder comment stands where the file's lines would be lost. The same
+ * Write sent again goes through: the model was told, and meant it.
+ */
+function rewriteRefusal(file: string, before: string, after: string, ctx: ToolContext): string | undefined {
+  const old = splitLines(before)
+  const next = splitLines(after)
+  const lost = old.length - next.length
+  const had = new Set(old.map((line) => line.trim()))
+  const placeholder = lost >= PLACEHOLDER_MIN_LOST ? next.findIndex((line) => PLACEHOLDER.test(line) && !had.has(line.trim())) : -1
+  let reason: string | undefined
+  if (placeholder >= 0) {
+    reason = `Line ${placeholder + 1} of the new content is a placeholder (${JSON.stringify(next[placeholder]!.trim().slice(0, 80))}), and it is ${plural(lost, 'line')} shorter than ${shown(file, ctx)}: Write replaces the whole file, so the lines it stands for would be lost. Make the change with Edit, or write the file in full.`
+  } else if (old.length >= REWRITE_MIN_LINES) {
+    const counts = new Map<string, number>()
+    for (const line of old) counts.set(line.trimEnd(), (counts.get(line.trimEnd()) ?? 0) + 1)
+    let common = 0
+    for (const line of next) {
+      const left = counts.get(line.trimEnd())
+      if (!left) continue
+      common++
+      counts.set(line.trimEnd(), left - 1)
+    }
+    const changed = old.length - common + (next.length - common)
+    if (changed <= old.length * REWRITE_MAX_CHANGED) {
+      reason = `This Write sends all ${plural(next.length, 'line')} of ${shown(file, ctx)} to change about ${plural(Math.max(1, changed), 'line')}. Make those changes with Edit or MultiEdit, which send only what changes. To replace the file anyway, send the same Write again.`
+    }
+  }
+  if (!reason) return undefined
+  let seen = turnedBack.get(ctx.files)
+  if (!seen) turnedBack.set(ctx.files, (seen = new Map()))
+  const key = sha256(Buffer.from(after))
+  if (seen.get(file) === key) {
+    seen.delete(file)
+    return undefined
+  }
+  seen.set(file, key)
+  return reason
+}
+
 export const writeTool: Tool<WriteInput> = {
   definition: {
     name: 'Write',
@@ -388,6 +494,8 @@ export const writeTool: Tool<WriteInput> = {
     const file = filePath(input, ctx)
     const loaded = await loadForWrite(file, ctx)
     if (isOutcome(loaded)) return loaded
+    const refusal = loaded ? rewriteRefusal(file, loaded.text, input.content, ctx) : undefined
+    if (refusal) return fail(refusal)
     let bytes: Buffer
     try {
       bytes = inFileStyle(input.content, loaded)

@@ -4,11 +4,9 @@
  * description tells the model which one it is talking to, and whether the
  * commands are confined by a sandbox it may ask to leave.
  */
-import { collapseRepeats, truncateMiddle } from './text'
+import { collapseRepeats } from './text'
 import type { ShellDialect, Tool, ToolOutcome } from './types'
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from './shell/run'
-
-export const BASH_OUTPUT_LIMIT = 30_000
 
 function fail(content: string): ToolOutcome {
   return { ok: false, content }
@@ -46,7 +44,7 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
     '- Commands cannot be interactive: there is no terminal and stdin is closed. Pass flags such as --yes, and never open an editor or a pager (use git commit -m).',
     `- timeout is in milliseconds: default ${DEFAULT_TIMEOUT_MS} (${DEFAULT_TIMEOUT_MS / 60_000} minutes), at most ${MAX_TIMEOUT_MS} (${MAX_TIMEOUT_MS / 60_000} minutes).`,
     '- For servers, watchers and other commands that keep running, set run_in_background to true instead of adding &. You get an id at once; read new output with BashOutput and stop the command with KillShell.',
-    `- Output longer than ${BASH_OUTPUT_LIMIT} characters is shortened in the middle.`,
+    '- Long output is cut to its start and end; a note says where the rest is.',
     legacy ? '- Windows PowerShell has no && or ||: run commands that depend on each other one per line and check $LASTEXITCODE between them.' : '- Chain commands that depend on each other with &&.',
   ]
   if (sandbox) {
@@ -131,7 +129,8 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
       const result = await ctx.shell.run(input.command, { timeoutMs: input.timeout, signal: ctx.signal, onOutput: ctx.progress, ...(unsandboxed ? { unsandboxed } : {}) })
       const parts: string[] = []
       const body = collapseRepeats(result.output.replace(/\s+$/, ''))
-      parts.push(body ? truncateMiddle(body, BASH_OUTPUT_LIMIT) : '(no output)')
+      // Whole: the loop keeps a long output in a file and shows its start and end (ADR 0093).
+      parts.push(body || '(no output)')
       if (result.timedOut) {
         const seconds = Math.round((input.timeout ?? DEFAULT_TIMEOUT_MS) / 1000)
         parts.push(`The command ran longer than ${seconds} s and was stopped. Run long work with run_in_background, or raise timeout (at most ${MAX_TIMEOUT_MS}).`)
@@ -203,7 +202,7 @@ export const bashOutputTool: Tool<BashOutputInput> = {
     const body = collapseRepeats(output.replace(/\s+$/, ''))
     return {
       ok: true,
-      content: `Status: ${status}\n\n${body ? truncateMiddle(body, BASH_OUTPUT_LIMIT) : '(no new output)'}`,
+      content: `Status: ${status}\n\n${body || '(no new output)'}`,
     }
   },
 }

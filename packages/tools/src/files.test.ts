@@ -104,13 +104,15 @@ describe('Read of the same lines again', () => {
     assert.equal((await readTool.run({ file_path: 'short.txt' }, ctx)).content, '     1\tone\n     2\ttwo')
   })
 
-  it('does not point back to an output the loop cuts before the model sees it', async () => {
+  it('points back to the start of a long file, and to a long range, which the loop leaves whole', async () => {
     const huge = Array.from({ length: 1500 }, (_, index) => `line ${index} ${'x'.repeat(60)}`).join('\n')
     const root = await tempWorkspace({ 'huge.txt': huge })
     const ctx = testContext(root)
-    const first = await readTool.run({ file_path: 'huge.txt' }, ctx)
-    assert.ok(textOf(first.content).length > 55_000)
-    assert.ok(!textOf((await readTool.run({ file_path: 'huge.txt' }, ctx)).content).startsWith('Unchanged'))
+    await readTool.run({ file_path: 'huge.txt' }, ctx)
+    assert.match(textOf((await readTool.run({ file_path: 'huge.txt' }, ctx)).content), /^Unchanged: lines 1-\d+ of /)
+    const range = await readTool.run({ file_path: 'huge.txt', offset: 1, limit: 1500 }, ctx)
+    assert.ok(textOf(range.content).length > 40_000)
+    assert.match(textOf((await readTool.run({ file_path: 'huge.txt', offset: 1, limit: 1500 }, ctx)).content), /^Unchanged: /)
   })
 
   it('is not inherited by a subagent, whose conversation never held the output', async () => {
@@ -208,16 +210,75 @@ describe('big files', () => {
     assert.match(textOf((await readTool.run({ file_path: 'big.log' }, ctx)).content), /Get-Content -TotalCount 200 or Get-Content -Tail 200/)
   })
 
-  it('cuts one Read to about 100,000 characters and says where it stopped', async () => {
+  it('shows a long file named with no range from its start, with what the rest of it defines by line', async () => {
+    const source = Array.from({ length: 3000 }, (_, index) => (index % 10 === 0 ? `export function step${index + 1}(input: number): number {` : index % 10 === 9 ? '}' : `  input = input * 2 + ${index}`)).join('\n')
+    const root = await tempWorkspace({ 'steps.ts': source, 'wide.txt': `${`${'x'.repeat(99)}\n`.repeat(3000)}` })
+    const ctx = testContext(root)
+    const code = textOf((await readTool.run({ file_path: 'steps.ts' }, ctx)).content)
+    const shown = Number(/\(Lines 1-(\d+) of 3000: the start of a long file\. What the rest defines, by line; read there with offset and limit:\n/.exec(code)?.[1])
+    assert.ok(shown > 100 && code.length < 26_000, `${shown} lines, ${code.length} characters`)
+    const first = Math.ceil(shown / 10) * 10 + 1
+    assert.match(code, new RegExp(`\\n${first} export function step${first}\\(input: number\\): number\\n`), 'the first definition it did not show')
+    assert.match(code, /… and \d+ more definitions up to line 3000; CodeMap or Grep finds them\.\)$/)
+    const text = textOf((await readTool.run({ file_path: 'wide.txt' }, ctx)).content)
+    assert.match(text, /\(Lines 1-\d+ of 3000: the start of a long file\. Read on with offset and limit, or Grep it for what you need\.\)$/)
+  })
+
+  it('cuts one Read of a range to about 56,000 characters and says where it stopped', async () => {
     const root = await tempWorkspace({ 'wide.txt': `${`${'x'.repeat(99)}\n`.repeat(3000)}` })
-    const outcome = await readTool.run({ file_path: 'wide.txt' }, testContext(root))
+    const outcome = await readTool.run({ file_path: 'wide.txt', offset: 1, limit: 3000 }, testContext(root))
     const text = textOf(outcome.content)
-    assert.ok(text.length < 105_000, `${text.length} characters`)
+    assert.ok(text.length < 57_000, `${text.length} characters`)
     assert.match(text, /\(Lines 1-\d+ of 3000, shortened to fit\. Pass offset and limit to read other lines\.\)/)
   })
 })
 
 describe('Write', () => {
+  const module = (count: number) => Array.from({ length: count }, (_, index) => `export const value${index} = ${index}`).join('\n') + '\n'
+
+  it('turns back once a Write that sends a long file whole to change a few lines, and lets the same Write through after', async () => {
+    const before = module(300)
+    const root = await tempWorkspace({ 'values.ts': before })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'values.ts' }, ctx)
+    const after = before.replace('value7 = 7', 'value7 = 70').replace('value250 = 250', 'value250 = 2500')
+    const refused = await writeTool.run({ file_path: 'values.ts', content: after }, ctx)
+    assert.equal(refused.ok, false)
+    assert.match(textOf(refused.content), /^This Write sends all 300 lines of values\.ts to change about 4 lines\. Make those changes with Edit or MultiEdit, which send only what changes\. To replace the file anyway, send the same Write again\.$/)
+    assert.equal(await fs.readFile(path.join(root, 'values.ts'), 'utf8'), before)
+    assert.equal((await writeTool.run({ file_path: 'values.ts', content: after }, ctx)).ok, true, 'meant')
+    assert.equal(await fs.readFile(path.join(root, 'values.ts'), 'utf8'), after)
+    // A rewrite that changes much of it, or a short file, is a Write's to make.
+    await readTool.run({ file_path: 'values.ts' }, ctx)
+    const rewritten = module(300).replace(/= (\d+)/g, (_, n) => `= ${Number(n) * 3}`)
+    assert.equal((await writeTool.run({ file_path: 'values.ts', content: rewritten }, ctx)).ok, true)
+    const small = await tempWorkspace({ 'small.ts': module(50) })
+    const smallCtx = testContext(small)
+    await readTool.run({ file_path: 'small.ts' }, smallCtx)
+    assert.equal((await writeTool.run({ file_path: 'small.ts', content: module(50).replace('value3 = 3', 'value3 = 30') }, smallCtx)).ok, true)
+  })
+
+  it('turns back a Write whose placeholder stands for lines the file would lose', async () => {
+    const before = module(120)
+    const root = await tempWorkspace({ 'values.ts': before })
+    const ctx = testContext(root)
+    await readTool.run({ file_path: 'values.ts' }, ctx)
+    const lazy = `export const value0 = 100\n// ... rest of the values unchanged\n`
+    const refused = await writeTool.run({ file_path: 'values.ts', content: lazy }, ctx)
+    assert.equal(refused.ok, false)
+    assert.match(textOf(refused.content), /^Line 2 of the new content is a placeholder \("\/\/ \.\.\. rest of the values unchanged"\), and it is 118 lines shorter than values\.ts: Write replaces the whole file, so the lines it stands for would be lost\./)
+    for (const line of ['# ...existing code...', '/* ... previous methods ... */', '<!-- rest of the page -->', '  // other handlers stay the same']) {
+      const outcome = await writeTool.run({ file_path: 'values.ts', content: `export const a = 1\n${line}\n` }, ctx)
+      assert.equal(outcome.ok, false, line)
+    }
+    // A comment the file already had, or a file that really gets shorter, is not a placeholder.
+    const kept = await tempWorkspace({ 'notes.ts': `// rest of the setup happens in main.ts\n${module(60)}` })
+    const keptCtx = testContext(kept)
+    await readTool.run({ file_path: 'notes.ts' }, keptCtx)
+    assert.equal((await writeTool.run({ file_path: 'notes.ts', content: '// rest of the setup happens in main.ts\nexport {}\n' }, keptCtx)).ok, true)
+    assert.equal((await writeTool.run({ file_path: 'values.ts', content: 'export const only = 1\n' }, ctx)).ok, true)
+  })
+
   it('creates new files, but refuses to overwrite a file it has not read', async () => {
     const root = await tempWorkspace({ 'old.txt': 'before\n' })
     const ctx = testContext(root)

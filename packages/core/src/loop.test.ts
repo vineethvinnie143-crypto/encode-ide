@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import type { Message, ToolResultBlock, UserMessage } from '@encode/providers'
@@ -7,6 +8,7 @@ import { textBlock, userText } from '@encode/providers'
 import type { Tool, ToolKind } from '@encode/tools'
 import { outsideTools } from '@encode/tools/testing'
 import { isPaired, NOT_RUN } from './compaction'
+import { createOutputStore } from './outputs'
 import { CONTINUE_AFTER_LENGTH } from './prompt'
 import { loopHarness, type Harness } from './testing'
 import { AgentAbortedError } from './types'
@@ -175,6 +177,65 @@ describe('tool calls', () => {
     assert.ok(results.every((result) => result.error))
     assert.doesNotMatch(results[1].text, /failed 2 times/)
     assert.match(results[2].text, /This exact call has now failed 3 times with the same error/)
+  })
+
+  it('keep a long result whole in a file, and show the model its start, its end and where the rest is', async () => {
+    const lines = Array.from({ length: 6000 }, (_, index) => `row ${index + 1}: ${'value '.repeat(3)}`)
+    const loud = (name: string, bounded: boolean): Tool => ({
+      definition: { name, description: name, inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+      kind: 'read',
+      readOnly: true,
+      bounded,
+      access: () => ({ type: 'none' }),
+      describe: () => ({ title: name }),
+      run: async () => ({ ok: false, content: [textBlock(lines.join('\n')), textBlock('Exit code 1')] }),
+    })
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'encode-kept-')))
+    try {
+      const h = await loopHarness({
+        extraTools: [loud('Loud', false), loud('Measured', true)],
+        services: { outputs: createOutputStore({ dir }) },
+        script: [{ calls: [{ name: 'Loud', input: {}, id: 'call_loud' }, { name: 'Measured', input: {}, id: 'call_measured' }] }, { text: 'done' }],
+      })
+      await h.run('go')
+      const [kept, bounded] = resultsOf(h.conversation.messages())
+      const file = path.join(dir, 'test-session', 'Loud-call_loud.txt')
+      assert.equal(await fs.readFile(file, 'utf8'), lines.join('\n'), 'all of it')
+      assert.ok(kept.text.length < 16_000, `${kept.text.length} characters`)
+      assert.match(kept.text, /^row 1: /)
+      assert.match(kept.text, /row 6000: value value value\s*\nExit code 1$/, 'its end, and the part after it whole')
+      const note = /\[… Lines (\d+)-(\d+) of 6000 \(\d+ characters\) are not shown\. All of it is in (.+): Read it with offset and limit, or Grep it\. …\]/.exec(kept.text)
+      assert.ok(note, kept.text.slice(7000, 8500))
+      assert.equal(note[3], file)
+      assert.match(kept.text, new RegExp(`row ${Number(note[1]) - 1}: value value value\\s*\\n\\n\\[…`), 'the start stops on the line before the first one left out')
+      assert.equal(kept.error, true)
+      assert.ok(bounded.text.length > 60_000 - 200 && bounded.text.length <= 60_000 + 'Exit code 1'.length + 1, 'a tool that keeps its own size is only cut at the ceiling')
+      assert.equal((await fs.readdir(path.join(dir, 'test-session'))).length, 1)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('leave out the middle of a long result when there is nowhere to keep it, and say how to see it', async () => {
+    const long = Array.from({ length: 5000 }, (_, index) => `line ${index}`).join('\n')
+    const h = await loopHarness({
+      extraTools: [
+        {
+          definition: { name: 'Loud', description: 'Loud', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+          kind: 'read',
+          readOnly: true,
+          access: () => ({ type: 'none' }),
+          describe: () => ({ title: 'Loud' }),
+          run: async () => ({ ok: true, content: long }),
+        },
+      ],
+      script: [{ calls: [{ name: 'Loud', input: {} }] }, { text: 'done' }],
+    })
+    await h.run('go')
+    const [result] = resultsOf(h.conversation.messages())
+    assert.ok(result.text.length < 30_000)
+    assert.match(result.text, /are not shown\. Narrow what the call returns to see them\. …\]/)
+    assert.match(result.text, /line 4999$/)
   })
 
   it('run calls that only read together, and everything else in order', async () => {

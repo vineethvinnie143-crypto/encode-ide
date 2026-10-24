@@ -18,7 +18,7 @@ export { compareVersions, findPackage, projectPackages, renderPackages, type Eco
 export type { NativeDoc } from '@encode/lsp'
 export { renderMap, termsOf, type CodeMap, type IndexedFile, type MapRequest } from './codemap/rank'
 export { extract, languageOf, type Definition, type DefinitionKind } from './codemap/extract'
-export { createBashTool, bashOutputTool, killShellTool, BASH_OUTPUT_LIMIT, type BashSandbox } from './bash'
+export { createBashTool, bashOutputTool, killShellTool, type BashSandbox } from './bash'
 export * from './background'
 export * from './worktree'
 export { applyPlan, formatDiagnostics, lspEditTool, lspTool } from './lsp'

@@ -1178,7 +1178,21 @@ export interface ConversationEntry {
   problem?: EntryProblem
   /** The longer account behind an error or a notice (what a provider said, keys removed), shown folded. */
   details?: string
+  /** On your message: what its request has cost so far. */
+  usage?: RequestUsage
   createdAt: number
+}
+
+/** The model calls of one request together: the agent's, its subagents' and the reviewer's. */
+export interface RequestUsage {
+  calls: number
+  /** Every prompt token read, cached or not. */
+  inputTokens: number
+  /** Of inputTokens, read from the provider's prompt cache. */
+  cachedTokens: number
+  outputTokens: number
+  /** US dollars, when every call reported what it cost. */
+  cost?: number
 }
 
 /** What Auto review made of a call: who looked (the Reviewer model, or the fixed checks before it), and the verdict. */

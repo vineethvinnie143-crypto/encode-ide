@@ -1,6 +1,6 @@
 import { memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Copy, CornerDownRight, Flag, GitFork, Pencil, Undo2 } from '../../ui/icons'
-import type { ConversationEntry } from '@shared/types'
+import type { ConversationEntry, RequestUsage } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
 import { useChat } from '../../stores/chat'
@@ -120,12 +120,12 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
 }
 
 /** One part of a turn: the message that started it when you sent it while the agent worked, the work log, and the reply. */
-const PartView = memo(function PartView({ part }: { part: TurnPart }) {
+const PartView = memo(function PartView({ part, usage }: { part: TurnPart; usage?: RequestUsage }) {
   const replyEntries = part.reply.filter((entry) => entry.kind !== 'assistant' || entry.text?.trim() || entry.streaming)
   return (
     <>
       {part.steer && <SteerMessage entry={part.steer} />}
-      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} />
+      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} usage={usage} />
       {replyEntries.map((entry) => (
         <ReplyEntry key={entry.id} entry={entry} />
       ))}
@@ -233,8 +233,8 @@ function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
   return (
     <section className="turn" data-turn={turn.id}>
       {turn.user && <UserMessage entry={turn.user} />}
-      {turn.parts.map((part) => (
-        <PartView key={part.id} part={part} />
+      {turn.parts.map((part, index) => (
+        <PartView key={part.id} part={part} usage={index === turn.parts.length - 1 ? turn.user?.usage : undefined} />
       ))}
 
       <ResultCard turn={turn} latest={latest} />

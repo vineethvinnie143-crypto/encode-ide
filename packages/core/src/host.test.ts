@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import { messageText } from '@encode/providers'
-import type { ManagedShell } from '@encode/tools'
+import type { ManagedShell, Tool } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { toldWorkspaceRoot } from './environment'
 import type { Script } from './scripted'
@@ -189,6 +189,39 @@ describe('sessions', () => {
     assert.equal(after.length, 1)
     assert.notEqual(after[0].id, only.id)
     assert.equal((await fs.readdir(h.dir)).some((name) => name.includes(only.id)), false)
+  })
+
+  it('keeps a long result where the session reads it without asking, and removes it with the session', async () => {
+    const rows = Array.from({ length: 4000 }, (_, index) => `entry ${index + 1} of the log`).join('\n')
+    const loud: Tool = {
+      definition: { name: 'Loud', description: 'Loud', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+      kind: 'read',
+      readOnly: true,
+      access: () => ({ type: 'none' }),
+      describe: () => ({ title: 'Loud' }),
+      run: async () => ({ ok: true, content: rows }),
+    }
+    const script: Script = (request, step) => {
+      if (step === 0) return { calls: [{ name: 'Loud', input: {} }] }
+      if (step > 1) return { text: 'done' }
+      const last = request.payload.messages.at(-1)
+      const result = last?.role === 'user' ? last.content.find((block) => block.type === 'tool-result') : undefined
+      const text = result?.type === 'tool-result' ? result.content.map((part) => (part.type === 'text' ? part.text : '')).join('') : ''
+      const kept = / All of it is in (.+): Read it/.exec(text)?.[1] ?? 'nowhere'
+      return { calls: [{ name: 'Read', input: { file_path: kept, offset: 2000, limit: 2 } }] }
+    }
+    const h = await hostHarness({ script, host: { extraTools: [loud] } })
+    const [session] = await h.host.sessions()
+    await h.host.start(session.id, { text: 'look at the log', mode: 'code' })
+    assert.equal(h.of('approval-request').length, 0, 'read without asking')
+    const read = h.client.requests[2].payload.messages.at(-1)
+    const shown = read?.role === 'user' && read.content[0]?.type === 'tool-result' ? read.content[0] : undefined
+    assert.equal(shown?.isError, undefined)
+    assert.match(shown?.content[0]?.type === 'text' ? shown.content[0].text : '', /2000\tentry 2000 of the log/)
+    const folder = path.join(h.dir, 'outputs', session.id)
+    assert.equal((await fs.readdir(folder)).length, 1)
+    await h.host.remove(session.id)
+    assert.equal(await fs.stat(folder).catch(() => undefined), undefined)
   })
 
   it('resets one session or all of them', async () => {

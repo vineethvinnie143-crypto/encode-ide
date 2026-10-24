@@ -304,6 +304,17 @@
   flex: none;
   transition: color var(--dur-1) var(--ease-out);
 }
+/* What the request cost: smaller than the label, and the first thing cut when the row is narrow. */
+.worklog-usage {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .worklog-rule {
   flex: 1;
   height: 1px;

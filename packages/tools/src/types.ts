@@ -106,6 +106,8 @@ export interface Tool<Input extends Record<string, unknown> = Record<string, unk
    * built-in tool that is seldom needed waits for ToolSearch however few tools there are, as in Claude Code.
    */
   readonly defer?: boolean | 'always'
+  /** Its results keep within a size of their own, which says how to read on (Read): never kept in a file for being long (ADR 0093). */
+  readonly bounded?: boolean
   /** Rules the schema cannot express, checked after it passes. Returns what is wrong. */
   check?(input: Input): string | undefined
   /** What the call would touch, with paths resolved against the context. */

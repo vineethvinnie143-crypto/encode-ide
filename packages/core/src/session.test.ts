@@ -26,6 +26,51 @@ async function until<T>(read: () => T | undefined | false, ms = 3_000): Promise<
 const shown = (h: SessionHarness) => h.session.history().entries.map((entry) => [entry.kind, entry.text])
 
 describe('a session', () => {
+  it('keeps each step’s prompt the start of the next one’s, so a provider’s prompt cache serves all of it (ADR 0093)', async () => {
+    const h = await sessionHarness({
+      files: { 'a.txt': `${'alpha\n'.repeat(400)}` },
+      scriptFor: (root) => [
+        { calls: [{ name: 'Read', input: { file_path: `${root}/a.txt` } }] },
+        { calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', activeForm: 'Looking', status: 'in_progress' }] } }] },
+        // The same lines again: answered by pointing back, which rewrites nothing.
+        { calls: [{ name: 'Read', input: { file_path: `${root}/a.txt` } }] },
+        { text: 'Read it.' },
+        { calls: [{ name: 'Glob', input: { pattern: '*', path: root } }] },
+        { text: 'Listed.' },
+      ],
+    })
+    await h.session.start({ text: 'read a.txt', mode: 'code' })
+    await h.session.start({ text: 'and list the folder', mode: 'plan' })
+    const requests = h.client.requests.map((request) => request.payload)
+    assert.equal(requests.length, 6)
+    for (let index = 1; index < requests.length; index++) {
+      const [before, after] = [requests[index - 1]!, requests[index]!]
+      assert.deepEqual(after.system, before.system, `the instructions of request ${index + 1}`)
+      assert.deepEqual(after.tools, before.tools, `the tools of request ${index + 1}, in another mode too`)
+      assert.deepEqual(after.messages.slice(0, before.messages.length), before.messages, `request ${index + 1} starts with request ${index}`)
+    }
+  })
+
+  it('adds up what each request costs on its message, as it runs, and keeps it', async () => {
+    const h = await sessionHarness({ client: { costPerCall: 0.0025 }, scriptFor: (root) => [{ calls: [{ name: 'Glob', input: { pattern: '*', path: root } }] }, { text: 'Found them.' }] })
+    await h.session.start({ text: 'list the files', mode: 'code' })
+    const asked = () => h.session.history().entries.find((entry) => entry.kind === 'user')!
+    const usage = asked().usage!
+    assert.equal(usage.calls, 2)
+    assert.ok(usage.inputTokens > 1_000 && usage.outputTokens > 0)
+    assert.equal(usage.cost, 0.005)
+    const live = h.of('entry').filter((event) => event.entry.kind === 'user' && event.entry.usage)
+    assert.deepEqual(live.map((event) => event.entry.usage!.calls), [1, 2], 'shown after each call')
+    await h.reopen()
+    assert.deepEqual(asked().usage, usage)
+
+    const unpriced = await sessionHarness({ script: [{ text: 'ok' }] })
+    await unpriced.session.start({ text: 'hi', mode: 'code' })
+    const entry = unpriced.session.history().entries.find((candidate) => candidate.kind === 'user')!
+    assert.equal(entry.usage?.calls, 1)
+    assert.equal(entry.usage?.cost, undefined, 'no cost unless every call said one')
+  })
+
   it('runs a turn, shows it as events and stores it', async () => {
     const h = await sessionHarness({ script: [{ text: 'Hello there' }] })
     const end = await h.session.start({ text: 'say hi', mode: 'code' })
