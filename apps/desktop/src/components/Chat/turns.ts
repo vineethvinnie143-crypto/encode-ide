@@ -4,7 +4,7 @@
  * while the agent worked starts a new part of the turn, with its own work log
  * and reply. Pure, so the rules are unit tested.
  */
-import type { ConversationEntry, RequestUsage } from '@shared/types'
+import type { AgentStatus, ConversationEntry, RequestUsage } from '@shared/types'
 
 export type StepKind = 'read' | 'search' | 'edit' | 'shell' | 'web' | 'subagent' | 'ask' | 'computer' | 'other'
 
@@ -328,6 +328,17 @@ export function formatUsage(usage: RequestUsage | undefined): string {
   if (cached > 0) parts.push(`${cached}% cached`)
   if (usage.cost !== undefined) parts.push(usage.cost === 0 ? 'free' : usage.cost < 0.01 ? '<$0.01' : `$${usage.cost < 1 ? usage.cost.toFixed(3) : usage.cost.toFixed(2)}`)
   return parts.join(' · ')
+}
+
+/**
+ * What the agent is doing while its turn runs, in the words at the head of the log, and whether the dice beside them
+ * rolls: it rests while the agent waits on the person.
+ */
+export function workPhase(status: AgentStatus | undefined, log: readonly ConversationEntry[]): { words: string; rolling: boolean } {
+  if (status === 'awaiting-approval') return { words: 'Waiting for your approval', rolling: false }
+  if (status === 'awaiting-user') return { words: 'Waiting for your answer', rolling: false }
+  if (status === 'running-tool') return log.some((entry) => entry.tool?.state === 'reviewing') ? { words: 'Reviewing', rolling: true } : { words: 'Working', rolling: true }
+  return { words: 'Thinking', rolling: true }
 }
 
 /** "0:18", "12:05", "1:03:09": a running clock. */

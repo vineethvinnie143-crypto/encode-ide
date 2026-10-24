@@ -169,7 +169,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
                   <div className="chat-user-bubble">{turn.user.text}</div>
                 </div>
               )}
-              <WorkLog log={turn.log} active={turn.active} startedAt={turn.startedAt} endedAt={turn.endedAt} />
+              <WorkLog log={turn.log} active={turn.active} startedAt={turn.startedAt} endedAt={turn.endedAt} status={turn.active ? status : undefined} />
               {turn.reply.map((entry) =>
                 entry.kind === 'assistant' ? (
                   entry.text?.trim() || entry.streaming ? (
