@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { AgentEventBody, AgentStatus } from '@shared/types'
 import { setActiveSessionId } from './active'
-import { useChat } from './chat'
+import { finishedList, useChat } from './chat'
 import { useStatus } from './status'
 
 setActiveSessionId('session-1')
@@ -165,5 +165,33 @@ describe('cards a subagent in the background waits on', () => {
     apply({ type: 'ask', id: 'q2', entryId: 'e', question: 'Which one?' })
     apply({ type: 'status', status: 'running-tool' })
     assert.equal(useChat.getState().ask, null)
+  })
+})
+
+describe('the task list (ADR 0115)', () => {
+  const item = (id: string, status: 'pending' | 'in_progress' | 'completed') => ({ id, text: id, status })
+
+  it('is finished once every item is done, and an empty list is not', () => {
+    assert.equal(finishedList([item('a', 'completed'), item('b', 'completed')]), true)
+    assert.equal(finishedList([item('a', 'completed'), item('b', 'in_progress')]), false)
+    assert.equal(finishedList([]), false)
+  })
+
+  it('of a session opened with every item done shows no card, and one with work left shows it', async () => {
+    answer('agent.history', () => Promise.resolve({ entries: [], status: 'idle' }))
+    answer('agent.todos', () => Promise.resolve([item('a', 'completed'), item('b', 'completed')]))
+    await useChat.getState().load('session-1')
+    assert.deepEqual(useChat.getState().todos, [])
+
+    const left = [item('a', 'completed'), item('b', 'pending')]
+    answer('agent.todos', () => Promise.resolve(left))
+    await useChat.getState().load('session-1')
+    assert.deepEqual(useChat.getState().todos, left)
+  })
+
+  it('that the agent finishes while it works stays, for its card to fold away', () => {
+    const done = [item('a', 'completed')]
+    apply({ type: 'todos', todos: done })
+    assert.deepEqual(useChat.getState().todos, done)
   })
 })

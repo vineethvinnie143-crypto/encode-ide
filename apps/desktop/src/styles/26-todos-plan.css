@@ -7,6 +7,10 @@
   background: var(--surface-1);
   flex-shrink: 0;
 }
+/* The fold the task list grows and shrinks in (ADR 0115): it keeps its height under the thread, as the card did. */
+.chat-panel > .collapse {
+  flex-shrink: 0;
+}
 .todo-head {
   display: flex;
   align-items: center;

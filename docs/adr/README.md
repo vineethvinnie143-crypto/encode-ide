@@ -104,6 +104,7 @@ say so.
 | [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107 |
 | [0113](0113-pictures-and-files-go-with-a-message.md) | Pictures and files go with a message: pasted, dropped or picked | Accepted, builds on 0054, 0069 and 0111 |
 | [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083 |
+| [0115](0115-a-finished-task-list-folds-away-and-the-thread-follows-until-you-scroll-up.md) | A finished task list folds away, and the thread follows until you scroll up | Accepted, builds on 0017 |
 
 ## Template
 

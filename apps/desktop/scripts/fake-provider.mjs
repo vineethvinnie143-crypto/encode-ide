@@ -296,6 +296,13 @@ const SCENARIOS = {
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
   'long-reply': [{ text: longReply(), streamDelayMs: 3 }],
+  // A task list the agent finishes, then a long answer in many small pieces (ADR 0115): the finished list folds away
+  // under the thread, and the thread follows the answer to its end.
+  'follow-tasks': [
+    { text: 'Three steps.', call: { name: 'TodoWrite', args: { todos: followTasks('pending') } } },
+    { text: 'All three are done.', call: { name: 'TodoWrite', args: { todos: followTasks('completed') } } },
+    { text: longReply(), streamDelayMs: 3 },
+  ],
   // Lines far wider than the thread: the diff, the file read back, the command and its output scroll in their own boxes,
   // and the chat never scrolls sideways.
   'wide-lines': [
@@ -339,6 +346,15 @@ function overflowWindow(body, messages) {
  * A long answer full of markdown (about 1,200 words: headings, lists, tables, code, quotes), for measuring how the
  * thread copes with a big streamed reply. Deterministic, so two runs are comparable.
  */
+/** The three items of the follow-tasks list, the first under way unless all are `status`. */
+function followTasks(status) {
+  return [
+    ['Read the notes', 'Reading the notes'],
+    ['Write the review', 'Writing the review'],
+    ['Check the review', 'Checking the review'],
+  ].map(([content, activeForm], index) => ({ content, activeForm, status: status === 'pending' && index === 0 ? 'in_progress' : status }))
+}
+
 function longReply() {
   const topics = ['parser', 'scheduler', 'cache', 'router', 'renderer', 'store', 'watcher', 'planner']
   const out = ['# A long review']

@@ -8,6 +8,7 @@ import TrustBanner from '../permissions/TrustBanner'
 import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
 import FindBar from './FindBar'
+import { followsAfterScroll } from './follow'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
@@ -22,9 +23,6 @@ const SUGGESTIONS = [
   'Add tests for the main module',
 ]
 
-/** Within this many pixels of the bottom, the thread follows new text. */
-const FOLLOW_WITHIN = 90
-
 export default function ChatPanel() {
   const entries = useChat((state) => state.entries)
   const status = useChat((state) => state.status)
@@ -37,8 +35,10 @@ export default function ChatPanel() {
 
   const listRef = useRef<HTMLDivElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
+  // Whether the thread follows new text (follow.ts), and where the list was when it last scrolled.
   const follow = useRef(true)
-  const [atBottom, setAtBottom] = useState(true)
+  const lastTop = useRef(0)
+  const [following, setFollowing] = useState(true)
 
   // A turn that did not change stays the same object, so a streaming answer redraws only its own turn.
   const shown = useRef<Turn[]>([])
@@ -51,30 +51,38 @@ export default function ChatPanel() {
     if (!list) return
     if (smooth) list.scrollTo({ top: list.scrollHeight, behavior: scrollBehavior() })
     else list.scrollTop = list.scrollHeight
+    lastTop.current = list.scrollTop
   }
 
-  // Stay at the bottom while the thread grows (streaming, a step opening, a log folding), unless you scrolled up.
+  const stopFollowing = () => {
+    follow.current = false
+    setFollowing(false)
+  }
+
+  // Stay at the end while the thread grows (streaming, a step opening, a log folding) or the list shrinks (a card
+  // opening under it, the window made smaller), unless you scrolled up.
   useEffect(() => {
     const thread = threadRef.current
-    if (!thread) return
+    const list = listRef.current
+    if (!thread || !list) return
     const observer = new ResizeObserver(() => {
       if (follow.current) scrollToEnd()
     })
     observer.observe(thread)
+    observer.observe(list)
     return () => observer.disconnect()
   }, [])
 
   // A different session starts at its end, and comes in with a short fade rather than a cut.
   useEffect(() => {
     follow.current = true
-    setAtBottom(true)
+    setFollowing(true)
     scrollToEnd()
     if (loadedFor && !reducedMotion()) listRef.current?.animate({ opacity: [0.3, 1] }, { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
   }, [loadedFor])
 
   const jumpTo = (id: string) => {
-    follow.current = false
-    setAtBottom(false)
+    stopFollowing()
     listRef.current?.querySelector(`[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() })
   }
 
@@ -87,9 +95,15 @@ export default function ChatPanel() {
           onScroll={() => {
             const list = listRef.current
             if (!list) return
-            const near = list.scrollHeight - list.scrollTop - list.clientHeight < FOLLOW_WITHIN
-            follow.current = near
-            setAtBottom(near)
+            const top = list.scrollTop
+            follow.current = followsAfterScroll(follow.current, lastTop.current, top, list.scrollHeight - list.clientHeight)
+            lastTop.current = top
+            setFollowing(follow.current)
+          }}
+          // A turn of the wheel up stops the thread following at once, before the scroll it starts is reported, so a
+          // stream that grows the thread in the same frame cannot pull the list back down under your hand.
+          onWheel={(event) => {
+            if (event.deltaY < 0 && !event.ctrlKey && (listRef.current?.scrollTop ?? 0) > 0) stopFollowing()
           }}
         >
           <div className="thread" ref={threadRef}>
@@ -132,7 +146,7 @@ export default function ChatPanel() {
           </div>
         )}
 
-        {!atBottom && (
+        {!following && (
           <button
             type="button"
             className="latest-btn"
@@ -140,7 +154,7 @@ export default function ChatPanel() {
             title="Jump to the latest"
             onClick={() => {
               follow.current = true
-              setAtBottom(true)
+              setFollowing(true)
               scrollToEnd(!running)
             }}
           >

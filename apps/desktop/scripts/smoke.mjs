@@ -664,6 +664,7 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runWideLineChecks()
+  await runFollowChecks()
   await runRemoteChecks()
   await runCheckGateChecks()
   await runReviewGateChecks()
@@ -3874,6 +3875,94 @@ async function runWideLineChecks() {
   console.log('[smoke] wide lines and copy: ok')
 }
 
+/**
+ * The task card and the thread's following (ADR 0115): a finished task list folds away under the thread, the thread
+ * follows a long answer to its end, text that lands just after the thread scrolled itself does not stop it following,
+ * a turn of the wheel up does, and Jump to the latest starts it again.
+ */
+async function runFollowChecks() {
+  console.log('[smoke] --- task card and following ---')
+  const DISTANCE = "(() => { const list = document.querySelector('.chat-list'); return Math.round(list.scrollHeight - list.scrollTop - list.clientHeight) })()"
+  const LATEST = "!!document.querySelector('.latest-btn')"
+  const COUNT = "(document.querySelector('.todo-card .todo-count')?.textContent ?? '')"
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:follow-tasks] Plan it, then write a long review.')
+  await waitFor(`${COUNT} === '3/3'`, 15000, 'the task card with every item ticked')
+  await screenshot('16-task-card.png')
+
+  // While the answer streams the thread keeps to its end; the finished card folds away meanwhile.
+  const samples = []
+  let folded = false
+  const deadline = Date.now() + 60000
+  while (Date.now() < deadline) {
+    const state = await evaluate(`({ status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card') })`)
+    if (state.status === 'error') throw new Error('The follow-tasks request failed')
+    if (!state.card) folded = true
+    if (state.status === 'done') break
+    samples.push(state)
+    await sleep(120)
+  }
+  const lost = samples.filter((sample) => sample.latest)
+  console.log(`[smoke] following: ${samples.length} samples while it worked, largest gap ${Math.max(0, ...samples.map((sample) => sample.distance))} px, lost ${lost.length}`)
+  if (lost.length) throw new Error(`The thread stopped following while the answer streamed: ${JSON.stringify(lost.slice(0, 3))}`)
+  await waitFor("!document.querySelector('.todo-card')", 5000, 'the finished task card folding away')
+  await sleep(300)
+  const end = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  if (end.distance > 2 || end.latest) throw new Error(`The thread is not at the end of the answer: ${JSON.stringify(end)}`)
+  console.log(`[smoke] the finished card folded away ${folded ? 'while the answer streamed' : 'after the answer'}`)
+
+  // Grows the thread by the given heights, the second in a task after the frame of the first: the thread has scrolled
+  // itself to the first and the browser has not yet reported that scroll when the second lands, as when a diff opens
+  // or a burst of text comes in between two frames.
+  const PAD = `(heights) => new Promise((resolve) => {
+    const thread = document.querySelector('.chat-list .thread')
+    const pad = (height) => { const div = document.createElement('div'); div.className = 'smoke-pad'; div.style.cssText = 'flex-shrink:0;height:' + height + 'px'; thread.append(div) }
+    requestAnimationFrame(() => {
+      pad(heights[0])
+      setTimeout(() => {
+        if (heights[1]) pad(heights[1])
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))
+      }, 0)
+    })
+  })`
+  const unpad = "document.querySelectorAll('.chat-list .smoke-pad').forEach((node) => node.remove())"
+  await evaluate(`(${PAD})([60, 420])`)
+  const race = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] text landing before the scroll is reported:', JSON.stringify(race))
+  if (race.distance > 2 || race.latest) throw new Error(`Text that landed just after the thread scrolled itself stopped it following: ${JSON.stringify(race)}`)
+  await evaluate(unpad)
+  await sleep(200)
+
+  // A turn of the wheel up stops it at once; more text then leaves the list where you put it.
+  const box = await evaluate("(() => { const rect = document.querySelector('.chat-list').getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } })()")
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 })
+  await waitFor(LATEST, 4000, 'Jump to the latest after a turn of the wheel up')
+  await sleep(400)
+  const before = await evaluate(DISTANCE)
+  await evaluate(`(${PAD})([300])`)
+  const after = await evaluate(DISTANCE)
+  if (before < 30 || after < before + 290) throw new Error(`The thread did not stay where the wheel left it: ${before} px from the end, then ${after} px`)
+  if (!(await click('.latest-btn'))) throw new Error('No Jump to the latest button')
+  await waitFor(`${DISTANCE} <= 2 && !${LATEST}`, 4000, 'Jump to the latest back at the end')
+  await evaluate(`(${PAD})([300])`)
+  if ((await evaluate(DISTANCE)) > 2) throw new Error('After Jump to the latest the thread does not follow new text')
+  await evaluate(unpad)
+
+  // The step keeps how far the list got, and the session opened again shows no finished card.
+  for (let round = 0; round < 4; round++) {
+    const opened = await evaluate("(() => { const closed = [...document.querySelectorAll('.chat-list .worklog-head[aria-expanded=false]')]; closed.forEach((button) => button.click()); return closed.length })()")
+    if (!opened) break
+    await sleep(400)
+  }
+  const details = await evaluate("[...document.querySelectorAll('.chat-list .tool-row-detail')].map((node) => node.textContent)")
+  if (!details.includes('3 of 3 done')) throw new Error(`The last task step does not say 3 of 3 done: ${JSON.stringify(details)}`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0 && document.querySelectorAll('.chat-list .turn').length > 0", 30000, 'the session after a reload')
+  await sleep(600)
+  if (await evaluate("!!document.querySelector('.todo-card')")) throw new Error('A session opened with every task done shows the task card')
+  console.log('[smoke] task card and following: ok')
+}
+
 /** Esc twice stops the agent: the first press says what a second does, and the note goes when no second comes. */
 async function runStopChecks() {
   console.log('[smoke] --- Esc twice ---')
@@ -6094,7 +6183,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks, follow: runFollowChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

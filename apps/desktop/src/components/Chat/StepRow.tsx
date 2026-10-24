@@ -153,6 +153,11 @@ function detailOf(entry: ConversationEntry, root: string | null): string {
       return String(input.skill ?? '')
     case 'EnterPlanMode':
       return String(input.reason ?? '')
+    case 'TodoWrite': {
+      // The task card folds away once every item is done, so the step says how far the list had got.
+      const todos = Array.isArray(input.todos) ? (input.todos as { status?: unknown }[]) : []
+      return todos.length ? `${todos.filter((todo) => todo?.status === 'completed').length} of ${todos.length} done` : ''
+    }
     default:
       return ''
   }
