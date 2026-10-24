@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { collapseRepeats, decodeText, encodeText, looksLikeText, UnencodableTextError } from './text'
+import { collapseRepeats, decodeText, encodeText, excerpt, looksLikeText, UnencodableTextError } from './text'
 
 const char = (code: number) => String.fromCodePoint(code)
 
@@ -72,5 +72,38 @@ describe('collapseRepeats', () => {
   it('collapses each run on its own and keeps a count for every one', () => {
     const text = [...Array(5).fill('first repeated line'), 'between', ...Array(7).fill('second repeated line')].join('\n')
     assert.equal(collapseRepeats(text), 'first repeated line\n… (the line above is repeated 4 more times)\nbetween\nsecond repeated line\n… (the line above is repeated 6 more times)')
+  })
+})
+
+describe('excerpt', () => {
+  const numbered = (count: number) => Array.from({ length: count }, (_, index) => `line ${index + 1}`).join('\n')
+
+  it('keeps whole lines at both ends, and its line numbers are those of the whole text', () => {
+    const text = numbered(1000)
+    const cut = excerpt(text, 100, 60)
+    assert.equal(cut.lines, 1000)
+    assert.ok(cut.head.length <= 100 && cut.tail.length <= 60)
+    assert.equal(cut.head.split('\n').at(-1), `line ${cut.headTo}`)
+    assert.equal(cut.tail.split('\n')[0], `line ${cut.tailFrom}`)
+    assert.equal(cut.tail.split('\n').at(-1), 'line 1000')
+    const middle = text.split('\n').slice(cut.headTo, cut.tailFrom - 1).join('\n')
+    assert.equal(cut.omitted, middle.length + 2, 'the lines between, and the line ends around them')
+    assert.equal(`${cut.head}\n${middle}\n${cut.tail}`, text)
+  })
+
+  it('comes back whole when both parts hold it', () => {
+    assert.deepEqual(excerpt('a\nb\nc', 100, 100), { head: 'a\nb\nc', tail: '', lines: 3, headTo: 3, tailFrom: 4, omitted: 0 })
+  })
+
+  it('cuts inside a line too long for its part, and says so', () => {
+    const long = 'x'.repeat(500)
+    const one = excerpt(long, 100, 50)
+    assert.equal(one.head, `${'x'.repeat(100)}…`)
+    assert.equal(one.tail, `…${'x'.repeat(50)}`)
+    assert.deepEqual([one.headTo, one.tailFrom, one.omitted], [1, 1, 350])
+    const ends = excerpt(`${long}\nshort\n${'y'.repeat(500)}`, 100, 50)
+    assert.equal(ends.head, `${'x'.repeat(100)}…`)
+    assert.equal(ends.tail, `…${'y'.repeat(50)}`)
+    assert.deepEqual([ends.headTo, ends.tailFrom], [1, 3])
   })
 })

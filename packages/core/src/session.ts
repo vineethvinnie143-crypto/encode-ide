@@ -67,6 +67,7 @@ import type { RuleJudge } from './approval'
 import { filesNamed, gatherFiles, turnRecord, TURN_REPORT_LIMITS, type TurnRecordOutcome } from './turn-report'
 import type { AgentHooks, NotificationKind, SessionEndEvent } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
+import type { OutputStore } from './outputs'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
@@ -95,6 +96,7 @@ import {
   type CheckpointInfo,
   type ConversationEntry,
   type PlanRequest,
+  type RequestUsage,
   type RewindOutcome,
   type RewindPlan,
   type RewindRequest,
@@ -185,6 +187,8 @@ export interface SessionEnv {
   userDir?: string
   /** Directories read without asking, besides the workspace. */
   readRoots?: () => readonly string[]
+  /** Where results too long for the model are kept whole (ADR 0093); the session's folder in it is one of its read roots. */
+  outputs?: OutputStore
   beforeWrite?: ToolContext['beforeWrite']
   /** Tools from outside eNCode, offered besides the built-in ones. */
   extraTools?: readonly Tool[]
@@ -368,6 +372,8 @@ export class AgentSession {
   private todoList: TodoItem[] = []
   private planState: PlanRequest | null = null
   private turn: TurnState = {}
+  /** Your message whose request runs now: what its model calls cost adds up on it. */
+  private requestEntry: ConversationEntry | undefined
   /** The sessionStart hooks ran in this process: a sessionEnd is owed. */
   private started = false
   /** Where the next sessionStart says it comes from, after a reset. */
@@ -770,6 +776,30 @@ export class AgentSession {
     this.persist({ type: 'entry', entry: structuredClone(entry) })
   }
 
+  /** Adds a model call to the request that runs now, shown on your message as it goes. */
+  private countUsage(usage: Usage): void {
+    const entry = this.requestEntry
+    if (!entry) return
+    const before: RequestUsage = entry.usage ?? { calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 }
+    // A cost is shown only when every call said what it cost: a sum of some of them would read as the whole.
+    const priced = usage.cost !== undefined && (before.calls === 0 || before.cost !== undefined)
+    entry.usage = {
+      calls: before.calls + 1,
+      inputTokens: before.inputTokens + usage.inputTokens,
+      cachedTokens: before.cachedTokens + usage.cacheReadTokens,
+      outputTokens: before.outputTokens + usage.outputTokens,
+      ...(priced ? { cost: (before.cost ?? 0) + usage.cost! } : {}),
+    }
+    this.send({ type: 'entry', entry: structuredClone(entry) })
+  }
+
+  /** The request ended: what it cost is stored with your message. */
+  private settleUsage(): void {
+    const entry = this.requestEntry
+    this.requestEntry = undefined
+    if (entry?.usage) this.persist({ type: 'entry', entry: structuredClone(entry) })
+  }
+
   /** A line in the conversation from outside the session: a hook that failed, a store that could not be read. */
   tell(text: string): void {
     this.notice(text)
@@ -812,6 +842,7 @@ export class AgentSession {
         totalTokens: usage.inputTokens + usage.outputTokens,
         ...(usage.cacheReadTokens ? { cachedTokens: usage.cacheReadTokens } : {}),
       })
+      this.countUsage(usage)
     },
     fileChanged: (path) => this.send({ type: 'file-changed', path }),
     approve: (prompt, signal) => this.requestApproval(prompt, signal),
@@ -1171,6 +1202,7 @@ export class AgentSession {
       ...(env.worktrees ? { worktrees: this.worktreeTools } : {}),
       ...(code ? { code } : {}),
       codeMap: this.codeMap,
+      ...(env.outputs ? { outputs: env.outputs } : {}),
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1180,7 +1212,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}) },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {
@@ -1503,6 +1535,7 @@ export class AgentSession {
       if (this.approvals.size) this.setStatus('awaiting-approval')
       else if (this.questions.size) this.setStatus('awaiting-user')
       await this.flush().catch(() => undefined)
+      this.settleUsage()
       // News that came after the turn stopped reading it starts a turn of its own.
       this.wakeSoon()
     }
@@ -1527,7 +1560,9 @@ export class AgentSession {
       prompt.blocks.splice(prompt.blocks.length - 1, 0, ...this.readInbox())
       const message: UserMessage = { role: 'user', content: prompt.blocks }
       // The entry is stored before the message, so rewinding to the message takes both.
-      this.settleEntry(this.addEntry({ id: turnId, kind: 'user', text: input.text }))
+      const asked = this.addEntry({ id: turnId, kind: 'user', text: input.text })
+      this.settleEntry(asked)
+      this.requestEntry = asked
       const record = (await this.write({ type: 'message', id: turnId, message, turnId, agentId: 'main' })) as MessageRecord
       this.messages = [...this.messages, message]
       this.records = [...this.records, record]
@@ -1554,6 +1589,7 @@ export class AgentSession {
     try {
       this.setStatus('thinking')
       this.resolveProblems()
+      this.requestEntry = this.entries.find((entry) => entry.id === turnId && entry.kind === 'user')
       await this.env.external?.ready?.(signal).catch(() => undefined)
       const loop = this.getLoop()
       this.steerable = true

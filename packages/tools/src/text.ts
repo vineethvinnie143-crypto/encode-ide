@@ -161,6 +161,54 @@ export function truncateMiddle(text: string, maxLength: number): string {
   return text.slice(0, head) + marker(cutText.length, lines) + (tail ? text.slice(text.length - tail) : '')
 }
 
+/** The start and end of a long text, as `excerpt` cuts them. */
+export interface Excerpt {
+  head: string
+  tail: string
+  /** Lines of the whole text. */
+  lines: number
+  /** The last line the head shows and the first line the tail shows, 1-based. A line too long to show whole is cut, and counted as shown. */
+  headTo: number
+  tailFrom: number
+  /** Characters of the text neither part shows. */
+  omitted: number
+}
+
+/**
+ * The first `headChars` and last `tailChars` of a text, cut at line ends so that a line number means the same in what
+ * is shown and in the whole text: what the model sees of output kept whole in a file (ADR 0093). A line too long for
+ * its part is cut inside, where an ellipsis marks the cut. A text both parts can hold comes back whole, as the head.
+ */
+export function excerpt(text: string, headChars: number, tailChars: number): Excerpt {
+  const lines = text.split('\n')
+  const count = lines.length
+  let headTo = 0
+  /** Where the line after the head starts. */
+  let headEnd = 0
+  while (headTo < count && headEnd + lines[headTo]!.length + 1 <= headChars) headEnd += lines[headTo++]!.length + 1
+  let tailIndex = count
+  /** Where the tail's first line starts. */
+  let tailStart = text.length + 1
+  while (tailIndex > headTo && text.length + 1 - tailStart + lines[tailIndex - 1]!.length + 1 <= tailChars) tailStart -= lines[--tailIndex]!.length + 1
+  if (tailIndex <= headTo) return { head: text, tail: '', lines: count, headTo: count, tailFrom: count + 1, omitted: 0 }
+  /** Where what the head shows ends: before the line end that follows it. */
+  let shownTo = Math.max(0, headEnd - 1)
+  let head = text.slice(0, shownTo)
+  if (!headTo) {
+    headEnd = shownTo = Math.min(headChars, lines[0]!.length)
+    head = `${text.slice(0, headEnd)}…`
+    headTo = 1
+  }
+  let tail = text.slice(tailStart)
+  let tailFrom = tailIndex + 1
+  if (tailIndex === count) {
+    tailStart = Math.max(headEnd, text.length - tailChars)
+    tail = `…${text.slice(tailStart)}`
+    tailFrom = count
+  }
+  return { head, tail, lines: count, headTo, tailFrom, omitted: Math.max(0, tailStart - shownTo) }
+}
+
 /**
  * Replaces a run of identical lines by its first line and a count. Build and test logs repeat themselves (the same
  * warning for each of a hundred files), and the model reads the line once as well as it reads it a hundred times.

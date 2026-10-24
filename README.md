@@ -67,6 +67,11 @@ primary platform; the code stays cross-platform.
   After every edit the agent is told what the language servers say it broke, and a turn that would end with errors it
   made goes back to it to fix them (once by default; **Settings → Language servers**).
 
+  A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
+  range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
+  The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars
+  when the provider says.
+
   It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
   the window, and every session is an append-only log that survives a crash and can be forked.
 - **Computer use (Windows).** Off until you turn it on under **Settings → Agent**. The agent can then look at an

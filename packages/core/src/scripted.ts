@@ -40,6 +40,8 @@ export interface ScriptedOptions {
   documents?: boolean
   /** Pause between streamed chunks, ms. */
   delayMs?: number
+  /** What each call says it cost, in US dollars, as OpenRouter does. */
+  costPerCall?: number
 }
 
 export type Script = readonly ScriptedStep[] | ((request: CompletionRequest, step: number) => ScriptedStep)
@@ -118,7 +120,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
       return {
         kind: 'done',
         message,
-        usage: { inputTokens, outputTokens: estimateTokens([message]), cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: { inputTokens, outputTokens: estimateTokens([message]), cacheReadTokens: 0, cacheWriteTokens: 0, ...(options.costPerCall !== undefined ? { cost: options.costPerCall } : {}) },
         finish: current.finish ?? (current.calls?.length ? 'tool_use' : 'stop'),
       }
     },

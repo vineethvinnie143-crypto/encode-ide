@@ -317,6 +317,20 @@ a notice that did not show (and whether Windows' Focus assist was on), and the c
 What is most useful to hear: a background turn you did not expect, one that repeated itself, or a card that stayed
 after the work was gone.
 
+## Long output, long files and what a request cost
+
+- Ask for something with a long output: "run the whole test suite and tell me which tests fail", or "print the last
+  20,000 lines of the log". The agent should see the start and the end, and when it needs a line from the middle, read
+  it from the file eNCode kept, without asking you. That file lives in the session's folder and goes with the session.
+- Ask about one function of a file of a few thousand lines. The agent's first read should show the file's start and a
+  list of what the rest defines, by line, and its next read should go straight to the function.
+- The head of each work log shows what the request cost: "Worked for 1m 12s  18.4k tokens · 72% cached · $0.031".
+  The cost shows for providers that report it (OpenRouter does, and its free models read "free"); the others show
+  tokens only.
+
+What is most useful to hear: a long output the agent did not read on when it should have, a read that ran
+on page after page of a long file, and a cost that does not match your provider's dashboard.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries
@@ -597,6 +611,7 @@ sent by itself.
 | --- | --- |
 | Settings, with keys sealed | `%APPDATA%\eNCode\eNCode-settings.json` |
 | Sessions | `%APPDATA%\eNCode\sessions\` |
+| Long outputs kept whole, a folder for each session | `%APPDATA%\eNCode\sessions\outputs\` |
 | Logs | `%APPDATA%\eNCode\logs\` |
 | Your instructions, skills and agents | `%USERPROFILE%\.encode\` |
 | The agent's worktrees of a project | `.encode-worktrees\` in the project |

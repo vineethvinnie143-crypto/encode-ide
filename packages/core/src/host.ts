@@ -34,6 +34,7 @@ import { createDefaultAssessor, refuseEverything, type RuleJudge } from './appro
 import type { ExternalToolSource } from './external'
 import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
+import { createOutputStore, type OutputStore } from './outputs'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
 import { AgentSession, type RememberResult, type SessionCheckpoints, type SessionEnding, type SessionEnv } from './session'
 import type { SessionLog } from './session-records'
@@ -144,6 +145,8 @@ export interface HostOptions {
   nameSessions?: boolean
   /** How background news is timed in every session (see SessionEnv); tests shorten it. */
   timing?: SessionEnv['timing']
+  /** Where results too long for the model are kept whole, a folder for each session (ADR 0093). Default `<dir>/outputs`; false keeps none. */
+  outputs?: string | false
 }
 
 const NO_SESSION = 'That session does not exist.'
@@ -179,9 +182,11 @@ export class AgentHost {
   private readonly web: WebAccess
   private readonly assessor: ShellCommandAssessor
   private readonly desktop: DesktopBroker | undefined
+  private readonly outputs: OutputStore | undefined
 
   constructor(private readonly o: HostOptions) {
     this.store = createSessionStore({ dir: o.dir })
+    this.outputs = o.outputs === false ? undefined : createOutputStore({ dir: o.outputs ?? path.join(o.dir, 'outputs') })
     this.workspaceRoot = o.workspace ?? null
     this.home = o.home ?? os.homedir()
     this.platform = o.platform ?? process.platform
@@ -216,7 +221,7 @@ export class AgentHost {
     return { ...base, ...own, ...(keepEnv.length ? { keepEnv } : {}), ...(Object.keys(extraEnv).length ? { extraEnv } : {}) }
   }
 
-  private envFor(root: string, scope?: SessionScope): SessionEnv {
+  private envFor(sessionId: string, root: string, scope?: SessionScope): SessionEnv {
     const { o } = this
     const beforeWrite = scope?.beforeWrite ?? o.beforeWrite
     return {
@@ -243,8 +248,9 @@ export class AgentHost {
       skills: createSkills(() => this.skillSources(root)),
       agentSources: () => this.agentSources(root),
       userDir: this.userDir,
-      // What the agent may read without asking besides the workspace: skills and the user's own folder.
-      readRoots: () => [this.userDir, ...this.skillSources(root).map((source) => source.dir)],
+      // What the agent may read without asking besides the workspace: skills, the user's own folder, and the long results kept for this session.
+      readRoots: () => [this.userDir, ...this.skillSources(root).map((source) => source.dir), ...(this.outputs ? [this.outputs.folder(sessionId)] : [])],
+      ...(this.outputs ? { outputs: this.outputs } : {}),
       ...(beforeWrite ? { beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
       ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
@@ -273,7 +279,7 @@ export class AgentHost {
         scope = refusing(error)
       }
     }
-    const session = new AgentSession(log, this.envFor(root, scope))
+    const session = new AgentSession(log, this.envFor(log.id, root, scope))
     this.bornAt.set(session, this.epoch)
     this.loaded.set(log.id, session)
     return session
@@ -451,6 +457,7 @@ export class AgentHost {
     const session = this.loaded.get(sessionId)
     if (session) await this.retire(sessionId, session, 'deleted')
     await this.store.remove(sessionId)
+    await this.outputs?.remove(sessionId)
     this.reportJobs()
   }
 

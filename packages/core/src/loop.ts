@@ -37,6 +37,7 @@ import {
 } from '@encode/providers'
 import { screenCommand, type Screened } from '@encode/permissions'
 import {
+  excerpt,
   isInsideReal,
   loadedTools,
   truncateMiddle,
@@ -89,6 +90,7 @@ import { FailedCalls, mendedNote } from './repeats'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, scanHunks, scanText, warningNote } from './scan'
+import type { OutputStore } from './outputs'
 import { recoverTextCalls } from './text-calls'
 import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
 import type { ConversationEntry, ToolReview } from './ui'
@@ -105,6 +107,10 @@ const MAX_EMPTY_RETRIES = 2
 const MAX_STOP_ROUNDS = 3
 const MAX_OVERFLOW_RETRIES = 2
 const MAX_MODEL_RESULT_CHARS = 60_000
+/** A tool's text longer than this is kept whole in a file, and the model gets its start and end (ADR 0093). */
+const KEEP_OVER_CHARS = 25_000
+const KEPT_HEAD_CHARS = 8_000
+const KEPT_TAIL_CHARS = 6_000
 const MAX_UI_OUTPUT = 20_000
 const MAX_UI_STRING = 8_000
 const MAX_PREVIEW_HUNKS = 4
@@ -138,6 +144,8 @@ export interface LoopServices {
   code?: CodeIntelligence
   /** The folder's code index: CodeMap (ADR 0090). */
   codeMap?: CodeMapSource
+  /** Where results too long for the model are kept whole (ADR 0093); without it their middle is left out. */
+  outputs?: OutputStore
 }
 
 export interface LoopOptions {
@@ -240,12 +248,30 @@ function textOf(content: readonly ToolResultContent[]): string {
   return content.map((part) => (part.type === 'image' ? '[image]' : part.text)).join('\n')
 }
 
-/** What the model reads of an outcome: never empty, never huge. */
-function modelContent(outcome: ToolOutcome): ToolResultContent[] {
-  const parts = typeof outcome.content === 'string' ? [textBlock(outcome.content)] : outcome.content
-  const kept = parts
-    .filter((part) => part.type !== 'text' || part.text.length > 0)
-    .map((part) => (part.type === 'text' && part.text.length > MAX_MODEL_RESULT_CHARS ? textBlock(truncateMiddle(part.text, MAX_MODEL_RESULT_CHARS)) : part))
+/**
+ * The start and end of a long text, and what is between them: where the whole of it is kept when it could be, and how
+ * to read it. Line numbers are those of the kept file, so the model can read on from where the start stops.
+ */
+export function keptExcerpt(text: string, file: string | undefined): string {
+  const room = file ? 1 : 2
+  const cut = excerpt(text, KEPT_HEAD_CHARS * room, KEPT_TAIL_CHARS * room)
+  if (!cut.tail) return cut.head
+  const lines = cut.tailFrom - cut.headTo - 1
+  const left = lines > 0 ? `Lines ${cut.headTo + 1}-${cut.tailFrom - 1} of ${cut.lines} (${cut.omitted} characters) are not shown.` : `${cut.omitted} characters are not shown.`
+  const where = file ? ` All of it is in ${file}: Read it with offset and limit, or Grep it.` : ' Narrow what the call returns to see them.'
+  return `${cut.head}\n\n[… ${left}${where} …]\n\n${cut.tail}`
+}
+
+/** What the model reads of an outcome: never empty, never huge. A long text is kept whole in a file, unless the tool keeps its results short itself. */
+async function modelContent(outcome: ToolOutcome, tool: Tool, keep: ((text: string) => Promise<string | undefined>) | undefined): Promise<ToolResultContent[]> {
+  const parts = (typeof outcome.content === 'string' ? [textBlock(outcome.content)] : outcome.content).filter((part) => part.type !== 'text' || part.text.length > 0)
+  const kept: ToolResultContent[] = []
+  for (const part of parts) {
+    if (part.type !== 'text') kept.push(part)
+    else if (tool.bounded) kept.push(part.text.length > MAX_MODEL_RESULT_CHARS ? textBlock(truncateMiddle(part.text, MAX_MODEL_RESULT_CHARS)) : part)
+    else if (part.text.length > KEEP_OVER_CHARS) kept.push(textBlock(keptExcerpt(part.text, await keep?.(part.text))))
+    else kept.push(part)
+  }
   return kept.length ? kept : [textBlock('(no output)')]
 }
 
@@ -980,7 +1006,9 @@ export class AgentLoop {
     }
     progress.stop()
 
-    let content = modelContent(outcome)
+    let parts = 0
+    const keep = o.services.outputs && ((text: string) => o.services.outputs!.keep(o.services.sessionId, `${block.name}-${block.id}${parts++ ? `-${parts}` : ''}`, text))
+    let content = await modelContent(outcome, tool, keep)
     let isError = !outcome.ok
     const output = outcome.display?.output ?? textOf(content)
     const found = this.scanWritten(outcome)
