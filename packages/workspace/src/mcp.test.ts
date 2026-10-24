@@ -415,3 +415,70 @@ describe('what the screen may ask', () => {
     assert.deepEqual(r.starts, [])
   })
 })
+
+describe('adding and removing a server from the screen', () => {
+  it('writes your own server into your file and starts it, and a project’s into .mcp.json, approved when the folder is trusted', async () => {
+    const r = await rig({ files: { '.mcp.json': json({ other: 1, mcpServers: { kept: { command: 'k' } } }) }, servers: { mine: listing('echo'), web: listing('fetch'), kept: listing('k') } })
+    const added = await act(r, { type: 'add', name: 'mine', scope: 'user', setup: { type: 'stdio', command: 'npx', args: ['-y', 'server'], env: {} } })
+    assert.equal(added.ok, true, added.ok ? '' : added.reason)
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(r.home, '.encode', 'mcp.json'), 'utf8')), { mcpServers: { mine: { command: 'npx', args: ['-y', 'server'] } } })
+    assert.equal(view(added.report, 'mine').scope, 'user')
+
+    const twice = await act(r, { type: 'add', name: 'mine', scope: 'project', setup: { type: 'stdio', command: 'x', args: [], env: {} } })
+    assert.equal(twice.ok, false)
+    assert.match(twice.ok ? '' : twice.reason, /already/)
+
+    // Not trusted yet: written, and waiting.
+    const waiting = await act(r, { type: 'add', name: 'web', scope: 'project', setup: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${TOKEN}' } } })
+    assert.equal(waiting.ok, true, waiting.ok ? '' : waiting.reason)
+    assert.match(waiting.ok ? (waiting.note ?? '') : '', /trust this folder/)
+    assert.equal(view(waiting.report, 'web').state, 'needs-approval')
+    const file = JSON.parse(await fs.readFile(path.join(r.root, '.mcp.json'), 'utf8'))
+    assert.equal(file.other, 1, 'the rest of the file stays')
+    assert.deepEqual(file.mcpServers.web, { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${TOKEN}' } })
+    assert.ok(file.mcpServers.kept)
+
+    // Trusted: the person wrote it here, so it starts without a second approval.
+    assert.equal((await r.workspaces.act(r.root, { type: 'trust' })).ok, true)
+    const scope = await r.open()
+    const trusted = await act(r, { type: 'add', name: 'web2', scope: 'project', setup: { type: 'stdio', command: 'w', args: [], env: { MODE: 'fast' } } })
+    assert.equal(trusted.ok, true, trusted.ok ? '' : trusted.reason)
+    assert.equal(view(trusted.report, 'web2').state, 'connected', JSON.stringify([trusted.ok && trusted.note, view(trusted.report, 'web2').detail, trusted.report.broken]))
+    await scope.external.ready(signal())
+    assert.ok(names(scope).includes('mcp__web2__echo'), names(scope).join(', '))
+  })
+
+  it('takes a server out of the files of its scope, and the approval of a project’s with it', async () => {
+    const r = await rig({
+      user: { mine: { command: 'x' } },
+      project: { theirs: { command: 'y' } },
+      files: { '.encode/mcp.json': json({ mcpServers: { theirs: { command: 'z' } } }) },
+      servers: { mine: listing('echo'), theirs: listing('push') },
+    })
+    const scope = await r.open()
+    await scope.external.ready(signal())
+    assert.deepEqual(names(scope), ['mcp__mine__echo'])
+    const gone = await act(r, { type: 'remove', name: 'mine' })
+    assert.equal(gone.ok, true)
+    assert.deepEqual(names(scope), [])
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(r.home, '.encode', 'mcp.json'), 'utf8')), { mcpServers: {} })
+
+    const project = await act(r, { type: 'remove', name: 'theirs' })
+    assert.equal(project.ok, true)
+    assert.equal(project.report.servers.length, 0, 'the copy in .mcp.json does not come back')
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(r.root, '.mcp.json'), 'utf8')).mcpServers, {})
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(r.root, '.encode', 'mcp.json'), 'utf8')).mcpServers, {})
+  })
+
+  it('refuses a server it cannot use, and a file it cannot read, without writing', async () => {
+    for (const setup of [{ type: 'stdio', command: '', args: [], env: {} }, { type: 'http', url: 'ftp://x', headers: {} }, { type: 'stdio', command: 'x', args: [], env: { 'BAD NAME': '1' } }, { type: 'stdio', command: 'x', url: 'https://x' }, 'npx']) {
+      assert.notEqual(mcpActionProblem({ type: 'add', name: 'x', scope: 'user', setup }), null, JSON.stringify(setup))
+    }
+    assert.notEqual(mcpActionProblem({ type: 'add', name: 'x', scope: 'local', setup: { type: 'stdio', command: 'x', args: [], env: {} } }), null)
+    const r = await rig({ files: { '.mcp.json': '{ "mcpServers": ' } })
+    const refused = await act(r, { type: 'add', name: 'x', scope: 'project', setup: { type: 'stdio', command: 'x', args: [], env: {} } })
+    assert.equal(refused.ok, false)
+    assert.match(refused.ok ? '' : refused.reason, /not valid JSON/)
+    assert.equal(await fs.readFile(path.join(r.root, '.mcp.json'), 'utf8'), '{ "mcpServers": ')
+  })
+})

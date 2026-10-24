@@ -123,7 +123,8 @@ export interface Surface {
   /** The entry is final: show it and store it. */
   settle(entry: ConversationEntry): void
   delta(entry: ConversationEntry, text: string): void
-  usage(usage: Usage): void
+  /** A model call's measure; `model` names the model that answered, for the Usage page by model. */
+  usage(usage: Usage, model?: string): void
   fileChanged(path: string): void
   /** Resolves approved when the user approves; not approved when they refuse or the signal aborts. */
   approve(prompt: ApprovalPrompt, signal: AbortSignal): Promise<ApprovalResult>

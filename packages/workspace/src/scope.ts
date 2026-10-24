@@ -36,7 +36,7 @@ import { rememberRules } from './remember'
 import { reportOn, type WorkspaceReport } from './report'
 import { recordingHooks, sessionCheckpoints } from './rewind'
 import { actOnSandbox, type SandboxAction, type SandboxOutcome } from './sandbox-actions'
-import { sandboxReport, type SandboxReport } from './sandbox-report'
+import { sandboxReport, withMarks, type SandboxReport } from './sandbox-report'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /** How long a change of the editor's can be taken back, and a preview of one applied. */
@@ -588,7 +588,7 @@ export class Workspaces {
   async sandboxReport(root: string): Promise<SandboxReport> {
     const config = this.config(await realPathOf(root))
     const snapshot = await config.refresh()
-    return sandboxReport(this.options.sandbox, snapshot, this.home, this.platform, this.shellFor(snapshot))
+    return withMarks(sandboxReport(this.options.sandbox, snapshot, this.home, this.platform, this.shellFor(snapshot)), this.options.sandbox)
   }
 
   /** The shell the agent's commands run in for a folder's settings (PowerShell when they ask for it on Windows). */

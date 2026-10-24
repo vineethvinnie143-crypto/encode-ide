@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { McpReport, McpServerView } from '@shared/types'
-import { approvalWarning, bannerKey, cardActions, environmentLine, mcpBannerOf, offerLine, summaryLine, waitingServers } from './mcp'
+import { approvalWarning, bannerKey, cardActions, environmentLine, mcpBannerOf, newServerOf, offerLine, parsePairs, splitCommandLine, summaryLine, waitingServers, writtenValues } from './mcp'
 
 const server = (patch: Partial<McpServerView> = {}): McpServerView => ({
   name: 'github',
@@ -111,5 +111,31 @@ describe('the approval card', () => {
     assert.equal(environmentLine(server()), '')
     assert.equal(environmentLine(server({ envNames: ['TOKEN'], variables: ['GITHUB_TOKEN'] })), 'It sets TOKEN, and reads GITHUB_TOKEN from your environment.')
     assert.equal(environmentLine(server({ headerNames: ['Authorization'] })), 'It sends the headers Authorization.')
+  })
+})
+
+describe('the Add server form', () => {
+  it('splits a command line at spaces, keeps quoted words whole, and says what is wrong', () => {
+    assert.deepEqual(splitCommandLine('npx -y @modelcontextprotocol/server-filesystem .'), ['npx', '-y', '@modelcontextprotocol/server-filesystem', '.'])
+    assert.deepEqual(splitCommandLine(`  "C:\\Program Files\\node\\node.exe"  server.js --name 'my server' ""`), ['C:\\Program Files\\node\\node.exe', 'server.js', '--name', 'my server', ''])
+    assert.match(String(splitCommandLine('node "x')), /double quote is not closed/)
+    assert.equal(typeof splitCommandLine('   '), 'string')
+  })
+
+  it('reads variables and headers one per line', () => {
+    assert.deepEqual(parsePairs('TOKEN=${GITHUB_TOKEN}\n\nMODE = a=b\r\n', '='), { TOKEN: '${GITHUB_TOKEN}', MODE: 'a=b' })
+    assert.deepEqual(parsePairs('Authorization: Bearer ${TOKEN}', ':'), { Authorization: 'Bearer ${TOKEN}' })
+    assert.match(String(parsePairs('nothing here', '=')), /Line 1 needs NAME=value/)
+    assert.match(String(parsePairs('A=1\nA=2', '=')), /twice/)
+  })
+
+  it('makes the entry, and names the values a project’s file would show to everyone', () => {
+    const program = newServerOf({ kind: 'stdio', commandLine: 'npx -y server', env: 'TOKEN=abc\nHOME_DIR=${HOME}', url: '', headers: '' })
+    assert.deepEqual(program, { type: 'stdio', command: 'npx', args: ['-y', 'server'], env: { TOKEN: 'abc', HOME_DIR: '${HOME}' } })
+    assert.deepEqual(writtenValues(program as Exclude<typeof program, string>), ['TOKEN'])
+    const web = newServerOf({ kind: 'http', commandLine: '', env: '', url: ' https://mcp.example.com/mcp ', headers: 'Authorization: Bearer ${TOKEN:-x}' })
+    assert.deepEqual(web, { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${TOKEN:-x}' } })
+    assert.deepEqual(writtenValues(web as Exclude<typeof web, string>), [])
+    assert.match(String(newServerOf({ kind: 'sse', commandLine: '', env: '', url: '', headers: '' })), /address/)
   })
 })

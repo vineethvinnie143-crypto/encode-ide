@@ -435,6 +435,7 @@ const NO_CONFIG: HostConfig = {
   policy: 'workspace-write',
   maxSteps: 30,
   maxGoalRounds: 8,
+  contextCap: 200_000,
   computer: false,
   // Nothing starts before the settings arrive.
   languageServers: false,

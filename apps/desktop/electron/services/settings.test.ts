@@ -137,6 +137,19 @@ describe('SettingsService keys', () => {
   })
 })
 
+describe('SettingsService context size', () => {
+  it('summarizes past 200k tokens until the person picks one of the offered sizes, and takes no other', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.get().contextCap, 200_000)
+    assert.equal(settings.save({ contextCap: 400_000 }).contextCap, 400_000)
+    assert.equal(settings.save({ contextCap: 123_456 }).contextCap, 400_000, 'a size not offered is not taken')
+    assert.equal(settings.save({ contextCap: Number.POSITIVE_INFINITY }).contextCap, 400_000)
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().contextCap, 400_000, 'kept across a restart')
+    fs.writeFileSync(file(), JSON.stringify({ ...JSON.parse(onDisk()), contextCap: 'all of it' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().contextCap, 200_000, 'a file with anything else goes back to the default')
+  })
+})
+
 describe('SettingsService appearance', () => {
   it('starts dark with the Signal blue accent, in the system fonts', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')

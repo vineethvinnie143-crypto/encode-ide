@@ -297,8 +297,8 @@ export class AttemptSurface implements Surface {
     entry.text = (entry.text ?? '') + text
   }
 
-  usage(usage: Parameters<Surface['usage']>[0]): void {
-    this.parent.usage(usage)
+  usage(usage: Parameters<Surface['usage']>[0], model?: string): void {
+    this.parent.usage(usage, model)
   }
 
   // The project's files did not change: an editor showing them has nothing to reload.

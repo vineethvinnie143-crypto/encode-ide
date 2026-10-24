@@ -59,6 +59,7 @@ describe('a session', () => {
     assert.equal(usage.calls, 2)
     assert.ok(usage.inputTokens > 1_000 && usage.outputTokens > 0)
     assert.equal(usage.cost, 0.005)
+    assert.deepEqual(usage.models, { scripted: { calls: 2, inputTokens: usage.inputTokens, cachedTokens: usage.cachedTokens, outputTokens: usage.outputTokens, cost: 0.005 } }, 'by the model that answered')
     const live = h.of('entry').filter((event) => event.entry.kind === 'user' && event.entry.usage)
     assert.deepEqual(live.map((event) => event.entry.usage!.calls), [1, 2], 'shown after each call')
     await h.reopen()

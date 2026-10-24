@@ -25,6 +25,7 @@ import type {
   SessionGoal,
   SessionPatch,
   SessionSummary,
+  SessionUsage,
   SuggestionOutcome,
   BestOutcome,
   TodoItem,
@@ -36,6 +37,8 @@ import type { TurnRecordOutcome } from './turn-report'
 
 export type HostRequests = {
   sessions: { params: undefined; result: SessionSummary[] }
+  /** What each session's requests used, by the local day they began and by model (Settings > Usage). */
+  usage: { params: undefined; result: SessionUsage[] }
   create: { params: { projectRoot?: string | null; title?: string } | undefined; result: SessionSummary }
   update: { params: { sessionId: string; patch: SessionPatch }; result: SessionSummary | null }
   statuses: { params: undefined; result: Record<string, AgentStatus> }
@@ -258,6 +261,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   }
 
   on('sessions', () => host.sessions())
+  on('usage', () => host.usage())
   on('create', (params) => host.create(params ?? {}))
   on('update', ({ sessionId, patch }) => host.update(sessionId, patch))
   on('statuses', () => host.statuses())
@@ -311,6 +315,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
 /** `AgentHost`'s methods over a port. */
 export interface HostClient {
   sessions(): Promise<SessionSummary[]>
+  usage(): Promise<SessionUsage[]>
   create(options?: { projectRoot?: string | null; title?: string }): Promise<SessionSummary>
   update(sessionId: string, patch: SessionPatch): Promise<SessionSummary | null>
   statuses(): Promise<Record<string, AgentStatus>>
@@ -355,6 +360,7 @@ export interface HostClient {
 export function createHostClient(caller: HostCaller): HostClient {
   return {
     sessions: () => caller.request('sessions'),
+    usage: () => caller.request('usage'),
     create: (options) => caller.request('create', options),
     update: (sessionId, patch) => caller.request('update', { sessionId, patch }),
     statuses: () => caller.request('statuses'),

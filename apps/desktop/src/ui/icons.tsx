@@ -245,6 +245,12 @@ export const Bot = icon(
     <circle cx="12" cy="4.9" r="1.4" />
   </>,
 )
+/** A person: head and shoulders. */
+export const UserRound = icon('UserRound', <path d="M12 12.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4.5 20a7.5 7.5 0 0 1 15 0" />)
+/** Three bars on a base line. */
+export const BarChart = icon('BarChart', <path d="M4 20h16 M7 16.5V11 M12 16.5V6 M17 16.5v-3.5" />)
+/** The pointer of a mouse, with its tail. */
+export const MousePointer = icon('MousePointer', <path d="M5.5 4.5 18 10l-5.5 1.8L10.5 18z M12.5 11.8l5 5" />)
 export const Puzzle = icon('Puzzle', <path d="M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M16.5 13.5v6 M13.5 16.5h6" />)
 export const Layers = icon('Layers', <path d="M12 3.5 3.5 8 12 12.5 20.5 8z M3.5 12 12 16.5 20.5 12 M3.5 16 12 20.5 20.5 16" />)
 export const Bolt = icon('Bolt', <path d="M13 3 5 13h6l-1 8 8-10h-6z" />)

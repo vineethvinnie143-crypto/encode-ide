@@ -349,6 +349,29 @@ the session and say it finished, without what the agent wrote. Clicking it shoul
 What is most useful to hear: a setting the search does not find by the word you would use, a change that did not stick,
 a notice that did not show (and whether Windows' Focus assist was on), and the computer sleeping while the agent worked.
 
+### The other pages
+
+- **Usage** sums what your requests used over 7, 30 or 90 days: cost, tokens and requests, a chart by day, and tables by
+  model and by project. Compare a day's cost with your provider's dashboard.
+- **Personalization** holds your own instructions (`~/.encode/ENCODE.md`). Write "Answer in one short paragraph", save,
+  and ask something: the reply should follow it. Edit the file in Notepad while the page is open, then save on the
+  page: it should say the file changed and show what it holds now, not overwrite your edit. For a project, the page
+  names the file the agent reads (ENCODE.md, AGENTS.md or CLAUDE.md) or makes ENCODE.md.
+- **Skills and agents** (also the rail button) lists the built-in, your own and the project's. Make an agent that only
+  reads, then ask the agent to "use my-agent to look at X": it should hand the work over. Remove it: it goes to the
+  Recycle Bin.
+- **Appearance → Colours**: make a theme from the dark or light theme and change a few colours; the app follows as you
+  pick. A warning shows when text gets hard to read. Export it, import the file back, and switch back to eNCode.
+- **MCP servers → Add a server**: add `npx -y @modelcontextprotocol/server-filesystem .` for all your projects; it
+  should start and list its tools. Add one for this project with a header like `Authorization: Bearer abc`: the form
+  should warn that the value is written into `.mcp.json` for everyone. Remove both.
+- **Sandbox** lists the folders the sandbox marked. **Remove marks** on a project you no longer use should take them off
+  (check with `icacls <folder>`: no `Mandatory Label\Low`).
+- **Agent → Limits → Context size** caps how much the agent plans to fit in one request.
+
+What is most useful to hear: a usage number that is plainly wrong, a theme colour that leaves something unreadable,
+and an MCP server that the form added but that did not start.
+
 ## Work in the background
 
 - Ask for something that runs a while next to the work: "start the dev server in the background and watch its log for

@@ -135,6 +135,19 @@ export class Sandbox {
     return this.engine?.unsupported?.(file)
   }
 
+  /** The folders marked for the sandbox on this computer, for the person to see and take back. */
+  async marks(): Promise<string[]> {
+    return (await this.engine?.marked?.()) ?? []
+  }
+
+  /** Takes the marks off every folder, or only these. A folder is marked again the next time a command runs there confined. */
+  async releaseMarks(folders?: readonly string[]): Promise<string[]> {
+    if (!this.engine?.release) return []
+    const done = await this.engine.release(folders)
+    this.changed()
+    return done
+  }
+
   onChange(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)

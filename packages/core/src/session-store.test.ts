@@ -274,6 +274,43 @@ describe('marks and summaries', () => {
     assert.equal(summary.pinned, false)
   })
 
+  it('keeps what each request used by the day it began and by model, out of the list, and rebuilds it for an index without it', async () => {
+    const { store, dir } = await fresh()
+    const log = await store.create({ root: '/work', title: 'Costs' })
+    const day = new Date(2026, 9, 24, 9, 30).getTime()
+    const next = new Date(2026, 9, 25, 23, 50).getTime()
+    const models = { 'deepseek-chat': { calls: 2, inputTokens: 900, cachedTokens: 400, outputTokens: 90, cost: 0.002 }, 'claude-sonnet-4.5': { calls: 1, inputTokens: 100, cachedTokens: 0, outputTokens: 10 } }
+    await log.append({ type: 'entry', entry: { id: 'u1', kind: 'user', text: 'one', createdAt: day, usage: { calls: 3, inputTokens: 1000, cachedTokens: 400, outputTokens: 100, models } } })
+    // Stored before models were kept: its calls count under "".
+    await log.append({ type: 'entry', entry: { id: 'u2', kind: 'user', text: 'two', createdAt: day + 60_000, usage: { calls: 1, inputTokens: 50, cachedTokens: 0, outputTokens: 5, cost: 0.001 } } })
+    await log.append({ type: 'entry', entry: { id: 'u3', kind: 'user', text: 'three', createdAt: next, usage: { calls: 1, inputTokens: 10, cachedTokens: 0, outputTokens: 1, cost: 0.5, models: { 'deepseek-chat': { calls: 1, inputTokens: 10, cachedTokens: 0, outputTokens: 1, cost: 0.5 } } } } })
+    await log.append({ type: 'entry', entry: { id: 'u4', kind: 'user', text: 'nothing sent', createdAt: next } })
+
+    const [usage] = await store.usage()
+    assert.equal(usage.title, 'Costs')
+    assert.equal(usage.projectRoot, '/work')
+    assert.deepEqual(Object.keys(usage.days), ['2026-10-24', '2026-10-25'])
+    const first = usage.days['2026-10-24']
+    assert.equal(first.requests, 2)
+    // The day sums its models: DeepSeek's cost counts though the other model in that request reported none.
+    assert.deepEqual({ calls: first.calls, inputTokens: first.inputTokens, cost: first.cost, unpriced: first.unpriced }, { calls: 4, inputTokens: 1050, cost: 0.003, unpriced: 1 })
+    assert.deepEqual(first.models['deepseek-chat'], { calls: 2, inputTokens: 900, cachedTokens: 400, outputTokens: 90, cost: 0.002, unpriced: 0 })
+    assert.deepEqual(first.models['claude-sonnet-4.5'], { calls: 1, inputTokens: 100, cachedTokens: 0, outputTokens: 10, cost: 0, unpriced: 1 })
+    assert.deepEqual(first.models[''], { calls: 1, inputTokens: 50, cachedTokens: 0, outputTokens: 5, cost: 0.001, unpriced: 0 })
+    assert.equal(usage.days['2026-10-25'].cost, 0.5)
+    assert.equal('usage' in (await store.list())[0]!, false, 'the list leaves it out')
+
+    await store.dispose()
+    const index = JSON.parse(await fs.readFile(path.join(dir, 'index.json'), 'utf8')) as { sessions: Record<string, unknown>[] }
+    delete index.sessions[0]!.usage
+    await fs.writeFile(path.join(dir, 'index.json'), JSON.stringify(index))
+    const later = new Date(Date.now() + 60_000)
+    await fs.utimes(path.join(dir, 'index.json'), later, later)
+    const rebuilt = createSessionStore({ dir })
+    stores.push(rebuilt)
+    assert.deepEqual((await rebuilt.usage())[0]!.days, usage.days)
+  })
+
   it('rebuilds an index entry written before summaries existed', async () => {
     const { store, dir } = await fresh()
     const log = await store.create({ root: '/work', title: 'Old' })

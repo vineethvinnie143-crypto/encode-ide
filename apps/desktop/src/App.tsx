@@ -8,7 +8,6 @@ import { alertGate, toastOf } from './components/models/alerts'
 import ConnectModelDialog from './components/models/ConnectModelDialog'
 import BottomPanel from './components/panels/BottomPanel'
 import SidePanel from './components/panels/SidePanel'
-import PluginsModal from './components/PluginsModal'
 import PromptDialog from './components/PromptDialog'
 import QuickOpen from './components/QuickOpen'
 import SessionHeader from './components/SessionHeader'
@@ -53,7 +52,6 @@ async function refreshOpenTab(path: string): Promise<void> {
 export default function App() {
   const sidebarVisible = useUi((state) => state.sidebarVisible)
   const settingsOpen = useUi((state) => state.settingsOpen)
-  const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const quickOpenOpen = useUi((state) => state.quickOpenOpen)
   const quickOpenId = useUi((state) => state.quickOpenId)
@@ -217,7 +215,6 @@ export default function App() {
       </div>
 
       {quickOpenOpen && <QuickOpen key={quickOpenId} />}
-      {pluginsOpen && <PluginsModal />}
       {automationOpen && <AutomationModal />}
       <ConnectModelDialog />
       <RewindDialog />

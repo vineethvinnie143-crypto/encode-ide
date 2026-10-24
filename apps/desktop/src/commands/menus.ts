@@ -55,7 +55,7 @@ export const MENUS: readonly MenuSpec[] = [
       'view.review',
       'view.terminal',
       'view.problems',
-      'view.plugins',
+      'view.skills',
       'view.automations',
       '-',
       'panel.newTab',

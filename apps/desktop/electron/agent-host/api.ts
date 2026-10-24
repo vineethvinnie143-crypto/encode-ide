@@ -21,6 +21,8 @@ export interface HostConfig {
   policy: ApprovalPolicy
   maxSteps: number
   maxGoalRounds: number
+  /** Tokens a conversation may reach before older parts are summarized; see Settings.contextCap. */
+  contextCap: number
   /** The Computer tool is offered to the agent; see Settings.computer. */
   computer: boolean
   /** What answers the model calls: the scripted demo, nothing yet, or real models through the router. */

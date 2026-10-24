@@ -232,7 +232,7 @@ export function planReminder(gaps: readonly string[]): string {
 
 const MAX_OUTPUT_TOKENS = 16_000
 
-export type ReviewerAnswer = { ok: true; text: string; usage: Usage } | { ok: false; why: string }
+export type ReviewerAnswer = { ok: true; text: string; usage: Usage; model?: string } | { ok: false; why: string }
 
 /** One call to the Review role (or `role`), without tools, given up after `timeoutMs`; a model that cannot answer says why. */
 export async function askReviewer(
@@ -259,7 +259,7 @@ export async function askReviewer(
       ...(call.sticky ? { sticky: call.sticky } : {}),
       signal: AbortSignal.any([call.signal, late.signal]),
     })
-    if (outcome.kind === 'done') return { ok: true, text: messageText(outcome.message), usage: outcome.usage }
+    if (outcome.kind === 'done') return { ok: true, text: messageText(outcome.message), usage: outcome.usage, ...(outcome.message.origin ? { model: outcome.message.origin.model } : {}) }
     if (outcome.kind === 'paused') return { ok: false, why: outcome.message }
     return { ok: false, why: 'the change is too large for its model to read at once' }
   } catch (error) {

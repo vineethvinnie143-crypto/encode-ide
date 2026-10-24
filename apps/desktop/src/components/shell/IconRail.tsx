@@ -33,12 +33,11 @@ function RailButton({
   )
 }
 
-/** The 52 px strip of places: Home, Automations, Review, Plugins and skills, Models and roles, More, then Settings and you. */
+/** The 52 px strip of places: Home, Automations, Review, Skills and agents, Models and roles, More, then Settings and you. */
 export default function IconRail() {
   useShortcuts()
   const settingsOpen = useUi((state) => state.settingsOpen)
   const settingsSection = useUi((state) => state.settingsSection)
-  const pluginsOpen = useUi((state) => state.pluginsOpen)
   const automationOpen = useUi((state) => state.automationOpen)
   const sidebarMode = useUi((state) => state.sidebarMode)
   const reviewOpen = usePanels((state) => state.side.layout !== 'hidden' && activeKind(state.side) === 'review')
@@ -51,7 +50,7 @@ export default function IconRail() {
 
   const ui = useUi.getState
   const waiting = attentionCount(sessions, statuses)
-  const modalOpen = settingsOpen || pluginsOpen || automationOpen
+  const modalOpen = settingsOpen || automationOpen
   const modelsShown = settingsOpen && (settingsSection === 'models' || settingsSection === 'roles')
   const shortcut = (id: string) => commandRegistry.shortcut(id)
 
@@ -84,7 +83,6 @@ export default function IconRail() {
           // A full-width side panel covers the thread; Home is the thread.
           if (usePanels.getState().side.layout === 'full') usePanels.getState().setLayout('split')
           ui().setSettingsOpen(false)
-          ui().setPluginsOpen(false)
           ui().setAutomationOpen(false)
         }}
       >
@@ -104,7 +102,7 @@ export default function IconRail() {
       >
         <GitPullRequest size={20} />
       </RailButton>
-      <RailButton label="Plugins and skills" active={pluginsOpen} onClick={() => ui().setPluginsOpen(true)}>
+      <RailButton label="Skills and agents" active={settingsOpen && settingsSection === 'skills'} onClick={() => ui().openSettings('skills')}>
         <Puzzle size={20} />
       </RailButton>
       <RailButton label="Models and roles" active={modelsShown} onClick={() => ui().openSettings('models')}>

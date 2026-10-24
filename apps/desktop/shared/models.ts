@@ -52,6 +52,11 @@ export function withEffort(efforts: Partial<Record<ModelRole, ReasoningEffort>>,
 }
 
 /** The free models of the connection that serves them; the router spells it the same way. */
+/** The sizes Settings > Agent offers for Settings.contextCap; core compacts before a conversation passes it. */
+export const CONTEXT_CAPS: readonly number[] = [64_000, 128_000, 200_000, 400_000, 1_000_000]
+export const DEFAULT_CONTEXT_CAP = 200_000
+export const isContextCap = (value: unknown): value is number => typeof value === 'number' && CONTEXT_CAPS.includes(value)
+
 export const FREE_REF = '@free'
 
 /** Most models one role can list. */

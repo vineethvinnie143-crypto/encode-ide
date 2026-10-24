@@ -682,7 +682,7 @@ export class AgentLoop {
             (markup) => wasRead(o.conversation.messages(), markup),
           )) ||
         outcome.message
-      o.surface.usage(usage)
+      o.surface.usage(usage, outcome.message.origin?.model)
       if (isEmptyReply(message)) {
         if (finish === 'content_filter') return { kind: 'end', end: { kind: 'failed', code: 'refused', message: "The provider's safety system stopped the reply." } }
         if (empties++ < MAX_EMPTY_RETRIES) continue
@@ -897,7 +897,7 @@ export class AgentLoop {
         signal,
       })
       if (outcome.kind === 'done') {
-        o.surface.usage(outcome.usage)
+        o.surface.usage(outcome.usage, outcome.message.origin?.model)
         const text = messageText(outcome.message).trim()
         if (text) return { text: text.slice(0, MAX_SUMMARY_CHARS), byModel: true }
       }
@@ -1209,7 +1209,7 @@ export class AgentLoop {
       timeoutMs: SECOND_LOOK_TIMEOUT_MS,
     })
     entry.tool = { ...entry.tool!, state: 'running' }
-    if (answer.ok) o.surface.usage(answer.usage)
+    if (answer.ok) o.surface.usage(answer.usage, answer.model)
     const looked = answer.ok ? parseSecondLook(answer.text) : undefined
     if (looked?.run) {
       entry.tool = { ...entry.tool!, review: { by: 'second-look', verdict: 'approved', reason: looked.reason || `it ${why}, and the request asks for it` } }
@@ -1348,7 +1348,7 @@ export class AgentLoop {
       timeoutMs: CONVENTIONS_TIMEOUT_MS,
     })
     if (!answer.ok || signal.aborted) return
-    o.surface.usage(answer.usage)
+    o.surface.usage(answer.usage, answer.model)
     const offered = new Set((o.suggested?.() ?? []).map((line) => line.toLowerCase()))
     const lines = parseConventions(answer.text, text)?.filter((line) => !offered.has(line.toLowerCase()))
     if (!lines?.length || signal.aborted) return
@@ -1728,7 +1728,7 @@ export class AgentLoop {
       notice(`The Reviewer could not read the changes: ${lowerFirst(answer.why.replace(/\.$/, ''))}.`)
       return null
     }
-    o.surface.usage(answer.usage)
+    o.surface.usage(answer.usage, answer.model)
     let review
     try {
       review = parseCompletion(answer.text, input.files.map((file) => file.path))
@@ -1763,7 +1763,7 @@ export class AgentLoop {
       notice(`The Reviewer could not read the plan (${lowerFirst(answer.why.replace(/\.$/, ''))}), so it comes to you as it is.`)
       return null
     }
-    o.surface.usage(answer.usage)
+    o.surface.usage(answer.usage, answer.model)
     const gaps = parseGaps(answer.text)
     if (gaps === undefined) {
       notice("The Reviewer's answer about the plan could not be read, so it comes to you as it is.")

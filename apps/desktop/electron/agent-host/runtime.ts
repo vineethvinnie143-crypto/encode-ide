@@ -67,6 +67,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   policy: config.policy,
   maxSteps: config.maxSteps,
   maxGoalRounds: config.maxGoalRounds,
+  contextCap: config.contextCap,
   computer: config.computer,
   errorGate: config.errorGate,
   guide: config.guide,

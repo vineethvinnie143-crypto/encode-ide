@@ -1,3 +1,5 @@
+import { normalizeThemes, sameTheme, type CustomTheme } from './themes'
+
 /**
  * How eNCode looks. Stored with the settings, applied by the renderer as
  * data attributes and CSS variables on <html> (see src/theme/tokens.css) and
@@ -31,6 +33,10 @@ export interface Appearance {
   uiSize: number
   /** Size of code in replies, diffs and tool output in px. */
   codeSize: number
+  /** The id of the person's own theme in use, which then decides light or dark and the accent; '' for the built-in theme. */
+  theme: string
+  /** The person's own themes (shared/themes.ts). */
+  themes: CustomTheme[]
 }
 
 export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
@@ -56,6 +62,8 @@ export const DEFAULT_APPEARANCE: Appearance = {
   codeFont: FONT_SYSTEM,
   uiSize: 14,
   codeSize: 12,
+  theme: '',
+  themes: [],
 }
 
 /** --chrome of each theme: the window shows it before the first frame, so a light theme never flashes dark. */
@@ -108,6 +116,8 @@ export function normalizeSize(value: unknown, allowed: readonly number[], fallba
 /** A valid Appearance from anything: unknown fields are dropped, bad values fall back to `base`. */
 export function normalizeAppearance(value: unknown, base: Appearance = DEFAULT_APPEARANCE): Appearance {
   const input = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const themes = input.themes === undefined ? base.themes : normalizeThemes(input.themes)
+  const theme = typeof input.theme === 'string' ? input.theme : base.theme
   return {
     mode: oneOf(input.mode, THEME_MODES, base.mode),
     accent: oneOf(input.accent, ACCENTS, base.accent),
@@ -118,7 +128,14 @@ export function normalizeAppearance(value: unknown, base: Appearance = DEFAULT_A
     codeFont: normalizeFont(input.codeFont, base.codeFont),
     uiSize: normalizeSize(input.uiSize, UI_SIZES, base.uiSize),
     codeSize: normalizeSize(input.codeSize, CODE_SIZES, base.codeSize),
+    theme: themes.some((candidate) => candidate.id === theme) ? theme : '',
+    themes,
   }
+}
+
+/** The person's own theme in use, if any. */
+export function activeTheme(appearance: Pick<Appearance, 'theme' | 'themes'>): CustomTheme | null {
+  return (appearance.theme && appearance.themes.find((theme) => theme.id === appearance.theme)) || null
 }
 
 export function resolveTheme(mode: ThemeMode, systemPrefersDark: boolean): ResolvedTheme {
@@ -136,7 +153,10 @@ export function sameAppearance(a: Appearance, b: Appearance): boolean {
     a.uiFont === b.uiFont &&
     a.codeFont === b.codeFont &&
     a.uiSize === b.uiSize &&
-    a.codeSize === b.codeSize
+    a.codeSize === b.codeSize &&
+    a.theme === b.theme &&
+    a.themes.length === b.themes.length &&
+    a.themes.every((theme, index) => sameTheme(theme, b.themes[index]!))
   )
 }
 
@@ -181,7 +201,18 @@ export function fontVariables(appearance: Appearance): Record<string, string> {
  * before the settings arrive over IPC.
  */
 export function appearanceParams(appearance: Appearance): Record<keyof Appearance, string> {
-  return { ...appearance, uiSize: String(appearance.uiSize), codeSize: String(appearance.codeSize) }
+  // Only the theme in use: the first frame needs no other, and the rest arrive with the settings.
+  const theme = activeTheme(appearance)
+  return { ...appearance, uiSize: String(appearance.uiSize), codeSize: String(appearance.codeSize), theme: theme?.id ?? '', themes: theme ? JSON.stringify([theme]) : '' }
+}
+
+function themesParam(text: string | null): unknown {
+  if (!text) return []
+  try {
+    return JSON.parse(text)
+  } catch {
+    return []
+  }
 }
 
 /** Reads what appearanceParams wrote; anything missing or unknown falls back to the default. */
@@ -196,5 +227,7 @@ export function appearanceFromParams(params: { get(name: string): string | null 
     codeFont: params.get('codeFont'),
     uiSize: params.get('uiSize'),
     codeSize: params.get('codeSize'),
+    theme: params.get('theme') ?? '',
+    themes: themesParam(params.get('themes')),
   })
 }

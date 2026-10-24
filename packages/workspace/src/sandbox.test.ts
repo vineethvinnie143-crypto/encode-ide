@@ -125,6 +125,42 @@ describe('the Sandbox screen', () => {
     }
   })
 
+  it('lists the folders the sandbox marked and takes the marks off, one or all', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace())
+    const dir = await fs.realpath(await tempWorkspace())
+    let marks = ['C:\\work\\shop', 'C:\\work\\api']
+    const released: (readonly string[] | undefined)[] = []
+    const marking: SandboxEngine = {
+      ...engine(),
+      marked: async () => marks,
+      release: async (folders) => {
+        released.push(folders)
+        const done = folders ? marks.filter((folder) => folders.includes(folder)) : marks
+        marks = marks.filter((folder) => !done.includes(folder))
+        return done
+      },
+    }
+    const sandbox = new Sandbox({ platform: process.platform, home, dir, engine: marking, env: {} })
+    await sandbox.start()
+    const workspaces = new Workspaces({ home, platform: process.platform, sandbox })
+    assert.deepEqual((await workspaces.sandboxReport(root)).marked, ['C:\\work\\shop', 'C:\\work\\api'])
+
+    const one = await workspaces.sandboxAct(root, { type: 'unmark', folders: ['C:\\work\\api'] })
+    assert.equal(one.ok, true)
+    assert.deepEqual(one.report.marked, ['C:\\work\\shop'])
+    assert.match(one.ok ? (one.note ?? '') : '', /^Took the marks off C:\\work\\api\. A folder is marked again the next time/)
+    const all = await workspaces.sandboxAct(root, { type: 'unmark' })
+    assert.deepEqual(all.report.marked, [])
+    assert.deepEqual(released, [['C:\\work\\api'], undefined])
+    const none = await workspaces.sandboxAct(root, { type: 'unmark' })
+    assert.match(none.ok ? (none.note ?? '') : '', /No folder had marks/)
+
+    for (const action of [{ type: 'unmark', folders: 'C:\\' }, { type: 'unmark', folders: [''] }, { type: 'unmark', folders: [7] }]) assert.notEqual(sandboxActionProblem(action), null, JSON.stringify(action))
+    // An engine that marks nothing (Linux, macOS) has none to show.
+    assert.deepEqual((await (await setup(undefined, undefined)).workspaces.sandboxReport(root)).marked, [])
+  })
+
   it('tells a listener when the sandbox changes', async () => {
     const { workspaces, sandbox } = await setup(undefined, undefined)
     let calls = 0

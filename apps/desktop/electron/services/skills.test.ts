@@ -76,3 +76,67 @@ describe('the skill list', () => {
     assert.match(skills.read('release'), /ours/)
   })
 })
+
+describe('removing and showing skills', () => {
+  it('moves only the user\'s own skill to the bin, a folder skill as its folder, and shows a file where it is', async () => {
+    const userDir = temp()
+    const root = temp()
+    fs.mkdirSync(path.join(userDir, 'skills', 'release'), { recursive: true })
+    fs.writeFileSync(path.join(userDir, 'skills', 'release', 'SKILL.md'), '---\ndescription: Release\n---\nsteps')
+    fs.writeFileSync(path.join(userDir, 'skills', 'notes.md'), '---\ndescription: Notes\n---\nnotes')
+    fs.mkdirSync(path.join(root, '.encode', 'skills'), { recursive: true })
+    fs.writeFileSync(path.join(root, '.encode', 'skills', 'theirs.md'), '---\ndescription: Theirs\n---\nx')
+    const trashed: string[] = []
+    const shown: string[] = []
+    const skills = new SkillService(() => root, userDir, undefined, (file) => void shown.push(file), async (target) => void trashed.push(target))
+
+    await skills.remove('release')
+    await skills.remove('notes')
+    assert.deepEqual(trashed, [path.join(userDir, 'skills', 'release'), path.join(userDir, 'skills', 'notes.md')])
+    await assert.rejects(skills.remove('theirs'), /not one of your skills/, 'a project\'s skill belongs to the project')
+    skills.reveal('theirs')
+    assert.deepEqual(shown, [path.join(root, '.encode', 'skills', 'theirs.md')])
+  })
+})
+
+describe('the agent list', () => {
+  it('lists the built-in agents, then the user\'s and the project\'s with their files, and makes new ones in the user folder', async () => {
+    const userDir = temp()
+    const root = temp()
+    fs.mkdirSync(path.join(root, '.encode', 'agents'), { recursive: true })
+    fs.writeFileSync(path.join(root, '.encode', 'agents', 'docs.md'), '---\ndescription: Writes the docs\nrole: utility\n---\nBe brief.')
+    const trashed: string[] = []
+    const skills = new SkillService(() => root, userDir, undefined, undefined, async (target) => void trashed.push(target))
+
+    const before = skills.agents()
+    assert.deepEqual(
+      before.filter((agent) => agent.source === 'builtin').map((agent) => agent.name),
+      ['general-purpose', 'Explore', 'Plan', 'Review'],
+    )
+    const docs = before.find((agent) => agent.name === 'docs')!
+    assert.equal(docs.source, 'workspace')
+    assert.equal(docs.role, 'utility')
+    assert.equal(docs.path, path.join(root, '.encode', 'agents', 'docs.md'))
+    assert.equal(before.find((agent) => agent.name === 'Explore')!.path, undefined, 'a built-in agent has no file')
+
+    const made = skills.createAgent({ name: 'security-reviewer', description: 'Reviews\na change for\tinjection.', readOnly: true, role: 'reviewer' })
+    assert.equal(made.source, 'user')
+    assert.equal(made.description, 'Reviews a change for injection.', 'the description is one line')
+    assert.equal(made.role, 'reviewer')
+    assert.ok(made.tools?.includes('Read') && !made.tools.includes('Edit'), 'read-only gets the read-only tools')
+    assert.match(skills.readAgent('security-reviewer'), /What this agent does/)
+    const free = skills.createAgent({ name: 'builder', description: 'Builds things.', readOnly: false })
+    assert.equal(free.tools, undefined, 'an agent that may change files gets every tool')
+
+    assert.throws(() => skills.createAgent({ name: 'Explore', description: 'Mine', readOnly: true }), /already an agent/)
+    assert.throws(() => skills.createAgent({ name: 'docs', description: 'Mine', readOnly: true }), /already an agent/)
+    assert.throws(() => skills.createAgent({ name: '../escape', description: 'x', readOnly: true }), /starts with a letter/)
+    assert.throws(() => skills.createAgent({ name: 'blank', description: '  ', readOnly: true }), /when the main agent/)
+    assert.equal(fs.existsSync(path.join(userDir, 'agents', 'blank.md')), false)
+
+    await skills.removeAgent('builder')
+    assert.deepEqual(trashed, [path.join(userDir, 'agents', 'builder.md')])
+    await assert.rejects(skills.removeAgent('docs'), /not one of your agents/)
+    await assert.rejects(skills.removeAgent('Explore'), /not one of your agents/)
+  })
+})

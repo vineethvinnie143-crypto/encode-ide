@@ -6,6 +6,7 @@
 
 import type { Keybindings } from './keybindings'
 import type { Appearance } from './appearance'
+import type { CustomTheme } from './themes'
 import type { SearchCheckResult, SearchProviderId } from './search'
 import type { EditorIssueDraft } from './editor-issue'
 import type { TurnReportDraft, TurnReportSaved } from './turn-report'
@@ -117,6 +118,8 @@ export interface Settings {
   policy: ApprovalPolicy
   maxSteps: number
   maxGoalRounds: number
+  /** Tokens a conversation may reach before older parts are summarized, whatever the model's window; one of CONTEXT_CAPS. Default 200,000. */
+  contextCap: number
   /**
    * Lets the agent see and operate other applications on this computer (the Computer tool). Off until the person turns it
    * on; each application still asks the first time it is used. Windows only.
@@ -632,6 +635,11 @@ export interface McpReport {
   files: { user: string; project: string; encode: string }
 }
 
+/** A server as the Add form describes it, in the files' own format. */
+export type McpNewServer =
+  | { type: 'stdio'; command: string; args: string[]; env: Record<string, string> }
+  | { type: 'http' | 'sse'; url: string; headers: Record<string, string> }
+
 /** What the MCP screen can do to a folder's servers. */
 export type McpAction =
   | { type: 'approve'; name: string; /** The digest of the setup the person was shown. */ digest: string }
@@ -639,6 +647,10 @@ export type McpAction =
   | { type: 'restart'; name: string }
   | { type: 'turn-off'; name: string }
   | { type: 'turn-on'; name: string }
+  /** Writes the server into ~/.encode/mcp.json (`user`) or the project's .mcp.json (`project`). */
+  | { type: 'add'; name: string; scope: 'user' | 'project'; setup: McpNewServer }
+  /** Takes the server out of every file of its scope that lists it. */
+  | { type: 'remove'; name: string }
 
 /** The servers as they are after an action, with what happened in words. */
 export type McpOutcome = { ok: true; report: McpReport; note?: string } | { ok: false; reason: string; report: McpReport }
@@ -675,6 +687,8 @@ export interface SandboxReport {
   working?: string
   /** Your settings file, where the switches are saved. */
   file: string
+  /** Folders the sandbox changed so that it can confine commands there (Windows: the integrity marks). */
+  marked: string[]
 }
 
 /** What the Sandbox screen can do: change a switch in your own settings, or check the machine again. */
@@ -682,6 +696,8 @@ export type SandboxAction =
   | { type: 'set'; key: 'enabled' | 'required' | 'allowUnsandboxed' | 'caches' | 'powershell'; value: boolean }
   | { type: 'set'; key: 'network'; value: 'allow' | 'block' }
   | { type: 'recheck' }
+  /** Takes the marks off every folder, or only these. */
+  | { type: 'unmark'; folders?: string[] }
 
 /** The sandbox as it is after an action, with what happened in words. */
 export type SandboxOutcome = { ok: true; report: SandboxReport; note?: string } | { ok: false; reason: string; report: SandboxReport }
@@ -1305,6 +1321,45 @@ export interface RequestUsage {
   outputTokens: number
   /** US dollars, when every call reported what it cost. */
   cost?: number
+  /** The same, by the model that answered (the Usage page); absent in requests stored before it was kept. */
+  models?: Record<string, ModelUsage>
+}
+
+/** One model's calls in a request. */
+export interface ModelUsage {
+  calls: number
+  inputTokens: number
+  cachedTokens: number
+  outputTokens: number
+  /** US dollars, when every one of these calls reported what it cost. */
+  cost?: number
+}
+
+/** A sum of model calls on the Usage page: what reported a cost is summed, what did not is counted. */
+export interface UsageTally {
+  calls: number
+  inputTokens: number
+  cachedTokens: number
+  outputTokens: number
+  /** US dollars, of the calls that reported what they cost. */
+  cost: number
+  /** Calls whose cost was not reported. */
+  unpriced: number
+}
+
+/** One day of a session's requests, by the day each began on this computer's clock. */
+export interface DayUsage extends UsageTally {
+  requests: number
+  /** By the model that answered; "" for calls of requests stored before the model was kept. */
+  models: Record<string, UsageTally>
+}
+
+/** What one session's requests used, by day ("2026-10-24"). */
+export interface SessionUsage {
+  id: string
+  title: string
+  projectRoot: string | null
+  days: Record<string, DayUsage>
 }
 
 /** Who looked at a call before it ran (the Reviewer model, the fixed checks before it, or the agent's model asked again before a hard-to-undo command), and the verdict. */
@@ -1363,6 +1418,51 @@ export interface SkillInfo {
   description: string
   source: 'workspace' | 'user'
   path: string
+}
+
+/** An agent the main agent can start with the Task tool: built in, the person's own (~/.encode/agents) or the project's (.encode/agents). */
+export interface AgentDefinitionInfo {
+  name: string
+  description: string
+  source: 'builtin' | 'user' | 'workspace'
+  /** The role whose model it works on; the main agent's when absent. */
+  role?: string
+  /** The only tools it gets; every tool a subagent may have when absent. */
+  tools?: string[]
+  disallowedTools?: string[]
+  maxTurns?: number
+  color?: string
+  /** Its file; built-in agents have none. */
+  path?: string
+}
+
+/** A new agent in the person's folder, from Settings > Skills and agents. */
+export interface AgentCreateInput {
+  name: string
+  /** When the main agent should use it. */
+  description: string
+  /** Only reads and searches, as Explore does. */
+  readOnly: boolean
+  /** The role whose model it works on; the main agent's when absent. */
+  role?: 'main' | 'explore' | 'planner' | 'reviewer' | 'utility'
+}
+
+/** The person's own instructions, ~/.encode/ENCODE.md (Settings > Personalization). */
+export interface InstructionsInfo {
+  path: string
+  text: string
+  exists: boolean
+  /** Past this many characters the middle of the file is cut when it is sent. */
+  sentChars: number
+}
+
+/** A save of the instructions; `changed` when the file was changed elsewhere since it was read, with what it holds now. */
+export type InstructionsSaveOutcome = { ok: true; info: InstructionsInfo } | { ok: false; changed: InstructionsInfo }
+
+/** The open folder's own instructions file, by its path in the folder; `file` null when it has none. */
+export interface ProjectInstructions {
+  root: string
+  file: string | null
 }
 
 export interface PlanRequest {
@@ -1539,6 +1639,10 @@ export interface EncodeApi {
     chooseChatsFolder(): Promise<Settings | null>
     /** Puts the chats folder back to the eNCode folder in Documents. */
     resetChatsFolder(): Promise<Settings>
+    /** Saves one of the person's themes to a file they choose; resolves to the file, or null when cancelled. */
+    exportTheme(theme: CustomTheme): Promise<string | null>
+    /** Reads a theme from a file they choose, under the id given; null when cancelled. */
+    importTheme(id: string): Promise<CustomTheme | null>
   }
   search: {
     /** One search through the provider in use, the way the agent makes it: the answer says whether it works. */
@@ -1592,6 +1696,8 @@ export interface EncodeApi {
   }
   agent: {
     sessions(): Promise<SessionSummary[]>
+    /** What each session's requests used, by day and by model (Settings > Usage). */
+    usage(): Promise<SessionUsage[]>
     /** In the open project by default; `projectRoot: null` makes a standalone session. */
     createSession(options?: { projectRoot?: string | null }): Promise<SessionSummary>
     /** A chat: a session in the chats folder (see Settings.chatsFolder), which is made if it is missing. */
@@ -1659,6 +1765,28 @@ export interface EncodeApi {
     read(name: string): Promise<string>
     create(name: string, description?: string): Promise<SkillInfo>
     openFolder(): Promise<void>
+    /** Moves one of the person's own skills to the bin. */
+    remove(name: string): Promise<void>
+    /** Shows a skill's file in the file manager. */
+    reveal(name: string): Promise<void>
+  }
+  agents: {
+    list(): Promise<AgentDefinitionInfo[]>
+    read(name: string): Promise<string>
+    create(input: AgentCreateInput): Promise<AgentDefinitionInfo>
+    /** Moves one of the person's own agents to the bin. */
+    remove(name: string): Promise<void>
+    reveal(name: string): Promise<void>
+    openFolder(): Promise<void>
+  }
+  instructions: {
+    read(): Promise<InstructionsInfo>
+    /** Saves when the file still holds `base`, the text read. */
+    write(text: string, base: string): Promise<InstructionsSaveOutcome>
+    /** The open folder's instructions file; null when no folder is open. */
+    project(): Promise<ProjectInstructions | null>
+    /** Makes ENCODE.md in the open folder when it has no instructions file; resolves to the file it has. */
+    createProject(): Promise<string>
   }
   permissions: {
     /** The open folder's settings, trust and rules; null when no folder is open. */

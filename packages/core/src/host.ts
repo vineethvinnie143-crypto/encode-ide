@@ -59,6 +59,7 @@ import type {
   RuleScope,
   SessionGoal,
   SessionSummary,
+  SessionUsage,
   SuggestionOutcome,
   BestOutcome,
   TodoItem,
@@ -363,6 +364,11 @@ export class AgentHost {
       list = await this.store.list()
     }
     return list
+  }
+
+  /** What each session's requests used, by day, archived ones included (the Usage page). */
+  async usage(): Promise<SessionUsage[]> {
+    return this.store.usage()
   }
 
   /** A new session in `projectRoot`; by default the open folder, or none. */

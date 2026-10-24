@@ -77,6 +77,7 @@ export function tooBroad(folder: string, input: { env: Readonly<Record<string, s
 
 export interface WindowsEngine extends SandboxEngine {
   helperPath(): string | undefined
+  marked(): Promise<string[]>
   /** Takes the marks off every folder this engine marked (or only these), so that they are as they were. Returns the folders. */
   release(folders?: readonly string[]): Promise<string[]>
 }
@@ -242,6 +243,10 @@ export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngin
         env: mergeEnv(spec.env, policy.env, policy.unset, 'win32'),
         cwd: spec.cwd,
       }
+    },
+
+    async marked(): Promise<string[]> {
+      return Object.values((await current()).folders).map((entry) => entry.path)
     },
 
     release(folders?: readonly string[]): Promise<string[]> {

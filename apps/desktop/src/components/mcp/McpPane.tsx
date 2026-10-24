@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { McpAction, McpReport, McpServerView } from '@shared/types'
 import { api } from '../../api'
-import { STATE_CHIPS, SCOPE_LABELS, approvalWarning, cardActions, environmentLine, offerLine, summaryLine, type McpCardAction } from '../../panels/mcp'
+import { STATE_CHIPS, SCOPE_LABELS, approvalWarning, cardActions, environmentLine, newServerOf, offerLine, summaryLine, writtenValues, type McpCardAction, type McpServerForm } from '../../panels/mcp'
 import { shortPath } from '../../panels/permissions'
 import { useMcp } from '../../stores/mcp'
 import { useUi, type SettingsSection } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { AlertTriangle, RefreshCw } from '../../ui/icons'
+import { Dialog } from '../../ui/Dialog'
+import { AlertTriangle, Plus, RefreshCw } from '../../ui/icons'
 import { Chip } from '../../ui/Pill'
+import { Segmented } from '../../ui/Segmented'
 
 const EXAMPLE = JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '.'] } } }, null, 2)
 
@@ -81,6 +83,7 @@ export default function McpPane({ onOpenTab }: { onOpenTab(section: SettingsSect
 function Overview({ report }: { report: McpReport }) {
   const refresh = useMcp((state) => state.refresh)
   const loading = useMcp((state) => state.loading)
+  const [adding, setAdding] = useState(false)
   return (
     <div className="mcp-overview">
       <div className="mcp-overview-text">
@@ -90,10 +93,136 @@ function Overview({ report }: { report: McpReport }) {
           {report.starting ? ' · starting…' : ''}
         </div>
       </div>
-      <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} busy={loading} onClick={() => void refresh()}>
-        Refresh
-      </Button>
+      <div className="mcp-overview-actions">
+        <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} busy={loading} onClick={() => void refresh()}>
+          Refresh
+        </Button>
+        <Button size="sm" icon={<Plus size={13} />} onClick={() => setAdding(true)}>
+          Add a server
+        </Button>
+      </div>
+      {adding && <AddServer report={report} onClose={() => setAdding(false)} />}
     </div>
+  )
+}
+
+const KINDS = [
+  { value: 'stdio', label: 'Program' },
+  { value: 'http', label: 'HTTP' },
+  { value: 'sse', label: 'SSE' },
+] as const
+const SCOPES = [
+  { value: 'user', label: 'All my projects' },
+  { value: 'project', label: 'This project' },
+] as const
+const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/
+
+/** Settings > MCP > Add a server: written into the file of its scope, which the screen reads again at once. */
+function AddServer({ report, onClose }: { report: McpReport; onClose: () => void }) {
+  const { run, busy } = useRun()
+  const [name, setName] = useState('')
+  const [scope, setScope] = useState<'user' | 'project'>('user')
+  const [form, setForm] = useState<McpServerForm>({ kind: 'stdio', commandLine: '', env: '', url: '', headers: '' })
+  const [problem, setProblem] = useState<string | null>(null)
+  const edit = (patch: Partial<McpServerForm>) => setForm((current) => ({ ...current, ...patch }))
+  const server = useMemo(() => newServerOf(form), [form])
+  const shared = scope === 'project' && typeof server !== 'string' ? writtenValues(server) : []
+  const nameProblem = name && !SERVER_NAME.test(name) ? 'Use letters, digits, - and _, starting with a letter or digit.' : name.includes('__') ? 'A name cannot hold two underscores in a row.' : null
+
+  const add = async () => {
+    if (!name || nameProblem) return setProblem(nameProblem ?? 'Name the server.')
+    if (typeof server === 'string') return setProblem(server)
+    setProblem(null)
+    if (await run('add', { type: 'add', name, scope, setup: server })) onClose()
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add an MCP server"
+      description={scope === 'user' ? `Written into ${shortPath(report.files.user, 56)}; it starts in every project.` : 'Written into this project’s .mcp.json, which Claude Code reads too and everyone who has the project shares.'}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" busy={busy === 'add'} disabled={!name || Boolean(nameProblem)} onClick={() => void add()}>
+            Add the server
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="form-stack mcp-add"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void add()
+        }}
+      >
+        <label className="form-field">
+          <span className="form-label">Name</span>
+          <input className="text-input" data-autofocus value={name} placeholder="github" spellCheck={false} maxLength={48} onChange={(event) => setName(event.target.value.trim())} />
+          <span className={cx('form-help', nameProblem && 'is-problem')}>{nameProblem ?? 'Its tools reach the agent as mcp__name__tool.'}</span>
+        </label>
+        <div className="form-field">
+          <span className="form-label">Where</span>
+          <Segmented label="Where" value={scope} options={[...SCOPES]} onChange={setScope} />
+        </div>
+        <div className="form-field">
+          <span className="form-label">How eNCode reaches it</span>
+          <Segmented label="How eNCode reaches it" value={form.kind} options={[...KINDS]} onChange={(kind) => edit({ kind })} />
+        </div>
+        {form.kind === 'stdio' ? (
+          <>
+            <label className="form-field">
+              <span className="form-label">Command</span>
+              <input className="text-input mcp-add-code" value={form.commandLine} placeholder="npx -y @modelcontextprotocol/server-filesystem ." spellCheck={false} onChange={(event) => edit({ commandLine: event.target.value })} />
+              {typeof server !== 'string' && server.type === 'stdio' ? (
+                <span className="mcp-add-words" aria-label="What it runs, word by word">
+                  {[server.command, ...server.args].map((word, index) => (
+                    <code key={`${index}-${word}`}>{word || '""'}</code>
+                  ))}
+                </span>
+              ) : (
+                <span className="form-help">Quote a word with spaces in it. eNCode runs it in the open folder.</span>
+              )}
+            </label>
+            <label className="form-field">
+              <span className="form-label">Environment variables</span>
+              <textarea className="text-input mcp-add-pairs" rows={3} value={form.env} placeholder={'GITHUB_TOKEN=${GITHUB_TOKEN}'} spellCheck={false} onChange={(event) => edit({ env: event.target.value })} />
+              <span className="form-help">One NAME=value a line. {'${NAME}'} reads a variable of your own when the server starts.</span>
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="form-field">
+              <span className="form-label">Address</span>
+              <input className="text-input mcp-add-code" value={form.url} placeholder="https://mcp.example.com/mcp" spellCheck={false} onChange={(event) => edit({ url: event.target.value })} />
+            </label>
+            <label className="form-field">
+              <span className="form-label">Headers</span>
+              <textarea className="text-input mcp-add-pairs" rows={3} value={form.headers} placeholder={'Authorization: Bearer ${API_TOKEN}'} spellCheck={false} onChange={(event) => edit({ headers: event.target.value })} />
+              <span className="form-help">One Name: value a line. {'${NAME}'} reads a variable of your own when the server connects.</span>
+            </label>
+          </>
+        )}
+        {shared.length > 0 && (
+          <p className="mcp-add-warning" role="status">
+            <AlertTriangle size={14} aria-hidden="true" />
+            <span>
+              {shared.join(', ')} {shared.length === 1 ? 'is' : 'are'} written into .mcp.json as typed, for everyone who has the project. For a token, write {'${NAME}'} and set NAME on your own computer.
+            </span>
+          </p>
+        )}
+        {problem && (
+          <p className="form-problem" role="alert">
+            {problem}
+          </p>
+        )}
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   )
 }
 
@@ -146,6 +275,16 @@ function ServerCard({ server, report, onOpenTab }: { server: McpServerView; repo
     }
   }
 
+  const remove = async () => {
+    const confirmed = await useUi.getState().askConfirm({
+      title: `Remove ${server.name}?`,
+      body: server.scope === 'project' ? `It comes out of ${shortPath(server.file, 56)}, which everyone who has the project shares, and its approval goes with it.` : `It comes out of ${shortPath(server.file, 56)} and stops in every project.`,
+      confirmLabel: 'Remove the server',
+      danger: true,
+    })
+    if (confirmed) await run('remove', { type: 'remove', name: server.name })
+  }
+
   return (
     <section className={cx('mcp-card', `is-${server.state}`)} aria-label={`MCP server ${server.name}`}>
       <header className="mcp-card-top">
@@ -186,8 +325,7 @@ function ServerCard({ server, report, onOpenTab }: { server: McpServerView; repo
         </div>
       )}
 
-      {actions.length > 0 && (
-        <div className="mcp-actions">
+      <div className="mcp-actions">
           {actions.map((action) => (
             <Button
               key={action.kind}
@@ -200,8 +338,10 @@ function ServerCard({ server, report, onOpenTab }: { server: McpServerView; repo
               {action.label}
             </Button>
           ))}
+          <Button size="sm" variant="ghost" className="mcp-remove" busy={busy === 'remove'} disabled={busy !== null} onClick={() => void remove()}>
+            Remove…
+          </Button>
         </div>
-      )}
 
       {server.tools.length > 0 && (
         <details className="mcp-details">
@@ -274,7 +414,7 @@ function Files({ report }: { report: McpReport }) {
           </div>
         ))}
       </div>
-      <div className="perm-add-help">Add or remove a server by editing one of these files; eNCode reads them again as soon as you save. A project’s server never starts until you approve exactly what it starts, and a changed entry has to be approved again.</div>
+      <div className="perm-add-help">You can also edit these files yourself; eNCode reads them again as soon as you save. A project’s server never starts until you approve exactly what it starts, and a changed entry has to be approved again.</div>
     </section>
   )
 }

@@ -2392,3 +2392,47 @@ What is new:
 - The desktop's end-to-end run: the plan from Roles, a run on the fake provider with a check passing on eNCode's own
   Node.js, the scores, and the chips in Roles and the model list. The packaged smoke checks the tasks ship.
 
+
+## The Settings pages: usage, your instructions, skills and agents, themes, MCP servers and the sandbox's marks (UI-6b)
+
+Written with the pull request that adds these pages
+([0102](../adr/0102-the-settings-pages-show-usage-hold-your-instructions-skills-agents-themes-and-servers-and-change-them-in-their-own-files.md)).
+
+What is new:
+
+- the window writes files the agent reads: `~/.encode/ENCODE.md`, a project's ENCODE.md, skills and agents in
+  `~/.encode`, and MCP entries in `~/.encode/mcp.json` or the project's `.mcp.json`;
+- a removed skill or agent goes to the Recycle Bin through the shell;
+- a theme file is read from and written to a place the person picks, and a theme's colours go into the page's styles
+  and the window's frame;
+- the Windows sandbox's marks can be taken off folders from the window;
+- usage by day and model is kept in the session index.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| SP1 | A save from the page overwrites an edit made elsewhere, or a huge file | The instructions save names the text it started from; when the file differs it is not written and the page shows what the file holds. Over 256 KB is refused; line ends are kept; a link is written through and stays a link. | Mitigated |
+| SP2 | A page writes outside the folder it is meant for | Skill and agent names are checked against fixed patterns (letters, digits, - and _); the file is joined under the person's own folder and refused if it resolves outside it. Remove and Show in folder only take an item whose source is the person's own folder; a built-in or project item is refused. The project's instructions file is only made at the project's root, and never over one that exists. | Mitigated |
+| SP3 | A theme file carries something other than colours into the page or the frame | A file over 64 KB is refused; it must be JSON with `eNCodeTheme: 1` and a base of dark or light. Each colour must be `#rrggbb`, or the base's colour is used; unknown keys are dropped. The name is cut to 40 characters with direction, zero-width and control characters removed. Colours reach CSS only as custom property values and the frame only as checked hex. At most 12 themes are kept. | Mitigated |
+| SP4 | A theme makes the app unreadable, so the person cannot find the way back | The editor names every pair under 4.5:1 as it is made; the theme list (with eNCode's own colours first) and Reset stay in their place; High contrast still applies over a theme; deleting the theme, or choosing eNCode, goes back at once. | Mitigated |
+| SP5 | The MCP form starts a program the person did not mean, or a renderer that is not the person's adds and approves one | The entry is checked by the same parser that reads the files (one-line command, NUL-free text, variable names, a usable address and headers) and a taken name is refused. The command is shown word by word before it is added. A renderer able to send this could already approve a waiting server; the window is the person's, and its content runs in the sandboxed renderer of 0010 with no remote code. A project server added in an untrusted folder only waits. | Mitigated |
+| SP6 | A token typed into the form lands in a project's shared `.mcp.json` | The form names each header or variable whose value is written out instead of read from `${NAME}`, before it is added, for a project's file; the report never shows values, only names. | Accepted: the person may mean it |
+| SP7 | Remove marks leaves a folder half open, or takes marks off a folder eNCode did not mark | Only folders in the engine's own record are listed and released, with the protected paths inside them; a failure stops and says which folder; the record is saved after each one. A folder the agent works in again is marked again before the next command. A running command loses write access, which the prompt says. | Mitigated |
+| SP8 | Usage figures mislead | Costs are only what providers reported; calls without a cost are counted as unpriced, not as $0. The page says it counts on this computer only. | Accepted |
+
+### Residual risks
+
+- Anyone who can write the person's `~/.encode` could already change what the agent reads; the pages add no new way in.
+- Usage stays in the session index in the profile, like the sessions themselves; deleting a session removes its usage.
+
+### Verification
+
+- `instructions.test.ts` (refused overwrite, line ends, links, size, project file), `skills.test.ts` (make, remove to the
+  bin, refused names and sources), `themes.test.ts` and `appearance.test.ts` (built-in colours as tokens.css has them,
+  derived steps, contrast, mended colours, file round trip), `mcp.test.ts` (add to each scope, approval when trusted,
+  refused entries and unreadable files, remove from both project files), `sandbox.test.ts` and `engine.test.ts` (marked
+  list, one and all released), `session-store.test.ts` and `usage-model.test.ts` (days and models).
+- The desktop's end-to-end run: Usage after real requests, the context size, instructions saved into ENCODE.md, an
+  agent made from the form, a theme made, changed, exported and imported, and an MCP server added from the form and
+  removed.
