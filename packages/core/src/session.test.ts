@@ -161,7 +161,28 @@ describe('a session', () => {
   it('sends no map for a project of one or two files', async () => {
     const h = await sessionHarness({ files: { 'a.ts': 'export function a() {}\n' }, script: [{ text: 'ok' }] })
     await h.session.start({ text: 'go', mode: 'code' })
-    assert.doesNotMatch(text(h.client.requests[0].payload.messages[0]), /Code map/)
+    assert.doesNotMatch(text(h.client.requests[0].payload.messages[0]), /Code map|Installed versions/)
+  })
+
+  it('names the installed versions of the project\'s dependencies in the first message, and looks up their API', async () => {
+    const h = await sessionHarness({
+      files: {
+        'package.json': JSON.stringify({ dependencies: { zod: '^3.22.0', missing: '^1.0.0' } }),
+        'node_modules/zod/package.json': JSON.stringify({ name: 'zod', version: '3.23.8', types: 'index.d.ts' }),
+        'node_modules/zod/index.d.ts': '/** Parses a value, or throws. */\nexport declare function parse(value: unknown): unknown\n',
+      },
+      env: { natives: () => [{ name: 'GetEntityCoords', params: [{ name: 'entity', type: 'Entity', optional: false }], returns: ['vector3'], doc: ['Where the entity is.'], side: 'client' as const }] },
+      script: [{ calls: [{ name: 'CodeMap', input: { package: 'zod', symbol: 'parse' } }, { name: 'CodeMap', input: { package: 'natives', symbol: 'GetEntityCoords' } }] }, { text: 'ok' }],
+    })
+    await h.session.start({ text: 'validate the form', mode: 'code' })
+    await h.session.start({ text: 'and now?', mode: 'code' })
+    const users = h.client.requests.at(-1)!.payload.messages.filter((message) => message.role === 'user').map(text)
+    assert.match(users[0], /Installed versions of the project's dependencies \(write code for these versions; CodeMap with package shows their API as installed\):\nnpm: zod 3\.23\.8, missing not installed/)
+    assert.doesNotMatch(users.at(-1)!, /Installed versions/)
+    const results = h.client.requests.at(-1)!.payload.messages.flatMap((message) => (message.role === 'user' ? message.content : [])).filter((block) => block.type === 'tool-result').map((block) => JSON.stringify(block))
+    assert.match(results[0], /Parses a value, or throws\./)
+    assert.match(results[0], /export declare function parse\(value: unknown\): unknown/)
+    assert.match(results[1], /GetEntityCoords\(entity: Entity\): vector3/)
   })
 
   it('announces the mode when it changes, the goal while it is active, and attached files', async () => {

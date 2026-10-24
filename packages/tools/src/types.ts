@@ -14,7 +14,7 @@
  *   - `ToolRegistry.register`: tools from outside (MCP), with their own schema.
  */
 import type { IndexedFile } from './codemap/rank'
-import type { LanguageServers } from '@encode/lsp'
+import type { LanguageServers, NativeDoc } from '@encode/lsp'
 import type { ToolDefinition, ToolResultContent } from '@encode/providers'
 import type { DesktopHandle } from './computer/state'
 
@@ -503,6 +503,10 @@ export interface CodeMapSource {
   files(dir: string, signal?: AbortSignal): Promise<{ files: IndexedFile[]; truncated: boolean }>
   /** A tool changed a file: the index reads it again before its next use. */
   changed?(file: string): void
+  /** FiveM's natives, when eNCode installed them (ADR 0091). */
+  natives?(): readonly NativeDoc[] | undefined
+  /** False for a file the person's rules forbid reading, wherever it is; a package lookup leaves it out. */
+  readable?(file: string): boolean
 }
 
 export interface Skills {

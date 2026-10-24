@@ -214,14 +214,8 @@ export interface LibraryFile {
   text: string
 }
 
-/** Files of at most about this many bytes: lua-language-server skips larger ones when it preloads. */
-const FILE_BYTES = 400_000
-
-/**
- * The natives of both sides as `---@meta` files, by name, split so each stays small. A native both sides have is
- * written once, with the server's form as an overload where it differs; each says which side has it.
- */
-export function nativesLibrary(client: string, server: string, source: string): LibraryFile[] {
+/** The natives of the client's and the server's typings, by name, each side's form of it. */
+function bothSides(client: string, server: string): Map<string, { client?: Native; server?: Native }> {
   const byName = new Map<string, { client?: Native; server?: Native }>()
   for (const native of parseNatives(client)) {
     if (!IDENTIFIER.test(native.name) || LUA_KEYWORDS.has(native.name)) continue
@@ -235,6 +229,38 @@ export function nativesLibrary(client: string, server: string, source: string): 
     entry.server ??= serverSide(native)
     byName.set(native.name, entry)
   }
+  return byName
+}
+
+/** A native as the agent looks it up (CodeMap, ADR 0091): which side has it, and the server's form where it differs. */
+export interface NativeDoc extends Native {
+  side: 'client' | 'server' | 'both'
+  server?: Pick<Native, 'params' | 'returns'>
+}
+
+/** Every native of both sides once, by name, for the agent's lookups. */
+export function nativesIndex(client: string, server: string): NativeDoc[] {
+  const out: NativeDoc[] = []
+  for (const [name, entry] of [...bothSides(client, server)].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (entry.client && entry.server) {
+      const base = entry.client.doc.length || !entry.server.doc.length ? entry.client : { ...entry.client, doc: entry.server.doc }
+      const differs = funType(entry.client) !== funType(entry.server)
+      out.push({ ...base, name, side: 'both', ...(differs ? { server: { params: entry.server.params, returns: entry.server.returns } } : {}) })
+    } else if (entry.client) out.push({ ...entry.client, side: 'client' })
+    else out.push({ ...entry.server!, side: 'server' })
+  }
+  return out
+}
+
+/** Files of at most about this many bytes: lua-language-server skips larger ones when it preloads. */
+const FILE_BYTES = 400_000
+
+/**
+ * The natives of both sides as `---@meta` files, by name, split so each stays small. A native both sides have is
+ * written once, with the server's form as an overload where it differs; each says which side has it.
+ */
+export function nativesLibrary(client: string, server: string, source: string): LibraryFile[] {
+  const byName = bothSides(client, server)
   const header = `---@meta _\n-- FiveM's natives for lua-language-server, written by eNCode from ${clean(source)}. Written again when they are installed again.\n`
   const files: LibraryFile[] = []
   let chunk: string[] = []

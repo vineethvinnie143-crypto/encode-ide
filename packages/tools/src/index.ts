@@ -14,6 +14,8 @@ export { notebookEditTool, renderNotebook, type RenderedNotebook } from './noteb
 export { globTool, grepTool, grepRegex, FILE_TYPES } from './search'
 export { codeMapTool } from './codemap/tool'
 export { CodeIndex, type CodeIndexOptions } from './codemap/index'
+export { compareVersions, findPackage, projectPackages, renderPackages, type Ecosystem, type InstalledPackage, type PackageEnv } from './codemap/packages'
+export type { NativeDoc } from '@encode/lsp'
 export { renderMap, termsOf, type CodeMap, type IndexedFile, type MapRequest } from './codemap/rank'
 export { extract, languageOf, type Definition, type DefinitionKind } from './codemap/extract'
 export { createBashTool, bashOutputTool, killShellTool, BASH_OUTPUT_LIMIT, type BashSandbox } from './bash'

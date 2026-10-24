@@ -4,7 +4,7 @@
  * message) holds only files the person's rules let it read.
  */
 import path from 'node:path'
-import { CodeIndex, renderMap, termsOf, type CodeMapSource, type IndexedFile } from '@encode/tools'
+import { CodeIndex, projectPackages, renderMap, renderPackages, termsOf, type CodeMapSource, type IndexedFile, type NativeDoc } from '@encode/tools'
 import type { RuleJudge } from './approval'
 import { reminder } from './prompt'
 
@@ -14,13 +14,17 @@ export const FIRST_MAP_CHARS = 3_500
 export const FIRST_MAP_WAIT_MS = 1_500
 /** A project this small is read whole faster than mapped. */
 const MIN_FILES = 3
+/** The installed versions of the project's dependencies, in the same message (ADR 0091). */
+export const VERSIONS_CHARS = 700
 
 export interface SessionCodeMapOptions {
   root: string
+  home: string
   platform: NodeJS.Platform
   /** The folder's index, shared by its sessions; without it the session keeps its own. */
   shared?: () => CodeIndex | undefined
   rules?: RuleJudge
+  natives?: () => readonly NativeDoc[] | undefined
 }
 
 export class SessionCodeMap implements CodeMapSource {
@@ -36,7 +40,15 @@ export class SessionCodeMap implements CodeMapSource {
   async files(dir: string, signal?: AbortSignal): Promise<{ files: IndexedFile[]; truncated: boolean }> {
     const index = this.indexFor(dir)
     const files = await index.files(signal)
-    return { files: this.readable(index.root, files), truncated: index.truncated }
+    return { files: this.allowed(index.root, files), truncated: index.truncated }
+  }
+
+  natives(): readonly NativeDoc[] | undefined {
+    return this.options.natives?.()
+  }
+
+  readable(file: string): boolean {
+    return this.options.rules?.evaluate({ type: 'read', paths: [file] })?.decision !== 'deny'
   }
 
   changed(file: string): void {
@@ -44,17 +56,34 @@ export class SessionCodeMap implements CodeMapSource {
     for (const index of this.own.values()) index.changed(file)
   }
 
-  /** The map of the folder the agent works in, for its first message or after a summary, pulled towards what the person asked. */
+  /**
+   * The map of the folder the agent works in, and the versions of the project's dependencies, for its first message
+   * or after a summary, pulled towards what the person asked.
+   */
   async reminder(requests: readonly string[], dir = this.options.root, signal?: AbortSignal): Promise<string | undefined> {
     if (!dir) return undefined
+    const [map, versions] = await Promise.all([this.mapText(requests, dir, signal), this.versionsText(dir)])
+    if (signal?.aborted || (!map && !versions)) return undefined
+    const parts: string[] = []
+    if (map) parts.push(`Code map (background for you: where things are defined, by file and line, the most used first; CodeMap shows more):\n${map}`)
+    if (versions) parts.push(`Installed versions of the project's dependencies (write code for these versions; CodeMap with package shows their API as installed):\n${versions}`)
+    return reminder(parts.join('\n\n'))
+  }
+
+  private async mapText(requests: readonly string[], dir: string, signal?: AbortSignal): Promise<string | undefined> {
     const index = this.indexFor(dir)
     if (!(await index.ready(FIRST_MAP_WAIT_MS)) || signal?.aborted) return undefined
-    const files = this.readable(dir, index.current())
+    const files = this.allowed(dir, index.current())
     if (files.filter((file) => file.definitions.length).length < MIN_FILES) return undefined
     const map = renderMap(files, { terms: termsOf(requests.join('\n')), maxChars: FIRST_MAP_CHARS })
     if (!map.shownDefinitions) return undefined
     const more = map.shownFiles < map.files ? `\n(${map.shownFiles} of ${map.files} files with definitions; CodeMap shows the rest.)` : ''
-    return reminder(`Code map (background for you: where things are defined, by file and line, the most used first; CodeMap shows more):\n${map.text}${more}`)
+    return `${map.text}${more}`
+  }
+
+  private async versionsText(dir: string): Promise<string | undefined> {
+    const packages = await projectPackages(dir, { home: this.options.home, platform: this.options.platform, env: process.env, top: this.options.root }).catch(() => [])
+    return renderPackages(packages, VERSIONS_CHARS) || undefined
   }
 
   private indexFor(dir: string): CodeIndex {
@@ -75,9 +104,8 @@ export class SessionCodeMap implements CodeMapSource {
   }
 
   /** Leaves out what the person's rules forbid reading. */
-  private readable(root: string, files: IndexedFile[]): IndexedFile[] {
-    const { rules } = this.options
-    if (!rules) return files
-    return files.filter((file) => rules.evaluate({ type: 'read', paths: [path.join(root, file.path)] })?.decision !== 'deny')
+  private allowed(root: string, files: IndexedFile[]): IndexedFile[] {
+    if (!this.options.rules) return files
+    return files.filter((file) => this.readable(path.join(root, file.path)))
   }
 }

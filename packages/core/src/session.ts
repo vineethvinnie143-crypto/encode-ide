@@ -36,6 +36,7 @@ import {
   type BackgroundJobs,
   type BackgroundWork,
   type CodeIndex,
+  type NativeDoc,
   type CodeIntelligence,
   type DesktopServices,
   type FileStateTracker,
@@ -174,6 +175,8 @@ export interface SessionEnv {
   code?: () => CodeIntelligence | undefined
   /** The folder's code index, shared by its sessions (ADR 0090); without it the session keeps its own. */
   codeIndex?: () => CodeIndex | undefined
+  /** FiveM's natives, when eNCode installed them (ADR 0091). */
+  natives?: () => readonly NativeDoc[] | undefined
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -431,7 +434,7 @@ export class AgentSession {
       shell = missingShell(error, env.root)
     }
     this.shell = shell
-    this.codeMap = new SessionCodeMap({ root: env.root, platform: env.platform, ...(env.codeIndex ? { shared: env.codeIndex } : {}), ...(env.rules ? { rules: env.rules } : {}) })
+    this.codeMap = new SessionCodeMap({ root: env.root, home: env.home, platform: env.platform, ...(env.codeIndex ? { shared: env.codeIndex } : {}), ...(env.rules ? { rules: env.rules } : {}), ...(env.natives ? { natives: env.natives } : {}) })
     if (!this.shellError) this.codeMap.warm()
     this.jobsManager = createJobManager(shell, { onChange: () => env.jobsChanged?.(this.id), onEnd: (job) => this.jobEnded(job) })
     this.reviewer = env.autoReview === false ? undefined : createAutoReviewer({ client: env.client, sticky: this.id, onUsage: (usage) => this.surface.usage(usage) })

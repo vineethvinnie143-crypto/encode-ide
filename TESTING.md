@@ -53,6 +53,10 @@ holds:
   to look further (a folder, one file's outline, or where a name is defined and who uses it). Files your permission
   rules forbid it to read are never in it. Worth trying on a FiveM server: ask "which events does the garage resource
   register?" or where a callback is handled, and say when it pointed at the wrong place or missed one.
+- The first message also names the **versions installed** of the project's dependencies, and CodeMap can read a
+  dependency's API as installed, or one of FiveM's natives once they are installed from Settings > Language servers.
+  Worth trying in a project with an older or newer library than models know well (zod 4, React 19, a recent ox_lib):
+  say when the agent still wrote code for another version, or used a native that does not exist.
 
 ## Stay safe
 

@@ -19,7 +19,7 @@ import type { LibrarySpec, PrepareContext, Prepared } from '../catalog'
 import { installedDir } from '../install'
 import { NPM_LOCKS } from '../npm-locks'
 import { CFX_PLUGIN, CFX_RUNTIME } from './lua-files'
-import { nativesLibrary } from './natives'
+import { nativesIndex, nativesLibrary, type NativeDoc } from './natives'
 
 export const MANIFESTS = ['fxmanifest.lua', '__resource.lua']
 
@@ -250,7 +250,36 @@ function buildNatives(dir: string): void {
   const out = path.join(dir, 'library')
   fs.mkdirSync(out)
   for (const file of files) fs.writeFileSync(path.join(out, file.name), file.text, { flag: 'wx' })
+  // The same natives for the agent's lookups (CodeMap, ADR 0091).
+  fs.writeFileSync(path.join(dir, NATIVES_INDEX), JSON.stringify(nativesIndex(read('client', 'natives_universal.d.ts'), read('server', 'natives_server.d.ts'))), { flag: 'wx' })
   fs.rmSync(path.join(dir, 'node_modules'), { recursive: true, force: true })
+}
+
+/** The natives for the agent's lookups, beside the library. */
+const NATIVES_INDEX = 'natives.json'
+const MAX_INDEX_BYTES = 64_000_000
+let nativesCache: { file: string; mtimeMs: number; natives: NativeDoc[] } | undefined
+
+/**
+ * FiveM's natives as eNCode installed them, for the agent's lookups; undefined when they are not installed, or were
+ * installed by an eNCode that wrote no index (installing them again writes it). Read once, and again when it changes.
+ */
+export function installedNatives(toolsDir: string): NativeDoc[] | undefined {
+  const installed = installedDir(FIVEM_NATIVES, toolsDir)
+  if (!installed) return undefined
+  const file = path.join(installed.dir, NATIVES_INDEX)
+  try {
+    const stat = fs.statSync(file)
+    if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) return undefined
+    if (nativesCache?.file === file && nativesCache.mtimeMs === stat.mtimeMs) return nativesCache.natives
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (!Array.isArray(parsed)) return undefined
+    const natives = parsed.filter((entry): entry is NativeDoc => Boolean(entry) && typeof entry.name === 'string' && Array.isArray(entry.params) && Array.isArray(entry.returns) && Array.isArray(entry.doc))
+    nativesCache = { file, mtimeMs: stat.mtimeMs, natives }
+    return natives
+  } catch {
+    return undefined
+  }
 }
 
 export const FIVEM_NATIVES: LibrarySpec = {
