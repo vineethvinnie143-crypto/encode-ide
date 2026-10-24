@@ -318,9 +318,11 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       stateTimer = setInterval(saveState, options.stateIntervalMs ?? 30_000)
       stateTimer.unref?.()
     }
+    // eNCode's profile, and the command line's (ADR 0108): every chat, and the app's keys. Off limits to the agent.
+    const privateFolders = init.profileDir ? [init.profileDir, path.join(init.home, '.encode', 'cli')] : []
     // The sandbox around the agent's commands: found out once, here, so that the first session already knows whether it has one.
     sandbox = init.sandboxDir
-      ? new Sandbox({ dir: init.sandboxDir, home: init.home, ...(init.profileDir ? { hidden: [init.profileDir] } : {}), warn: (message) => peer.notify('warn', message) })
+      ? new Sandbox({ dir: init.sandboxDir, home: init.home, ...(privateFolders.length ? { hidden: privateFolders } : {}), warn: (message) => peer.notify('warn', message) })
       : undefined
     sandboxListener = sandbox?.onChange(() => {
       try {
@@ -372,7 +374,7 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       home: init.home,
       workspace: init.workspace,
       // eNCode's profile is off limits to the agent; its commands keep the sandbox's temp folder in it.
-      ...(init.profileDir ? { offLimits: { folders: [init.profileDir], except: sandbox?.ownFolders() ?? [] } } : {}),
+      ...(privateFolders.length ? { offLimits: { folders: privateFolders, except: sandbox?.ownFolders() ?? [] } } : {}),
       client,
       settings: () => agentSettings(config!),
       emit: (event) => peer.notify('event', event),

@@ -97,6 +97,7 @@ say so.
 | [0105](0105-a-chat-moves-into-a-worktree-and-back-from-the-chat-and-brings-the-worktrees-changes-into-the-project.md) | A chat moves into a worktree and back from the chat, and brings the worktree's changes into the project | Accepted, builds on 0073 and 0098 |
 | [0106](0106-encode-profile-is-off-limits-to-the-agent-and-files-a-folder-brings-are-read-with-care.md) | eNCode's profile is off limits to the agent, and the files a folder brings are read with care | Accepted, builds on 0061, 0063 and 0093 |
 | [0107](0107-the-chrome-dice-is-the-logo-and-the-theme-is-black-and-silver-from-it.md) | The chrome dice is the logo, and the theme is black and silver from it | Accepted, supersedes the logo and default colours of 0013 |
+| [0108](0108-the-command-line-runs-the-apps-agent-host-in-its-own-process-with-its-own-sessions.md) | The command line runs the app's agent host in its own process, with its own sessions | Accepted, builds on 0030, 0063 and 0106 |
 
 ## Template
 
