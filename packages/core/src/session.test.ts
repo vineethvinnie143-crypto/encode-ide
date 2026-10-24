@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import type { CompletionRequest, Message } from '@encode/providers'
+import type { RuleQuery } from '@encode/permissions'
 import { tempWorkspace } from '@encode/tools/testing'
 import type { AgentHooks, NotificationEvent } from './hooks'
 import { createSkills } from './skills'
@@ -120,6 +121,47 @@ describe('a session', () => {
     const first = text(h.client.requests[0].payload.messages[0])
     assert.match(first, /Answer in Dutch\./)
     assert.match(first, /Run pnpm test\./)
+  })
+
+  it('sends a map of the code with the first message, pulled towards what was asked, without files the rules deny', async () => {
+    const files = {
+      'src/router.ts': 'export class RequestRouter {}\nexport function createRequestRouter() { return new RequestRouter() }\n',
+      'src/server.ts': "import { RequestRouter } from './router'\nexport function startServer(router: RequestRouter) {}\n",
+      'src/billing.ts': 'export function chargeCustomer() {}\n',
+      'secret/keys.ts': 'export function loadVaultKeys() {}\n',
+    }
+    const rules = { evaluate: (query: RuleQuery) => (query.type === 'read' && query.paths.some((file) => file.includes(`${path.sep}secret${path.sep}`)) ? { decision: 'deny' as const, reason: 'no', rule: { behavior: 'deny' as const, tool: 'Read', source: 'user' as const, text: 'Read(secret/**)' } } : null) }
+    const h = await sessionHarness({ files, env: { rules }, script: [{ text: 'ok' }] })
+    await h.session.start({ text: 'Customers are charged twice in chargeCustomer', mode: 'code' })
+    await h.session.start({ text: 'and now?', mode: 'code' })
+    const users = h.client.requests.at(-1)!.payload.messages.filter((message) => message.role === 'user').map(text)
+    assert.match(users[0], /Code map \(background for you/)
+    assert.match(users[0], /src\/billing\.ts\n {2}1 export function chargeCustomer\(\)\nsrc\/router\.ts/)
+    assert.doesNotMatch(users[0], /loadVaultKeys|secret\/keys/)
+    assert.doesNotMatch(users[1], /Code map/)
+  })
+
+  it('maps a file the agent just wrote', async () => {
+    const h = await sessionHarness({
+      files: { 'a.ts': 'export function alpha() {}\n' },
+      scriptFor: (root) => [
+        { calls: [{ name: 'CodeMap', input: { symbol: 'delta' } }] },
+        { calls: [{ name: 'Write', input: { file_path: path.join(root, 'd.ts'), content: 'export function delta() {}\n' } }] },
+        { calls: [{ name: 'CodeMap', input: { symbol: 'delta' } }] },
+        { text: 'done' },
+      ],
+    })
+    await h.session.start({ text: 'go', mode: 'code' })
+    const results = h.client.requests.at(-1)!.payload.messages.flatMap((message) => (message.role === 'user' ? message.content : [])).filter((block) => block.type === 'tool-result')
+    const shown = (index: number) => JSON.stringify(results[index])
+    assert.match(shown(0), /No definition of delta/)
+    assert.match(shown(2), /delta is defined at:\\nd\.ts:1 export function delta\(\)/)
+  })
+
+  it('sends no map for a project of one or two files', async () => {
+    const h = await sessionHarness({ files: { 'a.ts': 'export function a() {}\n' }, script: [{ text: 'ok' }] })
+    await h.session.start({ text: 'go', mode: 'code' })
+    assert.doesNotMatch(text(h.client.requests[0].payload.messages[0]), /Code map/)
   })
 
   it('announces the mode when it changes, the goal while it is active, and attached files', async () => {
@@ -892,7 +934,7 @@ describe('subagents', () => {
     assert.deepEqual(end, { kind: 'done', reply: 'all done' })
     assert.deepEqual(h.client.requests.map((request) => request.role), ['main', 'explore', 'explore', 'main'])
     const subagent = h.client.requests[1]
-    assert.deepEqual(subagent.payload.tools.map((tool) => tool.name).sort(), ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch'])
+    assert.deepEqual(subagent.payload.tools.map((tool) => tool.name).sort(), ['Bash', 'BashOutput', 'CodeMap', 'Glob', 'Grep', 'Read', 'WebFetch', 'WebSearch'])
     assert.equal(subagent.payload.messages.length, 1)
     assert.match(text(subagent.payload.messages[0]), /List the files/)
     assert.match(JSON.stringify(h.client.requests.at(-1)!.payload.messages.at(-1)), /Found a\.txt/)

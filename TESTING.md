@@ -48,6 +48,11 @@ holds:
   whose lines differ from the file only in indentation are read as meant, and the tool's card shows the call as it
   ran. Most useful to hear about: a model that keeps failing at the same call, or a call written as text that shows
   up as words in the chat instead of running.
+- In a project of three or more source files, the agent's first message carries a short **map of the code**: the
+  definitions the project uses most, by file and line, pulled towards what you asked. The agent also has **CodeMap**
+  to look further (a folder, one file's outline, or where a name is defined and who uses it). Files your permission
+  rules forbid it to read are never in it. Worth trying on a FiveM server: ask "which events does the garage resource
+  register?" or where a callback is handled, and say when it pointed at the wrong place or missed one.
 
 ## Stay safe
 

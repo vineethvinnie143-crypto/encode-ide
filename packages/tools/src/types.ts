@@ -13,6 +13,7 @@
  *   - `ShellCommandAssessor`: judges a shell line (eNCode's own command rules).
  *   - `ToolRegistry.register`: tools from outside (MCP), with their own schema.
  */
+import type { IndexedFile } from './codemap/rank'
 import type { LanguageServers } from '@encode/lsp'
 import type { ToolDefinition, ToolResultContent } from '@encode/providers'
 import type { DesktopHandle } from './computer/state'
@@ -497,6 +498,13 @@ export type CodeIntelligence = Pick<
   | 'status'
 >
 
+/** The code map of a folder (ADR 0090): its files' definitions and the names they use, only the files the agent may read. */
+export interface CodeMapSource {
+  files(dir: string, signal?: AbortSignal): Promise<{ files: IndexedFile[]; truncated: boolean }>
+  /** A tool changed a file: the index reads it again before its next use. */
+  changed?(file: string): void
+}
+
 export interface Skills {
   list(): SkillSummary[]
   /** The skill's instructions, with its base directory, or undefined. */
@@ -541,6 +549,8 @@ export interface ToolContext {
   readonly worktrees?: Worktrees
   /** LSP and LSPEdit; absent where no language servers may run (a folder not trusted, servers turned off). */
   readonly code?: CodeIntelligence
+  /** CodeMap; absent where no index is kept. */
+  readonly codeMap?: CodeMapSource
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.

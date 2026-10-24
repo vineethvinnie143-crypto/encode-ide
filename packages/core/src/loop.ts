@@ -58,6 +58,7 @@ import {
   type WebAccess,
   type Worktrees,
   type CodeIntelligence,
+  type CodeMapSource,
 } from '@encode/tools'
 import { alwaysAllowFor, decideApproval, grantKey, hostOf, type ApprovalDecision, type RuleJudge } from './approval'
 import {
@@ -135,6 +136,8 @@ export interface LoopServices {
   worktrees?: Worktrees
   /** The folder's language servers: LSP and LSPEdit, and the errors after every edit. */
   code?: CodeIntelligence
+  /** The folder's code index: CodeMap (ADR 0090). */
+  codeMap?: CodeMapSource
 }
 
 export interface LoopOptions {
@@ -1000,7 +1003,10 @@ export class AgentLoop {
       ...(outcome.display?.diff ? { diff: outcome.display.diff } : {}),
       ...(found ? { warnings: found.lines } : {}),
     })
-    for (const file of outcome.changed ?? []) o.surface.fileChanged(relativeToRoot(o.services.root, file, o.services.platform))
+    for (const file of outcome.changed ?? []) {
+      o.surface.fileChanged(relativeToRoot(o.services.root, file, o.services.platform))
+      o.services.codeMap?.changed?.(file)
+    }
     if (this.edits) {
       if (outcome.changed?.length) await this.edits.after(outcome.changed, existed ?? new Set())
       else if (outcome.ok && block.name === 'Read' && access.type === 'read') this.edits.read(access.paths)
@@ -1100,6 +1106,7 @@ export class AgentLoop {
       ...(s.cwd ? { cwd: s.cwd() } : {}),
       ...(s.worktrees ? { worktrees: s.worktrees } : {}),
       ...(s.code ? { code: s.code } : {}),
+      ...(s.codeMap ? { codeMap: s.codeMap } : {}),
       ...(progress ? { progress } : {}),
     }
   }

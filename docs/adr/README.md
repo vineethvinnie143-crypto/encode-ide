@@ -79,6 +79,7 @@ say so.
 | [0087](0087-the-editor-suggests-code-as-you-type-from-the-inline-suggestions-role-drawn-as-ghost-text-and-sent-without-secrets.md) | The editor suggests code as you type, from the Inline suggestions role, drawn as ghost text and sent without secrets | Accepted, builds on 0052, 0060, 0062 and 0079 |
 | [0088](0088-report-editor-issue-replays-what-was-recorded-and-the-app-reaches-the-editor-through-a-fixed-interface.md) | Report editor issue replays what was recorded, and the app reaches the editor through a fixed interface | Accepted, builds on 0051, 0075, 0082 and 0087 |
 | [0089](0089-a-weaker-models-tool-calls-are-read-as-meant-mended-inputs-calls-written-as-text-and-closer-edit-matches.md) | A weaker model's tool calls are read as meant: mended inputs, calls written as text, and closer Edit matches | Accepted, builds on 0032, 0062 and 0073 |
+| [0090](0090-the-agent-knows-where-things-are-a-code-index-of-its-own-a-ranked-map-in-the-first-message-and-codemap.md) | The agent knows where things are: a code index of its own, a ranked map in the first message, and CodeMap | Accepted, builds on 0062, 0073 and 0089 |
 
 ## Template
 

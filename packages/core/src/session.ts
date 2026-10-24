@@ -35,6 +35,7 @@ import {
   type AgentMode,
   type BackgroundJobs,
   type BackgroundWork,
+  type CodeIndex,
   type CodeIntelligence,
   type DesktopServices,
   type FileStateTracker,
@@ -57,6 +58,7 @@ import {
   type WorktreeInfo,
   type Worktrees,
 } from '@encode/tools'
+import { SessionCodeMap } from './code-map'
 import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
@@ -170,6 +172,8 @@ export interface SessionEnv {
    * errors after every edit. Read when a turn starts.
    */
   code?: () => CodeIntelligence | undefined
+  /** The folder's code index, shared by its sessions (ADR 0090); without it the session keeps its own. */
+  codeIndex?: () => CodeIndex | undefined
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -410,6 +414,8 @@ export class AgentSession {
   /** Background work is being stopped with the conversation (reset, rewind, close): what it reports now is dropped. */
   private silent = false
   private readonly openedAt = Date.now()
+  /** CodeMap and the map in the first message (ADR 0090). */
+  private readonly codeMap: SessionCodeMap
 
   constructor(
     private readonly log: SessionLog,
@@ -425,6 +431,8 @@ export class AgentSession {
       shell = missingShell(error, env.root)
     }
     this.shell = shell
+    this.codeMap = new SessionCodeMap({ root: env.root, platform: env.platform, ...(env.codeIndex ? { shared: env.codeIndex } : {}), ...(env.rules ? { rules: env.rules } : {}) })
+    if (!this.shellError) this.codeMap.warm()
     this.jobsManager = createJobManager(shell, { onChange: () => env.jobsChanged?.(this.id), onEnd: (job) => this.jobEnded(job) })
     this.reviewer = env.autoReview === false ? undefined : createAutoReviewer({ client: env.client, sticky: this.id, onUsage: (usage) => this.surface.usage(usage) })
     this.load()
@@ -1063,6 +1071,8 @@ export class AgentSession {
     const servers = this.env.code?.()?.status().filter((server) => server.state !== 'missing' && server.state !== 'off' && server.state !== 'failed').map((server) => server.label)
     const parts = [environmentReminder({ ...environment, ...(servers?.length ? { languageServers: servers } : {}) })]
     if (this.worktree) parts.push(worktreeReminder(this.worktree, this.env.root))
+    const map = await this.codeMap.reminder(this.recentRequests(), this.workdir()).catch(() => undefined)
+    if (map) parts.push(map)
     const memory = renderMemory(await this.memory())
     if (memory) parts.push(memory)
     const notes = renderExternalNotes(this.env.external?.instructions?.() ?? [])
@@ -1156,6 +1166,7 @@ export class AgentSession {
       cwd: this.workdir,
       ...(env.worktrees ? { worktrees: this.worktreeTools } : {}),
       ...(code ? { code } : {}),
+      codeMap: this.codeMap,
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1165,7 +1176,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}) },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {
@@ -1252,10 +1263,13 @@ export class AgentSession {
   /** The reminders and the user's text, as the message the model reads. */
   private async promptBlocks(input: AgentStartInput, text: string, mode: AgentMode, turnId: string, signal: AbortSignal): Promise<{ blocks: UserBlock[] } | { blocked: string }> {
     const { env } = this
+    const first = this.messages.length === 0
     const blocks = await this.reminders(mode, signal)
     const add = (reminderText: string | undefined) => {
       if (reminderText) blocks.push(textBlock(reminderText))
     }
+    // Where things are in the project, about what the person asks first: it stays at the start of the conversation.
+    if (first) add(await this.codeMap.reminder([text], this.workdir(), signal).catch(() => undefined))
 
     try {
       const submitted = await env.hooks.userPromptSubmit?.({ sessionId: this.id, agentId: 'main', root: env.root, mode, signal, messageId: turnId, prompt: text })
