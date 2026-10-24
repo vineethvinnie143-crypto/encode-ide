@@ -457,17 +457,27 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     // The click gives the canvas the focus; the wheel is sent once the canvas has seen it.
     await desktop.act(actOf(window, [clickPoint(look.capture, centre)]), SIGNAL)
     await eventsAfter(a, state.events.length, 2)
-    const deltas = async (step: Step, kind: 'wheel' | 'hwheel', count: number) => {
+    // Notches that reach a busy window are put into one message by Windows (-240 for two), so the wheel is added up:
+    // every message is a whole number of notches the right way, and together they come to the amount asked for.
+    const scrolled = async (step: Step, kind: 'wheel' | 'hwheel', total: number) => {
       const before = (await a.state()).events.length
       await desktop.act(actOf(window, [step]), SIGNAL)
-      const events = await eventsAfter(a, before, count)
-      return events.filter((event) => event.startsWith(`${kind} `)).map((event) => Number(event.split(' ').pop()))
+      const deltasOf = (now: State) => now.events.slice(before).filter((event) => event.startsWith(`${kind} `)).map((event) => Number(event.split(' ').pop()))
+      const sum = (deltas: number[]) => deltas.reduce((all, delta) => all + delta, 0)
+      let seen: number[] = []
+      try {
+        await a.until((now) => Math.abs(sum((seen = deltasOf(now)))) >= Math.abs(total), `the ${kind} to come to ${total}`)
+      } catch (error) {
+        throw new assert.AssertionError({ message: `${error instanceof Error ? error.message : String(error)} It came as ${JSON.stringify(seen)}.` })
+      }
+      assert.ok(seen.every((delta) => delta !== 0 && delta % 120 === 0 && Math.sign(delta) === Math.sign(total)), `whole notches the right way: ${seen.join(', ')}`)
+      return sum(seen)
     }
     const target = { point: imagePoint(look.capture, centre), capture: look.capture.id }
-    assert.deepEqual(await deltas({ kind: 'scroll', target, direction: 'down', amount: 3 }, 'wheel', 3), [-120, -120, -120])
-    assert.deepEqual(await deltas({ kind: 'scroll', target, direction: 'up', amount: 2 }, 'wheel', 2), [120, 120])
-    assert.deepEqual(await deltas({ kind: 'scroll', target, direction: 'right', amount: 2 }, 'hwheel', 2), [120, 120])
-    assert.deepEqual(await deltas({ kind: 'scroll', direction: 'down', amount: 1 }, 'wheel', 1), [-120], 'without a target the wheel goes to where the pointer already is')
+    assert.equal(await scrolled({ kind: 'scroll', target, direction: 'down', amount: 3 }, 'wheel', -360), -360)
+    assert.equal(await scrolled({ kind: 'scroll', target, direction: 'up', amount: 2 }, 'wheel', 240), 240)
+    assert.equal(await scrolled({ kind: 'scroll', target, direction: 'right', amount: 2 }, 'hwheel', 240), 240)
+    assert.equal(await scrolled({ kind: 'scroll', direction: 'down', amount: 1 }, 'wheel', -120), -120, 'without a target the wheel goes to where the pointer already is')
   })
 
   it('drags from one point to another', async () => {
