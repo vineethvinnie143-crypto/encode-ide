@@ -42,13 +42,13 @@ export const codeMapTool: Tool<CodeMapInput> = {
   definition: {
     name: 'CodeMap',
     description: [
-      "Shows where things are defined without reading files: each file's classes, functions, methods, types and constants (and FiveM events, commands, callbacks and exports), by line.",
-      '- No input: the definitions most used across the project.',
+      'Shows where things are defined, by line, without reading files: classes, functions, methods, types and constants (and FiveM events, commands, callbacks, exports).',
+      '- No input: the most used definitions.',
       '- path: a folder, or one file (all its definitions, to Read by line range).',
       '- query: words or names to center the map on.',
       '- symbol: one exact name: where it is defined, which files use it.',
-      '- package: an installed dependency (npm, Python, Rust, Go, FiveM resource), or natives for FiveM\'s: its API at the installed version; with symbol or query, those declarations.',
-      'Cheaper than reading files to find code. It matches names, not meaning.',
+      '- package: an installed dependency (npm, Python, Rust, Go, FiveM) or natives (FiveM\'s): its API at the installed version; with symbol or query, only those.',
+      'Cheaper than reading files. It matches names, not meaning.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
