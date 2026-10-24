@@ -21,6 +21,21 @@ describe("what find reads in a step's row and in its opened body", () => {
     assert.equal(text.body, 'npm test\nDone\n\n\nFAIL src/cache.test.ts\n2 failed')
   })
 
+  it('names a step in the tense of its state', () => {
+    const head = (name: string, input: Record<string, unknown>, state: NonNullable<ConversationEntry['tool']>['state']) =>
+      stepText(tool(name, input, { state })).head.trim()
+    assert.equal(head('Write', { file_path: 'a.ts' }, 'waiting'), 'Write a.ts')
+    assert.equal(head('Write', { file_path: 'a.ts' }, 'reviewing'), 'Write a.ts')
+    assert.equal(head('Write', { file_path: 'a.ts' }, 'running'), 'Writing a.ts')
+    assert.equal(head('Write', { file_path: 'a.ts' }, 'done'), 'Wrote a.ts')
+    assert.equal(head('Edit', { file_path: 'a.ts' }, 'rejected'), 'Edit a.ts')
+    assert.equal(head('Bash', { command: 'npm test' }, 'running'), 'Running npm test')
+    assert.equal(head('Bash', { command: 'npm test' }, 'error'), 'Run npm test')
+    assert.equal(head('AskUserQuestion', { questions: [{ question: 'Which colour?' }] }, 'waiting'), 'Asking Which colour?')
+    assert.equal(head('AskUserQuestion', { questions: [{ question: 'Which colour?' }] }, 'done'), 'Asked Which colour?')
+    assert.equal(head('Task', { description: 'look around' }, 'running'), 'Subagent look around')
+  })
+
   it('has no body for a quiet step that shows nothing when opened', () => {
     assert.deepEqual(stepText(tool('Read', { file_path: 'src/app.ts' })), { head: 'Read src/app.ts ', body: '' })
   })

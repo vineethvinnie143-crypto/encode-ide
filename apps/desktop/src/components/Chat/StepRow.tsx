@@ -27,47 +27,50 @@ import { reviewLine } from './review-text'
 import { WorkRoot, shownPath } from './shown-path'
 import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 
-const TOOL_META: Record<string, { label: string; icon: typeof FileText }> = {
-  Read: { label: 'Read', icon: FileText },
-  Write: { label: 'Wrote', icon: Pencil },
-  Edit: { label: 'Edited', icon: Pencil },
-  MultiEdit: { label: 'Edited', icon: Pencil },
-  NotebookEdit: { label: 'Edited', icon: Pencil },
-  Glob: { label: 'Listed', icon: ListTree },
-  Grep: { label: 'Searched', icon: Search },
-  Bash: { label: 'Ran', icon: SquareTerminal },
-  BashOutput: { label: 'Read output', icon: SquareTerminal },
-  KillShell: { label: 'Stopped', icon: SquareTerminal },
-  WebFetch: { label: 'Fetched', icon: Globe },
-  WebSearch: { label: 'Searched the web', icon: Globe },
+/** A step's name in each tense: done (`label`), under way (`doing`), and not yet done, refused or failed (`todo`). */
+type ToolMeta = { label: string; doing?: string; todo?: string; icon: typeof FileText }
+
+const TOOL_META: Record<string, ToolMeta> = {
+  Read: { label: 'Read', doing: 'Reading', todo: 'Read', icon: FileText },
+  Write: { label: 'Wrote', doing: 'Writing', todo: 'Write', icon: Pencil },
+  Edit: { label: 'Edited', doing: 'Editing', todo: 'Edit', icon: Pencil },
+  MultiEdit: { label: 'Edited', doing: 'Editing', todo: 'Edit', icon: Pencil },
+  NotebookEdit: { label: 'Edited', doing: 'Editing', todo: 'Edit', icon: Pencil },
+  Glob: { label: 'Listed', doing: 'Listing', todo: 'List', icon: ListTree },
+  Grep: { label: 'Searched', doing: 'Searching', todo: 'Search', icon: Search },
+  Bash: { label: 'Ran', doing: 'Running', todo: 'Run', icon: SquareTerminal },
+  BashOutput: { label: 'Read output', doing: 'Reading output', todo: 'Read output', icon: SquareTerminal },
+  KillShell: { label: 'Stopped', doing: 'Stopping', todo: 'Stop', icon: SquareTerminal },
+  WebFetch: { label: 'Fetched', doing: 'Fetching', todo: 'Fetch', icon: Globe },
+  WebSearch: { label: 'Searched the web', doing: 'Searching the web', todo: 'Search the web', icon: Globe },
   Task: { label: 'Subagent', icon: Network },
-  AskUserQuestion: { label: 'Asked', icon: MessageCircleQuestion },
+  AskUserQuestion: { label: 'Asked', doing: 'Asking', todo: 'Ask', icon: MessageCircleQuestion },
   Computer: { label: 'Used the computer', icon: Monitor },
-  TodoWrite: { label: 'Updated tasks', icon: ListTree },
+  TodoWrite: { label: 'Updated tasks', doing: 'Updating tasks', todo: 'Update tasks', icon: ListTree },
   EnterPlanMode: { label: 'Planning first', icon: ListTree },
-  ExitPlanMode: { label: 'Proposed a plan', icon: ListTree },
+  ExitPlanMode: { label: 'Proposed a plan', doing: 'Proposing a plan', todo: 'Propose a plan', icon: ListTree },
   Skill: { label: 'Skill', icon: FileText },
   CreateGoal: { label: 'Goal', icon: CheckCircle2 },
   UpdateGoal: { label: 'Goal', icon: CheckCircle2 },
   GetGoal: { label: 'Goal', icon: CheckCircle2 },
-  read: { label: 'Read', icon: FileText },
-  read_file: { label: 'Read', icon: FileText },
-  write: { label: 'Wrote', icon: Pencil },
-  write_file: { label: 'Wrote', icon: Pencil },
-  edit: { label: 'Edited', icon: Pencil },
-  replace_in_file: { label: 'Edited', icon: Pencil },
-  glob: { label: 'Listed', icon: ListTree },
-  list_files: { label: 'Listed', icon: ListTree },
-  grep: { label: 'Searched', icon: Search },
-  search_files: { label: 'Searched', icon: Search },
-  pwsh: { label: 'Ran', icon: SquareTerminal },
-  run_command: { label: 'Ran', icon: SquareTerminal },
-  ask_user_question: { label: 'Asked', icon: MessageCircleQuestion },
-  ask_followup_question: { label: 'Asked', icon: MessageCircleQuestion },
+  read: { label: 'Read', doing: 'Reading', todo: 'Read', icon: FileText },
+  read_file: { label: 'Read', doing: 'Reading', todo: 'Read', icon: FileText },
+  write: { label: 'Wrote', doing: 'Writing', todo: 'Write', icon: Pencil },
+  write_file: { label: 'Wrote', doing: 'Writing', todo: 'Write', icon: Pencil },
+  edit: { label: 'Edited', doing: 'Editing', todo: 'Edit', icon: Pencil },
+  replace_in_file: { label: 'Edited', doing: 'Editing', todo: 'Edit', icon: Pencil },
+  glob: { label: 'Listed', doing: 'Listing', todo: 'List', icon: ListTree },
+  list_files: { label: 'Listed', doing: 'Listing', todo: 'List', icon: ListTree },
+  grep: { label: 'Searched', doing: 'Searching', todo: 'Search', icon: Search },
+  search_files: { label: 'Searched', doing: 'Searching', todo: 'Search', icon: Search },
+  pwsh: { label: 'Ran', doing: 'Running', todo: 'Run', icon: SquareTerminal },
+  run_command: { label: 'Ran', doing: 'Running', todo: 'Run', icon: SquareTerminal },
+  ask_user_question: { label: 'Asked', doing: 'Asking', todo: 'Ask', icon: MessageCircleQuestion },
+  ask_followup_question: { label: 'Asked', doing: 'Asking', todo: 'Ask', icon: MessageCircleQuestion },
   attempt_completion: { label: 'Done', icon: CheckCircle2 },
   task: { label: 'Subagent', icon: Network },
-  web_fetch: { label: 'Fetched', icon: Globe },
-  web_search: { label: 'Searched the web', icon: Globe },
+  web_fetch: { label: 'Fetched', doing: 'Fetching', todo: 'Fetch', icon: Globe },
+  web_search: { label: 'Searched the web', doing: 'Searching the web', todo: 'Search the web', icon: Globe },
 }
 
 const KIND_ICON: Record<StepKind, typeof FileText> = {
@@ -190,6 +193,10 @@ type Tool = NonNullable<ConversationEntry['tool']>
 function stepParts(entry: ConversationEntry, tool: Tool, root: string | null = null) {
   const meta = TOOL_META[tool.name] ?? { label: tool.name.replace(/_/g, ' '), icon: FileText }
   const state = tool.state ?? 'done'
+  // "Wrote" only once it has: a write waiting for approval says "Write", one under way "Writing". A question waiting
+  // for its answer is still being asked.
+  const underWay = state === 'running' || (state === 'waiting' && stepKind(tool.name) === 'ask')
+  const label = underWay ? (meta.doing ?? meta.label) : state === 'done' ? meta.label : (meta.todo ?? meta.label)
   const isComputer = tool.name === 'Computer'
   // A desktop step says what it did in words; opened, it shows only why it failed.
   const computer = isComputer ? computerStep(tool.input ?? {}, tool.output, tool.state) : null
@@ -198,7 +205,7 @@ function stepParts(entry: ConversationEntry, tool: Tool, root: string | null = n
   const content = tool.input.content
   return {
     icon: meta.icon,
-    label: computer?.label ?? meta.label,
+    label: computer?.label ?? label,
     detail: computer ? computer.detail : detailOf(entry, root),
     state,
     isShell: stepKind(tool.name) === 'shell',

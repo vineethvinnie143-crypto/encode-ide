@@ -361,10 +361,42 @@ describe('edited files', () => {
       tool('edit', { path: 'b.ts' }, { diff: [hunk(2, 2)] }),
       tool('edit', { path: '' }, { diff: [hunk(9, 9)] }),
     ]
+    // b.ts: the first edit rewrites line 1; the second rewrites that new line and line 2, so line 1 counts once.
     assert.deepEqual(editedFiles(calls), [
-      { path: 'b.ts', additions: 3, deletions: 3 },
+      { path: 'b.ts', additions: 2, deletions: 2 },
       { path: 'a.ts', additions: 5, deletions: 0 },
     ])
+  })
+
+  it("counts a file's net change when it is edited more than once", () => {
+    const line = (type: 'add' | 'del' | 'ctx', text: string) => ({ type, text })
+    // A file of ten lines: line 3 is changed, then changed again; a line is added after 7, then removed again.
+    const calls = [
+      tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [line('ctx', '2'), line('del', '3'), line('add', '3b'), line('ctx', '4')] }] }),
+      tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1, lines: [line('del', '3b'), line('add', '3c')] }] }),
+      tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 7, oldLines: 1, newStart: 7, newLines: 2, lines: [line('ctx', '7'), line('add', 'x')] }] }),
+      tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 8, oldLines: 1, newStart: 8, newLines: 0, lines: [line('del', 'x')] }] }),
+    ]
+    assert.deepEqual(editedFiles(calls), [{ path: 'a.ts', additions: 1, deletions: 1 }])
+    assert.deepEqual(editTotals(calls), { files: 1, additions: 1, deletions: 1 })
+  })
+
+  it('applies the hunks of one edit from the last, so each keeps its place', () => {
+    const line = (type: 'add' | 'del' | 'ctx', text: string) => ({ type, text })
+    const two = tool('Edit', { file_path: 'a.ts' }, {
+      diff: [
+        { oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: [line('ctx', '1'), line('add', 'a')] },
+        { oldStart: 20, oldLines: 1, newStart: 21, newLines: 0, lines: [line('del', '20')] },
+      ],
+    })
+    // Line 21 of the new file is the old line 21; removing it removes an old line.
+    const then = tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 21, oldLines: 1, newStart: 21, newLines: 0, lines: [line('del', '21')] }] })
+    assert.deepEqual(editedFiles([two, then]), [{ path: 'a.ts', additions: 1, deletions: 2 }])
+  })
+
+  it('sums edit by edit when the hunks do not fit together', () => {
+    const odd = tool('Edit', { file_path: 'a.ts' }, { diff: [{ oldStart: 1, oldLines: 5, newStart: 1, newLines: 1, lines: [{ type: 'add', text: 'a' }] }] })
+    assert.deepEqual(editedFiles([odd, odd]), [{ path: 'a.ts', additions: 2, deletions: 0 }])
   })
 
   it('names files the way the tools do, by file_path', () => {
