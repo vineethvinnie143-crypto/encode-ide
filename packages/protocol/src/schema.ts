@@ -80,8 +80,11 @@ function check(value: unknown, schema: JsonSchema, path: string, errors: SchemaE
   }
 
   if (typeof value === 'string') {
-    if (typeof schema.minLength === 'number' && [...value].length < schema.minLength) fail(`must be at least ${schema.minLength} characters`)
-    if (typeof schema.maxLength === 'number' && [...value].length > schema.maxLength) fail(`must be at most ${schema.maxLength} characters`)
+    // Characters are counted only when the length in UTF-16 units cannot settle it: a picture's base64 runs to megabytes.
+    const units = value.length
+    const characters = () => [...value].length
+    if (typeof schema.minLength === 'number' && (units < schema.minLength || (units < schema.minLength * 2 && characters() < schema.minLength))) fail(`must be at least ${schema.minLength} characters`)
+    if (typeof schema.maxLength === 'number' && units > schema.maxLength && characters() > schema.maxLength) fail(`must be at most ${schema.maxLength} characters`)
     if (typeof schema.pattern === 'string') {
       let pattern: RegExp | undefined
       try {

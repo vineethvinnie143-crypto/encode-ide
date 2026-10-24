@@ -196,6 +196,8 @@ export interface BudgetQuery {
   sticky?: string
   tool?: string
   agent?: string
+  /** The request carries pictures: the budget is of a model that reads them, where one is ready (ADR 0113). */
+  images?: boolean
 }
 
 export interface ModelClient {

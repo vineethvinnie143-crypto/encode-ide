@@ -781,6 +781,15 @@ describe('ModelRouter: sessions, abort and budget', () => {
     const empty = new TestWorld({ catalogs: {} })
     assert.equal((await empty.router.budget('main')).model, '@free')
   })
+
+  it('reports a model that sees pictures for a request that carries them, while one is ready', async () => {
+    const sees = { tools: true, parallelTools: true, images: true, documents: false, reasoning: false, promptCache: false }
+    const world = freeWorld({ catalogs: { openrouter: [catalogEntry(A), catalogEntry(B, { capabilities: sees }), catalogEntry(C)] } })
+    assert.equal((await world.router.budget('main')).model, A)
+    assert.deepEqual(await world.router.budget('main', { images: true }).then(({ model, images }) => ({ model, images })), { model: B, images: true })
+    const blind = freeWorld()
+    assert.deepEqual(await blind.router.budget('main', { images: true }).then(({ model, images }) => ({ model, images })), { model: A, images: false }, 'none sees them: the best model, which is told they are there')
+  })
 })
 
 /** A KeySource whose read for one provider never finishes, like a token refresh on a dead connection. */

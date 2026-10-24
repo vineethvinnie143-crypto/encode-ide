@@ -249,6 +249,53 @@ describe('a session', () => {
     assert.equal(h.session.history().entries.filter((entry) => entry.kind === 'user').at(-1)?.text, 'four')
   })
 
+  it('sends attached pictures as images before the words, and PDFs as their text (ADR 0113)', async () => {
+    const pdf = (await fs.readFile(path.join(process.cwd(), 'packages/tools/src/pdf/fixtures/reportlab.pdf'))).toString('base64')
+    const h = await sessionHarness({ script: [{ text: 'ok' }], client: { images: true } })
+    const preview = 'data:image/jpeg;base64,AAAA'
+    await h.session.start({
+      text: 'what is wrong here?',
+      mode: 'code',
+      attachments: [{ path: 'notes.txt', content: 'x'.repeat(20_001) }],
+      media: [
+        { name: 'Screenshot 1.png', mediaType: 'image/png', data: 'iVBORw0KGgo=', preview },
+        { name: 'report<1>.pdf', mediaType: 'application/pdf', data: pdf },
+      ],
+    })
+    const request = h.client.requests.at(-1)!
+    const content = request.payload.messages.at(-1)!.content
+    assert.deepEqual(content.slice(-3), [{ type: 'text', text: '<attached_picture name="Screenshot 1.png" />' }, { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=' }, { type: 'text', text: 'what is wrong here?' }])
+    const files = content.at(-4)
+    assert.ok(files?.type === 'text' && files.text.startsWith('<attached_files>\n--- notes.txt ---\n'))
+    assert.match(files.text, /\n\(cut here: the first 20,000 of 20,001 characters came with the message\)\n/)
+    assert.match(files.text, /\n--- report1\.pdf ---\nPDF report1\.pdf: 2 pages, titled "Canvas test"\./, 'a PDF is read the way Read reads one, its name kept to one plain line')
+    assert.equal(request.requirements.images, true)
+    const asked = h.session.history().entries.find((entry) => entry.kind === 'user')
+    assert.equal(asked?.text, 'what is wrong here?')
+    assert.deepEqual(asked?.attached, [
+      { name: 'notes.txt', kind: 'file' },
+      { name: 'Screenshot 1.png', kind: 'picture', preview },
+      { name: 'report<1>.pdf', kind: 'pdf' },
+    ])
+  })
+
+  it('tells a model that cannot see pictures where they are, and the person once for each new one (ADR 0113)', async () => {
+    const h = await sessionHarness({ script: [{ text: 'ok' }], client: { images: false } })
+    const picture = { name: 'shot.png', mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' }
+    await h.session.start({ text: 'look', mode: 'code', media: [picture] })
+    const sent = h.client.requests.at(-1)!
+    assert.equal(sent.requirements.images, false)
+    assert.ok(!JSON.stringify(sent.payload.messages).includes('"type":"image"'))
+    assert.match(JSON.stringify(sent.payload.messages.at(-1)), /<attached_picture name=\\"shot\.png\\" \/>.*A picture is here, but the model in use cannot see pictures\./)
+    const told = () => h.session.history().entries.filter((entry) => entry.kind === 'notice' && /cannot see pictures/.test(entry.text ?? ''))
+    assert.equal(told().length, 1)
+    assert.match(told()[0].text ?? '', /^scripted cannot see pictures, so it was told where they are but not shown them\./)
+    await h.session.start({ text: 'and now?', mode: 'code' })
+    assert.equal(told().length, 1, 'the same picture is not told of again')
+    await h.session.start({ text: 'another', mode: 'code', media: [picture] })
+    assert.equal(told().length, 2)
+  })
+
   it('notes a new day to the model', async () => {
     const h = await sessionHarness({ script: [{ text: 'ok' }] })
     await h.session.start({ text: 'one', mode: 'code' })

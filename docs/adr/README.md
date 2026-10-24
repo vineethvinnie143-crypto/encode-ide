@@ -102,6 +102,7 @@ say so.
 | [0110](0110-what-a-testers-diagnostics-showed-copy-a-folder-windows-will-not-let-the-sandbox-mark-small-screens-and-log-levels.md) | What a tester's diagnostics showed: Copy, a folder Windows will not let the sandbox mark, small screens, and log levels | Accepted, builds on 0063 and 0109 |
 | [0111](0111-a-folder-on-another-machine-opens-over-ssh-the-agent-works-there-and-the-keys-stay-on-the-pc.md) | A folder on another machine opens over SSH: the agent works there, and the keys stay on the PC | Accepted, builds on 0040, 0064, 0106 and 0108 |
 | [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107 |
+| [0113](0113-pictures-and-files-go-with-a-message.md) | Pictures and files go with a message: pasted, dropped or picked | Accepted, builds on 0054, 0069 and 0111 |
 
 ## Template
 

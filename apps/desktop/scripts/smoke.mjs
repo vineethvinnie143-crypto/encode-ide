@@ -672,6 +672,7 @@ async function runProviderPhase() {
   await runSmallerModelChecks()
   await runModelTestChecks()
   await runStopChecks()
+  await runAttachChecks()
   await runSteerChecks()
   await runEffortChecks()
   await runSubagentChecks()
@@ -3914,6 +3915,85 @@ async function runStopChecks() {
 }
 
 /**
+ * Pictures and files in the chat box (ADR 0113). A screenshot pasted into the box shows as a thumbnail; a PDF and a
+ * text file dropped on it come by name, and a file it cannot take is named in one note. The message shows what came
+ * with it. The mock model cannot see pictures: it is sent a note where the picture is, the PDF's text and the file's,
+ * and the person is told once that the picture was not shown to it.
+ */
+async function runAttachChecks() {
+  console.log('[smoke] --- pictures and files ---')
+  await evaluate('window.eNCode.agent.reset()')
+  const tiles = "document.querySelectorAll('.composer-attachments .attachment-picture, .composer-attachments .attachment-chip:not(.is-reading)').length"
+  // A screenshot of a large screen on the clipboard, drawn here, pasted into the box.
+  await evaluate(`(async () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 2400
+    canvas.height = 1350
+    const context = canvas.getContext('2d')
+    context.fillStyle = '#101010'
+    context.fillRect(0, 0, 2400, 1350)
+    context.fillStyle = '#e04040'
+    context.fillRect(200, 200, 900, 500)
+    context.fillStyle = '#f2f2f2'
+    context.font = '96px sans-serif'
+    context.fillText('Error 42', 260, 480)
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+    const data = new DataTransfer()
+    data.items.add(new File([blob], 'image.png', { type: 'image/png' }))
+    const box = document.querySelector('.composer-input')
+    box.focus()
+    box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+  })()`)
+  await waitFor("document.querySelector('.composer-attachments .attachment-picture img')?.naturalWidth > 0", 10000, 'the pasted screenshot shows as a thumbnail')
+  const title = await evaluate("document.querySelector('.composer-attachments .attachment-picture')?.title ?? ''")
+  if (title !== 'Screenshot 1.png, 1568 × 882') throw new Error(`The pasted screenshot is not named and made smaller to send: ${title}`)
+
+  // A PDF and a text file dropped on the box, with a file it cannot take.
+  const pdf = (await fs.readFile(path.join(root, '..', '..', 'packages', 'tools', 'src', 'pdf', 'fixtures', 'reportlab.pdf'))).toString('base64')
+  await evaluate(`(() => {
+    const bytes = Uint8Array.from(atob(${JSON.stringify(pdf)}), (char) => char.charCodeAt(0))
+    const data = new DataTransfer()
+    data.items.add(new File([bytes], 'report.pdf', { type: 'application/pdf' }))
+    data.items.add(new File(['-- the client side\\nlocal ready = true\\n'], 'client.lua', { type: '' }))
+    data.items.add(new File([new Uint8Array([77, 90, 0, 1])], 'setup.exe', { type: 'application/x-msdownload' }))
+    const card = document.querySelector('.composer-card')
+    for (const type of ['dragenter', 'dragover']) card.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }))
+    window.__dropped = data
+  })()`)
+  await waitFor("!!document.querySelector('.composer-card.is-dropping .composer-drop')", 3000, 'a file dragged over the chat box says what a drop does')
+  await screenshot('ui-dark-attach-drop.png')
+  await evaluate("document.querySelector('.composer-card').dispatchEvent(new DragEvent('drop', { dataTransfer: window.__dropped, bubbles: true, cancelable: true }))")
+  await waitFor("!document.querySelector('.composer-drop')", 3000, 'the drop hint goes once the files are dropped')
+  await waitFor(`${tiles} === 3`, 10000, 'the dropped PDF and text file join the screenshot')
+  await waitFor("[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'Not attached: setup.exe is not a picture, a PDF or a text file.')", 5000, 'a note on the file that cannot go')
+  await screenshot('ui-dark-attached.png')
+
+  await sendPrompt('[scenario:follow-up] What is wrong in this screenshot?')
+  await driveAgent('17-attached')
+  const shown = await evaluate(`(() => {
+    const message = [...document.querySelectorAll('.turn-user')].at(-1)
+    return {
+      pictures: message?.querySelectorAll('.bubble-attached img.attached-picture').length ?? 0,
+      files: [...(message?.querySelectorAll('.bubble-attached .attachment-name') ?? [])].map((node) => node.textContent),
+      words: message?.querySelector('.chat-user-bubble')?.textContent ?? '',
+      left: ${tiles},
+      told: document.body.textContent.includes('cannot see pictures, so it was told where they are but not shown them'),
+    }
+  })()`)
+  console.log('[smoke] attached:', JSON.stringify(shown))
+  if (shown.pictures !== 1 || shown.files.join() !== 'client.lua,report.pdf' || !shown.words.startsWith('[scenario:follow-up] What is wrong') || shown.left !== 0 || !shown.told) {
+    throw new Error(`The message does not show what came with it, or the person was not told the model cannot see pictures: ${JSON.stringify(shown)}`)
+  }
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const sent = JSON.stringify(request.messages.filter((message) => message.role === 'user').at(-1)?.content ?? '')
+  const expected = ['<attached_picture name=\\"Screenshot 1.png\\" />', 'A picture is here, but the model in use cannot see pictures.', '--- report.pdf ---\\nPDF report.pdf: 2 pages', '--- client.lua ---\\n-- the client side']
+  const missing = expected.filter((part) => !sent.includes(part))
+  if (missing.length || sent.includes('image_url')) throw new Error(`The model was not sent what was attached as it should be (missing ${missing.join(' | ') || 'nothing'}): ${sent.slice(0, 600)}`)
+  await screenshot('ui-dark-attached-sent.png')
+  console.log('[smoke] pictures and files: ok')
+}
+
+/**
  * Messages sent while the agent works. By default Enter queues and Ctrl+Enter steers: the Steering row shows until the
  * request takes the message with the command's result, the model reads it, and the thread shows it between the two
  * parts of the turn. With Steer chosen in Settings the keys swap, and a queued message can be steered with its button.
@@ -6014,7 +6094,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

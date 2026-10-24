@@ -1071,9 +1071,12 @@ export class ModelRouter implements ModelClient {
   private async budgetOn(role: ModelRole, query: BudgetQuery = {}, pin?: string): Promise<ModelBudget> {
     const { role: resolved, refs } = pin !== undefined ? { role, refs: [pin] } : resolveModelList(this.config, { role, tool: query.tool, agent: query.agent })
     const sticky = query.sticky !== undefined ? this.sessions.get(query.sticky) : undefined
-    const requirements: Requirements = { promptTokens: 0, maxOutputTokens: 1, tools: false, images: false }
-    const { candidates } = selectCandidates(this.selection, { role: resolved, refs, requirements, sticky })
-    const first = candidates[0]?.info
+    const ready = (images: boolean) => {
+      const requirements: Requirements = { promptTokens: 0, maxOutputTokens: 1, tools: false, images }
+      return selectCandidates(this.selection, { role: resolved, refs, requirements, sticky }).candidates[0]?.info
+    }
+    // A request with pictures goes to a model that reads them, as `complete` sends it, while one is ready; else to the first.
+    const first = (query.images ? ready(true) : undefined) ?? ready(false)
     if (first) return budgetOf(first)
     // Nothing runs now: the best guess is the role's first model, available or not.
     for (const ref of refs) {

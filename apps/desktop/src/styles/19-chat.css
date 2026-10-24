@@ -116,6 +116,25 @@
   display: flex;
   justify-content: flex-end;
 }
+/* The pictures and files that came with a message, above its bubble (ADR 0113). */
+.bubble-attached {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.attached-picture {
+  display: block;
+  width: auto;
+  max-width: 160px;
+  height: 96px;
+  border: 1px solid var(--bubble-border);
+  border-radius: var(--r-14);
+  background: #000;
+  object-fit: cover;
+}
 .chat-user-bubble {
   max-width: 80%;
   padding: 10px 16px;

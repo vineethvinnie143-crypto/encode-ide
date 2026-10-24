@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { textBlock, userText, type AssistantMessage, type ImageBlock, type Message, type ToolResultBlock, type UserMessage } from '@encode/providers'
-import { KEEP_SCREENS, pruneScreens, SCREEN_REMOVED, withoutScreens, withoutScreensFrom } from './screens'
+import { IMAGE_UNSEEN, KEEP_SCREENS, pruneScreens, SCREEN_REMOVED, withoutImagesFrom, withoutScreens, withoutScreensFrom } from './screens'
 
 const screen = (data: string): ImageBlock => ({ type: 'image', mediaType: 'image/png', data, transient: true })
 const photo = (data: string): ImageBlock => ({ type: 'image', mediaType: 'image/png', data })
@@ -55,6 +55,20 @@ describe('what a log keeps of a screenshot', () => {
     assert.notEqual(stored, loud)
     assert.equal(stored.length, loud.length)
     assert.deepEqual(stored.flatMap(imagesOf), [])
+  })
+})
+
+describe('what a model that cannot see pictures is sent (ADR 0113)', () => {
+  it('is a note in the place of every image, a screenshot keeping its own', () => {
+    const attached: UserMessage = { role: 'user', content: [textBlock('<attached_picture name="a.png" />'), photo('MINE'), textBlock('what is this?')] }
+    const conversation = [attached, step('a'), result('a', 'Image a.png (1 KB):', photo('READ'), screen('SCREEN'))]
+    const sent = withoutImagesFrom(conversation)
+    assert.deepEqual(sent.flatMap(imagesOf), [])
+    assert.deepEqual(textsOf(sent[0]), ['<attached_picture name="a.png" />', IMAGE_UNSEEN, 'what is this?'])
+    assert.deepEqual(textsOf(sent[2]), ['Image a.png (1 KB):', IMAGE_UNSEEN, SCREEN_REMOVED])
+    assert.equal(sent[1], conversation[1], 'the rest is not touched')
+    const quiet = [userText('hi'), step('b'), result('b', 'ok')]
+    assert.equal(withoutImagesFrom(quiet), quiet)
   })
 })
 

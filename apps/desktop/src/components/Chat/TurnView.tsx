@@ -1,5 +1,5 @@
 import { memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, CornerDownRight, Flag, GitFork, Pencil, Undo2 } from '../../ui/icons'
+import { Check, ChevronDown, Copy, CornerDownRight, FileText, Flag, GitFork, Paperclip, Pencil, Picture, Undo2 } from '../../ui/icons'
 import type { ConversationEntry, RequestUsage } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
@@ -74,9 +74,29 @@ function ReportButton({ entry }: { entry: ConversationEntry }) {
   )
 }
 
+/** The pictures and files that came with your message (ADR 0113), above it: the pictures first, then the files by name. */
+function Attached({ items }: { items: NonNullable<ConversationEntry['attached']> }) {
+  const shown = [...items.filter((item) => item.kind === 'picture'), ...items.filter((item) => item.kind !== 'picture')]
+  return (
+    <div className="bubble-attached" aria-label="Attached">
+      {shown.map((item, index) =>
+        item.kind === 'picture' && item.preview?.startsWith('data:image/') ? (
+          <img key={index} className="attached-picture" src={item.preview} alt={item.name} title={item.name} draggable={false} />
+        ) : (
+          <span key={index} className="attachment-chip" title={item.name}>
+            {item.kind === 'pdf' ? <FileText size={12} /> : item.kind === 'picture' ? <Picture size={12} /> : <Paperclip size={11} />}
+            <span className="attachment-name">{item.name}</span>
+          </span>
+        ),
+      )}
+    </div>
+  )
+}
+
 function UserMessage({ entry }: { entry: ConversationEntry }) {
   return (
     <div className="turn-user">
+      {entry.attached?.length ? <Attached items={entry.attached} /> : null}
       <div className="bubble-row">
         <div className="chat-user-bubble">{entry.text}</div>
       </div>

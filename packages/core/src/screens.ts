@@ -8,14 +8,17 @@
  *  - The conversation in memory keeps the newest `KEEP_SCREENS` and drops thinking from the first message
  *    it changed on, the way any rewrite does: thinking minted after a changed message no longer matches
  *    the prompt it was written under (see compaction.ts).
- *  - A model that cannot read images is sent none (`withoutScreensFrom`).
+ *  - A model that cannot read images is sent no image at all, screenshot or not: a note stands in the place of each
+ *    (`withoutImagesFrom`).
  */
-import { textBlock, type Message, type ToolResultContent, type UserBlock } from '@encode/providers'
+import { textBlock, type ImageBlock, type Message, type ToolResultContent, type UserBlock } from '@encode/providers'
 import { dropThinkingFrom } from './compaction'
 
 /** Screenshots a conversation keeps. One: coordinates belong to the newest capture, and an older one can be taken again. */
 export const KEEP_SCREENS = 1
 export const SCREEN_REMOVED = '[screenshot removed to save context]'
+/** What a model that cannot see pictures reads in place of one: a picture the person attached, an image a tool read. */
+export const IMAGE_UNSEEN = '[A picture is here, but the model in use cannot see pictures.]'
 
 const isScreen = (block: { type: string; transient?: true }): boolean => block.type === 'image' && block.transient === true
 
@@ -83,4 +86,24 @@ export function pruneScreens(messages: readonly Message[], keep = KEEP_SCREENS):
     }
   }
   return first < 0 ? messages : dropThinkingFrom(out, first)
+}
+
+const holdsPicture = (block: UserBlock): boolean => block.type === 'image' || (block.type === 'tool-result' && block.content.some((part) => part.type === 'image'))
+
+/** The message with a note in place of each image: a screenshot's usual one, or that the picture cannot be seen. */
+function blind(message: Message): Message {
+  if (message.role !== 'user' || !message.content.some(holdsPicture)) return message
+  const note = (image: ImageBlock) => textBlock(image.transient ? SCREEN_REMOVED : IMAGE_UNSEEN)
+  const content = message.content.map((block): UserBlock => {
+    if (block.type === 'image') return note(block)
+    if (block.type !== 'tool-result' || !block.content.some((part) => part.type === 'image')) return block
+    return { ...block, content: block.content.map((part) => (part.type === 'image' ? note(part) : part)) }
+  })
+  return { role: 'user', content }
+}
+
+/** What a model that cannot read images is sent: the messages without any image; the same array when there was none. */
+export function withoutImagesFrom(messages: readonly Message[]): readonly Message[] {
+  if (!messages.some((message) => message.role === 'user' && message.content.some(holdsPicture))) return messages
+  return messages.map(blind)
 }

@@ -77,6 +77,8 @@ export interface ConversationEntry {
   details?: string
   /** On your message: what its request has cost so far. */
   usage?: RequestUsage
+  /** On your message: the pictures and files that came with it. */
+  attached?: EntryAttachment[]
   /** On a notice: lines eNCode suggests keeping in the project's instructions file (ADR 0097). */
   suggestion?: EntrySuggestion
   /** On a notice: the attempts of a best-of-N request, and which to keep (ADR 0098). */
@@ -324,6 +326,27 @@ export interface AgentStartInput {
   best?: number
   /** File context the user attached to the prompt. */
   attachments?: { path: string; content: string }[]
+  /** Pictures and PDFs the person attached (ADR 0113). */
+  media?: AttachedMedia[]
+}
+
+/** A picture or a PDF attached to a message: a pasted screenshot, a file dropped or picked from the computer. */
+export interface AttachedMedia {
+  /** Its file name, or a name eNCode gave a pasted picture. */
+  name: string
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'application/pdf'
+  /** Base64, without a data: prefix. */
+  data: string
+  /** A picture's thumbnail, a small JPEG as a data: URL, shown on the person's message. */
+  preview?: string
+}
+
+/** What came with the person's message, shown on it. */
+export interface EntryAttachment {
+  name: string
+  kind: 'picture' | 'pdf' | 'file'
+  /** A picture's thumbnail, as a data: URL. */
+  preview?: string
 }
 
 export interface AgentHistory {

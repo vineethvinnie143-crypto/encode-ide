@@ -75,8 +75,30 @@ describe('messages handed to the running request', () => {
     // The request is over: the first one goes out as the next request.
     working('done')
     useChat.getState().drainQueue('session-1')
-    assert.deepEqual(lastCall('agent.start')!.args.slice(0, 2), ['session-1', { text: 'first', mode: 'code', attachments: undefined }])
+    assert.deepEqual(lastCall('agent.start')!.args.slice(0, 2), ['session-1', { text: 'first', mode: 'code' }])
     assert.deepEqual(queued(), ['second', 'later'])
+  })
+
+  it('keep the pictures and files of a queued message until it is sent, and give them back to edit (ADR 0113)', () => {
+    fresh()
+    working('running-tool')
+    const picture = { id: 'p1', kind: 'picture' as const, name: 'Screenshot 1.png', mediaType: 'image/png' as const, data: 'iVBORw0KGgo=', preview: 'data:image/jpeg;base64,AAAA', width: 2, height: 2 }
+    useChat.setState({ attachments: [picture], draft: 'why is this red?' })
+    useChat.getState().enqueue('why is this red?', { attachments: [picture] })
+    assert.deepEqual([useChat.getState().draft, useChat.getState().attachments], ['', []], 'the chat box is empty again')
+    const id = useChat.getState().queues['session-1'][0].id
+    useChat.getState().sendQueued(id)
+    assert.deepEqual(queued(), ['why is this red?'], 'a running request reads words only, so it waits')
+    useChat.getState().editQueued(id)
+    assert.deepEqual([useChat.getState().draft, useChat.getState().attachments], ['why is this red?', [picture]])
+    useChat.getState().enqueue('why is this red?', { attachments: [picture] })
+    working('done')
+    useChat.getState().drainQueue('session-1')
+    assert.deepEqual(lastCall('agent.start')!.args[1], {
+      text: 'why is this red?',
+      mode: 'code',
+      media: [{ name: 'Screenshot 1.png', mediaType: 'image/png', data: 'iVBORw0KGgo=', preview: 'data:image/jpeg;base64,AAAA' }],
+    })
   })
 
   it('that the request refuses wait for it to end while it runs, and come back at once when nothing runs', async () => {

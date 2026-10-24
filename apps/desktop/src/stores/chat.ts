@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import { api } from '../api'
 import { enqueue, dequeue, moveQueued, removeQueued, takeQueued, mergeDraft, type Queued } from '../components/Chat/queue'
+import { startInput, type ComposerAttachment } from '../components/Chat/attachments'
 import { getActiveSessionId } from './active'
 import { appendTexts, createDeltaBuffer } from './deltas'
 import { useSettings } from './settings'
@@ -51,6 +52,8 @@ interface ChatStore {
   /** The session whose entries are shown; the thread starts at its end, and fades in, when this changes. */
   loadedFor: string
   draft: string
+  /** What the chat box will send with the draft (ADR 0113): files, pictures, PDFs. */
+  attachments: ComposerAttachment[]
   /** Messages sent while the agent worked, by session, waiting to go out one by one. */
   queues: Record<string, Queued[]>
   /** Messages handed to a session's running request that no step has taken yet, by session. */
@@ -59,11 +62,14 @@ interface ChatStore {
   streamStartedAt: number
   streamChars: number
   setDraft(text: string): void
+  attach(items: readonly ComposerAttachment[]): void
+  detach(id: string): void
   init(): Promise<void>
   load(sessionId: string): Promise<void>
   /** Starts a turn. `keepDraft`: the message comes from elsewhere (the Review tab), so what the composer holds stays. */
   /** `best`: make that many attempts side by side, in Code mode (ADR 0098). */
-  send(text: string, attachments?: { path: string; content: string }[], options?: { keepDraft?: boolean; best?: number }): void
+  /** What the chat box held is cleared with the draft; `attachments` go with the message. */
+  send(text: string, attachments?: readonly ComposerAttachment[], options?: { keepDraft?: boolean; best?: number }): void
   /** Runs the last request again from where a problem stopped it. */
   retry(): void
   stop(): Promise<void>
@@ -72,7 +78,7 @@ interface ChatStore {
   answerApproval(answer: boolean | ApprovalAnswer, id?: string): Promise<void>
   answer(text: string): Promise<void>
   /** Holds a message until the agent is done. */
-  enqueue(text: string, options?: { keepDraft?: boolean }): void
+  enqueue(text: string, options?: { keepDraft?: boolean; attachments?: readonly ComposerAttachment[] }): void
   /**
    * Hands a message to the running request, which reads it after the step it is on. A message no step takes (the
    * request was ending, or a tool ended it) goes to the front of the queue, so it is the next request.
@@ -148,6 +154,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   initialized: false,
   loadedFor: '',
   draft: '',
+  attachments: [],
   queues: {},
   steering: {},
   tokensPerSecond: 0,
@@ -155,6 +162,8 @@ export const useChat = create<ChatStore>((set, get) => ({
   streamChars: 0,
 
   setDraft: (text) => set({ draft: text }),
+  attach: (items) => set((state) => ({ attachments: [...state.attachments, ...items] })),
+  detach: (id) => set((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) })),
 
   init: async () => {
     try {
@@ -218,13 +227,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   send: (text, attachments, options) => {
     const trimmed = text.trim()
     if (!trimmed || get().running) return
-    set({ running: true, status: 'thinking', approvals: [], ask: null, streamStartedAt: 0, streamChars: 0, ...(options?.keepDraft ? {} : { draft: '' }) })
+    set({ running: true, status: 'thinking', approvals: [], ask: null, streamStartedAt: 0, streamChars: 0, ...(options?.keepDraft ? {} : { draft: '', attachments: [] }) })
     const sessionId = getActiveSessionId()
     void api.agent
       .start(sessionId, {
         text: trimmed,
         mode: options?.best ? 'code' : (useSettings.getState().settings?.agentMode ?? 'code'),
-        attachments,
+        ...startInput(attachments ?? []),
         ...(options?.best ? { best: options.best } : {}),
       })
       .catch((error: Error) => {
@@ -297,8 +306,8 @@ export const useChat = create<ChatStore>((set, get) => ({
 
   enqueue: (text, options) => {
     const sessionId = getActiveSessionId()
-    const queue = enqueue(get().queues[sessionId] ?? [], text, crypto.randomUUID())
-    set({ queues: { ...get().queues, [sessionId]: queue }, ...(options?.keepDraft ? {} : { draft: '' }) })
+    const queue = enqueue(get().queues[sessionId] ?? [], text, crypto.randomUUID(), options?.attachments)
+    set({ queues: { ...get().queues, [sessionId]: queue }, ...(options?.keepDraft ? {} : { draft: '', attachments: [] }) })
   },
 
   steer: (text, options) => {
@@ -324,9 +333,14 @@ export const useChat = create<ChatStore>((set, get) => ({
     const sessionId = getActiveSessionId()
     const { taken, rest } = takeQueued(get().queues[sessionId] ?? [], id)
     if (!taken) return
+    // A running request reads words only: pictures and files wait for a request of their own.
+    if (get().running && taken.attachments?.length) {
+      useUi.getState().notify('info', 'Pictures and files go with a new request, so this message waits until eNCode is done.')
+      return
+    }
     set({ queues: { ...get().queues, [sessionId]: rest } })
     if (get().running) get().steer(taken.text, { keepDraft: true })
-    else get().send(taken.text, undefined, { keepDraft: true })
+    else get().send(taken.text, taken.attachments, { keepDraft: true })
   },
 
   followSteers: (event) => {
@@ -357,7 +371,7 @@ export const useChat = create<ChatStore>((set, get) => ({
     const sessionId = getActiveSessionId()
     const { taken, rest } = takeQueued(get().queues[sessionId] ?? [], id)
     if (!taken) return
-    set({ queues: { ...get().queues, [sessionId]: rest }, draft: mergeDraft(get().draft, taken.text) })
+    set({ queues: { ...get().queues, [sessionId]: rest }, draft: mergeDraft(get().draft, taken.text), attachments: [...get().attachments, ...(taken.attachments ?? [])] })
   },
 
   drainQueue: (sessionId) => {
@@ -365,12 +379,12 @@ export const useChat = create<ChatStore>((set, get) => ({
     if (!next) return
     set({ queues: { ...get().queues, [sessionId]: rest } })
     if (sessionId === getActiveSessionId()) {
-      get().send(next.text)
+      get().send(next.text, next.attachments, { keepDraft: true })
       return
     }
     // A session in the background: start it directly; its events reach the sidebar through the sessions store.
     void api.agent
-      .start(sessionId, { text: next.text, mode: useSettings.getState().settings?.agentMode ?? 'code' })
+      .start(sessionId, { text: next.text, mode: useSettings.getState().settings?.agentMode ?? 'code', ...startInput(next.attachments ?? []) })
       .catch((error: Error) => useUi.getState().notify('error', errorText(error)))
   },
 
