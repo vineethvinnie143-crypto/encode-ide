@@ -57,6 +57,7 @@ function config(searchProvider: SearchProviderId): HostConfig {
     computer: false,
     languageServers: false,
     errorGate: 'auto',
+    guide: 'auto',
     model: 'none',
     router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
     providers: {},

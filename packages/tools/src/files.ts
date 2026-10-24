@@ -188,6 +188,7 @@ interface ReadInput extends Record<string, unknown> {
 }
 
 export const readTool: Tool<ReadInput> = {
+  brief: `Reads a file (absolute path; a relative one resolves from the workspace root), numbered like cat -n (the prefix is not part of the file). Up to ${READ_DEFAULT_LIMIT} lines; of a long file its start and an outline of the rest: offset (1-based line) and limit read a part. Images come back as images, notebooks by cell, PDFs at most ${PDF_MAX_PAGES} pages a call (pages). Not directories. A file must be read before Write or Edit changes it.`,
   definition: {
     name: 'Read',
     description: [
@@ -455,6 +456,7 @@ function rewriteRefusal(file: string, before: string, after: string, ctx: ToolCo
 }
 
 export const writeTool: Tool<WriteInput> = {
+  brief: 'Writes a whole file, creating missing folders. An existing file must have been read first, keeps its encoding and line endings, and is better changed with Edit.',
   definition: {
     name: 'Write',
     description: [
@@ -584,6 +586,7 @@ const editProperties = {
 }
 
 export const editTool: Tool<EditInput> = {
+  brief: "Replaces exact text in a file read in this session. old_string matches the file exactly (indentation, no Read prefix) and once, unless replace_all; an empty one creates a new file.",
   definition: {
     name: 'Edit',
     description: [
@@ -626,6 +629,7 @@ export const editTool: Tool<EditInput> = {
 }
 
 export const multiEditTool: Tool<MultiEditInput> = {
+  brief: 'Several Edit replacements in one file, in order, each on the text the one before produced: all succeed or none applies.',
   definition: {
     name: 'MultiEdit',
     description: [

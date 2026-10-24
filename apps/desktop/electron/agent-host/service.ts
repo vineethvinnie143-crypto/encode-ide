@@ -418,6 +418,7 @@ const NO_CONFIG: HostConfig = {
   // Nothing starts before the settings arrive.
   languageServers: false,
   errorGate: 'auto',
+  guide: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

@@ -65,6 +65,20 @@ describe('the router\'s roles', () => {
     assert.deepEqual(freePool, { providers: [] })
   })
 
+  it('give no role the free models unless the settings name them for it, though a free connection is set up (ADR 0094)', () => {
+    const profiles = [demo, openRouter(), anthropic()]
+    const router = routerSettingsOf(settings({ profiles, activeProfileId: 'an', freeOnly: false, freeProfileId: 'or', roles: { main: ['an:claude-sonnet-4-5'] } }))
+    assert.deepEqual(router.roles, { main: ['p-an:claude-sonnet-4-5'] })
+    const { config } = parseRouterConfig(router)
+    for (const role of ['main', 'explore', 'planner', 'reviewer', 'summarizer', 'utility', 'inline']) assert.deepEqual(resolveModelList(config, { role }).refs, ['p-an:claude-sonnet-4-5'], role)
+    // Named for one role, they serve that role (and those that follow it) only.
+    const chosen = routerSettingsOf(settings({ profiles, activeProfileId: 'an', freeOnly: false, freeProfileId: 'or', roles: { main: ['an:claude-sonnet-4-5'], utility: [FREE_REF] } }))
+    const parsed = parseRouterConfig(chosen).config
+    assert.deepEqual(resolveModelList(parsed, { role: 'utility' }).refs, ['@free'])
+    assert.deepEqual(resolveModelList(parsed, { role: 'inline' }).refs, ['@free'], 'inline suggestions follow Small tasks')
+    assert.deepEqual(resolveModelList(parsed, { role: 'explore' }).refs, ['p-an:claude-sonnet-4-5'])
+  })
+
   it('serve "@free" from the one connection that was named, and only that one', () => {
     const profiles = [demo, openRouter(), openRouter({ id: 'or2', name: 'Paid OpenRouter' })]
     assert.deepEqual(routerSettingsOf(settings({ profiles, activeProfileId: 'or', roles: { main: [FREE_REF] } })).freePool, { providers: ['p-or'] })

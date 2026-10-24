@@ -19,6 +19,8 @@ interface TodoWriteInput extends Record<string, unknown> {
 }
 
 export const todoWriteTool: Tool<TodoWriteInput> = {
+  brief:
+    'The visible task list for work of three or more steps: send the whole list each time. Items have content ("Run the tests"), activeForm ("Running the tests") and status; one in_progress at a time, completed only when really done.',
   definition: {
     name: 'TodoWrite',
     description: [
@@ -74,6 +76,7 @@ interface AskInput extends Record<string, unknown> {
 }
 
 export const askUserQuestionTool: Tool<AskInput> = {
+  brief: 'Asks the user one to four multiple-choice questions, for a decision only they can make. header: up to 12 characters. Two to four options; a recommended one goes first, its label ending "(Recommended)".',
   definition: {
     name: 'AskUserQuestion',
     description: [
@@ -146,6 +149,7 @@ export const PLAN_MODE_ENTERED =
   'You are in plan mode now. Only the read-only tools work: read and search the code, run nothing that changes anything. Investigate until you can plan the change, then call ExitPlanMode with a concrete, ordered plan. The user reviews it before any work starts.'
 
 export const enterPlanModeTool: Tool<EnterPlanInput> = {
+  brief: 'Asks the user to switch to plan mode (read-only tools; then ExitPlanMode) before work worth agreeing on first: a feature, a change across files, a choice of approach.',
   definition: {
     name: 'EnterPlanMode',
     description: [
@@ -183,6 +187,7 @@ interface PlanInput extends Record<string, unknown> {
 }
 
 export const exitPlanModeTool: Tool<PlanInput> = {
+  brief: 'In plan mode, puts your plan to the user for approval: Markdown, the steps in order, the files each touches, how it will be checked. Approved, you leave plan mode; else revise.',
   definition: {
     name: 'ExitPlanMode',
     description: [
@@ -233,6 +238,10 @@ interface TaskInput extends Record<string, unknown> {
 export function createTaskTool(types: readonly SubagentType[]): Tool<TaskInput> {
   const names = types.map((type) => type.name)
   return {
+    brief: [
+      'Starts a subagent that works on its own and reports back once. It sees none of this conversation: prompt is a complete brief (the goal, what is known, what to return, whether it may change files). Several calls run together; run_in_background reports as a notice later; SendMessage to its agent id continues it. Types:',
+      ...types.map((type) => `- ${type.name}: ${type.description}${type.tools ? ` (tools: ${type.tools.join(', ')})` : ''}`),
+    ].join('\n'),
     definition: {
       name: 'Task',
       description: [
@@ -300,6 +309,7 @@ interface SkillInput extends Record<string, unknown> {
 
 export function createSkillTool(skills: readonly SkillSummary[]): Tool<SkillInput> {
   return {
+    brief: ['Loads a skill: instructions for a kind of task. Load the one a task matches first, and follow it.', ...(skills.length ? skills.map((skill) => `- ${skill.name}: ${skill.description}`) : ['(none yet)'])].join('\n'),
     definition: {
       name: 'Skill',
       description: [

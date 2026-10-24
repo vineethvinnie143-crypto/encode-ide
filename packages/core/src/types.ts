@@ -7,6 +7,7 @@ import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, U
 import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
 import type { ErrorGate } from './edit-diagnostics'
+import type { GuideSetting } from './guide'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
 
 export interface AgentSettings {
@@ -28,6 +29,8 @@ export interface AgentSettings {
    * it back once, `on` up to three times, `off` lets it end. Default `auto`.
    */
   errorGate?: ErrorGate
+  /** `auto` (the default): a model that needs no guide gets the short instructions and tool descriptions (ADR 0094). `full`: every model gets the full guide. */
+  guide?: GuideSetting
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8 }

@@ -94,14 +94,15 @@ export class ToolRegistry {
 
   /**
    * What a request carries: every tool `allowed` names, except the deferred ones that were not loaded yet. An agent that
-   * cannot search (ToolSearch is not among its tools) is sent what it may use in full, because it could not ask.
+   * cannot search (ToolSearch is not among its tools) is sent what it may use in full, because it could not ask. `brief`:
+   * for a model that needs no guide, each tool's brief in place of its description.
    */
-  visibleDefinitions(allowed: readonly string[] | undefined, loaded: ReadonlySet<string>): ToolDefinition[] {
+  visibleDefinitions(allowed: readonly string[] | undefined, loaded: ReadonlySet<string>, brief = false): ToolDefinition[] {
     const names = this.deferredSet()
     const searches = names.size > 0 && this.tools.has(TOOL_SEARCH) && (!allowed || allowed.includes(TOOL_SEARCH))
     return this.list(allowed)
       .filter((tool) => !searches || !names.has(tool.definition.name) || loaded.has(tool.definition.name))
-      .map((tool) => tool.definition)
+      .map((tool) => (brief && tool.brief ? { ...tool.definition, description: tool.brief } : tool.definition))
   }
 
   private deferredSet(): ReadonlySet<string> {

@@ -83,6 +83,7 @@ say so.
 | [0091](0091-the-agent-writes-for-the-versions-installed-their-names-in-the-first-message-and-their-api-through-codemap.md) | The agent writes for the versions installed: their names in the first message, and their API through CodeMap | Accepted, builds on 0084 and 0090 |
 | [0092](0092-the-agent-is-measured-by-a-benchmark-of-its-own-and-a-reported-request-replays-into-it.md) | The agent is measured by a benchmark of its own, and a reported request replays into it | Accepted, builds on 0062, 0088, 0089, 0090 and 0091 |
 | [0093](0093-a-long-result-is-kept-whole-in-a-file-and-the-model-reads-its-ends-and-reads-on-by-range.md) | A long result is kept whole in a file, and the model reads its ends and reads on by range | Accepted, builds on 0062 and 0092 |
+| [0094](0094-old-results-are-shortened-early-and-seldom-strong-models-get-a-short-guide-and-small-jobs-a-small-model.md) | Old results are shortened early and seldom, strong models get a short guide, and small jobs a small model | Accepted, builds on 0062 and 0093 |
 
 ## Template
 

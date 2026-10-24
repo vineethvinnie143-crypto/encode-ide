@@ -84,6 +84,7 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'models.add', section: 'models', label: 'Add a provider', keywords: 'openrouter deepseek anthropic openai custom local ollama' },
   { id: 'roles.free', section: 'roles', label: 'Only use free models', keywords: 'free pool billed paid cost' },
   { id: 'roles.list', section: 'roles', label: 'Models for each role', keywords: 'main explore plan review compaction small tasks effort' },
+  { id: 'roles.guide', section: 'roles', label: 'Short instructions for strong models', keywords: 'guide prompt system instructions tokens cost' },
   { id: 'agent.policy', section: 'agent', label: 'Approvals', keywords: 'what eNCode may do without asking read only full access auto review policy' },
   { id: 'agent.computer', section: 'agent', label: 'Let the agent use this computer', keywords: 'computer use gui mouse keyboard' },
   { id: 'agent.search', section: 'agent', label: 'Web search', keywords: 'brave tavily duckduckgo search key' },

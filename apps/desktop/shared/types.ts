@@ -63,6 +63,9 @@ export type ApprovalPolicy = 'read-only' | 'workspace-write' | 'full-access' | '
  */
 export type ErrorGate = 'auto' | 'on' | 'off'
 
+/** `auto`: models that need no guide get the short instructions (ADR 0094); `full`: every model gets the full guide. */
+export type Guide = 'auto' | 'full'
+
 /**
  * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
  * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
@@ -110,6 +113,8 @@ export interface Settings {
   inlineSuggest: InlineSuggest
   /** See ErrorGate. Default `auto`. */
   errorGate: ErrorGate
+  /** See Guide. Default `auto`. */
+  guide: Guide
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */
@@ -412,6 +417,8 @@ export interface ModelInfo {
   contextLength?: number
   free?: boolean
   pricing?: string
+  /** US dollars per million tokens read and written, where the listing says (OpenRouter's does). */
+  price?: { input: number; output: number }
   /** The provider lists tool calls among what the model supports; the agent needs them. Unset when the listing does not say. */
   tools?: boolean
 }

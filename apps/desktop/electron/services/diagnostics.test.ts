@@ -46,6 +46,7 @@ const settings: Settings = {
   formatOnType: false,
   inlineSuggest: 'auto',
   errorGate: 'auto',
+  guide: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,
