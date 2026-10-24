@@ -101,10 +101,11 @@ say so.
 | [0109](0109-what-the-first-tester-round-showed-edits-in-another-shape-longer-requests-full-access-and-a-chat-that-never-scrolls-sideways.md) | What the first tester round showed: edits in another shape, longer requests, Full access, and a chat that never scrolls sideways | Accepted, builds on 0009, 0063, 0089, 0097 and 0107 |
 | [0110](0110-what-a-testers-diagnostics-showed-copy-a-folder-windows-will-not-let-the-sandbox-mark-small-screens-and-log-levels.md) | What a tester's diagnostics showed: Copy, a folder Windows will not let the sandbox mark, small screens, and log levels | Accepted, builds on 0063 and 0109 |
 | [0111](0111-a-folder-on-another-machine-opens-over-ssh-the-agent-works-there-and-the-keys-stay-on-the-pc.md) | A folder on another machine opens over SSH: the agent works there, and the keys stay on the PC | Accepted, builds on 0040, 0064, 0106 and 0108 |
-| [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107 |
+| [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107; where the dice sits superseded by 0116 |
 | [0113](0113-pictures-and-files-go-with-a-message.md) | Pictures and files go with a message: pasted, dropped or picked | Accepted, builds on 0054, 0069 and 0111 |
 | [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083 |
 | [0115](0115-a-finished-task-list-folds-away-and-the-thread-follows-until-you-scroll-up.md) | A finished task list folds away, and the thread follows until you scroll up | Accepted, builds on 0017 |
+| [0116](0116-the-dice-rolls-under-the-latest-step.md) | The dice rolls under the latest step | Accepted, builds on 0112 and 0115 |
 
 ## Template
 

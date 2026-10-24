@@ -19,7 +19,7 @@ import { NoticeLine, ProblemCard } from './ProblemCard'
 import { WorkRoot, shownPath } from './shown-path'
 import { BestCard } from './BestCard'
 import { SuggestionCard } from './SuggestionCard'
-import WorkLog from './WorkLog'
+import WorkLog, { LiveLine } from './WorkLog'
 import { editedFiles, editTotals, type Turn, type TurnPart } from './turns'
 
 const timeOf = (timestamp: number) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -147,13 +147,11 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
 
 /** One part of a turn: the message that started it when you sent it while the agent worked, the work log, and the reply. */
 const PartView = memo(function PartView({ part, usage }: { part: TurnPart; usage?: RequestUsage }) {
-  // Only the part that runs follows the chat's status, so a finished one is not drawn again when it changes.
-  const status = useChat((state) => (part.active ? state.status : undefined))
   const replyEntries = part.reply.filter((entry) => entry.kind !== 'assistant' || entry.text?.trim() || entry.streaming)
   return (
     <>
       {part.steer && <SteerMessage entry={part.steer} />}
-      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} usage={usage} status={status} />
+      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} usage={usage} />
       {replyEntries.map((entry) => (
         <ReplyEntry key={entry.id} entry={entry} />
       ))}
@@ -254,6 +252,9 @@ function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
  * whose change card offers Undo.
  */
 function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
+  const live = turn.active ? turn.parts[turn.parts.length - 1] : undefined
+  // Only the turn that runs follows the chat's status, so a finished one is not drawn again when it changes.
+  const status = useChat((state) => (turn.active ? state.status : undefined))
   const answer = turn.reply.filter((entry) => entry.kind === 'assistant' && entry.text?.trim())
   const lastAnswer = answer[answer.length - 1]
   const answerText = answer.map((entry) => entry.text).join('\n\n')
@@ -266,6 +267,8 @@ function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
       ))}
 
       <ResultCard turn={turn} latest={latest} />
+
+      {live && <LiveLine status={status} log={live.log} reply={live.reply} startedAt={live.startedAt} usage={turn.user?.usage} />}
 
       {!turn.active && lastAnswer && (
         <div className="msg-actions" data-find-skip>

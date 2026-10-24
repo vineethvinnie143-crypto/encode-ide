@@ -11,7 +11,7 @@ import { cx } from '../ui/cx'
 import { ArrowUp, MessageSquare, Square } from '../ui/icons'
 import Markdown from './Chat/Markdown'
 import { WorkRoot } from './Chat/shown-path'
-import WorkLog from './Chat/WorkLog'
+import WorkLog, { LiveLine } from './Chat/WorkLog'
 import { buildTurns } from './Chat/turns'
 
 type Ask = { id: string; question: string; options?: string[] }
@@ -169,7 +169,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
                   <div className="chat-user-bubble">{turn.user.text}</div>
                 </div>
               )}
-              <WorkLog log={turn.log} active={turn.active} startedAt={turn.startedAt} endedAt={turn.endedAt} status={turn.active ? status : undefined} />
+              <WorkLog log={turn.log} active={turn.active} startedAt={turn.startedAt} endedAt={turn.endedAt} />
               {turn.reply.map((entry) =>
                 entry.kind === 'assistant' ? (
                   entry.text?.trim() || entry.streaming ? (
@@ -184,6 +184,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
                   </div>
                 ),
               )}
+              {turn.active && <LiveLine status={status} log={turn.log} reply={turn.reply} startedAt={turn.startedAt} />}
             </section>
           ))}
           {approval && (

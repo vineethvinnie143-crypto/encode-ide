@@ -2,21 +2,19 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentStatus, ConversationEntry, RequestUsage } from '@shared/types'
 import { AlertTriangle, ChevronRight, Info } from '../../ui/icons'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
-import { foldText, markdownHaystack } from '../../find/text'
 import { useNow } from '../../hooks/useNow'
+import { foldText, markdownHaystack } from '../../find/text'
 import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
 import { Details } from '../../ui/Details'
 import ThinkingDice from '../../ui/ThinkingDice'
 import StepRow, { GroupRow, stepsHold } from './StepRow'
-import { formatClock, formatDuration, formatUsage, logItems, stepsOf, summarizeSteps, workPhase, type LogItem, type Turn } from './turns'
+import { formatClock, formatDuration, formatUsage, logItems, stepsOf, summarizeSteps, workPhase, type LogItem, type Turn, type TurnPart } from './turns'
 
 type WorkLogProps = Pick<Turn, 'log' | 'active' | 'startedAt' | 'endedAt'> & {
   /** What the request cost, on the log of its last part. */
   usage?: RequestUsage
-  /** The chat's status, while this log's part is the one running: what the head says the agent is doing. */
-  status?: AgentStatus
 }
 
 const texts = new WeakMap<ConversationEntry, string>()
@@ -36,11 +34,11 @@ export function logHolds(items: readonly LogItem[], needle: string): boolean {
 }
 
 /**
- * What the agent did in a turn. While it works the log is open, the dice rolls beside what it is doing ("Thinking",
- * "Working") and a clock runs; when the turn ends it folds to "Worked for 2m 14s", and a click opens it again.
+ * What the agent did in a turn. While it works the log is open and its head says what was done so far; the dice and
+ * the clock are on the line under the latest step (LiveLine, ADR 0116). When the turn ends the log folds to "Worked
+ * for 2m 14s", and a click opens it again.
  */
-function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProps) {
-  const now = useNow(active)
+function WorkLog({ log, active, startedAt, endedAt, usage }: WorkLogProps) {
   const items = useMemo(() => logItems(log), [log])
   const [own, setOpen] = useState(active)
   const touched = useRef(false)
@@ -58,10 +56,10 @@ function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProp
     if (!active && !touched.current) setOpen(false)
   }, [active])
 
-  if (!active && !log.length) return null
+  if (!log.length) return null
 
-  const phase = active ? workPhase(status, log) : null
-  const spent = formatUsage(usage)
+  const steps = summarizeSteps(stepsOf({ log }))
+  const spent = active ? '' : formatUsage(usage)
 
   return (
     <div ref={logRef} className={cx('worklog', active && 'is-live')}>
@@ -70,7 +68,7 @@ function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProp
         type="button"
         className="worklog-head"
         aria-expanded={open}
-        title={summarizeSteps(stepsOf({ log }))}
+        title={steps}
         onClick={() => {
           touched.current = true
           // Find holds the log open: closing it by hand keeps it closed for this search.
@@ -80,15 +78,7 @@ function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProp
           } else setOpen((value) => !value)
         }}
       >
-        {phase ? (
-          <>
-            <ThinkingDice rolling={phase.rolling} className="worklog-dice" />
-            <span className={cx('worklog-label', phase.rolling && 'shimmer')}>{phase.words}</span>
-            <span className="worklog-clock">{formatClock(now - startedAt)}</span>
-          </>
-        ) : (
-          <span className="worklog-label">Worked for {formatDuration(endedAt - startedAt)}</span>
-        )}
+        <span className="worklog-label">{active ? steps || 'Working' : `Worked for ${formatDuration(endedAt - startedAt)}`}</span>
         {spent && <span className="worklog-usage">{spent}</span>}
         <span className="worklog-rule" />
         {log.length > 0 && <ChevronRight size={14} className={cx('worklog-chevron', open && 'is-open')} />}
@@ -128,3 +118,24 @@ function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProp
 
 /** Skips a log whose steps are the ones it drew last: the answer after it may stream, the log stays. */
 export default memo(WorkLog)
+
+/**
+ * The last line of a turn the agent is working on (ADR 0116): the dice rolling beside what it is doing ("Thinking",
+ * "Working", "Writing", or at rest while it waits on you), the clock of the part it is on and what the request has
+ * used. It sits under the latest step and the answer streaming in, so it is where you look as the thread follows, at
+ * every step and not only at the top of the turn.
+ */
+export function LiveLine({ status, log, reply, startedAt, usage }: Pick<TurnPart, 'log' | 'reply' | 'startedAt'> & { status?: AgentStatus; usage?: RequestUsage }) {
+  const now = useNow(true)
+  const writing = reply.some((entry) => entry.kind === 'assistant' && entry.streaming && Boolean(entry.text?.trim()))
+  const phase = workPhase(status, log, writing)
+  const spent = formatUsage(usage)
+  return (
+    <div className="turn-live">
+      <ThinkingDice rolling={phase.rolling} className="worklog-dice" />
+      <span className={cx('worklog-label', phase.rolling && 'shimmer')}>{phase.words}</span>
+      <span className="worklog-clock">{formatClock(now - startedAt)}</span>
+      {spent && <span className="worklog-usage">{spent}</span>}
+    </div>
+  )
+}

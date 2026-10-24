@@ -331,14 +331,15 @@ export function formatUsage(usage: RequestUsage | undefined): string {
 }
 
 /**
- * What the agent is doing while its turn runs, in the words at the head of the log, and whether the dice beside them
- * rolls: it rests while the agent waits on the person.
+ * What the agent is doing while its turn runs, in the words of the line under its latest step (ADR 0116), and whether
+ * the dice beside them rolls: it rests while the agent waits on the person. `writing` is true while the answer after
+ * the last step streams in.
  */
-export function workPhase(status: AgentStatus | undefined, log: readonly ConversationEntry[]): { words: string; rolling: boolean } {
+export function workPhase(status: AgentStatus | undefined, log: readonly ConversationEntry[], writing = false): { words: string; rolling: boolean } {
   if (status === 'awaiting-approval') return { words: 'Waiting for your approval', rolling: false }
   if (status === 'awaiting-user') return { words: 'Waiting for your answer', rolling: false }
   if (status === 'running-tool') return log.some((entry) => entry.tool?.state === 'reviewing') ? { words: 'Reviewing', rolling: true } : { words: 'Working', rolling: true }
-  return { words: 'Thinking', rolling: true }
+  return { words: writing ? 'Writing' : 'Thinking', rolling: true }
 }
 
 /** "0:18", "12:05", "1:03:09": a running clock. */

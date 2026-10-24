@@ -1,6 +1,6 @@
 # 0112. The dice rolls while the agent works
 
-- Status: Accepted, builds on 0107
+- Status: Accepted, builds on 0107; where the dice sits superseded by 0116
 - Date: 2026-10-24
 
 ## Context

@@ -832,7 +832,9 @@ Windows display scale (125%, 150%). Leave it open for an hour. Long commands, lo
 should scroll in their own box: the chat itself never scrolls sideways, at any window size.
 While a long answer streams, the chat should keep to its end until you scroll up, even by one turn of the wheel;
 **Jump to the latest** (the arrow at the bottom right) takes you back and it follows again. A task list the agent
-finishes folds away a moment after its last tick; one it left unfinished stays.
+finishes folds away a moment after its last tick; one it left unfinished stays. The rolling dice sits on the last
+line of the running turn, under the latest step, and says what is happening there (Thinking, Working, Writing, or
+waiting for you).
 
 What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
 the tools you use now.

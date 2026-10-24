@@ -3885,6 +3885,14 @@ async function runFollowChecks() {
   const DISTANCE = "(() => { const list = document.querySelector('.chat-list'); return Math.round(list.scrollHeight - list.scrollTop - list.clientHeight) })()"
   const LATEST = "!!document.querySelector('.latest-btn')"
   const COUNT = "(document.querySelector('.todo-card .todo-count')?.textContent ?? '')"
+  // The line with the dice under the latest step (ADR 0116): the turn's last, and in view while the thread follows.
+  const LIVE = `(() => {
+    const line = document.querySelector('.chat-list .turn-live')
+    if (!line) return null
+    const list = document.querySelector('.chat-list').getBoundingClientRect()
+    const box = line.getBoundingClientRect()
+    return { words: line.querySelector('.worklog-label')?.textContent ?? '', last: line === line.parentElement.lastElementChild, seen: box.top >= list.top && box.bottom <= list.bottom + 1 }
+  })()`
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:follow-tasks] Plan it, then write a long review.')
   await waitFor(`${COUNT} === '3/3'`, 15000, 'the task card with every item ticked')
@@ -3895,7 +3903,7 @@ async function runFollowChecks() {
   let folded = false
   const deadline = Date.now() + 60000
   while (Date.now() < deadline) {
-    const state = await evaluate(`({ status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card') })`)
+    const state = await evaluate(`({ status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card'), live: ${LIVE} })`)
     if (state.status === 'error') throw new Error('The follow-tasks request failed')
     if (!state.card) folded = true
     if (state.status === 'done') break
@@ -3905,10 +3913,16 @@ async function runFollowChecks() {
   const lost = samples.filter((sample) => sample.latest)
   console.log(`[smoke] following: ${samples.length} samples while it worked, largest gap ${Math.max(0, ...samples.map((sample) => sample.distance))} px, lost ${lost.length}`)
   if (lost.length) throw new Error(`The thread stopped following while the answer streamed: ${JSON.stringify(lost.slice(0, 3))}`)
+  const lines = samples.filter((sample) => sample.status !== 'idle')
+  const off = lines.filter((sample) => !sample.live || !sample.live.last || !sample.live.seen)
+  const words = [...new Set(lines.map((sample) => sample.live?.words).filter(Boolean))]
+  console.log(`[smoke] the dice line: ${lines.length - off.length} of ${lines.length} samples at the end of the turn and in view, saying ${words.join(', ')}`)
+  if (off.length > 1 || !words.includes('Writing')) throw new Error(`The dice line was not under the latest step while the agent worked: ${JSON.stringify(off.slice(0, 3))}, words ${words.join(', ')}`)
   await waitFor("!document.querySelector('.todo-card')", 5000, 'the finished task card folding away')
   await sleep(300)
-  const end = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  const end = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST}, live: ${LIVE} })`)
   if (end.distance > 2 || end.latest) throw new Error(`The thread is not at the end of the answer: ${JSON.stringify(end)}`)
+  if (end.live) throw new Error('The dice line is still there after the turn ended')
   console.log(`[smoke] the finished card folded away ${folded ? 'while the answer streamed' : 'after the answer'}`)
 
   // Grows the thread by the given heights, the second in a task after the frame of the first: the thread has scrolled
@@ -3971,16 +3985,16 @@ async function runStopChecks() {
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:slow-reply] Write a long review.')
   await waitFor(`${running} && document.body.textContent.includes('The parser')`, 20000, 'the long answer streams')
-  // While the model writes, the dice rolls beside "Thinking" at the head of the turn's log (ADR 0112).
+  // While the answer streams in, the dice rolls beside "Writing" on the line under it, the turn's last (ADR 0112, 0116).
   const thinking = await evaluate(`(() => {
-    const head = document.querySelector('.worklog.is-live .worklog-head')
-    const dice = head?.querySelector('.think-dice')
+    const line = document.querySelector('.chat-list .turn-live')
+    const dice = line?.querySelector('.think-dice')
     const cube = dice?.querySelector('.think-dice-cube')
-    return head ? { words: head.querySelector('.worklog-label')?.textContent ?? '', clock: head.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0 } : null
+    return line ? { words: line.querySelector('.worklog-label')?.textContent ?? '', clock: line.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0, last: line === line.parentElement.lastElementChild, headDice: !!document.querySelector('.worklog-head .think-dice') } : null
   })()`)
   console.log('[smoke] thinking:', JSON.stringify(thinking))
-  if (!thinking || thinking.words !== 'Thinking' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14) {
-    throw new Error(`The running turn does not show the rolling dice beside "Thinking": ${JSON.stringify(thinking)}`)
+  if (!thinking || thinking.words !== 'Writing' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14 || !thinking.last || thinking.headDice) {
+    throw new Error(`The running turn does not end on the rolling dice beside "Writing": ${JSON.stringify(thinking)}`)
   }
   await screenshot('ui-dark-thinking.png')
 
