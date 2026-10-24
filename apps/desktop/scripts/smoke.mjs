@@ -3289,7 +3289,9 @@ async function runComputerChecks() {
     await sendPrompt('[scenario:computer-check] Look at the desktop, then run a command.')
     // The first use builds the helper that drives windows, which takes a while.
     await waitFor("!!document.querySelector('.approval-card')", 180000, `the command waits for you (${label})`)
-    const banner = await evaluateInBanner(BANNER_STATE)
+    // The card and the banner hear of the wait by two roads, so the banner may be a moment behind the card.
+    let banner = await evaluateInBanner(BANNER_STATE)
+    for (const started = Date.now(); banner.mode !== 'waiting' && Date.now() - started < 3000; banner = await evaluateInBanner(BANNER_STATE)) await sleep(100)
     console.log(`[smoke] banner (${label}):`, JSON.stringify(banner))
     if (banner.mode !== 'waiting' || banner.text !== 'eNCode is waiting for you' || !banner.stop) throw new Error(`The banner says ${JSON.stringify(banner)} while the agent waits for the person`)
     if (banner.hint !== 'Ctrl+Alt+Esc') throw new Error(`The banner shows no stop key: ${JSON.stringify(banner.hint)}`)
