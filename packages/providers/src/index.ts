@@ -11,3 +11,5 @@ export { createAnthropicAdapter, ANTHROPIC_VERSION, type AnthropicOptions } from
 export * from './direct-client'
 export * from './plain'
 export * from './redact'
+export * from './families'
+export { createThinkSplitter, NO_REASONING, SKIP_SIGNATURE } from './reasoning'

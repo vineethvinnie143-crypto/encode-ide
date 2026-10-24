@@ -58,6 +58,26 @@ holds:
   Worth trying in a project with an older or newer library than models know well (zod 4, React 19, a recent ox_lib):
   say when the agent still wrote code for another version, or used a native that does not exist.
 
+## Reasoning models
+
+With a key of your own for DeepSeek, Kimi (Moonshot), GLM (Z.ai), MiniMax or Gemini, or any of them through
+OpenRouter, give a reasoning model a task that takes several steps with tools ("read the config, fix the bug, run the
+tests"). Before this build, DeepSeek's thinking models and Gemini 3 stopped at the second step with an error about
+reasoning or a thought signature; now the task goes on, and each step's reasoning shows above it. MiniMax's reasoning
+shows as reasoning, not as the start of its answer.
+
+To score a model on your own key, from a checkout of the repository (the key comes from the environment and is never
+written down):
+
+```
+pnpm bench run --model openrouter:deepseek/deepseek-v3.2          # OPENROUTER_API_KEY
+pnpm bench run --base-url https://api.deepseek.com --model deepseek-reasoner   # ENCODE_BENCH_API_KEY
+pnpm bench compare bench-results/<before>.json bench-results/<after>.json
+```
+
+What is most useful to hear: a model that still stops at the second step or later (the error's words), a reply whose
+reasoning shows as its answer, and a family whose answers got worse when its reasoning went back.
+
 ## Stay safe
 
 - The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command

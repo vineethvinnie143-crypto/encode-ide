@@ -5,6 +5,7 @@
  * catalogs; this table is the offline floor and DirectClient's source.
  */
 import type { ModelCapabilities, ProviderType } from './contract'
+import { FAMILY_LIMITS } from './families'
 import type { ModelFamily } from './messages'
 
 export interface ModelInfo {
@@ -29,6 +30,7 @@ const FAMILIES: ReadonlyArray<[RegExp, ModelFamily]> = [
   [/mistral|mixtral|codestral|devstral|magistral|ministral|pixtral/i, 'mistral'],
   [/llama|meta-llama\//i, 'meta'],
   [/grok|x-ai\//i, 'xai'],
+  [/minimax|abab/i, 'minimax'],
 ]
 
 /** The family a model id belongs to, from its name (works for OpenRouter's vendor/model ids too). */
@@ -79,8 +81,8 @@ export function modelInfo(model: string): ModelInfo & { known: boolean } {
   for (const [pattern, info] of KNOWN) if (pattern.test(id)) return { family, ...info, known: true }
   return {
     family,
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
-    maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    contextWindow: FAMILY_LIMITS[family]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxOutputTokens: FAMILY_LIMITS[family]?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     capabilities: caps({ images: family === 'anthropic' || family === 'openai' || family === 'google' }),
     known: false,
   }

@@ -13,6 +13,8 @@ import { createMessagesStream } from './anthropic'
 import { classifyStreamError, isTransportError, SERVER_TOOL_REFUSED_CODE, TransportError } from './errors'
 import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type FetchLike } from './http'
 import type { AssistantMessage, DocumentBlock, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
+import { effortWord, takesSampling } from './families'
+import { createThinkSplitter, detailText, replayFor, requestStart, signed, SKIP_SIGNATURE, type Replay } from './reasoning'
 import { readSse } from './sse'
 import { acceptingToolNames } from './tool-names'
 
@@ -33,7 +35,14 @@ type ChatPart =
 type ChatMessage =
   | { role: 'system'; content: string | ChatPart[] }
   | { role: 'user'; content: string | ChatPart[] }
-  | { role: 'assistant'; content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }
+  | {
+      role: 'assistant'
+      content: string | null
+      tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string }; extra_content?: Record<string, unknown> }>
+      reasoning_content?: string
+      reasoning?: string
+      reasoning_details?: Record<string, unknown>[]
+    }
   | { role: 'tool'; tool_call_id: string; content: string | ChatPart[] }
 
 /**
@@ -47,6 +56,32 @@ const REJECTS_PARAMETER = /unrecognized|unknown|unsupported|unexpected|extra (?:
 function unknownParameter(message: string, body: Record<string, unknown>): string | undefined {
   if (!REJECTS_PARAMETER.test(message)) return undefined
   return OPTIONAL_PARAMETERS.find((name) => name in body && new RegExp(`(?:^|[^A-Za-z_])${name}(?:$|[^A-Za-z_])`).test(message))
+}
+
+/** The fields reasoning goes back in (reasoning.ts): a server that names one as unknown is sent the request without them. */
+const REPLAY_FIELDS = ['reasoning_content', 'reasoning_details', 'reasoning', 'extra_content'] as const
+const refusesReplay = (message: string) =>
+  REJECTS_PARAMETER.test(message) && !/must be passed back/i.test(message) && REPLAY_FIELDS.some((name) => new RegExp(`(?:^|[^A-Za-z_])${name}(?:$|[^A-Za-z_])`).test(message))
+
+/** Takes the reasoning sent back out of the messages; false when there was none. */
+function dropReplay(body: Record<string, unknown>): boolean {
+  let dropped = false
+  for (const message of (body.messages as Array<Record<string, unknown>> | undefined) ?? []) {
+    if (message.role !== 'assistant') continue
+    for (const name of ['reasoning_content', 'reasoning_details', 'reasoning'] as const) {
+      if (name in message) {
+        delete message[name]
+        dropped = true
+      }
+    }
+    for (const call of (message.tool_calls as Array<Record<string, unknown>> | undefined) ?? []) {
+      if ('extra_content' in call) {
+        delete call.extra_content
+        dropped = true
+      }
+    }
+  }
+  return dropped
 }
 
 const MAX_TOKENS_UNSUPPORTED = /max_tokens[^.]{0,80}(?:not supported|unsupported|use 'max_completion_tokens')|use max_completion_tokens/i
@@ -84,16 +119,26 @@ function argumentsOf(block: ToolUseBlock): string {
   }
 }
 
-function assistantMessage(message: AssistantMessage, mapId: (id: string) => string): ChatMessage | undefined {
+function assistantMessage(message: AssistantMessage, mapId: (id: string) => string, replay: Replay): ChatMessage | undefined {
   const text = message.content
     .filter((block) => block.type === 'text')
     .map((block) => block.text)
     .join('\n\n')
-  const calls = message.content
-    .filter((block): block is ToolUseBlock => block.type === 'tool-use')
-    .map((block) => ({ id: mapId(block.id), type: 'function' as const, function: { name: block.name, arguments: argumentsOf(block) } }))
+  const blocks = message.content.filter((block): block is ToolUseBlock => block.type === 'tool-use')
+  const calls = blocks.map((block, index) => {
+    const call = { id: mapId(block.id), type: 'function' as const, function: { name: block.name, arguments: argumentsOf(block) } }
+    if (replay.extras && block.extra) return { ...call, extra_content: block.extra }
+    // Gemini checks the first call of each step; one it did not sign gets the value it takes for that.
+    if (index === 0 && replay.skipSignature && !signed(block, replay.extras)) return { ...call, extra_content: { google: { thought_signature: SKIP_SIGNATURE } } }
+    return call
+  })
   if (!text && !calls.length) return undefined
-  return calls.length ? { role: 'assistant', content: text || null, tool_calls: calls } : { role: 'assistant', content: text }
+  const content = replay.think ? `<think>${replay.think}</think>\n\n${text}` : text
+  const out: ChatMessage = calls.length ? { role: 'assistant', content: content || null, tool_calls: calls } : { role: 'assistant', content }
+  if (replay.reasoningContent !== undefined) out.reasoning_content = replay.reasoningContent
+  if (replay.reasoningDetails) out.reasoning_details = replay.reasoningDetails
+  else if (replay.reasoning !== undefined) out.reasoning = replay.reasoning
+  return out
 }
 
 /** Tool results become tool messages, first; the rest of the turn (text, images) follows as one user message. */
@@ -174,9 +219,10 @@ export function buildChatBody(target: TransportTarget, request: ModelRequest, op
       messages.push({ role: 'system', content: system.map((part) => part.text).join('\n\n') })
     }
   }
-  for (const message of request.messages) {
+  const current = requestStart(request.messages)
+  for (const [index, message] of request.messages.entries()) {
     if (message.role === 'assistant') {
-      const converted = assistantMessage(message, mapId)
+      const converted = assistantMessage(message, mapId, replayFor(target, openRouter, message, index > current))
       if (converted) messages.push(converted)
     } else {
       messages.push(...userMessages(message, target, mapId))
@@ -195,10 +241,11 @@ export function buildChatBody(target: TransportTarget, request: ModelRequest, op
     if (target.family === 'openai' && !openRouter && /(?:^|\.)openai\.com$/.test(hostOf(target.baseUrl))) body.max_completion_tokens = limit
     else body.max_tokens = limit
   }
-  if (request.temperature !== undefined && !target.capabilities.reasoning) body.temperature = request.temperature
+  if (request.temperature !== undefined && !target.capabilities.reasoning && takesSampling(target.family, target.model)) body.temperature = request.temperature
   if (request.reasoning && target.capabilities.reasoning) {
+    const word = effortWord(target.family, request.reasoning)
     if (openRouter) body.reasoning = { effort: effortFor(request.reasoning) }
-    else if (target.family === 'openai') body.reasoning_effort = effortFor(request.reasoning)
+    else if (word) body.reasoning_effort = word
   }
   if (openRouter) {
     const fallbacks = (target.serverFallbacks ?? []).filter((model) => model && model !== target.model)
@@ -328,10 +375,21 @@ function toolSlots() {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+
 /** Events for one choice delta (streamed) or message (whole). */
 function* choiceEvents(source: Record<string, unknown>, slotOf: (entry: Record<string, unknown>) => number): Generator<TransportEvent> {
   const reasoning = source.reasoning_content ?? source.reasoning
+  const details = Array.isArray(source.reasoning_details) ? source.reasoning_details.filter(isRecord) : []
   if (typeof reasoning === 'string' && reasoning) yield { type: 'thinking', text: reasoning }
+  else {
+    // Reasoning that comes only as OpenRouter's details is shown from them.
+    for (const detail of details) {
+      const text = detailText(detail)
+      if (text) yield { type: 'thinking', text }
+    }
+  }
+  for (const detail of details) yield { type: 'reasoning-detail', detail }
   const text = contentText(source.content)
   if (text) yield { type: 'text', text }
   const calls = source.tool_calls
@@ -345,6 +403,7 @@ function* choiceEvents(source: Record<string, unknown>, slotOf: (entry: Record<s
         ...(typeof entry.id === 'string' && entry.id ? { id: entry.id } : {}),
         ...(typeof fn.name === 'string' && fn.name ? { name: fn.name } : {}),
         arguments: argumentsText(fn.arguments),
+        ...(isRecord(entry.extra_content) ? { extra: entry.extra_content } : {}),
       }
     }
   }
@@ -358,7 +417,9 @@ function* wholeReplyEvents(json: unknown): Generator<TransportEvent> {
   const choice = choices?.[0]
   if (!choice) throw new TransportError('protocol', 'The provider returned no choices.')
   if (typeof payload.model === 'string' && payload.model) yield { type: 'model', model: payload.model }
-  yield* choiceEvents((choice.message ?? {}) as Record<string, unknown>, toolSlots())
+  const split = createThinkSplitter()
+  for (const event of choiceEvents((choice.message ?? {}) as Record<string, unknown>, toolSlots())) yield* split.through(event)
+  yield* split.flush()
   const usage = chatUsage(payload.usage)
   if (usage) yield { type: 'usage', usage }
   yield { type: 'finish', reason: typeof choice.finish_reason === 'string' ? chatFinish(choice.finish_reason) : 'stop' }
@@ -367,6 +428,7 @@ function* wholeReplyEvents(json: unknown): Generator<TransportEvent> {
 async function* streamedReplyEvents(response: Response, signal: AbortSignal, where: string): AsyncGenerator<TransportEvent> {
   if (!response.body) throw new TransportError('protocol', `${where} returned an empty stream.`)
   const slotOf = toolSlots()
+  const split = createThinkSplitter()
   let model: string | undefined
   let finished = false
   let done = false
@@ -396,13 +458,15 @@ async function* streamedReplyEvents(response: Response, signal: AbortSignal, whe
     const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0]
     if (!choice) continue
     if (choice.error) throw streamErrorOf(choice.error)
-    yield* choiceEvents((choice.delta ?? choice.message ?? {}) as Record<string, unknown>, slotOf)
+    for (const event of choiceEvents((choice.delta ?? choice.message ?? {}) as Record<string, unknown>, slotOf)) yield* split.through(event)
     if (typeof choice.finish_reason === 'string' && choice.finish_reason) {
       if (choice.finish_reason === 'error') throw new TransportError('server', `${where} ended the reply with an error.`)
       finished = true
+      yield* split.flush()
       yield { type: 'finish', reason: chatFinish(choice.finish_reason) }
     }
   }
+  yield* split.flush()
   if (!finished && !done) throw new TransportError('protocol', `The stream from ${where} ended before the reply was complete.`)
 }
 
@@ -435,6 +499,7 @@ function negotiate(body: Record<string, unknown>, error: TransportError): boolea
     delete body[name]
     return true
   }
+  if (refusesReplay(message) && dropReplay(body)) return true
   // An endpoint that refuses streaming with a plain 4xx and no reason gets one try without it.
   if (body.stream && (error.status === 404 || error.status === 405 || error.status === 415)) {
     body.stream = false

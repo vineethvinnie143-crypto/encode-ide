@@ -14,6 +14,7 @@ export interface DraftToolCall {
   id?: string
   name?: string
   arguments: string
+  extra?: Record<string, unknown>
 }
 
 export type DraftBlock = TextBlock | ThinkingBlock | RedactedThinkingBlock | DraftToolCall
@@ -50,6 +51,27 @@ export interface Assembler {
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/
 
+/** The fields of a reasoning detail that stream in pieces; the rest (id, format, signature) are whole in the last piece that has them. */
+const DETAIL_TEXT = ['text', 'summary', 'data'] as const
+
+/**
+ * Adds one streamed piece of OpenRouter's reasoning_details to the details so far: a piece with the index and type of
+ * the last detail continues it, anything else starts the next one.
+ */
+export function mergeDetail(details: Record<string, unknown>[], piece: Record<string, unknown>): void {
+  const tail = details[details.length - 1]
+  const continues = tail !== undefined && tail.type === piece.type && (piece.index === undefined || tail.index === piece.index)
+  if (!continues) {
+    details.push({ ...piece })
+    return
+  }
+  for (const [key, value] of Object.entries(piece)) {
+    if (value === undefined || value === null) continue
+    if ((DETAIL_TEXT as readonly string[]).includes(key) && typeof value === 'string' && typeof tail[key] === 'string') tail[key] = (tail[key] as string) + value
+    else tail[key] = value
+  }
+}
+
 function randomId(): string {
   return `toolu_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`
 }
@@ -84,7 +106,7 @@ function refuseUnsafeCalls(content: AssistantBlock[], finish: FinishReason): voi
   const refuse = (index: number, error: string) => {
     const block = content[index]
     if (block.type !== 'tool-use' || block.invalid) return
-    content[index] = { type: 'tool-use', id: block.id, name: block.name, input: {}, invalid: { raw: JSON.stringify(block.input), error } }
+    content[index] = { type: 'tool-use', id: block.id, name: block.name, input: {}, invalid: { raw: JSON.stringify(block.input), error }, ...(block.extra ? { extra: block.extra } : {}) }
   }
   if (finish === 'length' && content.length) refuse(content.length - 1, TRUNCATED_CALL)
   if (finish === 'content_filter') content.forEach((_, index) => refuse(index, FILTERED_CALL))
@@ -131,6 +153,15 @@ export function createAssembler(options: AssemblerOptions): Assembler {
         received++
         blocks.push({ type: 'redacted-thinking', data: event.data })
         return
+      case 'reasoning-detail': {
+        received++
+        const tail = last()
+        // The details belong to the reasoning streaming beside them; reasoning that came only as details gets a block of its own.
+        const block: ThinkingBlock = tail?.type === 'thinking' && tail.signature === undefined ? tail : { type: 'thinking', text: '' }
+        if (block !== tail) blocks.push(block)
+        mergeDetail((block.details ??= []), event.detail)
+        return
+      }
       case 'tool-call': {
         received++
         let call = calls.get(event.index)
@@ -142,6 +173,7 @@ export function createAssembler(options: AssemblerOptions): Assembler {
         if (event.id && !call.id) call.id = event.id
         if (event.name && !call.name) call.name = event.name
         call.arguments += event.arguments
+        if (event.extra) call.extra = { ...call.extra, ...event.extra }
         return
       }
       case 'usage':
@@ -188,10 +220,11 @@ export function createAssembler(options: AssemblerOptions): Assembler {
         }
       }
       if (input) error = options.validateToolCall?.(block.name, input)
+      const extra = block.extra ? { extra: block.extra } : {}
       content.push(
         input && !error
-          ? { type: 'tool-use', id, name: block.name, input }
-          : { type: 'tool-use', id, name: block.name, input: {}, invalid: { raw: block.arguments, error: error ?? 'Invalid arguments.' } },
+          ? { type: 'tool-use', id, name: block.name, input, ...extra }
+          : { type: 'tool-use', id, name: block.name, input: {}, invalid: { raw: block.arguments, error: error ?? 'Invalid arguments.' }, ...extra },
       )
     }
     let reason: FinishReason = finish ?? (hasCalls ? 'tool_use' : 'stop')

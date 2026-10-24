@@ -308,6 +308,14 @@ describe('compaction', () => {
     assert.ok(dropThinkingFrom(messages, 99).every((message, i) => message === messages[i]), 'nothing before the index changes')
   })
 
+  it("drops a call's signature with the thinking, and keeps the call", () => {
+    const signedCall: AssistantBlock = { type: 'tool-use', id: 'x', name: 'Read', input: { file_path: 'a' }, extra: { google: { thought_signature: 'S' } } }
+    const messages: Message[] = [userText('a'), assistant(signedCall), results(result('x', 'X'))]
+    const [, changed] = dropThinkingFrom(messages, 1)
+    assert.deepEqual(changed.content, [{ type: 'tool-use', id: 'x', name: 'Read', input: { file_path: 'a' } }])
+    assert.equal(dropThinkingFrom(messages, 2)[1], messages[1])
+  })
+
   it('builds the summary request from what the plan drops, with the user\'s instructions', () => {
     const plan = planCompaction(long(), 100)!
     const request = summaryRequest(plan, 100_000, 'keep the file names')

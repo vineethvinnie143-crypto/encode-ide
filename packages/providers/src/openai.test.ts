@@ -5,7 +5,7 @@ import { after, before, beforeEach, describe, it } from 'node:test'
 import { createAssembler } from './assembler'
 import type { TransportEvent, TransportTarget } from './contract'
 import { TransportError } from './errors'
-import type { ModelRequest } from './messages'
+import type { AssistantMessage, ModelRequest } from './messages'
 import { buildChatBody, createOpenAICompatibleAdapter, createOpenRouterAdapter } from './openai'
 
 type Reply = (response: http.ServerResponse) => void
@@ -289,5 +289,125 @@ describe('buildChatBody', () => {
   it('describes images as text for a model that cannot read them', () => {
     const body = buildChatBody(target(), history, false) as { messages: Array<Record<string, any>> }
     assert.match(JSON.stringify(body.messages[5]), /cannot read images/)
+  })
+})
+
+describe('reasoning read and sent back by family (ADR 0099)', () => {
+  const user = (text: string) => ({ role: 'user' as const, content: [{ type: 'text' as const, text }] })
+  const results = (id: string) => ({ role: 'user' as const, content: [{ type: 'tool-result' as const, toolUseId: id, content: [{ type: 'text' as const, text: 'ok' }] }] })
+
+  it("reads OpenRouter's details, a call's extra_content and a <think> block from the stream", async () => {
+    replies.push(
+      events(
+        { choices: [{ delta: { reasoning: 'Read ', reasoning_details: [{ type: 'reasoning.text', text: 'Read ', index: 0, format: 'google-gemini-v1' }] } }] },
+        { choices: [{ delta: { reasoning: 'it.', reasoning_details: [{ type: 'reasoning.text', text: 'it.', index: 0 }, { type: 'reasoning.encrypted', data: 'ENC', index: 1 }] } }] },
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'Read', arguments: '{"file_path":"a"}' }, extra_content: { google: { thought_signature: 'S1' } } }] } }] },
+        { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+      ),
+    )
+    const { reply } = await run(createOpenAICompatibleAdapter(), target({ family: 'google', model: 'gemini-3-pro' }))
+    assert.deepEqual(reply.message.content, [
+      {
+        type: 'thinking',
+        text: 'Read it.',
+        details: [
+          { type: 'reasoning.text', text: 'Read it.', index: 0, format: 'google-gemini-v1' },
+          { type: 'reasoning.encrypted', data: 'ENC', index: 1 },
+        ],
+      },
+      { type: 'tool-use', id: 'call_1', name: 'Read', input: { file_path: 'a' }, extra: { google: { thought_signature: 'S1' } } },
+    ])
+
+    replies.push(events({ choices: [{ delta: { content: '<think>Plan it' } }] }, { choices: [{ delta: { content: '.</think>\n\nDone.' }, finish_reason: 'stop' }] }))
+    const tagged = await run(createOpenAICompatibleAdapter(), target({ family: 'minimax', model: 'MiniMax-M2' }))
+    assert.deepEqual(tagged.reply.message.content, [
+      { type: 'thinking', text: 'Plan it.' },
+      { type: 'text', text: 'Done.' },
+    ])
+  })
+
+  it('sends each family its own reasoning back, in its field, and other models’ never', () => {
+    const own = (model: string, provider = 'local'): AssistantMessage => ({
+      role: 'assistant',
+      origin: { provider, model, family: 'other' },
+      content: [
+        { type: 'thinking', text: 'Think.', details: [{ type: 'reasoning.text', text: 'Think.', signature: 'sig', index: 0 }] },
+        { type: 'text', text: 'Reading.' },
+        { type: 'tool-use', id: 'call_1', name: 'Read', input: { file_path: 'a' }, extra: { google: { thought_signature: 'S1' } } },
+      ],
+    })
+    const history = (first: AssistantMessage, second: AssistantMessage): ModelRequest => ({
+      system: [],
+      tools: [],
+      messages: [user('fix it'), first, results('call_1'), user('and the test'), second, results('call_1')],
+    })
+    const assistants = (body: Record<string, unknown>) => (body.messages as Array<Record<string, any>>).filter((message) => message.role === 'assistant')
+
+    const deepseek = assistants(buildChatBody(target({ family: 'deepseek', model: 'deepseek-v4-pro' }), history(own('claude-x', 'other'), own('deepseek-v4-pro')), false))
+    assert.deepEqual(
+      deepseek.map((message) => message.reasoning_content),
+      ['(This step was taken without reasoning that can be shown.)', 'Think.'],
+    )
+    assert.ok(deepseek.every((message) => !('extra_content' in message.tool_calls[0]) || message === deepseek[1]))
+
+    const minimax = assistants(buildChatBody(target({ family: 'minimax', model: 'MiniMax-M2' }), history(own('MiniMax-M2'), own('MiniMax-M2')), false))
+    assert.deepEqual(
+      minimax.map((message) => message.content),
+      ['<think>Think.</think>\n\nReading.', '<think>Think.</think>\n\nReading.'],
+    )
+
+    const gemini = assistants(buildChatBody(target({ family: 'google', model: 'gemini-3-pro' }), history(own('gpt-x'), own('gpt-x')), false))
+    assert.equal(gemini[0].tool_calls[0].extra_content, undefined, 'an earlier turn is not checked')
+    assert.deepEqual(gemini[1].tool_calls[0].extra_content, { google: { thought_signature: 'skip_thought_signature_validator' } })
+    const signed = assistants(buildChatBody(target({ family: 'google', model: 'gemini-3-pro' }), history(own('gemini-3-pro'), own('gemini-3-pro')), false))
+    assert.deepEqual(signed[1].tool_calls[0].extra_content, { google: { thought_signature: 'S1' } })
+
+    const router = assistants(buildChatBody(target({ provider: 'openrouter', family: 'anthropic', model: 'anthropic/claude-x', providerType: 'openrouter' }), history(own('anthropic/claude-x', 'openrouter'), own('anthropic/claude-x', 'openrouter')), true))
+    assert.equal(router[0].reasoning_details, undefined, 'an earlier turn')
+    assert.deepEqual(router[1].reasoning_details, [{ type: 'reasoning.text', text: 'Think.', signature: 'sig', index: 0 }])
+
+    const plain = assistants(buildChatBody(target({ family: 'openai', model: 'gpt-x' }), history(own('gpt-x'), own('gpt-x')), false))
+    assert.ok(plain.every((message) => !('reasoning_content' in message) && !('reasoning' in message)), 'OpenAI is sent what it always was')
+  })
+
+  it('goes on with a tool-call loop on a server that, like DeepSeek in thinking mode, refuses a step without its reasoning', async () => {
+    const strict: Reply = (response) => {
+      const body = seen[seen.length - 1].body
+      const missing = body.messages.some((message: Record<string, unknown>) => message.role === 'assistant' && typeof message.reasoning_content !== 'string')
+      if (missing) json(400, { error: { message: 'The reasoning_content in the thinking mode must be passed back to the API.' } })(response)
+      else events({ choices: [{ delta: { content: 'Done.' }, finish_reason: 'stop' }] })(response)
+    }
+    const deepseek = target({ family: 'deepseek', model: 'deepseek-v4-pro', capabilities: { tools: true, parallelTools: true, images: false, reasoning: true, promptCache: false } })
+    replies.push(
+      events(
+        { choices: [{ delta: { reasoning_content: 'Read a first.' } }] },
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'Read', arguments: '{"file_path":"a"}' } }] }, finish_reason: 'tool_calls' }] },
+      ),
+      strict,
+    )
+    const first = await run(createOpenAICompatibleAdapter(), deepseek, { ...request, messages: [user('fix it')] })
+    const second = await run(createOpenAICompatibleAdapter(), deepseek, { ...request, messages: [user('fix it'), first.reply.message, results('call_1')] })
+    assert.deepEqual(second.reply.message.content, [{ type: 'text', text: 'Done.' }])
+    assert.equal(seen[1].body.messages[2].reasoning_content, 'Read a first.')
+  })
+
+  it('asks again without the reasoning when a server names its field as unknown, never on DeepSeek’s demand for it', async () => {
+    const history: ModelRequest = {
+      ...request,
+      messages: [
+        user('fix it'),
+        { role: 'assistant', origin: { provider: 'local', model: 'kimi-k3', family: 'moonshot' }, content: [{ type: 'thinking', text: 'Think.' }, { type: 'tool-use', id: 'call_1', name: 'Read', input: {} }] },
+        results('call_1'),
+      ],
+    }
+    replies.push(json(400, { error: { message: 'Unrecognized request argument supplied: reasoning_content' } }), events({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }))
+    await run(createOpenAICompatibleAdapter(), target({ family: 'moonshot', model: 'kimi-k3' }), history)
+    assert.equal(seen.length, 2)
+    assert.equal(seen[0].body.messages[2].reasoning_content, 'Think.')
+    assert.equal('reasoning_content' in seen[1].body.messages[2], false)
+
+    replies.push(json(400, { error: { message: 'The reasoning_content in the thinking mode must be passed back to the API.' } }))
+    await assert.rejects(run(createOpenAICompatibleAdapter(), target({ family: 'deepseek', model: 'deepseek-v4-pro' }), history))
+    assert.equal(seen.length, 3, 'not sent again without it')
   })
 })
