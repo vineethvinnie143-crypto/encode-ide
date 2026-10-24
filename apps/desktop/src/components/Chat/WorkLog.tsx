@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ConversationEntry, RequestUsage } from '@shared/types'
+import type { AgentStatus, ConversationEntry, RequestUsage } from '@shared/types'
 import { AlertTriangle, ChevronRight, Info } from '../../ui/icons'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
 import { foldText, markdownHaystack } from '../../find/text'
@@ -8,12 +8,15 @@ import { Collapse } from '../../ui/Collapse'
 import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
 import { Details } from '../../ui/Details'
+import ThinkingDice from '../../ui/ThinkingDice'
 import StepRow, { GroupRow, stepsHold } from './StepRow'
-import { formatClock, formatDuration, formatUsage, logItems, stepsOf, summarizeSteps, type LogItem, type Turn } from './turns'
+import { formatClock, formatDuration, formatUsage, logItems, stepsOf, summarizeSteps, workPhase, type LogItem, type Turn } from './turns'
 
 type WorkLogProps = Pick<Turn, 'log' | 'active' | 'startedAt' | 'endedAt'> & {
   /** What the request cost, on the log of its last part. */
   usage?: RequestUsage
+  /** The chat's status, while this log's part is the one running: what the head says the agent is doing. */
+  status?: AgentStatus
 }
 
 const texts = new WeakMap<ConversationEntry, string>()
@@ -33,10 +36,10 @@ export function logHolds(items: readonly LogItem[], needle: string): boolean {
 }
 
 /**
- * What the agent did in a turn. While it works the log is open and a clock runs;
- * when the turn ends it folds to "Worked for 2m 14s", and a click opens it again.
+ * What the agent did in a turn. While it works the log is open, the dice rolls beside what it is doing ("Thinking",
+ * "Working") and a clock runs; when the turn ends it folds to "Worked for 2m 14s", and a click opens it again.
  */
-function WorkLog({ log, active, startedAt, endedAt, usage }: WorkLogProps) {
+function WorkLog({ log, active, startedAt, endedAt, usage, status }: WorkLogProps) {
   const now = useNow(active)
   const items = useMemo(() => logItems(log), [log])
   const [own, setOpen] = useState(active)
@@ -57,7 +60,7 @@ function WorkLog({ log, active, startedAt, endedAt, usage }: WorkLogProps) {
 
   if (!active && !log.length) return null
 
-  const label = active ? `Working for ${formatClock(now - startedAt)}` : `Worked for ${formatDuration(endedAt - startedAt)}`
+  const phase = active ? workPhase(status, log) : null
   const spent = formatUsage(usage)
 
   return (
@@ -77,7 +80,15 @@ function WorkLog({ log, active, startedAt, endedAt, usage }: WorkLogProps) {
           } else setOpen((value) => !value)
         }}
       >
-        <span className={cx('worklog-label', active && 'shimmer')}>{label}</span>
+        {phase ? (
+          <>
+            <ThinkingDice rolling={phase.rolling} className="worklog-dice" />
+            <span className={cx('worklog-label', phase.rolling && 'shimmer')}>{phase.words}</span>
+            <span className="worklog-clock">{formatClock(now - startedAt)}</span>
+          </>
+        ) : (
+          <span className="worklog-label">Worked for {formatDuration(endedAt - startedAt)}</span>
+        )}
         {spent && <span className="worklog-usage">{spent}</span>}
         <span className="worklog-rule" />
         {log.length > 0 && <ChevronRight size={14} className={cx('worklog-chevron', open && 'is-open')} />}

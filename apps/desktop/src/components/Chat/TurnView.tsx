@@ -127,11 +127,13 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
 
 /** One part of a turn: the message that started it when you sent it while the agent worked, the work log, and the reply. */
 const PartView = memo(function PartView({ part, usage }: { part: TurnPart; usage?: RequestUsage }) {
+  // Only the part that runs follows the chat's status, so a finished one is not drawn again when it changes.
+  const status = useChat((state) => (part.active ? state.status : undefined))
   const replyEntries = part.reply.filter((entry) => entry.kind !== 'assistant' || entry.text?.trim() || entry.streaming)
   return (
     <>
       {part.steer && <SteerMessage entry={part.steer} />}
-      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} usage={usage} />
+      <WorkLog log={part.log} active={part.active} startedAt={part.startedAt} endedAt={part.endedAt} usage={usage} status={status} />
       {replyEntries.map((entry) => (
         <ReplyEntry key={entry.id} entry={entry} />
       ))}

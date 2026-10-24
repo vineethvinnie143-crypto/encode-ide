@@ -308,6 +308,16 @@
   flex: none;
   transition: color var(--dur-1) var(--ease-out);
 }
+/* The rolling dice sits close to the words it goes with; its box is wider than the dice for the turns. */
+.worklog-dice {
+  margin: 0 -5px 0 -4px;
+}
+.worklog-clock {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
 /* What the request cost: smaller than the label, and the first thing cut when the row is narrow. */
 .worklog-usage {
   flex: 0 1 auto;

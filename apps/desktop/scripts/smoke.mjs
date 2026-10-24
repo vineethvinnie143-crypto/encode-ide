@@ -3881,6 +3881,18 @@ async function runStopChecks() {
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:slow-reply] Write a long review.')
   await waitFor(`${running} && document.body.textContent.includes('The parser')`, 20000, 'the long answer streams')
+  // While the model writes, the dice rolls beside "Thinking" at the head of the turn's log (ADR 0112).
+  const thinking = await evaluate(`(() => {
+    const head = document.querySelector('.worklog.is-live .worklog-head')
+    const dice = head?.querySelector('.think-dice')
+    const cube = dice?.querySelector('.think-dice-cube')
+    return head ? { words: head.querySelector('.worklog-label')?.textContent ?? '', clock: head.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0 } : null
+  })()`)
+  console.log('[smoke] thinking:', JSON.stringify(thinking))
+  if (!thinking || thinking.words !== 'Thinking' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14) {
+    throw new Error(`The running turn does not show the rolling dice beside "Thinking": ${JSON.stringify(thinking)}`)
+  }
+  await screenshot('ui-dark-thinking.png')
 
   await composerKey({ key: 'Escape' })
   await waitFor(`${hint} === 'Press Esc again to stop'`, 2000, 'the first Esc says what a second does')
@@ -6002,7 +6014,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

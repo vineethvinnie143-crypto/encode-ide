@@ -1,0 +1,154 @@
+/*
+ * The eNCode dice, rolling while the agent works (ui/ThinkingDice.tsx, ADR 0112). A cube in CSS 3D seen from above
+ * and to the side, as the logo is drawn, without perspective so that it keeps the logo's lines at any size. The faces
+ * keep the logo's own black, chrome and white in both themes, as the mark does.
+ */
+.think-dice {
+  --edge: 1.05em;
+  --half: calc(var(--edge) / 2);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--edge) * 1.8);
+  height: calc(var(--edge) * 1.8);
+}
+.think-dice-hop,
+.think-dice-view,
+.think-dice-cube {
+  display: block;
+  width: var(--edge);
+  height: var(--edge);
+  transform-style: preserve-3d;
+}
+.think-dice-view {
+  transform: rotateX(-32deg) rotateY(-42deg);
+}
+.think-dice-cube {
+  position: relative;
+}
+.think-dice.is-rolling .think-dice-hop {
+  animation: think-dice-hop 0.4s infinite;
+}
+.think-dice.is-rolling .think-dice-cube {
+  animation: think-dice-roll 3.2s infinite;
+}
+
+.think-dice-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  padding: 14%;
+  border-radius: 20%;
+  background: linear-gradient(150deg, #2a2a2a, #060606 72%);
+  /* The chrome rim: a bright edge, and a darker band inside it. */
+  box-shadow:
+    inset 0 0 0 0.06em #ececec,
+    inset 0 0 0 0.12em rgb(120 120 120 / 0.35);
+  color: #f2f2f2;
+  backface-visibility: hidden;
+}
+.think-dice-face.is-top {
+  transform: rotateX(90deg) translateZ(var(--half));
+}
+.think-dice-face.is-bottom {
+  transform: rotateX(-90deg) translateZ(var(--half));
+}
+.think-dice-face.is-front {
+  transform: translateZ(var(--half));
+}
+.think-dice-face.is-back {
+  transform: rotateY(180deg) translateZ(var(--half));
+}
+.think-dice-face.is-left {
+  transform: rotateY(-90deg) translateZ(var(--half));
+}
+.think-dice-face.is-right {
+  transform: rotateY(90deg) translateZ(var(--half));
+}
+.think-dice-face > svg {
+  grid-area: 1 / 1 / 4 / 4;
+  width: 100%;
+  height: 100%;
+  /* Upright from where the dice is seen, as </> sits in the logo. */
+  transform: rotate(-45deg);
+}
+.think-dice-face > i {
+  width: 78%;
+  height: 78%;
+  place-self: center;
+  border-radius: 50%;
+  background: currentColor;
+}
+.think-dice-face > .at-1 { grid-area: 1 / 1; }
+.think-dice-face > .at-3 { grid-area: 1 / 3; }
+.think-dice-face > .at-4 { grid-area: 2 / 1; }
+.think-dice-face > .at-5 { grid-area: 2 / 2; }
+.think-dice-face > .at-6 { grid-area: 2 / 3; }
+.think-dice-face > .at-7 { grid-area: 3 / 1; }
+.think-dice-face > .at-9 { grid-area: 3 / 3; }
+
+/*
+ * Eight quarter turns, about one axis and then the other, each settling on a face before the next; the last lands
+ * where the first began, so the loop has no seam. Reduced motion plays one frame of it, the rest it ends on.
+ */
+@keyframes think-dice-roll {
+  0%,
+  8% {
+    transform: rotateX(0deg) rotateY(0deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  12.5%,
+  20.5% {
+    transform: rotateX(90deg) rotateY(0deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  25%,
+  33% {
+    transform: rotateX(90deg) rotateY(90deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  37.5%,
+  45.5% {
+    transform: rotateX(180deg) rotateY(90deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  50%,
+  58% {
+    transform: rotateX(180deg) rotateY(180deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  62.5%,
+  70.5% {
+    transform: rotateX(270deg) rotateY(180deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  75%,
+  83% {
+    transform: rotateX(270deg) rotateY(270deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  87.5%,
+  95.5% {
+    transform: rotateX(360deg) rotateY(270deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  100% {
+    transform: rotateX(360deg) rotateY(360deg);
+  }
+}
+/* One hop per quarter turn, timed with it: still while it rests, up as it turns, down as it lands. */
+@keyframes think-dice-hop {
+  0%,
+  64% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  }
+  80% {
+    transform: translateY(-0.14em);
+    animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.4);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}

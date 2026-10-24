@@ -16,6 +16,7 @@ import {
   stepsOf,
   summarizeSteps,
   toolPath,
+  workPhase,
 } from './turns'
 
 let counter = 0
@@ -339,6 +340,18 @@ describe('durations', () => {
     assert.equal(formatClock(725_000), '12:05')
     assert.equal(formatClock(3_789_000), '1:03:09')
     assert.equal(formatClock(-5), '0:00')
+  })
+})
+
+describe('what the head of a running log says', () => {
+  it('names what the agent is doing, and rests the dice while it waits on you', () => {
+    const log = [entry('tool', { tool: { name: 'bash', input: {}, state: 'running' } })]
+    assert.deepEqual(workPhase('thinking', []), { words: 'Thinking', rolling: true })
+    assert.deepEqual(workPhase(undefined, []), { words: 'Thinking', rolling: true })
+    assert.deepEqual(workPhase('running-tool', log), { words: 'Working', rolling: true })
+    assert.deepEqual(workPhase('running-tool', [entry('tool', { tool: { name: 'bash', input: {}, state: 'reviewing' } })]), { words: 'Reviewing', rolling: true })
+    assert.deepEqual(workPhase('awaiting-approval', log), { words: 'Waiting for your approval', rolling: false })
+    assert.deepEqual(workPhase('awaiting-user', log), { words: 'Waiting for your answer', rolling: false })
   })
 })
 
