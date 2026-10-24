@@ -199,7 +199,10 @@ describe('installing a download', () => {
     assert.ok(launch.args.at(-1)!.startsWith(path.join(dir, 'cache', 'jdtls')))
     const noJava = discover(pinned, dir, { platform: 'win32', which: () => null, isFile: () => false, tools: { dir: path.join(dir, 'tools'), context: context(fakeFetch({})) } })
     assert.match((noJava as { missing: string }).missing, /needs Java 21 or newer/)
-    await assert.rejects(installServer(pinned, context(fakeFetch({ 'https://download.eclipse.org/jdtls/x/jdtls.tar.gz': { body: makeTar([{ name: 'other', data: 'x' }], true) } }))), /does not match its checksum/)
+    // A newer version whose file does not match: refused, and the one in place stays.
+    const newer: ServerSpec = { ...pinned, installer: { ...(pinned.installer as Extract<NonNullable<ServerSpec['installer']>, { kind: 'download' }>), release: { version: '9.10', base: 'https://download.eclipse.org/jdtls/x/', sha256: { 'jdtls.tar.gz': sha256(tar) } } } }
+    await assert.rejects(installServer(newer, context(fakeFetch({ 'https://download.eclipse.org/jdtls/x/jdtls.tar.gz': { body: makeTar([{ name: 'other', data: 'x' }], true) } }))), /does not match its checksum/)
+    assert.equal(installedDir(pinned, path.join(dir, 'tools'))?.version, '9.9')
   })
 })
 
@@ -228,7 +231,7 @@ describe('installing with a toolchain', () => {
 
   it('says what is needed when the toolchain is not there, and what it said when it failed', async () => {
     const plan = await planInstall(spec, context(fakeFetch({})))
-    assert.match((plan as { unavailable: string }).unavailable, /needs Go \(go was not found on the PATH\)/)
+    assert.equal((plan as { unavailable: string }).unavailable, "Installing Go's language server needs Go, which is not on this computer (go was not found on the PATH). Install it, then try again.")
     await assert.rejects(
       installServer(spec, context(fakeFetch({}), { which: () => 'go', run: async () => ({ code: 1, output: 'downloading\nverifying: checksum mismatch\n' }) })),
       /go could not install it \(exit 1\): downloading verifying: checksum mismatch/,

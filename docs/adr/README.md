@@ -103,6 +103,7 @@ say so.
 | [0111](0111-a-folder-on-another-machine-opens-over-ssh-the-agent-works-there-and-the-keys-stay-on-the-pc.md) | A folder on another machine opens over SSH: the agent works there, and the keys stay on the PC | Accepted, builds on 0040, 0064, 0106 and 0108 |
 | [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107 |
 | [0113](0113-pictures-and-files-go-with-a-message.md) | Pictures and files go with a message: pasted, dropped or picked | Accepted, builds on 0054, 0069 and 0111 |
+| [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083 |
 
 ## Template
 

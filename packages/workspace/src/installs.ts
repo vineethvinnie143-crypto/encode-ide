@@ -4,7 +4,7 @@
  * own tools folder, shared by every folder; what may run is still decided per folder (trusted folders only). A library
  * a server reads (FiveM's natives, ADR 0084) is installed the same way, and its server starts again to read it.
  */
-import { InstallFailed, installServer, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, planInstall, removeInstall, type Installable, type InstallContext, type InstallPlan, type LibrarySpec, type ServerSpec } from '@encode/lsp'
+import { InstallFailed, installedDir, installServer, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, planInstall, removeInstall, removeRuntime, type Installable, type InstallContext, type InstallPlan, type LibrarySpec, type ServerSpec } from '@encode/lsp'
 import { agentEnvironment } from '@encode/tools'
 import { launchContext, type InstallState, type ServerTools } from './code'
 
@@ -121,6 +121,11 @@ export class ServerInstalls {
     await this.rediscover(spec, { stop: true })
     try {
       removeInstall(spec, this.options.tools.dir)
+      // eNCode's copy of the server's toolchain goes too, once no other server it installed runs on it (ADR 0114).
+      const runtime = 'installer' in spec && (spec.installer?.kind === 'toolchain' || spec.installer?.kind === 'download') ? spec.installer.runtime : undefined
+      const catalog = this.options.catalog ?? LANGUAGE_SERVERS
+      const shared = catalog.some((other) => other.id !== spec.id && (other.installer?.kind === 'toolchain' || other.installer?.kind === 'download') && other.installer.runtime === runtime && installedDir(other, this.options.tools.dir))
+      if (runtime && !shared) removeRuntime(runtime, this.options.tools.dir)
       return { ok: true, dir: '' }
     } catch (error) {
       return { ok: false, reason: `eNCode could not remove all of it: ${error instanceof Error ? error.message : String(error)}` }

@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { companionFiles, discover, fromChildProcess, installedDir, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
+import { companionFiles, discover, fromChildProcess, installedDir, installedRuntimeLabel, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, LanguageServers, type LibrarySpec, type ActionInfo, type CodeDiagnostic, type CompletionEntry, type CompletionResult, type EditorFoldRange, type EditorHighlight, type EditorInlayHint, type EditorSemanticTokens, type EditorSymbol, type EditorTriggers, type FolderLanguages, type LaunchContext, type LaunchPlan, type Range, type ServerProcess, type ServerSpec, type ServerState, type SignatureHelp, type TextEdit } from '@encode/lsp'
 import { agentEnvironment, decodeText, searchPath } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 
@@ -73,6 +73,8 @@ export interface LanguageServerInfo {
   installer?: 'npm' | 'download' | 'toolchain'
   /** eNCode installed it, at this version. */
   installed?: string
+  /** The toolchain eNCode fetched for it, which it runs on: ".NET SDK 10.0.402" (ADR 0114). */
+  runtime?: string
   /** An install is running: bytes so far, of about this many. */
   installing?: { done: number; total: number }
   /** The last install failed, and why. */
@@ -391,6 +393,7 @@ export function languageServersReport(
     const spec = specs.get(view.id)
     const use = used.get(view.id)
     const installed = spec && options.tools ? installedDir(spec, options.tools.dir) : null
+    const runtime = installed && spec && options.tools ? installedRuntimeLabel(spec, options.tools.dir) : undefined
     const install = extra.installs?.(view.id)
     return {
       ...view,
@@ -400,6 +403,7 @@ export function languageServersReport(
       ...(use ? { used: { files: use.files, markers: use.markers } } : {}),
       ...(spec?.installer && spec.installer.kind !== 'library' && options.tools ? { installer: spec.installer.kind } : {}),
       ...(installed ? { installed: installed.version } : {}),
+      ...(runtime ? { runtime } : {}),
       ...(install && 'error' in install ? { installError: install.error } : install ? { installing: install } : {}),
       ...libraryViews(view.id, use?.markers ?? [], options, extra.installs),
     }

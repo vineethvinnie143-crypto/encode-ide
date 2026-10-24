@@ -750,6 +750,8 @@ export interface LanguageServerInfo {
   installer?: 'npm' | 'download' | 'toolchain'
   /** eNCode installed it, at this version. */
   installed?: string
+  /** The toolchain eNCode fetched for it, which it runs on: ".NET SDK 10.0.402" (ADR 0114). */
+  runtime?: string
   /** An install is running: bytes so far, of about this many. */
   installing?: { done: number; total: number }
   /** The last install failed, and why. */

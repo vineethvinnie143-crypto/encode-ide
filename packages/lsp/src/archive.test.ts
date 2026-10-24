@@ -5,7 +5,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import { describe, it } from 'node:test'
 import { check, gen } from '@encode/testkit'
-import { ArchiveRefused, readTar, readZip, safeEntryPath, writeFiles } from './archive'
+import { ArchiveRefused, readGzip, readTar, readZip, safeEntryPath, unpackZip, writeFiles } from './archive'
 import { header, longName, makeTar, makeZip, pad, paxPath } from './test-archives'
 
 const LIMITS = { maxFiles: 1000, maxBytes: 10 * 1024 * 1024 }
@@ -151,5 +151,76 @@ describe('writing what an archive held', () => {
         if (!(error instanceof ArchiveRefused)) throw error
       }
     })
+  })
+})
+
+describe('unpacking a zip from disk, entry by entry (toolchains)', () => {
+  const refusedAsync = (run: () => Promise<unknown>, pattern: RegExp) => assert.rejects(run, (error: unknown) => error instanceof ArchiveRefused && pattern.test(error.message))
+
+  it('writes what readZip reads, with executable modes, and refuses a bad archive before writing a file', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-unzip-'))
+    try {
+      const write = (name: string, archive: Buffer) => {
+        const file = path.join(parent, name)
+        fs.writeFileSync(file, archive)
+        return file
+      }
+      const good = write('good.zip', makeZip([{ name: 'go/bin/go.exe', data: 'MZ go', mode: 0o100755 }, { name: 'go/', mode: 0o040755 }, { name: 'go/src/a.go', data: 'package a', method: 0 }, { name: 'go/VERSION', data: 'go1.27.3' }]))
+      await unpackZip(good, path.join(parent, 'out'), { ...LIMITS, strip: 1 })
+      assert.equal(fs.readFileSync(path.join(parent, 'out', 'bin', 'go.exe'), 'utf8'), 'MZ go')
+      assert.equal(fs.readFileSync(path.join(parent, 'out', 'src', 'a.go'), 'utf8'), 'package a')
+      if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(parent, 'out', 'bin', 'go.exe')).mode & 0o111, 0o111)
+      await assert.rejects(unpackZip(good, path.join(parent, 'out'), LIMITS), /EEXIST/)
+      // Refused from the directory alone: nothing is written, not even the folder.
+      for (const [name, archive, limits, pattern] of [
+        ['slip', makeZip([{ name: 'a.txt', data: 'a' }, { name: '../../evil', data: 'x' }]), LIMITS, /outside its folder/],
+        ['twice', makeZip([{ name: 'a.txt', data: '1' }, { name: 'A.TXT', data: '2' }]), LIMITS, /twice/],
+        ['link', makeZip([{ name: 'link', data: '/etc', mode: 0o120777 }]), LIMITS, /is a link/],
+        ['large', makeZip([{ name: 'a', data: 'x'.repeat(300) }]), { maxFiles: 10, maxBytes: 100 }, /unpacks to more than 100 bytes/],
+        ['many', makeZip([{ name: 'a', data: '1' }, { name: 'b', data: '2' }, { name: 'c', data: '3' }]), { maxFiles: 2, maxBytes: 100 }, /more than 2 files/],
+        ['zip64', makeZip([{ name: 'a', data: 'x' }], { zip64: true }), LIMITS, /Zip64/],
+        ['junk', Buffer.from('not a zip at all'), LIMITS, /not a zip/],
+      ] as const) {
+        await refusedAsync(() => unpackZip(write(`${name}.zip`, archive), path.join(parent, `out-${name}`), limits), pattern)
+        assert.equal(fs.existsSync(path.join(parent, `out-${name}`)), false, name)
+      }
+      // A broken entry stops it where it is found; the caller removes the folder.
+      await refusedAsync(() => unpackZip(write('crc.zip', makeZip([{ name: 'a', data: 'x', crc: 1 }])), path.join(parent, 'out-crc'), LIMITS), /checksum/)
+      assert.deepEqual(fs.readdirSync(path.join(parent, 'out-crc')), [])
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('reads back any tree as readZip does', async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'encode-unzip-'))
+    let round = 0
+    try {
+      const part = gen.string('abcxyz-_.', 1, 6)
+      const name = gen.map(gen.array(part, 1, 3), (parts) => parts.join('/'))
+      const entries = gen.map(gen.array(gen.tuple(name, gen.string('ab\n', 0, 40), gen.int(0, 1)), 1, 6), (list) => {
+        const seen = new Set<string>()
+        const kept = list.filter(([file]) => safeEntryPath(file) === file && !seen.has(file.toLowerCase()) && seen.add(file.toLowerCase()))
+        return kept.filter(([file]) => !kept.some(([other]) => other.toLowerCase().startsWith(`${file.toLowerCase()}/`)))
+      })
+      await check(entries, async (list) => {
+        const archive = makeZip(list.map(([file, data, executable]) => ({ name: file, data, mode: executable ? 0o100755 : 0o100644 })))
+        const file = path.join(parent, `${++round}.zip`)
+        fs.writeFileSync(file, archive)
+        const out = path.join(parent, `${round}`)
+        await unpackZip(file, out, LIMITS)
+        for (const entry of readZip(archive, LIMITS)) assert.deepEqual(fs.readFileSync(path.join(out, ...entry.path.split('/'))), entry.data)
+      })
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a program gzipped alone, within the limit', () => {
+    const files = readGzip(zlib.gzipSync(Buffer.from('ELF rust-analyzer')), 'rust-analyzer', LIMITS)
+    assert.deepEqual(files.map((file) => [file.path, file.data.toString(), file.executable]), [['rust-analyzer', 'ELF rust-analyzer', true]])
+    refused(() => readGzip(Buffer.from('not gzip'), 'rust-analyzer', LIMITS), /does not unpack/)
+    refused(() => readGzip(zlib.gzipSync(Buffer.alloc(500)), 'rust-analyzer', { maxFiles: 1, maxBytes: 100 }), /unpacks to too much/)
+    refused(() => readGzip(zlib.gzipSync(Buffer.from('x')), '../rust-analyzer', LIMITS), /not a file name/)
   })
 })
