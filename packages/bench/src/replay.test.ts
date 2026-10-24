@@ -6,7 +6,7 @@ import { after, describe, test } from 'node:test'
 import { AgentHost, createScriptedClient, DEFAULT_SETTINGS, readTurnReport, scrambleRecord, TURN_REPORT_KIND, type AgentSettings, type ScriptedStep, type TurnRecord, type TurnReport } from '@encode/core'
 import { Workspaces } from '@encode/workspace'
 import { main } from './cli'
-import { compareReplay, formatReplay, playReplay, readTask, replayReport, writeReplayTask } from './index'
+import { AS_WRITTEN, compareReplay, formatReplay, playReplay, readTask, replayReport, replayTaskFiles, writeReplayTask } from './index'
 
 const made: string[] = []
 after(async () => {
@@ -22,15 +22,18 @@ const temp = async (prefix: string) => {
 
 const BEFORE = 'export const limit = 3\nexport const name = "shop"\n'
 
-/** A request the way a person runs one in the app, on the same host and scope, and the record of it the app would save. */
-async function recordedRequest(steps: ScriptedStep[]): Promise<TurnRecord> {
+/**
+ * A request the way a person runs one in the app, on the same host and scope, and the record of it the app would save.
+ * Its steps run as written unless `help` gives the scripted model, a smaller one, the help it would get (ADR 0100).
+ */
+async function recordedRequest(steps: ScriptedStep[], help = false): Promise<TurnRecord> {
   const base = await temp('replay-source-')
   const root = path.join(base, 'shop')
   await fs.mkdir(path.join(root, 'src'), { recursive: true })
   await fs.writeFile(path.join(root, 'src', 'a.js'), BEFORE)
   await fs.mkdir(path.join(base, 'home'), { recursive: true })
   const workspaces = new Workspaces({ home: path.join(base, 'home'), checkpoints: { dir: path.join(base, 'checkpoints') }, transcriptPath: (id) => path.join(base, `${id}.jsonl`) })
-  const settings: AgentSettings = { ...DEFAULT_SETTINGS, policy: 'workspace-write', computer: false }
+  const settings: AgentSettings = { ...DEFAULT_SETTINGS, policy: 'workspace-write', computer: false, ...(help ? {} : AS_WRITTEN) }
   const host: AgentHost = new AgentHost({
     dir: path.join(base, 'sessions'),
     home: path.join(base, 'home'),
@@ -117,6 +120,42 @@ describe('a report of a request, played again', () => {
     assert.equal(comparison.differs, 1)
     assert.match(formatReplay(comparison), /1 call does something else now\./)
     await assert.rejects(writeReplayTask(report, 'replay-missed-edit', tasks), /there already/)
+  })
+
+  test('leaves out a change eNCode held until the model said what it would change, and plays the one sent after', async () => {
+    const steps: ScriptedStep[] = [
+      { text: 'Reading it.', calls: [{ name: 'Read', input: { file_path: 'src/a.js' } }] },
+      // A smaller model's first change, with nothing said about it: held, not run.
+      { calls: [{ name: 'Edit', input: { file_path: 'src/a.js', old_string: 'limit = 3', new_string: 'limit = 5' } }] },
+      {
+        text: 'I will change limit in src/a.js from 3 to 5, then read the file back to check that the new value is there.',
+        calls: [{ name: 'Edit', input: { file_path: 'src/a.js', old_string: 'limit = 3', new_string: 'limit = 5' } }],
+      },
+      { calls: [{ name: 'Read', input: { file_path: 'src/a.js' } }] },
+      { text: 'Raised the limit to 5.' },
+    ]
+    const report = reportOf(await recordedRequest(steps, true))
+    assert.deepEqual(
+      report.results.map((result) => [result.tool, result.ok]),
+      [
+        ['Read', true],
+        ['Edit', false],
+        ['Edit', true],
+        ['Read', true],
+      ],
+    )
+    const replay = JSON.parse(replayTaskFiles(report, 'held-edit').files.get('replay.json')!) as { steps: ScriptedStep[]; expect: unknown[] }
+    assert.equal(replay.steps.length, 4, 'the step of the held change alone is left out')
+    assert.deepEqual(replay.expect, [
+      { tool: 'Read', ok: true },
+      { tool: 'Edit', ok: true },
+      { tool: 'Read', ok: true },
+    ])
+    const { comparison } = await replayReport(report)
+    assert.equal(comparison.differs, 0, JSON.stringify(comparison.rows))
+    // With every word replaced the held result no longer reads as held: the call is kept, and runs when played.
+    const scrambled = JSON.parse(replayTaskFiles(reportOf(scrambleRecord(await recordedRequest(steps, true))), 'held-edit').files.get('replay.json')!) as { steps: ScriptedStep[] }
+    assert.equal(scrambled.steps.length, 5)
   })
 
   test('compares calls made on one side only, and leaves out the ones declined', () => {

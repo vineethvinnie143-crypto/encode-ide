@@ -6,7 +6,7 @@ import { after, describe, test } from 'node:test'
 import { createScriptedClient, type ScriptedStep } from '@encode/core'
 import type { CompletionRequest, ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
-import { compareReports, findPrograms, formatReport, meteredClient, parseReport, parseTask, playReplay, readTask, readTasks, referenceClient, runBench, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
+import { compareReports, findPrograms, formatReport, meteredClient, parseReport, parseTask, playReplay, readTask, readTasks, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
 
 const TASKS = path.join(process.cwd(), 'packages', 'bench', 'tasks')
 const made: string[] = []
@@ -58,7 +58,7 @@ describe('the built-in tasks', async () => {
       if (missing.length) return t.skip(`needs ${missing.join(', ')}`)
       const untouched = await runTask(task, { client: createScriptedClient(idle), programs })
       assert.equal(untouched.outcome, 'failed', `${task.id} passes without any change: ${JSON.stringify(untouched.checks)}`)
-      const reference = await runTask(task, { client: referenceClient(task)!, programs })
+      const reference = await runTask(task, { client: referenceClient(task)!, programs, settings: REFERENCE_SETTINGS })
       assert.equal(reference.outcome, 'passed', JSON.stringify(reference.checks.filter((check) => !check.passed), null, 2))
       // A reference run is the model doing everything right: no call fails, and nothing it runs is declined.
       assert.equal(reference.metrics.toolFailures, 0, JSON.stringify(reference.metrics.byTool))
@@ -145,7 +145,7 @@ describe('a run', () => {
       { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] },
       { text: 'Wrote done.txt.' },
     ])
-    const run = await runTask(task, { client, programs: await findPrograms([]) })
+    const run = await runTask(task, { client, programs: await findPrograms([]), settings: AS_WRITTEN })
     assert.equal(run.outcome, 'passed')
     assert.equal(run.metrics.declined, 1)
     assert.equal(run.metrics.questions, 1)

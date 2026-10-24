@@ -231,6 +231,24 @@ const SCENARIOS = {
     { text: 'Writing it.', attempt: (n) => ({ name: 'Write', args: { file_path: 'src/best.ts', content: `export function sum(a: number, b: number): number {\n  return a ${n === 2 ? '+' : '-'} b\n}\n` } }) },
     { text: 'Wrote sum in src/best.ts.' },
   ],
+  // A smaller model's first change, with no word of what it changes: eNCode holds it until the model says (ADR 0100).
+  'think-first': [
+    { text: 'Adding it.', call: { name: 'Write', args: { file_path: 'src/planned.ts', content: 'export const planned = true\n' } } },
+    {
+      text: 'I will add one file, src/planned.ts, exporting planned; nothing else changes, and the typecheck covers it.',
+      call: { name: 'Write', args: { file_path: 'src/planned.ts', content: 'export const planned = true\n' } },
+    },
+    { text: 'Added src/planned.ts.' },
+  ],
+  // Two setbacks: the same edit that matches nothing, twice, and another to the same file. eNCode asks whether the Plan
+  // role's strong model may finish the request; the smoke says yes, and that model answers (ADR 0100).
+  stronger: [
+    { text: 'Reading it.', call: { name: 'Read', args: { file_path: 'src/utils.ts' } } },
+    { text: 'Changing it.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + c', new_string: 'return a + b' } } },
+    { text: 'Again.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + c', new_string: 'return a + b' } } },
+    { text: 'Another way.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + d', new_string: 'return a + b' } } },
+    { text: 'src/utils.ts has no such line to change; it already reads as asked, so nothing was changed.' },
+  ],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
@@ -379,12 +397,13 @@ function chunk(delta, finish = null) {
 const STEERED = 'sent the message below while you were working'
 const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
 
-/** What eNCode tells the model within a turn of what the language servers or the Reviewer found: the turn goes on. */
+/** What eNCode tells the model within a turn of what the language servers or the Reviewer found, or that a stronger model takes over: the turn goes on. */
 const LANGUAGE_SERVER_NEWS = [
   'The language servers found errors after your changes',
   'The language servers checked your changes again',
   'Before you finish: your changes this turn left errors',
   'The Reviewer read your changes before the person sees them',
+  'A stronger model does the rest of this request',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
 const REVIEWED = 'The Reviewer read your changes before the person sees them'

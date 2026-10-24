@@ -7,7 +7,7 @@ import { modalOpen } from '../../commands/useKeymap'
 import { DEFAULT_ALWAYS_SCOPE, SCOPE_CHOICES, alwaysRulesText, ruleTiming, scopeNote, trustOffer } from '../../panels/permissions'
 import { Button, IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { AlertTriangle, ChevronLeft, ChevronRight, ListTree, ShieldAlert, ShieldCheck } from '../../ui/icons'
+import { AlertTriangle, ChevronLeft, ChevronRight, ListTree, ShieldAlert, ShieldCheck, Sparkles } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import DiffView from './DiffView'
 import { reviewLine } from './review-text'
@@ -24,6 +24,7 @@ import { reviewLine } from './review-text'
 /** The buttons' words, for a request that is not about touching something. */
 const WORDS: Record<string, { approve: string; session: string; deny: string; explain: string; withNote: string }> = {
   EnterPlanMode: { approve: 'Plan first', session: 'Plan first whenever it asks', deny: 'Go ahead without a plan', explain: 'Say how to go ahead', withNote: 'Go ahead with this note' },
+  StrongerModel: { approve: 'Use it for this request', session: 'Use it whenever one fails twice', deny: 'Keep going', explain: 'Say how to go on', withNote: 'Keep going with this note' },
 }
 const DEFAULT_WORDS = { approve: 'Approve', session: 'Approve for this session', deny: 'Deny', explain: 'Deny and explain', withNote: 'Deny with this note' }
 
@@ -112,7 +113,7 @@ export default function ApprovalCard() {
     <div className="approval-card" role="group" aria-label="Approval needed">
       <div className="approval-top">
         <div className="approval-head">
-          {approval.tool === 'EnterPlanMode' ? <ListTree size={16} /> : <ShieldAlert size={16} />}
+          {approval.tool === 'EnterPlanMode' ? <ListTree size={16} /> : approval.tool === 'StrongerModel' ? <Sparkles size={16} /> : <ShieldAlert size={16} />}
           <span>{approval.title}</span>
           {approval.background && (
             <em className="approval-tag" title="A subagent working in the background asks. It waits for you; nothing else does.">
@@ -141,7 +142,8 @@ export default function ApprovalCard() {
           <span>{reviewLine(approval.review)}</span>
         </div>
       )}
-      <pre className="approval-detail">{approval.detail}</pre>
+      {/* A question in words, not a command or a file: read as prose. */}
+      {approval.tool === 'StrongerModel' ? <p className="approval-prose">{approval.detail}</p> : <pre className="approval-detail">{approval.detail}</pre>}
       {approval.warnings && approval.warnings.length > 0 && (
         <div className="approval-warnings" role="note">
           <AlertTriangle size={14} />

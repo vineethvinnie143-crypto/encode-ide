@@ -85,6 +85,8 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'roles.free', section: 'roles', label: 'Only use free models', keywords: 'free pool billed paid cost' },
   { id: 'roles.list', section: 'roles', label: 'Models for each role', keywords: 'main explore plan review compaction small tasks effort' },
   { id: 'roles.guide', section: 'roles', label: 'Short instructions for strong models', keywords: 'guide prompt system instructions tokens cost' },
+  { id: 'roles.smaller', section: 'roles', label: 'Help smaller models', keywords: 'weak cheap deepseek glm kimi qwen minimax think before edit plan first' },
+  { id: 'roles.stronger', section: 'roles', label: 'Offer a stronger model when one fails twice', keywords: 'upgrade escalate stronger model failures retry cost ask' },
   { id: 'agent.policy', section: 'agent', label: 'Approvals', keywords: 'what eNCode may do without asking read only full access auto review policy' },
   { id: 'agent.askAgain', section: 'agent', label: 'Before a command that is hard to undo', keywords: 'irreversible destructive delete force push publish deploy drop confirm self-consistency full access' },
   { id: 'agent.computer', section: 'agent', label: 'Let the agent use this computer', keywords: 'computer use gui mouse keyboard' },

@@ -85,6 +85,18 @@ export type AskAgain = 'on' | 'off'
 export type LearnConventions = 'on' | 'off'
 
 /**
+ * `auto`: a model that is not one of the strong ones gets a few lines of help after the instructions, and its first
+ * change in a request waits until it has said what will change (ADR 0100). `off`: no model does.
+ */
+export type HelpSmaller = 'auto' | 'off'
+
+/**
+ * `ask`: when a smaller model runs into trouble twice in a request and the Plan or Review role has a strong model of
+ * its own, you are asked whether that model may do the rest of the request (ADR 0100). `off`: never.
+ */
+export type OfferStronger = 'ask' | 'off'
+
+/**
  * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
  * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
  * `off`: never. See shared/inline.ts.
@@ -141,6 +153,10 @@ export interface Settings {
   askAgain: AskAgain
   /** See LearnConventions. Default `on`. */
   learnConventions: LearnConventions
+  /** See HelpSmaller. Default `auto`. */
+  helpSmaller: HelpSmaller
+  /** See OfferStronger. Default `ask`. */
+  offerStronger: OfferStronger
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */

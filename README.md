@@ -214,6 +214,15 @@ a billed model from ever being tried after a free one or on another key
   DeepSeek or Gemini 3 stopped at the second step. Only the model that wrote the reasoning is sent it. The temperature
   is not sent to Kimi, MiniMax or Gemini 3, which choose their own, and an effort goes to DeepSeek and Kimi in their
   own words.
+- **Smaller models** (every model but Claude Opus, Sonnet and Fable, GPT-5, o3, Gemini Pro and Grok 4) get help
+  ([ADR 0100](docs/adr/0100-smaller-models-get-help-and-a-strong-model-takes-the-hard-steps-when-the-person-says-so.md)):
+  a short part of the instructions on taking small, checked steps; before the first change of a request they say which
+  files will change and how they will check it; and DeepSeek and Qwen's Coder models are sent the temperature their
+  makers recommend for code when you set none. When a smaller model runs into trouble twice in one request (the checks
+  or the Reviewer send its work back, or a call fails the same way twice), and your Plan or Review role has a strong
+  model of its own, eNCode asks whether that model may do the rest of the request, with both prices. It is never
+  switched unasked, and the next request starts on Main again. **Settings → Roles** suggests a strong model of the same
+  connection for Plan and Review while Main is a smaller one, and turns both kinds of help off.
 - **Settings → Models** edits the connections. Presets for the Connect window:
 
 | Preset | Base URL | Example model |

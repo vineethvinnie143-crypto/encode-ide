@@ -41,8 +41,11 @@ import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOp
 import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
 import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry } from './ui'
 
-/** The Reviewer, the second look and the conventions offer would each take a scripted step of their own; their tests turn them on (ADRs 0096, 0097). */
-const HARNESS_SETTINGS: AgentSettings = { ...DEFAULT_SETTINGS, review: 'off', askAgain: 'off', learnConventions: 'off' }
+/**
+ * The Reviewer, the second look and the conventions offer would each take a scripted step of their own, and the scripted
+ * model is no strong one, so its first change would wait for a plan; their tests turn them on (ADRs 0096, 0097, 0100).
+ */
+const HARNESS_SETTINGS: AgentSettings = { ...DEFAULT_SETTINGS, review: 'off', askAgain: 'off', learnConventions: 'off', smallerHelp: 'off', offerStronger: 'off' }
 
 export class RecordingSurface implements Surface {
   readonly statuses: AgentStatus[] = []

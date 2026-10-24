@@ -13,7 +13,7 @@ import { createMessagesStream } from './anthropic'
 import { classifyStreamError, isTransportError, SERVER_TOOL_REFUSED_CODE, TransportError } from './errors'
 import { describeEndpoint, guardStream, isJsonResponse, postJson, readJson, type FetchLike } from './http'
 import type { AssistantMessage, DocumentBlock, ImageBlock, ModelRequest, ReasoningEffort, ToolUseBlock, UserMessage } from './messages'
-import { effortWord, takesSampling } from './families'
+import { codeTemperature, effortWord, takesSampling } from './families'
 import { createThinkSplitter, detailText, replayFor, requestStart, signed, SKIP_SIGNATURE, type Replay } from './reasoning'
 import { readSse } from './sse'
 import { acceptingToolNames } from './tool-names'
@@ -241,7 +241,8 @@ export function buildChatBody(target: TransportTarget, request: ModelRequest, op
     if (target.family === 'openai' && !openRouter && /(?:^|\.)openai\.com$/.test(hostOf(target.baseUrl))) body.max_completion_tokens = limit
     else body.max_tokens = limit
   }
-  if (request.temperature !== undefined && !target.capabilities.reasoning && takesSampling(target.family, target.model)) body.temperature = request.temperature
+  const temperature = request.temperature ?? codeTemperature(target.family, target.model)
+  if (temperature !== undefined && !target.capabilities.reasoning && takesSampling(target.family, target.model)) body.temperature = temperature
   if (request.reasoning && target.capabilities.reasoning) {
     const word = effortWord(target.family, request.reasoning)
     if (openRouter) body.reasoning = { effort: effortFor(request.reasoning) }

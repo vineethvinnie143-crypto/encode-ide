@@ -204,7 +204,7 @@ async function driveAgent(label, timeoutMs = 120000, options = {}) {
         title: card.querySelector('.approval-head')?.textContent ?? '',
         reason: card.querySelector('.approval-reason')?.textContent ?? '',
         review: card.querySelector('.approval-review')?.textContent ?? '',
-        detail: card.querySelector('.approval-detail')?.textContent ?? '',
+        detail: card.querySelector('.approval-detail, .approval-prose')?.textContent ?? '',
       }
     })()`)
     if (card) {
@@ -495,7 +495,10 @@ async function runProviderPhase() {
     reviewWork: 'off',
     // Off until runSecondLookChecks and runConventionsChecks: each would take a model call the other steps do not expect.
     askAgain: 'off',
-    learnConventions: 'off'
+    learnConventions: 'off',
+    // Off until runSmallerModelChecks: the mock model is no strong one, so its first change in a request would wait for a plan.
+    helpSmaller: 'off',
+    offerStronger: 'off'
   })`)
   const secret = await checkKeyStorage()
 
@@ -647,6 +650,7 @@ async function runProviderPhase() {
   await runReviewGateChecks()
   await runSecondLookChecks()
   await runConventionsChecks()
+  await runSmallerModelChecks()
   await runStopChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3285,7 +3289,9 @@ async function runComputerChecks() {
     await sendPrompt('[scenario:computer-check] Look at the desktop, then run a command.')
     // The first use builds the helper that drives windows, which takes a while.
     await waitFor("!!document.querySelector('.approval-card')", 180000, `the command waits for you (${label})`)
-    const banner = await evaluateInBanner(BANNER_STATE)
+    // The card and the banner hear of the wait by two roads, so the banner may be a moment behind the card.
+    let banner = await evaluateInBanner(BANNER_STATE)
+    for (const started = Date.now(); banner.mode !== 'waiting' && Date.now() - started < 3000; banner = await evaluateInBanner(BANNER_STATE)) await sleep(100)
     console.log(`[smoke] banner (${label}):`, JSON.stringify(banner))
     if (banner.mode !== 'waiting' || banner.text !== 'eNCode is waiting for you' || !banner.stop) throw new Error(`The banner says ${JSON.stringify(banner)} while the agent waits for the person`)
     if (banner.hint !== 'Ctrl+Alt+Esc') throw new Error(`The banner shows no stop key: ${JSON.stringify(banner.hint)}`)
@@ -3421,6 +3427,42 @@ async function runConventionsChecks() {
   if (now !== `${original.trimEnd()}\n\n## Conventions\n\n- Use \`pnpm\` for installs and scripts, never \`npm\`.\n`) throw new Error(`ENCODE.md reads ${JSON.stringify(now)}`)
   await fs.writeFile(file, original)
   await evaluate("window.eNCode.settings.save({ learnConventions: 'off' })")
+}
+
+async function runSmallerModelChecks() {
+  console.log('[smoke] --- help for smaller models, and a stronger model after two setbacks ---')
+  const planned = path.join(demoPath, 'src', 'planned.ts')
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'local-mock', helpSmaller: 'auto' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:think-first] Add a planned flag in src/planned.ts')
+  await driveAgent('15f-think-first')
+  const noticesOf = () => evaluate("window.eNCode.agent.history().then((history) => history.entries.filter((entry) => entry.kind === 'notice').map((entry) => entry.text ?? ''))")
+  const notices = await noticesOf()
+  if (!notices.some((text) => text.includes('eNCode asked the agent to say what it will change before its first edit.'))) throw new Error(`No notice of the held change: ${JSON.stringify(notices)}`)
+  if ((await fs.readFile(planned, 'utf8').catch(() => '')) !== 'export const planned = true\n') throw new Error('src/planned.ts was not written after the plan')
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const system = seen.messages.filter((message) => message.role === 'system').map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content))).join('\n')
+  if (!system.includes('# Small, checked steps')) throw new Error('The help for smaller models was not sent')
+  const held = seen.messages.filter((message) => message.role === 'tool').map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+  if (!held[0]?.includes('Not run yet. Before the first change of a request')) throw new Error(`The first change was not held: ${JSON.stringify(held)}`)
+  const rows = (await toolOutputs()).filter((tool) => tool.name === 'Write')
+  if (rows.length !== 1) throw new Error(`The held change should show no row of its own: ${JSON.stringify(rows)}`)
+  await screenshot('15f-think-first.png')
+  await fs.rm(planned, { force: true })
+
+  await evaluate("window.eNCode.settings.save({ helpSmaller: 'off', offerStronger: 'ask', roles: { planner: ['local-mock:claude-sonnet-4.5'] } })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:stronger] Make add in src/utils.ts return a + b')
+  const approvals = await driveAgent('15g-stronger')
+  console.log('[smoke] a stronger model asked:', JSON.stringify(approvals.map((card) => card.title)))
+  const card = approvals.find((candidate) => candidate.title.includes('take over this request'))
+  if (!card || !card.title.includes('Let claude-sonnet-4.5 take over this request?')) throw new Error(`No offer of the stronger model: ${JSON.stringify(approvals)}`)
+  if (!/mock-model ran into trouble twice in this request: the same `Edit` call failed twice; and `Edit` failed twice on utils\.ts\./.test(card.detail)) throw new Error(`The offer reads ${JSON.stringify(card.detail)}`)
+  const last = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  if (last.model !== 'claude-sonnet-4.5') throw new Error(`The rest of the request went to ${last.model}`)
+  const told = await noticesOf()
+  if (!told.some((text) => text.includes('claude-sonnet-4.5 does the rest of this request: mock-model ran into trouble twice.'))) throw new Error(`No notice of the take-over: ${JSON.stringify(told)}`)
+  await evaluate("window.eNCode.settings.save({ offerStronger: 'off', roles: {} })")
 }
 
 /** The tool entries of the active session, with their outputs. */

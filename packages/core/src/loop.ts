@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   isEmptyReply,
+  isStrongModel,
   messageText,
   textBlock,
   toolUses,
@@ -109,6 +110,7 @@ import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completi
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
 import { FailedCalls, mendedNote } from './repeats'
+import { CHANGE_TOOLS, helpsSmaller, saidWhatChanges, Setbacks, shortModel, SMALLER_MODEL_PART, STRONGER_AFTER, STRONGER_ROLES, strongerPrompt, takeOverNote, THINK_FIRST, type SentBack } from './smaller'
 import { withoutScreensFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
@@ -407,6 +409,12 @@ export class AgentLoop {
   private readonly inflight = new Set<ConversationEntry>()
   /** Calls that failed this turn, so one sent again and again is told to change course. */
   private readonly failures = new FailedCalls()
+  /** What went wrong this request, for offering a stronger model (ADR 0100). */
+  private readonly setbacks = new Setbacks()
+  /** Once a request (ADR 0100): the first change was looked at; the person was asked about a stronger model; the role whose model took over. */
+  private changeSeen = false
+  private strongerAsked = false
+  private stronger: ModelRole | undefined
   private readonly approvedApps: Set<string>
   /** Errors after every edit, and the gate at the end of a turn; only where language servers run. */
   private readonly edits: EditDiagnostics | undefined
@@ -486,6 +494,10 @@ export class AgentLoop {
     let stopRounds = 0
     this.edits?.startTurn()
     this.failures.clear()
+    this.setbacks.clear()
+    this.changeSeen = false
+    this.strongerAsked = false
+    this.stronger = undefined
     if (this.gated) o.services.checks?.ledger.startRequest()
     this.checkRounds = 0
     this.checksRefused = false
@@ -525,7 +537,8 @@ export class AgentLoop {
         const reply = messageText(message)
         const sent = await this.beforeFinish({ ...turn, mode }, reply)
         if (sent) {
-          await o.conversation.add(userText(reminder(sent)), { turnId: turn.turnId })
+          const took = await this.offerStronger(turn)
+          await o.conversation.add(userText(reminder(took ? `${sent}\n\n${took}` : sent)), { turnId: turn.turnId })
           continue
         }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
@@ -553,6 +566,10 @@ export class AgentLoop {
             state.stop = undefined
           }
         }
+        if (state.stop === undefined) {
+          const took = await this.offerStronger(turn)
+          if (took) state.context.push(took)
+        }
       } finally {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
         const content: UserBlock[] = calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN))
@@ -578,14 +595,15 @@ export class AgentLoop {
     let overflows = 0
     let empties = 0
     for (;;) {
-      // A model that needs no guide is sent the short one (ADR 0094); the model the router expects decides.
-      const short = shortGuide(o.settings().guide, (await o.client.budget(o.role, this.query())).model)
-      const system = short && o.shortSystem ? o.shortSystem : o.system
+      // A model that needs no guide is sent the short one (ADR 0094), a smaller one its help (0100); the model the router expects decides.
+      const expected = (await o.client.budget(this.callRole, this.query())).model
+      const short = shortGuide(o.settings().guide, expected)
+      const system = short && o.shortSystem ? o.shortSystem : helpsSmaller(o.settings().smallerHelp, expected) ? [...o.system, SMALLER_MODEL_PART] : o.system
       const tools = o.registry.visibleDefinitions(o.tools, loadedTools(o.conversation.messages(), o.registry), short)
       await this.noteContext(system, tools, turn)
       await this.fit(turn)
       const settings = o.settings()
-      const budget = await o.client.budget(o.role, this.query())
+      const budget = await o.client.budget(this.callRole, this.query())
       this.vision = budget.images
       this.documents = budget.documents
       // A model that cannot read images is not sent the screens it could not see anyway.
@@ -625,7 +643,7 @@ export class AgentLoop {
       }
 
       const outcome = await o.client.complete({
-        role: o.role,
+        role: this.callRole,
         ...(o.agentId !== 'main' ? { agent: o.agentId } : {}),
         payload,
         requirements: { promptTokens: this.meter.estimate(sent, this.fixed), maxOutputTokens, tools: tools.length > 0, images: hasImages(sent) },
@@ -691,6 +709,11 @@ export class AgentLoop {
     return { sticky: this.o.services.sessionId, ...(this.o.agentId !== 'main' ? { agent: this.o.agentId } : {}) }
   }
 
+  /** The role whose models do the work: the agent's own, or the stronger one the person let take over (ADR 0100). */
+  private get callRole(): ModelRole {
+    return this.stronger ?? this.o.role
+  }
+
   /** Records the system prompt and tools when they changed, and sizes them. */
   private async noteContext(system: SystemPart[], tools: ToolDefinition[], turn: Turn): Promise<void> {
     const { o } = this
@@ -721,7 +744,7 @@ export class AgentLoop {
    */
   private async fit(turn: Turn, options: FitOptions = {}): Promise<number> {
     const { o } = this
-    const budget = await o.client.budget(o.role, this.query())
+    const budget = await o.client.budget(this.callRole, this.query())
     // A prompt is paid for in full on every step, and a model does not read 800,000 tokens as well as 150,000: past the
     // person's cap (200,000 unless they set another) the window counts as that big.
     const cap = o.settings().contextCap ?? DEFAULT_CONTEXT_CAP
@@ -888,6 +911,7 @@ export class AgentLoop {
   // ------------------------------------------------------------ tool calls
 
   private async runCalls(calls: readonly ToolUseBlock[], turn: Turn, state: StepState): Promise<void> {
+    const held = await this.thinkFirst(calls, turn)
     let batch: Prepared[] = []
     const flush = async () => {
       const group = batch
@@ -899,6 +923,10 @@ export class AgentLoop {
     try {
       for (const block of calls) {
         this.checkAbort(turn.signal)
+        if (held.has(block.id)) {
+          state.results.set(block.id, failed(block.id, THINK_FIRST))
+          continue
+        }
         const prepared = await this.prepare(block, turn, state)
         if (!prepared) continue
         if (prepared.parallel) {
@@ -965,6 +993,8 @@ export class AgentLoop {
       this.settleEntry(entry, { state: ui, ok: false, output: shown, ...(review ? { review } : {}) })
       // eNCode's own call (a check) is not the model's to be told it repeats.
       const again = own ? undefined : this.failures.record(block.name, block.input, told)
+      // A call the person, a rule or a hook refused is no failure of the model's.
+      if (!own && ui === 'error') this.setbacks.call(block.name, block.input, told)
       state.results.set(block.id, failed(block.id, again ? `${told}\n\n${again}` : told))
       return undefined
     }
@@ -1172,7 +1202,7 @@ export class AgentLoop {
       system: SECOND_LOOK_SYSTEM,
       prompt: secondLookPrompt({ requests: o.requests?.() ?? [], command: access.command, cwd: access.cwd === root ? '.' : relativeToRoot(root, access.cwd, o.services.platform), why }),
       tool: 'SecondLook',
-      role: o.role,
+      role: this.callRole,
       maxOutputTokens: SECOND_LOOK_TOKENS,
       ...(o.services.sessionId ? { sticky: o.services.sessionId } : {}),
       signal: turn.signal,
@@ -1250,6 +1280,7 @@ export class AgentLoop {
     if (prepared.fixes.length) content = [...content, textBlock(mendedNote(prepared.fixes))]
     const again = own ? undefined : this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
     if (again) content = [...content, textBlock(again)]
+    if (!own) this.setbacks.call(block.name, block.input, isError ? textOf(content) : undefined)
 
     state.results.set(block.id, { type: 'tool-result', toolUseId: block.id, content, ...(isError ? { isError: true } : {}) })
     this.settleEntry(entry, {
@@ -1544,6 +1575,75 @@ export class AgentLoop {
     return found.length ? claimsReminder(found.slice(0, 6)) : null
   }
 
+  /** The model that wrote the last reply, or the one the router expects for the work. */
+  private async workingModel(): Promise<string> {
+    const last = [...this.o.conversation.messages()].reverse().find((message): message is AssistantMessage => message.role === 'assistant')
+    return last?.origin?.model ?? (await this.o.client.budget(this.callRole, this.query())).model
+  }
+
+  /**
+   * Think before edit (ADR 0100): the first change of a request, from a smaller model that has said nothing of what it
+   * will change, is not run; its result asks the agent to say so first. Once a request, whichever way it goes.
+   */
+  private async thinkFirst(calls: readonly ToolUseBlock[], turn: Turn): Promise<ReadonlySet<string>> {
+    const { o } = this
+    const changes = calls.filter((call) => CHANGE_TOOLS.has(call.name) && !call.invalid)
+    if (this.changeSeen || turn.mode !== 'code' || !changes.length) return new Set()
+    this.changeSeen = true
+    if (!helpsSmaller(o.settings().smallerHelp, await this.workingModel())) return new Set()
+    if (saidWhatChanges(o.conversation.messages())) return new Set()
+    o.surface.settle(o.surface.entry({ kind: 'notice', text: 'eNCode asked the agent to say what it will change before its first edit.' }))
+    return new Set(changes.map((call) => call.id))
+  }
+
+  /**
+   * After two setbacks in a request of a smaller model (ADR 0100): when the Plan or Review role has a strong model of
+   * its own, the person is asked whether it may do the rest of the request. It costs more, so it is never done unasked;
+   * an answer for the session counts for every later request of it. Returns what the model is told, or null.
+   */
+  private async offerStronger(turn: Turn): Promise<string | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.stronger || this.strongerAsked || this.setbacks.count < STRONGER_AFTER) return null
+    if ((o.settings().offerStronger ?? 'ask') === 'off') return null
+    const from = await this.workingModel()
+    if (isStrongModel(from)) return null
+    let offer: { role: ModelRole; budget: Awaited<ReturnType<ModelClient['budget']>> } | undefined
+    for (const role of STRONGER_ROLES) {
+      const budget = await o.client.budget(role, this.query()).catch(() => undefined)
+      if (budget && budget.model !== from && isStrongModel(budget.model)) {
+        offer = { role, budget }
+        break
+      }
+    }
+    if (!offer) return null
+    this.strongerAsked = true
+    const current = await o.client.budget(o.role, this.query()).catch(() => undefined)
+    const prompt = strongerPrompt({ from, to: offer.budget, role: offer.role, reasons: this.setbacks.reasons, ...(current?.price && current.model === from ? { price: current.price } : {}) })
+    const notice = o.surface.entry({ kind: 'notice', text: `${shortModel(from)} ran into trouble twice in this request.` })
+    const answer = await o.surface.approve(
+      { entryId: notice.id, tool: 'StrongerModel', title: prompt.title, detail: prompt.detail, input: { model: offer.budget.model, role: offer.role }, grant: 'StrongerModel' },
+      turn.signal,
+    )
+    if (turn.signal.aborted) {
+      o.surface.settle(notice)
+      this.checkAbort(turn.signal)
+    }
+    if (!answer.approved) {
+      notice.text = `${shortModel(from)} keeps going with this request.`
+      o.surface.settle(notice)
+      return answer.note ? `The person, asked whether a stronger model should take over, said: ${answer.note}` : null
+    }
+    this.stronger = offer.role
+    notice.text = `${shortModel(offer.budget.model)} does the rest of this request: ${shortModel(from)} ran into trouble twice.`
+    o.surface.settle(notice)
+    // Its work is held to the finish gates afresh.
+    this.checkRounds = 0
+    this.claimChecked = false
+    this.reviewed = false
+    this.edits?.freshGate()
+    return takeOverNote(from)
+  }
+
   /**
    * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), the project's
    * checks (ADR 0095), the scan of the changes, what the reply claims, and the Reviewer (ADR 0096). The first that
@@ -1556,19 +1656,23 @@ export class AgentLoop {
       o.surface.settle(o.surface.entry({ kind: 'notice', text: notice }))
       return text
     }
+    const setback = (gate: SentBack, notice: string, text: string) => {
+      if (o.agentId === 'main') this.setbacks.sentBack(gate)
+      return back(notice, text)
+    }
     if (code) {
       const left = await this.edits?.gate(o.settings().errorGate ?? 'auto', turn.signal)
-      if (left) return back('The language servers still report errors in the files the agent changed, so it goes on to fix them.', left)
+      if (left) return setback('errors', 'The language servers still report errors in the files the agent changed, so it goes on to fix them.', left)
       const checked = await this.checkGate(turn)
-      if (checked) return back("The project's checks failed after the agent's changes, so it goes on to fix them.", checked)
+      if (checked) return setback('checks', "The project's checks failed after the agent's changes, so it goes on to fix them.", checked)
       const scanned = await this.scanGate(turn)
       if (scanned) return back("eNCode's scan found what is often a security bug in the agent's changes, so it goes on to check it.", scanned)
     }
     const claims = await this.claimCheck(reply)
-    if (claims) return back("eNCode could not confirm something the agent's reply says, so it checks it.", claims)
+    if (claims) return setback('claims', "eNCode could not confirm something the agent's reply says, so it checks it.", claims)
     if (code) {
       const reviewed = await this.reviewGate(turn, reply)
-      if (reviewed) return back(reviewed.notice, reviewed.text)
+      if (reviewed) return reviewed.serious ? setback('reviewer', reviewed.notice, reviewed.text) : back(reviewed.notice, reviewed.text)
     }
     return null
   }
@@ -1601,7 +1705,7 @@ export class AgentLoop {
    * the reply. P0 and P1 findings go back to the agent, and so do the cases no test covers when the project has tests
    * and the request added none. Anything else is only told to the person.
    */
-  private async reviewGate(turn: Turn, reply: string): Promise<{ notice: string; text: string } | null> {
+  private async reviewGate(turn: Turn, reply: string): Promise<{ notice: string; text: string; serious: boolean } | null> {
     const { o } = this
     if (o.agentId !== 'main' || this.reviewed || !o.services.changes) return null
     if (o.services.checks && !o.services.checks.ledger.changedInRequest) return null
@@ -1639,7 +1743,7 @@ export class AgentLoop {
       return null
     }
     const serious = review.findings.some((finding) => finding.priority === 'P0' || finding.priority === 'P1')
-    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : 'The Reviewer listed cases no test covers, so the agent adds tests for them.', text }
+    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : 'The Reviewer listed cases no test covers, so the agent adds tests for them.', text, serious }
   }
 
   /** Once a request, when the person wants it: the Reviewer reads a plan before the person does. The gaps it finds, or null. */

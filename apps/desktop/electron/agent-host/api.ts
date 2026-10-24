@@ -4,7 +4,7 @@
  * own; the main process answers one, for keys. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
-import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests, ReviewSetting } from '@encode/core'
+import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests, ReviewSetting, SmallerHelp, StrongerOffer } from '@encode/core'
 import type { CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
@@ -43,6 +43,8 @@ export interface HostConfig {
   reviewWork: ReviewSetting
   askAgain: 'on' | 'off'
   learnConventions: 'on' | 'off'
+  helpSmaller: SmallerHelp
+  offerStronger: StrongerOffer
 }
 
 export interface HostInit {

@@ -73,6 +73,8 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   review: config.reviewWork,
   askAgain: config.askAgain,
   learnConventions: config.learnConventions,
+  smallerHelp: config.helpSmaller,
+  offerStronger: config.offerStronger,
 })
 
 const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, maxOutputTokens: 8_192 }

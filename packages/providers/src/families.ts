@@ -1,6 +1,7 @@
 /**
- * What each model family expects of a request beyond the dialect (ADR 0099): which take sampling parameters, how a
- * reasoning effort is named, and the limits to assume for one of its models nothing is known about.
+ * What each model family expects of a request beyond the dialect (ADR 0099, 0100): which take sampling parameters and
+ * at what temperature for code, how a reasoning effort is named, and the limits to assume for one of its models nothing
+ * is known about.
  */
 import type { ModelFamily, ReasoningEffort } from './messages'
 
@@ -11,6 +12,17 @@ import type { ModelFamily, ReasoningEffort } from './messages'
 export function takesSampling(family: ModelFamily, model: string): boolean {
   if (family === 'moonshot' || family === 'minimax') return false
   return !(family === 'google' && /gemini-(?:[3-9]|\d{2,})/i.test(model))
+}
+
+/**
+ * The temperature a family's maker recommends for code, sent when the person set none (ADR 0100): DeepSeek's 0.0 for
+ * coding (its API's own default is 1.0), and 0.7 for Qwen's Coder models, as their model card says. Undefined for the
+ * rest, which keep their provider's default.
+ */
+export function codeTemperature(family: ModelFamily, model: string): number | undefined {
+  if (family === 'deepseek') return 0
+  if (family === 'qwen' && /coder/i.test(model)) return 0.7
+  return undefined
 }
 
 /**

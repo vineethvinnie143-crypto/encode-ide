@@ -117,7 +117,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
           ...(call.invalid ? { invalid: call.invalid } : {}),
         })
       }
-      const message = { role: 'assistant' as const, content, origin: { provider: 'scripted', model: 'scripted', family: 'other' as const } }
+      const message = { role: 'assistant' as const, content, origin: { provider: 'scripted', model: options.model ?? 'scripted', family: 'other' as const } }
       const inputTokens = estimateTokens(request.payload.messages) + Math.ceil(JSON.stringify(request.payload.tools).length / 3.5)
       return {
         kind: 'done',

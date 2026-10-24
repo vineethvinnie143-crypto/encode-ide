@@ -766,7 +766,13 @@ describe('ModelRouter: sessions, abort and budget', () => {
 
   it("reports the window of the model a call would use now", async () => {
     const world = new TestWorld({ catalogs: { openrouter: [catalogEntry(A, { contextWindow: 262_144, maxOutputTokens: 32_768 })] } })
-    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false, documents: false })
+    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false, documents: false, price: { input: 0, output: 0 }, free: true })
+    const priced = new TestWorld({
+      settings: { providers: { openrouter: { type: 'openrouter' } }, roles: { main: ['openrouter:vendor/beta', 'openrouter:vendor/gamma'] } },
+      catalogs: { openrouter: [catalogEntry('vendor/beta', { price: { input: 3, output: 15 }, free: false }), catalogEntry('vendor/gamma', { free: false })] },
+    })
+    assert.deepEqual((await priced.router.budget('main')).price, { input: 3, output: 15 }, 'what the model costs, so a stronger one can be offered with its price')
+    assert.equal((await priced.router.budget('main')).free, false)
     const seeing = new TestWorld({
       catalogs: { openrouter: [catalogEntry(A, { capabilities: { tools: true, parallelTools: true, images: true, documents: true, reasoning: false, promptCache: false } })] },
     })
