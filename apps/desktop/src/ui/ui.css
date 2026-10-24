@@ -613,9 +613,12 @@
 }
 
 /* Collapse: a fold that grows and shrinks. The row's height is animated between 0fr and 1fr, so the content needs no measuring. */
+/* One column no wider than the fold: a long line inside (a diff, a command's output) scrolls in its own box instead of
+   widening the fold, and with it the whole chat, once the fold has settled and clips nothing. */
 .collapse {
   display: grid;
   grid-template-rows: 0fr;
+  grid-template-columns: minmax(0, 1fr);
   transition: grid-template-rows var(--dur-3) var(--ease-out);
 }
 .collapse.is-open {
@@ -623,6 +626,7 @@
 }
 .collapse-inner {
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   opacity: 0;
   transition: opacity var(--dur-2) var(--ease-out);

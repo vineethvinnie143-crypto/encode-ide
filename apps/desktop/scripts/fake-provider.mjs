@@ -20,6 +20,14 @@ import http from 'node:http'
 const port = Number(process.env.FAKE_PROVIDER_PORT || 8787)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** One word of about 900 characters: nowhere to break it. */
+const WIDE = `start${Array.from({ length: 60 }, (_, index) => `_segment${String(index).padStart(2, '0')}`).join('')}_end`
+
+/** A table of sixteen columns, wider than any thread. */
+const WIDE_TABLE = [0, 1, 2]
+  .map((row) => `| ${Array.from({ length: 16 }, (_, column) => (row === 1 ? '---' : `column ${column + 1} of the wide table`)).join(' | ')} |`)
+  .join('\n')
+
 // A step is the model's next message: some text, and a tool call when it has not finished yet.
 // The calls use the tool names and inputs of the agent engine (Claude Code's contracts).
 const SCENARIOS = {
@@ -288,6 +296,15 @@ const SCENARIOS = {
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
   'long-reply': [{ text: longReply(), streamDelayMs: 3 }],
+  // Lines far wider than the thread: the diff, the file read back, the command and its output scroll in their own boxes,
+  // and the chat never scrolls sideways.
+  'wide-lines': [
+    { text: 'Writing the long line.', call: { name: 'Write', args: { file_path: 'wide.txt', content: `${WIDE}\n` } } },
+    { text: 'Reading it back.', call: { name: 'Read', args: { file_path: 'wide.txt' } } },
+    { text: 'Changing its first word.', call: { name: 'Edit', args: { file_path: 'wide.txt', old_string: WIDE, new_string: WIDE.replace('start', 'begin') } } },
+    { text: 'Printing it.', call: { name: 'Bash', args: { command: `echo ${WIDE}` } } },
+    { text: `Done. wide.txt now holds ${WIDE.replace('start', 'begin')}\n\n${WIDE_TABLE}` },
+  ],
   // The fourth request is refused as too long: the first two steps wrote and read back a long survey, and the model's
   // window is only the instructions and tools plus a little more. The older steps are summarized and the survey's
   // output is shortened, so the compacted transcript fits.
@@ -432,13 +449,14 @@ function chunk(delta, finish = null) {
 const STEERED = 'sent the message below while you were working'
 const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
 
-/** What eNCode tells the model within a turn of what the language servers or the Reviewer found, or that a stronger model takes over: the turn goes on. */
+/** What eNCode tells the model within a turn of what the language servers or the Reviewer found, that a stronger model takes over, or to carry on after a compaction: the turn goes on. */
 const LANGUAGE_SERVER_NEWS = [
   'The language servers found errors after your changes',
   'The language servers checked your changes again',
   'Before you finish: your changes this turn left errors',
   'The Reviewer read your changes before the person sees them',
   'A stronger model does the rest of this request',
+  'The conversation was just compacted to fit the context window',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
 const REVIEWED = 'The Reviewer read your changes before the person sees them'

@@ -43,6 +43,17 @@ const ALIASES: Record<string, readonly string[]> = {
 /** A name as models vary it: case, underscores and dashes do not count. */
 const norm = (name: string) => name.toLowerCase().replace(/[_\-\s]/g, '')
 
+/** Whether a key a model sent names the parameter `name`: the same name as models vary it, or one of its aliases. */
+export function sameParameter(key: string, name: string): boolean {
+  return norm(key) === norm(name) || Boolean(ALIASES[name]?.includes(norm(key)))
+}
+
+/**
+ * Keys models add to say why they make a call. A tool that takes no such parameter would refuse the whole call for
+ * one; leaving the note out changes nothing the tool does.
+ */
+const NOTE_KEYS = new Set(['explanation', 'reason', 'reasoning', 'rationale', 'thought', 'thoughts', 'thinking', 'comment', 'comments', 'note', 'notes', 'summary', 'purpose', 'intent', 'description'])
+
 const INTEGER = /^\s*-?\d{1,15}\s*$/
 const NUMBER = /^\s*-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?\s*$/i
 
@@ -143,6 +154,10 @@ function mendObject(value: Record<string, unknown>, schema: JsonSchema, path: st
   const renamed = new Map([...wanted].filter(([, name]) => claims.indexOf(name) === claims.lastIndexOf(name)))
   for (const [key, field] of Object.entries(value)) {
     const name = renamed.get(key) ?? key
+    if (!Object.hasOwn(properties, name) && schema.additionalProperties === false && NOTE_KEYS.has(norm(key))) {
+      fixes.push(`"${at(path, key)}" left out, as ${path ? 'it' : 'the tool'} takes no such parameter`)
+      continue
+    }
     if (name !== key) fixes.push(`"${at(path, key)}" as "${at(path, name)}"`)
     const fieldSchema = properties[name]
     if (field === null && fieldSchema && !required.has(name) && !typesOf(fieldSchema).includes('null') && !('anyOf' in fieldSchema) && !('oneOf' in fieldSchema)) {

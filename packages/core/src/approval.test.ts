@@ -515,8 +515,10 @@ describe('a command that asks to run outside the sandbox', () => {
     ...(view ? { sandbox: view } : {}),
   })
 
-  it('is the person’s to allow under every policy but Read Only, which refuses it, and the Reviewer never answers it', async () => {
-    for (const policy of ['workspace-write', 'auto-review', 'full-access'] as const) {
+  it('is the person’s to allow under Workspace Write and Auto review, runs under Full access, is refused by Read Only, and the Reviewer never answers it', async () => {
+    const full = await context('full-access', { assessor: allowing })
+    assert.deepEqual(await decideApproval(outside(full.root), { ...full, shell: state(full.root, sandbox(true)) }), { kind: 'allow' })
+    for (const policy of ['workspace-write', 'auto-review'] as const) {
       const base = await context(policy, { assessor: allowing })
       const ctx = { ...base, shell: state(base.root, sandbox(true)) }
       const decision = await decideApproval(outside(ctx.root), ctx)

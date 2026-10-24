@@ -46,8 +46,10 @@ holds:
 - Smaller and cheaper models (DeepSeek, GLM, Qwen, Kimi and the free ones) get more of their tool calls through. A
   number sent as text, `path` for `file_path`, a call written in the reply's text instead of as a call, and an edit
   whose lines differ from the file only in indentation are read as meant, and the tool's card shows the call as it
-  ran. Most useful to hear about: a model that keeps failing at the same call, or a call written as text that shows
-  up as words in the chat instead of running.
+  ran. So are edits sent in another tool's shape: a list of changes sent to Edit runs as MultiEdit (all or none), one
+  change sent to MultiEdit runs as one edit, and SEARCH/REPLACE blocks are read as edits. A call that is still refused
+  shows the file it named and what was wrong with it. Most useful to hear about: a model that keeps failing at the same
+  call, or a call written as text that shows up as words in the chat instead of running.
 - In a project of three or more source files, the agent's first message carries a short **map of the code**: the
   definitions the project uses most, by file and line, pulled towards what you asked. The agent also has **CodeMap**
   to look further (a folder, one file's outline, or where a name is defined and who uses it). Files your permission
@@ -110,7 +112,8 @@ model does on your own work, a task that says it could not run, and how long it 
 
 - The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command
   and before it touches anything outside the folder. Leave it there. **Full access** lets the agent run commands without
-  asking. **Auto review** lets a second model approve low-risk commands for you; it is a judgment call by a model, so
+  asking, outside the sandbox too when a command needs that (ssh, scp); only a command that is hard to undo gets a
+  second look first. **Auto review** lets a second model approve low-risk commands for you; it is a judgment call by a model, so
   use it on projects you know, not on code you do not trust.
 - Every command the agent runs is in the **sandbox** (Settings → Sandbox): it can change files only in the open
   folder, its git folder, and a temp and cache folder of the sandbox's own. On Windows it can still read your files,
@@ -151,7 +154,8 @@ should have, and any message you could not understand.
   `Set-Content $HOME\Documents\encode-test.txt hi`). It should fail with "Access to the path … is denied", and the agent should
   then ask you before running it outside the sandbox. Answer no, and it should stop or find another way.
 - A command that cannot work inside (pushing over SSH, or a git hook while a Git Bash window is open) asks to run
-  outside, each time. Turn off **Let a command ask to leave the sandbox** and no command runs outside it.
+  outside, each time, under every approval policy but **Full access**, where it runs outside without a card. Turn off
+  **Let a command ask to leave the sandbox** and no command runs outside it, Full access included.
 - Turn off **Run commands in PowerShell** to go back to Git Bash. Commands then run outside the sandbox, and the screen
   says so.
 
@@ -411,7 +415,10 @@ on page after page of a long file, and a cost that does not match your provider'
   log's head should grow more slowly than before as the session goes on, and the cached share should stay high. When
   the agent needs an old output again, it should read it from the file its note names, not run the command again.
 - Go on until the notice "Compacted … earlier messages into a summary" appears, or type `/compact`. The agent's next
-  step should edit the files it was working on straight away, without reading them again first.
+  step should edit the files it was working on straight away, without reading them again first. After a compaction
+  that happens on its own, the agent should carry on with the request, not stop at a progress report.
+- One request can take up to 200 steps before it stops with "Stopped after 200 steps"; **Settings → Agent → Max
+  agent steps** takes 1 to 1000. Older builds saved 30 for everyone, so a 30 from them becomes 200; any other number you set stays.
 - With a strong model as Main (Claude Sonnet 4.5, GPT-5, Gemini 2.5 Pro), the agent should behave as before. If it
   starts to skip a rule (edits without reading, guesses a path), turn off **Settings → Roles → Instructions → Short
   instructions for strong models** and tell us which model it was.
@@ -764,7 +771,8 @@ and none is ever printed. It is not in the portable build.
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,
 run the tests and fix what fails, then review the diff. Stop it in the middle of a turn. Work in two sessions at once.
 Edit a file in the editor by hand while the agent works in the same folder. Change the theme, the text size and the
-Windows display scale (125%, 150%). Leave it open for an hour.
+Windows display scale (125%, 150%). Leave it open for an hour. Long commands, long lines in a diff and wide tables
+should scroll in their own box: the chat itself never scrolls sideways, at any window size.
 
 What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
 the tools you use now.

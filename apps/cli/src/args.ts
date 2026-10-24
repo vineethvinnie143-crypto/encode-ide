@@ -2,7 +2,7 @@
  * The command line's arguments, read into what a run needs. Pure, so every way of calling it is tested; nothing here
  * touches the disk, the network or a key.
  */
-import type { AgentMode, ApprovalPolicy } from '@encode/core'
+import { MAX_STEPS_LIMIT, type AgentMode, type ApprovalPolicy } from '@encode/core'
 
 export type OutputFormat = 'text' | 'json' | 'stream-json'
 
@@ -113,7 +113,7 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = {}):
 
   const maxSteps = values.get('--max-steps')
   const steps = maxSteps === undefined ? undefined : Number(maxSteps)
-  if (steps !== undefined && (!Number.isInteger(steps) || steps < 1 || steps > 100)) throw new UsageError('--max-steps is a whole number from 1 to 100')
+  if (steps !== undefined && (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS_LIMIT)) throw new UsageError(`--max-steps is a whole number from 1 to ${MAX_STEPS_LIMIT}`)
   if (switches.has('--color') && switches.has('--no-color')) throw new UsageError('give --color or --no-color, not both')
   if (switches.has('--continue') && values.has('--resume')) throw new UsageError('give --continue or --resume, not both')
 
@@ -170,7 +170,7 @@ Session:
   -r, --resume <id>            carry on with a session (its id or the start of it)
   --mode <code|ask|plan>       code (default) changes files; ask only reads; plan proposes a plan first
   --policy <policy>            read-only, workspace-write (default), full-access or auto-review
-  --max-steps <n>              steps per request, 1 to 100 (default 30)
+  --max-steps <n>              steps per request, 1 to 1000 (default 200)
   -C, --cwd <folder>           work in this folder instead of the current one
   --trust                      trust the folder without asking (its settings, hooks and servers apply)
   --no-sandbox                 run commands outside the operating-system sandbox

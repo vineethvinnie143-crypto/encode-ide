@@ -75,6 +75,8 @@
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --selected: color-mix(in srgb, var(--accent) 12%, transparent);
   --focus: color-mix(in srgb, var(--accent) 60%, transparent);
+  /* What waits on the person (an approval, a question) is marked in the theme's own colour; --warning is for risk. */
+  --attention: var(--accent);
 
   /* Type */
   /* The fonts and sizes come from Settings > Appearance (src/theme/appearance.ts sets these on <html>);

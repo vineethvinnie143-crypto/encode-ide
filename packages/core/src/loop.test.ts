@@ -140,6 +140,42 @@ describe('tool calls', () => {
     assert.equal(card?.tool?.input.offset, 2, 'the card shows the call as it ran')
   })
 
+  it('run a list of edits sent to Edit as MultiEdit, all or none, and say so', async () => {
+    const h = await loopHarness({
+      files: { 'a.txt': 'one\ntwo\nthree\n' },
+      scriptFor: (root) => [
+        { calls: [{ name: 'Read', input: { file_path: path.join(root, 'a.txt') } }] },
+        {
+          calls: [
+            {
+              name: 'Edit',
+              input: { path: path.join(root, 'a.txt'), edits: [{ old_str: 'one', new_str: 'uno' }, { old_string: 'three', new_string: 'tres' }], explanation: 'translate' },
+            },
+          ],
+        },
+        { text: 'done' },
+      ],
+    })
+    await h.run('translate a.txt')
+    assert.equal(await fs.readFile(path.join(h.root, 'a.txt'), 'utf8'), 'uno\ntwo\ntres\n')
+    const result = resultsOf(h.conversation.messages())[1]
+    assert.equal(result.error, false)
+    assert.match(result.text, /eNCode read this call as: 2 changes in "edits" made with MultiEdit, all or none; "path" as "file_path"; "explanation" left out, as the tool takes no such parameter; "edits\[0\]\.old_str" as "edits\[0\]\.old_string"; "edits\[0\]\.new_str" as "edits\[0\]\.new_string"\./)
+    const card = h.surface.settled.filter((entry) => entry.kind === 'tool')[1]
+    assert.equal(card?.tool?.name, 'MultiEdit', 'the card shows the tool that ran')
+  })
+
+  it('show what a refused call sent, so its row names the file', async () => {
+    const h = await loopHarness({
+      script: [{ calls: [{ name: 'Edit', input: {}, invalid: { raw: '{"file_path":"/x/a.ts","start_line":3}', error: 'Invalid input for Edit: old_string is required.' } }] }, { text: 'ok' }],
+    })
+    await h.run('edit it')
+    const card = h.surface.settled.find((entry) => entry.kind === 'tool')
+    assert.equal(card?.tool?.state, 'error')
+    assert.equal(card?.tool?.input.file_path, '/x/a.ts')
+    assert.match(card?.tool?.output ?? '', /old_string is required/)
+  })
+
   it('make tool calls a model wrote in its text into calls, and run them', async () => {
     const h = await loopHarness({
       files: { 'a.txt': 'alpha\n' },
@@ -471,9 +507,34 @@ describe('the context window', () => {
       await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(2_000)}`)] }, { turnId: `t${i}` })
     }
     assert.deepEqual(await h.run('and now?'), { kind: 'done', reply: 'ok' })
+    // Compacted before the model said anything this request: its answer is not a stop in the middle of the work.
     assert.deepEqual(h.client.requests.map((request) => request.role), ['main', 'summarizer', 'main'])
     assert.ok(h.conversation.messages().length < 14)
     assert.ok(isPaired(h.conversation.messages()))
+  })
+
+  it('carries on after an automatic compaction instead of stopping at a progress report', async () => {
+    let calls = 0
+    const h = await loopHarness({
+      files: { 'a.txt': 'alpha\n' },
+      scriptFor: (root) => (request) => {
+        if (request.role === 'summarizer') return { text: 'SUMMARY' }
+        calls++
+        if (calls === 1) return { calls: [{ name: 'Glob', input: { pattern: '*.txt' } }] }
+        if (calls === 2) return { outcome: { kind: 'compact', window: 4_000, used: 9_000 } }
+        // After the summary the model reports progress; asked, it reads the file and then finishes.
+        if (calls === 3) return { text: 'I have summarized the work so far.' }
+        if (calls === 4) return { calls: [{ name: 'Read', input: { file_path: path.join(root, 'a.txt') } }] }
+        return { text: 'It says alpha.' }
+      },
+    })
+    for (let i = 0; i < 6; i++) {
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(2_000)}`), { turnId: `t${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(2_000)}`)] }, { turnId: `t${i}` })
+    }
+    assert.deepEqual(await h.run('what is in a.txt?'), { kind: 'done', reply: 'It says alpha.' })
+    assert.equal(calls, 5)
+    assert.ok(h.conversation.messages().some((message) => JSON.stringify(message).includes('just compacted to fit the context window')))
   })
 
   it('gives up when compacting cannot make the prompt fit', async () => {

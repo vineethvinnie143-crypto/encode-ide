@@ -103,4 +103,12 @@ describe('a tool call mended where it means one thing', () => {
     const input = { at: '3' }
     assert.equal(repairInput(input, either).value, input)
   })
+
+  it('leaves out a note a model added when the tool takes no such parameter, and nothing else unknown', () => {
+    const noted = repairInput({ file_path: 'a.ts', explanation: 'to see the imports', thought: 'x' }, read)
+    assert.deepEqual(noted.value, { file_path: 'a.ts' })
+    assert.deepEqual(noted.fixes, ['"explanation" left out, as the tool takes no such parameter', '"thought" left out, as the tool takes no such parameter'])
+    // A key that may change what the call does is never dropped.
+    assert.deepEqual(repairInput({ file_path: 'a.ts', cwd: '/elsewhere' }, read), { value: { file_path: 'a.ts', cwd: '/elsewhere' }, fixes: [] })
+  })
 })

@@ -155,7 +155,7 @@
 }
 .sb-row .meta.warn,
 .sb-activity-row .meta.warn {
-  color: var(--warning);
+  color: var(--attention);
 }
 
 /* A session's title lines up with its project's name. The project's row is the chevron (14 px), a gap, the folder (16 px) and a gap; a session's is its 16 px status slot and a gap, so it starts one chevron and one gap in. */
@@ -221,8 +221,8 @@
   background: var(--accent);
 }
 .dot.attn {
-  background: var(--warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
+  background: var(--attention);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention) 22%, transparent);
 }
 
 .sb-rename {

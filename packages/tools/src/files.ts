@@ -14,6 +14,7 @@ import { extract } from './codemap/extract'
 import { outline } from './codemap/rank'
 import { buildDiff } from './diff'
 import { applyEdit, applyEdits, changedRegion, type EditSpec } from './edit'
+import { reshapeEdit } from './edit-shape'
 import { stateOf, staleness } from './file-state'
 import { NOTEBOOK_MAX_BYTES, renderNotebook } from './notebook'
 import { PDF_MAX_BYTES, PDF_MAX_PAGES, readPdfFile } from './pdf-read'
@@ -612,6 +613,7 @@ export const editTool: Tool<EditInput> = {
     if (isNotebook(input.file_path)) return NOTEBOOK_NOTE
     return input.old_string === input.new_string ? 'old_string and new_string are identical, so there is nothing to change.' : undefined
   },
+  reshape: (input) => reshapeEdit(input, 'Edit'),
   async access(input, ctx) {
     return { type: 'write', paths: [await realPathOf(filePath(input, ctx))] }
   },
@@ -664,6 +666,7 @@ export const multiEditTool: Tool<MultiEditInput> = {
     if (input.edits.length > 1 && input.edits.some((edit) => !edit.old_string)) return 'only a single edit may have an empty old_string.'
     return undefined
   },
+  reshape: (input) => reshapeEdit(input, 'MultiEdit'),
   async access(input, ctx) {
     return { type: 'write', paths: [await realPathOf(filePath(input, ctx))] }
   },

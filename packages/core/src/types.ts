@@ -64,7 +64,14 @@ export interface AgentSettings {
   offerStronger?: StrongerOffer
 }
 
-export const DEFAULT_SETTINGS: AgentSettings = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8 }
+/**
+ * Steps one request may take before the agent stops and asks to go on. High enough that real work (a weaker model, a
+ * server reached over ssh) finishes in one request, as in Claude Code; the person can lower it.
+ */
+export const DEFAULT_MAX_STEPS = 200
+export const MAX_STEPS_LIMIT = 1000
+
+export const DEFAULT_SETTINGS: AgentSettings = { policy: 'workspace-write', maxSteps: DEFAULT_MAX_STEPS, maxGoalRounds: 8 }
 
 export class AgentAbortedError extends Error {
   constructor() {

@@ -145,17 +145,17 @@ export function AgentSection({ settings }: { settings: Settings }) {
       </SettingsGroup>
 
       <SettingsGroup title="Limits">
-        <SettingRow id="agent.limits" htmlFor="max-steps" label="Max agent steps" help="How many steps one request may take before the agent stops and asks you to go on. 1 to 100.">
+        <SettingRow id="agent.limits" htmlFor="max-steps" label="Max agent steps" help="How many steps one request may take before the agent stops and asks you to go on. 1 to 1000; 200 unless you set it.">
           <CommitInput
             id="max-steps"
             className="narrow"
             type="number"
             min={1}
-            max={100}
+            max={1000}
             value={String(settings.maxSteps)}
             onCommit={(text) => {
               const steps = Math.round(Number(text))
-              if (text.trim() && Number.isFinite(steps)) void save({ maxSteps: Math.max(1, Math.min(100, steps)) })
+              if (text.trim() && Number.isFinite(steps)) void save({ maxSteps: Math.max(1, Math.min(1000, steps)) })
             }}
           />
         </SettingRow>

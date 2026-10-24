@@ -66,8 +66,8 @@ agent's commands that way. The forces:
   caches out, turn PowerShell on, add protected and hidden paths. `allowWrite` and `allowRead` are read from the
   person's own settings only.
 - **Leaving the sandbox is the person's call alone.** The shell tool has an `unsandboxed` flag when the settings allow
-  it. Such a command is asked about under every approval policy, Full access included, and no rule, "Always allow" or
-  Reviewer answers for the person; Read Only refuses it. The model is told what is read-only, to use the flag only
+  it. Such a command is asked about under every approval policy but Full access, which runs it without asking (0109), and
+  no rule, "Always allow" or Reviewer answers for the person; Read Only refuses it. The model is told what is read-only, to use the flag only
   after a command failed for that reason, and, when a failed command's output looks like the sandbox stopped it, that
   the flag exists.
 - **A repository without a hooks folder gets an empty one** before its first command, as `git init` would have made

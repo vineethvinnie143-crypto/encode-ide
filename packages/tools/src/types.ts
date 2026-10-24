@@ -92,6 +92,13 @@ export interface ToolOutcome {
   mode?: AgentMode
 }
 
+/** A call read in a tool's shape (Tool.reshape): the input, what was changed, and the tool that runs it if another one. */
+export interface Reshaped {
+  input: Record<string, unknown>
+  fixes: string[]
+  tool?: string
+}
+
 export interface Tool<Input extends Record<string, unknown> = Record<string, unknown>> {
   readonly definition: ToolDefinition
   readonly kind: ToolKind
@@ -117,6 +124,11 @@ export interface Tool<Input extends Record<string, unknown> = Record<string, unk
   readonly brief?: string
   /** Rules the schema cannot express, checked after it passes. Returns what is wrong. */
   check?(input: Input): string | undefined
+  /**
+   * The call in this tool's own shape, when a model sent it in a shape that can mean one thing only (MultiEdit's list
+   * of edits to Edit, SEARCH/REPLACE blocks): tried before the schema's own repairs, on input that fails the schema.
+   */
+  reshape?(input: Record<string, unknown>): Reshaped | undefined
   /** What the call would touch, with paths resolved against the context. */
   access(input: Input, context: ToolContext): ToolAccess | Promise<ToolAccess>
   /** How the call reads in an approval card; may read the disk for a diff preview. */

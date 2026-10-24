@@ -110,6 +110,10 @@ export const STEER_NOTE = reminder('The user sent the message below while you we
 export const CONTINUE_AFTER_LENGTH =
   'Your last reply was cut off by the output limit. Continue directly from where it stopped, with no apology and no recap. If you were writing a large file, split the work into smaller steps.'
 
+/** Sent once when the first reply after an automatic compaction would end the request. */
+export const RESUME_AFTER_COMPACTION =
+  'The conversation was just compacted to fit the context window, and your reply would end the request here. If the request is finished, give your final answer to the user now. If it is not, carry on with the next step now; do not stop to report progress.'
+
 /** Sent when the model answered with nothing to act on. */
 export const NUDGE_EMPTY = 'Your last reply was empty. Continue with the task, or say that it is finished.'
 
