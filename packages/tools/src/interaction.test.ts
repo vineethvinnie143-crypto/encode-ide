@@ -125,7 +125,7 @@ describe('the built-in tool set', () => {
   it('describes the shell it runs, and leaves out what a session does not have', () => {
     const names = builtinTools({ dialect: 'pwsh', platform: 'win32' }).map((tool) => tool.definition.name)
     assert.deepEqual(names, [
-      'Bash', 'BashOutput', 'KillShell', 'Glob', 'Grep', 'Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch',
+      'Bash', 'BashOutput', 'KillShell', 'Glob', 'Grep', 'CodeMap', 'Read', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch',
       'TodoWrite', 'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal', 'GetGoal',
     ])
     const bash = builtinTools({ dialect: 'pwsh', platform: 'win32', only: ['Bash'], shellProgram: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' })[0]

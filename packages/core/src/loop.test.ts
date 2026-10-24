@@ -383,7 +383,7 @@ describe('the context window', () => {
   })
 
   it('keeps only a share of a small window for the answer, rather than compacting on every request', async () => {
-    // The instructions and tools take about 5,800 tokens and the conversation about 8,600. Reserving all 8,192 tokens an
+    // The instructions and tools take about 6,000 tokens and the conversation about 8,000. Reserving all 8,192 tokens an
     // answer may take would leave a 20,000-token window 11,800 for the prompt, which is less than that; a quarter of it
     // leaves 15,000.
     const h = await loopHarness({
@@ -391,8 +391,8 @@ describe('the context window', () => {
       script: (request) => (request.role === 'summarizer' ? { text: 'SUMMARY' } : { text: 'ok' }),
     })
     for (let i = 0; i < 2; i++) {
-      await h.conversation.add(userText(`question ${i} ${'x'.repeat(7_500)}`), { turnId: `t${i}` })
-      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(7_500)}`)] }, { turnId: `t${i}` })
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(7_000)}`), { turnId: `t${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(7_000)}`)] }, { turnId: `t${i}` })
     }
     assert.deepEqual(await h.run('and now?'), { kind: 'done', reply: 'ok' })
     assert.deepEqual(h.client.requests.map((request) => request.role), ['main'])

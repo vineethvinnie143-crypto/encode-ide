@@ -6,7 +6,7 @@ import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
 import { detectLanguages, EditRefused, type CodeLocation, type EditorCallItem, type EditPlan, type FolderLanguages, type InstallPlan, type LanguageServers } from '@encode/lsp'
-import { detectShell, realPathOf, type ShellProgram } from '@encode/tools'
+import { CodeIndex, detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import {
   folderLanguageServers,
   languageServersReport,
@@ -117,6 +117,7 @@ export class Workspaces {
   private readonly hubs = new Map<string, McpHub>()
   /** A folder's language servers, shared by its sessions and the editor; each server in it stops when unused. */
   private readonly code = new Map<string, LanguageServers>()
+  private readonly indexes = new Map<string, CodeIndex>()
   /** Servers eNCode installs when asked, for every folder; none without a tools folder. */
   readonly installs: ServerInstalls | undefined
   /** The languages each folder uses, read again after a minute. */
@@ -210,6 +211,18 @@ export class Workspaces {
       this.code.set(key, servers)
     }
     return servers
+  }
+
+  /** The code index of a folder, given as a real path (ADR 0090): one per folder, shared by its sessions. */
+  codeIndex(root: string): CodeIndex {
+    const config = this.config(root)
+    const key = workspaceKey(config.root, this.platform === 'win32')
+    let index = this.indexes.get(key)
+    if (!index) {
+      index = new CodeIndex({ root: config.root, caseInsensitive: this.platform === 'win32' || this.platform === 'darwin' })
+      this.indexes.set(key, index)
+    }
+    return index
   }
 
   /**
@@ -610,6 +623,7 @@ export class Workspaces {
     const code = [...this.code.values()]
     this.hubs.clear()
     this.code.clear()
+    this.indexes.clear()
     await Promise.all([...hubs.map((hub) => hub.close().catch(() => undefined)), ...code.map((servers) => servers.dispose().catch(() => undefined))])
   }
 
@@ -750,6 +764,7 @@ export class Workspaces {
       }),
       external: hub,
       ...(code ? { code: () => (code.available().ok ? code : undefined) } : {}),
+      codeIndex: () => this.codeIndex(config.root),
       release: async () => release(),
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
     }

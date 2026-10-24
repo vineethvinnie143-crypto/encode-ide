@@ -23,6 +23,7 @@ import {
 import { lspEditTool, lspTool } from './lsp'
 import { notebookEditTool } from './notebook'
 import { ToolRegistry } from './registry'
+import { codeMapTool } from './codemap/tool'
 import { globTool, grepTool } from './search'
 import type { ShellDialect, SkillSummary, SubagentType, Tool } from './types'
 import { webFetchTool, webSearchTool } from './web/tools'
@@ -51,6 +52,8 @@ export interface BuiltinToolOptions {
   worktrees?: boolean
   /** LSP and LSPEdit, for a session whose folder may run language servers. Default false. */
   code?: boolean
+  /** CodeMap. Default true. */
+  codeMap?: boolean
   /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
   sandbox?: BashSandbox
   /** Only these tools, by name. */
@@ -64,6 +67,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
     killShellTool as Tool,
     globTool as Tool,
     grepTool as Tool,
+    ...(options.codeMap ?? true ? [codeMapTool as Tool] : []),
     readTool as Tool,
     editTool as Tool,
     multiEditTool as Tool,
@@ -94,7 +98,7 @@ export function createToolRegistry(options: BuiltinToolOptions, extra: readonly 
 }
 
 /** What the built-in subagent types may use. */
-export const READ_ONLY_TOOL_NAMES = ['Bash', 'BashOutput', 'Glob', 'Grep', 'Read', 'LSP', 'WebFetch', 'WebSearch'] as const
+export const READ_ONLY_TOOL_NAMES = ['Bash', 'BashOutput', 'Glob', 'Grep', 'CodeMap', 'Read', 'LSP', 'WebFetch', 'WebSearch'] as const
 
 export const BUILTIN_SUBAGENT_TYPES: readonly SubagentType[] = [
   {

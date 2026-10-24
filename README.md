@@ -43,9 +43,11 @@ primary platform; the code stays cross-platform.
   session, never what the agent wrote), the taskbar button flashing while it waits for you, and keeping the computer
   awake while an agent works. **Archived sessions** restores or deletes what you put away.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
-  - files: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`. Read shows images, Jupyter
-    notebooks cell by cell, and PDFs page by page with their outline, through eNCode's own PDF reader; a model that
-    reads PDFs also gets the pages that have figures or scans, as the pages themselves;
+  - files: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`, and `CodeMap`, which shows where
+    things are defined without reading files (a map of the project or a folder, a file's outline, or where one name
+    is defined and which files use it; FiveM's events, commands, callbacks and exports included). Read shows images,
+    Jupyter notebooks cell by cell, and PDFs page by page with their outline, through eNCode's own PDF reader; a
+    model that reads PDFs also gets the pages that have figures or scans, as the pages themselves;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,
     `KillShell`), and `Monitor`, which turns the lines of a command into events the agent hears;
   - delegation: subagents through `Task`, in the foreground or the background, continued with `SendMessage`;

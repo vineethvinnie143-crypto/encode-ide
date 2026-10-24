@@ -1798,3 +1798,48 @@ already goes through.
   closest lines shown with what differs, quoted.
 - `loop.test.ts`: a mended call runs as mended and its result says so; a call written as text runs through approval;
   markup copied from a tool's result is not run; the third same failure gets the note.
+
+## The code map (Accuracy 1b)
+
+Written with the pull request that gives the agent an index of the project's definitions, a ranked map of them in its
+first message, and the CodeMap tool
+([0090](../adr/0090-the-agent-knows-where-things-are-a-code-index-of-its-own-a-ranked-map-in-the-first-message-and-codemap.md)).
+
+What is new:
+
+- one code index per folder in the agent host, built in the background: definitions and names used, for each source
+  file;
+- a map of about a thousand tokens in a session's first message, and after a summary;
+- the CodeMap tool, read-only, for the main agent and its subagents.
+
+No new IPC call, setting or permission. The index reads files; it never runs anything in them.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| M1 | The map shows a file the person's rules forbid the agent to read | Every map and every CodeMap answer leaves out the files a permission rule denies reading, by the session's own rules, before anything is ranked or shown. CodeMap itself asks for the read permission of the folder or file it is given, like Grep. | Mitigated |
+| M2 | A secret reaches the model without the agent reading a file: a key in a constant, a token in a signature | Only files in a language it reads are opened, so `.env`, key files and data are never read. A constant is kept by its name and type, cut at its `=`. Each line shown has provider key prefixes, JWTs, long tokens of mixed letters and digits, and passwords in URLs replaced by `…`, and is cut to 110 characters. | Mitigated (by pattern; see the residual risks) |
+| M3 | The index reads outside the folder: through a link, a worktree, or a path given to CodeMap | The walk follows no links and leaves out eNCode's worktrees, `.git`, dependencies and build output, as Glob does. CodeMap refuses a path outside the folder the agent works in. A worktree has its own index. | Mitigated |
+| M4 | A file crafted to stall the agent host: a huge file, a minified bundle, a line of a hundred thousand letters | Files over 1 MB and minified files are left out. At most 10,000 files, 2,000 definitions and 600 names a file are kept, and the ranking follows at most a million uses. The work runs in slices of 8 ms in the agent host's own process. A definition's line is searched for secrets only in its first 1,000 characters and read for its signature only in its first 4,000, after fuzzing found the secret search and Lua's signature taking seconds on such lines. The definition rules read a line's first 1,000 characters, each is anchored at the start of the line, and FiveM's patterns start with a fixed name. C's function rules are built from parts that take different characters, after a line of `*` or `&` took seconds there, found by fuzzing a wider set of long lines. | Mitigated |
+| M5 | Text in a file steers the model through the map (`function ignore_previous_instructions()`) | The map is a reminder that says it is background: file paths and the first 110 characters of definition lines, which Grep would show the agent as well. It carries no permission and runs nothing. | Accepted (no new exposure) |
+| M6 | The map in the first message leaks one session's rules-denied file into another session of the folder | The index is shared, but what is shown is filtered by each session's rules when it is read, so a file one session may not read never reaches it from another's index. | Mitigated |
+| M7 | Memory grows without end in a large or busy folder | One index per folder, released when the workspaces close. Only the kept parts of a file are held, copied out of its text, so the text itself is not kept: about 9 MB for each thousand files of eNCode's own code, measured. Files deleted are dropped at the next walk. | Mitigated |
+
+### Residual risks
+
+- Secrets are found by their shape. A short password with a plain name in a function's default argument, in a source
+  file, can be in the map, as it would be in what Grep or Read shows.
+- The map is about names. A name used in a file may be another thing of the same name, so a map can point at the
+  wrong definition. CodeMap says so, and names the LSP tool where servers run.
+
+### Verification
+
+- `extract.test.ts`: comments and strings blanked in each family; definitions, members and parents for each language;
+  FiveM's events, commands, callbacks and exports; secrets cut from a definition's line; a constant cut at its `=`.
+- `codemap.test.ts`: the map's order and budget; the pull of a request's words and kinds; a folder's map; the index
+  read once, again for a file a tool wrote and for a file that changed, without `node_modules`, ignored files,
+  `.env`, Markdown and minified files; the file limit said; CodeMap's map, outline and symbol answers, and its
+  refusals outside the folder and for a missing path.
+- `session.test.ts`: the first message carries a map without the files the rules deny; a file the agent just wrote is
+  mapped; a project of one or two files gets no map.

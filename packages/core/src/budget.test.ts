@@ -51,7 +51,8 @@ describe('the cost of a request before the first word', () => {
       ...payload.tools.map((tool): [string, number] => [`  ${tool.name}`, toolChars(tool)]),
     ])
     assert.ok(system <= 6_500, `the instructions are ${system} characters; the ceiling is 6500`)
-    assert.ok(tools <= 20_500, `the tools are ${tools} characters; the ceiling is 20500`)
+    // CodeMap (ADR 0090) raised it from 20,500: a map in one call saves the Glob, Grep and Read rounds that find code.
+    assert.ok(tools <= 21_000, `the tools are ${tools} characters; the ceiling is 21000`)
     for (const tool of payload.tools) assert.ok(toolChars(tool) <= 3_000, `${tool.name} is ${toolChars(tool)} characters; one tool may take at most 3000`)
   })
 
@@ -102,7 +103,7 @@ describe('a server with many tools', () => {
     ])
     assert.ok(sent.some((tool) => tool.name === 'ToolSearch'))
     assert.ok(!sent.some((tool) => tool.name.startsWith('mcp__')))
-    assert.ok(sentChars < 20_500 + 3_500, `${sentChars} characters of tools are sent`)
+    assert.ok(sentChars < 21_000 + 3_500, `${sentChars} characters of tools are sent`)
     assert.ok(definitions > 60_000, `the definitions themselves are ${definitions} characters`)
   })
 })
