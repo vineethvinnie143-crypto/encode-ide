@@ -28,8 +28,8 @@ const MODES: { value: AgentMode; label: string; description: string }[] = [
 
 function liveState(status: string): { tone: 'accent' | 'warning' | 'danger'; label: string; spinner?: boolean } | null {
   if (status === 'thinking' || status === 'running-tool') return { tone: 'accent', label: 'Working', spinner: true }
-  if (status === 'awaiting-approval') return { tone: 'warning', label: 'Needs approval' }
-  if (status === 'awaiting-user') return { tone: 'warning', label: 'Waiting for you' }
+  if (status === 'awaiting-approval') return { tone: 'accent', label: 'Needs approval' }
+  if (status === 'awaiting-user') return { tone: 'accent', label: 'Waiting for you' }
   if (status === 'error') return { tone: 'danger', label: 'Error' }
   return null
 }

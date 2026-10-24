@@ -117,11 +117,23 @@ export class ToolRegistry {
 
   /**
    * The call's input mended where it can mean one thing only (a number sent as text, `path` for `file_path`), with
-   * what was changed (ADR 0089). An input that passes, or a tool that is not known, comes back as it is.
+   * what was changed (ADR 0089). An input that passes, or a tool that is not known, comes back as it is. A call the
+   * tool reads in its own shape first (Tool.reshape) may name another tool to run it (`name`), when `allowed` lets it.
    */
-  repair(name: string, input: Record<string, unknown>): Repaired {
+  repair(name: string, input: Record<string, unknown>, allowed?: (name: string) => boolean): Repaired & { name?: string } {
     const tool = this.tools.get(name)
-    return tool ? repairInput(input, tool.definition.inputSchema) : { value: input, fixes: [] }
+    if (!tool) return { value: input, fixes: [] }
+    const schema = tool.definition.inputSchema
+    if (!validationMessage(input, schema)) return { value: input, fixes: [] }
+    const shaped = tool.reshape?.(input)
+    const target = shaped?.tool ? (allowed?.(shaped.tool) === false ? undefined : this.tools.get(shaped.tool)) : tool
+    if (shaped && target) {
+      const mended = repairInput(shaped.input, target.definition.inputSchema)
+      if (!validationMessage(mended.value, target.definition.inputSchema)) {
+        return { value: mended.value, fixes: [...shaped.fixes, ...mended.fixes], ...(target !== tool ? { name: target.definition.name } : {}) }
+      }
+    }
+    return repairInput(input, schema)
   }
 
   /**

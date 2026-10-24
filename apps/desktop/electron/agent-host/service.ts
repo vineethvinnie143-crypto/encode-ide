@@ -7,7 +7,7 @@
  * A turn the host was running when it died is over: the user is told, and the
  * conversation stays as the session log left it.
  */
-import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
+import { createHostClient, DEFAULT_MAX_STEPS, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { parseBrowserRequest, type BrowserAnswer, type BrowserRequest } from '@encode/tools'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
@@ -454,7 +454,7 @@ export class AgentHostService {
 
 const NO_CONFIG: HostConfig = {
   policy: 'workspace-write',
-  maxSteps: 30,
+  maxSteps: DEFAULT_MAX_STEPS,
   maxGoalRounds: 8,
   contextCap: 200_000,
   computer: false,

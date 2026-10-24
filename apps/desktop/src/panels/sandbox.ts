@@ -98,7 +98,7 @@ export function switchRows(report: SandboxReport): SwitchRow[] {
     {
       key: 'allowUnsandboxed',
       label: 'Let a command ask to leave the sandbox',
-      help: 'For what a sandbox cannot do, such as git push over SSH. You are asked each time, under every approval policy, and no rule, “Always allow” or reviewer can answer for you.',
+      help: 'For what a sandbox cannot do, such as git push over SSH. You are asked each time under every approval policy but Full access, which runs them without asking, and no rule, “Always allow” or reviewer can answer for you.',
       checked: settings.allowUnsandboxed,
     },
     {

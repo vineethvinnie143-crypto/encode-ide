@@ -257,7 +257,12 @@
   padding-left: 10px;
   color: var(--text-2);
 }
+/* A table wider than the reply scrolls in its own box. */
 .markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   font-size: calc(11.5px + var(--ui-small));
   margin: 8px 0;

@@ -663,6 +663,7 @@ async function runProviderPhase() {
   if (!featureCheck.jobsArray || !featureCheck.planNull) throw new Error('jobs/plan surface failed')
 
   await runMentionChecks()
+  await runWideLineChecks()
   await runCheckGateChecks()
   await runReviewGateChecks()
   await runSecondLookChecks()
@@ -3801,6 +3802,45 @@ async function runMentionChecks() {
   console.log('[smoke] mentions: ok')
 }
 
+/**
+ * Lines far wider than the thread: with every fold open, the diff, the file read back, the command and its output each
+ * scroll in their own box, the reply wraps, and the chat itself never scrolls sideways or grows past its column.
+ */
+async function runWideLineChecks() {
+  console.log('[smoke] --- wide lines ---')
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:wide-lines] Write a long line, change it and print it.')
+  await driveAgent('15-wide-lines')
+  for (let round = 0; round < 6; round++) {
+    const opened = await evaluate(`(() => {
+      const closed = [...document.querySelectorAll('.chat-list .worklog-head[aria-expanded=false], .chat-list .tool-row-toggle[aria-expanded=false]')]
+      closed.forEach((button) => button.click())
+      return closed.length
+    })()`)
+    if (!opened) break
+    await sleep(500)
+  }
+  const sizes = await evaluate(`(() => {
+    const list = document.querySelector('.chat-list')
+    const thread = list.querySelector('.thread')
+    const boxes = [...list.querySelectorAll('.diff-view, .tool-row-output, .markdown table')]
+    return {
+      list: { client: list.clientWidth, scroll: list.scrollWidth },
+      thread: Math.round(thread.getBoundingClientRect().width),
+      boxes: boxes.map((box) => ({ client: box.clientWidth, scroll: box.scrollWidth })),
+      steps: list.querySelectorAll('.tool-row').length,
+    }
+  })()`)
+  console.log('[smoke] wide lines:', JSON.stringify(sizes))
+  await screenshotSizes('ui-dark-wide-lines')
+  if (sizes.steps < 4) throw new Error(`Expected four steps in the thread, found ${sizes.steps}`)
+  if (sizes.boxes.filter((box) => box.scroll > box.client + 1).length < 2) throw new Error('The long diff line and the wide table do not each scroll in their own box')
+  if (sizes.list.scroll > sizes.list.client + 1) throw new Error(`The chat scrolls sideways: ${sizes.list.scroll} px of content in ${sizes.list.client} px`)
+  if (sizes.thread > 784) throw new Error(`The thread grew to ${sizes.thread} px, past its 784 px column`)
+  await fs.rm(path.join(demoPath, 'wide.txt'), { force: true })
+  console.log('[smoke] wide lines: ok')
+}
+
 /** Esc twice stops the agent: the first press says what a second does, and the note goes when no second comes. */
 async function runStopChecks() {
   console.log('[smoke] --- Esc twice ---')
@@ -5838,7 +5878,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

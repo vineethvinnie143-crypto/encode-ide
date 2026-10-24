@@ -9,10 +9,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid var(--warning);
+  border: 1px solid color-mix(in srgb, var(--attention) 55%, var(--border-strong));
   border-radius: var(--r-14);
   background: var(--surface-2);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 14%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--attention) 8%, transparent);
   animation: ui-pop-down var(--dur-3) var(--ease-out);
 }
 
@@ -34,7 +34,7 @@
 }
 .approval-head svg {
   flex-shrink: 0;
-  color: var(--warning);
+  color: var(--attention);
 }
 .approval-head span {
   min-width: 0;

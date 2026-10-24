@@ -98,6 +98,7 @@ say so.
 | [0106](0106-encode-profile-is-off-limits-to-the-agent-and-files-a-folder-brings-are-read-with-care.md) | eNCode's profile is off limits to the agent, and the files a folder brings are read with care | Accepted, builds on 0061, 0063 and 0093 |
 | [0107](0107-the-chrome-dice-is-the-logo-and-the-theme-is-black-and-silver-from-it.md) | The chrome dice is the logo, and the theme is black and silver from it | Accepted, supersedes the logo and default colours of 0013 |
 | [0108](0108-the-command-line-runs-the-apps-agent-host-in-its-own-process-with-its-own-sessions.md) | The command line runs the app's agent host in its own process, with its own sessions | Accepted, builds on 0030, 0063 and 0106 |
+| [0109](0109-what-the-first-tester-round-showed-edits-in-another-shape-longer-requests-full-access-and-a-chat-that-never-scrolls-sideways.md) | What the first tester round showed: edits in another shape, longer requests, Full access, and a chat that never scrolls sideways | Accepted, builds on 0009, 0063, 0089, 0097 and 0107 |
 
 ## Template
 

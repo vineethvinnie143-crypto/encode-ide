@@ -8,6 +8,7 @@ import { isInlineSuggest } from '../../shared/inline'
 import { cleanEfforts, cleanRoles, DEFAULT_CONTEXT_CAP, isContextCap, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
 import type { AgentMode, ApprovalPolicy, AskAgain, CheckGate, LearnConventions, ErrorGate, FollowUp, Guide, HelpSmaller, ModelProfile, NotifyWhen, OfferStronger, ProfileKind, ReviewWork, SendKey, Settings } from '../../shared/types'
+import { DEFAULT_MAX_STEPS, MAX_STEPS_LIMIT } from '@encode/core'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -22,6 +23,8 @@ interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'com
   searchKeysEnc: Partial<Record<KeyedSearchProviderId, string>>
   /** The folder the person chose for chats, or null for the default one. */
   chatsFolder: string | null
+  /** The person set the step limit themselves (so a new default does not replace it). */
+  stepsChosen?: boolean
 }
 
 /** The name a search key has in the vault; a profile's id is a UUID, so the two cannot meet. */
@@ -41,7 +44,7 @@ function defaults(): StoredSettings {
     profiles: [{ ...DEMO_PROFILE }],
     activeProfileId: DEMO_PROFILE.id,
     policy: 'workspace-write',
-    maxSteps: 30,
+    maxSteps: DEFAULT_MAX_STEPS,
     maxGoalRounds: 8,
     contextCap: DEFAULT_CONTEXT_CAP,
     computer: false,
@@ -253,13 +256,16 @@ export class SettingsService {
     if (!profiles.length) profiles.push({ ...DEMO_PROFILE })
 
     const active = profiles.find((p) => p.id === input.activeProfileId) ?? profiles[0]
+    const stepsChosen = input.stepsChosen === true || (typeof input.maxSteps === 'number' && input.maxSteps !== 30)
     // A file from before the model router: whoever already ran a real model keeps being allowed to, and has set up.
     const usesRealModel = profiles.some((p) => p.kind !== 'demo' && (Boolean(p.apiKeyEnc) || isLocalUrl(p.baseUrl)))
     return {
       profiles,
       activeProfileId: active.id,
       policy: normalizePolicy(input.policy, base.policy),
-      maxSteps: clamp(input.maxSteps, 1, 100, base.maxSteps),
+      // Before 0109 the default was 30, and every file holds it: only a limit the person set themselves is kept.
+      maxSteps: stepsChosen ? clamp(input.maxSteps, 1, MAX_STEPS_LIMIT, base.maxSteps) : base.maxSteps,
+      stepsChosen,
       maxGoalRounds: clamp(input.maxGoalRounds, 1, 100, base.maxGoalRounds),
       contextCap: isContextCap(input.contextCap) ? input.contextCap : base.contextCap,
       computer: typeof input.computer === 'boolean' ? input.computer : base.computer,
@@ -405,7 +411,10 @@ export class SettingsService {
     }
 
     if (patch.policy !== undefined) next.policy = normalizePolicy(patch.policy, next.policy)
-    if (patch.maxSteps !== undefined) next.maxSteps = clamp(patch.maxSteps, 1, 100, 30)
+    if (patch.maxSteps !== undefined) {
+      next.maxSteps = clamp(patch.maxSteps, 1, MAX_STEPS_LIMIT, DEFAULT_MAX_STEPS)
+      next.stepsChosen = true
+    }
     if (patch.maxGoalRounds !== undefined) next.maxGoalRounds = clamp(patch.maxGoalRounds, 1, 100, 8)
     if (isContextCap(patch.contextCap)) next.contextCap = patch.contextCap
     if (typeof patch.computer === 'boolean') next.computer = patch.computer

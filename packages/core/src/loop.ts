@@ -108,7 +108,7 @@ import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, na
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
-import { CONTINUE_AFTER_LENGTH, reminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
@@ -119,7 +119,7 @@ import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
 import type { OutputStore } from './outputs'
 import { recoverTextCalls } from './text-calls'
-import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
+import { AgentAbortedError, DEFAULT_MAX_STEPS, MAX_STEPS_LIMIT, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
 import type { ConversationEntry, ToolReview } from './ui'
 
 /** What a call may ask of the model for its answer. */
@@ -298,6 +298,16 @@ function folded(text: string | undefined, home?: string): { details?: string } {
   return details ? { details } : {}
 }
 
+/** What a call that could not be read sent, when it is an object after all (it failed its schema): for showing it. */
+function sentInput(raw: string): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
 function trimInput(input: Record<string, unknown>): Record<string, unknown> {
   let changed = false
   const out: Record<string, unknown> = {}
@@ -416,6 +426,8 @@ export class AgentLoop {
   private readonly inflight = new Set<ConversationEntry>()
   /** Calls that failed this turn, so one sent again and again is told to change course. */
   private readonly failures = new FailedCalls()
+  /** Whether this agent may use a tool: a call read as another tool's runs as that tool only when it may. */
+  private readonly offers = (name: string) => !this.o.tools || this.o.tools.includes(name)
   /** What went wrong this request, for offering a stronger model (ADR 0100). */
   private readonly setbacks = new Setbacks()
   /** Once a request (ADR 0100): the first change was looked at; the person was asked about a stronger model; the role whose model took over. */
@@ -445,6 +457,10 @@ export class AgentLoop {
   /** What the request taught (ADR 0097): commands that failed and what worked after; whether it ended on an answer and was offered. */
   private lessons: Lesson[] = []
   private answered = false
+  /** An automatic compaction happened since the model last replied: a reply that would end the request is asked about once. */
+  private compactedSinceReply = false
+  /** The model has replied in this request. */
+  private repliedThisTurn = false
   private offered = false
   /** The finish gates hold this agent's work (LoopOptions.gates). */
   private readonly gated: boolean
@@ -496,9 +512,12 @@ export class AgentLoop {
     const { o } = this
     const { signal } = turn
     let mode = turn.mode
-    const maxSteps = clamp(Math.floor(o.maxSteps ?? o.settings().maxSteps) || 30, 1, 100)
+    const maxSteps = clamp(Math.floor(o.maxSteps ?? o.settings().maxSteps) || DEFAULT_MAX_STEPS, 1, MAX_STEPS_LIMIT)
     let lengthRetries = 0
     let stopRounds = 0
+    let resumed = false
+    this.repliedThisTurn = false
+    this.compactedSinceReply = false
     this.edits?.startTurn()
     this.failures.clear()
     this.setbacks.clear()
@@ -534,6 +553,9 @@ export class AgentLoop {
       if (response.kind === 'end') return response.end
       const { message, finish } = response
       const calls = toolUses(message)
+      const afterCompaction = this.compactedSinceReply
+      this.compactedSinceReply = false
+      this.repliedThisTurn = true
 
       if (!calls.length) {
         if (finish === 'length' && lengthRetries++ < MAX_LENGTH_RETRIES) {
@@ -541,6 +563,13 @@ export class AgentLoop {
           continue
         }
         if (await steered()) continue
+        // A summary in place of the work so far reads like a fresh start, and a weaker model may answer it with a
+        // progress report: asked once whether the request is finished, it carries on.
+        if (afterCompaction && !resumed) {
+          resumed = true
+          await o.conversation.add(userText(reminder(RESUME_AFTER_COMPACTION)), { turnId: turn.turnId })
+          continue
+        }
         const reply = messageText(message)
         const sent = await this.beforeFinish({ ...turn, mode }, reply)
         if (sent) {
@@ -657,7 +686,10 @@ export class AgentLoop {
         sticky: o.services.sessionId,
         signal: turn.signal,
         onEvent,
-        validateToolCall: (name, input) => o.registry.check(name, o.registry.repair(name, input).value),
+        validateToolCall: (name, input) => {
+          const repaired = o.registry.repair(name, input, this.offers)
+          return o.registry.check(repaired.name ?? name, repaired.value)
+        },
       })
 
       if (outcome.kind === 'paused') {
@@ -800,6 +832,7 @@ export class AgentLoop {
           messages = repairPairing(applyCompaction(plan, written.text, preface, reread ? [reread] : []))
           removed = plan.dropped.length
           summary = written.text
+          if (!options.manual && this.repliedThisTurn) this.compactedSinceReply = true
           rewritten = true
           this.meter.reset()
           o.surface.settle(o.surface.entry({ kind: 'notice', text: compactedNotice(removed, written.byModel) }))
@@ -995,9 +1028,12 @@ export class AgentLoop {
    * Checks a call, runs the hooks and asks for approval. Returns the call to
    * run, or nothing when it was settled here (refused, invalid or rejected).
    */
-  private async prepare(block: ToolUseBlock, turn: Turn, state: StepState, own = false): Promise<Prepared | undefined> {
+  private async prepare(sent: ToolUseBlock, turn: Turn, state: StepState, own = false): Promise<Prepared | undefined> {
     const { o } = this
-    const entry = o.surface.entry({ kind: 'tool', tool: { name: block.name, input: trimInput(block.input), state: 'running', ...(own ? { by: 'encode' as const } : {}) } })
+    let block = sent
+    // A call that was not run still shows what was sent: the file it named, the command it gave.
+    const shown = block.invalid ? sentInput(block.invalid.raw) : block.input
+    const entry = o.surface.entry({ kind: 'tool', tool: { name: block.name, input: trimInput(shown), state: 'running', ...(own ? { by: 'encode' as const } : {}) } })
     this.inflight.add(entry)
     const refuse = (shown: string, ui: 'error' | 'rejected', told = shown, review?: ToolReview): undefined => {
       this.settleEntry(entry, { state: ui, ok: false, output: shown, ...(review ? { review } : {}) })
@@ -1014,12 +1050,14 @@ export class AgentLoop {
       return refuse(`Not run: ${block.invalid.error}`, 'error', `Not run: ${block.invalid.error}${hint}`)
     }
     if (o.tools && !o.tools.includes(block.name)) return refuse(`${block.name} is not available to this agent.`, 'error')
-    // A value sent in the wrong shape that can mean one thing only ("50" for 50, `path` for `file_path`) is read as meant.
-    const { value: repaired, fixes } = o.registry.repair(block.name, block.input)
+    // A value sent in the wrong shape that can mean one thing only ("50" for 50, `path` for `file_path`, a list of
+    // edits sent to Edit) is read as meant.
+    const { value: repaired, fixes, name: runAs } = o.registry.repair(block.name, block.input, this.offers)
+    if (runAs) block = { ...block, name: runAs }
     const problem = o.registry.check(block.name, repaired, turn.mode)
     if (problem) return refuse(problem, 'error')
     const tool = o.registry.get(block.name)!
-    if (fixes.length) entry.tool = { ...entry.tool!, input: trimInput(repaired) }
+    if (fixes.length) entry.tool = { ...entry.tool!, name: block.name, input: trimInput(repaired) }
     // The user may have changed a rule, or the folder's settings, since the last call.
     await o.refresh?.().catch(() => undefined)
 

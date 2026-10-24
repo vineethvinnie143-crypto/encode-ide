@@ -150,6 +150,26 @@ describe('SettingsService context size', () => {
   })
 })
 
+describe('SettingsService step limit', () => {
+  it('lets a request take 200 steps until the person sets a limit from 1 to 1000, and keeps it across restarts', () => {
+    const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(settings.get().maxSteps, 200)
+    assert.equal(settings.save({ maxSteps: 30 }).maxSteps, 30)
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().maxSteps, 30, 'a 30 the person chose stays')
+    assert.equal(settings.save({ maxSteps: 5000 }).maxSteps, 1000)
+    assert.equal(settings.save({ maxSteps: 0 }).maxSteps, 1)
+  })
+
+  it('reads the 30 every older file holds as the new default, and keeps any other limit', () => {
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'workspace-write', maxSteps: 30 }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().maxSteps, 200)
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'workspace-write', maxSteps: 75 }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().maxSteps, 75)
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'workspace-write', maxSteps: 'many' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().maxSteps, 200)
+  })
+})
+
 describe('SettingsService appearance', () => {
   it('starts dark with the Mono accent, in the system fonts', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')

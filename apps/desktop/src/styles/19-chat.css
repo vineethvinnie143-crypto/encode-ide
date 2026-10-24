@@ -197,6 +197,10 @@
   line-height: 18px;
 }
 
+/* A long word (a path, a link, a hash) wraps instead of pushing the chat sideways. */
+.markdown {
+  overflow-wrap: break-word;
+}
 .markdown > :last-child {
   margin-bottom: 0;
 }

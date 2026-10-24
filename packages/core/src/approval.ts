@@ -249,6 +249,8 @@ async function decideAccess(access: ToolAccess, context: ApprovalContext): Promi
       if (access.unsandboxed && context.shell.sandbox?.active) {
         if (policy === 'read-only') return deny('The approval policy is Read Only, which keeps every command in the sandbox. Ask the user to switch to Workspace Write if the command is needed.')
         if (!context.shell.sandbox.allowUnsandboxed) return deny('The settings do not let commands run outside the sandbox.')
+        // Full access runs commands without asking, outside the sandbox too when the settings let them out of it.
+        if (policy === 'full-access') return ALLOW
         return ask('This command asks to run outside the sandbox, which is what limits what a command can change. Only you can allow that.')
       }
       if (policy === 'full-access') return ALLOW
