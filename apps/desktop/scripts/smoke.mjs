@@ -4743,6 +4743,79 @@ async function runReviewChecks() {
 }
 
 /**
+ * Best of N (ADR 0098), on the repository the review checks made, their uncommitted change still in it: `/best 2`
+ * makes two attempts in worktrees that hold that change too, each writes src/best.ts its own way and runs the demo's
+ * tests, asked for under the card by attempt; the Reviewer picks the second; the project changes only on Keep, and
+ * no worktree or branch is left after.
+ */
+async function runBestOfChecks() {
+  console.log('[smoke] --- best of N ---')
+  const git = (...args) => execFileSync('git', args, { cwd: demoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
+  const target = path.join(demoPath, 'src', 'best.ts')
+  const uncommitted = await fs.readFile(path.join(demoPath, 'src', 'review-me.ts'), 'utf8')
+  if (!uncommitted.includes('second change')) throw new Error('The review checks left no uncommitted change to seed the attempts with')
+  const before = await providerStats()
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'local-mock', checkGate: 'auto' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('/best 2 [scenario:best-of] Add a sum function in src/best.ts')
+  await waitFor("!!document.querySelector('.best-card')", 20000, 'the best-of card')
+  await waitFor("document.querySelectorAll('.best-card .best-attempt').length === 2", 10000, 'two attempts on the card')
+  // The attempts are under way: each has its worktree, which holds the project's uncommitted change.
+  await until(async () => {
+    const names = await fs.readdir(path.join(demoPath, '.encode-worktrees')).catch(() => [])
+    return names.filter((name) => name.startsWith('best-')).length === 2
+  }, 30000, 'two worktrees')
+  const names = (await fs.readdir(path.join(demoPath, '.encode-worktrees'))).filter((name) => name.startsWith('best-')).sort()
+  for (const name of names) {
+    await until(async () => (await fs.readFile(path.join(demoPath, '.encode-worktrees', name, 'src', 'review-me.ts'), 'utf8').catch(() => '')).includes('second change'), 20000, `the seed of ${name}`)
+  }
+  const approvals = await driveAgent('16-best-of', 180000)
+  console.log('[smoke] best of N asked:', JSON.stringify(approvals.map((card) => card.title)))
+  if (!approvals.length || approvals.some((card) => !/^Attempt [12]: /.test(card.title))) throw new Error(`Every approval should name its attempt: ${JSON.stringify(approvals)}`)
+  await waitFor("document.querySelector('.best-card')?.dataset.state === 'ready'", 30000, 'the attempts are judged')
+  const after = await providerStats()
+  if (after.bestOfRequests - before.bestOfRequests !== 1) throw new Error(`The Reviewer was asked ${after.bestOfRequests - before.bestOfRequests} times, not once`)
+  const seen = await (await fetch(`http://127.0.0.1:${providerPort}/__last-best-of`)).json()
+  console.log('[smoke] the verdict was asked:', JSON.stringify({ tools: seen.tools.length, user: seen.user.slice(0, 600) }))
+  if (seen.tools.length) throw new Error('The Reviewer was given tools')
+  if (!/<attempt-[0-9a-f]+ n="1">[\s\S]*\+2 \|\s+return a - b/.test(seen.user) || !/<attempt-[0-9a-f]+ n="2">[\s\S]*\+2 \|\s+return a \+ b/.test(seen.user)) throw new Error('The Reviewer did not see both attempts')
+  const card = await evaluate(`(() => {
+    const card = document.querySelector('.best-card')
+    return {
+      title: card.querySelector('.best-title')?.textContent ?? '',
+      reason: card.querySelector('.best-reason')?.textContent ?? '',
+      rows: [...card.querySelectorAll('.best-attempt')].map((row) => row.textContent),
+    }
+  })()`)
+  console.log('[smoke] the card:', JSON.stringify(card))
+  if (card.title !== 'Attempt 2 looks best' || !card.reason.includes('Attempt 2 adds the numbers')) throw new Error(`The card reads ${JSON.stringify(card)}`)
+  if (!card.rows.every((row) => row.includes('Checks passed') && row.includes('+3'))) throw new Error(`Each attempt should show its passing checks and its lines: ${JSON.stringify(card.rows)}`)
+  if (await fs.stat(target).catch(() => null)) throw new Error('The project changed before Keep')
+  await screenshot('16-best-of.png')
+
+  if (!(await click('.best-card .best-attempt[data-attempt="2"] .btn.primary'))) throw new Error('Attempt 2 has no Keep')
+  await waitFor("document.querySelector('.best-card')?.dataset.state === 'kept'", 20000, 'the card says attempt 2 was kept')
+  const kept = await fs.readFile(target, 'utf8')
+  if (!kept.includes('return a + b')) throw new Error(`src/best.ts reads ${JSON.stringify(kept)}`)
+  if ((await fs.readFile(path.join(demoPath, 'src', 'review-me.ts'), 'utf8')) !== uncommitted) throw new Error('Keeping the attempt changed a file it did not change')
+  const left = (await fs.readdir(path.join(demoPath, '.encode-worktrees')).catch(() => [])).filter((name) => name.startsWith('best-'))
+  if (left.length) throw new Error(`Worktrees were left: ${left.join(', ')}`)
+  if (git('branch', '--list', 'encode/best-*').trim()) throw new Error('The attempts left branches')
+  if (git('worktree', 'list', '--porcelain').split('\n').filter((line) => line.startsWith('worktree ')).length !== 1) throw new Error('git still lists the attempts')
+  // Kept through the checkpoints: the request that made the attempts changed one file, so Undo and Rewind can take it back.
+  const recorded = await evaluate(`(async () => {
+    const [session] = await window.eNCode.agent.sessions()
+    const info = await window.eNCode.agent.checkpoints(session.id)
+    return info.turns.map((turn) => turn.files)
+  })()`)
+  console.log('[smoke] the checkpoints hold:', JSON.stringify(recorded))
+  if (recorded.at(-1) !== 1) throw new Error(`The checkpoints recorded ${JSON.stringify(recorded)}`)
+  await screenshot('16b-best-of-kept.png')
+  await evaluate("window.eNCode.settings.save({ activeProfileId: 'demo', checkGate: 'off' })")
+  await fs.rm(target, { force: true })
+}
+
+/**
  * Ask the Reviewer, with the unstaged change of the review checks in view: the offline demo says it reads no code;
  * a real model is sent the change with numbered lines and no tools, and its findings become comments on those lines,
  * marked with their priority, while a finding on a file the change does not touch is dropped.
@@ -5656,6 +5729,7 @@ try {
   await runAboutChecks()
   await runPanelChecks()
   await runReviewChecks()
+  await runBestOfChecks()
   await runFontChecks()
   await runAppearanceChecks()
   await runDogfoodChecks()

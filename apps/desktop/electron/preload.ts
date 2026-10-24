@@ -203,6 +203,7 @@ const api: EncodeApi = {
     rewindApply: (sessionId: string, request: RewindRequest) => invoke('agent:rewind-apply', sessionId, request),
     rewindConversation: (sessionId: string, entryId: string) => invoke('agent:rewind-conversation', sessionId, entryId),
     answerSuggestion: (sessionId: string, entryId: string, accept: boolean) => invoke('agent:answer-suggestion', sessionId, entryId, accept),
+    answerBest: (sessionId: string, entryId: string, keep: number, force?: boolean) => invoke('agent:answer-best', sessionId, entryId, keep, force === true),
     approve: (requestId: string, answer: boolean | ApprovalAnswer) => invoke('agent:approve', requestId, answer),
     answer: (requestId: string, answer: string) => invoke('agent:answer', requestId, answer),
     onEvent: (callback) => on<AgentEvent>('agent:event', callback),

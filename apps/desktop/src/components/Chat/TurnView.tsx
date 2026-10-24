@@ -16,6 +16,7 @@ import { cx } from '../../ui/cx'
 import Markdown from './Markdown'
 import { NoticeLine, ProblemCard } from './ProblemCard'
 import { WorkRoot, shownPath } from './shown-path'
+import { BestCard } from './BestCard'
 import { SuggestionCard } from './SuggestionCard'
 import WorkLog from './WorkLog'
 import { editedFiles, editTotals, type Turn, type TurnPart } from './turns'
@@ -118,6 +119,7 @@ function ReplyEntry({ entry }: { entry: ConversationEntry }) {
   }
   if (entry.kind === 'error') return <ProblemCard entry={entry} />
   if (entry.suggestion) return <SuggestionCard entry={entry} />
+  if (entry.best) return <BestCard entry={entry} />
   return <NoticeLine entry={entry} />
 }
 

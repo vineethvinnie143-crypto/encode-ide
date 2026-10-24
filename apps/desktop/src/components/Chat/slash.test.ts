@@ -6,7 +6,9 @@ import { setActiveSessionId } from '../../stores/active'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { findSlash, SLASH_COMMANDS } from './picker'
-import { effortOf, reviewKindOf, runSlash, SLASH_RUNNERS } from './slash'
+import { bestOf, effortOf, reviewKindOf, runSlash, SLASH_RUNNERS } from './slash'
+import { useChat } from '../../stores/chat'
+import { useWorkspace } from '../../stores/workspace'
 
 const notes: string[] = []
 useUi.setState({ notify: (_kind, text) => void notes.push(text) })
@@ -45,6 +47,38 @@ describe('slash commands', () => {
     await run('shortcuts')
     assert.equal(useUi.getState().settingsOpen, true)
     assert.equal(useUi.getState().settingsSection, 'shortcuts', 'the shortcuts are a section of the Settings page')
+  })
+})
+
+describe('/best', () => {
+  beforeEach(() => {
+    notes.length = 0
+  })
+
+  it('reads the count and the request, three attempts by default', () => {
+    assert.deepEqual(bestOf('2 add a dark mode toggle'), { count: 2, request: 'add a dark mode toggle' })
+    assert.deepEqual(bestOf('  add a toggle  '), { count: 3, request: 'add a toggle' })
+    assert.deepEqual(bestOf('4\nfix the\nparser'), { count: 4, request: 'fix the\nparser' })
+    assert.deepEqual(bestOf('5 add a toggle'), { error: '/best makes 2 to 4 attempts, not 5.' })
+    assert.deepEqual(bestOf('3'), { error: 'Write the request after /best 3.' })
+    assert.match((bestOf('') as { error: string }).error, /^Write the request after \/best/)
+  })
+
+  it('sends the request as attempts in Code mode, and says why not while eNCode works', async () => {
+    const starts: unknown[] = []
+    answer('agent.start', (_sessionId, input) => {
+      starts.push(input)
+      return Promise.resolve()
+    })
+    useWorkspace.setState({ workspace: { root: '/w', name: 'w' } } as never)
+    useChat.setState({ running: false })
+    await run('best', '2 add a toggle')
+    assert.deepEqual(starts, [{ text: 'add a toggle', mode: 'code', attachments: undefined, best: 2 }])
+    await run('best', 'add another')
+    assert.equal(starts.length, 1, 'eNCode is working on the first')
+    assert.deepEqual(notes, ['Wait until eNCode is done, then send /best again.'])
+    useChat.setState({ running: false })
+    useWorkspace.setState({ workspace: null } as never)
   })
 })
 

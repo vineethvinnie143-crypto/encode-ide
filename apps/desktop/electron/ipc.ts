@@ -444,6 +444,10 @@ export function registerIpc(deps: IpcDeps): void {
   handle('agent:answer-suggestion', (sessionId: string, entryId: string, accept: boolean) =>
     host.answerSuggestion(String(sessionId), String(entryId), accept === true).catch((error) => Promise.reject(hostFailure(error))),
   )
+  // The host's schema takes an attempt from 0 (discard them all) to 4, and refuses anything else.
+  handle('agent:answer-best', (sessionId: string, entryId: string, keep: unknown, force: unknown) =>
+    host.answerBest(String(sessionId), String(entryId), Number(keep), force === true).catch((error) => Promise.reject(hostFailure(error))),
+  )
   // The host writes the transcript; the save dialog and the file are the main process's.
   handle('agent:export', async (sessionId: string, targetPath?: string) =>
     exportSessionZip(await host.exportData(String(sessionId)), targetPath ? String(targetPath) : undefined),

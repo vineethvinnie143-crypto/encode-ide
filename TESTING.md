@@ -413,6 +413,24 @@ wrong or not worth the round, and how long the review made you wait.
 What is most useful to hear: a dangerous command that ran without a second look, a harmless one that was asked about,
 a model that confirmed something it should not have, and lines offered that were wrong or not worth keeping.
 
+## Best of N
+
+- In a git project, with some uncommitted change, send `/best 3 <a request that is hard to get right>` (a bug with
+  several possible causes, a refactor). The card shows three attempts working side by side, each with what it is
+  doing; approvals they need say "Attempt 2: ...". Your files do not change while they run, and the folder
+  `.encode-worktrees` holds their copies, each starting from your project as it is, uncommitted change included.
+- When they end, the Reviewer picks one ("Attempt 2 looks best" and why); each row shows its checks, lines added and
+  removed, a note, and its reply and files behind the arrow. **Keep** on any attempt writes its changes into your
+  project; reverting that request in the Review tab, or **Rewind**, takes them back. **Discard all** writes nothing. Either way the
+  copies and their branches are gone afterwards.
+- Change a file yourself while the attempts run, then Keep one that changed it too: you are asked before your change
+  is written over.
+- Press Stop while they run: the copies are removed. `/best` in Ask or Plan mode, outside a git repository, or while
+  the agent works in a worktree says why it cannot run.
+
+What is most useful to hear: whether the pick was the attempt you would have kept, how long the attempts took next to
+one request, and anything left in `.encode-worktrees` afterwards.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries

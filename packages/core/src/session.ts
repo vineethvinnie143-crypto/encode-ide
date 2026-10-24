@@ -16,6 +16,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import {
   messageText,
   textBlock,
@@ -30,6 +31,7 @@ import {
 import {
   addToolSearch,
   createFileStateTracker,
+  TOOL_SEARCH,
   createJobManager,
   createToolRegistry,
   type AgentMode,
@@ -59,6 +61,20 @@ import {
   type WorktreeInfo,
   type Worktrees,
 } from '@encode/tools'
+import {
+  answeredNote,
+  attemptCount,
+  attemptNote,
+  attemptsMessage,
+  ATTEMPT_EXCLUDED,
+  hasSeeding,
+  keepAttempt,
+  onlyInside,
+  removeAttempts,
+  runBest,
+  type AttemptAgent,
+  type SeedingGit,
+} from './best-of'
 import { SessionCodeMap } from './code-map'
 import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
 import type { ChangedText } from './diff-scan'
@@ -72,6 +88,7 @@ import { AgentLoop, type LoopServices } from './loop'
 import type { OutputStore } from './outputs'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { saveConventions } from './conventions'
+import { memoryConversation } from './conversation'
 import { mentionBlocks } from './mentions'
 import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
@@ -96,8 +113,10 @@ import {
   type ApprovalRequest,
   type AskRequest,
   type BackgroundJob,
+  type BestOutcome,
   type CheckpointInfo,
   type ConversationEntry,
+  type EntryBest,
   type PlanRequest,
   type RequestUsage,
   type RewindOutcome,
@@ -248,6 +267,11 @@ export interface SessionCheckpoints {
   changes?(turn: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<{ known: boolean; at?: number; files: TurnFileChange[] }>
   /** Writes a file the agent changed, for the person, while it holds what they saw (see `CheckpointService.write`). */
   write?(write: TurnFileWrite): Promise<TurnWriteOutcome>
+  /**
+   * Records what the files eNCode wrote itself under `toolUseId` (through `beforeWrite`) hold now, as the PostToolUse
+   * hook does for a tool's: a kept attempt of best of N (ADR 0098).
+   */
+  wrote?(toolUseId: string): Promise<void>
 }
 
 /** A request's changes are read whole up to these sizes for the scan and the Reviewer (ADR 0096). */
@@ -296,6 +320,15 @@ function clock(ms: number): string {
 function settled(entry: ConversationEntry): ConversationEntry {
   const copy = structuredClone(entry)
   if (copy.streaming) copy.streaming = false
+  // Attempts eNCode closed in the middle of (ADR 0098): their worktrees are left for the person to discard.
+  if (copy.best && (copy.best.state === 'running' || copy.best.state === 'judging')) {
+    copy.best.state = 'failed'
+    copy.best.error = 'eNCode closed before the attempts ended.'
+    for (const attempt of copy.best.attempts) {
+      delete attempt.activity
+      if (attempt.state === 'running') attempt.state = 'stopped'
+    }
+  }
   if (copy.tool && (copy.tool.state === 'running' || copy.tool.state === 'waiting' || copy.tool.state === 'reviewing')) {
     copy.tool = { ...copy.tool, state: 'rejected', ok: false, output: copy.tool.output || 'Interrupted.' }
   }
@@ -412,6 +445,8 @@ export class AgentSession {
   private learning: Promise<void> = Promise.resolve()
   private learningController = new AbortController()
   private readonly answering = new Set<string>()
+  /** Best-of cards being answered (ADR 0098): one answer at a time each. */
+  private readonly keeping = new Set<string>()
   private goalState: SessionGoal | null = null
   private todoList: TodoItem[] = []
   private planState: PlanRequest | null = null
@@ -1566,8 +1601,20 @@ export class AgentSession {
     if (this.controller) throw new Error('eNCode is already working on this session. Stop it first.')
     const text = (input.text ?? '').trim()
     if (!text) throw new Error('Type a request first.')
+    if (input.best !== undefined) await this.bestReady(input)
     this.heard()
     return this.exclusive((controller) => this.runTurn(input, text, controller))
+  }
+
+  /** Why best of N cannot run on this request, thrown plainly (ADR 0098). */
+  private async bestReady(input: AgentStartInput): Promise<void> {
+    if (attemptCount(input.best) === undefined) throw new Error('Say how many attempts to make: 2 to 4.')
+    if (input.mode === 'ask' || input.mode === 'plan') throw new Error('Best of N changes code, so it runs in Code mode. Switch to Code and send it again.')
+    const git = this.env.worktrees
+    if (!hasSeeding(git)) throw new Error('Best of N needs git worktrees, which this session does not have.')
+    if (this.worktree) throw new Error(`The agent works in the worktree ${this.worktree.name}, and best of N starts from the project folder. Ask the agent to leave the worktree first.`)
+    const why = await git.unavailable(this.env.root)
+    if (why) throw new Error(`Best of N makes a git worktree for each attempt. ${why}`)
   }
 
   /**
@@ -1668,6 +1715,14 @@ export class AgentSession {
         await this.rename(this.provisionalTitle)
       }
 
+      const count = attemptCount(input.best)
+      if (count !== undefined && mode === 'code') {
+        const end = await this.runAttempts(count, turnId, signal)
+        this.conclude(end)
+        if (end.kind === 'done') this.naming = this.nameSession(text).catch(() => undefined)
+        return end
+      }
+
       const loop = this.getLoop()
       // From here a message sent while the turn runs steers it; the loop closes that again where the turn ends.
       this.steerable = true
@@ -1707,6 +1762,130 @@ export class AgentSession {
     const controller = new AbortController()
     this.learningController = controller
     this.learning = loop.offerConventions(controller.signal).catch(() => undefined)
+  }
+
+  // ------------------------------------------------------------ best of N (ADR 0098)
+
+  /** The request made `count` times side by side and judged; the card then waits for the person to keep one. */
+  private async runAttempts(count: number, turnId: string, signal: AbortSignal): Promise<TurnEnd> {
+    const git = this.env.worktrees as SeedingGit
+    const tag = randomUUID().slice(0, 8)
+    const best: EntryBest = {
+      state: 'running',
+      attempts: Array.from({ length: count }, (_, index) => ({ n: index + 1, state: 'running' as const, steps: 0, files: [], checks: 'none' as const })),
+    }
+    const entry = this.addEntry({ kind: 'notice', text: `${count} attempts at this request`, best })
+    this.settleEntry(entry)
+    await runBest({
+      count,
+      root: this.env.root,
+      git,
+      client: this.env.client,
+      sticky: this.id,
+      requests: this.recentRequests(),
+      name: (n) => `best-${tag}-${n}`,
+      best,
+      show: () => this.send({ type: 'entry', entry: structuredClone(entry) }),
+      store: () => this.settleEntry(entry),
+      agent: (n, worktree, surface) => this.attemptAgent({ n, total: count, turnId, worktree, surface }),
+      parent: this.surface,
+      entryId: entry.id,
+      signal,
+    })
+    const ready = best.state === 'ready'
+    const text = ready ? attemptsMessage(best) : `eNCode could not make attempts at this request: ${best.error ?? 'they ended on a problem'}`
+    // The conversation goes on from what was tried, so the next request knows of it; the person's choice follows as news.
+    await this.conversation.add({ role: 'assistant', content: [textBlock(text)] }, { turnId })
+    return { kind: 'done', reply: ready ? (best.pick ? `Attempt ${best.pick} looks best.` : 'The attempts are ready.') : text }
+  }
+
+  /**
+   * Attempt `n`'s agent: the main agent's model, tools and instructions, on a copy of the conversation, in its
+   * worktree, with a shell, jobs, checks and a record of reads of its own.
+   */
+  private async attemptAgent(attempt: { n: number; total: number; turnId: string; worktree: WorktreeInfo; surface: Surface }): Promise<AttemptAgent> {
+    const { env } = this
+    const { worktree } = attempt
+    const shell = env.createShell()
+    if (!(await shell.setCwd(worktree.path, { base: true }))) {
+      await Promise.resolve(shell.dispose?.()).catch(() => undefined)
+      throw new Error(`The shell could not move into ${worktree.path}.`)
+    }
+    const jobs = createJobManager(shell)
+    const checks: ProjectChecks = {
+      ledger: new CheckLedger(),
+      list: async () => {
+        const cwd = shell.state().cwd
+        if (!isWithin(worktree.path, cwd)) return []
+        const configured = env.checks?.()
+        return detectChecks(cwd, { platform: env.platform, top: worktree.path, ...(configured ? { configured } : {}) })
+      },
+    }
+    const registry = this.buildRegistry(this.definitions())
+    const left = new Set(ATTEMPT_EXCLUDED)
+    if (!registry.deferred().some((tool) => !left.has(tool.definition.name))) left.add(TOOL_SEARCH)
+    const note: SystemPart = { text: attemptNote({ n: attempt.n, total: attempt.total, path: worktree.path, root: env.root }) }
+    const loop = new AgentLoop({
+      agentId: `attempt-${attempt.n}`,
+      role: 'main',
+      client: env.client,
+      registry,
+      tools: registry
+        .list()
+        .map((tool) => tool.definition.name)
+        .filter((name) => !left.has(name)),
+      system: [...this.system, note],
+      ...(this.shortSystem ? { shortSystem: [...this.shortSystem, note] } : {}),
+      // The Reviewer reads the attempts together once they end: reading each one first would be paid for twice.
+      settings: () => ({ ...env.settings(), review: 'off' }),
+      hooks: env.hooks,
+      surface: attempt.surface,
+      conversation: memoryConversation(this.messages),
+      services: {
+        root: worktree.path,
+        home: env.home,
+        platform: env.platform,
+        sessionId: this.id,
+        files: createFileStateTracker(),
+        shell,
+        jobs,
+        web: env.web,
+        skills: env.skills,
+        beforeWrite: onlyInside(worktree.path),
+        summarize: this.summarizePage,
+        cwd: () => worktree.path,
+        ...(env.outputs ? { outputs: env.outputs } : {}),
+        checks,
+      },
+      approvedHosts: this.approvedHosts,
+      approvedApps: this.approvedApps,
+      assessor: env.assessor,
+      ...(env.rules ? { rules: env.rules } : {}),
+      ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
+      refresh: this.refreshRules,
+      // The project itself is read as the main agent reads it; only the attempt's copy is written.
+      readRoots: () => [...(env.readRoots?.() ?? []), env.root],
+      ...(this.reviewer ? { reviewer: this.reviewer } : {}),
+      requests: this.recentRequests,
+      gates: true,
+    })
+    return {
+      run: (signal) => loop.run({ turnId: attempt.turnId, mode: 'code', signal }),
+      checks,
+      dispose: async () => {
+        await jobs.dispose().catch(() => undefined)
+        await Promise.resolve(shell.dispose?.()).catch(() => undefined)
+      },
+    }
+  }
+
+  /** The worktrees of the best-of cards in `entries`, which the conversation is about to lose. */
+  private async dropAttempts(entries: readonly ConversationEntry[]): Promise<void> {
+    const git = this.env.worktrees
+    if (!hasSeeding(git)) return
+    for (const entry of entries) {
+      if (entry.best?.attempts.some((attempt) => attempt.worktree)) await removeAttempts(git, this.env.root, entry.best).catch(() => undefined)
+    }
   }
 
   /** A request that ended on something thrown: the person stopped it, or a fault the chat shows plainly. */
@@ -2157,6 +2336,7 @@ export class AgentSession {
       this.startSource = 'clear'
     }
     await this.flush()
+    await this.dropAttempts(this.entries)
     const { header } = this.log.snapshot()
     // The worktree stays too: its folder and branch hold work, and the shell stands in it.
     const keep = { title: this.titleValue, goal: this.goalState, todos: this.todoList, plan: this.planState, worktree: this.worktree }
@@ -2207,9 +2387,10 @@ export class AgentSession {
   private async cutBefore(entryId: string): Promise<{ text: string }> {
     const entry = this.entries.find((candidate) => candidate.id === entryId && candidate.kind === 'user')
     if (!entry) throw new Error('That request is not in this session.')
-    // Background work belongs to the conversation that is going away.
+    // Background work belongs to the conversation that is going away, and so do the attempts after the cut.
     await this.stopBackground(false)
     await this.flush()
+    await this.dropAttempts(this.entries.slice(this.entries.indexOf(entry)))
     await this.log.truncateBefore(entryId)
     this.load()
     await this.afterCut()
@@ -2432,6 +2613,52 @@ export class AgentSession {
       return { ok: true, file: saved.file }
     } finally {
       this.answering.delete(entryId)
+    }
+  }
+
+  /**
+   * The person's answer to a best-of card (ADR 0098): keep attempt `choice`, whose files are written into the project
+   * through the checkpoints, or discard them all; every worktree is removed after. A file the project changed since the
+   * attempts started stops the keep unless `force`.
+   */
+  async answerBest(entryId: string, choice: number | 'discard', force = false): Promise<BestOutcome> {
+    const entry = this.entries.find((candidate) => candidate.id === entryId)
+    const best = entry?.best
+    if (!entry || !best) return { ok: false, error: 'These attempts are not in this conversation.' }
+    if (best.state === 'kept' || best.state === 'discarded' || this.keeping.has(entryId)) return { ok: false, error: 'These attempts were already answered.' }
+    if (best.state === 'running' || best.state === 'judging') return { ok: false, error: 'The attempts are still running. Wait for them, or stop them.' }
+    if (this.controller) return { ok: false, error: 'eNCode is working on this session. Wait for it to finish, or stop it, first.' }
+    const git = this.env.worktrees
+    if (!hasSeeding(git)) return { ok: false, error: 'Worktrees are not available in this session.' }
+    const index = this.entries.indexOf(entry)
+    const asked = this.entries.slice(0, index).reverse().find((candidate) => candidate.kind === 'user')
+    this.keeping.add(entryId)
+    try {
+      if (choice !== 'discard') {
+        if (best.state !== 'ready') return { ok: false, error: 'These attempts ended on a problem, so there is none to keep. Discard them.' }
+        const attempt = best.attempts.find((candidate) => candidate.n === choice)
+        if (!attempt?.files.length) return { ok: false, error: `Attempt ${choice} changed no file, so there is nothing of it to keep.` }
+        const kept = await keepAttempt({
+          root: this.env.root,
+          git,
+          attempt,
+          force,
+          ...(this.env.beforeWrite ? { beforeWrite: this.env.beforeWrite } : {}),
+          ...(this.env.checkpoints?.wrote ? { wrote: (toolUseId: string) => this.env.checkpoints!.wrote!(toolUseId) } : {}),
+          turnId: asked?.id ?? entryId,
+        })
+        if (!kept.ok) return kept
+        for (const file of kept.files) this.send({ type: 'file-changed', path: path.join(this.env.root, ...file.split('/')) })
+        best.kept = choice
+      }
+      best.state = choice === 'discard' ? 'discarded' : 'kept'
+      const left = await removeAttempts(git, this.env.root, best)
+      this.settleEntry(entry)
+      this.deliver({ text: answeredNote(best, asked?.text ?? ''), line: best.state === 'kept' ? `You kept attempt ${best.kept}` : 'You discarded the attempts', wake: false })
+      if (left.length) this.notice(`${left.length === 1 ? 'One attempt’s worktree' : `${left.length} attempts’ worktrees`} could not be removed: ${left.join(', ')}. Delete ${left.length === 1 ? 'it' : 'them'} when nothing uses ${left.length === 1 ? 'it' : 'them'}.`)
+      return { ok: true, ...(best.state === 'kept' ? { files: best.attempts.find((candidate) => candidate.n === best.kept)?.files.map((file) => file.path) ?? [] } : {}) }
+    } finally {
+      this.keeping.delete(entryId)
     }
   }
 

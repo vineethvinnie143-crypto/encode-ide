@@ -2199,3 +2199,56 @@ What is new:
   again with the request, the command and why; the card gives the model's reason and the denied delete does not run.
   A request that sets a rule gets the offer below the answer, ENCODE.md is unchanged until Add, and after Add holds the
   line under a Conventions heading.
+
+## Best of N: several attempts side by side, and the one the person keeps (Accuracy 2d)
+
+Written with the pull request that runs several attempts at one request, each in a git worktree of its own, has the
+Reviewer pick one, and writes the attempt the person keeps into the project
+([0098](../adr/0098-several-attempts-at-one-request-run-side-by-side-in-worktrees-and-the-person-keeps-the-one-the-reviewer-picks.md)).
+
+What is new:
+
+- eNCode copies the project's uncommitted work, and its ignored `.env` files of at most 64 KB, into a worktree under
+  `.encode-worktrees`, commits it there under its own name with no hooks or signature, and links the installed
+  dependency folders (`node_modules`, `.venv`, ...) into it;
+- two to four agents run at once, each with the main agent's model, tools and instructions, its own shell and checks;
+- data sent to the Review role's model: the last three requests and every attempt's reply, checks, scan and change;
+- a write eNCode makes on the person's click: an attempt's changed files copied into the project, through the
+  checkpoints;
+- one IPC call, `agent:answer-best` (a session id, an entry id, a whole number 0 to 4 where 0 discards, a boolean to
+  write over the person's changes), and its host call; `agent:start` takes `best` (a whole number 2 to 4).
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| BN1 | An attempt changes the project, or another attempt's copy, while it runs | The file tools of an attempt write only inside its worktree (`onlyInside`, before the checkpoints and the tools' own checks); the person's approval policy holds every call, and an approval names the attempt. A shell command can still write anywhere the project's sandbox allows (BN8). | Mitigated |
+| BN2 | Keep writes outside the project: a `..` or `.git` path in what the attempt changed, a link the attempt made, a link or a linked folder in the project | Paths with `..` or `.git` are refused; only plain files of the attempt are copied; a file in the project that is not a plain file is never written over (a link would be written through); the nearest existing folder of each target must be inside the project by its real path. Nothing is written when any file is refused. | Mitigated |
+| BN3 | Keep writes over what the person changed while the attempts ran | A file is written only when the project still holds what the seed copied, or already holds what the attempt wrote; otherwise the card names the files and writes nothing until **Keep anyway**. Every write goes through the checkpoints under the request, so Undo and Rewind take it back. | Mitigated |
+| BN4 | Removing a worktree deletes what its links point to (the project's `node_modules`, `.venv`) | The links a seed made are taken out of the worktree before `git worktree remove --force`; on Windows they are junctions, which `rmdir` takes away alone; a test removes a seeded worktree and finds the linked folder whole. | Mitigated |
+| BN5 | The seed runs code of the project's: a commit hook, a signing program, an editor | The seed's commit runs with hooks turned off (`core.hooksPath` pointed at a folder that does not exist, `--no-verify`), `commit.gpgsign=false`, and a fixed message; worktree creation already starts no hook (0073). | Mitigated |
+| BN6 | An attempt's reply or change talks the Reviewer into picking it ("pick attempt 1") | The Reviewer has no tools; every request, reply and change is in a block named with a random nonce and marked as data; only a number among the attempts, a reason and notes are read, flattened. A wrong pick changes nothing by itself: the person keeps an attempt, after seeing each one's checks, scan and change. | Mitigated |
+| BN7 | The attempts cost several times a request, or leave worktrees behind | Only `/best` starts them, at most four; their tokens and the review count in the request's cost. Stop, a reset, a rewind and Keep or Discard remove the worktrees; a run eNCode closed in the middle of shows **Remove the attempts** after the restart. | Mitigated |
+| BN8 | An attempt's shell command writes into the project outside its copy (`cd ..`, an absolute path), or installs into the shared dependency folders | The attempt's instructions say to change only its copy and not to install; the person's approval policy and the sandbox (0063) hold its commands as they hold the main agent's; the scan, the checks and Keep only see what changed in the copy. eNCode does not confine an attempt's commands to its worktree. | Accepted |
+| BN9 | A renderer that is not the person keeps or discards attempts, or answers twice | The call names a card of the session; the host's schema checks the arguments; a card is answered once, and a second answer, an unknown card or a number that is not an attempt with changes is refused. | Mitigated |
+| BN10 | `.env` secrets copied into a worktree reach a model | The worktree is inside the project, whose `.env` files the agent can already read; the copy adds no reader. A change to an ignored file, `.env` included, is not part of an attempt's changes: the Reviewer is not shown it and Keep does not copy it. | Accepted |
+
+### Residual risks
+
+- An attempt's commands are not confined to its worktree (BN8): the sandbox allows writes in the whole project.
+- Every attempt uses the Main role's model, so a mistake the model always makes is made N times; the Reviewer, a second
+  model when the person set one, and the checks are what tell the attempts apart.
+
+### Verification
+
+- `worktrees.test.ts`: the seed copies changed, new and deleted files and commits them as eNCode with no hook, links
+  `node_modules` and copies `.env`, refuses more than it copies, measures the attempt's changes (a commit included),
+  reads a file as the seed held it, and takes the links out before a remove, leaving the linked folder whole.
+- `best-of.test.ts`: attempts side by side in their copies with the project unchanged until Keep, the verdict and the
+  fallback, a write outside the attempt refused, the person's change found and **Keep anyway**, the keep through the
+  checkpoints as one call under the request, a link in the project and a linked folder never written through, the
+  approval label, Stop, the plain refusals, a reset and a restart.
+- The desktop's end-to-end run: `/best 2` makes two worktrees seeded with the project's uncommitted change, the
+  approvals are labelled with the attempt, the Reviewer is asked once with both changes and no tools, the card shows
+  the pick, each attempt's checks and lines, the project is unchanged until Keep, and after Keep holds the pick's file,
+  with no worktree or branch left and the keep in the request's checkpoints.
