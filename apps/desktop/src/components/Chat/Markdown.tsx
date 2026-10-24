@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
+import { copyText } from '../../copy'
 import { patchBlocks } from '../../dom-blocks'
 import { renderMarkdownBlocks } from '../../markdown'
 
@@ -27,7 +28,8 @@ export default function Markdown({ text }: { text: string }) {
         const copy = target.closest<HTMLButtonElement>('.code-copy')
         if (copy) {
           const code = copy.closest('.code-block')?.querySelector('code')?.textContent ?? ''
-          void navigator.clipboard.writeText(code).then(() => {
+          void copyText(code).then((copied) => {
+            if (!copied) return
             copy.textContent = 'Copied'
             window.setTimeout(() => {
               copy.textContent = 'Copy'

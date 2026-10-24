@@ -3833,12 +3833,35 @@ async function runWideLineChecks() {
   })()`)
   console.log('[smoke] wide lines:', JSON.stringify(sizes))
   await screenshotSizes('ui-dark-wide-lines')
+
+  // A 1366 x 768 screen with the side panel open: the panels give up width before the thread's column drops under 720 px.
+  await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false })
+  await sleep(400)
+  const small = await evaluate(`(() => ({
+    side: Math.round(document.querySelector('.right-wrap:not(.is-hidden):not(.is-full)')?.getBoundingClientRect().width ?? 0),
+    sidebar: Math.round(document.querySelector('.sidebar-wrap')?.getBoundingClientRect().width ?? 0),
+    main: Math.round(document.querySelector('.app-main').getBoundingClientRect().width),
+  }))()`)
+  await send('Emulation.clearDeviceMetricsOverride')
+  await sleep(200)
+  console.log('[smoke] 1366 x 768:', JSON.stringify(small))
+  if (small.side && small.main < 700) throw new Error(`On a 1366 x 768 screen the thread's column is ${small.main} px: the panels took the rest`)
   if (sizes.steps < 4) throw new Error(`Expected four steps in the thread, found ${sizes.steps}`)
   if (sizes.boxes.filter((box) => box.scroll > box.client + 1).length < 2) throw new Error('The long diff line and the wide table do not each scroll in their own box')
   if (sizes.list.scroll > sizes.list.client + 1) throw new Error(`The chat scrolls sideways: ${sizes.list.scroll} px of content in ${sizes.list.client} px`)
   if (sizes.thread > 784) throw new Error(`The thread grew to ${sizes.thread} px, past its 784 px column`)
+
+  // Copy reply puts the answer on the system clipboard: pasted into the message box, it comes back.
+  if (!(await click('.chat-list button[aria-label="Copy reply"]'))) throw new Error('No Copy reply button under the answer')
+  await waitFor("!!document.querySelector('.chat-list button[aria-label=\"Copied\"]')", 4000, 'Copy reply says Copied')
+  await typeInto('.composer-input', '')
+  await evaluate("document.querySelector('.composer-input').focus()")
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2, commands: ['paste'] })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 })
+  await waitFor("document.querySelector('.composer-input').value.includes('begin_segment00')", 4000, 'the copied reply pastes back')
+  await typeInto('.composer-input', '')
   await fs.rm(path.join(demoPath, 'wide.txt'), { force: true })
-  console.log('[smoke] wide lines: ok')
+  console.log('[smoke] wide lines and copy: ok')
 }
 
 /** Esc twice stops the agent: the first press says what a second does, and the note goes when no second comes. */
@@ -4276,6 +4299,7 @@ const theme = () => evaluate('document.documentElement.dataset.theme')
 async function screenshotSizes(name) {
   for (const [width, height] of [
     [1280, 800],
+    [1366, 768],
     [1920, 1080],
   ]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })

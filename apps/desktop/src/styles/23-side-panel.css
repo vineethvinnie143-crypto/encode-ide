@@ -29,8 +29,11 @@
   flex: none;
   min-width: 0;
   min-height: 0;
-  /* A width saved on a bigger window cannot cover the thread. */
-  max-width: 60%;
+  /*
+   * A width saved on a bigger window cannot cover the thread, and on a small screen the panel gives up width, down to
+   * 360 px, before the thread's column drops under --thread-room (52 px is the icon rail).
+   */
+  max-width: min(60%, max(360px, calc(100vw - 52px - var(--sidebar-w, 0px) - var(--thread-room))));
   display: flex;
 }
 .right-wrap.is-full {
@@ -64,8 +67,11 @@
   border-left: 0;
 }
 
-/* Below 1100 px the side panel floats over the thread instead of pushing it. */
+/* Below 1100 px the side panel floats over the thread instead of pushing it, so the sessions list keeps its width. */
 @media (max-width: 1099px) {
+  .sheet-work.has-side .sidebar-wrap {
+    max-width: none;
+  }
   .right-wrap:not(.is-full):not(.is-hidden) {
     position: absolute;
     top: 0;

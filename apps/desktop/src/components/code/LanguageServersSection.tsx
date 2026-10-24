@@ -5,6 +5,7 @@ import { filesLabel, headline, installPercent, sortedServers, stateLabel } from 
 import { useCode } from '../../stores/code'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
+import { copyText } from '../../copy'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Code2, Copy, Download, RefreshCw, Trash2 } from '../../ui/icons'
@@ -73,7 +74,7 @@ function LibraryRow({ library, canInstall }: { library: LanguageLibraryInfo; can
 
 function ServerRow({ server, partial, canInstall }: { server: LanguageServerInfo; partial: boolean; canInstall: boolean }) {
   const { label, tone } = stateLabel(server)
-  const copy = () => void navigator.clipboard.writeText(server.install).then(() => useUi.getState().notify('success', 'Install command copied.'))
+  const copy = () => void copyText(server.install).then((copied) => copied && useUi.getState().notify('success', 'Install command copied.'))
   // Where it was found while it runs; why it stopped, failed or is missing otherwise.
   const detail = server.state === 'running' || server.state === 'starting' ? server.command : server.state === 'missing' ? undefined : server.detail
   const used = usedLabel(server, partial)

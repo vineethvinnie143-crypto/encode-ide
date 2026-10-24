@@ -134,7 +134,11 @@ Each item names what remains, why it is acceptable for now, and who closes it.
     ([0063](../adr/0063-the-agents-commands-run-in-the-operating-systems-sandbox-and-the-person-is-told-what-it-does-not-hold-back.md)):
     under every policy, Full access included, a command changes only the project folders, a
     temp folder and the package caches, on Linux, macOS and Windows. On Windows it can still
-    read, use the network and end other programs (RP12).
+    read, use the network and end other programs (RP12). The exception is a command that asks
+    to leave the sandbox: Full access runs it without asking, as the owner chose (0109, P33).
+  - On Windows a folder the account may not change the security settings of cannot be
+    prepared; commands there run only outside the sandbox, and the Sandbox screen says so
+    (0110).
   - Where the sandbox is off or cannot start, approvals are the only control, and the Sandbox
     screen says so.
 - **R2. Prompt injection inside allowed actions.** Injected text can still steer which

@@ -8,6 +8,7 @@ import { useReview } from '../../stores/review'
 import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
 import { useUi } from '../../stores/ui'
+import { copyText } from '../../copy'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
 import { foldText } from '../../find/text'
 import { Button, IconButton } from '../../ui/Button'
@@ -31,7 +32,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       label={done ? 'Copied' : label}
       size="sm"
       onClick={() => {
-        void navigator.clipboard.writeText(text).then(() => {
+        void copyText(text).then((copied) => {
+          if (!copied) return
           setDone(true)
           window.setTimeout(() => setDone(false), 1500)
         })

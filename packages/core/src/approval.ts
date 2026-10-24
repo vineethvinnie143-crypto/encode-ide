@@ -22,10 +22,11 @@
  * profile folder (its keys, the browser's sign-ins, every chat).
  *
  * A command that asks to run outside the sandbox (`unsandboxed`) is the
- * person's to allow, under every policy including Full access: the sandbox is
- * what bounds a command that was approved, or never asked about, and a
- * command must not be able to lift it for itself. No rule, no Always allow
- * and no Reviewer answers that question; the settings can refuse it outright.
+ * person's to allow, under every policy but Full access, which is that answer
+ * given for the session (0109): the sandbox is what bounds a command that was
+ * approved, or never asked about, and a command must not be able to lift it
+ * for itself. No rule, no Always allow and no Reviewer answers that question;
+ * the settings can refuse it outright.
  *
  * The user's permission rules (settings files, `@encode/permissions`) come in
  * three places, always in this order: a deny rule refuses under every policy;

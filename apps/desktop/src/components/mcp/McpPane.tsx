@@ -5,6 +5,7 @@ import { STATE_CHIPS, SCOPE_LABELS, approvalWarning, cardActions, environmentLin
 import { shortPath } from '../../panels/permissions'
 import { useMcp } from '../../stores/mcp'
 import { useUi, type SettingsSection } from '../../stores/ui'
+import { copyText } from '../../copy'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Dialog } from '../../ui/Dialog'
@@ -369,12 +370,7 @@ function ServerCard({ server, report, onOpenTab }: { server: McpServerView; repo
 function Empty({ report }: { report: McpReport }) {
   const notify = useUi((state) => state.notify)
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(EXAMPLE)
-      notify('success', 'Copied. Paste it into one of the files below and change it to the server you want.')
-    } catch {
-      notify('error', 'eNCode could not copy that. Select the text and copy it yourself.')
-    }
+    if (await copyText(EXAMPLE)) notify('success', 'Copied. Paste it into one of the files below and change it to the server you want.')
   }
   return (
     <section className="mcp-empty" aria-label="No servers">

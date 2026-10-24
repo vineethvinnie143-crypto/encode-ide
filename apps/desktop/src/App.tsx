@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import AutomationModal from './components/AutomationModal'
 import ChatPanel from './components/Chat/ChatPanel'
 import RewindDialog from './components/Chat/RewindDialog'
@@ -188,7 +188,11 @@ export default function App() {
         <div className="sheet">
           {/* Settings is a page over the sessions and the work area; they stay mounted and laid out under it, so a
               draft, a terminal or a browser page is as it was when the page closes. */}
-          <div className={cx('sheet-work', settingsOpen && 'is-covered')} inert={settingsOpen}>
+          <div
+            className={cx('sheet-work', settingsOpen && 'is-covered', layout === 'split' && 'has-side')}
+            inert={settingsOpen}
+            style={{ '--sidebar-w': `${sidebarVisible ? sidebar.size : 0}px` } as CSSProperties}
+          >
             {sidebarVisible && (
               <>
                 <div className="sidebar-wrap" ref={sidebarRef} style={{ width: sidebar.size }}>

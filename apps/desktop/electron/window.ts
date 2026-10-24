@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { appearanceParams, type Appearance } from '../shared/appearance'
 import { NATIVE_CAPTIONS, captionOverlay, windowBackground, windowBorder } from './appearance'
+import { rendererMayUse } from './permissions'
 
 /** The Vite dev server, honoured only by an unpackaged build. */
 const devServer = app.isPackaged ? undefined : process.env.VITE_DEV_SERVER_URL
@@ -36,13 +37,12 @@ function rendererUrl(appearance: Appearance): string {
 }
 
 /**
- * A page can ask for permissions (camera, location, notifications, the list of installed fonts). eNCode's
- * own page may list the fonts, for Settings > Appearance; no other page or frame gets anything. Browser
- * tabs have sessions of their own, with their own rules (browser/guard.ts).
+ * A page can ask for permissions (camera, location, notifications, the list of installed fonts, the clipboard).
+ * eNCode's own page gets the few in permissions.ts; no other page or frame gets anything. Browser tabs have
+ * sessions of their own, with their own rules (browser/guard.ts).
  */
 function restrictPermissions(win: BrowserWindow): void {
-  const allowed = (permission: string, url: string | undefined, mainFrame: boolean | undefined) =>
-    permission === 'local-fonts' && mainFrame === true && url !== undefined && isRendererUrl(url)
+  const allowed = (permission: string, url: string | undefined, mainFrame: boolean | undefined) => rendererMayUse(permission, url, mainFrame, isRendererUrl)
   const session = win.webContents.session
   session.setPermissionRequestHandler((_contents, permission, callback, details) => callback(allowed(permission, details.requestingUrl, details.isMainFrame)))
   session.setPermissionCheckHandler((_contents, permission, _origin, details) => allowed(permission, details.requestingUrl, details.isMainFrame))

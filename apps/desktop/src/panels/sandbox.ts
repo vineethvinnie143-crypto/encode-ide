@@ -20,6 +20,17 @@ export interface Headline {
 
 /** The one sentence above the switches: is the agent's shell confined, and if not, what that means. */
 export function headline(report: SandboxReport): Headline {
+  if (report.state === 'active' && report.blocked.length > 0) {
+    const folders = report.blocked.length === 1 ? report.blocked[0] : `${report.blocked.length} folders (${report.blocked.join(', ')})`
+    const outside = report.settings.allowUnsandboxed
+      ? 'Commands there run only outside the sandbox: you are asked each time, unless you chose Full access.'
+      : 'Commands there do not run, because the settings do not let a command leave the sandbox.'
+    return {
+      tone: 'warning',
+      title: 'The sandbox cannot be used in this folder',
+      detail: `Windows does not let your account change the security settings of ${folders}, which the sandbox needs to mark it. This happens with a folder an administrator or an earlier Windows installation made, often on a second drive. ${outside} To use the sandbox here, work in a copy of the folder inside your user folder, or have the folder’s owner give your account Full control of it (Properties > Security), then Check again.`,
+    }
+  }
   if (report.state === 'active') {
     const through = report.engine ? ENGINES[report.engine] : 'the system’s sandbox'
     return {

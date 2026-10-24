@@ -107,6 +107,8 @@ export class Sandbox {
   private readonly prepared = new Map<string, Promise<void>>()
   private readonly listeners = new Set<() => void>()
   private progress: string | undefined
+  /** Folders the system does not let this account prepare, by the engine's words: commands there run only outside. */
+  private readonly refused = new Map<string, string>()
 
   constructor(private readonly options: SandboxOptions) {
     this.platform = options.platform ?? process.platform
@@ -130,6 +132,7 @@ export class Sandbox {
   refresh(): Promise<SandboxStatus> {
     this.probed = undefined
     this.prepared.clear()
+    this.refused.clear()
     return this.start()
   }
 
@@ -146,6 +149,11 @@ export class Sandbox {
   /** What is being prepared right now ("Preparing C:\\work for the sandbox"), or nothing. */
   working(): string | undefined {
     return this.progress
+  }
+
+  /** Folders the system does not let this account prepare (Windows: change their security settings), so commands there cannot be confined. */
+  blocked(): string[] {
+    return [...this.refused.values()]
   }
 
   /** Why a program cannot run in this system's sandbox (Windows: Git Bash), or nothing. */
@@ -253,6 +261,13 @@ export class Sandbox {
         .prepare(policy, (message) => {
           this.progress = message
           this.changed()
+        })
+        .then(() => {
+          for (const folder of policy.writable) this.refused.delete(folder.toLowerCase())
+        })
+        .catch((error: unknown) => {
+          if (error instanceof SandboxError && error.code === 'no-permission' && error.folder) this.refused.set(error.folder.toLowerCase(), error.folder)
+          throw error
         })
         .finally(() => {
           this.progress = undefined
