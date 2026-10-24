@@ -14,6 +14,7 @@ import SessionHeader from './components/SessionHeader'
 import { SettingsPage } from './components/settings/SettingsPage'
 import { CommandPalette } from './components/shell/CommandPalette'
 import { AboutDialog, ConfirmDialog } from './components/shell/Dialogs'
+import { RemoteDialog } from './components/shell/RemoteDialog'
 import IconRail from './components/shell/IconRail'
 import SessionSidebar from './components/shell/SessionSidebar'
 import TitleBar from './components/shell/TitleBar'
@@ -29,6 +30,7 @@ import { useEditor } from './stores/editor'
 import { useScreenReaderRunning } from './stores/editor-layout'
 import { useGit } from './stores/git'
 import { usePanels } from './stores/panels'
+import { useRemote } from './stores/remote'
 import { useSessions } from './stores/sessions'
 import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
@@ -94,6 +96,8 @@ export default function App() {
     void useSettings.getState().load()
     void useSessions.getState().init()
     void useGit.getState().refresh()
+    // The connection of a folder on another machine, for the sidebar's badge.
+    return useRemote.getState().init()
   }, [])
 
   useEffect(() => {
@@ -235,6 +239,7 @@ export default function App() {
       <StatusDialog />
       <CommandPalette />
       <AboutDialog />
+      <RemoteDialog />
       <InstallServerDialog />
       <EditorIssueDialog />
       <TurnReportDialog />

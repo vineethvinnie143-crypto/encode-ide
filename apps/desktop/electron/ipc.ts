@@ -16,18 +16,19 @@ import { turnReportFile } from './services/turn-report'
 import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
 import { InlineRequests, readInlineRequest } from './services/inline-suggest'
 import { exportSessionZip } from './services/export'
-import type { GitService } from './services/git'
 import type { LogService } from './services/logs'
 import type { ModelsService } from './services/models'
 import type { ModelTestStore } from './services/model-tests'
-import type { ReviewService } from './services/review'
 import { commitRequestOf, reviewActionOf, reviewOptionsOf, reviewScopeOf } from './services/review-input'
 import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
-import type { ShellService } from './services/shell'
 import type { InstructionsService } from './services/instructions'
 import type { SkillService } from './services/skills'
-import type { WorkspaceService } from './services/workspace'
+import type { FolderFiles } from './services/workspace'
+import { ConnectError } from './remote/machine'
+import type { FolderGit, FolderReview, FolderShell, Places } from './remote/places'
+import { NODE_RELEASE, nodePlatform } from './remote/bootstrap'
+import { parseRemotePath, parseTarget, remoteRoot, type SshTarget } from './remote/target'
 import { applyNativeAppearance } from './appearance'
 import { isRendererUrl } from './window'
 import { inlineState } from '../shared/inline'
@@ -41,6 +42,7 @@ import type {
   McpAction,
   PermissionsAction,
   PlanRequest,
+  RemoteOpenResult,
   SandboxAction,
   SearchOptions,
   SessionGoal,
@@ -55,16 +57,24 @@ import type {
 export interface IpcDeps {
   getWindow: () => BrowserWindow | null
   settings: SettingsService
-  workspace: WorkspaceService
-  shell: ShellService
+  /** The open folder's services, on this PC or on another machine (remote/places.ts). */
+  workspace: FolderFiles
+  shell: FolderShell
   schedules: ScheduleService
   skills: SkillService
   /** The person's own instructions and the open folder's instructions file. */
   instructions: InstructionsService
   models: ModelsService
-  git: GitService
-  review: ReviewService
+  git: FolderGit
+  review: FolderReview
   agent: AgentHostService
+  /** Where the open folder is: this PC, or another machine over SSH (ADR 0111). */
+  places: Places
+  remote: {
+    /** The host names of ~/.ssh/config. */
+    hosts(): string[]
+    installNode(target: SshTarget, platform: string): Promise<{ ok: true } | { ok: false; message: string; detail?: string }>
+  }
   /** What Test this model scored, by model. */
   modelTests: ModelTestStore
   /** Tells the agent host the settings changed. */
@@ -120,7 +130,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, instructions, models, git, review, agent, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, instructions, models, git, review, agent, places, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
   const host = agent.client
   /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
   const inline = new InlineRequests()
@@ -184,10 +194,12 @@ export function registerIpc(deps: IpcDeps): void {
     return folder
   }
 
-  const openWorkspaceAt = async (rootPath: string) => {
+  /** Opens a folder where its name says (remote/places.ts); one the system's dialog chose is always this PC's. */
+  const openWorkspaceAt = async (rootPath: string, options: { local?: boolean } = {}) => {
     agent.closeDocuments()
-    const opened = await workspace.open(rootPath)
-    settings.touchWorkspace(opened.root)
+    const opened = await places.open(rootPath, options)
+    // A folder elsewhere is remembered by its full name, so it opens there again.
+    settings.touchWorkspace(opened.remote?.uri ?? opened.root)
     await tellHostFolder(opened.root)
     return opened
   }
@@ -231,16 +243,46 @@ export function registerIpc(deps: IpcDeps): void {
       ? await dialog.showOpenDialog(win, { ...options, properties: [...options.properties] })
       : await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
     if (result.canceled || !result.filePaths[0]) return null
-    return openWorkspaceAt(result.filePaths[0])
+    return openWorkspaceAt(result.filePaths[0], { local: true })
   })
   handle('workspace:open-path', (rootPath: string) => openWorkspaceAt(String(rootPath)))
-  handle('workspace:get', () => workspace.current)
+  handle('workspace:get', () => places.shown)
   handle('workspace:close', async () => {
     agent.closeDocuments()
-    shell.disposeAll()
-    await workspace.close()
+    await places.close()
     settings.setLastWorkspace(null)
     await tellHostFolder(null)
+  })
+
+  // A folder on another machine (ADR 0111): what the person typed is checked here before it reaches ssh.
+  handle('remote:hosts', () => deps.remote.hosts())
+  handle('remote:state', () => places.remote?.current ?? null)
+  handle('remote:open', async (host: unknown, folder: unknown): Promise<RemoteOpenResult> => {
+    const target = parseTarget(String(host ?? ''))
+    if ('error' in target) return { ok: false, kind: 'input', message: target.error }
+    const where = parseRemotePath(String(folder ?? ''))
+    if (typeof where !== 'string') return { ok: false, kind: 'input', message: where.error }
+    try {
+      return { ok: true, workspace: await openWorkspaceAt(remoteRoot({ ...target, path: where })) }
+    } catch (error) {
+      if (!(error instanceof ConnectError)) return { ok: false, kind: 'failed', message: plainFailure('remote:open', error).message }
+      const { kind, message, detail, machine } = error.failure
+      const platform = machine ? nodePlatform(machine) : null
+      return {
+        ok: false,
+        kind,
+        message,
+        ...(detail ? { detail } : {}),
+        ...((kind === 'node-missing' || kind === 'node-old') && platform && NODE_RELEASE.builds[platform] ? { install: { platform, version: NODE_RELEASE.version } } : {}),
+      }
+    }
+  })
+  // Only a build of eNCode's own list is installed, and only in eNCode's folder there; the page names which one.
+  handle('remote:install-node', (host: unknown, platform: unknown) => {
+    const target = parseTarget(String(host ?? ''))
+    if ('error' in target) return { ok: false, message: target.error }
+    if (typeof platform !== 'string' || !Object.hasOwn(NODE_RELEASE.builds, platform)) return { ok: false, message: 'eNCode has no Node.js build for that machine.' }
+    return deps.remote.installNode(target, platform)
   })
   handle('workspace:recent', () => settings.get().recentWorkspaces)
   handle('workspace:list', (rel: string) => workspace.list(String(rel ?? '')))

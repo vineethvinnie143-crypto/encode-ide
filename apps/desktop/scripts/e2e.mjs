@@ -35,7 +35,7 @@ function fail(message) {
   process.exit(1)
 }
 
-for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/electron/overlay-preload.cjs', 'dist/renderer/index.html']) {
+for (const built of ['dist/electron/main.cjs', 'dist/electron/preload.cjs', 'dist/electron/agent-host.cjs', 'dist/electron/encode-server.cjs', 'dist/electron/overlay-preload.cjs', 'dist/renderer/index.html']) {
   if (!fs.existsSync(path.join(root, built))) fail(`${built} is missing. Run pnpm build first.`)
 }
 
@@ -82,6 +82,18 @@ fs.writeFileSync(
 fs.rmSync(shotsDir, { recursive: true, force: true })
 fs.mkdirSync(shotsDir, { recursive: true })
 
+// A machine over SSH (ADR 0111), played by this one where there is a POSIX shell: the stand-in ssh runs the command it
+// is given in a shell whose home is a folder of the run's own.
+const remoteHome = path.join(sandbox, 'remote-home')
+let fakeSsh = null
+if (!isWindows) {
+  fs.mkdirSync(path.join(remoteHome, 'project', 'src'), { recursive: true })
+  fs.writeFileSync(path.join(remoteHome, 'project', 'README.md'), '# On the other machine\n')
+  fs.writeFileSync(path.join(remoteHome, 'project', 'src', 'main.js'), 'export const where = "remote"\n')
+  fakeSsh = path.join(sandbox, 'fake-ssh')
+  fs.writeFileSync(fakeSsh, '#!/bin/sh\n# The last argument is the command for the machine; the others are options of ssh.\nfor last; do :; done\nHOME="$ENCODE_FAKE_REMOTE_HOME" exec sh -c "$last"\n', { mode: 0o755 })
+}
+
 const [debugPort, providerPort] = await Promise.all([freePort(), freePort()])
 const env = {
   ...process.env,
@@ -102,6 +114,7 @@ const env = {
   // What the window would have said when its page stopped; it reloads without asking.
   ENCODE_CRASH_LOG: path.join(sandbox, 'crashes.jsonl'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
+  ...(fakeSsh ? { ENCODE_SSH_PROGRAM: fakeSsh, ENCODE_FAKE_REMOTE_HOME: remoteHome } : {}),
 }
 delete env.VITE_DEV_SERVER_URL
 delete env.ELECTRON_RUN_AS_NODE

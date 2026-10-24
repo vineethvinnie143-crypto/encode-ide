@@ -30,6 +30,8 @@ export interface DiagnosticsInput {
   /** Counts only; what the conversations say never goes into a report. */
   sessions: { total: number; archived: number } | null
   workspaceOpen: boolean
+  /** A folder on another machine (ADR 0111): how its connection stands and what runs there, never the machine's name. */
+  remote?: { status: string; node?: string; system?: string } | null
   /** The open folder's language servers, with the last lines of those that stopped or failed; null with no folder open. */
   languageServers: (LanguageServersReport & { logs?: Record<string, string[]> }) | null
   /** The names (never the values) of the ENCODE_* variables the process was started with. */
@@ -112,7 +114,8 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],
     ['API keys', keys],
-    ['Folders', `${settings.recentWorkspaces.length} remembered, ${input.workspaceOpen ? 'one open' : 'none open'}`],
+    ['Folders', `${settings.recentWorkspaces.length} remembered, ${input.workspaceOpen ? (input.remote ? 'one open on another machine' : 'one open') : 'none open'}`],
+    ...(input.remote ? [['Other machine', `${input.remote.status}${input.remote.node ? `, Node ${input.remote.node}` : ''}${input.remote.system ? ` on ${input.remote.system}` : ''}`] as [string, string]] : []),
   ])
   out.push('', 'Models')
   for (const profile of settings.profiles) {

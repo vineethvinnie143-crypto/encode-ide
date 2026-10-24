@@ -6,6 +6,7 @@
  * nothing, so it starts signed out of everything and forgets it all when eNCode closes.
  */
 import { createHash } from 'node:crypto'
+import { isPublicAddress } from '@encode/permissions'
 import { isLocalHost } from '@encode/tools'
 
 /** The person's tabs: cookies and sign-ins kept between runs. */
@@ -71,6 +72,33 @@ export function followsOnItsOwn(opened: ReadonlySet<string>, url: string): boole
 /** The host an address opens, for the agent tab's list of opened hosts; null for anything not http or https. */
 export function openedHost(url: string): string | null {
   return hostOf(url)
+}
+
+/** Names that only a local network answers. */
+const LOCAL_SUFFIXES = ['.local', '.lan', '.internal', '.intranet', '.home.arpa', '.localdomain']
+
+/**
+ * While the open folder is on another machine (ADR 0111), the agent's tab loads nothing from this PC or its network: the
+ * agent's localhost is that machine's, not this PC's, and an agent there must not reach this PC's network through it,
+ * as its model requests cannot. A web address (http, https, ws, wss) whose host is this PC's name, a literal address
+ * that is not public, or a name that resolves to one is held; `resolve` gives a name's addresses. Null when it may load,
+ * otherwise the host that was held. Other schemes (data:, blob:, about:) load nothing from the network.
+ */
+export async function heldOnRemote(url: string, resolve: (host: string) => Promise<string[]>): Promise<string | null> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return null
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
+  if (!host) return null
+  // The URL parser has already turned 0x7f.1 and the like into dotted quads.
+  if (host.includes(':') || /^[\d.]+$/.test(host)) return isPublicAddress(host) ? null : host
+  if (isLocalHost(host) || !host.includes('.') || LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))) return host
+  const addresses = await resolve(host).catch(() => [])
+  return addresses.some((address) => !isPublicAddress(address)) ? host : null
 }
 
 /**

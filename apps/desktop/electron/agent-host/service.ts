@@ -143,6 +143,29 @@ export class AgentHostService {
     await this.ready()
   }
 
+  /**
+   * Ends the host that runs and starts another, from what `spawn` and `init` give now: the open folder moved to or
+   * from another machine (ADR 0111). The sessions are closed first, as when eNCode quits.
+   */
+  async restart(): Promise<void> {
+    if (this.disposed) return
+    const { peer, child } = this
+    this.child = undefined
+    this.peer = undefined
+    this.starting = undefined
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = undefined
+    }
+    if (peer && !peer.closed) await peer.request('shutdown', undefined, { timeoutMs: SHUTDOWN_TIMEOUT_MS }).catch(() => undefined)
+    peer?.close('The agent moved to another machine.')
+    child?.kill()
+    this.working.clear()
+    this.failures = 0
+    this.startedAt = 0
+    await this.ready()
+  }
+
   /** Tells the host which model and limits to use; takes effect on its next call. */
   configure(config: HostConfig): void {
     this.config = config

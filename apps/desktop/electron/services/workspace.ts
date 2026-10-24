@@ -1,4 +1,3 @@
-import { shell } from 'electron'
 import fssync from 'node:fs'
 import type { Dirent, Stats } from 'node:fs'
 import fs from 'node:fs/promises'
@@ -71,7 +70,23 @@ function validName(name: string): string {
   return trimmed
 }
 
+/** What the system does with a file it is asked to delete or show: Electron's on this PC, eNCode's own on another machine. */
+export interface WorkspaceSystem {
+  /** Moves a file or folder to the Recycle Bin or the Trash. */
+  trash(abs: string): Promise<void>
+  /** Shows a file in the system's file manager. */
+  reveal(abs: string): void
+}
+
+/** What the main process uses of an open folder: this PC's (WorkspaceService), or one on another machine (remote/machine.ts). */
+export type FolderFiles = Pick<
+  WorkspaceService,
+  'current' | 'rootPath' | 'rootRealPath' | 'resolve' | 'toRelative' | 'open' | 'close' | 'list' | 'listAll' | 'read' | 'readForEditor' | 'write' | 'createFile' | 'createDir' | 'rename' | 'remove' | 'reveal' | 'search'
+>
+
 export class WorkspaceService {
+  constructor(private readonly system: WorkspaceSystem) {}
+
   private root: string | null = null
   private rootReal: string | null = null
   private watcher: fssync.FSWatcher | null = null
@@ -288,14 +303,14 @@ export class WorkspaceService {
     if (abs === this.root) throw new Error('Cannot delete the workspace root')
     // A path that is gone already says so (fs's error is in words); the Recycle Bin's own says "Failed to parse path".
     await fs.lstat(abs)
-    await shell.trashItem(abs).catch(() => {
+    await this.system.trash(abs).catch(() => {
       throw new Error(`Could not move ${this.toRelative(abs)} to the ${process.platform === 'win32' ? 'Recycle Bin' : 'Trash'}.`)
     })
   }
 
   async reveal(rel: string): Promise<void> {
     const abs = this.resolve(rel)
-    shell.showItemInFolder(abs)
+    this.system.reveal(abs)
   }
 
   async search(options: SearchOptions): Promise<SearchResult> {

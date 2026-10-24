@@ -243,9 +243,34 @@ export interface FileEntry {
 }
 
 export interface OpenWorkspace {
+  /** The folder's path; on another machine, its path there. */
   root: string
   name: string
+  /** A folder on another machine over SSH (ADR 0111): the machine, and the folder's full name in eNCode. */
+  remote?: { label: string; uri: string }
 }
+
+/** How the connection to another machine stands (ADR 0111). */
+export interface RemoteState {
+  status: 'connecting' | 'uploading' | 'starting' | 'connected' | 'lost' | 'closed'
+  /** `user@host:port`, as the person wrote it. */
+  label: string
+  /** Why it was lost, in words. */
+  message?: string
+}
+
+/** Why a folder on another machine did not open, for the Open dialog. */
+export interface RemoteOpenFailure {
+  ok: false
+  kind: 'input' | 'ssh-missing' | 'auth' | 'host-key' | 'host-key-changed' | 'unreachable' | 'node-missing' | 'node-old' | 'failed'
+  message: string
+  /** What ssh said, for a Details fold. */
+  detail?: string
+  /** For node-missing and node-old: whether eNCode can put its own Node.js there, and what it is. */
+  install?: { platform: string; version: string }
+}
+
+export type RemoteOpenResult = { ok: true; workspace: OpenWorkspace } | RemoteOpenFailure
 
 export interface ReadFileResult {
   path: string
@@ -1661,6 +1686,18 @@ export interface EncodeApi {
     reveal(path: string): Promise<void>
     search(options: SearchOptions): Promise<SearchResult>
     onFileChanged(cb: (paths: string[]) => void): () => void
+  }
+  /** Folders on other machines over SSH (ADR 0111). */
+  remote: {
+    /** The host names of ~/.ssh/config, for the Host box. */
+    hosts(): Promise<string[]>
+    /** Connects (unless that machine's folder is open already) and opens the folder there. */
+    open(host: string, folder: string): Promise<RemoteOpenResult>
+    /** Puts eNCode's own Node.js on a machine that has none, after the person said yes. */
+    installNode(host: string, platform: string): Promise<{ ok: true } | { ok: false; message: string; detail?: string }>
+    /** The connection of the folder that is open, or null. */
+    state(): Promise<RemoteState | null>
+    onState(cb: (state: RemoteState) => void): () => void
   }
   settings: {
     get(): Promise<Settings>

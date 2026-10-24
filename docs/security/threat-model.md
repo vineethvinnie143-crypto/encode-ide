@@ -2577,3 +2577,66 @@ What is new:
   the prompt (trust asked first, commands, an approval answered in words, a proposed plan carried out).
 - The packaged smoke runs `bin\encode.cmd --version` and a print-mode request on the demo agent from the installed
   layout.
+
+## A folder on another machine over SSH (Remote folders)
+
+Written with the pull request that adds it ([0111](../adr/0111-a-folder-on-another-machine-opens-over-ssh-the-agent-works-there-and-the-keys-stay-on-the-pc.md)).
+
+What is new:
+
+- eNCode runs `ssh` to a machine the person names, sends its own program there (`encode-server.cjs`) and runs it on
+  the machine's Node.js; the agent host, the folder's files, git, terminals and the Review tab run there;
+- one connection carries three channels: the agent host's API, the agent's model and search requests (made by this
+  PC), and the folder services;
+- with the person's yes, an official Node.js is downloaded into `~/.encode-server` on the machine.
+
+The machine's account is trusted with its own files, as a terminal over SSH is. It is not trusted with this PC: its
+keys, its files, its network or its other folders.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| SR1 | A machine or folder name becomes an ssh option or a second argument (`-oProxyCommand=…`) | `parseTarget` refuses a leading `-`, spaces, controls and shell characters in the user, host and port; the host goes after `--`; eNCode's own options are fixed: `-T -e none -a -x`, `ClearAllForwardings`, `BatchMode`, timeouts. The folder never goes on the command line: it is sent as JSON on the folder channel. | Mitigated |
+| SR2 | The start command runs something else in the login shell | It is one single-quoted line with no quote, `!` or newline inside, built from a version, a checksum and a nonce that must each match `[A-Za-z0-9._:+-]`; the loader goes as base64. | Mitigated |
+| SR3 | An API key reaches the machine | The agent there is given stand-ins (`encode-remote-key-` and 48 random hex digits, per profile or provider, per connection). This PC swaps a stand-in for its key only in a header and only for the server the key was entered for; a stand-in in the URL or body, or one this PC did not give, is refused; redirects are not followed; an error body has the key taken out. The end-to-end run checks that the provider gets the key and no file on the machine holds it. | Mitigated |
+| SR4 | The machine uses this PC to reach this PC or its network | The `net` channel reaches only the origins of the model profiles and search providers. The Browser tool's tab (this PC's browser) cancels every request to a loopback, private, link-local or other special address, a local name, or a name that resolves to one, while the folder is on a machine; the check runs on this PC for each request. The Computer tool is off there. | Mitigated (SR-R3) |
+| SR5 | The program on the machine asks this PC for more than its folder needs | The folder channel serves the machine a fixed list of methods; this PC answers only four requests (a commit message, a review, the Turn view's record and its write-back), and only while the agent host runs on that machine, so a machine the folder left, or one not yet moved to, reaches no agent host. On the host channel the machine gets stand-ins for keys, and browser steps under SR4. Each request is checked against its schema by the side that answers it; at most 32 model requests are open at once, 64 MB each. | Mitigated |
+| SR6 | A login script prints what looks like eNCode's answer | eNCode's lines carry a nonce new for every connection; at most 64 KB may come before the start line. | Mitigated |
+| SR7 | A changed program runs as eNCode's on the machine | The loader checks `~/.encode-server/<version>/encode-server.cjs` against the checksum of the build on this PC at every start; an upload is written beside it and renamed into place only once its checksum is right. | Mitigated (SR-R1) |
+| SR8 | The Node.js eNCode installs is not the official one | It is asked for first; it comes from nodejs.org over HTTPS, is checked against a SHA-256 pinned in the source for each platform, and is unpacked with `umask 077` into `~/.encode-server` only. No root, nothing else changes. | Mitigated |
+| SR9 | Someone between this PC and the machine poses as it | `ssh` checks the person's known hosts. `BatchMode` means an unknown key fails instead of asking, and a changed key is refused with words that say what it can mean. | Mitigated |
+| SR10 | A password or one-time code is asked for and typed somewhere it should not be | eNCode never types one: `BatchMode` makes ssh fail at once. Key or ssh-agent sign-in only. | Mitigated |
+| SR11 | The agent there reads eNCode's own data (sessions, its program, its Node.js) | `~/.encode-server` is the agent host's profile folder there, off limits to the agent and to sandboxed commands as on this PC (0106). A stand-in it might read works only through this PC, to its server, while the connection lasts. | Mitigated (SR-R4) |
+| SR12 | A path meant for the machine touches this PC, or the other way round | While a machine's folder is open, a Windows path, the chats folder and this PC's recent folders are this PC's; the system's folder dialog always opens this PC's; anything else is the machine's. A recent folder on a machine keeps its `ssh://` name. | Mitigated |
+| SR13 | A machine that failed, or one being left, changes what the window shows | Each machine's connection state is kept apart in the window; file-change notices reach the window only from the machine whose folder is open. | Mitigated |
+| SR14 | A diagnostics report names the machine | It says that a folder is open on another machine, how the connection stands, and the Node.js and system there; never the host, user or path. | Mitigated |
+
+### Residual risks
+
+- **SR-R1.** Whoever controls the account on the machine controls the agent there: they can read the folder and the
+  sessions kept there, change the program or the Node.js it runs, approve the agent's steps, and spend the person's
+  model credit through this PC while the connection lasts. No key leaves this PC, and nothing they do reaches this
+  PC's files.
+- **SR-R2.** A message line may be up to 192 MB, so that large files fit; a hostile machine can make eNCode hold that
+  much memory for one message.
+- **SR-R3.** A name is resolved before the Browser tool's request, with the tab's own resolver and a cache of a minute;
+  a name that answers differently between the check and the connection (DNS rebinding) can still reach this PC's
+  network once.
+- **SR-R4.** The agent's commands there are sandboxed as that machine allows (bubblewrap on Linux when installed,
+  Seatbelt on macOS); without a sandbox there, approvals are the only limit, as on any such machine.
+
+### Verification
+
+- `electron/remote/target.test.ts`: names refused as options or split arguments, folders that climb out, ssh's
+  arguments with the host after `--`, hosts from `~/.ssh/config`.
+- `electron/remote/bootstrap.test.ts`: the start line in bash, dash and sh; a login script's output passed over; the
+  upload checked; the Node.js install against a local server, a wrong checksum refused.
+- `electron/remote/tunnel.test.ts`: the key swapped in a header for its own server only; stand-ins in the URL and body,
+  unknown stand-ins and other origins refused; redirects not followed; error bodies scrubbed.
+- `electron/remote/remote.test.ts`: the real program over a stand-in ssh; the method list enforced; ssh's failures in
+  plain words.
+- `electron/remote/places.test.ts`: which side a path is on; one machine closed only after the agent has moved.
+- `electron/browser/rules.test.ts`: the addresses the agent's tab holds while the folder is on a machine.
+- The end-to-end run's `remote` part: the provider receives the key, no file on the machine holds it, and a page of
+  this PC opened by the agent there is held.

@@ -664,6 +664,7 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runWideLineChecks()
+  await runRemoteChecks()
   await runCheckGateChecks()
   await runReviewGateChecks()
   await runSecondLookChecks()
@@ -4304,6 +4305,97 @@ const DEFAULT_APPEARANCE = {
 const theme = () => evaluate('document.documentElement.dataset.theme')
 
 /** The window at the two sizes the UI pull requests are reviewed at. */
+/** Every file under a folder, by its path. */
+async function filesUnder(dir) {
+  const found = []
+  for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...(await filesUnder(full)))
+    else if (entry.isFile()) found.push(full)
+  }
+  return found
+}
+
+/**
+ * A folder on another machine over SSH (ADR 0111), played by this machine: e2e.mjs names a stand-in ssh that runs the
+ * command in a shell with a home of its own. The folder opens there through the dialog, the agent works there with
+ * the key put in on this side only, and the folder on this PC comes back with its sessions.
+ */
+async function runRemoteChecks() {
+  const remoteHome = process.env.ENCODE_FAKE_REMOTE_HOME
+  if (!remoteHome) {
+    console.log('[smoke] folder on another machine: skipped, there is no POSIX shell here to play the machine')
+    return
+  }
+  console.log('[smoke] --- folder on another machine ---')
+  const project = path.join(remoteHome, 'project')
+  const localRoot = (await evaluate('window.eNCode.workspace.get()'))?.root
+  // The key of the test provider: the one the run stored already, or one for this part when it runs on its own.
+  const mock = (await evaluate('window.eNCode.settings.get()')).profiles.find((profile) => profile.id === 'local-mock')
+  if (!mock?.hasApiKey) await evaluate(`window.eNCode.settings.setProfileKey('local-mock', ${JSON.stringify(`sk-remote-${Date.now().toString(36)}`)})`)
+
+  // Through the project switcher, as a person would.
+  await click('.proj-switch')
+  await waitFor(menuOpen('Projects'), 4000, 'the project switcher')
+  if (!(await click('.ui-menu [role^="menuitem"]', 'Open folder on another machine'))) throw new Error('No Open folder on another machine in the project switcher')
+  await waitFor("!!document.querySelector('input[aria-label=\"Machine\"]')", 5000, 'the Open dialog for another machine')
+  await typeInto('input[aria-label="Machine"]', 'devbox')
+  await typeInto('input[aria-label="Folder on that machine"]', '~/missing')
+  await click('.ui-dialog button', 'Connect')
+  await waitFor("document.querySelector('.ui-dialog .problem-text')?.textContent.includes('does not exist')", 60000, 'a folder that is not there is refused in words')
+  await typeInto('input[aria-label="Folder on that machine"]', '~/project')
+  await screenshot('ui-dark-remote-dialog.png')
+  await click('.ui-dialog button', 'Connect')
+  await waitFor("document.querySelector('.proj-machine')?.textContent.includes('devbox') && document.querySelectorAll('.tree-row').length > 0", 60000, 'the folder open on devbox')
+  const shown = await evaluate('window.eNCode.workspace.get()')
+  if (shown?.root !== project || !shown.remote?.uri.startsWith('ssh://devbox/')) throw new Error(`The open folder is not the one on devbox: ${JSON.stringify(shown)}`)
+  const tree = await evaluate("[...document.querySelectorAll('.tree-row')].map((row) => row.textContent.trim())")
+  if (!tree.some((text) => text.includes('README.md'))) throw new Error(`The tree does not show the machine's files: ${tree}`)
+  const opened = await evaluate("window.eNCode.workspace.read('README.md')")
+  if (!opened.content.includes('On the other machine')) throw new Error('A file of the machine did not read back')
+  await screenshot('ui-dark-remote-open.png')
+
+  // The agent works there, through the model this PC reaches: the default scenario writes a file and runs a command.
+  await sendPrompt('Check the provider path on the other machine.')
+  await driveAgent('16-remote')
+  const written = await fs.readFile(path.join(project, 'provider-check.txt'), 'utf8').catch(() => '')
+  if (!written.includes('hello from a real provider stream')) throw new Error('The agent did not write its file on the machine')
+  // The key reached the provider from this side; the machine only ever held a stand-in for it.
+  const { authorization } = await (await fetch(`http://127.0.0.1:${providerPort}/__last-authorization`)).json()
+  if (!/^Bearer sk-/.test(authorization ?? '') || authorization.includes('encode-remote-key-')) throw new Error(`The provider was not sent the key: ${authorization}`)
+  const secret = authorization.slice('Bearer '.length)
+  const leaked = []
+  for (const file of await filesUnder(remoteHome)) if ((await fs.readFile(file)).includes(secret)) leaked.push(file)
+  if (leaked.length) throw new Error(`The key reached the other machine: ${leaked.join(', ')}`)
+  const logs = await filesUnder(path.join(remoteHome, '.encode-server', 'data', 'sessions'))
+  if (!logs.length) throw new Error("The machine keeps no session of its own: the agent did not run there")
+
+  // The Browser tool is this PC's browser: while the folder is on the machine, its tab opens nothing on this PC, so the
+  // page of this computer that the browser check opens is held, whatever the agent host there decided.
+  await sendPrompt('[scenario:browser-check] Check the greeter app in the browser.')
+  await driveAgent('16-remote-browser', 120000)
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const results = request.messages.filter((message) => message.role === 'tool').map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+  const first = results.slice(-8)[0] ?? ''
+  console.log('[smoke] remote browser:', JSON.stringify(first.slice(0, 240)))
+  if (/Greeter at http/.test(results.join('\n')) || !/ERR_BLOCKED_BY_CLIENT|opens nothing on this PC/.test(first)) throw new Error(`The agent’s tab opened a page of this PC while the folder was on another machine: ${JSON.stringify(first.slice(0, 600))}`)
+  if (await click('.side-panel .panel-tab.is-active .panel-tab-close')) await waitFor("!document.querySelector('.browser-agent-chip')", 4000, 'the agent’s tab closes')
+
+  // Back to this PC: its folder opens again, with its own sessions, and the machine stays a recent folder.
+  await click('.proj-switch')
+  await waitFor(menuOpen('Projects'), 4000, 'the project switcher')
+  const listed = await evaluate("[...document.querySelectorAll('.ui-menu [role^=\"menuitem\"]')].map((node) => node.textContent)")
+  if (!(await click('.ui-menu [role^="menuitem"]', path.basename(localRoot)))) throw new Error(`No ${path.basename(localRoot)} in the project switcher: ${listed}`)
+  await waitFor("!document.querySelector('.proj-machine') && document.querySelectorAll('.tree-row').length > 0", 30000, 'the folder on this PC again')
+  const back = await evaluate('window.eNCode.workspace.get()')
+  if (back?.root !== localRoot || back.remote) throw new Error(`The folder on this PC did not come back: ${JSON.stringify(back)}`)
+  const sessions = await evaluate('window.eNCode.agent.sessions()')
+  if (sessions.some((session) => session.projectRoot === project)) throw new Error("This PC's agent lists the machine's sessions")
+  const recents = (await evaluate('window.eNCode.settings.get()')).recentWorkspaces
+  if (!recents.some((root) => root.startsWith('ssh://devbox/'))) throw new Error(`The machine's folder is not a recent folder: ${recents}`)
+  console.log('[smoke] folder on another machine: ok')
+}
+
 async function screenshotSizes(name) {
   for (const [width, height] of [
     [1280, 800],
@@ -5910,7 +6002,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

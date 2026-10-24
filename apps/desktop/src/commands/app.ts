@@ -16,8 +16,9 @@ import { usePanels } from '../stores/panels'
 import { useSessions } from '../stores/sessions'
 import { useSettings } from '../stores/settings'
 import { useStatus } from '../stores/status'
-import { adjacentRecent, buildSidebar, nextAttention, visibleOrder } from '../stores/sidebar-model'
+import { adjacentRecent, buildSidebar, nextAttention, placeRecents, visibleOrder } from '../stores/sidebar-model'
 import { useUi, type TurnReportTarget } from '../stores/ui'
+import { useRemote } from '../stores/remote'
 import { useWorkspace } from '../stores/workspace'
 import { agentActions } from './agent'
 import { buildCommands, type AppActions } from './commands'
@@ -52,7 +53,7 @@ export const helpActions = {
 function sidebarOrder(): string[] {
   const model = buildSidebar(sessions().sessions, {
     workspaceRoot: useWorkspace.getState().workspace?.root ?? null,
-    recentRoots: useSettings.getState().settings?.recentWorkspaces ?? [],
+    recentRoots: placeRecents(useSettings.getState().settings?.recentWorkspaces ?? [], useWorkspace.getState().workspace),
     chatsFolder: useSettings.getState().settings?.chatsFolder,
   })
   return visibleOrder(model, new Set(ui().collapsedProjects))
@@ -197,6 +198,7 @@ function createAppActions(): AppActions {
     newSession: () => void sessions().newSession(),
     newChat: () => void sessions().newChat(),
     openFolder: () => void useWorkspace.getState().openDialog(),
+    openRemote: () => useRemote.getState().show(),
     quickOpen: (query) => ui().setQuickOpenOpen(true, query),
     save: () => {
       // Out of habit, on the Settings page: it keeps each change as it is made.

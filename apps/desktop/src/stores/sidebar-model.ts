@@ -2,7 +2,8 @@
  * What the session sidebar shows, worked out from the sessions and their
  * live state. Pure, so the grouping, ordering and guard rules are unit tested.
  */
-import type { AgentStatus, SessionSummary } from '@shared/types'
+import { remoteHost, remoteParts } from '@shared/remote'
+import type { AgentStatus, OpenWorkspace, SessionSummary } from '@shared/types'
 import { isToday } from '../ui/time'
 
 export type RowStatus = 'running' | 'approval' | 'unread' | 'idle'
@@ -33,7 +34,36 @@ export function sameRoot(a: string | null | undefined, b: string | null | undefi
 }
 
 export function projectName(root: string): string {
+  // A folder on another machine that is not open says which machine (ADR 0111).
+  const remote = remoteParts(root)
+  if (remote) return `${remote.folder.split('/').filter(Boolean).pop() ?? remote.folder} (${remoteHost(remote.machine)})`
   return root.split(/[\\/]/).filter(Boolean).pop() ?? root
+}
+
+/**
+ * The recent folders as the sidebar lists them. While a folder on another machine is open, that machine's folders are
+ * named by their paths there, as its sessions name them; other machines' keep their full names.
+ */
+/**
+ * The recent folders the sidebar groups sessions under: those of the place that is open, since its agent holds only
+ * their sessions. The project switcher lists the others.
+ */
+export function placeRecents(recents: readonly string[], workspace: Pick<OpenWorkspace, 'remote'> | null | undefined): string[] {
+  const machine = workspace?.remote ? remoteParts(workspace.remote.uri)?.machine : undefined
+  if (!machine) return recents.filter((root) => !remoteParts(root))
+  return recents.flatMap((root) => {
+    const parts = remoteParts(root)
+    return parts && parts.machine === machine && parts.folder.startsWith('/') ? [parts.folder] : []
+  })
+}
+
+export function shownRecents(recents: readonly string[], workspace: Pick<OpenWorkspace, 'remote'> | null | undefined): string[] {
+  const machine = workspace?.remote ? remoteParts(workspace.remote.uri)?.machine : undefined
+  if (!machine) return [...recents]
+  return recents.map((root) => {
+    const parts = remoteParts(root)
+    return parts && parts.machine === machine && parts.folder.startsWith('/') ? parts.folder : root
+  })
 }
 
 export interface ProjectGroup {

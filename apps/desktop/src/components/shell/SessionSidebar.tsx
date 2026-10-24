@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { isRemoteRoot, remoteHost, remoteParts } from '@shared/remote'
 import type { SessionSummary } from '@shared/types'
 import { commandRegistry, sessionActions } from '../../commands/app'
 import { useShortcuts } from '../../commands/useShortcuts'
+import { useRemote } from '../../stores/remote'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
 import {
@@ -11,7 +13,9 @@ import {
   placeName,
   rootKey,
   rowStatus,
+  placeRecents,
   sameRoot,
+  shownRecents,
   type RowStatus,
 } from '../../stores/sidebar-model'
 import { useStatus } from '../../stores/status'
@@ -165,7 +169,11 @@ export default function SessionSidebar() {
   const activeId = useSessions((state) => state.activeId)
   const statuses = useStatus((state) => state.statusById)
   const workspace = useWorkspace((state) => state.workspace)
-  const recentRoots = useSettings((state) => state.settings?.recentWorkspaces)
+  const savedRecents = useSettings((state) => state.settings?.recentWorkspaces)
+  // The switcher lists every recent folder; the groups below, only those of the place that is open (stores/sidebar-model.ts).
+  const recentRoots = useMemo(() => shownRecents(savedRecents ?? [], workspace), [savedRecents, workspace])
+  const groupRoots = useMemo(() => placeRecents(savedRecents ?? [], workspace), [savedRecents, workspace])
+  const machines = useRemote((state) => state.machines)
   const chatsFolder = useSettings((state) => state.settings?.chatsFolder)
   const mode = useUi((state) => state.sidebarMode)
   const collapsed = useUi((state) => state.collapsedProjects)
@@ -173,8 +181,8 @@ export default function SessionSidebar() {
   const [menu, setMenu] = useState<{ x: number; y: number; session: SessionSummary } | null>(null)
 
   const model = useMemo(
-    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: recentRoots ?? [], chatsFolder }),
-    [sessions, workspace?.root, recentRoots, chatsFolder],
+    () => buildSidebar(sessions, { workspaceRoot: workspace?.root ?? null, recentRoots: groupRoots, chatsFolder }),
+    [sessions, workspace?.root, groupRoots, chatsFolder],
   )
   const groups = useMemo(() => activityGroups(sessions, statuses), [sessions, statuses])
   const archived = useMemo(() => sessions.filter((session) => session.archived).sort((a, b) => b.updatedAt - a.updatedAt), [sessions])
@@ -187,7 +195,8 @@ export default function SessionSidebar() {
   }
 
   const contextEntries = (session: SessionSummary): MenuEntry[] => {
-    const others = model.projects.filter((project) => !sameRoot(project.root, session.projectRoot)).slice(0, 8)
+    // A session stays on its machine: another machine's folders are not offered.
+    const others = model.projects.filter((project) => !isRemoteRoot(project.root) && !sameRoot(project.root, session.projectRoot)).slice(0, 8)
     const toChats = chatsFolder && !isChat(session, chatsFolder) ? chatsFolder : null
     const entries: MenuEntry[] = [
       { id: 'rename', label: 'Rename', shortcut: 'F2', onSelect: () => setRenamingId(session.id) },
@@ -220,10 +229,14 @@ export default function SessionSidebar() {
       id: rootKey(root),
       label: placeName(root, chatsFolder),
       checked: sameRoot(root, workspace?.root),
-      onSelect: () => void useWorkspace.getState().openPath(root),
+      // A folder of another machine connects there first, in the dialog that shows how it goes.
+      onSelect: () => void (isRemoteRoot(root) ? useRemote.getState().openRecent(root) : useWorkspace.getState().openPath(root)),
     }))
     if (entries.length) entries.push({ kind: 'separator', id: 'sep-open' })
-    entries.push({ id: 'open', label: 'Open folder…', shortcut: commandRegistry.shortcut('file.openFolder'), onSelect: () => void useWorkspace.getState().openDialog() })
+    entries.push(
+      { id: 'open', label: 'Open folder…', shortcut: commandRegistry.shortcut('file.openFolder'), onSelect: () => void useWorkspace.getState().openDialog() },
+      { id: 'open-remote', label: 'Open folder on another machine…', onSelect: () => commandRegistry.run('file.openRemote') },
+    )
     return entries
   }
 
@@ -244,6 +257,13 @@ export default function SessionSidebar() {
 
   const inChats = workspace ? sameRoot(workspace.root, chatsFolder) : false
   const place = workspace ? (inChats ? 'Chats' : workspace.name) : null
+  // A folder on another machine shows the machine, and how the connection stands when it is not up.
+  const machine = workspace?.remote ? remoteHost(remoteParts(workspace.remote.uri)?.machine ?? workspace.remote.label) : null
+  const connection = workspace?.remote ? machines[workspace.remote.label] : undefined
+  const linkState = machine ? (connection?.status === 'lost' ? 'lost' : connection && connection.status !== 'connected' ? 'connecting' : 'up') : null
+  const switchTitle = workspace?.remote
+    ? `${workspace.root} on ${workspace.remote.label}${linkState === 'lost' ? ` (connection lost${connection?.message ? `: ${connection.message}` : ''})` : linkState === 'connecting' ? ' (connecting)' : ''}`
+    : (workspace?.root ?? 'Open a folder')
 
   return (
     <aside className="session-sidebar" aria-label="Sessions">
@@ -253,9 +273,16 @@ export default function SessionSidebar() {
           width={280}
           entries={switcherEntries}
           trigger={(props) => (
-            <button type="button" className="proj-switch" title={workspace?.root ?? 'Open a folder'} {...props}>
-              <span className="proj-mark">{(place ?? 'e').slice(0, 1).toLowerCase()}</span>
+            <button type="button" className="proj-switch" title={switchTitle} {...props}>
+              {/* On another machine the machine's chip says where instead, so a narrow sidebar keeps the folder's name. */}
+              {!machine && <span className="proj-mark">{(place ?? 'e').slice(0, 1).toLowerCase()}</span>}
               <span className="proj-name">{place ?? 'No folder open'}</span>
+              {machine && (
+                <span className={cx('proj-machine', linkState && `is-${linkState}`)}>
+                  <span className="proj-machine-dot" aria-hidden="true" />
+                  <span className="proj-machine-name">{machine}</span>
+                </span>
+              )}
               <ChevronDown size={14} className="muted" />
             </button>
           )}

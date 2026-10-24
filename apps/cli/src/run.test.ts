@@ -157,7 +157,7 @@ describe('the encode command', () => {
     const version = mainIo(where, ['--version'])
     assert.equal(await main(version), 0)
     await settle()
-    assert.match(version.out(), /^eNCode \d+\.\d+\.\d+\n$/)
+    assert.match(version.out(), /^eNCode \d+\.\d+\.\d+(?: [a-z]+, commit [0-9a-f]{7}(?: \+ local changes)?)?\n$/)
     const help = mainIo(where, ['-h'])
     assert.equal(await main(help), 0)
     await settle()
