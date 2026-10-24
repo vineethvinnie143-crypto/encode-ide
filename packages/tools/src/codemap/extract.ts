@@ -55,6 +55,8 @@ const MAX_DEFINITIONS = 2_000
 const SHOWN_CHARS = 110
 /** How much of a definition's line is searched for secrets: many times what is shown. */
 const SEARCHED_CHARS = 1_000
+/** What of a line the definition rules read. */
+const RULE_CHARS = 1_000
 
 const LANGUAGES: Record<string, { language: string; syntax: Syntax; rules: Rules }> = {}
 
@@ -251,25 +253,22 @@ const KOTLIN_RULES: Rules = [
   ...OO_RULES,
 ]
 
+// A C or C++ type word with its template arguments, two deep (`std::map<int, std::vector<char*>>`), then the spaces,
+// `*` and `&` before the next word. Each part takes characters the others do not, so a line that does not match fails
+// in one pass: with `*` and `&` allowed in three parts in a row, a line of a thousand of them took seconds.
+const C_ARGS = String.raw`(?:<[^<>;(){}]*(?:<[^<>;(){}]*(?:<[^<>;(){}]*>[^<>;(){}]*)*>[^<>;(){}]*)*>)?`
+const C_TEMPLATE = String.raw`(?:template\s*<[^>]*>\s*)?`
+const C_WORD = String.raw`(?:(?:::)?[A-Za-z_]\w*${C_ARGS}(?:::[A-Za-z_]\w*${C_ARGS})*[\s*&]+)`
+
 const C_RULES: Rules = [
   { re: /^\s*(?:template\s*<.*>\s*)?(?:class|struct|union)\s+(?:\w+\s+)*?([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^;{]*)?\{?\s*$/, kind: 'class', container: 'members' },
   { re: /^\s*(?:typedef\s+)?enum(?:\s+class|\s+struct)?\s+([A-Za-z_]\w*)\s*(?::[^;{]*)?\{?\s*$/, kind: 'enum' },
   { re: /^\s*namespace\s+([\w:]+)\s*\{/, kind: 'module', container: 'transparent' },
   { re: /^\s*#\s*define\s+([A-Za-z_]\w*)/, kind: 'macro', anywhere: true },
   { re: /^\s*typedef\b[^;]*?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;/, kind: 'type' },
-  {
-    re: /^\s*(?:template\s*<[^>]*>\s*)?(?:(?:static|inline|extern|constexpr|virtual|explicit|const|unsigned|signed|struct|enum|friend)\s+)*[\w:<>,*&~]+(?:\s+|\s*[*&]+\s*)(?:[\w:<>,*&]+\s+)*?[*&]*([A-Za-z_~][\w~]*(?:::[A-Za-z_~][\w~]*)*)\s*\([^;]*$/,
-    kind: 'function',
-  },
-  {
-    re: /^\s*(?:(?:static|inline|extern|const|unsigned|signed|struct|enum)\s+)*[\w:<>,*&]+(?:\s+|\s*[*&]+\s*)[*&]*([A-Za-z_]\w*)\s*\([^)]*\)\s*;/,
-    kind: 'function',
-  },
-  {
-    re: /^\s*(?:(?:virtual|static|inline|explicit|constexpr|friend)\s+)*(?:[\w:<>,*&~]+(?:\s+|\s*[*&]+\s*))*?[*&]*([A-Za-z_~][\w~]*)\s*\(/,
-    kind: 'method',
-    member: true,
-  },
+  { re: new RegExp(String.raw`^\s*${C_TEMPLATE}${C_WORD}+([A-Za-z_~][\w~]*(?:::[A-Za-z_~][\w~]*)*)\s*\([^;]*$`), kind: 'function' },
+  { re: new RegExp(String.raw`^\s*${C_TEMPLATE}${C_WORD}{1,6}([A-Za-z_]\w*)\s*\([^)]*\)\s*;`), kind: 'function' },
+  { re: new RegExp(String.raw`^\s*${C_TEMPLATE}${C_WORD}*([A-Za-z_~][\w~]*)\s*\(`), kind: 'method', member: true },
 ]
 
 const SHELL_RULES: Rules = [
@@ -478,10 +477,12 @@ export function extract(file: string, text: string): Extracted | undefined {
       else scope = depth === transparent ? 'top' : 'nested'
     }
 
+    // A definition starts near the start of its line; reading a long line's start bounds what a rule can cost.
+    const head = codeLine.length > RULE_CHARS ? codeLine.slice(0, RULE_CHARS) : codeLine
     for (const rule of spec.rules) {
       if (scope === 'nested' && !rule.anywhere) continue
       if (rule.member ? scope !== 'member' : scope === 'member' && !rule.anywhere) continue
-      const match = rule.re.exec(codeLine)
+      const match = rule.re.exec(head)
       if (!match) continue
       const at = match.index + match[0].lastIndexOf(match[rule.group ?? 1])
       // The name as written in the file, at the place the code has it.

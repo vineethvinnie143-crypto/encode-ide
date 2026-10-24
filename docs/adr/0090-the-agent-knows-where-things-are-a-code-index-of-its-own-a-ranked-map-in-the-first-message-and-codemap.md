@@ -63,6 +63,12 @@ names it uses.
   constant is cut at its `=`, so its value is never kept. A file keeps at most 2,000 definitions and its 600 most used
   names. What is kept is copied out of the file's text, so the text is not held in memory. That is about 9 MB for
   each thousand files of eNCode's own code, measured, indexed at about 1,200 files a second.
+- **Bounded on long lines.** The definition rules read a line's first 1,000 characters. C's and C++'s function rules
+  are built from parts that take different characters (a type word with its template arguments, then spaces, `*` and
+  `&`), so a line that does not match fails in one pass. Written the first way, with `*` and `&` allowed in three parts
+  in a row, a line of a thousand of them took half a second and one of four thousand half a minute. The new rules also
+  read declarations behind export macros (`ZEND_API void f(...);`) and no longer take a constructor's list of members
+  (`: base(x)`) for functions, checked on 4,000 headers of `/usr/include` and native modules.
 
 ### The map
 

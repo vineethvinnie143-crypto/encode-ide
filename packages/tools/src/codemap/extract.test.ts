@@ -152,14 +152,24 @@ describe('the definitions of a file', () => {
 
   it('reads a line of hundreds of thousands of characters in about the time it takes to read it', () => {
     // Found by fuzzing: the secret search on letters with no digit, and Lua's signature on `function` with no `(`, took
-    // seconds, and grow with the square of the line.
+    // seconds, and grow with the square of the line; C's function rules on a run of `*` or `&` grew with its cube.
     const started = performance.now()
     const letters = extract('a.ts', `export function big(x = "${'abcdefghij'.repeat(30_000)}") {}\nexport function next() {}\n`)!
     const lua = extract('a.lua', `function f(${'function '.repeat(30_000)}\n`)!
+    const c = extract('a.c', `${'*'.repeat(100_000)}\n${'&'.repeat(100_000)}\nint a${'*'.repeat(100_000)}(;\n${'static '.repeat(20_000)}\nint tail(void) {}\n`)!
     assert.ok(performance.now() - started < 1_500, `${Math.round(performance.now() - started)} ms`)
     assert.deepEqual(letters.definitions.map((definition) => definition.name), ['big', 'next'])
     assert.ok(letters.definitions[0].text.length <= 110)
     assert.deepEqual(lua.definitions.map((definition) => definition.name), ['f'])
+    assert.deepEqual(c.definitions.map((definition) => definition.name), ['tail'])
+  })
+
+  it("reads C's declarations behind export macros, and not a constructor's list of members", () => {
+    assert.deepEqual(
+      shown('a.h', ['ZEND_API void ZEND_FASTCALL zend_hash_clean(HashTable *ht);', 'PHPAPI zend_string *php_escape_shell_cmd(const char *str);', 'extern _X_EXPORT int GetDefaultPointSize ( void );', 'std::map<std::string, std::vector<int*>> &index_of(const char **names)', '{', '}'].join('\n')),
+      ['1 function zend_hash_clean', '2 function php_escape_shell_cmd', '3 function GetDefaultPointSize', '4 function index_of'],
+    )
+    assert.deepEqual(shown('a.cpp', ['class Heap {', 'public:', '  template <class U> void destroy(U* p) { p->~U(); }', '  Heap(int size)', '    : base_type(size), m_size(0)', '  {}', '  virtual ~Heap();', '};'].join('\n')), ['1 class Heap', '3 method Heap.destroy', '4 method Heap.Heap', '7 method Heap.~Heap'])
   })
 
   it('reads Svelte and Vue from their scripts only', () => {
