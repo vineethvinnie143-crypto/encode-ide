@@ -668,9 +668,10 @@ async function runProviderPhase() {
   await runInlineSuggestionChecks()
   await runEditorIssueChecks()
   await runComputerChecks()
-  await runMoreSettingsChecks()
   await runCompactionChecks()
   await runNamingChecks()
+  // After a request of its own (naming), since the checks before reset their sessions: Usage has something to count.
+  await runMoreSettingsChecks()
 }
 
 async function providerStats() {
