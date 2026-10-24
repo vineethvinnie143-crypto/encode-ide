@@ -795,6 +795,9 @@ note and left out.
 With a model that sees pictures (Claude, GPT-4o or later, Gemini, some free ones), ask about what the screenshot
 shows. With one that cannot, the chat says so once, and the model is told a picture is there without seeing it:
 choose a model that reads images for that role in Settings. A PDF goes as its text, its first 20 pages.
+An OpenRouter preset (`@preset/...`) is sent pictures from the start; after its first answer eNCode knows the model
+behind it (what it can read, its window and price), and if that model cannot read pictures, the same message goes again
+at once with a note in their place.
 
 What is most useful to hear: a picture that comes out blurred or cut, a file refused that should not be, and a paste
 that attached a picture when you wanted the text (or the other way round).

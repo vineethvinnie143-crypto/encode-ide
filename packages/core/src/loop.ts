@@ -645,6 +645,7 @@ export class AgentLoop {
     const { o } = this
     let overflows = 0
     let empties = 0
+    let unseenRetry = false
     for (;;) {
       // A conversation with pictures goes to a model of the role that sees them, where one is ready (ADR 0113).
       const query = { ...this.query(), ...(hasImages(o.conversation.messages()) ? { images: true } : {}) }
@@ -716,6 +717,12 @@ export class AgentLoop {
       })
 
       if (outcome.kind === 'paused') {
+        // Sent pictures, the model refused them (a preset not yet known to be one that reads them): now known, the call
+        // goes again with a note in place of each, once (ADR 0117).
+        if (!blind && query.images && !unseenRetry && (await o.client.budget(this.callRole, query)).images === false) {
+          unseenRetry = true
+          continue
+        }
         const { reason, message, detail, retryAt } = outcome
         return { kind: 'end', end: { kind: 'paused', reason, message, ...(detail ? { detail } : {}), ...(retryAt ? { retryAt } : {}) } }
       }

@@ -296,6 +296,27 @@ describe('a session', () => {
     assert.equal(told().length, 2)
   })
 
+  it('sends the pictures again as notes, at once, when the model turns out not to read them (ADR 0117)', async () => {
+    const client = { images: true as boolean }
+    const h = await sessionHarness({
+      client,
+      // The router sent the picture, the preset's model refused it and is now known not to read pictures.
+      script: (_request, step) => {
+        if (step > 0) return { text: 'ok' }
+        client.images = false
+        return { outcome: { kind: 'paused', reason: 'no-model', message: 'None of the models chosen for the main agent that are ready can read images.' } }
+      },
+    })
+    await h.session.start({ text: 'look', mode: 'code', media: [{ name: 'shot.png', mediaType: 'image/png', data: 'iVBORw0KGgo=' }] })
+    const [first, second] = h.client.requests
+    assert.equal(h.client.requests.length, 2)
+    assert.equal(first.requirements.images, true)
+    assert.equal(second.requirements.images, false)
+    assert.match(JSON.stringify(second.payload.messages.at(-1)), /A picture is here, but the model in use cannot see pictures\./)
+    assert.ok(shown(h).some(([kind, text]) => kind === 'assistant' && text === 'ok'))
+    assert.ok(shown(h).some(([kind, text]) => kind === 'notice' && /cannot see pictures/.test(text ?? '')))
+  })
+
   it('notes a new day to the model', async () => {
     const h = await sessionHarness({ script: [{ text: 'ok' }] })
     await h.session.start({ text: 'one', mode: 'code' })
