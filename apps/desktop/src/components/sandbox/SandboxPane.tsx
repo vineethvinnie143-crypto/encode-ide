@@ -65,6 +65,15 @@ export default function SandboxPane() {
     }
   }
   const limits = limitLines(report)
+  const unmark = async (folders?: string[]) => {
+    const one = folders?.length === 1 ? folders[0] : undefined
+    const confirmed = await useUi.getState().askConfirm({
+      title: one ? 'Take the marks off this folder?' : `Take the marks off ${report.marked.length} folders?`,
+      body: `${one ? shortPath(one, 64) : 'They'} get${one ? 's' : ''} the permissions back that ${one ? 'it' : 'they'} had before the sandbox. A command running there now can no longer change files. This can take a while for a large folder.`,
+      confirmLabel: 'Remove marks',
+    })
+    if (confirmed) await run(one ? `unmark:${one}` : 'unmark', { type: 'unmark', ...(folders ? { folders } : {}) })
+  }
 
   return (
     <div className="settings-sandbox">
@@ -136,6 +145,38 @@ export default function SandboxPane() {
           )
         })}
       </div>
+
+      {report.marked.length > 0 && (
+        <section aria-label="Folders marked for the sandbox">
+          <div className="section-title">Folders marked for the sandbox</div>
+          <div className="settings-card sandbox-marks">
+            {report.marked.map((folder) => (
+              <div key={folder} className="settings-row">
+                <div className="settings-row-text">
+                  <code className="sandbox-mark-path" title={folder}>
+                    {shortPath(folder, 72)}
+                  </code>
+                </div>
+                <div className="settings-row-control">
+                  <Button size="sm" variant="ghost" busy={busy === `unmark:${folder}`} disabled={busy !== null} onClick={() => void unmark([folder])}>
+                    Remove marks
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="perm-add-help sandbox-marks-foot">
+            <span>
+              Windows marks these folders so that confined commands can change them and nothing else. Taking the marks off puts their permissions back as they were; one the agent works in again is marked again.
+            </span>
+            {report.marked.length > 1 && (
+              <Button size="sm" variant="ghost" busy={busy === 'unmark'} disabled={busy !== null} onClick={() => void unmark()}>
+                Remove all marks
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="perm-add-help">
         Saved in <code title={report.file}>{shortPath(report.file, 56)}</code>. A project’s own settings can make the sandbox stricter, never looser. Folders besides

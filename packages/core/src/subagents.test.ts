@@ -56,6 +56,7 @@ describe('agent definitions', () => {
       color: 'blue',
       prompt: 'Be careful.',
       source: 'user',
+      file: path.join(dir, 'a.md'),
     })
     assert.equal(b.role, 'planner', 'role wins over model')
     assert.equal(b.maxTurns, 100, 'the number of turns is capped')

@@ -1,5 +1,5 @@
 import { BrowserWindow, app, dialog, ipcMain, shell as osShell, type IpcMainInvokeEvent } from 'electron'
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { describeError, shownError } from '@encode/core'
@@ -10,6 +10,7 @@ import { aboutInfo, currentEnvironment } from './build-info'
 import { diagnosticsFileName } from './services/diagnostics'
 import { editorIssueFile } from './services/editor-issue'
 import { editorIssueFileName, readEditorIssueDraft } from '../shared/editor-issue'
+import { MAX_THEME_FILE_BYTES, normalizeTheme, themeFile, themeFromFile, type CustomTheme } from '../shared/themes'
 import { readTurnReportDraft, turnReportFileName, type TurnReportSaved } from '../shared/turn-report'
 import { turnReportFile } from './services/turn-report'
 import { noAnswer, readEditorAsk, readEditorChange } from './services/editor-ask'
@@ -24,6 +25,7 @@ import { commitRequestOf, reviewActionOf, reviewOptionsOf, reviewScopeOf } from 
 import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
 import type { ShellService } from './services/shell'
+import type { InstructionsService } from './services/instructions'
 import type { SkillService } from './services/skills'
 import type { WorkspaceService } from './services/workspace'
 import { applyNativeAppearance } from './appearance'
@@ -31,6 +33,7 @@ import { isRendererUrl } from './window'
 import { inlineState } from '../shared/inline'
 import type { SearchProviderId } from '../shared/search'
 import type {
+  AgentCreateInput,
   AgentStartInput,
   ApprovalAnswer,
   EditorChangeResult,
@@ -55,6 +58,8 @@ export interface IpcDeps {
   shell: ShellService
   schedules: ScheduleService
   skills: SkillService
+  /** The person's own instructions and the open folder's instructions file. */
+  instructions: InstructionsService
   models: ModelsService
   git: GitService
   review: ReviewService
@@ -91,6 +96,20 @@ export function approvalAnswerOf(answer: unknown): ApprovalAnswer {
   }
 }
 
+const AGENT_ROLES = ['main', 'explore', 'planner', 'reviewer', 'utility'] as const
+
+/** A new agent as the renderer may ask for one: a name, when to use it, read-only or not, and a role. */
+export function agentCreateInputOf(input: unknown): AgentCreateInput {
+  const given = (typeof input === 'object' && input !== null ? input : {}) as { name?: unknown; description?: unknown; readOnly?: unknown; role?: unknown }
+  const role = AGENT_ROLES.find((candidate) => candidate === given.role)
+  return {
+    name: typeof given.name === 'string' ? given.name.slice(0, 100) : '',
+    description: typeof given.description === 'string' ? given.description.slice(0, 2_000) : '',
+    readOnly: given.readOnly === true,
+    ...(role ? { role } : {}),
+  }
+}
+
 /** The largest file the editor shows a language server, in characters; the servers read no more from the disk. */
 const MAX_DOCUMENT_CHARS = 8 * 1024 * 1024
 
@@ -100,7 +119,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, models, git, review, agent, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, instructions, models, git, review, agent, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
   const host = agent.client
   /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
   const inline = new InlineRequests()
@@ -401,6 +420,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle('shell:complete', (id: string, line: string) => shell.complete(String(id), String(line)))
 
   handle('agent:sessions', () => host.sessions())
+  handle('agent:usage', () => host.usage())
   handle('agent:create', (options?: { projectRoot?: unknown }) => {
     const projectRoot = options?.projectRoot
     return host.create(projectRoot === null || typeof projectRoot === 'string' ? { projectRoot } : undefined)
@@ -487,6 +507,32 @@ export function registerIpc(deps: IpcDeps): void {
     writeFileSync(picked.filePath, await diagnostics(), 'utf8')
     return picked.filePath
   })
+  // A colour theme of the person's own, to a file they choose and back (ADR 0102). A test run names the file instead.
+  handle('appearance:export-theme', async (value: unknown): Promise<string | null> => {
+    const theme = normalizeTheme(value)
+    if (!theme) throw new Error('That is not one of your themes.')
+    const answered = app.isPackaged ? undefined : process.env.ENCODE_THEME_FILE
+    const win = getWindow()
+    const options = {
+      title: 'Save the theme',
+      defaultPath: join(app.getPath('downloads'), `${theme.name.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || 'theme'}.encode-theme.json`),
+      filters: [{ name: 'eNCode theme', extensions: ['json'] }],
+    }
+    const target = answered ?? (await (win && !win.isDestroyed() ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options))).filePath
+    if (!target) return null
+    writeFileSync(target, themeFile(theme), 'utf8')
+    return target
+  })
+  handle('appearance:import-theme', async (id: unknown): Promise<CustomTheme | null> => {
+    if (typeof id !== 'string') throw new Error('A theme needs an id.')
+    const answered = app.isPackaged ? undefined : process.env.ENCODE_THEME_FILE
+    const win = getWindow()
+    const options = { title: 'Open a theme', properties: ['openFile' as const], filters: [{ name: 'eNCode theme', extensions: ['json'] }] }
+    const file = answered ?? (await (win && !win.isDestroyed() ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options))).filePaths[0]
+    if (!file) return null
+    if (statSync(file).size > MAX_THEME_FILE_BYTES) throw new Error('That file is too large to be a theme.')
+    return themeFromFile(readFileSync(file, 'utf8'), id)
+  })
   // A report of an editor issue (ADR 0088): checked again here, and written where the user says, like diagnostics.
   handle('app:save-editor-issue', async (value: unknown): Promise<EditorIssueSaved> => {
     const draft = readEditorIssueDraft(value)
@@ -562,6 +608,21 @@ export function registerIpc(deps: IpcDeps): void {
     skills.create(String(name), description ? String(description) : undefined),
   )
   handle('skills:open-folder', () => skills.openFolder())
+  handle('skills:remove', (name: string) => skills.remove(String(name)))
+  handle('skills:reveal', (name: string) => skills.reveal(String(name)))
+  handle('agents:list', () => skills.agents())
+  handle('agents:read', (name: string) => skills.readAgent(String(name)))
+  handle('agents:create', (input: unknown) => skills.createAgent(agentCreateInputOf(input)))
+  handle('agents:remove', (name: string) => skills.removeAgent(String(name)))
+  handle('agents:reveal', (name: string) => skills.revealAgent(String(name)))
+  handle('agents:open-folder', () => skills.openAgentsFolder())
+  handle('instructions:read', () => instructions.read())
+  handle('instructions:write', (text: unknown, base: unknown) => {
+    if (typeof text !== 'string' || typeof base !== 'string') throw new Error('Instructions are text.')
+    return instructions.write(text, base)
+  })
+  handle('instructions:project', () => instructions.project())
+  handle('instructions:create-project', () => instructions.createProject())
   // The Permissions screen is about the folder that is open; the renderer never names one.
   handle('permissions:report', async () => {
     const root = workspace.current?.root

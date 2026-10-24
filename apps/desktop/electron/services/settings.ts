@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { DEFAULT_APPEARANCE, normalizeAppearance } from '../../shared/appearance'
 import { cleanKeybindings } from '../../shared/keybindings'
 import { isInlineSuggest } from '../../shared/inline'
-import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
+import { cleanEfforts, cleanRoles, DEFAULT_CONTEXT_CAP, isContextCap, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
 import type { AgentMode, ApprovalPolicy, AskAgain, CheckGate, LearnConventions, ErrorGate, FollowUp, Guide, HelpSmaller, ModelProfile, NotifyWhen, OfferStronger, ProfileKind, ReviewWork, SendKey, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
@@ -43,6 +43,7 @@ function defaults(): StoredSettings {
     policy: 'workspace-write',
     maxSteps: 30,
     maxGoalRounds: 8,
+    contextCap: DEFAULT_CONTEXT_CAP,
     computer: false,
     recentWorkspaces: [],
     lastWorkspace: null,
@@ -260,6 +261,7 @@ export class SettingsService {
       policy: normalizePolicy(input.policy, base.policy),
       maxSteps: clamp(input.maxSteps, 1, 100, base.maxSteps),
       maxGoalRounds: clamp(input.maxGoalRounds, 1, 100, base.maxGoalRounds),
+      contextCap: isContextCap(input.contextCap) ? input.contextCap : base.contextCap,
       computer: typeof input.computer === 'boolean' ? input.computer : base.computer,
       recentWorkspaces: Array.isArray(input.recentWorkspaces)
         ? input.recentWorkspaces.filter((r): r is string => typeof r === 'string').slice(0, 12)
@@ -317,6 +319,7 @@ export class SettingsService {
       policy: this.data.policy,
       maxSteps: this.data.maxSteps,
       maxGoalRounds: this.data.maxGoalRounds,
+      contextCap: this.data.contextCap,
       computer: this.data.computer,
       recentWorkspaces: [...this.data.recentWorkspaces],
       lastWorkspace: this.data.lastWorkspace,
@@ -404,6 +407,7 @@ export class SettingsService {
     if (patch.policy !== undefined) next.policy = normalizePolicy(patch.policy, next.policy)
     if (patch.maxSteps !== undefined) next.maxSteps = clamp(patch.maxSteps, 1, 100, 30)
     if (patch.maxGoalRounds !== undefined) next.maxGoalRounds = clamp(patch.maxGoalRounds, 1, 100, 8)
+    if (isContextCap(patch.contextCap)) next.contextCap = patch.contextCap
     if (typeof patch.computer === 'boolean') next.computer = patch.computer
     if (Array.isArray(patch.recentWorkspaces)) {
       next.recentWorkspaces = patch.recentWorkspaces.filter((r): r is string => typeof r === 'string').slice(0, 12)

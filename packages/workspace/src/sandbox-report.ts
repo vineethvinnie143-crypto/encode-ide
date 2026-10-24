@@ -25,6 +25,8 @@ export interface SandboxReport {
   working?: string
   /** The person's own settings file, where the switches are saved. */
   file: string
+  /** Folders the sandbox changed so that it can confine commands there (Windows: the integrity marks). */
+  marked: string[]
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -35,6 +37,11 @@ function plural(count: number, one: string, many: string): string {
 export function shellName(shell: ShellProgram, platform: NodeJS.Platform): string {
   if (shell.dialect === 'bash') return platform === 'win32' ? 'Git Bash' : 'bash'
   return /powershell\.exe$/i.test(shell.file) ? 'Windows PowerShell' : 'PowerShell'
+}
+
+/** The report with the folders the sandbox marked; a list that cannot be read is shown as none. */
+export async function withMarks(report: SandboxReport, sandbox: Sandbox | undefined): Promise<SandboxReport> {
+  return { ...report, marked: (await sandbox?.marks().catch(() => [])) ?? [] }
 }
 
 export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnapshot, home: string, platform: NodeJS.Platform, shell?: ShellProgram): SandboxReport {
@@ -89,5 +96,6 @@ export function sandboxReport(sandbox: Sandbox | undefined, snapshot: ConfigSnap
     problems: all.problems,
     ...(working ? { working } : {}),
     file: settingsFiles(home, '', platform === 'win32' ? path.win32 : path.posix).user,
+    marked: [],
   }
 }

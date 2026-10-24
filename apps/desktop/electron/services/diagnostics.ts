@@ -101,7 +101,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
         .map(([id, chords]) => `${id} ${chords.join(' or ') || 'none'}`)
         .join(', ') || 'as shipped',
     ],
-    ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
+    ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal, summarized past ${Math.round(settings.contextCap / 1000)}k tokens`],
     ['Language servers', `${settings.languageServers ? 'on' : 'off'}, errors before finishing ${settings.errorGate}`],
     ['Checks before finishing', settings.checkGate],
     ['Reviewer before finishing', settings.reviewWork],

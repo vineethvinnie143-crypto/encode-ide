@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CONTEXT_CAPS } from '@shared/models'
 import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
 import type { AskAgain, CheckGate, LearnConventions, ReviewWork, Settings } from '@shared/types'
 import { api } from '../../api'
@@ -8,7 +9,6 @@ import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { cx } from '../../ui/cx'
 import { Segmented, type SegmentedOption } from '../../ui/Segmented'
-import { Toggle } from '../../ui/Toggle'
 import { SearchSettings } from '../search/SearchSettings'
 import { CommitInput, SettingRow, SettingsGroup } from './Section'
 
@@ -34,7 +34,7 @@ const LEARN: SegmentedOption<LearnConventions>[] = [
   { value: 'off', label: 'Never' },
 ]
 
-/** Settings > Agent: what it may do without asking, the computer, web search, checks before it finishes and its limits. */
+/** Settings > Agent: what it may do without asking, web search, checks before it finishes and its limits. */
 export function AgentSection({ settings }: { settings: Settings }) {
   const save = useSettings((state) => state.save)
   const setSearchKey = useSettings((state) => state.setSearchKey)
@@ -104,19 +104,6 @@ export function AgentSection({ settings }: { settings: Settings }) {
         </SettingRow>
       </SettingsGroup>
 
-      {settings.computerSupported && (
-        <SettingsGroup title="Computer">
-          <SettingRow
-            id="agent.computer"
-            htmlFor="computer-use"
-            label="Let the agent use this computer"
-            help="It can look at an application and use the mouse and keyboard in it, one application at a time, and only after you allow that application. A banner shows while it works. Stop it with the banner's Stop button, with Ctrl+Alt+Esc, or by using the mouse or keyboard yourself. eNCode's own windows and password fields are never shown to it."
-          >
-            <Toggle id="computer-use" checked={settings.computer} onChange={(computer) => void save({ computer })} />
-          </SettingRow>
-        </SettingsGroup>
-      )}
-
       <section className="settings-group settings-web-search" data-setting="agent.search">
         <SearchSettings
           provider={settings.searchProvider}
@@ -170,6 +157,19 @@ export function AgentSection({ settings }: { settings: Settings }) {
               const steps = Math.round(Number(text))
               if (text.trim() && Number.isFinite(steps)) void save({ maxSteps: Math.max(1, Math.min(100, steps)) })
             }}
+          />
+        </SettingRow>
+        <SettingRow
+          id="agent.contextCap"
+          label="Summarize the conversation past"
+          help="Before a conversation grows past this, eNCode shortens old tool results and then summarizes the oldest part, whatever the model's own window. Every step sends the whole conversation, so a larger size costs more each step, and most models read a long one less well. A model with a smaller window is summarized sooner."
+        >
+          <Segmented
+            label="Summarize the conversation past"
+            size="sm"
+            value={String(settings.contextCap)}
+            options={CONTEXT_CAPS.map((cap) => ({ value: String(cap), label: cap >= 1_000_000 ? `${cap / 1_000_000}M` : `${cap / 1000}k` }))}
+            onChange={(cap) => void save({ contextCap: Number(cap) })}
           />
         </SettingRow>
       </SettingsGroup>

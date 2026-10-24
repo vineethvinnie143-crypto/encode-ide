@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { WorktreeInfo } from '@encode/tools'
-import { previewOf, type ConversationEntry, type PlanRequest, type SessionGoal, type SessionSummary, type TodoItem } from './ui'
+import { previewOf, type ConversationEntry, type DayUsage, type ModelUsage, type PlanRequest, type RequestUsage, type SessionGoal, type SessionSummary, type SessionUsage, type TodoItem, type UsageTally } from './ui'
 import {
   SESSION_FORMAT,
   type ContextRecord,
@@ -160,7 +160,54 @@ export function parseLog(text: string): SessionRecord[] {
 
 // ---------------------------------------------------------------- the log
 
-type IndexEntry = SessionSummary
+/** A session in the index: its summary, and what its requests used by day, which the list leaves out. */
+type IndexEntry = SessionSummary & { usage?: Record<string, DayUsage> }
+
+const emptyTally = (): UsageTally => ({ calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0, cost: 0, unpriced: 0 })
+
+function addTally(tally: UsageTally, used: Pick<ModelUsage, 'calls' | 'inputTokens' | 'cachedTokens' | 'outputTokens' | 'cost'>): void {
+  tally.calls += used.calls
+  tally.inputTokens += used.inputTokens
+  tally.cachedTokens += used.cachedTokens
+  tally.outputTokens += used.outputTokens
+  if (used.cost !== undefined) tally.cost += used.cost
+  else tally.unpriced += used.calls
+}
+
+/** "2026-10-24", on this computer's clock. */
+function dayOf(at: number): string {
+  const date = new Date(at)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** The calls of a request no model was named for: all of them in a request stored before models were kept. */
+function unnamedOf(usage: RequestUsage): ModelUsage | undefined {
+  const named = Object.values(usage.models ?? {})
+  const sum = (key: 'calls' | 'inputTokens' | 'cachedTokens' | 'outputTokens') => usage[key] - named.reduce((total, model) => total + model[key], 0)
+  const calls = sum('calls')
+  if (calls <= 0) return undefined
+  // The rest of the cost is theirs only when it is known whole and for every named model.
+  const cost = usage.cost !== undefined && named.every((model) => model.cost !== undefined) ? usage.cost - named.reduce((total, model) => total + model.cost!, 0) : undefined
+  return { calls, inputTokens: Math.max(0, sum('inputTokens')), cachedTokens: Math.max(0, sum('cachedTokens')), outputTokens: Math.max(0, sum('outputTokens')), ...(cost !== undefined ? { cost: Math.max(0, cost) } : {}) }
+}
+
+/** What a session's requests used, by the day each began (the Usage page). */
+export function usageByDay(entries: Iterable<ConversationEntry>): Record<string, DayUsage> {
+  const days: Record<string, DayUsage> = {}
+  for (const entry of entries) {
+    const usage = entry.usage
+    if (!usage?.calls) continue
+    const day = (days[dayOf(entry.createdAt)] ??= { ...emptyTally(), requests: 0, models: {} })
+    day.requests++
+    // The day is the sum of its models, so a model that reported its cost counts even when another in the request did not.
+    const unnamed = unnamedOf(usage)
+    for (const [name, used] of [...Object.entries(usage.models ?? {}), ...(unnamed ? [['', unnamed] as const] : [])]) {
+      addTally(day, used)
+      addTally((day.models[name] ??= emptyTally()), used)
+    }
+  }
+  return days
+}
 
 class FileSessionLog implements SessionLog {
   private state: Derived
@@ -331,10 +378,13 @@ function indexOf(derived: Derived): IndexEntry {
     entryCount: derived.entries.size,
     ...(derived.wakeup ? { wakeAt: derived.wakeup.at } : {}),
     ...(derived.worktree ? { worktree: derived.worktree.name } : {}),
+    usage: usageByDay(derived.entries.values()),
   }
 }
 
 export interface FileSessionStore extends SessionStore {
+  /** What each session's requests used, by day, archived ones included. */
+  usage(): Promise<SessionUsage[]>
   /** Writes the index now, and closes every open log. */
   dispose(): Promise<void>
 }
@@ -397,8 +447,8 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       const id = name.slice(0, -LOG_EXTENSION.length)
       present.add(id)
       const known = entries.get(id)
-      // An entry from before the index carried marks and previews is rebuilt.
-      let stale = !known || typeof known.entryCount !== 'number'
+      // An entry from before the index carried marks, previews and usage is rebuilt.
+      let stale = !known || typeof known.entryCount !== 'number' || !known.usage
       if (known && !stale) {
         try {
           stale = (await fs.stat(path.join(dir, name))).mtimeMs > written
@@ -473,7 +523,12 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       return [...entries.values()]
         .filter((entry) => filter?.root === undefined || entry.projectRoot === filter.root)
         .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map((entry) => ({ ...entry }))
+        .map(({ usage: _usage, ...entry }) => entry)
+    },
+
+    async usage() {
+      const entries = await loadIndex()
+      return [...entries.values()].filter((entry) => entry.usage && Object.keys(entry.usage).length).map((entry) => ({ id: entry.id, title: entry.title, projectRoot: entry.projectRoot, days: structuredClone(entry.usage!) }))
     },
 
     async create(create: CreateSessionOptions) {

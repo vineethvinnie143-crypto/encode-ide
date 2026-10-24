@@ -155,6 +155,45 @@ export interface RequestUsage {
   outputTokens: number
   /** US dollars, when every call reported what it cost. */
   cost?: number
+  /** The same, by the model that answered (the Usage page); absent in requests stored before it was kept. */
+  models?: Record<string, ModelUsage>
+}
+
+/** One model's calls in a request, or on a day. */
+export interface ModelUsage {
+  calls: number
+  inputTokens: number
+  cachedTokens: number
+  outputTokens: number
+  /** US dollars, when every one of these calls reported what it cost. */
+  cost?: number
+}
+
+/** A sum of model calls on the Usage page: what reported a cost is summed, what did not is counted. */
+export interface UsageTally {
+  calls: number
+  inputTokens: number
+  cachedTokens: number
+  outputTokens: number
+  /** US dollars, of the calls that reported what they cost. */
+  cost: number
+  /** Calls whose cost was not reported. */
+  unpriced: number
+}
+
+/** One day of a session's requests, by the day each began on this computer's clock. */
+export interface DayUsage extends UsageTally {
+  requests: number
+  /** By the model that answered; "" for calls of requests stored before the model was kept. */
+  models: Record<string, UsageTally>
+}
+
+/** What one session's requests used, by day ("2026-10-24"). */
+export interface SessionUsage {
+  id: string
+  title: string
+  projectRoot: string | null
+  days: Record<string, DayUsage>
 }
 
 export interface ApprovalRequest {

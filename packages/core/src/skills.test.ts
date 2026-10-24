@@ -98,7 +98,7 @@ describe('agent definitions', () => {
     })
     const found = loadAgentDefinitions([{ dir, source: 'workspace' }])
     assert.deepEqual(found, [
-      { name: 'reviewer', description: 'Reviews diffs', tools: ['Read', 'Grep'], role: 'reviewer', prompt: 'Be strict.', source: 'workspace' },
+      { name: 'reviewer', description: 'Reviews diffs', tools: ['Read', 'Grep'], role: 'reviewer', prompt: 'Be strict.', source: 'workspace', file: path.join(dir, 'reviewer.md') },
     ])
   })
 })

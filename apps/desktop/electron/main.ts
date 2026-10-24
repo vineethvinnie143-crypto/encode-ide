@@ -24,6 +24,7 @@ import { ReviewService } from './services/review'
 import { ScheduleService } from './services/schedules'
 import { SettingsService, serverOf } from './services/settings'
 import { ShellService } from './services/shell'
+import { InstructionsService } from './services/instructions'
 import { SkillService, migrateLegacySkills } from './services/skills'
 import { WorkspaceService } from './services/workspace'
 import { createMainWindow } from './window'
@@ -109,7 +110,14 @@ if (!gotLock) {
     const shell = new ShellService()
 
     migrateLegacySkills(path.join(userData, 'skills'), path.join(userDir, 'skills'))
-    const skills = new SkillService(() => workspace.current?.root ?? null, userDir, (dir) => osShell.openPath(dir))
+    const skills = new SkillService(
+      () => workspace.current?.root ?? null,
+      userDir,
+      (dir) => osShell.openPath(dir),
+      (file) => osShell.showItemInFolder(file),
+      (target) => osShell.trashItem(target),
+    )
+    const instructions = new InstructionsService(userDir, () => workspace.current?.root ?? null)
 
     applyNativeAppearance(settings.get().appearance, null)
     const win = createMainWindow(settings.get().appearance)
@@ -345,6 +353,7 @@ if (!gotLock) {
       shell,
       schedules,
       skills,
+      instructions,
       models,
       git,
       review,

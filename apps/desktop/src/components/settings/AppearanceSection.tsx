@@ -1,5 +1,6 @@
 import { useMemo, useRef, type KeyboardEvent } from 'react'
 import {
+  activeTheme,
   CODE_SIZES,
   FONT_ENCODE,
   FONT_SYSTEM,
@@ -21,6 +22,7 @@ import { keyToMove, moveIndex } from '../../ui/nav'
 import { Segmented, type SegmentedOption } from '../../ui/Segmented'
 import { Select, type SelectOption } from '../../ui/Select'
 import { SettingRow, SettingsGroup } from './Section'
+import { ThemeSettings } from './ThemeSettings'
 
 const MODES: SegmentedOption<ThemeMode>[] = [
   { value: 'system', label: 'System', icon: <Monitor size={14} /> },
@@ -60,7 +62,7 @@ function fontOptions(builtIn: SelectOption<string>[], installed: readonly string
 }
 
 /** The accent as colour swatches: a radio group, so arrow keys move between them. */
-function AccentPicker({ value, onChange }: { value: Accent; onChange: (accent: Accent) => void }) {
+function AccentPicker({ value, disabled, onChange }: { value: Accent; disabled?: boolean; onChange: (accent: Accent) => void }) {
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
   const selected = ACCENT_OPTIONS.findIndex((option) => option.value === value)
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -72,7 +74,7 @@ function AccentPicker({ value, onChange }: { value: Accent; onChange: (accent: A
     buttons.current[next]?.focus()
   }
   return (
-    <div className="accent-swatches" role="radiogroup" aria-label="Accent" onKeyDown={onKeyDown}>
+    <div className="accent-swatches" role="radiogroup" aria-label="Accent" aria-disabled={disabled || undefined} onKeyDown={disabled ? undefined : onKeyDown}>
       {ACCENT_OPTIONS.map((option, index) => (
         <button
           key={option.value}
@@ -85,6 +87,7 @@ function AccentPicker({ value, onChange }: { value: Accent; onChange: (accent: A
           aria-label={option.label}
           title={option.label}
           tabIndex={option.value === value ? 0 : -1}
+          disabled={disabled}
           className={cx('accent-swatch', `accent-${option.value}`, option.value === value && 'is-on')}
           onClick={() => onChange(option.value)}
         />
@@ -101,6 +104,9 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
   const set = <K extends keyof Appearance>(key: K, next: Appearance[K]) =>
     void save({ appearance: { ...(useSettings.getState().settings?.appearance ?? value), [key]: next } })
   const installed = useInstalledFonts()
+  // A theme of your own sets light or dark and the accent itself.
+  const custom = activeTheme(value)
+  const modes = useMemo(() => MODES.map((mode) => ({ ...mode, disabled: Boolean(custom) })), [custom])
   const uiFonts = useMemo(
     () =>
       fontOptions(
@@ -128,15 +134,16 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
   return (
     <>
       <SettingsGroup title="Theme">
-        <SettingRow id="appearance.theme" label="Mode" help="System follows Windows' light or dark setting.">
-          <Segmented label="Mode" value={value.mode} options={MODES} onChange={(mode) => set('mode', mode)} />
+        <SettingRow id="appearance.theme" label="Mode" help={custom ? `${custom.name} is ${custom.base}.` : "System follows Windows' light or dark setting."}>
+          <Segmented label="Mode" value={custom ? custom.base : value.mode} options={modes} onChange={(mode) => set('mode', mode)} />
         </SettingRow>
-        <SettingRow id="appearance.accent" label="Accent" help="Links, focus rings, selection and the Send button.">
-          <AccentPicker value={value.accent} onChange={(accent) => set('accent', accent)} />
+        <SettingRow id="appearance.accent" label="Accent" help={custom ? `${custom.name} has its own accent; change it below.` : 'Links, focus rings, selection and the Send button.'}>
+          <AccentPicker value={value.accent} disabled={Boolean(custom)} onChange={(accent) => set('accent', accent)} />
         </SettingRow>
         <SettingRow id="appearance.contrast" label="Contrast" help="High makes secondary text and borders stronger.">
           <Segmented label="Contrast" value={value.contrast} options={CONTRASTS} onChange={(contrast) => set('contrast', contrast)} />
         </SettingRow>
+        <ThemeSettings appearance={value} />
       </SettingsGroup>
 
       <SettingsGroup title="Fonts">

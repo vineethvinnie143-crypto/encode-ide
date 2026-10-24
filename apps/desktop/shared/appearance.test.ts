@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
+import { newTheme } from './themes'
 import {
   CAPTION_SYMBOL,
   DEFAULT_APPEARANCE,
@@ -53,6 +54,8 @@ describe('appearance', () => {
       codeFont: 'Cascadia Code',
       uiSize: 15,
       codeSize: 13,
+      theme: '',
+      themes: [],
     }
     assert.deepEqual(normalizeAppearance({ accent: 'cyan', motion: 'sideways' }, base), { ...base, accent: 'cyan' })
     assert.deepEqual(normalizeAppearance(undefined), DEFAULT_APPEARANCE)
@@ -76,9 +79,16 @@ describe('appearance', () => {
       codeFont: FONT_ENCODE,
       uiSize: 16,
       codeSize: 11,
+      theme: '',
+      themes: [],
     }
     const params = new URLSearchParams(appearanceParams(appearance))
     assert.deepEqual(appearanceFromParams(params), appearance)
+    // A theme of the person's own goes with it, and only the one in use.
+    const mine = newTheme('theme-night', 'Night', 'dark', '#ff7a90')
+    const themed = { ...appearance, theme: 'theme-night', themes: [newTheme('theme-day', 'Day', 'light'), mine] }
+    assert.deepEqual(appearanceFromParams(new URLSearchParams(appearanceParams(themed))), { ...appearance, theme: 'theme-night', themes: [mine] })
+    assert.deepEqual(appearanceFromParams(new URLSearchParams('theme=theme-night&themes=%5Bnot%20json')), DEFAULT_APPEARANCE, 'a broken theme is no theme')
     assert.deepEqual(appearanceFromParams(new URLSearchParams('mode=light&accent=pink')), {
       ...DEFAULT_APPEARANCE,
       mode: 'light',

@@ -18,7 +18,6 @@ function isTyping(target: EventTarget | null): boolean {
 export function dialogOpen(): boolean {
   const ui = useUi.getState()
   return (
-    ui.pluginsOpen ||
     ui.automationOpen ||
     ui.aboutOpen ||
     ui.statusOpen ||

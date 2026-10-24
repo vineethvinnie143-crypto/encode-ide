@@ -95,6 +95,8 @@ const env = {
   ENCODE_EDITOR_ISSUE_FILE: path.join(sandbox, 'editor-issue.json'),
   // Where Report a problem with this request writes without asking.
   ENCODE_TURN_REPORT_FILE: path.join(sandbox, 'turn-report.json'),
+  // Where a theme is exported to, and imported from, without asking.
+  ENCODE_THEME_FILE: path.join(sandbox, 'theme.json'),
   // Where the Windows notices go instead of the screen, one JSON line each, so the smoke can read them.
   ENCODE_NOTICES_FILE: path.join(sandbox, 'notices.jsonl'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',

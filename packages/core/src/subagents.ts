@@ -76,6 +76,8 @@ export interface SubagentDefinition extends SubagentType {
   /** An accent for the lists that show it. */
   color?: string
   source: 'builtin' | 'user' | 'workspace'
+  /** The file it was read from; built-in agents have none. */
+  file?: string
 }
 
 /**
@@ -208,6 +210,7 @@ export function loadAgentDefinitions(sources: readonly AgentSource[]): SubagentD
         ...(color && COLORS.has(color) ? { color } : {}),
         ...(body.trim() ? { prompt: body.trim() } : {}),
         source,
+        file: path.join(dir, file),
       })
     }
   }
@@ -526,8 +529,8 @@ class SubagentSurface implements Surface {
     entry.text = (entry.text ?? '') + text
   }
 
-  usage(usage: Usage): void {
-    this.parent.usage(usage)
+  usage(usage: Usage, model?: string): void {
+    this.parent.usage(usage, model)
   }
 
   fileChanged(path: string): void {

@@ -117,6 +117,7 @@ import {
   type CheckpointInfo,
   type ConversationEntry,
   type EntryBest,
+  type ModelUsage,
   type PlanRequest,
   type RequestUsage,
   type RewindOutcome,
@@ -419,6 +420,19 @@ interface TurnState {
   worktree?: string
 }
 
+
+/** A model call added to a sum of them. A cost is kept only when every call said what it cost: a sum of some would read as the whole. */
+function addUsage(before: ModelUsage | undefined, usage: Usage): ModelUsage {
+  const calls = before?.calls ?? 0
+  const priced = usage.cost !== undefined && (calls === 0 || before?.cost !== undefined)
+  return {
+    calls: calls + 1,
+    inputTokens: (before?.inputTokens ?? 0) + usage.inputTokens,
+    cachedTokens: (before?.cachedTokens ?? 0) + usage.cacheReadTokens,
+    outputTokens: (before?.outputTokens ?? 0) + usage.outputTokens,
+    ...(priced ? { cost: (before?.cost ?? 0) + usage.cost! } : {}),
+  }
+}
 export class AgentSession {
   readonly id: string
   private readonly shellError?: string
@@ -870,18 +884,14 @@ export class AgentSession {
   }
 
   /** Adds a model call to the request that runs now, shown on your message as it goes. */
-  private countUsage(usage: Usage): void {
+  private countUsage(usage: Usage, model?: string): void {
     const entry = this.requestEntry
     if (!entry) return
     const before: RequestUsage = entry.usage ?? { calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 }
-    // A cost is shown only when every call said what it cost: a sum of some of them would read as the whole.
-    const priced = usage.cost !== undefined && (before.calls === 0 || before.cost !== undefined)
+    const name = model?.trim()
     entry.usage = {
-      calls: before.calls + 1,
-      inputTokens: before.inputTokens + usage.inputTokens,
-      cachedTokens: before.cachedTokens + usage.cacheReadTokens,
-      outputTokens: before.outputTokens + usage.outputTokens,
-      ...(priced ? { cost: (before.cost ?? 0) + usage.cost! } : {}),
+      ...addUsage(before, usage),
+      ...(name || before.models ? { models: { ...before.models, ...(name ? { [name]: addUsage(before.models?.[name], usage) } : {}) } } : {}),
     }
     this.send({ type: 'entry', entry: structuredClone(entry) })
   }
@@ -927,7 +937,7 @@ export class AgentSession {
       entry.text = (entry.text ?? '') + text
       this.send({ type: 'delta', entryId: entry.id, text })
     },
-    usage: (usage: Usage) => {
+    usage: (usage: Usage, model?: string) => {
       this.send({
         type: 'usage',
         promptTokens: usage.inputTokens,
@@ -935,7 +945,7 @@ export class AgentSession {
         totalTokens: usage.inputTokens + usage.outputTokens,
         ...(usage.cacheReadTokens ? { cachedTokens: usage.cacheReadTokens } : {}),
       })
-      this.countUsage(usage)
+      this.countUsage(usage, model)
     },
     fileChanged: (path) => this.send({ type: 'file-changed', path }),
     approve: (prompt, signal) => this.requestApproval(prompt, signal),

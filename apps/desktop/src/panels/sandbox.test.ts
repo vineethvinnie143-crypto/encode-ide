@@ -11,6 +11,7 @@ const report = (patch: Partial<SandboxReport> = {}): SandboxReport => ({
   tightened: [],
   problems: [],
   file: '/home/u/.encode/settings.json',
+  marked: [],
   ...patch,
 })
 

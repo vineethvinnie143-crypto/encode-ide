@@ -4,13 +4,17 @@ export type SidebarView = 'explorer' | 'search' | 'git'
 /** The sections of the Settings page; see components/settings/sections.ts. */
 export type SettingsSection =
   | 'general'
+  | 'personalization'
   | 'notifications'
   | 'appearance'
   | 'editor'
   | 'shortcuts'
   | 'models'
   | 'roles'
+  | 'usage'
   | 'agent'
+  | 'computer'
+  | 'skills'
   | 'permissions'
   | 'mcp'
   | 'sandbox'
@@ -77,7 +81,6 @@ interface UiStore {
   settingsFocus: { setting: string | null; id: number } | null
   /** The "Connect a model" dialog, opened from the model menu; a first start opens it by itself. */
   connectOpen: boolean
-  pluginsOpen: boolean
   automationOpen: boolean
   quickOpenOpen: boolean
   /** What Go to file starts with: '@' for the file's symbols, '#' for the folder's, ':' for a line. */
@@ -111,7 +114,6 @@ interface UiStore {
   /** Another section of the open page, from its list of sections. */
   setSettingsSection(section: SettingsSection): void
   setConnectOpen(open: boolean): void
-  setPluginsOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean, query?: string): void
   setPaletteOpen(open: boolean): void
@@ -172,7 +174,6 @@ export const useUi = create<UiStore>((set, get) => ({
   settingsSection: 'general',
   settingsFocus: null,
   connectOpen: false,
-  pluginsOpen: false,
   automationOpen: false,
   quickOpenOpen: false,
   quickOpenQuery: '',
@@ -205,7 +206,6 @@ export const useUi = create<UiStore>((set, get) => ({
     set((state) => ({ settingsSection: section, settingsOpen: true, settingsFocus: { setting: setting ?? null, id: (state.settingsFocus?.id ?? 0) + 1 } })),
   setSettingsSection: (section) => set({ settingsSection: section }),
   setConnectOpen: (open) => set({ connectOpen: open }),
-  setPluginsOpen: (open) => set({ pluginsOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open, query = '') =>
     set((state) => (open ? { quickOpenOpen: true, quickOpenQuery: query, quickOpenId: state.quickOpenId + 1 } : { quickOpenOpen: false })),

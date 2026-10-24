@@ -4,7 +4,7 @@ import { dialogOpen } from '../../commands/useKeymap'
 import { useSettings } from '../../stores/settings'
 import { useUi, type SettingsSection } from '../../stores/ui'
 import { cx } from '../../ui/cx'
-import { Archive, ArrowLeft, Bell, Bot, Code2, FileCode2, Gear, Keyboard, Layers, Network, Package, Palette, Search, Shield, Sparkles, type Icon } from '../../ui/icons'
+import { Archive, ArrowLeft, BarChart, Bell, Bot, Code2, FileCode2, Gear, Keyboard, Layers, MousePointer, Network, Package, Palette, Puzzle, Search, Shield, Sparkles, UserRound, type Icon } from '../../ui/icons'
 import { Kbd } from '../../ui/Kbd'
 import { keyToMove, moveIndex } from '../../ui/nav'
 import { Spinner } from '../../ui/Spinner'
@@ -16,22 +16,30 @@ import SandboxPane from '../sandbox/SandboxPane'
 import { AgentSection } from './AgentSection'
 import { AppearanceSection } from './AppearanceSection'
 import { ArchivedSection } from './ArchivedSection'
+import { ComputerSection } from './ComputerSection'
 import { EditorSection } from './EditorSection'
 import { GeneralSection } from './GeneralSection'
 import { ModelsSection } from './ModelsSection'
 import { NotificationsSection } from './NotificationsSection'
+import { PersonalizationSection } from './PersonalizationSection'
 import { SECTIONS, searchSettings, sectionInfo, type SettingInfo } from './sections'
 import { ShortcutsSection } from './ShortcutsSection'
+import { SkillsSection } from './SkillsSection'
+import { UsageSection } from './UsageSection'
 
 const ICONS: Record<SettingsSection, Icon> = {
   general: Gear,
+  personalization: UserRound,
   notifications: Bell,
   appearance: Palette,
   editor: FileCode2,
   shortcuts: Keyboard,
   models: Bot,
   roles: Layers,
+  usage: BarChart,
   agent: Sparkles,
+  computer: MousePointer,
+  skills: Puzzle,
   permissions: Shield,
   mcp: Network,
   sandbox: Package,
@@ -233,6 +241,8 @@ function SectionBody({ section, settings }: { section: SettingsSection; settings
   switch (section) {
     case 'general':
       return <GeneralSection settings={settings} />
+    case 'personalization':
+      return <PersonalizationSection />
     case 'notifications':
       return <NotificationsSection settings={settings} />
     case 'appearance':
@@ -245,8 +255,14 @@ function SectionBody({ section, settings }: { section: SettingsSection; settings
       return <ModelsSection settings={settings} />
     case 'roles':
       return <RolesSettings draft={settings} onChange={(patch) => void save(patch)} onConnect={() => useUi.getState().setConnectOpen(true)} />
+    case 'usage':
+      return <UsageSection settings={settings} />
     case 'agent':
       return <AgentSection settings={settings} />
+    case 'computer':
+      return <ComputerSection settings={settings} />
+    case 'skills':
+      return <SkillsSection />
     case 'permissions':
       return (
         <div className="settings-pane" data-setting="permissions.rules">

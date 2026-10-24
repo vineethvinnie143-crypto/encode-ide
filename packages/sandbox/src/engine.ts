@@ -59,6 +59,10 @@ export interface SandboxEngine {
   wrap(spec: SpawnSpec, policy: EnginePolicy): SpawnSpec
   /** Why this program cannot run inside the sandbox on this system (Windows: Git Bash), in words for the person, or nothing when it can. */
   unsupported?(file: string): string | undefined
+  /** The folders `prepare` changed so that commands can be confined there (Windows: the integrity marks). */
+  marked?(): Promise<string[]>
+  /** Puts those folders back as they were, all of them or only these; returns the ones done. */
+  release?(folders?: readonly string[]): Promise<string[]>
 }
 
 export type SandboxState = 'active' | 'unavailable' | 'disabled'

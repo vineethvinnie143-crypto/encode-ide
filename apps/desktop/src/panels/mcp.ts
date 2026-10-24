@@ -2,7 +2,7 @@
  * What the MCP screen and the banner above the composer say, as data and pure functions so the wording and the rules
  * about what to offer are unit tested. The components in components/mcp draw it.
  */
-import type { McpReport, McpServerState, McpServerView } from '@shared/types'
+import type { McpNewServer, McpReport, McpServerState, McpServerView } from '@shared/types'
 
 export type McpTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -126,4 +126,83 @@ export function environmentLine(server: McpServerView): string {
   if (server.headerNames.length) parts.push(`sends the headers ${server.headerNames.join(', ')}`)
   if (server.variables.length) parts.push(`reads ${server.variables.join(', ')} from your environment`)
   return parts.length ? `It ${parts.join(', and ')}.` : ''
+}
+
+/** The Add server form as typed. */
+export interface McpServerForm {
+  kind: 'stdio' | 'http' | 'sse'
+  commandLine: string
+  env: string
+  url: string
+  headers: string
+}
+
+/**
+ * A command line split into words the way the Add form shows them: at spaces, with "double" or 'single' quotes keeping
+ * a word whole. Nothing is expanded; the words go into the file as they are. Returns the words or why they cannot be used.
+ */
+export function splitCommandLine(text: string): string[] | string {
+  const words: string[] = []
+  let word = ''
+  let started = false
+  let quote: '"' | "'" | null = null
+  for (const char of text) {
+    if (quote) {
+      if (char === quote) quote = null
+      else word += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+      started = true
+    } else if (/\s/.test(char)) {
+      if (started) words.push(word)
+      word = ''
+      started = false
+    } else {
+      word += char
+      started = true
+    }
+  }
+  if (quote) return `A ${quote === '"' ? 'double' : 'single'} quote is not closed.`
+  if (started) words.push(word)
+  if (!words.length) return 'Write the program to start, e.g. npx -y @modelcontextprotocol/server-filesystem .'
+  return words
+}
+
+/** `NAME=value` lines (variables) or `Name: value` lines (headers); blank lines are skipped. */
+export function parsePairs(text: string, separator: '=' | ':'): Record<string, string> | string {
+  const pairs: Record<string, string> = {}
+  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+    const line = raw.trim()
+    if (!line) continue
+    const at = line.indexOf(separator)
+    const key = at > 0 ? line.slice(0, at).trim() : ''
+    if (!key) return `Line ${index + 1} needs ${separator === '=' ? 'NAME=value' : 'Name: value'}.`
+    if (Object.hasOwn(pairs, key)) return `${key} is there twice.`
+    pairs[key] = line.slice(at + 1).trim()
+  }
+  return pairs
+}
+
+/** The form as the server entry eNCode writes, or why it cannot be one yet. The host checks it again. */
+export function newServerOf(form: McpServerForm): McpNewServer | string {
+  if (form.kind === 'stdio') {
+    const words = splitCommandLine(form.commandLine)
+    if (typeof words === 'string') return words
+    const env = parsePairs(form.env, '=')
+    if (typeof env === 'string') return `Environment: ${env}`
+    return { type: 'stdio', command: words[0]!, args: words.slice(1), env }
+  }
+  const url = form.url.trim()
+  if (!url) return 'Write the server’s address, e.g. https://mcp.example.com/mcp'
+  const headers = parsePairs(form.headers, ':')
+  if (typeof headers === 'string') return `Headers: ${headers}`
+  return { type: form.kind, url, headers }
+}
+
+/** Names whose values are written out rather than read from ${NAME}: in a project's file, everyone who has it sees them. */
+export function writtenValues(server: McpNewServer): string[] {
+  const values = server.type === 'stdio' ? server.env : server.headers
+  return Object.entries(values)
+    .filter(([, value]) => value !== '' && !/\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}/.test(value))
+    .map(([key]) => key)
 }

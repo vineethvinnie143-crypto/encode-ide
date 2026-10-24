@@ -65,7 +65,7 @@ export interface AppActions {
   /** The theme on screen now: a System theme is shown as what it resolved to. */
   theme(): 'light' | 'dark'
   toggleTheme(): void
-  showPlugins(): void
+  showSkills(): void
   showAutomations(): void
 
   renameSession(): void
@@ -376,7 +376,7 @@ export function buildCommands(a: AppActions): Command[] {
       keywords: 'editor ghost text inline completion autocomplete ai model tab',
       run: () => a.toggleInlineSuggest(),
     },
-    { id: 'view.plugins', title: 'Plugins and skills', group: 'View', keywords: 'skills providers', run: () => a.showPlugins() },
+    { id: 'view.skills', title: 'Skills and agents', group: 'View', keywords: 'skills agents subagents playbooks plugins', run: () => a.showSkills() },
     { id: 'view.automations', title: 'Automations', group: 'View', keywords: 'scheduled tasks later every', run: () => a.showAutomations() },
     { id: 'panel.newTab', title: 'New tab', group: 'View', keys: ['Ctrl+T'], run: () => a.newPanelTab() },
     { id: 'panel.closeTab', title: 'Close tab', group: 'View', keys: ['Ctrl+W'], enabled: () => a.canClosePanelTab(), run: () => a.closePanelTab() },

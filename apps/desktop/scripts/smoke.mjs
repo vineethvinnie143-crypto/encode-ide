@@ -670,6 +670,8 @@ async function runProviderPhase() {
   await runComputerChecks()
   await runCompactionChecks()
   await runNamingChecks()
+  // After a request of its own (naming), since the checks before reset their sessions: Usage has something to count.
+  await runMoreSettingsChecks()
 }
 
 async function providerStats() {
@@ -1482,7 +1484,7 @@ async function runMcpChecks() {
       detail: card.querySelector('.mcp-detail')?.textContent ?? '',
       approval: card.querySelector('.mcp-approval')?.textContent ?? '',
       tools: [...card.querySelectorAll('.mcp-tools code')].map((node) => node.textContent),
-      buttons: [...card.querySelectorAll('.mcp-actions .btn')].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
+      buttons: [...card.querySelectorAll('.mcp-actions .btn:not(.mcp-remove)')].map((button) => ({ text: button.textContent.trim(), disabled: button.disabled })),
     }))`)
   const card = async (name) => (await cards()).find((item) => item.name === name)
   const cardIs = (name, state) => until(async () => (await card(name))?.state === state, `${name} to read ${state}`)
@@ -3260,6 +3262,102 @@ function pressStopShortcut() {
 }
 
 /** A turn that uses the computer waits for the person at a command; the person stops it from the banner, then from the keyboard. */
+/** The pages of UI-6b: Usage, Personalization, an agent of your own, the context size, a colour theme, and an MCP server added and removed by form. */
+async function runMoreSettingsChecks() {
+  console.log('[smoke] --- settings pages ---')
+  const home = process.env.ENCODE_HOME
+  const toastHas = (text) => `[...document.querySelectorAll('.toast')].some((toast) => toast.textContent.includes(${JSON.stringify(text)}))`
+
+  // Usage: the requests this run made were counted, by day and model.
+  await openSettings('Usage')
+  await waitFor("document.querySelectorAll('[data-setting=\"usage.summary\"] .usage-tile').length >= 3", 8000, 'the usage totals')
+  const usage = await evaluate('window.eNCode.agent.usage()')
+  if (!usage.some((session) => Object.values(session.days).some((day) => day.requests > 0 && Object.keys(day.models).length > 0))) throw new Error(`No request was counted: ${JSON.stringify(usage).slice(0, 400)}`)
+  if (!(await evaluate("!!document.querySelector('[data-setting=\"usage.models\"] .usage-row[data-usage]')"))) throw new Error('The Usage page lists no model')
+  await screenshot('settings-usage.png')
+
+  // The context size: kept at once, and sent to the agent.
+  await openSettings('Agent')
+  if (!(await click('[data-setting="agent.contextCap"] button', '128k'))) throw new Error('No 128k context size')
+  await settingIs('settings.contextCap === 128000', 'the context size is kept')
+  await click('[data-setting="agent.contextCap"] button', '200k')
+  await settingIs('settings.contextCap === 200000', 'the context size is back')
+
+  if (home) {
+    // Your instructions: written into ~/.encode/ENCODE.md, which every request reads.
+    await openSettings('Personalization')
+    await waitFor("!!document.querySelector('.personal-text')", 6000, 'the instructions box')
+    await typeInto('.personal-text', 'Prefer pnpm. Answer in short sentences.\n')
+    await click('.personal-foot .btn', 'Save')
+    await waitFor(toastHas('Saved.'), 6000, 'the instructions saved')
+    const written = await fs.readFile(path.join(home, '.encode', 'ENCODE.md'), 'utf8')
+    if (!written.startsWith('Prefer pnpm.')) throw new Error(`ENCODE.md holds ${JSON.stringify(written)}`)
+    await screenshot('settings-personalization.png')
+
+    // An agent of your own, made from the form and removed again.
+    await openSettings('Skills and agents')
+    await click('.btn', 'New agent')
+    await waitFor("!!document.querySelector('.ui-dialog .form-stack')", 4000, 'the New agent form')
+    await typeInto('.ui-dialog .form-stack input', 'smoke-reviewer')
+    await typeInto('.ui-dialog .form-stack label:nth-of-type(2) input', 'Reviews a change for the smoke test.')
+    await click('.ui-dialog-foot .btn', 'Make the agent')
+    await waitFor("!!document.querySelector('.item-row[data-agent=\"smoke-reviewer\"]')", 6000, 'the new agent in the list')
+    const agentFile = await fs.readFile(path.join(home, '.encode', 'agents', 'smoke-reviewer.md'), 'utf8')
+    if (!agentFile.includes('Reviews a change for the smoke test.')) throw new Error(`The agent file holds ${JSON.stringify(agentFile.slice(0, 200))}`)
+    await evaluate("window.eNCode.agents.remove('smoke-reviewer')").catch(() => fs.rm(path.join(home, '.encode', 'agents', 'smoke-reviewer.md'), { force: true }))
+    await fs.rm(path.join(home, '.encode', 'ENCODE.md'), { force: true })
+  }
+
+  // A colour theme of your own: made from the dark theme, a colour changed, exported and imported back.
+  await openSettings('Appearance')
+  await click('.theme-new')
+  await waitFor("!!document.querySelector('.ui-menu-item')", 4000, 'the New theme menu')
+  await click('.ui-menu-item', 'From the dark theme')
+  await waitFor("!!document.documentElement.dataset.custom && !!document.querySelector('[data-setting=\"appearance.themeEditor\"]')", 6000, 'the new theme applied, with its editor')
+  await evaluate("document.querySelector('.theme-color[title] .theme-hex[aria-label^=\"Accent\"]')?.focus()")
+  await typeInto('.theme-hex[aria-label^="Accent"]', '#ff7a90')
+  await pressKey('Enter')
+  await waitFor("getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#ff7a90'", 4000, 'the accent changed at once')
+  await waitFor("window.eNCode.settings.get().then((value) => value.appearance.themes[0]?.colors.accent === '#ff7a90')", 4000, 'the theme kept')
+  await screenshot('settings-theme.png')
+  await click('.theme-foot .btn', 'Export')
+  await waitFor(toastHas('Saved My theme'), 6000, 'the theme exported')
+  const exported = JSON.parse(await fs.readFile(process.env.ENCODE_THEME_FILE, 'utf8'))
+  if (exported.eNCodeTheme !== 1 || exported.colors.accent !== '#ff7a90' || 'id' in exported) throw new Error(`The theme file holds ${JSON.stringify(exported).slice(0, 300)}`)
+  await click('.theme-new')
+  await waitFor("!!document.querySelector('.ui-menu-item')", 4000, 'the New theme menu')
+  await click('.ui-menu-item', 'From a file')
+  await waitFor("window.eNCode.settings.get().then((value) => value.appearance.themes.length === 2 && value.appearance.themes[1].name === 'My theme 2')", 6000, 'the theme imported under a free name')
+  // Back to eNCode's own colours.
+  await click('.theme-card[data-theme-card="built-in"]')
+  await waitFor('!document.documentElement.dataset.custom', 4000, 'eNCode’s own colours again')
+  const current = await evaluate('window.eNCode.settings.get()')
+  await evaluate(`window.eNCode.settings.save({ appearance: ${JSON.stringify({ ...current.appearance, theme: '', themes: [] })} })`)
+
+  // An MCP server added from the form, then removed.
+  if (home) {
+    await openSettings('MCP servers')
+    await click('.mcp-overview .btn', 'Add a server')
+    await waitFor("!!document.querySelector('.ui-dialog .mcp-add')", 4000, 'the Add server form')
+    await typeInto('.mcp-add input[data-autofocus]', 'smoke-added')
+    const server = path.join(root, 'scripts', 'fake-mcp-server.mjs')
+    await typeInto('.mcp-add .mcp-add-code', `"${process.execPath}" "${server}" --note=added`)
+    await waitFor("document.querySelectorAll('.mcp-add-words code').length === 3", 4000, 'the command shown word by word')
+    await click('.ui-dialog-foot .btn', 'Add the server')
+    await waitFor("!!document.querySelector('.mcp-card[aria-label=\"MCP server smoke-added\"]')", 8000, 'the added server')
+    const userFile = JSON.parse(await fs.readFile(path.join(home, '.encode', 'mcp.json'), 'utf8'))
+    if (userFile.mcpServers['smoke-added']?.args?.[1] !== '--note=added') throw new Error(`mcp.json holds ${JSON.stringify(userFile.mcpServers['smoke-added'])}`)
+    await screenshot('settings-mcp-added.png')
+    await click('.mcp-card[aria-label="MCP server smoke-added"] .mcp-remove')
+    await waitFor("!!document.querySelector('.ui-dialog .confirm-body')", 4000, 'the Remove prompt')
+    await click('.ui-dialog-foot button', 'Remove the server')
+    await waitFor("!document.querySelector('.mcp-card[aria-label=\"MCP server smoke-added\"]')", 8000, 'the server removed')
+    const after = JSON.parse(await fs.readFile(path.join(home, '.encode', 'mcp.json'), 'utf8'))
+    if ('smoke-added' in after.mcpServers) throw new Error('The removed server is still in mcp.json')
+  }
+  await closeSettings()
+}
+
 async function runComputerChecks() {
   if (process.platform !== 'win32') {
     console.log('[smoke] --- computer use: skipped (Windows only) ---')
@@ -3272,7 +3370,7 @@ async function runComputerChecks() {
   const initial = await evaluate('window.eNCode.settings.get()')
   if (initial.computerSupported !== true) throw new Error('Windows should offer computer use')
   if (initial.computer !== false) throw new Error('Computer use must be off until the person turns it on')
-  await openSettings('Agent')
+  await openSettings('Computer use')
   await waitFor("!!document.querySelector('#computer-use')", 4000, 'the computer switch')
   await screenshot('computer-settings.png')
   await click('#computer-use')
@@ -4307,7 +4405,7 @@ async function runSettingsPageChecks() {
   await pressKey('ArrowDown')
   await waitFor("document.activeElement?.dataset.section === 'general'", 4000, 'ArrowDown goes from the search to the first section')
   await pressKey('ArrowDown')
-  await waitFor("document.activeElement?.dataset.section === 'notifications'", 4000, 'ArrowDown goes to the next section')
+  await waitFor("document.activeElement?.dataset.section === 'personalization'", 4000, 'ArrowDown goes to the next section')
   await openSettings('General')
   await sleep(300)
   await screenshot('ui-dark-settings.png')
@@ -5739,12 +5837,11 @@ try {
   if (await evaluate("!!document.querySelector('.ui-dialog')")) throw new Error('a file the editor wrote last was reported as changed')
   if ((await readDisk()) !== readme) throw new Error('the file was not put back')
 
-  // The Plugins and skills dialog.
-  if (!(await click('.rail-btn[aria-label="Plugins and skills"]'))) throw new Error('Plugins button not found')
-  await waitFor("!!document.querySelector('.settings-modal')", 8000, 'the Plugins and skills dialog')
-  await screenshot('07-plugins.png')
-  await click('.settings-header .icon-btn')
-  await sleep(300)
+  // Skills and agents, from the rail.
+  if (!(await click('.rail-btn[aria-label="Skills and agents"]'))) throw new Error('Skills and agents button not found')
+  await waitFor("document.querySelector('.settings-heading')?.textContent === 'Skills and agents' && !!document.querySelector('.item-row[data-agent=\"Explore\"]')", 8000, 'the Skills and agents page with the built-in agents')
+  await screenshot('07-skills.png')
+  await closeSettings()
 
   // Offline demo agent.
   await evaluate("window.eNCode.workspace.delete('.encode/demo-note.md').catch(() => null)")

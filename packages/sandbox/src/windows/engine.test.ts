@@ -260,6 +260,7 @@ describe('the Windows engine', () => {
     const stateDir = path.join(dir, 'release')
     const engine = make(client, { dir: stateDir })
     await engine.prepare(policy())
+    assert.deepEqual(await engine.marked(), ['C:\\work\\p', `${sandboxDir}\\tmp`])
     const released = await engine.release()
     assert.deepEqual(released, ['C:\\work\\p', `${sandboxDir}\\tmp`])
     assert.deepEqual(client.calls.unlabel[0], { folders: ['C:\\work\\p'], protect: ['C:\\work\\p\\.git\\hooks', 'C:\\work\\p\\.git\\config', 'C:\\work\\p\\.mcp.json'] })

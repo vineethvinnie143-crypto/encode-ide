@@ -44,7 +44,11 @@ primary platform; the code stays cross-platform.
   working. Search any setting from the page or from `Ctrl+K`, and a change is kept as you make it: no Save. Choose
   whether `Enter` or `Ctrl+Enter` sends, Windows notices when a request finishes or the agent needs you (they say which
   session, never what the agent wrote), the taskbar button flashing while it waits for you, and keeping the computer
-  awake while an agent works. **Archived sessions** restores or deletes what you put away.
+  awake while an agent works. **Archived sessions** restores or deletes what you put away. **Usage** shows what your
+  requests cost and used, by day, model and project. **Personalization** edits the instructions the agent reads every
+  time. **Skills and agents** lists, makes and removes them. **Appearance** takes colour themes of your own, made in
+  the app or imported from a file. **MCP servers** adds and removes servers from a form, and **Sandbox** takes its
+  marks off folders you no longer use.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
   - files: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`, and `CodeMap`, which shows where
     things are defined without reading files (a map of the project or a folder, a file's outline, or where one name
@@ -102,7 +106,7 @@ primary platform; the code stays cross-platform.
 
   It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
   the window, and every session is an append-only log that survives a crash and can be forked.
-- **Computer use (Windows).** Off until you turn it on under **Settings → Agent**. The agent can then look at an
+- **Computer use (Windows).** Off until you turn it on under **Settings → Computer use**. The agent can then look at an
   application, read its controls and use the mouse and keyboard in it, one application at a time, only after you allow
   that application. A banner shows while it works, and its **Stop** button or **Ctrl+Alt+Esc** ends it from any
   window, as does using the mouse or keyboard yourself. Terminals, password managers, eNCode itself and programs

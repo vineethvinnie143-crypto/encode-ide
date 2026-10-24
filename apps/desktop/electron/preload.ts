@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { SearchProviderId } from '../shared/search'
 import type { ModelTestProgress } from '../shared/model-tests'
+import type { CustomTheme } from '../shared/themes'
 import type {
+  AgentCreateInput,
   AgentMode,
   AgentEvent,
   ApprovalAnswer,
@@ -89,6 +91,8 @@ const api: EncodeApi = {
     setSearchKey: (provider: SearchProviderId, key: string) => invoke('settings:set-search-key', provider, key),
     chooseChatsFolder: () => invoke('settings:choose-chats-folder'),
     resetChatsFolder: () => invoke('settings:reset-chats-folder'),
+    exportTheme: (theme: CustomTheme) => invoke('appearance:export-theme', theme),
+    importTheme: (id: string) => invoke('appearance:import-theme', id),
   },
   search: {
     test: () => invoke('search:test'),
@@ -147,6 +151,22 @@ const api: EncodeApi = {
     read: (name: string) => invoke('skills:read', name),
     create: (name: string, description?: string) => invoke('skills:create', name, description),
     openFolder: () => invoke('skills:open-folder'),
+    remove: (name: string) => invoke('skills:remove', name),
+    reveal: (name: string) => invoke('skills:reveal', name),
+  },
+  agents: {
+    list: () => invoke('agents:list'),
+    read: (name: string) => invoke('agents:read', name),
+    create: (input: AgentCreateInput) => invoke('agents:create', input),
+    remove: (name: string) => invoke('agents:remove', name),
+    reveal: (name: string) => invoke('agents:reveal', name),
+    openFolder: () => invoke('agents:open-folder'),
+  },
+  instructions: {
+    read: () => invoke('instructions:read'),
+    write: (text: string, base: string) => invoke('instructions:write', text, base),
+    project: () => invoke('instructions:project'),
+    createProject: () => invoke('instructions:create-project'),
   },
   permissions: {
     report: () => invoke('permissions:report'),
@@ -181,6 +201,7 @@ const api: EncodeApi = {
   },
   agent: {
     sessions: () => invoke('agent:sessions'),
+    usage: () => invoke('agent:usage'),
     createSession: (options?: { projectRoot?: string | null }) => invoke('agent:create', options),
     createChat: () => invoke('agent:create-chat'),
     chatsFolder: () => invoke('agent:chats-folder'),

@@ -207,7 +207,7 @@ function createAppActions(): AppActions {
       const light = document.documentElement.dataset.theme === 'light'
       void settings.save({ appearance: { ...appearance, mode: light ? 'dark' : 'light' } })
     },
-    showPlugins: () => ui().setPluginsOpen(true),
+    showSkills: () => ui().openSettings('skills'),
     showAutomations: () => ui().setAutomationOpen(true),
 
     renameSession: withActive(sessionActions.rename),
