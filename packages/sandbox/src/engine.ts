@@ -63,7 +63,18 @@ export interface SandboxEngine {
   marked?(): Promise<string[]>
   /** Puts those folders back as they were, all of them or only these; returns the ones done. */
   release?(folders?: readonly string[]): Promise<string[]>
+  /**
+   * Gives the person's account what `prepare` needs in a folder the system refused it (Windows: Full control, after an
+   * administrator's yes). Only for a folder `prepare` refused with `no-permission`.
+   */
+  grant?(folder: string): Promise<GrantOutcome>
 }
+
+/**
+ * What fixing a folder's permissions came to. `cancelled`: the person said no to the system's prompt, so nothing changed.
+ * `owner`: the account that said yes to the system's prompt had to take ownership of the folder on the way.
+ */
+export type GrantOutcome = { ok: true; owner: boolean } | { ok: false; cancelled: true } | { ok: false; cancelled?: false; reason: string }
 
 export type SandboxState = 'active' | 'unavailable' | 'disabled'
 

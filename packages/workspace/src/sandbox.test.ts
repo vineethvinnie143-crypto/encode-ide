@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { Sandbox, type SandboxEngine } from '@encode/sandbox'
+import { DEFAULT_SETTINGS, Sandbox, SandboxError, type GrantOutcome, type SandboxEngine } from '@encode/sandbox'
 import { tempWorkspace } from '@encode/tools/testing'
 import { sandboxActionProblem } from './sandbox-actions'
 import { Workspaces } from './scope'
@@ -159,6 +159,44 @@ describe('the Sandbox screen', () => {
     for (const action of [{ type: 'unmark', folders: 'C:\\' }, { type: 'unmark', folders: [''] }, { type: 'unmark', folders: [7] }]) assert.notEqual(sandboxActionProblem(action), null, JSON.stringify(action))
     // An engine that marks nothing (Linux, macOS) has none to show.
     assert.deepEqual((await (await setup(undefined, undefined)).workspaces.sandboxReport(root)).marked, [])
+  })
+
+  it('fixes a folder Windows refused the sandbox, after an administrator’s yes, and says what changed (ADR 0118)', async () => {
+    const root = await fs.realpath(await tempWorkspace())
+    const home = await fs.realpath(await tempWorkspace())
+    const dir = await fs.realpath(await tempWorkspace())
+    let allowed = false
+    const answers: GrantOutcome[] = [{ ok: false, cancelled: true }, { ok: true, owner: true }]
+    const fixing: SandboxEngine = {
+      ...engine(),
+      prepare: async (policy) => {
+        if (!allowed && policy.writable.includes(root)) throw new SandboxError('no-permission', `Windows does not let this account change the security settings of ${root}.`, root)
+      },
+      grant: async () => {
+        const answer = answers.shift()!
+        if (answer.ok) allowed = true
+        return answer
+      },
+    }
+    const sandbox = new Sandbox({ platform: process.platform, home, dir, engine: fixing, env: {} })
+    await sandbox.start()
+    const workspaces = new Workspaces({ home, platform: process.platform, sandbox })
+    const session = sandbox.session({ roots: () => [root], settings: () => ({ ...DEFAULT_SETTINGS, allowWrite: [], denyWrite: [], denyRead: [], allowRead: [] }) })
+    await assert.rejects(session.wrapSpawn({ file: '/bin/sh', args: [], env: {}, cwd: root }))
+    assert.deepEqual((await workspaces.sandboxReport(root)).blocked, [root])
+
+    const no = await workspaces.sandboxAct(root, { type: 'fix', folder: root })
+    assert.ok(no.ok && no.note === 'Nothing changed: Windows did not get an administrator’s yes.')
+    assert.deepEqual(no.report.blocked, [root])
+
+    const yes = await workspaces.sandboxAct(root, { type: 'fix', folder: root })
+    assert.ok(yes.ok)
+    assert.deepEqual(yes.report.blocked, [])
+    assert.equal(yes.note, `Your account has Full control of ${root}, and the sandbox has marked it. Commands there run inside the sandbox again. Windows first had to make the account that said yes its owner.`)
+
+    const again = await workspaces.sandboxAct(root, { type: 'fix', folder: root })
+    assert.ok(!again.ok && /nothing to fix/.test(again.reason), 'a folder that works is not fixed again')
+    for (const action of [{ type: 'fix' }, { type: 'fix', folder: '' }, { type: 'fix', folder: 7 }, { type: 'fix', folder: 'x'.repeat(5000) }]) assert.notEqual(sandboxActionProblem(action), null, JSON.stringify(action))
   })
 
   it('tells a listener when the sandbox changes', async () => {

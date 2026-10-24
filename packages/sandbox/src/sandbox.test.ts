@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, before, describe, it } from 'node:test'
-import type { EnginePolicy, EngineProbe, SandboxEngine, SpawnSpec } from './engine'
+import type { EnginePolicy, EngineProbe, GrantOutcome, SandboxEngine, SpawnSpec } from './engine'
 import { SandboxError } from './errors'
 import { Sandbox } from './sandbox'
 import { DEFAULT_SETTINGS, type SandboxSettings } from './settings'
@@ -143,6 +143,61 @@ describe('the sandbox', () => {
     assert.deepEqual(sandbox.blocked(), [project])
     await sandbox.refresh()
     assert.deepEqual(sandbox.blocked(), [], 'checking again starts over')
+  })
+
+  it('fixes only a folder it was refused, then prepares it so the answer is its own (ADR 0118)', async () => {
+    const engine = fakeEngine()
+    let refuse = true
+    const granted: string[] = []
+    let answer: GrantOutcome = { ok: true, owner: false }
+    engine.prepare = async (policy) => {
+      engine.prepared.push(policy)
+      if (refuse && policy.writable.includes(project)) throw new SandboxError('no-permission', `Windows does not let this account change the security settings of ${project}.`, project)
+    }
+    engine.grant = async (folder) => {
+      granted.push(folder)
+      return answer
+    }
+    const sandbox = make(engine)
+    const session = sandbox.session({ roots: () => [project], settings: () => settings() })
+
+    const unknown = await sandbox.fixFolder(project, settings())
+    assert.ok(!unknown.ok && !unknown.cancelled && /nothing to fix/.test(unknown.reason), 'nothing was refused yet')
+    assert.deepEqual(granted, [])
+
+    await assert.rejects(session.wrapSpawn(spec()))
+    assert.deepEqual(sandbox.blocked(), [project])
+
+    answer = { ok: false, cancelled: true }
+    assert.deepEqual(await sandbox.fixFolder(project.toUpperCase(), settings()), { ok: false, cancelled: true })
+    assert.deepEqual(granted, [project], 'the folder by the name the sandbox knows it by, whatever its case on the screen')
+    assert.deepEqual(sandbox.blocked(), [project], 'a no to Windows changes nothing')
+
+    answer = { ok: true, owner: false }
+    const stillRefused = await sandbox.fixFolder(project, settings())
+    assert.ok(!stillRefused.ok && !stillRefused.cancelled && /security settings of/.test(stillRefused.reason), 'the sandbox tries the folder at once and says so')
+    assert.deepEqual(sandbox.blocked(), [project])
+
+    refuse = false
+    let changes = 0
+    sandbox.onChange(() => changes++)
+    const before = engine.prepared.length
+    assert.deepEqual(await sandbox.fixFolder(project, settings()), { ok: true, owner: false })
+    assert.deepEqual(sandbox.blocked(), [])
+    assert.ok(engine.prepared.length > before && engine.prepared.at(-1)!.writable.includes(project), 'prepared as a command there would')
+    assert.ok(changes > 0, 'the screen hears of it')
+    await session.wrapSpawn(spec())
+  })
+
+  it('has nothing to fix where the engine cannot', async () => {
+    const engine = fakeEngine()
+    engine.prepare = async () => {
+      throw new SandboxError('no-permission', 'refused', project)
+    }
+    const sandbox = make(engine)
+    await assert.rejects(sandbox.session({ roots: () => [project], settings: () => settings() }).wrapSpawn(spec()))
+    const outcome = await sandbox.fixFolder(project, settings())
+    assert.ok(!outcome.ok && !outcome.cancelled && /nothing to fix in a folder/.test(outcome.reason))
   })
 
   it('picks up an extra folder the person allows later', async () => {

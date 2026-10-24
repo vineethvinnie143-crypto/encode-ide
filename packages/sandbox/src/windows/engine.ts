@@ -16,11 +16,12 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { EnginePolicy, EngineProbe, SandboxEngine, SpawnSpec } from '../engine'
+import type { EnginePolicy, EngineProbe, GrantOutcome, SandboxEngine, SpawnSpec } from '../engine'
 import { mergeEnv } from '../env'
 import { SandboxError } from '../errors'
 import { ensureHelper, type BuildOptions, type HelperBuild } from './build'
 import { defaultClient, runArguments, type HelperClient, type LabelResult } from './client'
+import { grantFolder, type GrantOptions } from './grant'
 
 export interface WindowsEngineOptions {
   /** The sandbox's folder: the helper is built under `helper`, the folders marked so far are listed in `state.json`. */
@@ -31,6 +32,8 @@ export interface WindowsEngineOptions {
   home?: string
   /** The program's own folder, which must stay out of reach. Default: where the running program is. */
   appDir?: string
+  /** How Fix this folder runs its programs (tests). */
+  grant?: Partial<Omit<GrantOptions, 'env' | 'log'>>
   warn?(message: string): void
 }
 
@@ -96,6 +99,8 @@ export interface WindowsEngine extends SandboxEngine {
   marked(): Promise<string[]>
   /** Takes the marks off every folder this engine marked (or only these), so that they are as they were. Returns the folders. */
   release(folders?: readonly string[]): Promise<string[]>
+  /** Gives the person's account Full control of a folder it may not mark, after an administrator's yes (ADR 0118). */
+  grant(folder: string): Promise<GrantOutcome>
 }
 
 export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngine {
@@ -265,6 +270,13 @@ export function createWindowsEngine(options: WindowsEngineOptions): WindowsEngin
 
     async marked(): Promise<string[]> {
       return Object.values((await current()).folders).map((entry) => entry.path)
+    },
+
+    async grant(folder: string): Promise<GrantOutcome> {
+      // Never through `serial`: the step waits for the person's answer to Windows, and commands elsewhere must not.
+      const why = tooBroad(folder, { env, home, keep })
+      if (why) return { ok: false, reason: `${folder} is ${why}, which the sandbox never marks, so there is nothing to fix there.` }
+      return grantFolder(folder, { ...options.grant, env, log: path.join(options.dir, 'grant.log') })
     },
 
     release(folders?: readonly string[]): Promise<string[]> {

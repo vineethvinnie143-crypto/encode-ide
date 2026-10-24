@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { EngineLimits, EnginePolicy, SandboxEngine, SandboxStatus, SpawnSpec } from './engine'
+import type { EngineLimits, EnginePolicy, GrantOutcome, SandboxEngine, SandboxStatus, SpawnSpec } from './engine'
 import { SandboxError } from './errors'
 import { createLinuxEngine } from './linux'
 import { createMacEngine } from './macos'
@@ -172,6 +172,27 @@ export class Sandbox {
     const done = await this.engine.release(folders)
     this.changed()
     return done
+  }
+
+  /**
+   * Fix this folder (ADR 0118): for a folder the system did not let this account prepare, gives the account what the
+   * sandbox needs there (Windows: Full control, after an administrator's yes), then prepares it as a command in it
+   * would, so that the answer is the sandbox's own. Only a folder listed in `blocked` can be fixed.
+   */
+  async fixFolder(folder: string, settings: SandboxSettings): Promise<GrantOutcome> {
+    const known = this.refused.get(folder.toLowerCase())
+    if (!known) return { ok: false, reason: `The sandbox has not been refused ${folder}, so there is nothing to fix. Check again to see how it stands.` }
+    if (!this.engine?.grant) return { ok: false, reason: 'This system’s sandbox has nothing to fix in a folder.' }
+    const granted = await this.engine.grant(known)
+    if (!granted.ok) return granted
+    this.refused.delete(known.toLowerCase())
+    this.changed()
+    try {
+      await this.prepare(await this.policy({ roots: () => [known], settings: () => settings }))
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
+    return granted
   }
 
   onChange(listener: () => void): () => void {

@@ -1,6 +1,6 @@
 # 0110. What a tester's diagnostics showed: Copy, a folder Windows will not let the sandbox mark, small screens, and log levels
 
-- Status: Accepted, builds on 0063 and 0109
+- Status: Accepted, builds on 0063 and 0109; the one-click fix is built by 0118
 - Date: 2026-10-24
 
 ## Context
@@ -40,7 +40,8 @@ The first tester sent Help > Save diagnostics from their PC, running the 0.1.0 t
     they chose Full access. It names what helps: a copy of the folder inside the user folder, or Full control of the
     folder for the account (Properties > Security), then Check again.
   - A one-click fix with administrator rights (a UAC prompt for icacls) was written up and refused by the coding
-    agent's own safety check, because it changes a folder's permissions. It is not built and waits for the owner's call.
+    agent's own safety check, because it changes a folder's permissions. It was not built then and waited for the
+    owner's call; the owner asked for it, and 0118 builds it.
 - **Room for the thread.** On a small screen the side panel gives up width, down to 360 px, and then the sessions list,
   down to 220 px, before the thread's column drops under 720 px. That holds while their widths are as shipped: from the
   first touch of a divider the width is the person's and is kept, as before. Below 1100 px the side panel still floats

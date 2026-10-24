@@ -28,7 +28,7 @@ export function headline(report: SandboxReport): Headline {
     return {
       tone: 'warning',
       title: 'The sandbox cannot be used in this folder',
-      detail: `Windows does not let your account change the security settings of ${folders}, which the sandbox needs to mark it. This happens with a folder an administrator or an earlier Windows installation made, often on a second drive. ${outside} To use the sandbox here, work in a copy of the folder inside your user folder, or have the folder’s owner give your account Full control of it (Properties > Security), then Check again.`,
+      detail: `Windows does not let your account change the security settings of ${folders}, which the sandbox needs to mark it. This happens with a folder an administrator or an earlier Windows installation made, often on a second drive. ${outside} ${fixLine(report)}`,
     }
   }
   if (report.state === 'active') {
@@ -53,6 +53,27 @@ export function headline(report: SandboxReport): Headline {
   return report.settings.required
     ? { tone: 'danger', title: 'The sandbox cannot start, so no command runs', detail: `${reason} The settings require it. Fix that, or stop requiring it below.` }
     : { tone: 'warning', title: 'This computer cannot run the sandbox', detail: `${reason} Commands run with everything you can do on this computer.` }
+}
+
+/** What helps in a folder the sandbox cannot use: Fix this folder where this system can do it, the person's own steps otherwise. */
+function fixLine(report: SandboxReport): string {
+  return canFix(report)
+    ? 'Fix this folder asks Windows for an administrator’s yes once, then gives your account Full control of it, so the sandbox can mark it. Or work in a copy of the folder inside your user folder.'
+    : 'To use the sandbox here, work in a copy of the folder inside your user folder, or have the folder’s owner give your account Full control of it (Properties > Security), then Check again.'
+}
+
+/** Whether Fix this folder is offered: Windows' sandbox, in a folder it was refused (ADR 0118). */
+export function canFix(report: SandboxReport): boolean {
+  return report.state === 'active' && report.engine === 'integrity-level' && report.blocked.length > 0
+}
+
+/** What the person is told before Windows asks for an administrator. */
+export function fixConfirm(folder: string): { title: string; body: string; confirmLabel: string } {
+  return {
+    title: 'Fix this folder for the sandbox?',
+    body: `Windows asks for an administrator’s yes. Then your account gets Full control of ${folder} and what is inside it, so the sandbox can mark it. If Windows does not let even an administrator change its permissions, the account that says yes takes ownership of it first. Nothing else on this computer changes, and Remove marks does not take this back.`,
+    confirmLabel: 'Fix folder',
+  }
 }
 
 /** What this system's sandbox does not hold back, said plainly. Empty where it holds everything the screen promises. */

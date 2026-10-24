@@ -1,12 +1,15 @@
 import { sandboxChangeProblem, setSandboxSetting, type SandboxChange } from '@encode/config'
-import type { Sandbox } from '@encode/sandbox'
+import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
 import type { ShellProgram } from '@encode/tools'
 import type { ConfigSnapshot, WorkspaceConfig } from './config'
 import type { WorkspaceFs } from './fs'
 import { sandboxReport, withMarks, type SandboxReport } from './sandbox-report'
 
-/** What the Sandbox screen can do: change one of the switches in the person's own settings, ask the machine again, or take the marks off folders. */
-export type SandboxAction = ({ type: 'set' } & SandboxChange) | { type: 'recheck' } | { type: 'unmark'; folders?: string[] }
+/**
+ * What the Sandbox screen can do: change one of the switches in the person's own settings, ask the machine again, take
+ * the marks off folders, or fix a folder the system did not let the sandbox prepare (ADR 0118).
+ */
+export type SandboxAction = ({ type: 'set' } & SandboxChange) | { type: 'recheck' } | { type: 'unmark'; folders?: string[] } | { type: 'fix'; folder: string }
 
 /** The sandbox as it stands after the action, with what happened in words. */
 export type SandboxOutcome =
@@ -18,6 +21,10 @@ export function sandboxActionProblem(action: unknown): string | null {
   if (typeof action !== 'object' || action === null) return 'That is not an action.'
   const given = action as Record<string, unknown>
   if (given.type === 'recheck') return null
+  if (given.type === 'fix') {
+    const { folder } = given
+    return typeof folder === 'string' && folder.length > 0 && folder.length <= 4096 ? null : 'Name the folder to fix.'
+  }
   if (given.type === 'unmark') {
     const { folders } = given
     if (folders === undefined) return null
@@ -58,6 +65,22 @@ export async function actOnSandbox(
     const report = await look()
     const again = report.state === 'active' ? ' A folder is marked again the next time the agent runs a command in it.' : ''
     return { ok: true, report, note: done.length ? `Took the marks off ${done.length === 1 ? done[0] : `${done.length} folders`}.${again}` : 'No folder had marks to take off.' }
+  }
+  if (action.type === 'fix') {
+    if (!sandbox) return refused('This build has no sandbox.')
+    const settings = resolveSandboxSettings((await config.refresh()).effective.sandbox)
+    let fixed: Awaited<ReturnType<Sandbox['fixFolder']>>
+    try {
+      fixed = await sandbox.fixFolder(action.folder, settings)
+    } catch (error) {
+      return refused(error instanceof Error ? error.message : String(error))
+    }
+    if (fixed.ok) {
+      const owner = fixed.owner ? ' Windows first had to make the account that said yes its owner.' : ''
+      return { ok: true, report: await look(), note: `Your account has Full control of ${action.folder}, and the sandbox has marked it. Commands there run inside the sandbox again.${owner}` }
+    }
+    if (fixed.cancelled) return { ok: true, report: await look(), note: 'Nothing changed: Windows did not get an administrator’s yes.' }
+    return refused(fixed.reason)
   }
   const { type: _type, ...change } = action
   const result = await setSandboxSetting({ change: change as SandboxChange, home: config.home, fs: options.fs ?? config.fileSystem, platform })

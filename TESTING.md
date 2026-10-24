@@ -159,8 +159,9 @@ should have, and any message you could not understand.
 - A folder Windows does not let your account change the security settings of (often one on a second drive that an
   administrator or an earlier Windows installation made) cannot be prepared. **Settings → Sandbox** then says so and
   names the folder; commands there run only outside the sandbox, asked about once each (not at all under Full access).
-  Working in a copy inside your user folder, or giving your account Full control of the folder (Properties →
-  Security), then **Check again**, brings the sandbox back.
+  **Fix this folder** next to it asks Windows for an administrator's yes, gives your account Full control of that
+  folder, and marks it: the screen should then say commands run in a sandbox, and a command there should work inside
+  it. Saying no to Windows changes nothing. Working in a copy inside your user folder also brings the sandbox back.
 - Turn off **Run commands in PowerShell** to go back to Git Bash. Commands then run outside the sandbox, and the screen
   says so.
 

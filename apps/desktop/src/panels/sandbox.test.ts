@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { SandboxReport } from '@shared/types'
-import { actionFor, headline, limitLines, switchRows, workingLine } from './sandbox'
+import { actionFor, canFix, fixConfirm, headline, limitLines, switchRows, workingLine } from './sandbox'
 
 const report = (patch: Partial<SandboxReport> = {}): SandboxReport => ({
   state: 'active',
@@ -32,9 +32,25 @@ describe('what the screen says first', () => {
     assert.match(blocked.detail, /security settings of D:\\TEST SERVEr, which the sandbox needs/)
     assert.match(blocked.detail, /you are asked each time, unless you chose Full access/)
     assert.match(blocked.detail, /copy of the folder inside your user folder/)
+    assert.match(blocked.detail, /Fix this folder asks Windows for an administrator’s yes once/)
     const strict = headline(report({ blocked: ['D:\\a', 'E:\\b'], settings: { ...report().settings, allowUnsandboxed: false } }))
     assert.match(strict.detail, /2 folders \(D:\\a, E:\\b\)/)
     assert.match(strict.detail, /Commands there do not run/)
+  })
+
+  it('offers Fix this folder only for Windows’ sandbox in a folder it was refused, and says what it changes first (ADR 0118)', () => {
+    assert.equal(canFix(report({ engine: 'integrity-level', blocked: ['D:\\TEST SERVEr'] })), true)
+    assert.equal(canFix(report({ engine: 'integrity-level' })), false, 'nothing was refused')
+    assert.equal(canFix(report({ blocked: ['/srv/a'] })), false, 'not Windows')
+    assert.equal(canFix(report({ state: 'off', engine: 'integrity-level', blocked: ['D:\\a'] })), false, 'the sandbox is off')
+    const other = headline(report({ engine: 'seatbelt', blocked: ['/Volumes/x'] }))
+    assert.match(other.detail, /Full control of it \(Properties > Security\), then Check again/)
+    assert.doesNotMatch(other.detail, /Fix this folder/)
+    const ask = fixConfirm('D:\\TEST SERVEr')
+    assert.match(ask.body, /^Windows asks for an administrator’s yes\. Then your account gets Full control of D:\\TEST SERVEr/)
+    assert.match(ask.body, /takes ownership of it first/)
+    assert.match(ask.body, /Remove marks does not take this back/)
+    assert.equal(ask.confirmLabel, 'Fix folder')
   })
 
   it('says plainly when commands run with the person’s full access, and why', () => {

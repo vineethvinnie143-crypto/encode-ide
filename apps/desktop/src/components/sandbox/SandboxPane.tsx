@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
-import { actionFor, headline, limitLines, switchRows, workingLine, type SwitchKey } from '../../panels/sandbox'
+import { actionFor, canFix, fixConfirm, headline, limitLines, switchRows, workingLine, type SwitchKey } from '../../panels/sandbox'
 import { shortPath } from '../../panels/permissions'
 import { useSandbox } from '../../stores/sandbox'
 import { useUi } from '../../stores/ui'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { RefreshCw, ShieldAlert, ShieldCheck } from '../../ui/icons'
+import { RefreshCw, ShieldAlert, ShieldCheck, Wrench } from '../../ui/icons'
 import { Toggle } from '../../ui/Toggle'
 
 /**
@@ -74,6 +74,9 @@ export default function SandboxPane() {
     })
     if (confirmed) await run(one ? `unmark:${one}` : 'unmark', { type: 'unmark', ...(folders ? { folders } : {}) })
   }
+  const fix = async (folder: string) => {
+    if (await useUi.getState().askConfirm(fixConfirm(shortPath(folder, 64)))) await run(`fix:${folder}`, { type: 'fix', folder })
+  }
 
   return (
     <div className="settings-sandbox">
@@ -90,6 +93,28 @@ export default function SandboxPane() {
           Check again
         </Button>
       </section>
+
+      {canFix(report) && (
+        <section aria-label="Folders the sandbox cannot use">
+          <div className="settings-card sandbox-blocked">
+            {report.blocked.map((folder) => (
+              <div key={folder} className="settings-row">
+                <div className="settings-row-text">
+                  <code className="sandbox-mark-path" title={folder}>
+                    {shortPath(folder, 72)}
+                  </code>
+                  {busy === `fix:${folder}` && <div className="settings-row-help">Say yes to Windows’ prompt to go on. Marking a large folder can take a minute after that.</div>}
+                </div>
+                <div className="settings-row-control">
+                  <Button size="sm" variant="primary" icon={<Wrench size={13} />} busy={busy === `fix:${folder}`} disabled={busy !== null} onClick={() => void fix(folder)}>
+                    Fix this folder
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {limits.length > 0 && (
         <section className="perm-problems" aria-label="What the sandbox does not cover here">
