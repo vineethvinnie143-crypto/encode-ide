@@ -1746,3 +1746,55 @@ What is new:
   - scrambled, the saved file has the kind, the extension, the description and the origins, and none of the file's
     words;
   - the dogfood phase opens six of eNCode's own files of different kinds and edits each, then reports one of them.
+
+## A weaker model's tool calls read as meant (Accuracy 1a)
+
+Written with the pull request that mends a call's input, reads tool calls a model wrote as text, and lets Edit match
+across a shift in indentation
+([0089](../adr/0089-a-weaker-models-tool-calls-are-read-as-meant-mended-inputs-calls-written-as-text-and-closer-edit-matches.md)).
+
+What is new:
+
+- a call whose input fails its tool's schema can be mended before it is checked again (`repairInput`);
+- a reply with no tool call of its own can have calls read from its text (`recoverTextCalls`);
+- Edit can apply an edit whose `old_string` differs from the file only in indentation, and shows the closest lines when
+  nothing matches;
+- a note when the same call fails the same way three times in a turn.
+
+No new IPC call, setting or permission. Everything here runs in the core, before the checks and approvals a call
+already goes through.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| J1 | Tool-call markup in something the model read (a README, a web page, a tool's output, an issue) is run as if the model had called it: a prompt injection that skips the model's judgment | A reply's calls are read from its text only when the reply has no tool call of its own. Before any is made a call, every piece of markup taken out is looked for in what the conversation holds: tool results and messages, with Read's line numbers and spacing left aside. When any of it is there, the whole reply is left as it is and nothing runs. Markup inside a code fence is never read. | Mitigated (see the residual risks) |
+| J2 | A call read from text goes around the approvals, the permission rules or the hooks | It becomes an ordinary tool call of the reply, with a new id, and goes through the same schema check, permission rules, hooks, approvals, sandbox and checkpoints as any call. A tool the agent does not have is refused with the list of tools, as for a call sent the usual way. | Mitigated |
+| J3 | Mending an input changes what the call does, so the person approves one thing and another runs | Only an input that fails its schema is mended, and only by changes with one reading (text that is wholly a number or a boolean, JSON text of a list or an object, one value for a list of one, a `null` for a parameter that may be left out, a parameter's own name in another case or style, and a short fixed list of other names). Nothing inside `anyOf` or `oneOf` is changed. The mended input must pass the whole schema or nothing is changed. The card and the approval show the mended input, which is what runs, and the permission rules and hooks see it too. | Mitigated |
+| J4 | A name mended onto another parameter widens a call: `path` read as `file_path` on a tool that has its own `path`, or two names that both map onto one | An other name is used only when the schema does not have that name itself, when the call did not also send the right one, and when no two names in the call map onto the same parameter. | Mitigated |
+| J5 | Edit's indentation match changes the wrong place in a file | It applies only when the exact match and the earlier passes fail, the old text is at least 8 characters, the lines match at exactly one place, the shift is the same on every line, and it can be applied to every line of `new_string`. Otherwise the call is refused and the error says where the same text is with other spacing. The result says what was matched and how, the change goes through checkpoints and the Review tab as any edit, and the errors after the edit (0073) are reported. | Mitigated |
+| J6 | The closest-lines search, or the text-call reader, is made slow by a large file or a long reply | The closest-lines search is skipped when it would need more than 400,000 line comparisons, and stops early at each place that cannot beat the best one (about a quarter of a second at worst here). The text-call reader's patterns are lazy and anchored by fixed tags, and run once per reply that has no tool call of its own. | Mitigated |
+| J7 | The note after a mended call, or the closest lines, put a file's secret into the conversation | The note names only the parameters and the values the model itself sent. The closest lines are lines of a file the model asked to edit, which Read would show it anyway, and they go through the same result limits as any tool result. | Accepted (no new exposure) |
+
+### Residual risks
+
+- J1 finds copied markup by its text. A page that has the model *write* a call in its own words, rather than copy one,
+  is not caught; the call still needs the approvals its tool needs, as it would if the model had sent it the usual way.
+- A model that writes a call as an example, outside a code fence and not copied from anything it read, has that call
+  run, under the same approvals.
+- The list of other names is fixed in the code. A schema that uses one of those names for something else is safe
+  only because the schema's own name always wins.
+
+### Verification
+
+- `repair.test.ts`: numbers, booleans, lists and objects sent as text; names in another case and the known other
+  names; `null` left out; a list of one unwrapped; nothing changed for a reading that is not the only one, for a call
+  that still fails, or inside a choice.
+- `text-calls.test.ts`: each format read with its values kept as written; the words around them kept; a call only
+  shown, JSON that is an answer, and markup that does not read as a call left alone; a reply with its own calls left
+  alone.
+- `files.test.ts`: indentation shifted by a prefix and between tabs and spaces applied once and said; old text too
+  short, at two places, shifted unevenly, or not appliable to `new_string` refused with where the text is; the
+  closest lines shown with what differs, quoted.
+- `loop.test.ts`: a mended call runs as mended and its result says so; a call written as text runs through approval;
+  markup copied from a tool's result is not run; the third same failure gets the note.

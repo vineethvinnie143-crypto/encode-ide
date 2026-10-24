@@ -43,6 +43,11 @@ holds:
   private code, use a key of your own.
 - A paid key is never used for a call you did not choose: with **Only use free models** on, billed models are skipped,
   and a failed call is never retried on a second key or on a billed model after a free one.
+- Smaller and cheaper models (DeepSeek, GLM, Qwen, Kimi and the free ones) get more of their tool calls through. A
+  number sent as text, `path` for `file_path`, a call written in the reply's text instead of as a call, and an edit
+  whose lines differ from the file only in indentation are read as meant, and the tool's card shows the call as it
+  ran. Most useful to hear about: a model that keeps failing at the same call, or a call written as text that shows
+  up as words in the chat instead of running.
 
 ## Stay safe
 

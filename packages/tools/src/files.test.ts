@@ -341,13 +341,55 @@ describe('applyEdit', () => {
     assert.deepEqual(outcome, { ok: true, text: 'x = 10\ny = 20\n', replacements: 1 })
   })
 
-  it('points at the same text with other spacing, so the next try can copy it', () => {
+  it('applies whole lines that differ only in indentation or trailing spaces, at one place, indenting new_string alike', () => {
     const text = 'function a() {\n\treturn 1   \n}\nfunction b() {\n\treturn 2\n}\n'
-    const outcome = applyEdit(text, { old_string: 'function a() {\n  return 1\n}', new_string: 'x' }) as { ok: false; error: string }
+    const tabs = applyEdit(text, { old_string: 'function a() {\n  return 1\n}', new_string: 'function a() {\n  const one = 1\n  return one\n}' })
+    assert.deepEqual(tabs, {
+      ok: true,
+      text: 'function a() {\n\tconst one = 1\n\treturn one\n}\nfunction b() {\n\treturn 2\n}\n',
+      replacements: 1,
+      notes: ['old_string matched lines 1-3 only once indented with tabs for every 2 spaces, as the file has it; new_string was indented the same way. Copy text from Read exactly, spacing included.'],
+    })
+
+    // A method copied without its class's indentation, in a CRLF file, old_string closed by a newline.
+    const crlf = 'class A {\r\n    run() {\r\n        go()\r\n    }\r\n}\r\n'
+    const deeper = applyEdit(crlf, { old_string: 'run() {\n    go()\n}\n', new_string: 'run() {\n    go()\n    done()\n}\n' })
+    assert.ok(deeper.ok)
+    assert.equal(deeper.text, 'class A {\r\n    run() {\r\n        go()\r\n        done()\r\n    }\r\n}\r\n')
+    assert.match(deeper.notes![0], /^old_string matched lines 2-4 only once indented with 4 spaces more/)
+
+    // Indented further than the file: taken off every line, and off new_string's.
+    const less = applyEdit('if x then\n  call()\nend\n', { old_string: '    if x then\n      call()\n    end', new_string: '    if x then\n      call(1)\n    end' })
+    assert.equal(less.ok && less.text, 'if x then\n  call(1)\nend\n')
+
+    const trailing = applyEdit('local total = 0   \nreturn total\n', { old_string: 'local total = 0\nreturn total', new_string: 'local total = 1\nreturn total' })
+    assert.equal(trailing.ok && trailing.text, 'local total = 1\nreturn total\n')
+    assert.match(trailing.ok ? trailing.notes![0] : '', /only once trailing spaces are left aside/)
+  })
+
+  it('does not guess when indentation differs at two places, unevenly, or new_string cannot follow it', () => {
+    const twice = applyEdit('  value = compute()\n\tvalue = compute()\n', { old_string: 'value = compute()', new_string: 'x' })
+    assert.equal(twice.ok, false)
+    const uneven = applyEdit('if ready then\n      start()\nend\n', { old_string: 'if ready then\n  start()\nend', new_string: 'x' })
+    assert.equal(uneven.ok, false)
+    const cannot = applyEdit('  if ready then\n    start()\n  end\n', { old_string: '    if ready then\n      start()\n    end', new_string: 'if ready then\n  start()\nend' })
+    assert.equal(cannot.ok, false)
+    assert.match((cannot as { error: string }).error, /The same text is at lines 1-3 with different spacing/)
+  })
+
+  it('points at the same text with other spacing inside its lines, so the next try can copy it', () => {
+    const text = 'const  total = price * qty\nreturn total\n'
+    const outcome = applyEdit(text, { old_string: 'const total = price * qty\nreturn total', new_string: 'x' }) as { ok: false; error: string }
     assert.equal(outcome.ok, false)
     assert.match(outcome.error, /old_string was not found in the file\./)
-    assert.match(outcome.error, /The same text is at lines 1-3 with different spacing/)
-    assert.ok(outcome.error.includes('function a() {\n\treturn 1   \n}'))
+    assert.match(outcome.error, /The same text is at lines 1-2 with different spacing/)
+    assert.ok(outcome.error.includes('const  total = price * qty\nreturn total'))
+  })
+
+  it('shows the closest lines and how each differs when the text is not there', () => {
+    const text = ['export function totals(items) {', '  let sum = 0', '  for (const item of items) sum += item.price * item.quantity', '  return sum', '}', ''].join('\n')
+    const outcome = applyEdit(text, { old_string: '  let sum = 0\n  for (const item of items) sum += item.price * item.qty\n  return sum', new_string: 'x' }) as { ok: false; error: string }
+    assert.match(outcome.error, /The closest text is at lines 2-4\. Where it differs:\n  old_string line 2: "  for \(const item of items\) sum \+= item\.price \* item\.qty"\n  file line 3: "  for \(const item of items\) sum \+= item\.price \* item\.quantity"\nCopy those lines from the file as they are\./)
   })
 
   it('lists the places when the same text with other spacing is there more than once', () => {
@@ -356,7 +398,8 @@ describe('applyEdit', () => {
   })
 
   it('names the line where only the first line of old_string is found, and says nothing when nothing is close', () => {
-    const lead = applyEdit('const answer = compute()\nreturn answer\n', { old_string: 'const answer = compute()\nreturn other', new_string: 'x' }) as { ok: false; error: string }
+    const text = 'const answer = compute()\nreturn answer\n'
+    const lead = applyEdit(text, { old_string: 'const answer = compute()\nif (ready) start(answer, { retries: 3 })\nreturn other', new_string: 'x' }) as { ok: false; error: string }
     assert.match(lead.error, /Line 1 of the file has the same text as line 1 of old_string, but the lines around it differ\./)
     const nowhere = applyEdit('abc\n', { old_string: 'zzzzzzzzzz', new_string: 'x' }) as { ok: false; error: string }
     assert.equal(nowhere.error, 'old_string was not found in the file. Read the file again and copy the text exactly, including indentation, without the line-number prefix.')
