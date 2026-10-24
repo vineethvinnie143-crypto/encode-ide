@@ -18,7 +18,7 @@ import { FREE_POOL, parseModelRef, PROVIDER_ID } from './refs'
 
 export const PROVIDER_TYPES: readonly ProviderType[] = ['openai-compatible', 'openrouter', 'anthropic']
 
-export const MODEL_FAMILIES: readonly ModelFamily[] = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'moonshot', 'zhipu', 'mistral', 'meta', 'xai', 'other']
+export const MODEL_FAMILIES: readonly ModelFamily[] = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'moonshot', 'zhipu', 'mistral', 'meta', 'xai', 'minimax', 'other']
 
 export interface ProviderConfig {
   id: string

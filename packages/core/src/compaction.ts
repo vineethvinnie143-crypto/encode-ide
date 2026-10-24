@@ -329,12 +329,23 @@ export function firstDifference(before: readonly Message[], after: readonly Mess
   return length
 }
 
-/** Drops thinking from every assistant message from `index` on. Messages without any are returned as they are. */
+/**
+ * Drops thinking from every assistant message from `index` on, and what a provider attached to their calls to have it
+ * sent back (Gemini's signatures): both were minted for the conversation as it was. Messages without either are
+ * returned as they are.
+ */
 export function dropThinkingFrom(messages: readonly Message[], index: number): Message[] {
   return messages.map((message, i) => {
     if (i < index || message.role !== 'assistant') return message
-    if (!message.content.some((block) => block.type === 'thinking' || block.type === 'redacted-thinking')) return message
-    return { ...message, content: message.content.filter((block) => block.type !== 'thinking' && block.type !== 'redacted-thinking') }
+    if (!message.content.some((block) => block.type === 'thinking' || block.type === 'redacted-thinking' || (block.type === 'tool-use' && block.extra))) return message
+    const content = message.content
+      .filter((block) => block.type !== 'thinking' && block.type !== 'redacted-thinking')
+      .map((block) => {
+        if (block.type !== 'tool-use' || !block.extra) return block
+        const { extra: _minted, ...rest } = block
+        return rest
+      })
+    return { ...message, content }
   })
 }
 

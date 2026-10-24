@@ -25,6 +25,7 @@ export type ModelFamily =
   | 'mistral'
   | 'meta'
   | 'xai'
+  | 'minimax'
   | 'other'
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
@@ -69,6 +70,11 @@ export interface ThinkingBlock {
   text: string
   /** Anthropic's signature. It must come back byte for byte, or the block is rejected. */
   signature?: string
+  /**
+   * OpenRouter's `reasoning_details` for this reasoning, merged as they streamed: signed, summarized or encrypted
+   * reasoning that goes back unchanged to the model that wrote it (ADR 0099). Opaque to eNCode.
+   */
+  details?: Record<string, unknown>[]
 }
 
 /** Reasoning the provider encrypted. Only the model family that wrote it can read it. */
@@ -91,6 +97,11 @@ export interface ToolUseBlock {
   /** Parsed arguments; `{}` when `invalid` is set. */
   input: Record<string, unknown>
   invalid?: InvalidToolInput
+  /**
+   * What the provider attached to the call to have it sent back with it: Gemini's `extra_content`, which holds its
+   * thought signature (ADR 0099). Opaque to eNCode; only the model that wrote the call is sent it.
+   */
+  extra?: Record<string, unknown>
 }
 
 export type ToolResultContent = TextBlock | ImageBlock | DocumentBlock

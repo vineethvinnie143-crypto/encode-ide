@@ -207,6 +207,13 @@ a billed model from ever being tried after a free one or on another key
 - **Effort** sets how hard a role's models think, from Low to Max: the chip under the message box, `Ctrl+Shift+M` and
   `/effort` set it for the main role, and **Settings → Roles** for each role. A model without a reasoning setting
   ignores it, and a role left alone is left to its model.
+- **Reasoning models** get their own reasoning back as their providers ask
+  ([ADR 0099](docs/adr/0099-each-model-family-gets-its-own-reasoning-back-and-is-asked-in-its-own-terms.md)):
+  DeepSeek, Kimi and GLM in `reasoning_content`, MiniMax in its `<think>` block, Gemini's thought signatures on its
+  calls, and Claude's and Gemini's through OpenRouter as `reasoning_details`, so a task with tools goes on where
+  DeepSeek or Gemini 3 stopped at the second step. Only the model that wrote the reasoning is sent it. The temperature
+  is not sent to Kimi, MiniMax or Gemini 3, which choose their own, and an effort goes to DeepSeek and Kimi in their
+  own words.
 - **Settings → Models** edits the connections. Presets for the Connect window:
 
 | Preset | Base URL | Example model |

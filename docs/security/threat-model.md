@@ -2252,3 +2252,50 @@ What is new:
   approvals are labelled with the attempt, the Reviewer is asked once with both changes and no tools, the card shows
   the pick, each attempt's checks and lines, the project is unchanged until Keep, and after Keep holds the pick's file,
   with no worktree or branch left and the keep in the request's checkpoints.
+
+## Each model family's reasoning sent back, and its own request terms (Model families 1)
+
+Written with the pull request that reads each family's reasoning from the chat-completions dialect and sends it back
+the way that family's provider asks
+([0099](../adr/0099-each-model-family-gets-its-own-reasoning-back-and-is-asked-in-its-own-terms.md)).
+
+What is new:
+
+- data read from a provider and stored with the message it came with: OpenRouter's `reasoning_details` (text,
+  summaries, encrypted reasoning and signatures), a call's `extra_content` (Gemini's thought signature), and the
+  `<think>` block at the start of a reply's text, as thinking;
+- data sent to a provider: that same reasoning, back to the model and provider that wrote it, in the field its family
+  reads (`reasoning_content`, `reasoning_details`, `reasoning`, a `<think>` prefix, `extra_content`), and two fixed
+  values of eNCode's (a placeholder sentence for DeepSeek, Gemini's `skip_thought_signature_validator`);
+- request fields left out by family (the temperature for Kimi, MiniMax and Gemini 3) or sent in the family's words
+  (`reasoning_effort` for DeepSeek and Kimi), and a larger default output limit for unknown models of five families.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| RF1 | One model's reasoning reaches another model or provider: a paid model's reasoning sent to a free provider that may log it, or text a model was steered into writing passed to the next model as its own reasoning | Reasoning goes back only with a message whose origin is the target's provider and model (`sameModel`, with OpenRouter's `:free`-style variants and Google's `models/` set aside); for any other message the field is empty, or DeepSeek's fixed placeholder. A test sends a conversation written by two models and finds each one's reasoning only in its own requests. | Mitigated |
+| RF2 | A provider's opaque data (encrypted reasoning, signatures, `extra_content`) is read or run by eNCode | It is stored as it came and only sent back; eNCode reads a detail's type, index, text and summary to merge streamed pieces and to show text, and nothing in it is a path, a command or a tool input. | Mitigated |
+| RF3 | A reply hides its answer from the person inside `<think>` tags | Only a block at the very start of the reply's text is taken as thinking, and thinking is shown in the turn as any model's reasoning is; `<think>` anywhere else is text. A reply that never closes its block shows as reasoning, with no answer, as a model that stopped while thinking does. | Accepted |
+| RF4 | Sending reasoning back raises what a request costs, or the session files grow with opaque data | Reasoning goes back only where the family's provider asks for it (the current request for most, every turn for four families whose providers want it or ignore the rest), and costs show on the work log per request (0093). Compaction drops it with the thinking (0009), signatures included. | Accepted |
+| RF5 | A server that does not know the fields refuses every request | A server that names one of the fields as unknown is asked again once without them, as with an unknown parameter; a server's demand that they be passed back (DeepSeek's) is never taken for that, so the fields are not dropped where they are needed. | Mitigated |
+| RF6 | A setting of the person's is not sent: the temperature to Kimi, MiniMax or Gemini 3, an effort a family reads in other words | The families' documentation says these settings are refused or harm the model; a model without a setting has always ignored it, and the README says so. Nothing is sent that the person did not set. | Accepted |
+| RF7 | The larger default output limit for an unknown model of five families lets a reply run longer and cost more | A limit is a ceiling, not a target: what a reply costs is what it writes; a server that allows less names its limit and is asked again with it. Catalog models keep their catalog limit. | Accepted |
+
+### Residual risks
+
+- The families' rules follow their providers' documentation as of October 2026; a provider that changes what it wants
+  back stops a tool-call loop until a rule follows it. The benchmark against the person's own key (0092) is how a
+  tester finds that out.
+- Kimi's own tool-call ids are replaced with eNCode's, as every id with other characters is; a server running Kimi's
+  parser may read them less well.
+
+### Verification
+
+- `reasoning.test.ts`: the `<think>` block read whatever pieces its tags are cut into, text left alone elsewhere, the
+  merging of streamed details, the request boundary, the same-model rule, and what each family is sent.
+- `openai.test.ts`: details, signatures and a `<think>` block read from a stream; each family sent its own field and
+  no other model's reasoning; a loop that goes on against a server that refuses a step without its reasoning, as
+  DeepSeek does; a request asked again without the fields when a server names them as unknown, and not when it demands
+  them.
+- `compaction.test.ts`: a call's signature dropped with the thinking, the call kept.

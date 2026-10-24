@@ -78,8 +78,13 @@ export type TransportEvent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string; signature?: string }
   | { type: 'redacted-thinking'; data: string }
-  /** A slice of a tool call: id and name arrive once, the JSON arguments in pieces. */
-  | { type: 'tool-call'; index: number; id?: string; name?: string; arguments: string }
+  /** One piece of OpenRouter's `reasoning_details`; pieces with the same index make one detail (ADR 0099). */
+  | { type: 'reasoning-detail'; detail: Record<string, unknown> }
+  /**
+   * A slice of a tool call: id and name arrive once, the JSON arguments in pieces. `extra` is what the provider
+   * attached to the call to have it sent back (Gemini's `extra_content`).
+   */
+  | { type: 'tool-call'; index: number; id?: string; name?: string; arguments: string; extra?: Record<string, unknown> }
   /** Cumulative counts; later events overwrite the fields they carry. */
   | { type: 'usage'; usage: Partial<Usage> }
   | { type: 'finish'; reason: FinishReason; detail?: string }

@@ -200,6 +200,7 @@ export async function runAttempt(input: AttemptInput): Promise<AttemptResult> {
         case 'text':
         case 'thinking':
         case 'redacted-thinking':
+        case 'reasoning-detail':
         case 'tool-call':
           // An empty delta (a role chunk, say) proves nothing about the model.
           if (event.type === 'text' ? !event.text : event.type === 'thinking' && !event.text && !event.signature) break
