@@ -830,8 +830,9 @@ run the tests and fix what fails, then review the diff. Stop it in the middle of
 Edit a file in the editor by hand while the agent works in the same folder. Change the theme, the text size and the
 Windows display scale (125%, 150%). Leave it open for an hour. Long commands, long lines in a diff and wide tables
 should scroll in their own box: the chat itself never scrolls sideways, at any window size.
-While a long answer streams, the chat should keep to its end until you scroll up, even by one turn of the wheel;
-**Jump to the latest** (the arrow at the bottom right) takes you back and it follows again. A task list the agent
+While a long answer streams, the chat should keep to its end until you scroll up (one turn of the wheel, the scroll
+bar, the keys, Find), and nothing else should stop it; **Jump to the latest** (the arrow at the bottom right) takes you
+back and it follows again, and so does sending a message. A task list the agent
 finishes folds away a moment after its last tick; one it left unfinished stays. The rolling dice sits on the last
 line of the running turn, under the latest step, and says what is happening there (Thinking, Working, Writing, or
 waiting for you).

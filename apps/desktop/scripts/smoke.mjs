@@ -3893,7 +3893,17 @@ async function runFollowChecks() {
     const box = line.getBoundingClientRect()
     return { words: line.querySelector('.worklog-label')?.textContent ?? '', last: line === line.parentElement.lastElementChild, seen: box.top >= list.top && box.bottom <= list.bottom + 1 }
   })()`
+  // Every scroll of the list while the agent works, to say what moved it if the thread stops following.
+  await evaluate(`(() => {
+    const list = document.querySelector('.chat-list')
+    const trace = (window.__followTrace = [])
+    window.__followStart = performance.now()
+    list.addEventListener('scroll', () => {
+      if (trace.length < 2000) trace.push({ t: Math.round(performance.now() - window.__followStart), top: Math.round(list.scrollTop), end: list.scrollHeight - list.clientHeight })
+    })
+  })()`)
   await evaluate('window.eNCode.agent.reset()')
+  console.log('[smoke] before the request:', JSON.stringify(await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)))
   await sendPrompt('[scenario:follow-tasks] Plan it, then write a long review.')
   await waitFor(`${COUNT} === '3/3'`, 15000, 'the task card with every item ticked')
   await screenshot('16-task-card.png')
@@ -3903,7 +3913,7 @@ async function runFollowChecks() {
   let folded = false
   const deadline = Date.now() + 60000
   while (Date.now() < deadline) {
-    const state = await evaluate(`({ status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card'), live: ${LIVE} })`)
+    const state = await evaluate(`({ t: Math.round(performance.now() - window.__followStart), status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card'), live: ${LIVE} })`)
     if (state.status === 'error') throw new Error('The follow-tasks request failed')
     if (!state.card) folded = true
     if (state.status === 'done') break
@@ -3912,7 +3922,11 @@ async function runFollowChecks() {
   }
   const lost = samples.filter((sample) => sample.latest)
   console.log(`[smoke] following: ${samples.length} samples while it worked, largest gap ${Math.max(0, ...samples.map((sample) => sample.distance))} px, lost ${lost.length}`)
-  if (lost.length) throw new Error(`The thread stopped following while the answer streamed: ${JSON.stringify(lost.slice(0, 3))}`)
+  if (lost.length) {
+    const trace = await evaluate('window.__followTrace')
+    console.log('[smoke] the scrolls up to the first sample that lost it:', JSON.stringify(trace.filter((scroll) => scroll.t <= lost[0].t).slice(-40)))
+    throw new Error(`The thread stopped following while the answer streamed: ${JSON.stringify(lost.slice(0, 3))}`)
+  }
   const lines = samples.filter((sample) => sample.status !== 'idle')
   const off = lines.filter((sample) => !sample.live || !sample.live.last || !sample.live.seen)
   const words = [...new Set(lines.map((sample) => sample.live?.words).filter(Boolean))]
@@ -3947,8 +3961,24 @@ async function runFollowChecks() {
   await evaluate(unpad)
   await sleep(200)
 
-  // A turn of the wheel up stops it at once; more text then leaves the list where you put it.
-  const box = await evaluate("(() => { const rect = document.querySelector('.chat-list').getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) } })()")
+  // The page moves the list up on its own, as when something above what is in view gets shorter and the browser keeps
+  // the view in place, or a control above takes the focus. Nobody scrolled, so the thread goes back to its end.
+  await evaluate("document.querySelector('.chat-list').scrollTop -= 337")
+  await sleep(300)
+  const moved = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] the page moving the list up on its own:', JSON.stringify(moved))
+  if (moved.distance > 2 || moved.latest) throw new Error(`The page moving the list up on its own stopped the thread following: ${JSON.stringify(moved)}`)
+
+  // A turn of the wheel up stops it at once; more text then leaves the list where you put it. The wheel turns over a
+  // part of the list nothing covers: on a small screen the side panel lies over its right side.
+  const box = await evaluate(`(() => {
+    const list = document.querySelector('.chat-list')
+    const view = list.getBoundingClientRect()
+    const y = Math.round(view.top + view.height / 2)
+    for (let x = Math.round(view.left + 40); x < view.right - 20; x += 40) if (list.contains(document.elementFromPoint(x, y))) return { x, y }
+    return null
+  })()`)
+  if (!box) throw new Error('Nothing of the chat list is in view to turn the wheel over')
   await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 })
   await waitFor(LATEST, 4000, 'Jump to the latest after a turn of the wheel up')
   await sleep(400)
@@ -3961,6 +3991,42 @@ async function runFollowChecks() {
   await evaluate(`(${PAD})([300])`)
   if ((await evaluate(DISTANCE)) > 2) throw new Error('After Jump to the latest the thread does not follow new text')
   await evaluate(unpad)
+  await sleep(200)
+
+  // Dragging the scrollbar up stops it too, and more text leaves the list where the drag did.
+  // On a small screen the side panel lies over the scrollbar, and there is none to drag.
+  const bar = await evaluate("(() => { const list = document.querySelector('.chat-list'); const rect = list.getBoundingClientRect(); const x = Math.round(rect.right - 4), y = Math.round(rect.bottom - 10); return { width: list.offsetWidth - list.clientWidth, x, y, free: document.elementFromPoint(x, y) === list } })()")
+  if (!bar.width || !bar.free) console.log('[smoke] no scrollbar in view to drag:', JSON.stringify(bar))
+  else {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y })
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bar.x, y: bar.y, button: 'left', buttons: 1, clickCount: 1 })
+    for (let step = 1; step <= 6; step++) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y - step * 25, button: 'left', buttons: 1 })
+      await sleep(30)
+    }
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bar.x, y: bar.y - 150, button: 'left', buttons: 0, clickCount: 1 })
+    await waitFor(LATEST, 4000, 'Jump to the latest after dragging the scrollbar up')
+    console.log('[smoke] dragging the scrollbar up stops the thread following')
+    await sleep(700)
+    const dragged = await evaluate(DISTANCE)
+    await evaluate(`(${PAD})([300])`)
+    const grown = await evaluate(DISTANCE)
+    if (dragged < 30 || grown < dragged + 290) throw new Error(`The thread did not stay where the scrollbar left it: ${dragged} px from the end, then ${grown} px`)
+    if (!(await click('.latest-btn'))) throw new Error('No Jump to the latest button after the drag')
+    await waitFor(`${DISTANCE} <= 2 && !${LATEST}`, 4000, 'Jump to the latest back at the end after the drag')
+    await evaluate(unpad)
+  }
+
+  // Sending a message goes to the end and follows the answer, wherever you had scrolled to.
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -480 })
+  await waitFor(LATEST, 4000, 'Jump to the latest after reading back')
+  await sleep(700)
+  await sendPrompt('[scenario:follow-up] Carry on.')
+  await waitFor("document.querySelector('.chat-list').textContent.includes('Follow-up handled.') && !document.querySelector('.composer-send.is-stop')", 15000, 'the answer to a message sent while reading back')
+  await sleep(400)
+  const sent = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] a message sent while reading back:', JSON.stringify(sent))
+  if (sent.distance > 2 || sent.latest) throw new Error(`A message sent while reading back did not take the thread to its answer: ${JSON.stringify(sent)}`)
 
   // The step keeps how far the list got, and the session opened again shows no finished card.
   for (let round = 0; round < 4; round++) {

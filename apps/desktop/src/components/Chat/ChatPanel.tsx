@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, MessageCircleQuestion } from '../../ui/icons'
 import { useChat } from '../../stores/chat'
+import { useFind } from '../../stores/find'
 import { useWorkspace } from '../../stores/workspace'
 import { LogoMark } from '../../ui/Logo'
 import { reducedMotion, scrollBehavior } from '../../ui/motion'
@@ -8,7 +9,7 @@ import TrustBanner from '../permissions/TrustBanner'
 import ApprovalCard from './ApprovalCard'
 import Composer from './Composer'
 import FindBar from './FindBar'
-import { followsAfterScroll } from './follow'
+import { followsAfterScroll, YOURS_MS } from './follow'
 import GoalCard from './GoalCard'
 import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
@@ -39,12 +40,24 @@ export default function ChatPanel() {
   const follow = useRef(true)
   const lastTop = useRef(0)
   const [following, setFollowing] = useState(true)
+  // When you last scrolled the list yourself (the wheel, a key, a touch, a find), and whether you hold it (a press on
+  // the list or its scrollbar): only a move up of yours stops the thread following.
+  const touched = useRef(-Infinity)
+  const pressed = useRef(false)
+  const touch = () => {
+    touched.current = performance.now()
+  }
 
   // A turn that did not change stays the same object, so a streaming answer redraws only its own turn.
   const shown = useRef<Turn[]>([])
   const turns = useMemo(() => (shown.current = reuseTurns(shown.current, buildTurns(entries, running))), [entries, running])
   // The last request that edited files: its change card offers Undo.
   const latestEdit = useMemo(() => latestEditTurn(turns)?.id ?? null, [turns])
+  // The last message you sent, at the start or while the agent worked: the thread goes down to it and follows on.
+  const lastSent = useMemo(() => {
+    for (let at = entries.length - 1; at >= 0; at--) if (entries[at].kind === 'user' || entries[at].kind === 'steer') return entries[at].id
+    return null
+  }, [entries])
 
   const scrollToEnd = (smooth = false) => {
     const list = listRef.current
@@ -73,6 +86,34 @@ export default function ChatPanel() {
     return () => observer.disconnect()
   }, [])
 
+  // Letting go of the list counts as yours for a moment after, while the scroll it made is reported. A press the page
+  // never hears end (a scrollbar dragged out of the window) ends at the next move with no button down.
+  useEffect(() => {
+    const release = (event: PointerEvent) => {
+      if (!pressed.current || (event.type === 'pointermove' && event.buttons)) return
+      pressed.current = false
+      touch()
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    window.addEventListener('pointermove', release)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      window.removeEventListener('pointermove', release)
+    }
+  }, [])
+
+  // Find moves the list to a match: that is you reading back too.
+  useEffect(() => {
+    let seen = useFind.getState()
+    return useFind.subscribe(() => {
+      const state = useFind.getState()
+      if (state.open && (state.needle !== seen.needle || state.index !== seen.index || state.step !== seen.step)) touch()
+      seen = state
+    })
+  }, [])
+
   // A different session starts at its end, and comes in with a short fade rather than a cut.
   useEffect(() => {
     follow.current = true
@@ -81,6 +122,14 @@ export default function ChatPanel() {
     if (loadedFor && !reducedMotion()) listRef.current?.animate({ opacity: [0.3, 1] }, { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' })
   }, [loadedFor])
 
+  // Sending a message goes to the end and follows what comes back, wherever you had scrolled to.
+  useEffect(() => {
+    if (!lastSent) return
+    follow.current = true
+    setFollowing(true)
+    scrollToEnd()
+  }, [lastSent])
+
   const jumpTo = (id: string) => {
     stopFollowing()
     listRef.current?.querySelector(`[data-turn="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start', behavior: scrollBehavior() })
@@ -88,7 +137,7 @@ export default function ChatPanel() {
 
   return (
     <div className="chat-panel" data-status={status}>
-      <div className="chat-scroll">
+      <div className="chat-scroll" onKeyDown={touch}>
         <div
           className="chat-list"
           ref={listRef}
@@ -96,15 +145,26 @@ export default function ChatPanel() {
             const list = listRef.current
             if (!list) return
             const top = list.scrollTop
-            follow.current = followsAfterScroll(follow.current, lastTop.current, top, list.scrollHeight - list.clientHeight)
-            lastTop.current = top
+            const end = list.scrollHeight - list.clientHeight
+            const yours = pressed.current || performance.now() - touched.current < YOURS_MS
+            follow.current = followsAfterScroll(follow.current, lastTop.current, top, end, yours)
+            // The page moved the list up while it followed (something above got shorter as text came in below): back to
+            // the end at once, rather than at the next text.
+            if (follow.current && !yours && top < lastTop.current - 1 && top < end - 1) scrollToEnd()
+            else lastTop.current = top
             setFollowing(follow.current)
           }}
           // A turn of the wheel up stops the thread following at once, before the scroll it starts is reported, so a
           // stream that grows the thread in the same frame cannot pull the list back down under your hand.
           onWheel={(event) => {
-            if (event.deltaY < 0 && !event.ctrlKey && (listRef.current?.scrollTop ?? 0) > 0) stopFollowing()
+            if (event.ctrlKey) return
+            touch()
+            if (event.deltaY < 0 && (listRef.current?.scrollTop ?? 0) > 0) stopFollowing()
           }}
+          onPointerDown={() => {
+            pressed.current = true
+          }}
+          onTouchMove={touch}
         >
           <div className="thread" ref={threadRef}>
             {entries.length === 0 && !running && (
