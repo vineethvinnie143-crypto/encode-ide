@@ -664,6 +664,7 @@ async function runProviderPhase() {
 
   await runMentionChecks()
   await runWideLineChecks()
+  await runFollowChecks()
   await runRemoteChecks()
   await runCheckGateChecks()
   await runReviewGateChecks()
@@ -3874,6 +3875,174 @@ async function runWideLineChecks() {
   console.log('[smoke] wide lines and copy: ok')
 }
 
+/**
+ * The task card and the thread's following (ADR 0115): a finished task list folds away under the thread, the thread
+ * follows a long answer to its end, text that lands just after the thread scrolled itself does not stop it following,
+ * a turn of the wheel up does, and Jump to the latest starts it again.
+ */
+async function runFollowChecks() {
+  console.log('[smoke] --- task card and following ---')
+  const DISTANCE = "(() => { const list = document.querySelector('.chat-list'); return Math.round(list.scrollHeight - list.scrollTop - list.clientHeight) })()"
+  const LATEST = "!!document.querySelector('.latest-btn')"
+  const COUNT = "(document.querySelector('.todo-card .todo-count')?.textContent ?? '')"
+  // The line with the dice under the latest step (ADR 0116): the turn's last, and in view while the thread follows.
+  const LIVE = `(() => {
+    const line = document.querySelector('.chat-list .turn-live')
+    if (!line) return null
+    const list = document.querySelector('.chat-list').getBoundingClientRect()
+    const box = line.getBoundingClientRect()
+    return { words: line.querySelector('.worklog-label')?.textContent ?? '', last: line === line.parentElement.lastElementChild, seen: box.top >= list.top && box.bottom <= list.bottom + 1 }
+  })()`
+  // Every scroll of the list while the agent works, to say what moved it if the thread stops following.
+  await evaluate(`(() => {
+    const list = document.querySelector('.chat-list')
+    const trace = (window.__followTrace = [])
+    window.__followStart = performance.now()
+    list.addEventListener('scroll', () => {
+      if (trace.length < 2000) trace.push({ t: Math.round(performance.now() - window.__followStart), top: Math.round(list.scrollTop), end: list.scrollHeight - list.clientHeight })
+    })
+  })()`)
+  await evaluate('window.eNCode.agent.reset()')
+  console.log('[smoke] before the request:', JSON.stringify(await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)))
+  await sendPrompt('[scenario:follow-tasks] Plan it, then write a long review.')
+  await waitFor(`${COUNT} === '3/3'`, 15000, 'the task card with every item ticked')
+  await screenshot('16-task-card.png')
+
+  // While the answer streams the thread keeps to its end; the finished card folds away meanwhile.
+  const samples = []
+  let folded = false
+  const deadline = Date.now() + 60000
+  while (Date.now() < deadline) {
+    const state = await evaluate(`({ t: Math.round(performance.now() - window.__followStart), status: document.querySelector('.chat-panel')?.dataset.status ?? '', distance: ${DISTANCE}, latest: ${LATEST}, card: !!document.querySelector('.todo-card'), live: ${LIVE} })`)
+    if (state.status === 'error') throw new Error('The follow-tasks request failed')
+    if (!state.card) folded = true
+    if (state.status === 'done') break
+    samples.push(state)
+    await sleep(120)
+  }
+  const lost = samples.filter((sample) => sample.latest)
+  console.log(`[smoke] following: ${samples.length} samples while it worked, largest gap ${Math.max(0, ...samples.map((sample) => sample.distance))} px, lost ${lost.length}`)
+  if (lost.length) {
+    const trace = await evaluate('window.__followTrace')
+    console.log('[smoke] the scrolls up to the first sample that lost it:', JSON.stringify(trace.filter((scroll) => scroll.t <= lost[0].t).slice(-40)))
+    throw new Error(`The thread stopped following while the answer streamed: ${JSON.stringify(lost.slice(0, 3))}`)
+  }
+  const lines = samples.filter((sample) => sample.status !== 'idle')
+  const off = lines.filter((sample) => !sample.live || !sample.live.last || !sample.live.seen)
+  const words = [...new Set(lines.map((sample) => sample.live?.words).filter(Boolean))]
+  console.log(`[smoke] the dice line: ${lines.length - off.length} of ${lines.length} samples at the end of the turn and in view, saying ${words.join(', ')}`)
+  if (off.length > 1 || !words.includes('Writing')) throw new Error(`The dice line was not under the latest step while the agent worked: ${JSON.stringify(off.slice(0, 3))}, words ${words.join(', ')}`)
+  await waitFor("!document.querySelector('.todo-card')", 5000, 'the finished task card folding away')
+  await sleep(300)
+  const end = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST}, live: ${LIVE} })`)
+  if (end.distance > 2 || end.latest) throw new Error(`The thread is not at the end of the answer: ${JSON.stringify(end)}`)
+  if (end.live) throw new Error('The dice line is still there after the turn ended')
+  console.log(`[smoke] the finished card folded away ${folded ? 'while the answer streamed' : 'after the answer'}`)
+
+  // Grows the thread by the given heights, the second in a task after the frame of the first: the thread has scrolled
+  // itself to the first and the browser has not yet reported that scroll when the second lands, as when a diff opens
+  // or a burst of text comes in between two frames.
+  const PAD = `(heights) => new Promise((resolve) => {
+    const thread = document.querySelector('.chat-list .thread')
+    const pad = (height) => { const div = document.createElement('div'); div.className = 'smoke-pad'; div.style.cssText = 'flex-shrink:0;height:' + height + 'px'; thread.append(div) }
+    requestAnimationFrame(() => {
+      pad(heights[0])
+      setTimeout(() => {
+        if (heights[1]) pad(heights[1])
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))
+      }, 0)
+    })
+  })`
+  const unpad = "document.querySelectorAll('.chat-list .smoke-pad').forEach((node) => node.remove())"
+  await evaluate(`(${PAD})([60, 420])`)
+  const race = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] text landing before the scroll is reported:', JSON.stringify(race))
+  if (race.distance > 2 || race.latest) throw new Error(`Text that landed just after the thread scrolled itself stopped it following: ${JSON.stringify(race)}`)
+  await evaluate(unpad)
+  await sleep(200)
+
+  // The page moves the list up on its own, as when something above what is in view gets shorter and the browser keeps
+  // the view in place, or a control above takes the focus. Nobody scrolled, so the thread goes back to its end.
+  await evaluate("document.querySelector('.chat-list').scrollTop -= 337")
+  await sleep(300)
+  const moved = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] the page moving the list up on its own:', JSON.stringify(moved))
+  if (moved.distance > 2 || moved.latest) throw new Error(`The page moving the list up on its own stopped the thread following: ${JSON.stringify(moved)}`)
+
+  // A turn of the wheel up stops it at once; more text then leaves the list where you put it. The wheel turns over a
+  // part of the list nothing covers: on a small screen the side panel lies over its right side.
+  const box = await evaluate(`(() => {
+    const list = document.querySelector('.chat-list')
+    const view = list.getBoundingClientRect()
+    const y = Math.round(view.top + view.height / 2)
+    for (let x = Math.round(view.left + 40); x < view.right - 20; x += 40) if (list.contains(document.elementFromPoint(x, y))) return { x, y }
+    return null
+  })()`)
+  if (!box) throw new Error('Nothing of the chat list is in view to turn the wheel over')
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 })
+  await waitFor(LATEST, 4000, 'Jump to the latest after a turn of the wheel up')
+  await sleep(400)
+  const before = await evaluate(DISTANCE)
+  await evaluate(`(${PAD})([300])`)
+  const after = await evaluate(DISTANCE)
+  if (before < 30 || after < before + 290) throw new Error(`The thread did not stay where the wheel left it: ${before} px from the end, then ${after} px`)
+  if (!(await click('.latest-btn'))) throw new Error('No Jump to the latest button')
+  await waitFor(`${DISTANCE} <= 2 && !${LATEST}`, 4000, 'Jump to the latest back at the end')
+  await evaluate(`(${PAD})([300])`)
+  if ((await evaluate(DISTANCE)) > 2) throw new Error('After Jump to the latest the thread does not follow new text')
+  await evaluate(unpad)
+  await sleep(200)
+
+  // Dragging the scrollbar up stops it too, and more text leaves the list where the drag did.
+  // On a small screen the side panel lies over the scrollbar, and there is none to drag.
+  const bar = await evaluate("(() => { const list = document.querySelector('.chat-list'); const rect = list.getBoundingClientRect(); const x = Math.round(rect.right - 4), y = Math.round(rect.bottom - 10); return { width: list.offsetWidth - list.clientWidth, x, y, free: document.elementFromPoint(x, y) === list } })()")
+  if (!bar.width || !bar.free) console.log('[smoke] no scrollbar in view to drag:', JSON.stringify(bar))
+  else {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y })
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: bar.x, y: bar.y, button: 'left', buttons: 1, clickCount: 1 })
+    for (let step = 1; step <= 6; step++) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bar.x, y: bar.y - step * 25, button: 'left', buttons: 1 })
+      await sleep(30)
+    }
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bar.x, y: bar.y - 150, button: 'left', buttons: 0, clickCount: 1 })
+    await waitFor(LATEST, 4000, 'Jump to the latest after dragging the scrollbar up')
+    console.log('[smoke] dragging the scrollbar up stops the thread following')
+    await sleep(700)
+    const dragged = await evaluate(DISTANCE)
+    await evaluate(`(${PAD})([300])`)
+    const grown = await evaluate(DISTANCE)
+    if (dragged < 30 || grown < dragged + 290) throw new Error(`The thread did not stay where the scrollbar left it: ${dragged} px from the end, then ${grown} px`)
+    if (!(await click('.latest-btn'))) throw new Error('No Jump to the latest button after the drag')
+    await waitFor(`${DISTANCE} <= 2 && !${LATEST}`, 4000, 'Jump to the latest back at the end after the drag')
+    await evaluate(unpad)
+  }
+
+  // Sending a message goes to the end and follows the answer, wherever you had scrolled to.
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -480 })
+  await waitFor(LATEST, 4000, 'Jump to the latest after reading back')
+  await sleep(700)
+  await sendPrompt('[scenario:follow-up] Carry on.')
+  await waitFor("document.querySelector('.chat-list').textContent.includes('Follow-up handled.') && !document.querySelector('.composer-send.is-stop')", 15000, 'the answer to a message sent while reading back')
+  await sleep(400)
+  const sent = await evaluate(`({ distance: ${DISTANCE}, latest: ${LATEST} })`)
+  console.log('[smoke] a message sent while reading back:', JSON.stringify(sent))
+  if (sent.distance > 2 || sent.latest) throw new Error(`A message sent while reading back did not take the thread to its answer: ${JSON.stringify(sent)}`)
+
+  // The step keeps how far the list got, and the session opened again shows no finished card.
+  for (let round = 0; round < 4; round++) {
+    const opened = await evaluate("(() => { const closed = [...document.querySelectorAll('.chat-list .worklog-head[aria-expanded=false]')]; closed.forEach((button) => button.click()); return closed.length })()")
+    if (!opened) break
+    await sleep(400)
+  }
+  const details = await evaluate("[...document.querySelectorAll('.chat-list .tool-row-detail')].map((node) => node.textContent)")
+  if (!details.includes('3 of 3 done')) throw new Error(`The last task step does not say 3 of 3 done: ${JSON.stringify(details)}`)
+  await send('Page.reload')
+  await waitFor("document.querySelectorAll('.tree-row').length > 0 && document.querySelectorAll('.chat-list .turn').length > 0", 30000, 'the session after a reload')
+  await sleep(600)
+  if (await evaluate("!!document.querySelector('.todo-card')")) throw new Error('A session opened with every task done shows the task card')
+  console.log('[smoke] task card and following: ok')
+}
+
 /** Esc twice stops the agent: the first press says what a second does, and the note goes when no second comes. */
 async function runStopChecks() {
   console.log('[smoke] --- Esc twice ---')
@@ -3882,16 +4051,16 @@ async function runStopChecks() {
   await evaluate('window.eNCode.agent.reset()')
   await sendPrompt('[scenario:slow-reply] Write a long review.')
   await waitFor(`${running} && document.body.textContent.includes('The parser')`, 20000, 'the long answer streams')
-  // While the model writes, the dice rolls beside "Thinking" at the head of the turn's log (ADR 0112).
+  // While the answer streams in, the dice rolls beside "Writing" on the line under it, the turn's last (ADR 0112, 0116).
   const thinking = await evaluate(`(() => {
-    const head = document.querySelector('.worklog.is-live .worklog-head')
-    const dice = head?.querySelector('.think-dice')
+    const line = document.querySelector('.chat-list .turn-live')
+    const dice = line?.querySelector('.think-dice')
     const cube = dice?.querySelector('.think-dice-cube')
-    return head ? { words: head.querySelector('.worklog-label')?.textContent ?? '', clock: head.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0 } : null
+    return line ? { words: line.querySelector('.worklog-label')?.textContent ?? '', clock: line.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0, last: line === line.parentElement.lastElementChild, headDice: !!document.querySelector('.worklog-head .think-dice') } : null
   })()`)
   console.log('[smoke] thinking:', JSON.stringify(thinking))
-  if (!thinking || thinking.words !== 'Thinking' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14) {
-    throw new Error(`The running turn does not show the rolling dice beside "Thinking": ${JSON.stringify(thinking)}`)
+  if (!thinking || thinking.words !== 'Writing' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14 || !thinking.last || thinking.headDice) {
+    throw new Error(`The running turn does not end on the rolling dice beside "Writing": ${JSON.stringify(thinking)}`)
   }
   await screenshot('ui-dark-thinking.png')
 
@@ -6094,7 +6263,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks, follow: runFollowChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

@@ -327,6 +327,15 @@
   flex: none;
   transition: color var(--dur-1) var(--ease-out);
 }
+/* The line under the latest step while the agent works (ADR 0116): the dice, what it is doing, the clock. */
+.turn-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
 /* The rolling dice sits close to the words it goes with; its box is wider than the dice for the turns. */
 .worklog-dice {
   margin: 0 -5px 0 -4px;

@@ -343,7 +343,7 @@ describe('durations', () => {
   })
 })
 
-describe('what the head of a running log says', () => {
+describe('what the line under a running turn says', () => {
   it('names what the agent is doing, and rests the dice while it waits on you', () => {
     const log = [entry('tool', { tool: { name: 'bash', input: {}, state: 'running' } })]
     assert.deepEqual(workPhase('thinking', []), { words: 'Thinking', rolling: true })
@@ -352,6 +352,13 @@ describe('what the head of a running log says', () => {
     assert.deepEqual(workPhase('running-tool', [entry('tool', { tool: { name: 'bash', input: {}, state: 'reviewing' } })]), { words: 'Reviewing', rolling: true })
     assert.deepEqual(workPhase('awaiting-approval', log), { words: 'Waiting for your approval', rolling: false })
     assert.deepEqual(workPhase('awaiting-user', log), { words: 'Waiting for your answer', rolling: false })
+  })
+
+  it('says Writing while the answer streams in, and the waits and steps still win', () => {
+    const log = [entry('tool', { tool: { name: 'bash', input: {}, state: 'running' } })]
+    assert.deepEqual(workPhase('thinking', [], true), { words: 'Writing', rolling: true })
+    assert.deepEqual(workPhase('running-tool', log, true), { words: 'Working', rolling: true })
+    assert.deepEqual(workPhase('awaiting-approval', log, true), { words: 'Waiting for your approval', rolling: false })
   })
 })
 

@@ -129,6 +129,11 @@ function giveBack(sessionId: string): void {
   })
 }
 
+/** A task list whose every item is done: its card folds away (TodoCard), and a session opened with one shows none (ADR 0115). */
+export function finishedList(todos: readonly TodoItem[]): boolean {
+  return todos.length > 0 && todos.every((todo) => todo.status === 'completed')
+}
+
 /** The tokens of a conversation that has used none: a new, loaded or reset one counts from here. */
 const NO_USAGE = { total: 0, cached: 0, prompt: 0, completion: 0 } as const
 
@@ -210,7 +215,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         approvals: history.status === 'awaiting-approval' ? (history.approvals ?? (history.approval ? [history.approval] : [])) : [],
         ask: history.status === 'awaiting-user' ? (history.ask ?? null) : null,
         goal,
-        todos,
+        todos: finishedList(todos) ? [] : todos,
         plan,
         usageTotals: NO_USAGE,
         tokensPerSecond: 0,
