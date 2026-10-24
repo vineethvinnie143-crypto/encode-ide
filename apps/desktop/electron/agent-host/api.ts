@@ -4,14 +4,14 @@
  * own; the main process answers one, for keys. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
-import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests } from '@encode/core'
+import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests, ReviewSetting } from '@encode/core'
 import type { CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
 import type { ApprovalPolicy, InlineSuggestAnswer, InlineSuggestRequest, McpAction, McpOutcome, McpReport, ModelAlert, ModelRole, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, ReasoningEffort, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
-import type { CodeReviewInput, CodeReviewResult } from './code-review'
+import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
 import type { CommitDraftInput } from './commit-message'
 import type { RouterSettings } from './router-settings'
 
@@ -40,6 +40,7 @@ export interface HostConfig {
   errorGate: ErrorGate
   guide: GuideSetting
   checkGate: CheckGate
+  reviewWork: ReviewSetting
 }
 
 export interface HostInit {

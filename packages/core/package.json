@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@encode/diff": "workspace:*",
     "@encode/permissions": "workspace:*",
     "@encode/protocol": "workspace:*",
     "@encode/providers": "workspace:*",

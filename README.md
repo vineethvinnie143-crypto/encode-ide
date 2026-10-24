@@ -72,6 +72,12 @@ primary platform; the code stays cross-platform.
   one that was there before the request is left alone and said so. Its last reply is checked too: "all tests pass"
   with no passing run, a file that does not exist, or a function a file does not hold sends it back once to check.
 
+  Then the lines the request added are scanned for what is often a security bug (a key in the code, SQL or a shell line
+  joined from a value, `eval` of input, TLS checks off, a FiveM server event that pays out what the client sends), and
+  for smaller models the Reviewer reads the change against the request before you see the answer: a serious finding,
+  or a case no test covers, goes back to the agent once. It reads a plan before you do, too
+  (**Settings → Agent → Reviewer**: smaller models, always or never).
+
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
   range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
   The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars

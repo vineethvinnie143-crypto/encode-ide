@@ -298,6 +298,26 @@ export interface SessionStoreOptions {
 }
 
 const INDEX_FILE = 'index.json'
+
+/**
+ * Errors that renaming over a file gives on Windows while another program holds it open for a moment (the session list
+ * reading it, an antivirus scanning it): they pass on their own, so the index is not left behind the sessions.
+ */
+const TRANSIENT_RENAME_ERRORS = new Set(['EPERM', 'EACCES', 'EBUSY'])
+const RENAME_DELAYS_MS = [20, 40, 80, 160, 320, 640]
+
+async function renameOver(from: string, to: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? ''
+      if (attempt >= RENAME_DELAYS_MS.length || !TRANSIENT_RENAME_ERRORS.has(code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, RENAME_DELAYS_MS[attempt]))
+    }
+  }
+}
 const LOG_EXTENSION = '.jsonl'
 
 function indexOf(derived: Derived): IndexEntry {
@@ -399,10 +419,15 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     if (!index) return
     const sessions = [...index.values()]
     const target = path.join(dir, INDEX_FILE)
-    const temp = `${target}.${process.pid}.tmp`
+    const temp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     await ensureDir()
     await fs.writeFile(temp, JSON.stringify({ v: SESSION_FORMAT, sessions }), { mode: 0o600 })
-    await fs.rename(temp, target)
+    try {
+      await renameOver(temp, target)
+    } catch (error) {
+      await fs.rm(temp, { force: true })
+      throw error
+    }
   }
 
   function scheduleIndex(): void {

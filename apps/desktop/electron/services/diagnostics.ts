@@ -104,6 +104,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Limits', `${settings.maxSteps} steps a turn, ${settings.maxGoalRounds} rounds for a goal`],
     ['Language servers', `${settings.languageServers ? 'on' : 'off'}, errors before finishing ${settings.errorGate}`],
     ['Checks before finishing', settings.checkGate],
+    ['Reviewer before finishing', settings.reviewWork],
     ['Suggestions as you type', `${settings.inlineSuggest}, ${inlineState(settings).on ? 'on' : 'off'}`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],
     ['Appearance', JSON.stringify(settings.appearance)],

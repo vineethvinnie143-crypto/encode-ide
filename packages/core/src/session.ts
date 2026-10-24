@@ -61,6 +61,7 @@ import {
 } from '@encode/tools'
 import { SessionCodeMap } from './code-map'
 import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
+import type { ChangedText } from './diff-scan'
 import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
@@ -106,6 +107,7 @@ import {
   type SessionSummary,
   type TodoItem,
   type TurnChangeSet,
+  type ChangeVersion,
   type TurnFileChange,
   type TurnFileWrite,
   type TurnWriteOutcome,
@@ -244,6 +246,39 @@ export interface SessionCheckpoints {
   changes?(turn: string, limits?: { maxFileBytes?: number; maxTotalBytes?: number }): Promise<{ known: boolean; at?: number; files: TurnFileChange[] }>
   /** Writes a file the agent changed, for the person, while it holds what they saw (see `CheckpointService.write`). */
   write?(write: TurnFileWrite): Promise<TurnWriteOutcome>
+}
+
+/** A request's changes are read whole up to these sizes for the scan and the Reviewer (ADR 0096). */
+const CHANGE_LIMITS = { maxFileBytes: 1_000_000, maxTotalBytes: 8_000_000 }
+const UNKEPT: Record<Extract<ChangeVersion, { state: 'unread' }>['why'], string> = {
+  large: 'too large to show',
+  budget: 'left out to keep this short',
+  unkept: 'no copy was kept',
+  lost: 'its copy is lost',
+  outside: 'outside the workspace',
+}
+
+function versionText(version: ChangeVersion): { text: string | null } | { note: string } {
+  if (version.state === 'missing') return { text: null }
+  if (version.state === 'unread') return { note: UNKEPT[version.why] }
+  const bytes = Buffer.from(version.bytes)
+  return bytes.includes(0) ? { note: 'binary file: not shown' } : { text: bytes.toString('utf8') }
+}
+
+/** What a request's file tools changed, as text; a file with no text to read is named with why. */
+export function changedTexts(files: readonly TurnFileChange[]): ChangedText[] {
+  const out: ChangedText[] = []
+  for (const file of files) {
+    const before = versionText(file.before)
+    const after = versionText(file.after)
+    if ('note' in before || 'note' in after) {
+      const note = 'note' in after ? after.note : (before as { note: string }).note
+      out.push({ path: file.path, before: file.before.state === 'missing' ? null : '', after: file.after.state === 'missing' ? null : '', note })
+    } else if (before.text !== null || after.text !== null) {
+      out.push({ path: file.path, before: before.text, after: after.text })
+    }
+  }
+  return out
 }
 
 function errorMessage(error: unknown): string {
@@ -1226,6 +1261,7 @@ export class AgentSession {
       codeMap: this.codeMap,
       ...(env.outputs ? { outputs: env.outputs } : {}),
       checks: this.checks,
+      ...(env.checkpoints?.changes ? { changes: this.requestChanges } : {}),
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1280,7 +1316,8 @@ export class AgentSession {
       ...(env.extraRoots ? { extraRoots: env.extraRoots } : {}),
       refresh: this.refreshRules,
       ...(env.readRoots ? { readRoots: env.readRoots } : {}),
-      ...(this.reviewer ? { reviewer: this.reviewer, requests: this.recentRequests } : {}),
+      ...(this.reviewer ? { reviewer: this.reviewer } : {}),
+      requests: this.recentRequests,
       preface: this.preface,
       steers: this.steering,
     })
@@ -1288,6 +1325,26 @@ export class AgentSession {
 
   /** Where relative paths and searches start: the root, or the worktree the agent works in. */
   private readonly workdir = (): string => this.worktree?.path ?? this.env.root
+
+  /** The request running now, and the messages taken into it while it ran: the checkpoints record each as a turn. */
+  private requestParts: string[] = []
+
+  /** What one request's file tools changed so far, as text (ADR 0096): a file by its first version and its last. */
+  private readonly requestChanges = async (turn: string): Promise<ChangedText[]> => {
+    const checkpoints = this.env.checkpoints
+    if (!checkpoints?.changes) return []
+    const parts = this.requestParts[0] === turn ? this.requestParts : [turn]
+    const merged = new Map<string, TurnFileChange>()
+    for (const part of parts) {
+      const changes = await checkpoints.changes(part, CHANGE_LIMITS)
+      if (!changes.known) continue
+      for (const file of changes.files) {
+        const earlier = merged.get(file.file)
+        merged.set(file.file, earlier ? { ...file, before: earlier.before } : file)
+      }
+    }
+    return changedTexts([...merged.values()])
+  }
 
   /** The jobs as the agents see them: a command the agent stops itself needs no notice that it ended. */
   private readonly agentJobs: JobManager = {
@@ -1483,6 +1540,8 @@ export class AgentSession {
       } catch (error) {
         this.hookFailed('UserPromptSubmit', error)
       }
+      // The checkpoints count what follows as this message's, so the request's changes are read from both.
+      this.requestParts.push(id)
       for (const block of await this.mentions(text)) blocks.push(textBlock(block))
       blocks.push(textBlock(text))
     }
@@ -1570,6 +1629,7 @@ export class AgentSession {
     const { signal } = controller
     const mode: AgentMode = input.mode === 'ask' || input.mode === 'plan' ? input.mode : 'code'
     const turnId = newRecordId()
+    this.requestParts = [turnId]
     try {
       this.setStatus('thinking')
       // Servers that are still starting get a moment to bring their tools: the list is fixed for the turn once it begins.

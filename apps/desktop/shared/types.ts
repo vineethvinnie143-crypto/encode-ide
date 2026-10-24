@@ -73,6 +73,12 @@ export type Guide = 'auto' | 'full'
 export type CheckGate = 'auto' | 'on' | 'off'
 
 /**
+ * Whether the Reviewer reads the agent's finished changes and its plans before you do (ADR 0096): `auto` for models
+ * that need the full guide or when the Review role has a model of its own, `on` always, `off` never.
+ */
+export type ReviewWork = 'auto' | 'on' | 'off'
+
+/**
  * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
  * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
  * `off`: never. See shared/inline.ts.
@@ -123,6 +129,8 @@ export interface Settings {
   guide: Guide
   /** See CheckGate. Default `auto`. */
   checkGate: CheckGate
+  /** See ReviewWork. Default `auto`. */
+  reviewWork: ReviewWork
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */

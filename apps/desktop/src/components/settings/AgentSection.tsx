@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
-import type { CheckGate, Settings } from '@shared/types'
+import type { CheckGate, ReviewWork, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
@@ -15,6 +15,12 @@ import { CommitInput, SettingRow, SettingsGroup } from './Section'
 const CHECK_GATES: SegmentedOption<CheckGate>[] = [
   { value: 'auto', label: 'Up to twice' },
   { value: 'on', label: 'Up to 4 times' },
+  { value: 'off', label: 'Never' },
+]
+
+const REVIEW_WORK: SegmentedOption<ReviewWork>[] = [
+  { value: 'auto', label: 'Smaller models' },
+  { value: 'on', label: 'Always' },
   { value: 'off', label: 'Never' },
 ]
 
@@ -114,9 +120,16 @@ export function AgentSection({ settings }: { settings: Settings }) {
         <SettingRow
           id="agent.checks"
           label="Check the agent's work before it finishes"
-          help="When a request changed code, eNCode runs the project's typecheck and tests (from package.json, Cargo.toml, go.mod or pytest's settings, or the checks list in .encode/settings.json) and sends the agent back for what its changes broke; failures that were there before are left alone. Each run needs what the agent's own command would. It also checks the reply: a claim that the tests pass with no passing run, a file that is not there, or a name a file does not hold sends the agent back once."
+          help="When a request changed code, eNCode runs the project's typecheck and tests (from package.json, Cargo.toml, go.mod or pytest's settings, or the checks list in .encode/settings.json) and sends the agent back for what its changes broke; failures that were there before are left alone. Each run needs what the agent's own command would. It also reads the lines the agent added for common security bugs (keys in code, SQL or commands built from values, FiveM events that trust what the client sends) and checks the reply: a claim that the tests pass with no passing run, a file that is not there, or a name a file does not hold sends the agent back once."
         >
           <Segmented label="Check the agent's work before it finishes" value={settings.checkGate} options={CHECK_GATES} onChange={(checkGate) => void save({ checkGate })} />
+        </SettingRow>
+        <SettingRow
+          id="agent.review"
+          label="Have the Reviewer read the agent's work"
+          help="The model of the Review role reads each finished change against your request, and each plan, before you do. What holds up the work, and cases no test covers when the project has tests, go back to the agent once. Smaller models: for models that need the full guide, or whenever the Review role has a model of its own. It sends the change to that model, and its answer adds to what the request costs."
+        >
+          <Segmented label="Have the Reviewer read the agent's work" value={settings.reviewWork} options={REVIEW_WORK} onChange={(reviewWork) => void save({ reviewWork })} />
         </SettingRow>
       </SettingsGroup>
 

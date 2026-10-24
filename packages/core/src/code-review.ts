@@ -1,13 +1,24 @@
 /**
  * Ask the Reviewer: one call to the model of the Review role with a change, each line numbered as in its file, and
  * back a short verdict and findings tied to those lines, which the Review tab shows as comments. The model reads only
- * what it is given and has no tools, so it changes nothing; the main process decides what goes in (see
- * review-prompt.ts) and keeps the request small.
+ * what it is given and has no tools, so it changes nothing; the caller decides what goes in (the desktop's
+ * review-prompt.ts for the Review tab, review.ts for a request's changes) and keeps the request small.
  */
 import { randomBytes } from 'node:crypto'
-import { estimateTokens } from '@encode/core'
 import { messageText, repairJson, textBlock, type ModelClient, type ModelRequest } from '@encode/providers'
-import type { FindingPriority, ReviewFinding } from '../../shared/types'
+import { estimateTokens } from './compaction'
+
+export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+/** A problem the Reviewer found, tied to one line of the change as the review names its file. */
+export interface ReviewFinding {
+  path: string
+  side: 'old' | 'new'
+  line: number
+  priority: FindingPriority
+  title: string
+  body: string
+}
 
 export interface CodeReviewFile {
   /** As the review names it, which is how a finding names it back. */
@@ -69,7 +80,7 @@ const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim()
 const cut = (value: string, limit: number) => (value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value)
 
 /** The object in a reply: as JSON, inside a code fence, among other words, or with the slips a model makes in JSON. */
-function objectIn(reply: string): Record<string, unknown> | undefined {
+export function objectIn(reply: string): Record<string, unknown> | undefined {
   const text = reply.replace(/\r\n?/g, '\n').trim()
   const fenced = /```(?:json)?\s*\n([\s\S]*?)\n?```/i.exec(text)
   const body = fenced ? fenced[1] : text

@@ -30,5 +30,6 @@ export function hostConfigOf(settings: Settings, keyRevision: (profileId: string
     errorGate: settings.errorGate,
     guide: settings.guide,
     checkGate: settings.checkGate,
+    reviewWork: settings.reviewWork,
   }
 }

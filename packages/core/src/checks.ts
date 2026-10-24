@@ -252,6 +252,19 @@ export class CheckLedger {
   startRequest(): void {
     this.startedAt = this.seq
     this.base = undefined
+    this.wroteFiles = false
+  }
+
+  private wroteFiles = false
+
+  /** A tool changed a file, code or not: the scan and the Reviewer have something to read (ADR 0096). */
+  wrote(): void {
+    this.wroteFiles = true
+  }
+
+  /** Whether any file changed since the request started. */
+  get wroteInRequest(): boolean {
+    return this.wroteFiles
   }
 
   /** The agent changed code. */

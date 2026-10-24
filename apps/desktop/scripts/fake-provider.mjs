@@ -199,6 +199,24 @@ const SCENARIOS = {
     { text: 'Swapping them.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a * b', new_string: 'return b * a' } } },
     { text: 'Swapped them; all tests pass.' },
   ],
+  // A change that divides by an empty list's length: the Reviewer finds it before the person sees the reply (ADR 0096).
+  'review-gate': [
+    {
+      text: 'Adding it.',
+      call: { name: 'Write', args: { file_path: 'src/average.ts', content: 'export function average(values: number[]): number {\n  return values.reduce((sum, value) => sum + value, 0) / values.length\n}\n' } },
+    },
+    {
+      text: 'Added average in src/average.ts.',
+      reviewed: {
+        text: 'The Reviewer is right; an empty list now gives 0.',
+        call: {
+          name: 'Write',
+          args: { file_path: 'src/average.ts', content: 'export function average(values: number[]): number {\n  if (values.length === 0) return 0\n  return values.reduce((sum, value) => sum + value, 0) / values.length\n}\n' },
+        },
+      },
+    },
+    { text: 'Added average in src/average.ts; an empty list gives 0.' },
+  ],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.
@@ -275,9 +293,10 @@ let lastRequest = null
 let lastReviewer = null
 /** The latest request of Ask the Reviewer, for the smoke to check what it was sent. */
 let lastCodeReview = null
+let lastCompletionReview = null
 /** The latest suggestion asked for as you type, for the smoke to check what was sent. */
 let lastInline = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, inlineRequests: 0 }
+const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -343,9 +362,15 @@ function chunk(delta, finish = null) {
 const STEERED = 'sent the message below while you were working'
 const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
 
-/** What eNCode tells the model within a turn of what the language servers found: the turn goes on. */
-const LANGUAGE_SERVER_NEWS = ['The language servers found errors after your changes', 'The language servers checked your changes again', 'Before you finish: your changes this turn left errors']
+/** What eNCode tells the model within a turn of what the language servers or the Reviewer found: the turn goes on. */
+const LANGUAGE_SERVER_NEWS = [
+  'The language servers found errors after your changes',
+  'The language servers checked your changes again',
+  'Before you finish: your changes this turn left errors',
+  'The Reviewer read your changes before the person sees them',
+]
 const GATED = 'Before you finish: your changes this turn left errors'
+const REVIEWED = 'The Reviewer read your changes before the person sees them'
 function isLanguageServerNews(message) {
   if (message.role !== 'user') return false
   const text = textOf(message.content)
@@ -397,7 +422,9 @@ function stepOf(messages) {
   const step = script[Math.min(done, script.length - 1)]
   // Sent back by the error gate: the step it has for that.
   const last = messages.at(-1)
-  return step.gated && last?.role === 'user' && textOf(last.content).includes(GATED) ? step.gated : step
+  if (step.gated && last?.role === 'user' && textOf(last.content).includes(GATED)) return step.gated
+  // Sent back by the Reviewer before the person sees the reply (ADR 0096).
+  return step.reviewed && last?.role === 'user' && textOf(last.content).includes(REVIEWED) ? step.reviewed : step
 }
 
 /** What OpenAI would refuse in a transcript, or null. */
@@ -468,6 +495,25 @@ function codeReviewAnswer(user) {
   })}\n\`\`\``
 }
 
+/** The Reviewer before the agent finishes (ADR 0096): the request, the reply and the change, and no tools. */
+const COMPLETION_REVIEWER = 'You are the Reviewer. A coding agent has just finished'
+const isCompletionReview = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(COMPLETION_REVIEWER))
+
+/** A P1 where the change divides by a list's length, and a P3 that stays with the Reviewer; nothing on a guarded one. */
+function completionReviewAnswer(user) {
+  const file = /<file path=("(?:[^"\\]|\\.)*")[^>]*>\n([\s\S]*?)\n<\/file>/.exec(user)
+  const divides = file ? /^\+(\d+) \| .*\/ values\.length/m.exec(file[2]) : null
+  if (!file || !divides || /^\+\d+ \| .*values\.length === 0/m.test(file[2])) return JSON.stringify({ summary: 'The change does what the request asks.', findings: [], untested: [] })
+  return `\`\`\`json\n${JSON.stringify({
+    summary: 'average divides by the length of a list that can be empty.',
+    findings: [
+      { file: JSON.parse(file[1]), line: Number(divides[1]), priority: 'P1', title: 'An empty list gives NaN', body: 'values.length is 0 for an empty list, so the result is NaN. Return 0 first.' },
+      { file: JSON.parse(file[1]), line: 1, priority: 'P3', title: 'No doc comment', body: 'Say what an empty list gives.' },
+    ],
+    untested: [],
+  })}\n\`\`\``
+}
+
 /** The editor's call for a suggestion as you type (ADR 0087): no tools, the file with <cursor/> in it. */
 const INLINE_SYSTEM = 'You are the autocomplete of a code editor.'
 const isInline = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(INLINE_SYSTEM))
@@ -514,6 +560,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.url === '/__last-code-review') {
       sendJson(response, 200, lastCodeReview)
+      return
+    }
+    if (request.url === '/__last-completion-review') {
+      sendJson(response, 200, lastCompletionReview)
       return
     }
     if (request.url?.startsWith('/__fail/') && request.method === 'POST') {
@@ -581,6 +631,14 @@ const server = http.createServer(async (request, response) => {
       const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
       lastCodeReview = { model: body.model ?? null, tools: body.tools ?? [], user }
       await sendText(response, body, codeReviewAnswer(user))
+      return
+    }
+
+    if (isCompletionReview(messages)) {
+      stats.completionReviews += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastCompletionReview = { model: body.model ?? null, tools: body.tools ?? [], system: messages.filter((message) => message.role === 'system').map((message) => textOf(message.content)).join('\n'), user }
+      await sendText(response, body, completionReviewAnswer(user))
       return
     }
 

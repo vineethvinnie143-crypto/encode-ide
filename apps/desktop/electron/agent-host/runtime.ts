@@ -10,7 +10,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { AgentHost, NO_MODEL_MESSAGE, createDemoClient, serveHost, type AgentSettings, type HostOptions } from '@encode/core'
+import { AgentHost, NO_MODEL_MESSAGE, createDemoClient, reviewChanges, serveHost, type AgentSettings, type HostOptions } from '@encode/core'
 import { Peer, RpcError, type Port } from '@encode/protocol'
 import {
   createAnthropicAdapter,
@@ -34,7 +34,6 @@ import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, sea
 import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
 import type { DesktopHostApi, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
-import { reviewChanges } from './code-review'
 import { draftCommitMessage } from './commit-message'
 import { inlineInput, suggestInline } from './inline-suggest'
 
@@ -71,6 +70,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   errorGate: config.errorGate,
   guide: config.guide,
   checkGate: config.checkGate,
+  review: config.reviewWork,
 })
 
 const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, maxOutputTokens: 8_192 }
