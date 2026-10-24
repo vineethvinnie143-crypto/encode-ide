@@ -1,11 +1,11 @@
 /**
  * The wire between the main process and the agent host (a utility process).
- * The host serves the session API of @encode/core and three requests of its
- * own; the main process answers one, for keys. Everything crosses as
+ * The host serves the session API of @encode/core and requests of its own;
+ * the main process answers the host's requests for keys and for the browser. Everything crosses as
  * structured-clonable data, and secrets cross only when asked for.
  */
 import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests, ReviewSetting, SmallerHelp, StrongerOffer } from '@encode/core'
-import type { CodeDiagnostic } from '@encode/tools'
+import type { BrowserAnswer, BrowserRequest, CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
 import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
@@ -172,6 +172,8 @@ export type MainApi = {
      * code, never a setting); empty when there is none.
      */
     searchKey: { params: { provider: KeyedSearchProviderId }; result: string }
+    /** A step of the Browser tool in the agent tab of a chat (ADR 0103); the window shows the tab. */
+    browser: { params: { session: string; request: BrowserRequest }; result: BrowserAnswer }
   }
   events: {
     /** What the editor shows, for the language servers: its text goes before it is saved. */

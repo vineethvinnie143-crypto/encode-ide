@@ -4,6 +4,8 @@ import type { ModelTestProgress } from '../shared/model-tests'
 import type { CustomTheme } from '../shared/themes'
 import type {
   AgentCreateInput,
+  AgentTabRequest,
+  BrowserKeyAction,
   AgentMode,
   AgentEvent,
   ApprovalAnswer,
@@ -28,6 +30,7 @@ import type {
   ShellCreateOptions,
   ShellPromptInfo,
   TodoItem,
+  WorktreeRequest,
   ZoomAction,
 } from '../shared/types'
 
@@ -56,6 +59,11 @@ const api: EncodeApi = {
     onOpenSession: (callback) => on<string>('app:open-session', callback),
     screenReader: () => invoke('app:screen-reader'),
     onScreenReader: (callback) => on<boolean>('app:screen-reader', callback),
+  },
+  browser: {
+    onOpenTab: (callback) => on<string>('browser:open-tab', callback),
+    onAgentTab: (callback) => on<AgentTabRequest>('browser:agent', callback),
+    onKey: (callback) => on<{ contentsId: number; action: BrowserKeyAction }>('browser:key', callback),
   },
   window: {
     minimize: () => invoke('window:minimize'),
@@ -215,6 +223,8 @@ const api: EncodeApi = {
     reset: (sessionId?: string) => invoke('agent:reset', sessionId),
     remove: (sessionId: string) => invoke('agent:remove', sessionId),
     fork: (sessionId: string) => invoke('agent:fork', sessionId),
+    side: (sessionId: string) => invoke('agent:side', sessionId),
+    worktree: (sessionId: string, request: WorktreeRequest) => invoke('agent:worktree', sessionId, request),
     rename: (sessionId: string, title: string) => invoke('agent:rename', sessionId, title),
     goal: (sessionId: string) => invoke('agent:goal', sessionId),
     setGoal: (sessionId: string, goal: SessionGoal | null) => invoke('agent:set-goal', sessionId, goal),

@@ -6,6 +6,8 @@ import { hostConfigOf } from './agent-host/config'
 import { spawnAgentHost } from './agent-host/electron'
 import { AgentHostService } from './agent-host/service'
 import { applyNativeAppearance, followSystemTheme } from './appearance'
+import { AgentBrowser } from './browser/agent-browser'
+import { guardBrowserTabs } from './browser/guard'
 import { aboutInfo, currentEnvironment } from './build-info'
 import { Banner, electronShortcuts } from './computer-overlay'
 import { registerIpc } from './ipc'
@@ -129,6 +131,23 @@ if (!gotLock) {
       if (target && !target.isDestroyed()) target.webContents.send(channel, payload)
     }
 
+    // Browser tabs are <webview>s of the window: the guard decides what each may be, and the agent's tabs are driven here.
+    const agentBrowser = new AgentBrowser({
+      show: (key) => {
+        const target = mainWindow
+        if (!target || target.isDestroyed()) return false
+        target.webContents.send('browser:agent', { type: 'show', key })
+        return true
+      },
+      close: (key) => send('browser:agent', { type: 'close', key }),
+      log: (message) => console.warn(`[browser] ${message}`),
+    })
+    guardBrowserTabs(win, agentBrowser, {
+      openTab: (url) => send('browser:open-tab', url),
+      key: (contentsId, action) => send('browser:key', { contentsId, action }),
+      log: (message) => console.warn(`[browser] ${message}`),
+    })
+
     // While the agent uses the computer the person sees a banner with a Stop button, and Ctrl+Alt+Esc stops it from any window.
     const banner = new Banner({
       // On the screen the pointer is on: that is where the person is looking, and where the agent works.
@@ -225,6 +244,7 @@ if (!gotLock) {
       },
       // A search key has no address to check: where a search goes is fixed in the code, not a setting.
       searchKey: (provider) => settings.searchKeyFor(provider),
+      browser: (sessionId, request, signal) => agentBrowser.call(sessionId, request, signal),
       onEvent: (event) => {
         send('agent:event', event)
         attention.see(event)

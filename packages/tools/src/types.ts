@@ -16,6 +16,7 @@
 import type { IndexedFile } from './codemap/rank'
 import type { LanguageServers, NativeDoc } from '@encode/lsp'
 import type { ToolDefinition, ToolResultContent } from '@encode/providers'
+import type { BrowserHandle } from './browser/tool'
 import type { DesktopHandle } from './computer/state'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
@@ -550,6 +551,8 @@ export interface ToolContext {
   readonly web: WebAccess
   /** The way to the desktop for the Computer tool; absent where there is none. */
   readonly desktop?: DesktopHandle
+  /** The agent's Browser tab, for the Browser tool; absent outside the desktop app. */
+  readonly browser?: BrowserHandle
   readonly interaction: Interaction
   readonly subagents?: Subagents
   readonly skills?: Skills

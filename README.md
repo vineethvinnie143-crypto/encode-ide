@@ -66,7 +66,11 @@ primary platform; the code stays cross-platform.
   - questions: `AskUserQuestion`;
   - code intelligence: `LSP` (definitions, references, hover, symbols, calls, diagnostics, code actions) and
     `LSPEdit` (renames across files, code actions), through the language servers on your computer or installed by eNCode;
-  - worktrees: `EnterWorktree` and `ExitWorktree` keep the agent's work on a branch of its own, apart from your checkout.
+  - worktrees: `EnterWorktree` and `ExitWorktree` keep the agent's work on a branch of its own, apart from your checkout;
+    you can move a chat there yourself with `/worktree` and back with `/local`, and the worktree's chip brings its
+    changes into your project folder ([ADR 0105](docs/adr/0105-a-chat-moves-into-a-worktree-and-back-from-the-chat-and-brings-the-worktrees-changes-into-the-project.md));
+  - the browser: `Browser` drives the chat's own Browser tab: open, look, click, type, choose, scroll, wait and read the
+    console. Pages on your computer open at once; other sites ask, like `WebFetch`.
 
   After every edit the agent is told what the language servers say it broke, and a turn that would end with errors it
   made goes back to it to fix them (once by default; **Settings → Language servers**).
@@ -282,10 +286,16 @@ before it runs, and the operating system's sandbox limits what it can change
 
 The side panel holds tabs: **Files** (the explorer, search and source control), **Editor**,
 **Review**, **Browser**, **Terminal** and **Trajectory**. `Ctrl+T` opens a New tab page to choose from, and a
-Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was. The tab
-shows a page in a frame and lifts the framing rules (`X-Frame-Options`, `frame-ancestors`) from
-what that frame loads, so sites that forbid framing do not leave it blank. That is a stopgap until
-the browser gets a view of its own.
+Browser tab remembers its page, so `Ctrl+Shift+T` brings a closed one back where it was. A Browser
+tab is a real page in a process of its own, with back, forward, reload, zoom and a lock for https;
+your tabs share one session kept on disk, so a sign-in lasts
+([ADR 0103](docs/adr/0103-browser-tabs-are-pages-in-their-own-process-and-each-chat-has-an-agent-tab-the-browser-tool-drives.md)).
+The agent has a tab of its own in each chat, marked Agent, signed in to nothing and forgotten when
+eNCode closes: the `Browser` tool opens your dev server there, reads the page, clicks, types and
+reads the console, and you watch each step. A **side chat** (`/side`, or Side chat in the session's
+menu) opens a copy of the chat in a tab to ask about it without adding to it; it only reads, and
+closing it deletes it
+([ADR 0104](docs/adr/0104-a-side-chat-is-a-copy-of-a-chat-to-ask-about-it-on-the-side-read-only-unlisted-and-deleted-when-closed.md)).
 `Ctrl+Alt+F` makes the panel full width, `Ctrl+Shift+B` cycles split, full and hidden, and
 `Ctrl+Alt+B` hides it. A hidden panel stays alive: a browser keeps its page and a terminal its
 shell.

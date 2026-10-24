@@ -7,11 +7,15 @@ import {
   closeSide,
   cycleLayout,
   defaultPanels,
+  MAX_TABS,
   normalizePanels,
   openBottom,
   openSide,
   reopenSide,
+  savedPanels,
   setLayout,
+  showAgentSide,
+  showChatSide,
   stepSide,
   toggleBottom,
   toggleFull,
@@ -21,6 +25,8 @@ import {
   type PanelTabKind,
   type PanelsState,
 } from '../panels/model'
+import { api } from '../api'
+import { errorText } from '../ipc-error'
 import { useUi, type SidebarView } from './ui'
 
 const KEY = 'eNCode.panels.v1'
@@ -46,7 +52,8 @@ function loadRecent(): string[] {
 
 function save(state: PanelsState): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ side: { ...state.side, closed: undefined }, bottom: state.bottom }))
+    const saved = savedPanels(state)
+    localStorage.setItem(KEY, JSON.stringify({ side: { ...saved.side, closed: undefined }, bottom: saved.bottom }))
   } catch {
     /* storage may be unavailable */
   }
@@ -59,6 +66,12 @@ interface PanelsStore extends PanelsState {
   openPage(url: string): void
   /** A Browser tab went to an address: it keeps it, takes the site's name, and the page joins the recent ones. */
   visit(id: string, url: string, title: string): void
+  /** Shows a chat's agent tab, opening it if it is not open. */
+  showAgent(key: string): void
+  /** Closes a chat's agent tab. */
+  closeAgent(key: string): void
+  /** Opens a side chat of a session (ADR 0104) in a new tab, and asks `question` in it; resolves to the tab's id, or null when none opened. */
+  openSideChat(sessionId: string, question?: string): Promise<string | null>
   /** Shows a tab of this kind in the side panel; for Files, which view (Explorer, Search or Source control) to show. */
   open(kind: PanelTabKind, options?: { view?: SidebarView }): void
   close(id: string): void
@@ -112,14 +125,51 @@ export const usePanels = create<PanelsStore>((set, get) => {
     },
     visit: (id, url, title) => {
       apply(visitSide(snapshot(), id, url, title))
-      get().rememberPage(url)
+      // The agent's pages are not the person's recent pages.
+      if (!get().side.tabs.find((tab) => tab.id === id)?.agent) get().rememberPage(url)
+    },
+
+    showAgent: (key) => apply(showAgentSide(snapshot(), key, newId())),
+    closeAgent: (key) => {
+      const tab = get().side.tabs.find((candidate) => candidate.agent === key)
+      if (tab) apply(closeSide(snapshot(), tab.id))
+    },
+
+    openSideChat: async (sessionId, question) => {
+      if (get().side.tabs.length >= MAX_TABS) {
+        useUi.getState().notify('error', 'The side panel has no room for another tab. Close one, then open the side chat.')
+        return null
+      }
+      let made: { id: string; createdAt: number }
+      try {
+        made = await api.agent.side(sessionId)
+      } catch (error) {
+        useUi.getState().notify('error', errorText(error))
+        return null
+      }
+      const id = newId()
+      const next = showChatSide(snapshot(), { session: made.id, of: sessionId, at: made.createdAt }, id)
+      if (!next.side.tabs.some((tab) => tab.id === id)) {
+        // The strip filled up meanwhile: the side chat would have no tab, so it goes.
+        void api.agent.remove(made.id).catch(() => undefined)
+        useUi.getState().notify('error', 'The side panel has no room for another tab. Close one, then open the side chat.')
+        return null
+      }
+      apply(next)
+      if (question?.trim()) void api.agent.start(made.id, { text: question.trim(), mode: 'ask' }).catch((error) => useUi.getState().notify('error', errorText(error)))
+      return id
     },
 
     open: (kind, options) => {
       if (kind === 'files' && options?.view) useUi.getState().setSidebarView(options.view)
       apply(openSide(snapshot(), kind, newId()))
     },
-    close: (id) => apply(closeSide(snapshot(), id)),
+    close: (id) => {
+      const chat = get().side.tabs.find((tab) => tab.id === id)?.chat
+      apply(closeSide(snapshot(), id))
+      // A side chat is not kept: closing its tab deletes it.
+      if (chat) void api.agent.remove(chat.session).catch(() => undefined)
+    },
     reopen: () => apply(reopenSide(snapshot(), newId())),
     activate: (id) => apply(activateSide(snapshot(), id)),
     activateAt: (index) => apply(activateSideAt(snapshot(), index)),

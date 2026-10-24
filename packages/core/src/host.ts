@@ -20,6 +20,7 @@ import {
   type CodeIndex,
   type NativeDoc,
   type CodeIntelligence,
+  type BrowserBackend,
   type DesktopBackend,
   type DesktopBroker,
   type DesktopOptions,
@@ -62,6 +63,8 @@ import type {
   SessionUsage,
   SuggestionOutcome,
   BestOutcome,
+  WorktreeOutcome,
+  WorktreeRequest,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -141,6 +144,8 @@ export interface HostOptions {
    */
   desktop?: DesktopBackend
   desktopOptions?: Partial<DesktopOptions>
+  /** A Browser tab of each session's own, for the Browser tool (ADR 0103); absent outside the desktop app. */
+  browser?: (sessionId: string) => BrowserBackend
   reviewPlan?(plan: string, signal: AbortSignal): Promise<PlanVerdict>
   system?: SystemPart[]
   warn?(message: string): void
@@ -155,6 +160,8 @@ export interface HostOptions {
 }
 
 const NO_SESSION = 'That session does not exist.'
+/** A side chat's title; not the default one, so it is never named after its first message. */
+const SIDE_TITLE = 'Side chat'
 
 /** The scope of a session whose settings could not be loaded: nothing runs until they can. */
 function refusing(error: unknown): SessionScope {
@@ -260,6 +267,7 @@ export class AgentHost {
       ...(beforeWrite ? { beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
       ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
+      ...(o.browser ? { browser: o.browser } : {}),
       ...(o.reviewPlan ? { reviewPlan: o.reviewPlan } : {}),
       ...(o.system ? { system: o.system } : {}),
       ...(o.warn ? { warn: o.warn } : {}),
@@ -463,13 +471,45 @@ export class AgentHost {
     for (const summary of await this.store.list()) await (await this.open(summary.id)).reset()
   }
 
+  /** Deletes a session, and its side chats with it. */
   async remove(sessionId: string): Promise<void> {
-    await this.retiring.get(sessionId)
-    const session = this.loaded.get(sessionId)
-    if (session) await this.retire(sessionId, session, 'deleted')
-    await this.store.remove(sessionId)
-    await this.outputs?.remove(sessionId)
+    const sides = (await this.store.list({ sides: true })).filter((summary) => summary.sideOf === sessionId)
+    for (const id of [sessionId, ...sides.map((side) => side.id)]) {
+      await this.retiring.get(id)
+      const session = this.loaded.get(id)
+      if (session) await this.retire(id, session, 'deleted')
+      await this.store.remove(id)
+      await this.outputs?.remove(id)
+    }
     this.reportJobs()
+  }
+
+  /**
+   * A side chat of a session (ADR 0104): a copy of its conversation as it stands, to ask about it on the side without
+   * adding to it. Lists leave it out; it goes when the person closes it, with its session, or when eNCode starts again.
+   * A side chat of a side chat is one more of the same session.
+   */
+  async side(sessionId: string): Promise<SessionSummary> {
+    const source = await this.open(sessionId)
+    await source.flush()
+    const of = source.summary().sideOf ?? sessionId
+    const log = await this.store.create({ root: source.marks().projectRoot, title: SIDE_TITLE, fork: { sessionId, recordId: source.lastRecordId() }, sideOf: of })
+    const session = await this.make(log)
+    await session.rename(SIDE_TITLE)
+    await session.update({ pinned: false, archived: false, unread: false })
+    if (session.goal()) session.setGoal(null)
+    if (session.plan()) session.setPlan(null)
+    return session.summary()
+  }
+
+  /** Deletes the side chats left from before (eNCode closed with one open): none is shown any more. Resolves to how many. */
+  async removeSideChats(): Promise<number> {
+    const sides = (await this.store.list({ sides: true })).filter((summary) => summary.sideOf !== undefined && !this.loaded.has(summary.id))
+    for (const side of sides) {
+      await this.store.remove(side.id)
+      await this.outputs?.remove(side.id)
+    }
+    return sides.length
   }
 
   /** A copy of a session as it stands, without its marks, plan or goal progress. */
@@ -530,6 +570,11 @@ export class AgentHost {
   }
 
   /** Keeps one attempt of a best-of-N request (`keep` from 1), or discards them all (`keep` 0) (ADR 0098). */
+  /** What the person asks of a session's worktree from the chat (ADR 0105). */
+  async worktree(sessionId: string, request: WorktreeRequest): Promise<WorktreeOutcome> {
+    return (await this.open(sessionId)).worktreeAction(request)
+  }
+
   async answerBest(sessionId: string, entryId: string, keep: number, force = false): Promise<BestOutcome> {
     return (await this.open(sessionId)).answerBest(entryId, keep >= 1 ? Math.floor(keep) : 'discard', force)
   }

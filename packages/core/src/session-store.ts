@@ -378,6 +378,7 @@ function indexOf(derived: Derived): IndexEntry {
     entryCount: derived.entries.size,
     ...(derived.wakeup ? { wakeAt: derived.wakeup.at } : {}),
     ...(derived.worktree ? { worktree: derived.worktree.name } : {}),
+    ...(derived.header.sideOf ? { sideOf: derived.header.sideOf } : {}),
     usage: usageByDay(derived.entries.values()),
   }
 }
@@ -521,7 +522,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
     async list(filter) {
       const entries = await loadIndex()
       return [...entries.values()]
-        .filter((entry) => filter?.root === undefined || entry.projectRoot === filter.root)
+        .filter((entry) => (filter?.root === undefined || entry.projectRoot === filter.root) && (filter?.sides === true || !entry.sideOf))
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .map(({ usage: _usage, ...entry }) => entry)
     },
@@ -537,6 +538,7 @@ export function createSessionStore(options: SessionStoreOptions): FileSessionSto
       const id = create.id ?? newRecordId()
       const header: SessionHeader = { type: 'session', v: SESSION_FORMAT, id, at: create.createdAt ?? Date.now(), root: create.root || null, title: create.title || DEFAULT_TITLE }
       const records: SessionRecord[] = [header]
+      if (create.sideOf) header.sideOf = create.sideOf
       if (create.fork) {
         header.forkedFrom = { sessionId: create.fork.sessionId, recordId: create.fork.recordId ?? '' }
         const copied = await copyOf(create.fork.sessionId, create.fork.recordId)

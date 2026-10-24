@@ -165,6 +165,13 @@ export function worktreeReminder(worktree: WorktreeInfo | null, root: string): s
   )
 }
 
+/** A side chat's first request (ADR 0104): the conversation above is a copy, and nothing said here goes back to it. */
+export function sideReminder(): string {
+  return reminder(
+    'This is a side chat: a copy of the conversation above, for the user to ask about it on the side. Answer what they ask here; do not carry on with the work of the conversation above. Nothing said here goes back to it.',
+  )
+}
+
 export function dateReminder(date: string): string {
   return reminder(`Today's date is now ${date}.`)
 }

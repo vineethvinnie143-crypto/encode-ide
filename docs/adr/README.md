@@ -92,6 +92,9 @@ say so.
 | [0100](0100-smaller-models-get-help-and-a-strong-model-takes-the-hard-steps-when-the-person-says-so.md) | Smaller models get help, and a strong model takes the hard steps when the person says so | Accepted, builds on 0052, 0094, 0095, 0096 and 0099 |
 | [0101](0101-test-this-model-scores-a-model-on-the-benchmark-from-settings-before-it-takes-a-role.md) | Test this model scores a model on the benchmark from Settings, before it takes a role | Accepted, builds on 0052, 0092, 0094 and 0100 |
 | [0102](0102-the-settings-pages-show-usage-hold-your-instructions-skills-agents-themes-and-servers-and-change-them-in-their-own-files.md) | The Settings pages show usage, hold your instructions, skills, agents, themes and servers, and change them in their own files | Accepted, builds on 0057, 0063, 0068 and 0093 |
+| [0103](0103-browser-tabs-are-pages-in-their-own-process-and-each-chat-has-an-agent-tab-the-browser-tool-drives.md) | Browser tabs are pages in their own process, and each chat has an agent tab the Browser tool drives | Accepted, builds on 0007, 0010 and 0015 |
+| [0104](0104-a-side-chat-is-a-copy-of-a-chat-to-ask-about-it-on-the-side-read-only-unlisted-and-deleted-when-closed.md) | A side chat is a copy of a chat to ask about it on the side: read-only, unlisted, and deleted when closed | Accepted, builds on 0015, 0030 and 0031 |
+| [0105](0105-a-chat-moves-into-a-worktree-and-back-from-the-chat-and-brings-the-worktrees-changes-into-the-project.md) | A chat moves into a worktree and back from the chat, and brings the worktree's changes into the project | Accepted, builds on 0073 and 0098 |
 
 ## Template
 

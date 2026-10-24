@@ -126,6 +126,7 @@ export const MENUS: readonly MenuSpec[] = [
       'session.unread',
       '-',
       'session.fork',
+      'session.side',
       'session.export',
       'session.delete',
       '-',

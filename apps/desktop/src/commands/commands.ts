@@ -73,6 +73,7 @@ export interface AppActions {
   archiveSession(): void
   markUnread(): void
   forkSession(): void
+  sideChat(): void
   exportSession(): void
   deleteSession(): void
   back(): void
@@ -410,6 +411,7 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'session.archive', title: 'Archive session', keys: ['Ctrl+Shift+A'], run: () => a.archiveSession(), ...session },
     { id: 'session.unread', title: 'Mark as unread', keys: ['Ctrl+Shift+U'], run: () => a.markUnread(), ...session },
     { id: 'session.fork', title: 'Fork session', run: () => a.forkSession(), ...session },
+    { id: 'session.side', title: 'Side chat', keywords: 'ask a question on the side about this chat', run: () => a.sideChat(), ...session },
     { id: 'session.export', title: 'Export session…', run: () => a.exportSession(), ...session },
     { id: 'session.delete', title: 'Delete session…', run: () => a.deleteSession(), ...session },
     {

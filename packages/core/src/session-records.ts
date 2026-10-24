@@ -47,6 +47,8 @@ export interface SessionHeader extends RecordBase {
   title: string
   /** The session and record this one was forked from. */
   forkedFrom?: { sessionId: string; recordId: string }
+  /** A side chat of that session (ADR 0104): a copy to ask questions in, not listed, removed with it. */
+  sideOf?: string
 }
 
 export interface ContextRecord extends RecordBase {
@@ -234,11 +236,13 @@ export interface CreateSessionOptions {
   createdAt?: number
   /** Starts from a copy of another session, up to and including `recordId` (default: all of it). */
   fork?: { sessionId: string; recordId?: string }
+  /** Makes it a side chat of that session, which lists leave out. */
+  sideOf?: string
 }
 
 export interface SessionStore {
-  /** Newest first. `root` keeps only the sessions of that project. */
-  list(options?: { root?: string | null }): Promise<SessionSummary[]>
+  /** Newest first. `root` keeps only the sessions of that project; side chats are left out unless `sides`. */
+  list(options?: { root?: string | null; sides?: boolean }): Promise<SessionSummary[]>
   create(options: CreateSessionOptions): Promise<SessionLog>
   open(id: string): Promise<SessionLog | undefined>
   remove(id: string): Promise<void>

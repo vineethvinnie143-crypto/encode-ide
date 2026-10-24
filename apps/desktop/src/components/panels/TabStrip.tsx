@@ -2,7 +2,7 @@ import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { PanelTab, PanelTabKind } from '../../panels/model'
 import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Activity, AlertTriangle, Code2, Files, GitPullRequest, Globe, ListTree, Plus, SquareTerminal, X } from '../../ui/icons'
+import { Activity, AlertTriangle, Bot, Code2, Files, GitPullRequest, Globe, ListTree, MessageSquare, Plus, SquareTerminal, X } from '../../ui/icons'
 import { keyToMove, moveIndex } from '../../ui/nav'
 
 const ICONS: Record<PanelTabKind, typeof Files> = {
@@ -15,6 +15,7 @@ const ICONS: Record<PanelTabKind, typeof Files> = {
   trajectory: ListTree,
   jobs: Activity,
   problems: AlertTriangle,
+  chat: MessageSquare,
 }
 
 /**
@@ -71,7 +72,7 @@ export function TabStrip({
       <div className="panel-tabs">
         <div className="panel-tablist" role="tablist" aria-label={label} onKeyDown={onKeyDown}>
           {tabs.map((tab, index) => {
-            const Icon = ICONS[tab.kind]
+            const Icon = tab.agent ? Bot : ICONS[tab.kind]
             const active = tab.id === activeId
             return (
               <div key={tab.id} className={cx('panel-tab', active && 'is-active')}>

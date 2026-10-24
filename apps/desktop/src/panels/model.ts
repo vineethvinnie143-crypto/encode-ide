@@ -4,7 +4,7 @@
  * stores/panels.ts keeps the state and saves it.
  */
 
-export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'review' | 'terminal' | 'trajectory' | 'jobs' | 'problems'
+export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'review' | 'terminal' | 'trajectory' | 'jobs' | 'problems' | 'chat'
 export type PanelLayout = 'split' | 'full' | 'hidden'
 
 export interface PanelTab {
@@ -13,6 +13,22 @@ export interface PanelTab {
   title: string
   /** The page a Browser tab shows, so it comes back after Reopen and after a restart. */
   url?: string
+  /**
+   * A chat's agent tab (ADR 0103): the key of its partition. It is the agent's while the window lives; it is not saved,
+   * not reopened, and its page never moves to one of the person's tabs.
+   */
+  agent?: string
+  /**
+   * A side chat (ADR 0104): its session, the session it is a side chat of, and when it was made, so that it shows only
+   * what was said in it. Like an agent tab it is not saved or reopened: closing it deletes it.
+   */
+  chat?: SideChat
+}
+
+export interface SideChat {
+  session: string
+  of: string
+  at: number
 }
 
 export interface Strip {
@@ -41,6 +57,7 @@ const TITLES: Record<PanelTabKind, string> = {
   trajectory: 'Trajectory',
   jobs: 'Jobs',
   problems: 'Problems',
+  chat: 'Side chat',
 }
 
 /** A web address a Browser tab can hold: http or https, not absurdly long. */
@@ -127,6 +144,38 @@ export function visitSide(state: PanelsState, id: string, url: string, title: st
   return { ...state, side: { ...state.side, tabs } }
 }
 
+/**
+ * Shows a chat's agent tab: the one open for `key`, or a new one beside the others (never in place of a New tab page,
+ * which is the person's). The panel comes back if it was hidden. A strip that is full stays as it is.
+ */
+export function showAgentSide(state: PanelsState, key: string, id: string): PanelsState {
+  const existing = state.side.tabs.find((tab) => tab.agent === key)
+  const layout = state.side.layout === 'hidden' ? 'split' : state.side.layout
+  if (existing) return { ...state, side: { ...state.side, activeId: existing.id, layout } }
+  if (state.side.tabs.length >= MAX_TABS) return state
+  const tab: PanelTab = { id, kind: 'browser', title: 'Agent', agent: key }
+  return { ...state, side: { ...state.side, tabs: [...state.side.tabs, tab], activeId: id, layout } }
+}
+
+/**
+ * Shows a new side chat beside the other tabs (never in place of a New tab page). The panel comes back if it was
+ * hidden. A strip that is full stays as it is: the caller tells the person.
+ */
+export function showChatSide(state: PanelsState, chat: SideChat, id: string): PanelsState {
+  if (state.side.tabs.length >= MAX_TABS) return state
+  const layout = state.side.layout === 'hidden' ? 'split' : state.side.layout
+  const tab: PanelTab = { id, kind: 'chat', title: nextTitle(state.side.tabs, 'chat'), chat }
+  return { ...state, side: { ...state.side, tabs: [...state.side.tabs, tab], activeId: id, layout } }
+}
+
+/** The tabs as they are saved: without the agent tabs and side chats, which belong to this run of the window. */
+export function savedPanels(state: PanelsState): PanelsState {
+  const keep = (tabs: PanelTab[]) => tabs.filter((tab) => !tab.agent && !tab.chat)
+  const tabs = keep(state.side.tabs)
+  const activeId = tabs.some((tab) => tab.id === state.side.activeId) ? state.side.activeId : (tabs[0]?.id ?? null)
+  return { ...state, side: { ...state.side, tabs, activeId, closed: keep(state.side.closed) } }
+}
+
 /** Closes a tab and remembers it for Reopen. Closing the last tab hides the panel. */
 export function closeSide(state: PanelsState, id: string): PanelsState {
   const index = state.side.tabs.findIndex((tab) => tab.id === id)
@@ -134,8 +183,8 @@ export function closeSide(state: PanelsState, id: string): PanelsState {
   const closed = state.side.tabs[index]
   const tabs = state.side.tabs.filter((tab) => tab.id !== id)
   const activeId = state.side.activeId === id ? neighbourAfterClose(state.side.tabs, index) : state.side.activeId
-  // A New tab page is not worth reopening.
-  const remembered = closed.kind === 'new' ? state.side.closed : [closed, ...state.side.closed].slice(0, MAX_CLOSED)
+  // A New tab page is not worth reopening, an agent tab is the agent's, and a side chat is deleted when it closes.
+  const remembered = closed.kind === 'new' || closed.agent || closed.chat ? state.side.closed : [closed, ...state.side.closed].slice(0, MAX_CLOSED)
   return {
     ...state,
     side: { ...state.side, tabs, activeId, closed: remembered, layout: tabs.length ? state.side.layout : 'hidden' },

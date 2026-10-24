@@ -28,6 +28,8 @@ import type {
   SessionUsage,
   SuggestionOutcome,
   BestOutcome,
+  WorktreeOutcome,
+  WorktreeRequest,
   TodoItem,
   TurnChangeSet,
   TurnFileWrite,
@@ -53,6 +55,7 @@ export type HostRequests = {
   reset: { params: { sessionId?: string } | undefined; result: void }
   remove: { params: { sessionId: string }; result: void }
   fork: { params: { sessionId: string }; result: SessionSummary }
+  side: { params: { sessionId: string }; result: SessionSummary }
   rename: { params: { sessionId: string; title: string }; result: void }
   goal: { params: { sessionId: string }; result: SessionGoal | null }
   setGoal: { params: { sessionId: string; goal: SessionGoal | null }; result: void }
@@ -65,6 +68,7 @@ export type HostRequests = {
   answerSuggestion: { params: { sessionId: string; entryId: string; accept: boolean }; result: SuggestionOutcome }
   /** `keep`: the attempt to keep, from 1; 0 discards them all (ADR 0098). */
   answerBest: { params: { sessionId: string; entryId: string; keep: number; force?: boolean }; result: BestOutcome }
+  worktree: { params: { sessionId: string; request: WorktreeRequest }; result: WorktreeOutcome }
   checkpoints: { params: { sessionId: string }; result: CheckpointInfo }
   rewindPlan: { params: { sessionId: string; turn: string }; result: RewindPlan }
   redoPlan: { params: { sessionId: string }; result: RewindPlan | null }
@@ -223,6 +227,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   reset: { type: ['object', 'null'], properties: optionalSessionId },
   remove: object(sessionId, ['sessionId']),
   fork: object(sessionId, ['sessionId']),
+  side: object(sessionId, ['sessionId']),
   rename: object({ ...sessionId, title: text(400) }, ['sessionId', 'title']),
   goal: object(sessionId, ['sessionId']),
   setGoal: object({ ...sessionId, goal: nullable(GOAL) }, ['sessionId', 'goal']),
@@ -234,6 +239,16 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   rewind: object({ ...sessionId, entryId: id }, ['sessionId', 'entryId']),
   answerSuggestion: object({ ...sessionId, entryId: id, accept: { type: 'boolean' } }, ['sessionId', 'entryId', 'accept']),
   answerBest: object({ ...sessionId, entryId: id, keep: { type: 'integer', minimum: 0, maximum: 4 }, force: { type: 'boolean' } }, ['sessionId', 'entryId', 'keep']),
+  worktree: object(
+    {
+      ...sessionId,
+      request: object(
+        { action: { enum: ['enter', 'leave', 'remove', 'bring'] }, name: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }, discard: { type: 'boolean' }, force: { type: 'boolean' } },
+        ['action'],
+      ),
+    },
+    ['sessionId', 'request'],
+  ),
   checkpoints: object(sessionId, ['sessionId']),
   rewindPlan: object({ ...sessionId, turn: id }, ['sessionId', 'turn']),
   redoPlan: object(sessionId, ['sessionId']),
@@ -273,6 +288,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('reset', (params) => host.reset(params?.sessionId || undefined))
   on('remove', ({ sessionId }) => host.remove(sessionId))
   on('fork', ({ sessionId }) => host.fork(sessionId))
+  on('side', ({ sessionId }) => host.side(sessionId))
   on('rename', ({ sessionId, title }) => host.rename(sessionId, title))
   on('goal', ({ sessionId }) => host.goal(sessionId))
   on('setGoal', ({ sessionId, goal }) => host.setGoal(sessionId, goal))
@@ -284,6 +300,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('rewind', ({ sessionId, entryId }) => host.rewind(sessionId, entryId))
   on('answerSuggestion', ({ sessionId, entryId, accept }) => host.answerSuggestion(sessionId, entryId, accept))
   on('answerBest', ({ sessionId, entryId, keep, force }) => host.answerBest(sessionId, entryId, keep, force === true))
+  on('worktree', ({ sessionId, request }) => host.worktree(sessionId, request))
   on('checkpoints', ({ sessionId }) => host.checkpointInfo(sessionId))
   on('rewindPlan', ({ sessionId, turn }) => host.rewindPlan(sessionId, turn))
   on('redoPlan', ({ sessionId }) => host.redoPlan(sessionId))
@@ -328,6 +345,7 @@ export interface HostClient {
   reset(sessionId?: string): Promise<void>
   remove(sessionId: string): Promise<void>
   fork(sessionId: string): Promise<SessionSummary>
+  side(sessionId: string): Promise<SessionSummary>
   rename(sessionId: string, title: string): Promise<void>
   goal(sessionId: string): Promise<SessionGoal | null>
   setGoal(sessionId: string, goal: SessionGoal | null): Promise<void>
@@ -339,6 +357,7 @@ export interface HostClient {
   rewind(sessionId: string, entryId: string): Promise<{ text: string }>
   answerSuggestion(sessionId: string, entryId: string, accept: boolean): Promise<SuggestionOutcome>
   answerBest(sessionId: string, entryId: string, keep: number, force?: boolean): Promise<BestOutcome>
+  worktree(sessionId: string, request: WorktreeRequest): Promise<WorktreeOutcome>
   checkpoints(sessionId: string): Promise<CheckpointInfo>
   rewindPlan(sessionId: string, turn: string): Promise<RewindPlan>
   redoPlan(sessionId: string): Promise<RewindPlan | null>
@@ -372,6 +391,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     reset: (sessionId) => caller.request('reset', sessionId ? { sessionId } : undefined),
     remove: (sessionId) => caller.request('remove', { sessionId }),
     fork: (sessionId) => caller.request('fork', { sessionId }),
+    side: (sessionId) => caller.request('side', { sessionId }),
     rename: (sessionId, title) => caller.request('rename', { sessionId, title }),
     goal: (sessionId) => caller.request('goal', { sessionId }),
     setGoal: (sessionId, goal) => caller.request('setGoal', { sessionId, goal }),
@@ -383,6 +403,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     rewind: (sessionId, entryId) => caller.request('rewind', { sessionId, entryId }),
     answerSuggestion: (sessionId, entryId, accept) => caller.request('answerSuggestion', { sessionId, entryId, accept }),
     answerBest: (sessionId, entryId, keep, force) => caller.request('answerBest', { sessionId, entryId, keep, ...(force ? { force: true } : {}) }),
+    worktree: (sessionId, request) => caller.request('worktree', { sessionId, request }),
     checkpoints: (sessionId) => caller.request('checkpoints', { sessionId }),
     rewindPlan: (sessionId, turn) => caller.request('rewindPlan', { sessionId, turn }),
     redoPlan: (sessionId) => caller.request('redoPlan', { sessionId }),

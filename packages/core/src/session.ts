@@ -40,6 +40,7 @@ import {
   type CodeIndex,
   type NativeDoc,
   type CodeIntelligence,
+  type BrowserBackend,
   type DesktopServices,
   type FileStateTracker,
   type Goals,
@@ -69,6 +70,7 @@ import {
   ATTEMPT_EXCLUDED,
   hasSeeding,
   keepAttempt,
+  copyChanges,
   onlyInside,
   removeAttempts,
   runBest,
@@ -90,7 +92,7 @@ import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { saveConventions } from './conventions'
 import { memoryConversation } from './conversation'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -114,6 +116,8 @@ import {
   type AskRequest,
   type BackgroundJob,
   type BestOutcome,
+  type WorktreeOutcome,
+  type WorktreeRequest,
   type CheckpointInfo,
   type ConversationEntry,
   type EntryBest,
@@ -227,6 +231,8 @@ export interface SessionEnv {
    * sessions must hand out a view whose `dispose` lets go without stopping the desktop (see createDesktopBroker).
    */
   desktop?: (sessionId: string) => DesktopServices
+  /** The agent's Browser tab of a session, opened at its first use (ADR 0103); absent outside the desktop app. */
+  browser?: (sessionId: string) => BrowserBackend
   /** Every event, tagged with the session. */
   emit(event: AgentEvent): void
   /** A session's background jobs changed. */
@@ -418,6 +424,8 @@ interface TurnState {
   root?: string
   /** The worktree the model was last told it works in ('' for none). */
   worktree?: string
+  /** A side chat's model was told it is one. */
+  side?: boolean
 }
 
 
@@ -445,6 +453,8 @@ export class AgentSession {
   /** The settings the loop's tools were chosen by; a change builds a new loop between turns. */
   private loopKey = ''
   private desktop: DesktopServices | undefined
+  /** The session's Browser tab, kept across turns and closed with the session. */
+  private browser: BrowserBackend | undefined
   private messages: Message[] = []
   private records: MessageRecord[] = []
   private entries: ConversationEntry[] = []
@@ -671,6 +681,7 @@ export class AgentSession {
       entryCount: snapshot.entries.length,
       ...(snapshot.wakeup ? { wakeAt: snapshot.wakeup.at } : {}),
       ...(this.worktree ? { worktree: this.worktree.name } : {}),
+      ...(snapshot.header.sideOf ? { sideOf: snapshot.header.sideOf } : {}),
     }
   }
 
@@ -1187,6 +1198,7 @@ export class AgentSession {
         skills: this.env.skills.list().slice(0, 20),
         completion: settings.completionTool,
         computer: this.desktop !== undefined,
+        browser: this.env.browser !== undefined,
         background: true,
         worktrees: Boolean(this.env.worktrees),
         code: Boolean(this.env.code?.()),
@@ -1304,6 +1316,7 @@ export class AgentSession {
       goals,
       background: this.background,
       ...(this.desktop ? { desktop: this.desktop } : {}),
+      ...(env.browser ? { browser: () => (this.browser ??= env.browser!(this.id)) } : {}),
       ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}),
       summarize: this.summarizePage,
       cwd: this.workdir,
@@ -1520,6 +1533,11 @@ export class AgentSession {
 
     if (this.turn.mode !== mode && !(first && mode === 'code')) add(modeReminder(mode))
     this.turn.mode = mode
+
+    if (!this.turn.side && this.log.snapshot().header.sideOf) {
+      add(sideReminder())
+      this.turn.side = true
+    }
 
     if (this.goalState?.status === 'active') add(goalReminder(this.goalState))
 
@@ -2672,6 +2690,61 @@ export class AgentSession {
     }
   }
 
+  /**
+   * What the person asks of the session's worktree from the chat (ADR 0105): the same git work as the agent's
+   * EnterWorktree and ExitWorktree, and bringing the worktree's changes into the project folder. Not while a request
+   * runs: the shell would move under it. The model hears of it with the next request.
+   */
+  async worktreeAction(request: WorktreeRequest): Promise<WorktreeOutcome> {
+    if (this.controller) return { ok: false, error: 'eNCode is working on this session. Wait for it to finish, or stop it, first.' }
+    if (!this.env.worktrees || !this.env.root) return { ok: false, error: 'Worktrees are not available in this session: it has no project folder.' }
+    await this.worktreeSettled
+    const signal = AbortSignal.timeout(5 * 60_000)
+    const told = this.turn.worktree
+    if (request.action === 'enter') {
+      const name = request.name?.trim()
+      const entered = await this.worktreeTools.enter(name ? { name } : {}, signal)
+      if (!entered.ok) return { ok: false, error: entered.reason }
+      // The person did this, not the model: the next request tells the model where it works now.
+      this.turn.worktree = told
+      return { ok: true, worktree: this.shownWorktree() }
+    }
+    const worktree = this.worktree
+    if (!worktree) return { ok: false, error: 'This session works in the project folder, not in a worktree.' }
+    if (request.action === 'bring') {
+      const git = this.env.worktrees
+      if (!git.changes || !git.original) return { ok: false, error: 'This build cannot copy a worktree’s changes.' }
+      const copied = await copyChanges({
+        root: this.env.root,
+        git: { changes: git.changes, original: git.original },
+        worktree,
+        seed: { base: worktree.base, linked: [] },
+        force: request.force === true,
+        who: `the worktree ${worktree.name}`,
+        since: 'the worktree was made',
+        failed: 'The changes could not be brought in',
+        tag: 'worktree-bring',
+        turnId: 'worktree-bring',
+        signal,
+      })
+      if (!copied.ok) return copied
+      for (const file of copied.files) this.send({ type: 'file-changed', path: path.join(this.env.root, ...file.split('/')) })
+      if (copied.files.length) {
+        const list = copied.files.length > 20 ? `${copied.files.slice(0, 20).join(', ')} and ${copied.files.length - 20} more` : copied.files.join(', ')
+        this.deliver({
+          text: `The user copied what the worktree ${worktree.name} changed into the project folder ${this.env.root}: ${list}. You still work in the worktree.`,
+          line: `You brought ${copied.files.length === 1 ? 'one file' : `${copied.files.length} files`} into the project`,
+          wake: false,
+        })
+      }
+      return { ok: true, worktree: this.shownWorktree(), files: copied.files }
+    }
+    const left = await this.worktreeTools.exit({ action: request.action === 'remove' ? 'remove' : 'keep', discard: request.action === 'remove' && request.discard === true }, signal)
+    if (!left.ok) return { ok: false, error: left.reason, ...(left.work ? { work: left.work } : {}) }
+    this.turn.worktree = told
+    return { ok: true, worktree: null }
+  }
+
   /** Resolves once what the last request taught was offered, or found nothing to offer (ADR 0097); for tests. */
   learned(): Promise<void> {
     return this.learning
@@ -2697,6 +2770,8 @@ export class AgentSession {
     await this.jobsManager.dispose().catch(() => undefined)
     await this.shell.dispose().catch(() => undefined)
     this.letGoOfDesktop()
+    await this.browser?.dispose().catch(() => undefined)
+    this.browser = undefined
     await this.env.release?.().catch(() => undefined)
     await this.log.close().catch(() => undefined)
   }

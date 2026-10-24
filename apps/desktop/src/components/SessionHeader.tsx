@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ComponentProps } from 'react'
 import type { AgentMode, BackgroundJob } from '@shared/types'
 import { api } from '../api'
-import { commandRegistry, sessionActions } from '../commands/app'
+import { commandRegistry, sessionActions, worktreeActions } from '../commands/app'
 import { useShortcuts } from '../commands/useShortcuts'
 import { errorText } from '../ipc-error'
 import { activeKind } from '../panels/model'
@@ -103,6 +103,25 @@ export default function SessionHeader() {
     { id: 'trajectory', label: 'Show the trajectory', onSelect: () => usePanels.getState().open('trajectory') },
   ]
 
+  // The worktree's chip is its menu (ADR 0105). None of it while the agent works: its shell stands in the worktree.
+  const busy = status === 'thinking' || status === 'running-tool' || status === 'awaiting-approval' || status === 'awaiting-user'
+  const worktreeEntries = (): MenuEntry[] => {
+    if (!session?.worktree) return []
+    return [
+      { kind: 'group', id: 'g-worktree', label: `Worktree ${session.worktree}` },
+      {
+        id: 'bring',
+        label: 'Bring changes into the project',
+        description: 'Copy what it changed into your project folder.',
+        disabled: busy,
+        onSelect: () => void worktreeActions.bring(session),
+      },
+      { id: 'local', label: 'Work in the project folder', description: 'The worktree stays.', disabled: busy, onSelect: () => void worktreeActions.leave(session) },
+      { kind: 'separator', id: 'sep-worktree' },
+      { id: 'remove', label: 'Remove the worktree…', danger: true, disabled: busy, onSelect: () => void worktreeActions.remove(session) },
+    ]
+  }
+
   const actionEntries = (): MenuEntry[] => {
     if (!session) return []
     return [
@@ -122,6 +141,16 @@ export default function SessionHeader() {
         },
       },
       { id: 'fork', label: 'Fork session', onSelect: () => void sessionActions.fork(session) },
+      { id: 'side', label: 'Side chat', description: 'Ask about this chat on the side; nothing goes back to it.', onSelect: () => void sessionActions.side(session) },
+      session.worktree
+        ? { id: 'local', label: 'Work in the project folder', description: `The worktree ${session.worktree} stays.`, disabled: busy, onSelect: () => void worktreeActions.leave(session) }
+        : {
+            id: 'worktree',
+            label: 'Work in a worktree',
+            description: 'A checkout and branch of its own, apart from yours.',
+            disabled: busy || !branch,
+            onSelect: () => void worktreeActions.enter(session),
+          },
       { id: 'export', label: 'Export session…', onSelect: () => void sessionActions.export(session) },
       { kind: 'separator', id: 'sep-b' },
       { id: 'archive', label: 'Archive', shortcut: commandRegistry.shortcut('session.archive'), onSelect: () => void sessionActions.archive(session) },
@@ -153,10 +182,18 @@ export default function SessionHeader() {
           </span>
         )}
         {session?.worktree && (
-          <span className="ui-chip is-mono tone-accent" title={`The agent works in the worktree .encode-worktrees/${session.worktree}, on a branch of its own, apart from your checkout`}>
-            <GitFork size={12} />
-            {session.worktree}
-          </span>
+          <Menu
+            label="Worktree"
+            width={300}
+            entries={worktreeEntries}
+            trigger={(props) => (
+              <ChipButton {...props} className="is-mono tone-accent" title={`The agent works in the worktree .encode-worktrees/${session.worktree}, on a branch of its own, apart from your checkout`}>
+                <GitFork size={12} />
+                {session.worktree}
+                <ChevronDown size={11} />
+              </ChipButton>
+            )}
+          />
         )}
         {live && (
           <span className={cx('ui-chip', `tone-${live.tone}`)} role="status">

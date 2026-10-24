@@ -34,19 +34,22 @@ const shotsDir = path.join(root, 'screenshots')
 await fs.mkdir(shotsDir, { recursive: true })
 
 const { target, ws, send, evaluate, waitFor, errors } = await connect(port)
+
+/** Thrown when the parts ENCODE_SMOKE_ONLY asked for have passed: the run ends there. */
+class SmokePartsDone extends Error {}
 console.log('[smoke] target:', target.url)
 
 /**
- * Evaluates in the frame, a DevTools target of its own, that has loaded `url`. A frame the page refused to
- * show is an error page, so it has no target at that address.
+ * Evaluates in the Browser tab's page, a DevTools target of its own (a webview), that has loaded `url`. A page that
+ * did not load has no target at that address.
  */
 async function evaluateInFrame(url, expression, timeoutMs = 10000) {
   const started = Date.now()
   let seen = []
   while (Date.now() - started < timeoutMs) {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
-    seen = targets.filter((target) => target.type === 'iframe').map((target) => target.url)
-    const frame = targets.find((target) => target.type === 'iframe' && target.url === url && target.webSocketDebuggerUrl)
+    seen = targets.filter((target) => target.type === 'webview' || target.type === 'iframe').map((target) => target.url)
+    const frame = targets.find((target) => (target.type === 'webview' || target.type === 'iframe') && target.url === url && target.webSocketDebuggerUrl)
     if (frame) return evaluateOn(frame.webSocketDebuggerUrl, expression)
     await sleep(250)
   }
@@ -466,15 +469,9 @@ async function runFirstStartChecks() {
   await evaluate(`window.eNCode.settings.save({ profiles: ${JSON.stringify(keep)}, roles: {}, activeProfileId: ${JSON.stringify(demoSettings.activeProfileId)} })`)
 }
 
-async function runProviderPhase() {
-  console.log('[smoke] --- provider phase (local OpenAI-compatible server) ---')
+/** The test provider as the model of every role, with the gates the checks turn on one at a time switched off. */
+async function useTestProvider() {
   await ensureFakeProvider()
-
-  await evaluate('window.eNCode.agent.reset()')
-  await evaluate("window.eNCode.workspace.delete('provider-check.txt').catch(() => null)")
-  // Project instructions: the next conversation starts with them.
-  const marker = `smoke-instructions-${Date.now().toString(36)}`
-  await evaluate(`window.eNCode.workspace.write('ENCODE.md', ${JSON.stringify(`# Smoke project\n\nAlways mention ${marker}.\n`)})`)
   const current = await evaluate('window.eNCode.settings.get()')
   const profiles = current.profiles.filter((profile) => profile.id !== 'local-mock')
   profiles.push({
@@ -500,6 +497,18 @@ async function runProviderPhase() {
     helpSmaller: 'off',
     offerStronger: 'off'
   })`)
+}
+
+async function runProviderPhase() {
+  console.log('[smoke] --- provider phase (local OpenAI-compatible server) ---')
+  await ensureFakeProvider()
+
+  await evaluate('window.eNCode.agent.reset()')
+  await evaluate("window.eNCode.workspace.delete('provider-check.txt').catch(() => null)")
+  // Project instructions: the next conversation starts with them.
+  const marker = `smoke-instructions-${Date.now().toString(36)}`
+  await evaluate(`window.eNCode.workspace.write('ENCODE.md', ${JSON.stringify(`# Smoke project\n\nAlways mention ${marker}.\n`)})`)
+  await useTestProvider()
   const secret = await checkKeyStorage()
 
   await send('Page.reload')
@@ -659,6 +668,8 @@ async function runProviderPhase() {
   await runParityChecks()
   await runProblemChecks()
   await runWebChecks()
+  await runAgentBrowserChecks()
+  await runSideChatChecks()
   await runSearchChecks()
   await runPermissionChecks()
   await runAutoReviewChecks()
@@ -920,6 +931,89 @@ async function runWebChecks() {
   if (fetches.length !== 2 || !fetches.every((entry) => entry.output.includes('private or special-purpose network address'))) {
     throw new Error('WebFetch reached a private address')
   }
+}
+
+/**
+ * The Browser tool (ADR 0103) in the chat's own tab, a page of this computer that opens without asking: the agent types
+ * a name, picks a size and presses Greet, whose confirm dialog answers itself; the secret field is refused, the link to
+ * another site is held back, the link on the same host is followed, and the console holds the page's error and the
+ * dialog. The tab shows in the side panel as the agent's, and is not saved with the person's tabs.
+ */
+async function runAgentBrowserChecks() {
+  console.log('[smoke] --- the agent’s browser ---')
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:browser-check] Check the greeter app in the browser.')
+  const approvals = await driveAgent('15-browser', 120000)
+  if (approvals.length) throw new Error(`A page on this computer should open without asking: ${JSON.stringify(approvals)}`)
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const results = request.messages.filter((message) => message.role === 'tool').map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+  const browser = results.slice(-8)
+  console.log('[smoke] browser results:', JSON.stringify(browser.map((text) => text.slice(0, 160))))
+  const expect = (index, pattern, what) => {
+    if (!pattern.test(browser[index] ?? '')) throw new Error(`${what}: ${JSON.stringify((browser[index] ?? '').slice(0, 600))}`)
+  }
+  expect(0, /Greeter at http:\/\/127\.0\.0\.1:\d+\/__browser\/app \(200\)[\s\S]*e1 textbox "Name"[\s\S]*e2 combobox "Size" = "Small"[\s\S]*e3 button "Greet"[\s\S]*e6 password "Secret"/, 'The outline does not list the page as it is')
+  expect(0, /smoke: a console error/, 'The console error is not in the first answer')
+  expect(1, /e1 textbox "Name" = "Ada"/, 'Typing did not reach the name field')
+  expect(2, /e2 combobox "Size" = "Large"/, 'The size was not chosen')
+  expect(3, /Hello, Ada \(l\)/, 'Greet did not run, or its confirm did not answer itself')
+  expect(4, /never types one/, 'The secret field was typed into')
+  expect(5, /Held back: the page went to https:\/\/example\.com\/elsewhere/, 'The link to another site was followed')
+  expect(6, /Second page at http:\/\/127\.0\.0\.1:\d+\/__browser\/next/, 'The link on the same host was not followed')
+  expect(7, /confirm dialog: "Greet them\?"/, 'The console does not hold the dialog')
+  if (/hunter2/.test(browser.join('\n'))) throw new Error('The password reached the page or the model')
+
+  const tab = await evaluate(`(() => {
+    const pane = [...document.querySelectorAll('.side-panel .panel-pane')].find((node) => node.querySelector('.browser-agent-chip'))
+    return pane ? { address: pane.querySelector('.browser-address input')?.value ?? '', active: pane.classList.contains('is-active'), webview: pane.querySelector('webview')?.getAttribute('partition') ?? '' } : null
+  })()`)
+  console.log('[smoke] agent tab:', JSON.stringify(tab))
+  if (!tab || !tab.active || !/^encode-agent-[a-f0-9]{16}$/.test(tab.webview) || !tab.address.includes('/__browser/next')) throw new Error('The agent’s tab is not in the side panel on its page')
+  await screenshot('ui-dark-agent-browser.png')
+  const saved = await evaluate("JSON.parse(localStorage.getItem('eNCode.panels.v1') ?? '{}')")
+  if (JSON.stringify(saved).includes('__browser')) throw new Error('The agent’s tab was saved with the person’s tabs')
+  // Closed again, so the panel checks find the tabs they expect.
+  if (!(await click('.side-panel .panel-tab.is-active .panel-tab-close'))) throw new Error('The agent’s tab has no close button')
+  await waitFor("!document.querySelector('.browser-agent-chip')", 4000, 'the agent’s tab closes')
+}
+
+/**
+ * A side chat (ADR 0104): /side opens a copy of the chat in a side tab, asks there in Ask mode, and nothing goes back to
+ * the chat; the sidebar does not list it; closing the tab deletes it.
+ */
+async function runSideChatChecks() {
+  console.log('[smoke] --- side chat ---')
+  // The chat open now is the one used last.
+  const chat = await evaluate('window.eNCode.agent.sessions().then((list) => list[0] ? { id: list[0].id, title: list[0].title } : null)')
+  const history = () => evaluate(`window.eNCode.agent.history(${JSON.stringify(chat.id)}).then((history) => history.entries.map((entry) => ({ kind: entry.kind, text: entry.text ?? '' })))`)
+  let entries = await history()
+  if (!entries.some((entry) => entry.kind === 'user')) {
+    await sendPrompt('[scenario:side-check] Remember the word pelican.')
+    await driveAgent('15b-side-parent', 30000)
+    entries = await history()
+  }
+  const asked = entries.find((entry) => entry.kind === 'user').text.slice(0, 40)
+  await sendPrompt('/side [scenario:side-check] What did the chat above write?')
+  await waitFor("document.querySelector('.side-panel .panel-pane.is-active .side-chat .msg-assistant')?.textContent?.includes('Side answer')", 30000, 'the side chat answers')
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const sent = JSON.stringify(request.messages)
+  if (!sent.includes('This is a side chat')) throw new Error('The side chat’s model was not told it is one')
+  if (!sent.includes(JSON.stringify(asked).slice(1, -1))) throw new Error('The side chat did not get a copy of the conversation')
+  const shown = await evaluate(`(() => {
+    const pane = document.querySelector('.side-panel .panel-pane.is-active .side-chat')
+    return { bubbles: pane?.querySelectorAll('.chat-user-bubble').length ?? 0, of: pane?.querySelector('.side-chat-of')?.textContent ?? '' }
+  })()`)
+  console.log('[smoke] side chat:', JSON.stringify(shown))
+  if (shown.bubbles !== 1) throw new Error(`The side chat shows the chat's messages too, or not its own: ${JSON.stringify(shown)}`)
+  if (!shown.of.includes(chat.title)) throw new Error(`The side chat is not of the chat open now: ${JSON.stringify(shown)}`)
+  await screenshot('ui-dark-side-chat.png')
+  const after = (await history()).length
+  if (after !== entries.length) throw new Error(`The side chat added to the chat: ${entries.length} entries before, ${after} after`)
+  const listed = await evaluate("window.eNCode.agent.sessions().then((list) => list.filter((session) => session.sideOf || session.title === 'Side chat').length)")
+  if (listed) throw new Error('The sidebar lists the side chat')
+  if (JSON.stringify(await evaluate("JSON.parse(localStorage.getItem('eNCode.panels.v1') ?? '{}')")).includes('"chat"')) throw new Error('The side chat was saved with the tabs')
+  if (!(await click('.side-panel .panel-tab.is-active .panel-tab-close'))) throw new Error('The side chat has no close button')
+  await waitFor("!document.querySelector('.side-chat')", 4000, 'the side chat closes')
 }
 
 /**
@@ -4756,21 +4850,25 @@ async function runPanelChecks() {
   await waitFor("!document.querySelector('.newtab') && !!document.querySelector('.browser-address input')", 4000, 'the page became a Browser tab')
   if ((await titles()).length !== start.length + 1) throw new Error('choosing Browser added a tab instead of using the New tab page')
 
-  // A page that forbids being framed (X-Frame-Options and frame-ancestors) opens in the panel instead of leaving it blank
-  // white, and its script-blocking policy is still in force.
+  // A page that forbids being framed (X-Frame-Options and frame-ancestors) opens in the tab, which is a page of its own
+  // rather than a frame, and its script-blocking policy is in force.
   const deniedUrl = `http://127.0.0.1:${providerPort}/__frame/denied`
   await typeInto('.browser-address input', deniedUrl)
   await evaluate("document.querySelector('.browser-address input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
-  const framed = await evaluateInFrame(deniedUrl, 'document.title')
+  // The page's target is there as soon as it starts loading; its title once it has loaded.
+  let framed = ''
+  for (const started = Date.now(); !framed && Date.now() - started < 10000; await sleep(200)) framed = await evaluateInFrame(deniedUrl, "document.readyState === 'complete' ? document.title : ''")
   if (framed !== 'Framed page') {
-    throw new Error(framed === 'Script ran' ? 'The Browser tab dropped more than frame-ancestors from the page policy: its script ran' : `The framed page is titled ${JSON.stringify(framed)}`)
+    throw new Error(framed === 'Script ran' ? 'The Browser tab did not keep the page policy: its script ran' : `The page is titled ${JSON.stringify(framed)}`)
   }
-  console.log('[smoke] a page that forbids framing is shown in the Browser tab, with the rest of its policy')
+  console.log('[smoke] a page that forbids framing is shown in the Browser tab, with its policy')
 
-  // An address that needs no network: nothing listens on port 8, so the frame shows its error page.
+  // An address that needs no network: nothing listens on port 8, so the tab says the page did not load.
   await typeInto('.browser-address input', 'http://127.0.0.1:8/')
   await evaluate("document.querySelector('.browser-address input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))")
   await waitFor(`${inFront} === '127.0.0.1:8'`, 4000, 'the tab is named after the page')
+  await waitFor("/did not load/.test(document.querySelector('.side-panel .panel-pane.is-active .browser-failure')?.textContent ?? '')", 8000, 'the tab says the page did not load')
+  await screenshot('ui-dark-browser-failed.png')
 
   // Ctrl+W closes it and Ctrl+Shift+T brings it back on the same page, in the same place.
   const withBrowser = await titles()
@@ -4951,6 +5049,58 @@ async function runReviewChecks() {
   // Leave the side panel as it was found.
   await key({ key: 'w', code: 'KeyW', ctrlKey: true })
   await waitFor("!document.querySelector('.review-pane')", 4000, 'the Review tab closed')
+}
+
+/**
+ * A worktree from the chat (ADR 0105), on the repository the review checks made: /worktree moves the session into one,
+ * its chip's menu brings what it changed into the project and removes it, after asking, with the work in it; /local
+ * takes the session back and leaves the worktree where it is.
+ */
+async function runChatWorktreeChecks() {
+  console.log('[smoke] --- worktrees from the chat ---')
+  const git = (...args) => execFileSync('git', args, { cwd: demoPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 })
+  const chip = "document.querySelector('.session-header .ui-chip.tone-accent')?.textContent ?? ''"
+  const folder = (name) => path.join(demoPath, '.encode-worktrees', name)
+  // Run on its own (ENCODE_SMOKE_ONLY=worktree), the folder is not a repository yet.
+  if (!(await fs.stat(path.join(demoPath, '.git')).catch(() => null))) {
+    git('init', '-q')
+    git('config', 'user.name', 'eNCode smoke')
+    git('config', 'user.email', 'smoke@example.com')
+    git('config', 'commit.gpgsign', 'false')
+    git('add', '-A')
+    git('commit', '-q', '--no-verify', '-m', 'Baseline')
+  }
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('/worktree chat-a')
+  await waitFor(`(${chip}).includes('chat-a')`, 20000, 'the header shows the worktree')
+  if (!(await fs.stat(folder('chat-a')).catch(() => null))) throw new Error('/worktree made no worktree')
+  // What the agent would have done there: a new file, not committed.
+  await fs.writeFile(path.join(folder('chat-a'), 'src', 'from-worktree.ts'), 'export const fromWorktree = true\n')
+  const chooseFromChip = async (item) => {
+    if (!(await click('.session-header .ui-chip.tone-accent'))) throw new Error('The worktree chip is not a button')
+    await waitFor(menuOpen('Worktree'), 4000, 'the worktree menu')
+    if (!(await click('.ui-menu [role^="menuitem"]', item))) throw new Error(`The worktree menu has no ${item}`)
+  }
+  await chooseFromChip('Bring changes into the project')
+  await until(async () => (await fs.readFile(path.join(demoPath, 'src', 'from-worktree.ts'), 'utf8').catch(() => '')).includes('fromWorktree'), 10000, 'the change is in the project')
+  await screenshot('ui-dark-chat-worktree.png')
+  await chooseFromChip('Remove the worktree…')
+  await waitFor("!!document.querySelector('.confirm-body')", 6000, 'removing asks first, since the worktree holds work')
+  if (!(await click('.btn.danger', 'Remove'))) throw new Error('The confirm dialog has no Remove')
+  await waitFor(`!(${chip}).includes('chat-a')`, 20000, 'the chip goes')
+  if (await fs.stat(folder('chat-a')).catch(() => null)) throw new Error('The worktree folder is still there')
+  if (git('branch', '--list', 'encode/chat-a').trim()) throw new Error('The worktree left its branch')
+
+  await sendPrompt('/worktree chat-b')
+  await waitFor(`(${chip}).includes('chat-b')`, 20000, 'the second worktree')
+  await sendPrompt('/local')
+  await waitFor(`!(${chip}).includes('chat-b')`, 20000, '/local takes the session back')
+  if (!(await fs.stat(folder('chat-b')).catch(() => null))) throw new Error('/local removed the worktree')
+  // Left as the review and best-of checks expect the repository: no worktree, and the brought file gone.
+  git('worktree', 'remove', '--force', folder('chat-b'))
+  git('branch', '-D', 'encode/chat-b')
+  await fs.rm(path.join(demoPath, 'src', 'from-worktree.ts'), { force: true })
+  console.log('[smoke] worktrees from the chat: entered, brought in, removed after asking, left with /local')
 }
 
 /**
@@ -5632,6 +5782,21 @@ try {
   console.log('[smoke] tree rows:', await evaluate("document.querySelectorAll('.tree-row').length"))
   await checkLegacyImport()
 
+  // While working on one part: ENCODE_SMOKE_ONLY=browser runs those checks against the test provider, and nothing else.
+  // A full run, as CI makes, never sets it.
+  const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
+  if (only.length) {
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks }
+    await useTestProvider()
+    await send('Page.reload')
+    await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')
+    for (const name of only) {
+      if (!parts[name]) throw new Error(`No part of the smoke is called ${name}: ${Object.keys(parts).join(', ')}`)
+      await parts[name]()
+    }
+    throw new SmokePartsDone()
+  }
+
   // Pin the offline demo profile and auto-approval so this run is deterministic.
   const initialSettings = await evaluate('window.eNCode.settings.get()')
   if (!initialSettings.profiles.some((profile) => profile.id === 'demo')) {
@@ -5940,6 +6105,7 @@ try {
   await runPanelChecks()
   await runReviewChecks()
   await runBestOfChecks()
+  await runChatWorktreeChecks()
   await runFontChecks()
   await runAppearanceChecks()
   await runDogfoodChecks()
@@ -5951,14 +6117,19 @@ try {
     console.log('[smoke] PASS — no renderer exceptions')
   }
 } catch (error) {
-  console.error('[smoke] FAILED:', error.message)
-  if (errors.length) console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
-  try {
-    await screenshot('99-failure.png')
-  } catch {
-    /* ignore */
+  if (error instanceof SmokePartsDone) {
+    console.log(errors.length ? '[smoke] renderer errors:\n' + errors.join('\n---\n') : '[smoke] PASS (only the parts asked for)')
+    process.exitCode = errors.length ? 1 : 0
+  } else {
+    console.error('[smoke] FAILED:', error.message)
+    if (errors.length) console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
+    try {
+      await screenshot('99-failure.png')
+    } catch {
+      /* ignore */
+    }
+    process.exitCode = 1
   }
-  process.exitCode = 1
 } finally {
   if (provider) provider.kill()
   ws.close()

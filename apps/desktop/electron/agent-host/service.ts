@@ -9,6 +9,7 @@
  */
 import { createHostClient, type AgentEvent, type AgentStatus, type BackgroundJob, type HostCaller, type HostClient } from '@encode/core'
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
+import { parseBrowserRequest, type BrowserAnswer, type BrowserRequest } from '@encode/tools'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
 import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, InlineSuggestAnswer, InlineSuggestRequest, LanguageServersReport, ServerInstallPlan, ServerInstallResult, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
@@ -33,6 +34,8 @@ export interface AgentHostServiceOptions {
   apiKey(profileId: string, baseUrl: string): string | Promise<string>
   /** The key of a search provider that needs one, or an empty string. */
   searchKey(provider: KeyedSearchProviderId): string | Promise<string>
+  /** A step of the Browser tool in the agent tab of a chat; without it the agent has no browser. */
+  browser?(sessionId: string, request: BrowserRequest, signal: AbortSignal): Promise<BrowserAnswer>
   onEvent(event: AgentEvent): void
   onJobs(jobs: BackgroundJob[]): void
   /** The model router has something the person should hear: a key was refused, a quota is spent, a model is closed to the account. */
@@ -86,6 +89,14 @@ const SEARCH_KEY_REQUEST = {
   required: ['provider'],
   additionalProperties: false,
   properties: { provider: { type: 'string', enum: [...KEYED_SEARCH_PROVIDER_IDS] } },
+}
+
+/** The chat and a request that parseBrowserRequest checks field by field. */
+const BROWSER_REQUEST = {
+  type: 'object',
+  required: ['session', 'request'],
+  additionalProperties: false,
+  properties: { session: { type: 'string', minLength: 1, maxLength: 200 }, request: { type: 'object' } },
 }
 
 const STILL_WORKING: ReadonlySet<AgentStatus> = new Set(['thinking', 'running-tool', 'awaiting-approval', 'awaiting-user'])
@@ -335,6 +346,16 @@ export class AgentHostService {
         }
       },
       { schema: SEARCH_KEY_REQUEST },
+    )
+    peer.handle(
+      'browser',
+      async ({ session, request }, { signal }) => {
+        const parsed = parseBrowserRequest(request)
+        if (!parsed) return { ok: false, code: 'failed', message: 'eNCode did not take that browser step.' }
+        if (!this.o.browser) return { ok: false, code: 'unavailable', message: 'There is no browser here.' }
+        return this.o.browser(session, parsed, signal)
+      },
+      { schema: BROWSER_REQUEST },
     )
     peer.on('event', (event) => {
       this.track(event)

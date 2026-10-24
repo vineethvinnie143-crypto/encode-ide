@@ -720,6 +720,23 @@ there. "Leave the worktree" keeps it; "remove the worktree" deletes it, and refu
 committed or commits no other branch has, unless you tell it to discard them (which asks first). The folder does not
 show in the file list, search or your own `git status`.
 
+You can do the same yourself: `/worktree` (or **Work in a worktree** in the session's `...` menu) moves the chat into a
+new worktree, and `/local` takes it back, leaving the worktree. Click the worktree's chip in the header for **Bring
+changes into the project**, which copies what it changed into your folder (if you changed one of those files too, it
+asks before writing over yours), and **Remove the worktree**, which asks first when it holds work. None of it runs
+while the agent works.
+
+## The browser and side chats
+
+A Browser tab (`Ctrl+T`, then Browser) is a real browser: try sites that refuse to be framed, sign in somewhere and
+restart eNCode (you stay signed in), zoom with `Ctrl+plus`, and a page that does not load. Then ask the agent to check
+a web page it made: "start the dev server and check the form in the browser". It opens its own tab, marked Agent,
+and you see each click; it never types into a password field, and a link to a site it did not open stays unopened.
+
+`/side what did you change and why?` opens a side chat: a copy of the chat in a tab of its own. It answers from what
+the chat said and from reading the project, changes nothing, and nothing in it goes back to the chat. Close the tab to
+delete it.
+
 ## What to try
 
 Open a folder you know well and use eNCode for the work you would do anyway: ask it to explain code, make a change,

@@ -230,3 +230,89 @@ describe('a worktree in a session', () => {
     assert.doesNotMatch(lastUser(h.main[4]), /encode-worktrees/)
   })
 })
+
+/** fakeGit, with what a chat's worktree changed since it was made: its files against the project's when it was made. */
+function bringingGit() {
+  const base = new Map<string, Map<string, Buffer>>()
+  const { git, made } = fakeGit()
+  const walk = async (folder: string, prefix = ''): Promise<string[]> => {
+    const out: string[] = []
+    for (const entry of await fs.readdir(folder, { withFileTypes: true })) {
+      if (entry.name === '.encode-worktrees') continue
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) out.push(...(await walk(path.join(folder, entry.name), relative)))
+      else out.push(relative)
+    }
+    return out
+  }
+  const create = git.create.bind(git)
+  git.create = async (root, name, signal) => {
+    const info = await create(root, name, signal)
+    const files = new Map<string, Buffer>()
+    for (const file of await walk(info.path)) files.set(file, await fs.readFile(path.join(info.path, file)))
+    base.set(info.path, files)
+    return info
+  }
+  git.changes = async (worktree) => {
+    const was = base.get(worktree.path)!
+    const now = await walk(worktree.path)
+    const changes: { path: string; kind: 'added' | 'modified' | 'deleted' }[] = []
+    for (const file of now) {
+      const bytes = await fs.readFile(path.join(worktree.path, file))
+      if (!was.has(file)) changes.push({ path: file, kind: 'added' })
+      else if (!was.get(file)!.equals(bytes)) changes.push({ path: file, kind: 'modified' })
+    }
+    for (const file of was.keys()) if (!now.includes(file)) changes.push({ path: file, kind: 'deleted' })
+    return changes
+  }
+  git.original = async (worktree, _seed, file) => base.get(worktree.path)?.get(file) ?? null
+  return { git, made }
+}
+
+describe('a worktree from the chat (ADR 0105)', () => {
+  it('is entered and left by the person, never while a request runs, and the model hears of it with the next request', async () => {
+    const { git, made } = bringingGit()
+    const h = await harness([{ text: 'ok' }], { git })
+    const entered = await h.session.worktreeAction({ action: 'enter', name: 'side-work' })
+    assert.deepEqual(entered, { ok: true, worktree: { name: 'side-work', branch: 'encode/side-work', path: made[0].path } })
+    assert.equal(h.session.summary().worktree, 'side-work')
+    await h.session.start({ text: 'go on', mode: 'code' })
+    assert.match(lastUser(h.main.at(-1)!), /You work in the git worktree .*side-work/)
+    const again = await h.session.worktreeAction({ action: 'enter' })
+    assert.equal(again.ok, false)
+
+    const left = await h.session.worktreeAction({ action: 'leave' })
+    assert.deepEqual(left, { ok: true, worktree: null })
+    await fs.access(made[0].path)
+    await h.session.start({ text: 'and now', mode: 'code' })
+    assert.match(lastUser(h.main.at(-1)!), /You no longer work in a worktree/)
+    assert.equal((await h.session.worktreeAction({ action: 'bring' })).ok, false, 'there is no worktree to bring in')
+  })
+
+  it('brings what the worktree changed into the project, and stops at a file the project changed meanwhile unless forced', async () => {
+    const { git, made } = bringingGit()
+    const h = await harness([{ text: 'ok' }], { git })
+    await h.session.worktreeAction({ action: 'enter', name: 'feature' })
+    const where = made[0].path
+    await fs.writeFile(path.join(where, 'a.txt'), 'from the worktree\n')
+    await fs.writeFile(path.join(where, 'new.txt'), 'new\n')
+    await fs.writeFile(path.join(where, 'src', 'one.ts'), 'export const one = 2\n')
+    // The person changed one file in the project meanwhile, and another only in its line ends.
+    await fs.writeFile(path.join(h.root, 'src', 'one.ts'), 'export const one = 3\n')
+    await fs.writeFile(path.join(h.root, 'a.txt'), 'from the checkout\r\n')
+
+    const refused = await h.session.worktreeAction({ action: 'bring' })
+    assert.deepEqual(refused, { ok: false, error: 'src/one.ts was changed in the project after the worktree was made.', conflicts: ['src/one.ts'] })
+    assert.equal(await fs.readFile(path.join(h.root, 'a.txt'), 'utf8'), 'from the checkout\r\n', 'nothing was written')
+
+    const brought = await h.session.worktreeAction({ action: 'bring', force: true })
+    assert.equal(brought.ok, true)
+    assert.deepEqual(brought.ok && [...(brought.files ?? [])].sort(), ['a.txt', 'new.txt', 'src/one.ts'])
+    assert.equal(await fs.readFile(path.join(h.root, 'new.txt'), 'utf8'), 'new\n')
+    assert.equal(await fs.readFile(path.join(h.root, 'src', 'one.ts'), 'utf8'), 'export const one = 2\n')
+    assert.equal(h.session.summary().worktree, 'feature', 'the session still works in the worktree')
+
+    await h.session.start({ text: 'next', mode: 'code' })
+    assert.match(lastUser(h.main.at(-1)!), /The user copied what the worktree feature changed into the project folder/)
+  })
+})

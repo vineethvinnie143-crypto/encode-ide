@@ -25,8 +25,8 @@ const METRICS: SegmentedOption<UsageMetric>[] = [
 /** Rows a table shows before "Show all". */
 const TABLE_ROWS = 8
 
-/** "3 calls reported no cost", for the costs that are a lower bound. */
-const unpricedNote = (tally: Tally): string | null => (tally.unpriced ? `${tally.unpriced.toLocaleString()} ${tally.unpriced === 1 ? 'call' : 'calls'} reported no cost` : null)
+/** "3 calls unpriced", for the costs that are a lower bound. */
+const unpricedNote = (tally: Tally): string | null => (tally.unpriced ? `${tally.unpriced.toLocaleString()} ${tally.unpriced === 1 ? 'call' : 'calls'} unpriced` : null)
 
 /** Settings > Usage: what the requests of every session used, by day, by model and by project, counted from their records. */
 export function UsageSection({ settings }: { settings: Settings }) {

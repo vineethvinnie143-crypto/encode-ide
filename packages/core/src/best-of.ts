@@ -559,21 +559,54 @@ export interface KeepOptions {
 
 const sameBytes = (a: Buffer | null, b: Buffer | null) => (a === null || b === null ? a === b : a.equals(b))
 
+/** Text, as git may check it out: the same file with CRLF or LF line ends is the same file. */
+const sameFile = (a: Buffer | null, b: Buffer | null) => {
+  if (sameBytes(a, b)) return true
+  if (a === null || b === null || a.includes(0) || b.includes(0)) return false
+  const lf = (bytes: Buffer) => bytes.toString('latin1').replace(/\r\n/g, '\n')
+  return lf(a) === lf(b)
+}
+
 /**
  * Writes what the attempt changed into the project, through the checkpoints, so Undo, Rewind and the Review tab see
  * it as the request's work. A file the project changed since the attempts started is a conflict: nothing is written
  * unless `force`. A path whose real folder leaves the project is refused.
  */
 export async function keepAttempt(options: KeepOptions): Promise<{ ok: true; files: string[] } | { ok: false; error: string; conflicts?: string[] }> {
-  const { root, git, attempt } = options
+  const { attempt } = options
   const worktree = attempt.worktree as WorktreeInfo | undefined
   const seed = attempt.seed
   if (!worktree || !seed) return { ok: false, error: 'This attempt was already removed.' }
+  return copyChanges({ ...options, worktree, seed, who: `attempt ${attempt.n}`, since: 'the attempts started', failed: `Attempt ${attempt.n} could not be kept`, tag: `best-of-${attempt.n}` })
+}
+
+export interface CopyOptions extends Omit<KeepOptions, 'attempt' | 'git'> {
+  git: Pick<SeedingGit, 'changes' | 'original'>
+  worktree: WorktreeInfo
+  /** What the changes are measured from. */
+  seed: WorktreeSeed
+  /** The worktree, as the messages name it: "attempt 2". */
+  who: string
+  /** When the project's own changes count from: "the attempts started". */
+  since: string
+  /** "Attempt 2 could not be kept". */
+  failed: string
+  /** The start of the id of eNCode's own call that writes. */
+  tag: string
+}
+
+/**
+ * Copies what a worktree changed since `seed` into the project: a best-of attempt that is kept, or a chat's worktree
+ * whose changes the person brings in (ADR 0105). A file the project changed meanwhile is a conflict, and nothing is
+ * written unless `force`; a path whose real folder leaves the project, and anything but a plain file, are refused.
+ */
+export async function copyChanges(options: CopyOptions): Promise<{ ok: true; files: string[] } | { ok: false; error: string; conflicts?: string[] }> {
+  const { root, git, worktree, seed, who } = options
   let changes: SeedChange[]
   try {
     changes = await git.changes(worktree, seed, options.signal)
   } catch (error) {
-    return { ok: false, error: `What attempt ${attempt.n} changed could not be read: ${error instanceof Error ? error.message : String(error)}` }
+    return { ok: false, error: `What ${who} changed could not be read: ${error instanceof Error ? error.message : String(error)}` }
   }
   const steps: Array<{ file: string; target: string; previous: Buffer | null; next: Buffer | null }> = []
   const conflicts: string[] = []
@@ -583,23 +616,23 @@ export async function keepAttempt(options: KeepOptions): Promise<{ ok: true; fil
     if (change.path.split('/').some((part) => part === '..' || part.toLowerCase() === '.git')) return { ok: false, error: `${change.path} is not a path eNCode writes.` }
     const source = path.join(worktree.path, ...change.path.split('/'))
     const stats = change.kind === 'deleted' ? null : await fs.lstat(source).catch(() => null)
-    if (stats && !stats.isFile()) return { ok: false, error: `${change.path} in attempt ${attempt.n} is not a plain file, so eNCode does not copy it.` }
+    if (stats && !stats.isFile()) return { ok: false, error: `${change.path} in ${who} is not a plain file, so eNCode does not copy it.` }
     // Writing over a link in the project would write where it points, so only a plain file is written over.
     const there = await fs.lstat(target).catch(() => null)
     if (there && !there.isFile()) return { ok: false, error: `${change.path} in the project is not a plain file, so eNCode does not write over it.` }
     const next = change.kind === 'deleted' ? null : await readOrNull(source)
     const original = await git.original(worktree, seed, change.path, options.signal)
     const previous = await readOrNull(target)
-    if (!sameBytes(previous, original) && !sameBytes(previous, next)) conflicts.push(change.path)
+    if (!sameFile(previous, original) && !sameFile(previous, next)) conflicts.push(change.path)
     if (!(await realFolderInside(root, folder))) return { ok: false, error: `${change.path} leads outside the project, so eNCode does not write it.` }
     steps.push({ file: change.path, target, previous, next })
   }
   if (conflicts.length && !options.force) {
-    return { ok: false, error: `${conflicts.length === 1 ? `${conflicts[0]} was` : `${conflicts.length} files were`} changed in the project after the attempts started.`, conflicts }
+    return { ok: false, error: `${conflicts.length === 1 ? `${conflicts[0]} was` : `${conflicts.length} files were`} changed in the project after ${options.since}.`, conflicts }
   }
   const written: string[] = []
-  // One call of eNCode's own for the whole keep, as the checkpoints count a tool's.
-  const toolUseId = `best-of-${attempt.n}-${randomBytes(6).toString('hex')}`
+  // One call of eNCode's own for the whole copy, as the checkpoints count a tool's.
+  const toolUseId = `${options.tag}-${randomBytes(6).toString('hex')}`
   try {
     for (const step of steps) {
       if (sameBytes(step.previous, step.next)) continue
@@ -613,7 +646,7 @@ export async function keepAttempt(options: KeepOptions): Promise<{ ok: true; fil
     }
   } catch (error) {
     const done = written.length ? ` ${written.length === 1 ? `${written[0]} was` : `${written.length} files were`} written before it stopped; Undo takes them back.` : ''
-    return { ok: false, error: `Attempt ${attempt.n} could not be kept: ${error instanceof Error ? error.message : String(error)}.${done}` }
+    return { ok: false, error: `${options.failed}: ${error instanceof Error ? error.message : String(error)}.${done}` }
   } finally {
     if (written.length) await options.wrote?.(toolUseId).catch(() => undefined)
   }

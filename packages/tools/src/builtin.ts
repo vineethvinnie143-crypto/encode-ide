@@ -6,6 +6,7 @@
  */
 import { monitorTool, scheduleWakeupTool, sendMessageTool } from './background'
 import { bashOutputTool, createBashTool, killShellTool, type BashSandbox } from './bash'
+import { browserTool } from './browser/tool'
 import { computerTool } from './computer/tool'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
 import {
@@ -46,6 +47,8 @@ export interface BuiltinToolOptions {
   web?: boolean
   /** The Computer tool, for sessions that have a desktop to use. Default false. */
   computer?: boolean
+  /** The Browser tool: only where there is a browser to drive (the desktop app). */
+  browser?: boolean
   /** Monitor, ScheduleWakeup and SendMessage (with Task), for a session's main agent: their notices need a session. Default false. */
   background?: boolean
   /** EnterWorktree and ExitWorktree, for a session's main agent in a git repository. Default false. */
@@ -76,6 +79,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
   ]
   if (options.web ?? true) tools.push(webFetchTool as Tool, webSearchTool as Tool)
   if (options.computer) tools.push(computerTool as Tool)
+  if (options.browser) tools.push(browserTool as Tool)
   tools.push(todoWriteTool as Tool, askUserQuestionTool as Tool, enterPlanModeTool as Tool, exitPlanModeTool as Tool)
   if (options.subagentTypes?.length) tools.push(createTaskTool(options.subagentTypes) as Tool)
   if (options.background) {

@@ -142,8 +142,10 @@ export class WorkspaceService {
     const dirents = await fs.readdir(abs, { withFileTypes: true })
     const entries: FileEntry[] = []
 
+    const top = path.relative(this.resolve(''), abs) === ''
     for (const dirent of dirents) {
-      if (dirent.name === '.git') continue
+      // The agent's worktrees are whole copies of the project: the explorer leaves them out, as git status does.
+      if (dirent.name === '.git' || (top && dirent.name === '.encode-worktrees')) continue
       const childAbs = path.join(abs, dirent.name)
       let isDir = dirent.isDirectory()
       let size: number | undefined

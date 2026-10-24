@@ -15,7 +15,10 @@ import {
   openBottom,
   openSide,
   reopenSide,
+  savedPanels,
   setLayout,
+  showAgentSide,
+  showChatSide,
   stepSide,
   toggleBottom,
   toggleFull,
@@ -297,5 +300,53 @@ describe('saved panels', () => {
     const empty = normalizePanels({ side: { tabs: [], layout: 'split' }, bottom: { open: true, tabs: [] } })
     assert.equal(empty.side.layout, 'hidden')
     assert.equal(empty.bottom.open, false)
+  })
+})
+
+describe('agent tabs', () => {
+  it('opens beside the others, never in place of a New tab page, and shows the one already open', () => {
+    let state = setLayout(openSide(defaultPanels(), 'new', id()), 'hidden')
+    state = showAgentSide(state, 'aaaa', 'agent-1')
+    assert.deepEqual(kinds(state), ['files', 'new', 'browser'])
+    assert.equal(state.side.activeId, 'agent-1')
+    assert.equal(state.side.layout, 'split', 'the panel comes back')
+    state = activateSide(state, 'files')
+    state = showAgentSide(state, 'aaaa', 'agent-2')
+    assert.equal(state.side.tabs.length, 3, 'one tab per chat')
+    assert.equal(state.side.activeId, 'agent-1')
+    assert.equal(showAgentSide(state, 'bbbb', 'agent-3').side.tabs.at(-1)?.agent, 'bbbb')
+  })
+
+  it('is not saved, not reopened, and its page is no tab of the person’s', () => {
+    let state = showAgentSide(defaultPanels(), 'aaaa', 'agent-1')
+    state = visitSide(state, 'agent-1', 'http://localhost:5173/', 'localhost:5173')
+    const saved = savedPanels(state)
+    assert.deepEqual(kinds(saved), ['files'])
+    assert.equal(saved.side.activeId, 'files')
+    const closed = closeSide(state, 'agent-1')
+    assert.deepEqual(closed.side.closed, [])
+    assert.deepEqual(kinds(reopenSide(closed, id())), ['files'])
+  })
+})
+
+describe('side chats', () => {
+  const chat = (session: string) => ({ session, of: 'parent', at: 1 })
+
+  it('open beside the others, numbered, and bring the panel back', () => {
+    let state = setLayout(openSide(defaultPanels(), 'new', id()), 'hidden')
+    state = showChatSide(state, chat('s1'), 'chat-1')
+    state = showChatSide(state, chat('s2'), 'chat-2')
+    assert.deepEqual(kinds(state), ['files', 'new', 'chat', 'chat'])
+    assert.deepEqual(state.side.tabs.slice(2).map((tab) => tab.title), ['Side chat', 'Side chat 2'])
+    assert.equal(state.side.activeId, 'chat-2')
+    assert.equal(state.side.layout, 'split')
+  })
+
+  it('are not saved and not reopened: closing one deletes it', () => {
+    const state = showChatSide(defaultPanels(), chat('s1'), 'chat-1')
+    assert.deepEqual(kinds(savedPanels(state)), ['files'])
+    const closed = closeSide(state, 'chat-1')
+    assert.deepEqual(closed.side.closed, [])
+    assert.deepEqual(kinds(normalizePanels(JSON.parse(JSON.stringify(state)))), ['files'], 'a saved one would not come back either')
   })
 })
