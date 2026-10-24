@@ -18,6 +18,7 @@ import {
   createWebAccess,
   type AgentShellOptions,
   type CodeIndex,
+  type NativeDoc,
   type CodeIntelligence,
   type DesktopBackend,
   type DesktopBroker,
@@ -89,6 +90,8 @@ export interface SessionScope {
   code?: () => CodeIntelligence | undefined
   /** The folder's code index, shared by its sessions (ADR 0090). */
   codeIndex?: () => CodeIndex | undefined
+  /** FiveM's natives, when eNCode installed them (ADR 0091). */
+  natives?: () => readonly NativeDoc[] | undefined
   /** The session closed: let go of what was held for it. */
   release?: () => Promise<void>
 }
@@ -232,6 +235,7 @@ export class AgentHost {
       ...(scope?.external ? { external: scope.external } : {}),
       ...(scope?.code ? { code: scope.code } : {}),
       ...(scope?.codeIndex ? { codeIndex: scope.codeIndex } : {}),
+      ...(scope?.natives ? { natives: scope.natives } : {}),
       ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),

@@ -5,7 +5,7 @@ import { workspaceKey } from '@encode/config'
 import { combineHooks, type SessionScope } from '@encode/core'
 import type { HookRunner } from '@encode/hooks'
 import { resolveSandboxSettings, type Sandbox } from '@encode/sandbox'
-import { detectLanguages, EditRefused, type CodeLocation, type EditorCallItem, type EditPlan, type FolderLanguages, type InstallPlan, type LanguageServers } from '@encode/lsp'
+import { detectLanguages, EditRefused, installedNatives, type CodeLocation, type EditorCallItem, type EditPlan, type FolderLanguages, type InstallPlan, type LanguageServers } from '@encode/lsp'
 import { CodeIndex, detectShell, realPathOf, type ShellProgram } from '@encode/tools'
 import {
   folderLanguageServers,
@@ -765,6 +765,10 @@ export class Workspaces {
       external: hub,
       ...(code ? { code: () => (code.available().ok ? code : undefined) } : {}),
       codeIndex: () => this.codeIndex(config.root),
+      natives: () => {
+        const dir = this.options.languageServers?.tools?.dir
+        return dir ? installedNatives(dir) : undefined
+      },
       release: async () => release(),
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
     }

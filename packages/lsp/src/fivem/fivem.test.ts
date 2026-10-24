@@ -10,7 +10,7 @@ import { mergeSettings } from '../hub'
 import { installedDir, installedLaunch, installServer, planInstall, removeInstall, type InstallContext, type NpmLock } from '../install'
 import { NPM_LOCKS } from '../npm-locks'
 import { makeTar } from '../test-archives'
-import { CFX_SYMBOLS, FIVEM_NATIVES, findResources, importedResources, manifestImports, prepareLua, serverPath, writeCfxSupport } from '.'
+import { CFX_SYMBOLS, FIVEM_NATIVES, findResources, importedResources, installedNatives, manifestImports, prepareLua, serverPath, writeCfxSupport } from '.'
 import { CFX_PLUGIN, CFX_RUNTIME } from './lua-files'
 import { luaType, nativesLibrary, parseNatives } from './natives'
 
@@ -184,13 +184,21 @@ describe("FiveM's natives", () => {
     assert.match(plan.steps.join(' '), /@citizenfx\/client 9\.0\.1-1 and @citizenfx\/server 9\.0\.1-1 from the npm registry: 2 packages/)
     assert.match(plan.steps.join(' '), /Writes Lua definitions of FiveM's natives from them\. Nothing in them is run\./)
     const installed = await installServer(spec, context)
-    assert.deepEqual(fs.readdirSync(installed).sort(), ['encode-install.json', 'library'])
+    assert.deepEqual(fs.readdirSync(installed).sort(), ['encode-install.json', 'library', 'natives.json'])
     assert.match(fs.readFileSync(path.join(installed, 'library', 'natives-01.lua'), 'utf8'), /function DropPlayer\(playerSrc, reason\) end/)
     assert.equal(installedDir(FIVEM_NATIVES, context.toolsDir)?.dir, installed)
+    // The agent's lookups read the same natives, with the side that has each.
+    const natives = installedNatives(context.toolsDir)!
+    const coords = natives.find((native) => native.name === 'GetEntityCoords')!
+    assert.equal(coords.side, 'client')
+    assert.deepEqual(coords.params.map((param) => `${param.name}${param.optional ? '?' : ''}: ${param.type}`), ['entity: number', 'alive?: boolean'])
+    assert.deepEqual(coords.returns, ['vector3'])
+    assert.equal(natives.find((native) => native.name === 'DropPlayer')?.side, 'server')
     // Not a server: nothing of it is ever started.
     assert.equal(installedLaunch({ ...LANGUAGE_SERVERS.find((item) => item.id === 'lua')!, id: FIVEM_NATIVES.id, installer: spec.installer }, context.toolsDir, context), null)
     removeInstall(FIVEM_NATIVES, context.toolsDir)
     assert.equal(installedDir(FIVEM_NATIVES, context.toolsDir), null)
+    assert.equal(installedNatives(context.toolsDir), undefined)
   })
 
   it('are pinned to two packages of the npm registry, listed as a library of the Lua server', () => {

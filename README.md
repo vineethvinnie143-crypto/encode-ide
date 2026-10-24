@@ -45,7 +45,9 @@ primary platform; the code stays cross-platform.
 - **A coding agent with real tools.** The agent follows Claude Code's tool contracts:
   - files: `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`, and `CodeMap`, which shows where
     things are defined without reading files (a map of the project or a folder, a file's outline, or where one name
-    is defined and which files use it; FiveM's events, commands, callbacks and exports included). Read shows images,
+    is defined and which files use it; FiveM's events, commands, callbacks and exports included). With `package` it
+    reads an installed dependency's API at the version installed (npm, Python, Rust, Go, FiveM resources), or one of
+    FiveM's natives, and the first message names the versions installed. Read shows images,
     Jupyter notebooks cell by cell, and PDFs page by page with their outline, through eNCode's own PDF reader; a
     model that reads PDFs also gets the pages that have figures or scans, as the pages themselves;
   - commands: `Bash` in the operating system's shell, with background jobs (`BashOutput`,

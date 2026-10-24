@@ -1843,3 +1843,48 @@ No new IPC call, setting or permission. The index reads files; it never runs any
   refusals outside the folder and for a missing path.
 - `session.test.ts`: the first message carries a map without the files the rules deny; a file the agent just wrote is
   mapped; a project of one or two files gets no map.
+
+## Installed versions and package lookups (Accuracy 1c)
+
+Written with the pull request that names the installed versions of the project's dependencies in the first message,
+lets CodeMap read a dependency's API where it is installed, and gives it FiveM's natives
+([0091](../adr/0091-the-agent-writes-for-the-versions-installed-their-names-in-the-first-message-and-their-api-through-codemap.md)).
+
+What is new:
+
+- the manifests of the folder (`package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml` and `Cargo.lock`,
+  `go.mod`, `fxmanifest.lua`) are read when a session's first message is sent, for names and versions;
+- CodeMap's `package` reads an installed dependency's files: `node_modules`, the folder's virtual environment,
+  Cargo's and Go's caches, or a FiveM resource;
+- `natives.json`, written beside the FiveM natives' Lua library when they are installed, and read by CodeMap.
+
+No new IPC call, setting or permission. Nothing found is run: files are read as text.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| U1 | A package name steers the lookup out of where packages are (`../../.ssh`, `/etc`, `C:\x`) | Each name is checked against its ecosystem's shape first (npm's scope and name, a crate's, a Go module path, a Python distribution, a resource's), so no `..`, absolute path or drive is ever looked up. npm's walk up for `node_modules` stops at the project's root. A manifest's `types` or `exports` entry that climbs out of the package is ignored. | Mitigated |
+| U2 | A package carries a link to a file outside it (`index.d.ts` → the person's keys), so a lookup shows that file | Every file a lookup reads must be, by its real path, inside the folder it reads. The walk of a package follows no links. | Mitigated |
+| U3 | A lookup shows a file the person's rules forbid reading | CodeMap asks for the read permission of the package's folder, as Grep of it would: one outside the workspace (a virtual environment elsewhere, Cargo's or Go's cache) is judged by the rules and the mode like a Read there. Inside it, each file a rule denies is left out, by the session's own rules. | Mitigated |
+| U4 | A huge or crafted package stalls the agent host | A lookup reads at most 600 files, 2 MB each and 24 MB in all, and 24 entry files; manifests at most 40, 1 MB each, two folders deep. The definition rules are the code index's, bounded on long lines (0090, M4). `natives.json` over 64 MB, or of the wrong shape, is not used. | Mitigated |
+| U5 | Text in a dependency steers the model (a README or a doc comment that gives orders) | What a lookup returns is the dependency's declarations and documentation, as Read would show them, for a call the agent made. It carries no permission and runs nothing. The versions line in the first message holds only names and version numbers. | Accepted (no new exposure) |
+| U6 | The natives file is replaced by something else on disk | It is in eNCode's own tools folder, written with the natives' install (0083, 0084) and refused when it is not of the expected shape. Natives are shown as text and run nothing. | Accepted |
+
+### Residual risks
+
+- The versions line is read from the manifests without the read rules. It holds dependency names and version numbers
+  only; a rule that forbids reading `package.json` does not keep them out of the first message.
+- A package's documentation can be wrong about its own code. The lookup shows what is installed, not whether it is
+  right.
+
+### Verification
+
+- `packages.test.ts`: npm (with `@types`, `exports` types, `export * from`, links), Python (a venv, distribution and
+  import names, docstrings), Cargo (the locked version in Cargo's cache), Go (the module cache, escaped capitals) and
+  FiveM resources; names that would climb out refused; a link out of a package and a file the rules deny never read;
+  a long class shown by its members; natives in full, searched, and the message when they are not installed;
+  CodeMap's permission for a package and for the natives.
+- `fivem.test.ts`: `natives.json` written with the natives' install, read back, and gone after they are removed.
+- `session.test.ts`: the first message names the installed versions; CodeMap answers from a package and from the
+  natives in a session.

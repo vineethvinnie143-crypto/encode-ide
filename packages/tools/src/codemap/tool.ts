@@ -10,13 +10,20 @@ import { displayPath, realPathOf, resolveInputPath, toPosix } from '../paths'
 import { plural } from '../text'
 import type { Tool, ToolContext } from '../types'
 import { languageOf } from './extract'
+import { packageOverview, packageQuery, packageSymbol, renderNative, searchNatives } from './package-docs'
+import { findPackage, type InstalledPackage } from './packages'
 import { definitionsOf, outline, renderMap, termsOf, usersOf } from './rank'
 
 interface CodeMapInput extends Record<string, unknown> {
   path?: string
   query?: string
   symbol?: string
+  package?: string
 }
+
+/** The name that asks for FiveM's natives rather than a package. */
+const NATIVES = 'natives'
+const PACKAGE_CHARS = 8_000
 
 /** What one call shows. */
 const MAP_CHARS = 6_000
@@ -35,12 +42,13 @@ export const codeMapTool: Tool<CodeMapInput> = {
   definition: {
     name: 'CodeMap',
     description: [
-      "Shows where things are defined without reading files: each file's classes, functions, methods, types and constants (and FiveM events, commands, callbacks and exports), by line.",
-      '- No input: the definitions most used across the project.',
+      'Shows where things are defined, by line, without reading files: classes, functions, methods, types and constants (and FiveM events, commands, callbacks, exports).',
+      '- No input: the most used definitions.',
       '- path: a folder, or one file (all its definitions, to Read by line range).',
       '- query: words or names to center the map on.',
       '- symbol: one exact name: where it is defined, which files use it.',
-      'Cheaper than reading files to find code. It matches names, not meaning.',
+      '- package: an installed dependency (npm, Python, Rust, Go, FiveM) or natives (FiveM\'s): its API at the installed version; with symbol or query, only those.',
+      'Cheaper than reading files. It matches names, not meaning.',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -48,6 +56,7 @@ export const codeMapTool: Tool<CodeMapInput> = {
         path: { type: 'string', description: 'A folder or a file; omit for the project.' },
         query: { type: 'string' },
         symbol: { type: 'string', minLength: 1 },
+        package: { type: 'string', minLength: 1 },
       },
       additionalProperties: false,
     },
@@ -55,15 +64,22 @@ export const codeMapTool: Tool<CodeMapInput> = {
   kind: 'read',
   readOnly: true,
   async access(input, ctx) {
-    return { type: 'read', paths: [await realPathOf(targetOf(input, ctx))] }
+    const name = input.package?.trim()
+    // The natives are eNCode's own data; a package is read where it is installed, which may be outside the folder.
+    if (name?.toLowerCase() === NATIVES) return { type: 'none' }
+    const pkg = name ? await installed(name, ctx) : undefined
+    return { type: 'read', paths: [pkg?.dir ?? (await realPathOf(targetOf(input, ctx)))] }
   },
   describe(input, ctx) {
+    const name = input.package?.trim()
+    if (name) return { title: input.symbol?.trim() ? `Look up ${input.symbol.trim()} in ${name}` : `Read the API of ${name}${input.query?.trim() ? ` for ${input.query.trim()}` : ''}` }
     const target = targetOf(input, ctx)
     const where = target === workdir(ctx) ? '' : ` of ${displayPath(target, { root: workdir(ctx), platform: ctx.platform })}`
     if (input.symbol?.trim()) return { title: `Find ${input.symbol.trim()}${where ? ` in ${where.slice(4)}` : ''}` }
     return { title: `Map the code${where}${input.query?.trim() ? ` for ${input.query.trim()}` : ''}` }
   },
   async run(input, ctx) {
+    if (input.package?.trim()) return lookUpPackage(input, ctx)
     if (!ctx.codeMap) return fail('The code map is not available here. Use Glob and Grep to find code.')
     const dir = workdir(ctx)
     const target = targetOf(input, ctx)
@@ -79,9 +95,9 @@ export const codeMapTool: Tool<CodeMapInput> = {
     const index = await ctx.codeMap.files(dir, ctx.signal)
     const partial = index.truncated ? '\nThe folder has more source files than the map reads; files past them are not in it.' : ''
     const files = index.files
-    if (!files.length) return { ok: true, content: `No definitions found: the folder has no source files in a language the code map reads.${partial}` }
-
     const symbol = input.symbol?.trim()
+    if (!files.length && !symbol) return { ok: true, content: `No definitions found: the folder has no source files in a language the code map reads.${partial}` }
+
     if (symbol) {
       const scope = isFile ? files.filter((file) => file.path === relative) : files.filter((file) => !relative || file.path === relative || file.path.startsWith(`${relative}/`))
       const found = definitionsOf(scope, symbol)
@@ -92,6 +108,9 @@ export const codeMapTool: Tool<CodeMapInput> = {
         for (const { path: file, definition } of found.slice(0, SHOWN_DEFINITIONS)) lines.push(`${file}:${definition.line} ${definition.text}`)
         if (found.length > SHOWN_DEFINITIONS) lines.push(`… and ${found.length - SHOWN_DEFINITIONS} more.`)
       } else {
+        // A FiveM native is no definition of the project's, but it is what the name means there.
+        const native = ctx.codeMap.natives?.()?.find((entry) => entry.name === symbol)
+        if (native) return { ok: true, content: renderNative(native), display: { output: 'FiveM native' } }
         lines.push(`No definition of ${symbol} in the code map. It holds the classes, functions, methods, types and constants of source files; Grep finds any text.`)
       }
       if (users.length) {
@@ -120,4 +139,30 @@ export const codeMapTool: Tool<CodeMapInput> = {
     const more = map.shownFiles < map.files ? `\n(${plural(map.shownDefinitions, 'definition')} in ${map.shownFiles} of ${map.files} files with definitions. Narrow it with path or query, or name one file for all of its definitions.)` : ''
     return { ok: true, content: `${map.text}${more}${partial}`, display: { output: `${plural(map.shownDefinitions, 'definition')} in ${plural(map.shownFiles, 'file')}` } }
   },
+}
+
+const installed = (name: string, ctx: ToolContext): Promise<InstalledPackage | undefined> =>
+  findPackage(ctx.root, workdir(ctx), name, { home: ctx.home, platform: ctx.platform, env: process.env })
+
+async function lookUpPackage(input: CodeMapInput, ctx: ToolContext) {
+  const name = input.package!.trim()
+  const symbol = input.symbol?.trim()
+  const query = input.query?.trim()
+  if (name.toLowerCase() === NATIVES) {
+    const natives = ctx.codeMap?.natives?.()
+    if (!natives) return fail("FiveM's natives are not installed. They are installed from Settings > Language servers (FiveM natives); until then, WebFetch can read docs.fivem.net.")
+    if (symbol) {
+      const native = natives.find((entry) => entry.name === symbol) ?? natives.find((entry) => entry.name.toLowerCase() === symbol.toLowerCase())
+      if (native) return { ok: true, content: renderNative(native), display: { output: 'FiveM native' } }
+      return { ok: true, content: `No FiveM native is named ${symbol}.\n${searchNatives(natives, symbol.replace(/([a-z0-9])([A-Z])/g, '$1 $2'), PACKAGE_CHARS)}`, display: { output: 'Not found' } }
+    }
+    if (!query) return fail('Give symbol (a native\'s name) or query (words to search them for) with package natives.')
+    return { ok: true, content: searchNatives(natives, query, PACKAGE_CHARS), display: { output: 'FiveM natives' } }
+  }
+  const pkg = await installed(name, ctx)
+  if (!pkg) return { ok: true, content: `${name} is not a dependency the project has installed (looked in node_modules, the folder's virtual environments, Cargo.lock and go.mod, and FiveM's resources). Check the name as the manifest spells it.`, display: { output: 'Not found' } }
+  const source = ctx.codeMap
+  const lookup = { pkg, display: (absolute: string) => displayPath(absolute, { root: workdir(ctx), platform: ctx.platform }), from: workdir(ctx), root: ctx.root, ...(source?.readable ? { readable: (absolute: string) => source.readable!(absolute) } : {}) }
+  const content = symbol ? await packageSymbol(lookup, symbol, PACKAGE_CHARS, ctx.signal) : query ? await packageQuery(lookup, termsOf(query).length ? termsOf(query) : query.split(/\s+/), PACKAGE_CHARS, ctx.signal) : await packageOverview(lookup, PACKAGE_CHARS, ctx.signal)
+  return { ok: true, content, display: { output: `${pkg.name}${pkg.version ? ` ${pkg.version}` : ''}` } }
 }

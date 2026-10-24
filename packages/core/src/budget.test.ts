@@ -52,7 +52,9 @@ describe('the cost of a request before the first word', () => {
     ])
     assert.ok(system <= 6_500, `the instructions are ${system} characters; the ceiling is 6500`)
     // CodeMap (ADR 0090) raised it from 20,500: a map in one call saves the Glob, Grep and Read rounds that find code.
-    assert.ok(tools <= 21_000, `the tools are ${tools} characters; the ceiling is 21000`)
+    // Its package lookups (ADR 0091) from 21,000: one call reads a dependency's API instead of its files. The largest
+    // set is Windows', whose Bash says how Git Bash names paths.
+    assert.ok(tools <= 21_200, `the tools are ${tools} characters; the ceiling is 21200`)
     for (const tool of payload.tools) assert.ok(toolChars(tool) <= 3_000, `${tool.name} is ${toolChars(tool)} characters; one tool may take at most 3000`)
   })
 
