@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EFFORTS, EFFORT_INFO, FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO, freeProfile, isFreeRef, labelOfRef, mainPatch, mainRefs, parseRef, roleRefs, withEffort } from '@shared/models'
 import { applySmallRoles, smallRoleSuggestion } from '@shared/small-roles'
+import { applyStrongRoles, strongRoleSuggestion } from '@shared/strong-roles'
 import type { ModelRole, ModelStatus, ReasoningEffort, Settings } from '@shared/types'
 import { useModels } from '../../stores/models'
 import { Button, IconButton } from '../../ui/Button'
@@ -179,6 +180,31 @@ function SmallRolesHint({ draft, onChange }: { draft: Settings; onChange: (patch
   )
 }
 
+/** Where Main is a smaller model: one strong model of the same connection for planning and review (ADR 0100). */
+function StrongRolesHint({ draft, onChange }: { draft: Settings; onChange: (patch: Partial<Settings>) => void }) {
+  const catalogs = useModels((state) => state.catalogs)
+  const suggestion = strongRoleSuggestion(draft, (id) => catalogs[id]?.models)
+  if (!suggestion) return null
+  const roles = suggestion.roles.map((role) => ROLE_INFO[role].label).join(' and ')
+  const price = suggestion.model.price ? ` It costs $${suggestion.model.price.input.toFixed(2)} per million tokens read, for these steps only.` : ''
+  return (
+    <div className="roles-row roles-suggest" data-setting="roles.strong">
+      <div className="roles-row-text">
+        <div className="roles-row-title">
+          {roles} could use {suggestion.model.name}
+        </div>
+        <div className="roles-row-hint">
+          {suggestion.main.name} keeps writing the code; the plan and the review of its work are where a strong model helps most, and when {suggestion.main.name} runs into trouble twice in a
+          request, eNCode asks whether {suggestion.model.name} may finish it.{price}
+        </div>
+      </div>
+      <Button size="sm" onClick={() => onChange(applyStrongRoles(draft, suggestion))}>
+        Use {suggestion.model.name}
+      </Button>
+    </div>
+  )
+}
+
 function untilText(until: number): string {
   const date = new Date(until)
   const sameDay = date.toDateString() === new Date().toDateString()
@@ -303,6 +329,7 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
           that dial; each role has its own, and Default leaves it to the model.
         </p>
         <SmallRolesHint draft={draft} onChange={onChange} />
+        <StrongRolesHint draft={draft} onChange={onChange} />
         {MODEL_ROLES.map((role) => (
           <RoleRow key={role} draft={draft} role={role} onChange={onChange} />
         ))}
@@ -323,6 +350,30 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
             </div>
           </div>
           <Toggle id="short-guide" checked={draft.guide !== 'full'} onChange={(short) => onChange({ guide: short ? 'auto' : 'full' })} label="Short instructions for strong models" />
+        </div>
+        <div className="roles-row" data-setting="roles.smaller">
+          <div className="roles-row-text">
+            <label className="roles-row-title" htmlFor="help-smaller">
+              Help smaller models
+            </label>
+            <div className="roles-row-hint">
+              Every other model gets a few lines after the instructions, and its first change in a request waits until it has said which files it will change and how it will check
+              them. That is one more step at most, once a request.
+            </div>
+          </div>
+          <Toggle id="help-smaller" checked={draft.helpSmaller !== 'off'} onChange={(on) => onChange({ helpSmaller: on ? 'auto' : 'off' })} label="Help smaller models" />
+        </div>
+        <div className="roles-row" data-setting="roles.stronger">
+          <div className="roles-row-text">
+            <label className="roles-row-title" htmlFor="offer-stronger">
+              Offer a stronger model when one fails twice
+            </label>
+            <div className="roles-row-hint">
+              When a smaller model runs into trouble twice in a request (the checks or the Reviewer send its work back, or a call fails the same way twice) and the Plan or Review role
+              has a strong model, eNCode asks whether that model may do the rest of the request. It costs more, so it never happens without your yes.
+            </div>
+          </div>
+          <Toggle id="offer-stronger" checked={draft.offerStronger !== 'off'} onChange={(on) => onChange({ offerStronger: on ? 'ask' : 'off' })} label="Offer a stronger model when one fails twice" />
         </div>
       </section>
 

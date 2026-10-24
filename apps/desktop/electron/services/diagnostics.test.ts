@@ -51,6 +51,8 @@ const settings: Settings = {
   reviewWork: 'auto',
   askAgain: 'on',
   learnConventions: 'on',
+  helpSmaller: 'auto',
+  offerStronger: 'ask',
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,

@@ -111,6 +111,12 @@
 .approval-warnings li {
   word-break: break-word;
 }
+.approval-prose {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--fs-13);
+  line-height: 20px;
+}
 .approval-detail {
   margin: 0;
   max-height: 140px;

@@ -10,6 +10,7 @@ import type { CheckGate } from './checks'
 import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
 import type { ReviewSetting } from './review'
+import type { SmallerHelp, StrongerOffer } from './smaller'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
 
 export interface AgentSettings {
@@ -51,6 +52,16 @@ export interface AgentSettings {
   learnConventions?: 'on' | 'off'
   /** `auto` (the default): a model that needs no guide gets the short instructions and tool descriptions (ADR 0094). `full`: every model gets the full guide. */
   guide?: GuideSetting
+  /**
+   * `auto` (the default): a model that is not one of the strong ones gets the help for smaller models, a part after
+   * the instructions and its first change held until it says what will change (ADR 0100). `off`: no model does.
+   */
+  smallerHelp?: SmallerHelp
+  /**
+   * `ask` (the default): after two setbacks in a request of a smaller model, the person is asked whether the strong
+   * model of the Plan or Review role may do the rest of it (ADR 0100). `off`: never.
+   */
+  offerStronger?: StrongerOffer
 }
 
 export const DEFAULT_SETTINGS: AgentSettings = { policy: 'workspace-write', maxSteps: 30, maxGoalRounds: 8 }

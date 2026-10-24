@@ -2,7 +2,7 @@
  * Runs tasks one after another, each as often as asked, into one report. One at a time: runs side by side would
  * share the machine and the provider's rate limits, and measure each other.
  */
-import { createScriptedClient } from '@encode/core'
+import { createScriptedClient, type AgentSettings } from '@encode/core'
 import type { ModelClient } from '@encode/providers'
 import { findPrograms } from './programs'
 import type { BenchReport } from './report'
@@ -18,6 +18,15 @@ export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | '
   onRun?(run: TaskRun, task: BenchTask): void
   now?: () => Date
 }
+
+/** A script plays its steps as written: no change held until it says what it changes, no stronger model offered (ADR 0100). */
+export const AS_WRITTEN = { smallerHelp: 'off', offerStronger: 'off' } as const satisfies Partial<AgentSettings>
+
+/**
+ * A reference run, besides: a script cannot answer the checks, the Reviewer, the second look or the conventions offer
+ * (ADRs 0095 to 0097).
+ */
+export const REFERENCE_SETTINGS = { ...AS_WRITTEN, checkGate: 'off', review: 'off', askAgain: 'off', learnConventions: 'off' } as const satisfies Partial<AgentSettings>
 
 /**
  * The scripted model that plays a task's reference run, or the steps of a kept report; the last step is a plain reply,
@@ -37,8 +46,7 @@ export async function runBench(tasks: readonly BenchTask[], options: BenchOption
     for (let attempt = 1; attempt <= repeat; attempt++) {
       if (options.signal?.aborted) return report
       const client = options.client === 'reference' ? referenceClient(task) : options.client
-      // A script cannot answer the checks, the Reviewer, the second look or the conventions offer (ADRs 0095 to 0097): its steps are played as written.
-      const settings = options.client === 'reference' ? { ...options.settings, checkGate: 'off' as const, review: 'off' as const, askAgain: 'off' as const, learnConventions: 'off' as const } : options.settings
+      const settings = options.client === 'reference' ? { ...options.settings, ...REFERENCE_SETTINGS } : options.settings
       const run = client ? await runTask(task, { ...options, ...(settings ? { settings } : {}), client, programs, attempt }) : skippedRun(task, 'it has no reference solution', attempt)
       report.runs.push(run)
       options.onRun?.(run, task)

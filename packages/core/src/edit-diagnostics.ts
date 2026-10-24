@@ -78,6 +78,11 @@ export class EditDiagnostics {
     this.gateRounds = 0
   }
 
+  /** A stronger model took over the turn (ADR 0100): its work is held to the gate afresh. */
+  freshGate(): void {
+    this.gateRounds = 0
+  }
+
   /** Read opens the files in their servers, so their problems are known before they are edited. */
   read(paths: readonly string[]): void {
     const covered = paths.filter((file) => this.code.covers(file).ok)

@@ -186,6 +186,10 @@ export interface ModelBudget {
   images?: boolean
   /** Whether the model reads PDFs as documents. Absent when the client cannot tell. */
   documents?: boolean
+  /** What it costs, in US dollars per million tokens; absent when the client does not know. */
+  price?: { input: number; output: number }
+  /** Free to call. */
+  free?: boolean
 }
 
 export interface BudgetQuery {

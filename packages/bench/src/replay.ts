@@ -10,8 +10,8 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { TurnReport } from '@encode/core'
-import { referenceClient } from './bench'
+import { THINK_FIRST, type TurnReport } from '@encode/core'
+import { AS_WRITTEN, referenceClient } from './bench'
 import { findPrograms } from './programs'
 import { runTask, type TaskRun } from './run'
 import { readTask, safeRelative, TASK_ID, type BenchTask, type ReplayResult } from './task'
@@ -43,6 +43,26 @@ export interface ReplayTaskFiles {
   notes: string[]
 }
 
+/**
+ * The steps and results without the changes eNCode held until the model said what it would change (ADR 0100): they
+ * never ran, and the model sent them again after saying it. A replay plays its steps as written, so it plays those.
+ * A report with every word replaced keeps them, as its results no longer read as held.
+ */
+function withoutHeld(report: TurnReport): Pick<TurnReport, 'steps' | 'results'> {
+  const held = new Set(report.results.flatMap((result, index) => (!result.ok && result.text.startsWith(THINK_FIRST) ? [index] : [])))
+  if (!held.size) return report
+  // Each call has its result, in order.
+  let call = 0
+  const steps = report.steps.flatMap((step) => {
+    if (!step.calls) return [step]
+    const calls = step.calls.filter(() => !held.has(call++))
+    if (calls.length) return [{ ...step, calls }]
+    // A step of held calls alone is left out: with nothing in it, it would end the request when played.
+    return step.text ? [{ text: step.text }] : []
+  })
+  return { steps, results: report.results.filter((_, index) => !held.has(index)) }
+}
+
 /** The task a report makes: task.json, replay.json and the project's files. */
 export function replayTaskFiles(report: TurnReport, id: string): ReplayTaskFiles {
   if (!TASK_ID.test(id)) throw new Error(`${id} is not a task name: lower-case letters, digits and dashes`)
@@ -61,20 +81,21 @@ export function replayTaskFiles(report: TurnReport, id: string): ReplayTaskFiles
     files.set(`project/${kept ? [kept, ...rest].join('/') : relative}`, file.text)
     if (file.text.includes('\r\n')) notes.push(`${relative} ends its lines with CRLF; to keep them, add "packages/bench/tasks/${id}/project/${relative} text eol=crlf" to .gitattributes`)
   }
+  const { steps, results } = withoutHeld(report)
   const first = report.description.trim().split(/\r?\n/, 1)[0]?.trim() ?? ''
   const task = {
     id,
     title: `Replay: ${first || 'a reported request'}`.slice(0, 120),
     prompt: report.prompt.trim() ? report.prompt : 'The reported request had no text.',
     tags: ['replay', ...(report.scrambled ? ['scrambled'] : [])],
-    maxSteps: Math.min(200, report.steps.length + 1),
+    maxSteps: Math.min(200, steps.length + 1),
     ...(Object.keys(rename).length ? { rename } : {}),
     // A start: what was asked for is the person's to say, in checks like any task's.
     checks: [{ kind: 'tools', name: 'no tool call failed', failedAtMost: 0 }],
   }
-  const expect: ReplayResult[] = report.results.filter((result) => !COMMANDS.has(result.tool)).map((result) => ({ tool: result.tool, ok: result.ok }))
+  const expect: ReplayResult[] = results.filter((result) => !COMMANDS.has(result.tool)).map((result) => ({ tool: result.tool, ok: result.ok }))
   files.set('task.json', `${JSON.stringify(task, null, 2)}\n`)
-  files.set('replay.json', `{\n  "steps": [\n${report.steps.map((step) => `    ${JSON.stringify(step)}`).join(',\n')}\n  ],\n  "expect": ${JSON.stringify(expect)}\n}\n`)
+  files.set('replay.json', `{\n  "steps": [\n${steps.map((step) => `    ${JSON.stringify(step)}`).join(',\n')}\n  ],\n  "expect": ${JSON.stringify(expect)}\n}\n`)
   return { files, notes }
 }
 
@@ -132,7 +153,7 @@ export interface ReplayOutcome {
 /** Plays a task's replay on this eNCode and compares each call with what replay.json expects. */
 export async function playReplay(task: BenchTask, options: { workDir?: string; signal?: AbortSignal } = {}): Promise<ReplayOutcome> {
   if (!task.replay) throw new Error(`${task.id} has no replay.json`)
-  const run = await runTask(task, { client: referenceClient(task)!, programs: await findPrograms([]), ...options })
+  const run = await runTask(task, { client: referenceClient(task)!, programs: await findPrograms([]), settings: { ...AS_WRITTEN }, ...options })
   return { task, run, comparison: compareReplay(task.replay.expect, run.tools) }
 }
 

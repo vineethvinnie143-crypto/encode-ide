@@ -423,6 +423,8 @@ const NO_CONFIG: HostConfig = {
   reviewWork: 'auto',
   askAgain: 'on',
   learnConventions: 'on',
+  helpSmaller: 'auto',
+  offerStronger: 'ask',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

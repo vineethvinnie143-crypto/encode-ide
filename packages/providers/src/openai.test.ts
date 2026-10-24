@@ -391,6 +391,18 @@ describe('reasoning read and sent back by family (ADR 0099)', () => {
     assert.equal(seen[1].body.messages[2].reasoning_content, 'Read a first.')
   })
 
+  it("sends a family's temperature for code when the person set none, and the person's when they did (ADR 0100)", () => {
+    const temperature = (overrides: Partial<TransportTarget>, set?: number) =>
+      (buildChatBody(target(overrides), { ...request, ...(set !== undefined ? { temperature: set } : {}) }, false) as { temperature?: number }).temperature
+    assert.equal(temperature({ family: 'deepseek', model: 'deepseek-chat' }), 0)
+    assert.equal(temperature({ family: 'deepseek', model: 'deepseek-chat' }, 0.4), 0.4)
+    assert.equal(temperature({ family: 'qwen', model: 'qwen/qwen3-coder' }), 0.7)
+    assert.equal(temperature({ family: 'qwen', model: 'qwen/qwen3-max' }), undefined)
+    assert.equal(temperature({ family: 'zhipu', model: 'z-ai/glm-4.6' }), undefined)
+    const reasoning = { tools: true, parallelTools: true, images: false, reasoning: true, promptCache: false }
+    assert.equal(temperature({ family: 'deepseek', model: 'deepseek-reasoner', capabilities: reasoning }), undefined, 'a reasoning model keeps its own')
+  })
+
   it('asks again without the reasoning when a server names its field as unknown, never on DeepSeek’s demand for it', async () => {
     const history: ModelRequest = {
       ...request,

@@ -2299,3 +2299,55 @@ What is new:
   DeepSeek does; a request asked again without the fields when a server names them as unknown, and not when it demands
   them.
 - `compaction.test.ts`: a call's signature dropped with the thinking, the call kept.
+
+## Help for smaller models, and a stronger model when the person says so (Model families 2)
+
+Written with the pull request that gives smaller models fixed help and offers a strong model for the rest of a request
+after two setbacks
+([0100](../adr/0100-smaller-models-get-help-and-a-strong-model-takes-the-hard-steps-when-the-person-says-so.md)).
+
+What is new:
+
+- a fixed part of eNCode's after the instructions for every model that is not one of the strong ones, and a fixed
+  result in place of a change that was not run;
+- a temperature sent for code where the person set none (DeepSeek and Qwen's Coder models);
+- prices per million tokens carried from the router's catalogs to the agent (`ModelBudget.price`), shown on a card;
+- an approval card that moves the main agent's calls for the rest of a request to the Plan or Review role's own model,
+  with a session grant;
+- a suggestion in Settings > Roles that puts a model of Main's own connection on the Plan and Review roles.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| SM1 | A request costs more than the person chose: a stronger, pricier model takes over unasked, or text in a file steers the agent into failing on purpose to get one | The switch happens only on the person's yes on the card, whatever the approval policy (Full access does not answer it; the card is not a tool call). It is asked once a request, names the model, the role and the reasons, and shows both prices when the catalogs give them. "Use it whenever one fails twice" lasts until the session ends. The next request starts on Main's list again. Settings > Roles turns the offer off. | Mitigated |
+| SM2 | The request's code goes to a provider the person did not mean for it | The model that takes over is the one the person put on the Plan or Review role, which already reads the code when it plans or reviews; it is called through the router as any call, so free-only mode, the free pool's rule (code goes to a free model only when the person chose it) and every connection's key stay as they were. The card names the model before anything is sent. The suggestion only offers a model of Main's own connection, never a free one, never another key. | Mitigated |
+| SM3 | A held change is lost, or a model loops on the held result | A held call is not run, so nothing changes; its result says to say what will change and send the call again. A change is held once a request at most, whatever the agent does next, and only in Code mode for a smaller model that wrote fewer than 80 characters since the request began. The person sees one notice. | Mitigated |
+| SM4 | The help part or the held result carries instructions that change what the agent may do | Both are fixed text of eNCode's, written in this repository; they ask for a short plan and checked steps and give no permission, path or command. The part is after the instructions, cached with them, and the same for every request. | Mitigated |
+| SM5 | A setback is counted wrong: a refusal of the person's taken for the model's failure, so the person is asked for no reason, or a real loop is missed | A call refused by the person, a rule or a hook is not a setback; eNCode's own calls (checks, the claim check's reads) are not counted. The same call with the same error counts once. The scan's send-back and a Reviewer's minor note are not setbacks. A loop of calls that each succeed is not caught; the ADR names it. | Accepted |
+| SM6 | The temperature eNCode sends for code makes a model worse, or overrides the person | It is sent only when the person set none, only for two families whose makers recommend that value for code, and never to a reasoning model or the families 0099 leaves without one; a person's own temperature is always sent instead. | Mitigated |
+| SM7 | A price shown on the card is wrong, so the person approves a cost they did not expect | Prices come from the catalogs the router already uses for cost on the work log (0093); where none is known the card says the model may cost more per token, and gives no number. The work log shows what each request cost after it. | Accepted |
+| SM8 | The finish gates are skipped for the model that takes over, since they already ran for the smaller one | On a yes the check rounds, the claim check, the Reviewer and the language servers' gate start again for the new model's work. | Mitigated |
+
+### Residual risks
+
+- Which models count as strong is a list by name. A model the list does not name is offered help it may not need and
+  a stronger model it may not; a model with a strong name that is weak in practice gets neither.
+- A setback is what eNCode sees: a model that writes wrong code that passes the checks and the Reviewer is not caught
+  by this, only by the gates themselves.
+
+### Verification
+
+- `smaller.test.ts`: the strong-model rule, the plan said in reply or reasoning, setbacks counted once for the same
+  call and per file for changes, the card's words and prices, a held change and the other calls of its step, a strong
+  model and the setting off never held; the offer asked once, the Plan role for the rest of the request and Main for
+  the next, no and its note, the Review role when Plan has none, none when the offer is off, for a strong model or
+  without a strong role, and the checks held afresh after a take-over.
+- `strong-roles.test.ts`: the suggestion, never free, never another connection, not for a strong Main, a local server
+  or free-only mode, and given to Plan and Review alone.
+- `openai.test.ts`: the code temperature sent when the person set none, the person's own sent instead, none to a
+  reasoning model.
+- `router.test.ts`: prices on the budget where a catalog gives them.
+- `replay.test.ts`: a report with a held change makes a replay without it that plays the same as the request did.
+- The desktop's end-to-end run: a held write with the part and the held result sent to the model and one row for the
+  write; the offer after two setbacks, approved, and the next call sent to the Plan role's model.

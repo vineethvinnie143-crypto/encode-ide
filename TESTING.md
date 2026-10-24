@@ -78,6 +78,23 @@ pnpm bench compare bench-results/<before>.json bench-results/<after>.json
 What is most useful to hear: a model that still stops at the second step or later (the error's words), a reply whose
 reasoning shows as its answer, and a family whose answers got worse when its reasoning went back.
 
+## Smaller models and a stronger one
+
+With a smaller model on Main (DeepSeek, GLM, Kimi, Qwen, MiniMax or a free one), give it a change across a few files.
+Before its first edit it says, in a few lines, which files it will change and how it will check them; a notice says
+eNCode asked for that. It happens once a request at most.
+
+Then, on **Settings → Roles**, take the suggested strong model for Plan and Review (or set one yourself; it costs money, so it needs **Only use
+free models** off), and give the
+smaller model something it is likely to get wrong: a failing test that needs a real fix, or a bug in code it does not
+know. When it is sent back twice, a card asks whether the Plan model may take over this request, with both prices.
+**Use it for this request** moves the rest of the request to that model; the next request starts on Main again.
+**Keep going** lets the smaller model go on, with your note if you write one.
+
+What is most useful to hear: a plan before the first edit that was not worth the wait, a card that came when the model
+was doing fine (and what it said were the reasons), a card that never came while the model went round in circles, and
+whether the stronger model fixed what the smaller one could not. Both kinds of help turn off on **Settings → Roles**.
+
 ## Stay safe
 
 - The default is **Workspace Write**: edits inside the open folder go through, and the agent asks before every command
