@@ -174,6 +174,91 @@ describe('commands', () => {
   })
 })
 
+describe("eNCode's own folder", () => {
+  // A profile that stands where eNCode keeps one, with the session's results and the sandbox's temp folder in it.
+  async function profiled(policy: ApprovalPolicy, overrides: Partial<ApprovalContext> = {}) {
+    const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'encode-home-')))
+    const profile = path.join(home, '.config', 'eNCode')
+    const outputs = path.join(profile, 'sessions', 'outputs', 's1')
+    const temp = path.join(profile, 'sandbox', 'tmp')
+    for (const dir of [outputs, temp, path.join(home, '.config', 'eNCode-dev')]) await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(path.join(profile, 'eNCode-settings.json'), '{}')
+    const ctx = await context(policy, { home, offLimits: { folders: [profile], except: [outputs, temp] }, ...overrides })
+    return { ctx, home, profile, outputs, temp }
+  }
+  const refused = (decision: Awaited<ReturnType<typeof decideApproval>>) => decision.kind === 'deny' && /eNCode's own folder/.test(decision.reason)
+
+  it('is refused to reads and edits under every policy, Full access and an allow rule included', async () => {
+    for (const policy of ['read-only', 'workspace-write', 'auto-review', 'full-access'] as const) {
+      const { ctx, profile, home } = await profiled(policy)
+      ctx.rules = rulesFor(ctx.root, home, { allow: ['Read(//**)', 'Edit(//**)'] })
+      // Without the folder off limits, the rule lets the read through.
+      assert.equal((await decideApproval(read(path.join(profile, 'eNCode-settings.json')), { ...ctx, offLimits: undefined })).kind, 'allow', policy)
+      assert.ok(refused(await decideApproval(read(path.join(profile, 'eNCode-settings.json')), ctx)), policy)
+      assert.ok(refused(await decideApproval(write(path.join(profile, 'Cookies')), ctx)), policy)
+      assert.ok(refused(await decideApproval(read(profile), ctx)), policy)
+    }
+  })
+
+  it("leaves the session's own results and the sandbox's temp folder to the policy", async () => {
+    const { ctx, outputs, temp } = await profiled('full-access')
+    assert.equal((await decideApproval(read(path.join(outputs, 'Bash-1.txt')), ctx)).kind, 'allow')
+    assert.equal((await decideApproval(read(path.join(temp, 'out.txt')), ctx)).kind, 'allow')
+    // Another session's results are not this one's.
+    assert.ok(refused(await decideApproval(read(path.join(outputs, '..', 's2', 'Bash-1.txt')), ctx)))
+  })
+
+  it('sees through a link that leads into it', async (t) => {
+    const { ctx, profile } = await profiled('full-access')
+    try {
+      await fs.symlink(profile, path.join(ctx.root, 'profile'), 'dir')
+    } catch {
+      t.skip('this system cannot make links')
+      return
+    }
+    assert.ok(refused(await decideApproval(read(path.join(ctx.root, 'profile', 'eNCode-settings.json')), ctx)))
+  })
+
+  it('is refused to a command that names it, as it is, from ~ or through a variable that holds a parent of it', async () => {
+    const { ctx, home, profile } = await profiled('full-access')
+    const env = { PATH: process.env.PATH ?? '', HOME: home, XDG_CONFIG_HOME: path.join(home, '.config') }
+    const shell = { ...ctx.shell, env }
+    for (const line of [
+      `cat ${path.join(profile, 'eNCode-settings.json')}`,
+      'cat ~/.config/eNCode/eNCode-settings.json',
+      'ls ../../.config/eNCode',
+      'tar czf /tmp/x.tgz "$HOME"/.config/eNCode',
+      'cp -r ${XDG_CONFIG_HOME}/eNCode /tmp/x',
+      'ls $HOME/.config//eNCode/sessions',
+    ]) {
+      const cwd = line.startsWith('ls ../') ? path.join(home, 'work', 'p') : ctx.root
+      assert.ok(refused(await decideApproval(command(line, cwd), { ...ctx, shell })), line)
+    }
+    for (const line of ['ls ~/.config/eNCode-dev', 'echo eNCode', 'ls $HOME/.config', `cat ${path.join(ctx.root, 'a.txt')}`]) {
+      assert.equal((await decideApproval(command(line, ctx.root), { ...ctx, shell })).kind, 'allow', line)
+    }
+  })
+
+  it('is spelled through the variables of Windows and PowerShell, in any case', async () => {
+    const profile = 'C:\\Users\\u\\AppData\\Roaming\\eNCode'
+    const ctx = await context('full-access', {
+      platform: 'win32',
+      home: 'C:\\Users\\u',
+      offLimits: { folders: [profile], except: [] },
+      shell: { cwd: 'C:\\work\\p', env: { APPDATA: 'C:\\Users\\u\\AppData\\Roaming', USERPROFILE: 'C:\\Users\\u' }, dialect: 'pwsh' },
+    })
+    for (const line of [
+      'Get-Content $env:APPDATA\\eNCode\\eNCode-settings.json',
+      'type %appdata%\\encode\\Cookies',
+      'Copy-Item "${env:USERPROFILE}\\AppData\\Roaming\\eNCode" C:\\x -Recurse',
+      'dir c:/users/u/appdata/roaming/ENCODE',
+    ]) {
+      assert.ok(refused(await decideApproval(command(line, 'C:\\work\\p'), ctx)), line)
+    }
+    assert.equal((await decideApproval(command('Get-ChildItem $env:APPDATA\\eNCode-old', 'C:\\work\\p'), ctx)).kind, 'allow')
+  })
+})
+
 describe('the web', () => {
   it('asks once per site, and lets refused addresses through to the tool that refuses them', async () => {
     const approved = new Set<string>()

@@ -115,6 +115,9 @@ model does on your own work, a task that says it could not run, and how long it 
 - Every command the agent runs is in the **sandbox** (Settings → Sandbox): it can change files only in the open
   folder, its git folder, and a temp and cache folder of the sandbox's own. On Windows it can still read your files,
   use the network and end other programs, and the screen says so.
+- The agent never reads or changes **eNCode's own folder** (`%APPDATA%\eNCode`: your keys, the browser's sign-ins
+  and every chat), under any setting, Full access included; long results it saved for itself there are the exception.
+  To try it, ask it to read `%APPDATA%\eNCode\eNCode-settings.json`: it should say it cannot, and why.
 - Open a **copy** of a project you care about, not the only copy.
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
   pages the agent fetches. There is no telemetry and no update check.
@@ -757,6 +760,10 @@ A sentence that does not tell you what to do, or raw text anywhere in the window
 
 1. **Help → Save diagnostics…** and pick a place for the file.
 2. Send that file with what you did, what you expected and what happened. A screenshot helps.
+
+If the window goes blank and a box says **eNCode's window stopped**, choose **Reload**: your chats and running agents
+are still there, and only edits not yet saved in the editor are lost. Report it with diagnostics either way, and say
+what you were doing just before.
 
 The report says which build this is and what it runs on, lists the models without their keys, counts the sessions and
 ends with the last 400 lines of the log. It has no API keys, no file contents and no conversations. Your user folder is

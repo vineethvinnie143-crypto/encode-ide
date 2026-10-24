@@ -52,6 +52,17 @@ describe('the Seatbelt profile', () => {
     assert.ok(read.includes('(literal "/Users/u/.netrc")'))
   })
 
+  it('reads a writable folder inside a hidden one again, after the denial: the temp folder in eNCode’s profile', () => {
+    const profile = '/Users/u/Library/Application Support/eNCode'
+    const temp = `${profile}/sandbox/tmp`
+    const own = seatbeltProfile(policy({ writable: ['/Users/u/project', temp], unreadable: [profile], temp }), isDir)
+    const denied = own.indexOf(`(deny file-read*\n  (subpath "${profile}")`)
+    const reopened = own.indexOf(`(allow file-read*\n  (subpath "${temp}")`)
+    assert.ok(denied >= 0 && reopened > denied, own)
+    assert.ok(!own.includes('(allow file-read*\n  (subpath "/Users/u/project")'), 'a folder outside the hidden ones needs no allowance')
+    assert.ok(!text.includes('(allow file-read*'), 'nothing is read again when no writable folder lies in a hidden one')
+  })
+
   it('denies the network only when the policy blocks it', () => {
     assert.ok(!text.includes('network'))
     assert.ok(seatbeltProfile(policy({ network: false }), isDir).includes('(deny network*)'))

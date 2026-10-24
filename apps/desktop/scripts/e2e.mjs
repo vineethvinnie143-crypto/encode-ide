@@ -99,6 +99,8 @@ const env = {
   ENCODE_THEME_FILE: path.join(sandbox, 'theme.json'),
   // Where the Windows notices go instead of the screen, one JSON line each, so the smoke can read them.
   ENCODE_NOTICES_FILE: path.join(sandbox, 'notices.jsonl'),
+  // What the window would have said when its page stopped; it reloads without asking.
+  ENCODE_CRASH_LOG: path.join(sandbox, 'crashes.jsonl'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
 }
 delete env.VITE_DEV_SERVER_URL

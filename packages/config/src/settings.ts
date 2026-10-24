@@ -71,8 +71,11 @@ export interface SettingsSource {
   unsafe: string[]
 }
 
-/** Reads a file as text; null when it does not exist. Injected so loading is testable. */
-export type ReadText = (file: string) => Promise<string | null>
+/**
+ * Reads a file as text; null when it does not exist. Injected so loading is testable. `fromProject` marks a file the
+ * folder brings with it, which is somebody else's: the reader then refuses a link rather than following it.
+ */
+export type ReadText = (file: string, options?: { fromProject?: boolean }) => Promise<string | null>
 
 export const SETTINGS_DIR = '.encode'
 const MAX_SETTINGS_BYTES = 1024 * 1024
@@ -224,7 +227,7 @@ export async function loadSettingsSources(options: {
   for (const scope of ['user', 'project', 'local'] as const) {
     let text: string | null
     try {
-      text = await options.read(files[scope])
+      text = await options.read(files[scope], { fromProject: scope !== 'user' })
     } catch (error) {
       const problem = `could not be read: ${error instanceof Error ? error.message : String(error)}`
       sources.push({ scope, file: files[scope], settings: {}, problems: [problem], unsafe: [problem] })

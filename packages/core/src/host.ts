@@ -16,6 +16,7 @@ import {
   createAgentShell,
   createDesktopBroker,
   createWebAccess,
+  realPathOf,
   type AgentShellOptions,
   type CodeIndex,
   type NativeDoc,
@@ -25,6 +26,7 @@ import {
   type DesktopBroker,
   type DesktopOptions,
   type ManagedShell,
+  type OffLimits,
   type PlanVerdict,
   type ShellCommandAssessor,
   type Tool,
@@ -136,6 +138,12 @@ export interface HostOptions {
   createShell?(root: string): ManagedShell
   /** The user's own folder: ENCODE.md, skills and agents. Default `<home>/.encode`. */
   userDir?: string
+  /**
+   * eNCode's own folders, which the agent never reads or changes under any policy: the app's profile, with its keys,
+   * the browser's sign-ins and every chat. `except` names folders inside them the agent's commands use as their own
+   * (the sandbox's temp folder); a session's long results, kept there too, stay readable to that session.
+   */
+  offLimits?: { folders: readonly string[]; except?: readonly string[] }
   beforeWrite?: ToolContext['beforeWrite']
   extraTools?: readonly Tool[]
   /**
@@ -233,13 +241,27 @@ export class AgentHost {
     return { ...base, ...own, ...(keepEnv.length ? { keepEnv } : {}), ...(Object.keys(extraEnv).length ? { extraEnv } : {}) }
   }
 
-  private envFor(sessionId: string, root: string, scope?: SessionScope): SessionEnv {
+  /** Real paths of the off-limits folders, found once. */
+  private offLimitsReal?: Promise<[string[], string[]]>
+
+  /** What is off limits to a session: eNCode's own folders, but for the session's own results. */
+  private async offLimitsFor(sessionId: string): Promise<OffLimits | undefined> {
+    const limits = this.o.offLimits
+    if (!limits?.folders.length) return undefined
+    const real = (folders: readonly string[]) => Promise.all(folders.map((folder) => realPathOf(path.resolve(folder))))
+    this.offLimitsReal ??= Promise.all([real(limits.folders), real(limits.except ?? [])])
+    const [folders, except] = await this.offLimitsReal
+    return { folders, except: this.outputs ? [...except, await realPathOf(this.outputs.folder(sessionId))] : except }
+  }
+
+  private envFor(sessionId: string, root: string, scope?: SessionScope, offLimits?: OffLimits): SessionEnv {
     const { o } = this
     const beforeWrite = scope?.beforeWrite ?? o.beforeWrite
     return {
       root,
       home: this.home,
       platform: this.platform,
+      ...(offLimits ? { offLimits } : {}),
       client: o.client,
       settings: o.settings,
       hooks: scope?.hooks ? combineHooks(scope.hooks, o.hooks) : (o.hooks ?? {}),
@@ -293,7 +315,7 @@ export class AgentHost {
         scope = refusing(error)
       }
     }
-    const session = new AgentSession(log, this.envFor(log.id, root, scope))
+    const session = new AgentSession(log, this.envFor(log.id, root, scope, await this.offLimitsFor(log.id)))
     this.bornAt.set(session, this.epoch)
     this.loaded.set(log.id, session)
     return session

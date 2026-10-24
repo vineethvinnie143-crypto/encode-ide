@@ -143,6 +143,7 @@ export const globTool: Tool<GlobInput> = {
       include: (entry) => kept(entry) && (entry.isDirectory || matcher.test(entry.relative)),
       limit: WALK_LIMIT,
       signal: ctx.signal,
+      ...(ctx.offLimits ? { offLimits: ctx.offLimits } : {}),
     })
     if (!result.files.length) return { ok: true, content: 'No files found.' }
     const sorted = await newestFirst(result.files, ctx.signal)
@@ -442,6 +443,7 @@ export const grepTool: Tool<GrepInput> = {
         include: (entry) => kept(entry) && (entry.isDirectory || ((!byGlob || byGlob(entry.relative)) && (!byType || byType(entry.relative)))),
         limit: WALK_LIMIT,
         signal: ctx.signal,
+        ...(ctx.offLimits ? { offLimits: ctx.offLimits } : {}),
       })
       candidates = result.files
       truncatedWalk = result.truncated

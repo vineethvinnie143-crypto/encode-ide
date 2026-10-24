@@ -19,7 +19,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFileSync, execSync, spawn } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { connect, sleep } from './cdp.mjs'
+import { connect, findPage, sleep } from './cdp.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const port = process.env.ENCODE_DEBUG_PORT || '9222'
@@ -50,7 +50,15 @@ async function evaluateInFrame(url, expression, timeoutMs = 10000) {
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
     seen = targets.filter((target) => target.type === 'webview' || target.type === 'iframe').map((target) => target.url)
     const frame = targets.find((target) => (target.type === 'webview' || target.type === 'iframe') && target.url === url && target.webSocketDebuggerUrl)
-    if (frame) return evaluateOn(frame.webSocketDebuggerUrl, expression)
+    if (frame) {
+      try {
+        return await evaluateOn(frame.webSocketDebuggerUrl, expression)
+      } catch (error) {
+        // A page's target is listed as soon as it starts loading, before it has a context to run in, and a load can
+        // replace the context under a call: both mean the page is not there yet.
+        if (!/Cannot find default execution context|Execution context was destroyed|closed before it answered/.test(error.message)) throw error
+      }
+    }
     await sleep(250)
   }
   throw new Error(`The Browser tab did not show ${url}. Frames: ${seen.join(', ') || 'none'}`)
@@ -5763,6 +5771,36 @@ async function runFontChecks() {
   if (!(await bodyFont()).startsWith('system-ui')) throw new Error('saving the defaults did not bring the system font back')
 }
 
+let pageCrashed = false
+
+/**
+ * The window's page is made to crash: eNCode says so (a test run writes what it would have asked to a file) and loads
+ * it again, and the app comes back on a page of its own.
+ */
+async function runCrashCheck() {
+  console.log('[smoke] --- a page that stops ---')
+  const log = process.env.ENCODE_CRASH_LOG
+  if (!log) throw new Error('ENCODE_CRASH_LOG is not set (pnpm e2e sets it)')
+  pageCrashed = true
+  // Page.crash never answers: the page it would answer from is gone.
+  void send('Page.crash').catch(() => undefined)
+  let told = ''
+  for (const started = Date.now(); !told && Date.now() - started < 15000; await sleep(250)) told = await fs.readFile(log, 'utf8').catch(() => '')
+  const said = told ? JSON.parse(told.trim().split('\n')[0]) : null
+  if (!said || !/window stopped/.test(said.message) || !/Reload/.test(said.detail)) throw new Error(`the window did not say its page stopped: ${told || 'nothing'}`)
+  let back = false
+  for (const started = Date.now(); !back && Date.now() - started < 30000; await sleep(500)) {
+    try {
+      const page = await findPage(port, { attempts: 1 })
+      back = (await evaluateOn(page.webSocketDebuggerUrl, "!!window.eNCode && !!document.querySelector('.titlebar .menubar') && document.querySelectorAll('.tree-row').length > 0", 5000)) === true
+    } catch {
+      // Not back yet.
+    }
+  }
+  if (!back) throw new Error('the window did not come back after its page stopped')
+  console.log('[smoke] a page that stopped was reported and loaded again:', said.reason)
+}
+
 try {
   await send('Page.enable')
   await send('Runtime.enable')
@@ -5786,7 +5824,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')
@@ -6114,6 +6152,8 @@ try {
     console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
     process.exitCode = 1
   } else {
+    // Last, since it takes the page this run talks to away.
+    await runCrashCheck()
     console.log('[smoke] PASS — no renderer exceptions')
   }
 } catch (error) {
@@ -6124,7 +6164,8 @@ try {
     console.error('[smoke] FAILED:', error.message)
     if (errors.length) console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))
     try {
-      await screenshot('99-failure.png')
+      // After the crash check the page this run talks to is gone, and a screenshot would wait for it for ever.
+      if (!pageCrashed) await screenshot('99-failure.png')
     } catch {
       /* ignore */
     }
