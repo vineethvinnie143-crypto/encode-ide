@@ -59,7 +59,16 @@ function titleOf(reading: PdfReading, file: string): string | undefined {
   return title === path.basename(file) ? undefined : title
 }
 
-export async function readPdfFile(file: string, name: string, bytes: Uint8Array, pages: string | undefined, ctx: ToolContext): Promise<ToolOutcome> {
+/**
+ * A PDF the person attached to a message (ADR 0113), as Read gives one to a model that does not read PDFs: its text,
+ * with what the text leaves out said. It is not a file the agent can read on, so no more pages are offered.
+ */
+export async function attachedPdfText(name: string, bytes: Uint8Array, signal: AbortSignal): Promise<string> {
+  const outcome = await readPdfFile(name, name, bytes, undefined, { signal, readsDocuments: () => false }, true)
+  return typeof outcome.content === 'string' ? outcome.content : outcome.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n\n')
+}
+
+export async function readPdfFile(file: string, name: string, bytes: Uint8Array, pages: string | undefined, ctx: Pick<ToolContext, 'signal' | 'readsDocuments'>, onMessage = false): Promise<ToolOutcome> {
   const result = await readPdf(bytes, { pages, maxPages: PDF_MAX_PAGES, maxChars: PDF_MAX_CHARS, timeMs: PDF_TIME_MS, signal: ctx.signal })
   if (!result.ok) return { ok: false, content: `${name} ${result.error}` }
   const reading = result.reading
@@ -67,7 +76,8 @@ export async function readPdfFile(file: string, name: string, bytes: Uint8Array,
   const title = titleOf(reading, file)
   const head = [`PDF ${name}: ${plural(reading.pageCount, 'page')}${title ? `, titled "${title}"` : ''}.`]
   if (!reading.chosen && reading.outline.length) head.push(`Outline:\n${outlineText(reading.outline)}`)
-  if (reading.rest.length) {
+  if (reading.rest.length && onMessage) head.push(`(${pagesWord(read)} ${pageList(read)} of ${reading.pageCount} came with the message.)`)
+  else if (reading.rest.length) {
     const next = reading.rest.slice(0, Math.max(1, read.length))
     head.push(`(${pagesWord(read)} ${pageList(read)} of ${reading.pageCount}. Pass pages, like "${pageList(next).replace(/ and /g, ',').replace(/ /g, '')}", to read on.)`)
   }
@@ -98,7 +108,7 @@ export async function readPdfFile(file: string, name: string, bytes: Uint8Array,
   if (unseen.length) {
     const scanned = reading.pages.filter((page) => page.scanned && unseen.includes(page.number)).map((page) => page.number)
     const them = unseen.length === 1 ? 'it' : 'them'
-    const reason = !ctx.readsDocuments?.() ? `this model cannot see ${them}` : attached.length ? `read ${them} with pages to see ${them}` : `${unseen.length === 1 ? 'it was' : 'they were'} too large to attach`
+    const reason = onMessage ? `only ${unseen.length === 1 ? 'its' : 'their'} text came with the message` : !ctx.readsDocuments?.() ? `this model cannot see ${them}` : attached.length ? `read ${them} with pages to see ${them}` : `${unseen.length === 1 ? 'it was' : 'they were'} too large to attach`
     notes.push(`${pagesWord(unseen)} ${pageList(unseen)} ${unseen.length === 1 ? 'has' : 'have'} figures, charts or scans that the text leaves out; ${reason}.`)
     if (scanned.length) notes.push(`${pagesWord(scanned)} ${pageList(scanned)} ${scanned.length === 1 ? 'is' : 'are'} mostly an image, such as a scan without a text layer, so ${scanned.length === 1 ? 'its' : 'their'} text here is incomplete.`)
   }

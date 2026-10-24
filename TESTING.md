@@ -771,6 +771,20 @@ middle of a request, `/mode plan` and carrying out the plan, `encode -c` the nex
 The command line's sessions are its own: they do not show in the app. Keys come only from the terminal's environment,
 and none is ever printed. It is not in the portable build.
 
+## Screenshots and files in the chat
+
+Paste a screenshot into the chat box (Win+Shift+S, then Ctrl+V), drop files on it, or use **+ → Pictures or files from
+this PC…**. Pictures show as thumbnails above your words, PDFs and text files by name; × takes one off. A message takes
+ten pictures and PDFs; PDFs go up to 10 MB and text files up to 1 MB. Other files (.exe, .docx, .zip) are named in a
+note and left out.
+
+With a model that sees pictures (Claude, GPT-4o or later, Gemini, some free ones), ask about what the screenshot
+shows. With one that cannot, the chat says so once, and the model is told a picture is there without seeing it:
+choose a model that reads images for that role in Settings. A PDF goes as its text, its first 20 pages.
+
+What is most useful to hear: a picture that comes out blurred or cut, a file refused that should not be, and a paste
+that attached a picture when you wanted the text (or the other way round).
+
 ## A folder on another machine (SSH)
 
 eNCode opens a folder on a Linux or macOS machine you reach with `ssh` (a VM, a server, WSL with its SSH server on):
@@ -895,6 +909,8 @@ Updating means installing the next build over the last one: everything above sta
 - The free models run on an OpenRouter key of your own; eNCode has no free service of its own yet.
 - PDFs: no OCR, so a scanned page without a text layer is readable only by a model that reads PDFs; PDFs that need a
   password are refused.
+- Attached to a message: a PDF goes as its text only (its first 20 pages), side chats take words only, and a picture
+  in a sent message shows as a thumbnail, not full size.
 - A model that lists only a few thousand tokens of context cannot hold eNCode's instructions and tools. Pick one with at least 16,000.
 - An MCP server with many tools no longer fills the request: the model sees the tool names and loads the ones it needs (ADR 0062). If a tool you expect is not used, ask the agent to look for it ("find the GitHub tools").
 - Language servers: a server eNCode installed is not updated by itself; a newer one comes with a newer eNCode and is

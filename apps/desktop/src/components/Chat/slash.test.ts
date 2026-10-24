@@ -73,7 +73,7 @@ describe('/best', () => {
     useWorkspace.setState({ workspace: { root: '/w', name: 'w' } } as never)
     useChat.setState({ running: false })
     await run('best', '2 add a toggle')
-    assert.deepEqual(starts, [{ text: 'add a toggle', mode: 'code', attachments: undefined, best: 2 }])
+    assert.deepEqual(starts, [{ text: 'add a toggle', mode: 'code', best: 2 }])
     await run('best', 'add another')
     assert.equal(starts.length, 1, 'eNCode is working on the first')
     assert.deepEqual(notes, ['Wait until eNCode is done, then send /best again.'])

@@ -3,15 +3,19 @@
  * when it finishes. Plain functions, so the rules are unit tested.
  */
 
+import type { ComposerAttachment } from './attachments'
+
 export interface Queued {
   id: string
   text: string
+  /** Pictures and files that go with it (ADR 0113): a queued message keeps them until it is sent. */
+  attachments?: ComposerAttachment[]
 }
 
 /** Adds a message at the end. Blank text is not queued. */
-export function enqueue(queue: readonly Queued[], text: string, id: string): Queued[] {
+export function enqueue(queue: readonly Queued[], text: string, id: string, attachments: readonly ComposerAttachment[] = []): Queued[] {
   const trimmed = text.trim()
-  return trimmed ? [...queue, { id, text: trimmed }] : [...queue]
+  return trimmed ? [...queue, { id, text: trimmed, ...(attachments.length ? { attachments: [...attachments] } : {}) }] : [...queue]
 }
 
 /** The message to send next, and what stays queued. */

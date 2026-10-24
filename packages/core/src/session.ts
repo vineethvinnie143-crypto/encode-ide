@@ -30,6 +30,7 @@ import {
 } from '@encode/providers'
 import {
   addToolSearch,
+  attachedPdfText,
   createFileStateTracker,
   TOOL_SEARCH,
   createJobManager,
@@ -111,6 +112,7 @@ import {
   type AgentEventBody,
   type AgentHistory,
   type AgentStartInput,
+  type EntryAttachment,
   type AgentStatus,
   type ApprovalAnswer,
   type ApprovalRequest,
@@ -141,6 +143,29 @@ import {
 } from './ui'
 
 const MAX_ATTACHMENT_CHARS = 20_000
+/** A picture's base64 at most: 5 MB, what the providers take. The app shrinks pictures well below it. */
+const MAX_PICTURE_CHARS = 7_000_000
+
+/** An attached file's text, cut where it is too long, saying so. */
+function clipAttached(content: string): string {
+  if (content.length <= MAX_ATTACHMENT_CHARS) return content
+  return `${content.slice(0, MAX_ATTACHMENT_CHARS)}\n(cut here: the first ${MAX_ATTACHMENT_CHARS.toLocaleString('en-US')} of ${content.length.toLocaleString('en-US')} characters came with the message)`
+}
+
+/** An attachment's name as the model is told it: one line, nothing that could close the tag it is in. */
+function attachedName(name: string): string {
+  return name.replace(/[\u0000-\u001f\u007f<>"&]/g, '').trim().slice(0, 120) || 'attachment'
+}
+
+/** What the person's message shows of what came with it. */
+function entryAttachments(input: AgentStartInput): EntryAttachment[] {
+  return [
+    ...(input.attachments ?? []).map((file): EntryAttachment => ({ name: file.path.split(/[\\/]/).pop() || file.path, kind: 'file' })),
+    ...(input.media ?? []).map(
+      (item): EntryAttachment => ({ name: item.name, kind: item.mediaType === 'application/pdf' ? 'pdf' : 'picture', ...(item.preview ? { preview: item.preview } : {}) }),
+    ),
+  ]
+}
 /** Messages waiting to steer one turn; more than this and the person is better served by the queue. */
 const MAX_STEERS = 20
 const STEER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -1472,11 +1497,22 @@ export class AgentSession {
 
     for (const block of await this.mentions(text)) blocks.push(textBlock(block))
 
-    const attached = (input.attachments ?? [])
-      .filter((file) => file.content)
-      .map((file) => `--- ${file.path} ---\n${file.content.slice(0, MAX_ATTACHMENT_CHARS)}`)
-      .join('\n\n')
-    blocks.push(textBlock(attached ? `${text}\n\n<attached_files>\n${attached}\n</attached_files>` : text))
+    // What the person attached comes before their words (ADR 0113): files and PDFs as text, pictures as images.
+    const files = (input.attachments ?? []).filter((file) => file.content).map((file) => `--- ${file.path} ---\n${clipAttached(file.content)}`)
+    const pictures: UserBlock[] = []
+    for (const item of input.media ?? []) {
+      const name = attachedName(item.name)
+      if (item.mediaType === 'application/pdf') {
+        const read = await attachedPdfText(name, Buffer.from(item.data, 'base64'), signal).catch((error: unknown) => `${name} could not be read: ${error instanceof Error ? error.message : String(error)}`)
+        files.push(`--- ${name} ---\n${read}`)
+      } else if (item.data.length > MAX_PICTURE_CHARS) {
+        pictures.push(textBlock(`<attached_picture name="${name}">too large to send: pictures over 5 MB are not</attached_picture>`))
+      } else {
+        pictures.push(textBlock(`<attached_picture name="${name}" />`), { type: 'image', mediaType: item.mediaType, data: item.data })
+      }
+    }
+    if (files.length) blocks.push(textBlock(`<attached_files>\n${files.join('\n\n')}\n</attached_files>`))
+    blocks.push(...pictures, textBlock(text))
     return { blocks }
   }
 
@@ -1736,7 +1772,8 @@ export class AgentSession {
       prompt.blocks.splice(prompt.blocks.length - 1, 0, ...this.readInbox())
       const message: UserMessage = { role: 'user', content: prompt.blocks }
       // The entry is stored before the message, so rewinding to the message takes both.
-      const asked = this.addEntry({ id: turnId, kind: 'user', text: input.text })
+      const attached = entryAttachments(input)
+      const asked = this.addEntry({ id: turnId, kind: 'user', text: input.text, ...(attached.length ? { attached } : {}) })
       this.settleEntry(asked)
       this.requestEntry = asked
       const record = (await this.write({ type: 'message', id: turnId, message, turnId, agentId: 'main' })) as MessageRecord

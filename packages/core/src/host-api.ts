@@ -144,6 +144,11 @@ const TODO: JsonSchema = {
 
 const PLAN: JsonSchema = { type: 'object', required: ['id', 'plan'], properties: { id: text(200), plan: text(200_000) } }
 
+/** Pictures and PDFs on one message (ADR 0113), and the most base64 one may be: a PDF of 10 MB. */
+export const MAX_MEDIA = 10
+export const MAX_MEDIA_CHARS = 14_000_000
+const BASE64 = '^[A-Za-z0-9+/]*={0,2}$'
+
 const START_INPUT: JsonSchema = {
   type: 'object',
   required: ['text', 'mode'],
@@ -155,6 +160,20 @@ const START_INPUT: JsonSchema = {
       type: 'array',
       maxItems: 100,
       items: { type: 'object', required: ['path', 'content'], properties: { path: text(4_096), content: text(4_000_000) } },
+    },
+    media: {
+      type: 'array',
+      maxItems: MAX_MEDIA,
+      items: {
+        type: 'object',
+        required: ['name', 'mediaType', 'data'],
+        properties: {
+          name: text(255, 1),
+          mediaType: { enum: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'] },
+          data: { type: 'string', minLength: 1, maxLength: MAX_MEDIA_CHARS, pattern: BASE64 },
+          preview: { type: 'string', maxLength: 200_000, pattern: `^data:image/jpeg;base64,${BASE64.slice(1)}` },
+        },
+      },
     },
   },
 }

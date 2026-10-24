@@ -132,6 +132,11 @@ describe('the host over a port', () => {
     await refused('start', { sessionId: 's', input: { text: 5, mode: 'code' } })
     await refused('start', { sessionId: 's', input: { text: 'x', mode: 'root' } })
     await refused('start', { input: { text: 'x', mode: 'code' } })
+    const picture = { name: 'a.png', mediaType: 'image/png', data: 'iVBORw0KGgo=' }
+    await refused('start', { sessionId: 's', input: { text: 'x', mode: 'code', media: [{ ...picture, mediaType: 'image/svg+xml' }] } })
+    await refused('start', { sessionId: 's', input: { text: 'x', mode: 'code', media: [{ ...picture, data: 'not base64!' }] } })
+    await refused('start', { sessionId: 's', input: { text: 'x', mode: 'code', media: [{ ...picture, preview: 'javascript:alert(1)' }] } })
+    await refused('start', { sessionId: 's', input: { text: 'x', mode: 'code', media: Array.from({ length: 11 }, () => picture) } })
     await refused('update', { sessionId: 's', patch: { pinned: 'yes' } })
     await refused('approve', { requestId: 'r', answer: true })
     await refused('approve', { requestId: 'r', answer: { approved: true, remember: 'forever' } })

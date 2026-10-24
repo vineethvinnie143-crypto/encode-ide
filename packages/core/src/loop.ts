@@ -114,7 +114,7 @@ import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
 import { FailedCalls, mendedNote } from './repeats'
 import { CHANGE_TOOLS, helpsSmaller, saidWhatChanges, Setbacks, shortModel, SMALLER_MODEL_PART, STRONGER_AFTER, STRONGER_ROLES, strongerPrompt, takeOverNote, THINK_FIRST, type SentBack } from './smaller'
-import { withoutScreensFrom } from './screens'
+import { withoutImagesFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
 import type { OutputStore } from './outputs'
@@ -370,6 +370,19 @@ function wasRead(messages: readonly Message[], text: string): boolean {
   )
 }
 
+/** The images in the conversation: the person's pictures, and those tools returned. */
+function pictureCount(messages: readonly Message[]): number {
+  let count = 0
+  for (const message of messages) {
+    if (message.role !== 'user') continue
+    for (const block of message.content) {
+      if (block.type === 'image') count++
+      else if (block.type === 'tool-result') count += block.content.filter((part) => part.type === 'image').length
+    }
+  }
+  return count
+}
+
 function hasImages(messages: readonly Message[]): boolean {
   return messages.some((message) =>
     (message.content as UserBlock[]).some((block) => block.type === 'image' || (block.type === 'tool-result' && block.content.some((part) => part.type === 'image'))),
@@ -441,6 +454,8 @@ export class AgentLoop {
   private vision: boolean | undefined
   /** Whether it reads PDFs as documents. */
   private documents: boolean | undefined
+  /** The pictures the person was last told the model in use cannot see: told again only when there are more. */
+  private unseen = 0
   /** Times the checks sent the agent back this turn (ADR 0095); the person refused a check this turn; the reply was checked. */
   private checkRounds = 0
   private checksRefused = false
@@ -631,19 +646,27 @@ export class AgentLoop {
     let overflows = 0
     let empties = 0
     for (;;) {
+      // A conversation with pictures goes to a model of the role that sees them, where one is ready (ADR 0113).
+      const query = { ...this.query(), ...(hasImages(o.conversation.messages()) ? { images: true } : {}) }
       // A model that needs no guide is sent the short one (ADR 0094), a smaller one its help (0100); the model the router expects decides.
-      const expected = (await o.client.budget(this.callRole, this.query())).model
+      const expected = (await o.client.budget(this.callRole, query)).model
       const short = shortGuide(o.settings().guide, expected)
       const system = short && o.shortSystem ? o.shortSystem : helpsSmaller(o.settings().smallerHelp, expected) ? [...o.system, SMALLER_MODEL_PART] : o.system
       const tools = o.registry.visibleDefinitions(o.tools, loadedTools(o.conversation.messages(), o.registry), short)
       await this.noteContext(system, tools, turn)
       await this.fit(turn)
       const settings = o.settings()
-      const budget = await o.client.budget(this.callRole, this.query())
+      const budget = await o.client.budget(this.callRole, query)
       this.vision = budget.images
       this.documents = budget.documents
-      // A model that cannot read images is not sent the screens it could not see anyway.
-      const sent = budget.images === false ? withoutScreensFrom(o.conversation.messages()) : o.conversation.messages()
+      // A model that cannot read images is sent none: a note stands in the place of each, and the person is told once.
+      const blind = budget.images === false && query.images === true
+      const pictures = blind ? pictureCount(o.conversation.messages()) : 0
+      if (pictures > this.unseen) {
+        o.surface.settle(o.surface.entry({ kind: 'notice', text: `${modelOf(budget.model)} cannot see pictures, so it was told where they are but not shown them. To have them looked at, choose a model that reads images for this role in Settings.` }))
+      }
+      this.unseen = pictures
+      const sent = blind ? withoutImagesFrom(o.conversation.messages()) : o.conversation.messages()
       const maxOutputTokens = Math.min(budget.maxOutputTokens, MAX_OUTPUT_TOKENS)
       const payload: ModelRequest = {
         system,

@@ -106,6 +106,7 @@ export const FolderOpen = icon(
   <path d="M3.5 18.5v-11a2 2 0 0 1 2-2h3.6l2 2h6.4a2 2 0 0 1 2 2v1.5 M3.5 18.5l2.3-6.3a1.5 1.5 0 0 1 1.4-1h12.3a1 1 0 0 1 .95 1.3l-2 5.9a1.5 1.5 0 0 1-1.4 1.1z" />,
 )
 export const FolderPlus = icon('FolderPlus', <path d={`${folder} M12 10v5.5 M9.25 12.75h5.5`} />)
+export const Picture = icon('Picture', <>{frame}{dot(9, 9.5, 1.5)}<path d="M4.5 17.5 9.5 13l3.5 3 2.5-2 4 3.5" /></>)
 export const Paperclip = icon('Paperclip', <path d="M20 12l-7.5 7.5a5 5 0 0 1-7-7L13 5a3.5 3.5 0 0 1 5 5l-7.5 7.5a2 2 0 0 1-3-3L14 8" />)
 export const Copy = icon('Copy', <><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 5H6.5A1.5 1.5 0 0 0 5 6.5V15" /></>)
 export const Trash2 = icon('Trash2', <path d="M4.5 7h15 M9.5 7V4.5h5V7 M6.5 7l1 12.5h9l1-12.5 M10.5 11v5 M13.5 11v5" />)

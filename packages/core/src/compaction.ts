@@ -535,7 +535,7 @@ export function requestText(message: Message): string {
   for (const block of message.content as UserBlock[]) {
     if (block.type !== 'text' || isReminder(block)) continue
     const text = block.text
-    if (text.startsWith('<attached_files>')) continue
+    if (text.startsWith('<attached_files>') || text.startsWith('<attached_picture ')) continue
     const request = between(text, REQUEST_OPEN, REQUEST_CLOSE)
     if (request !== null) {
       parts.push(request)

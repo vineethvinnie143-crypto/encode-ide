@@ -1,5 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, Loader2, Paperclip, Pencil, Plus, Shield, Square, Target, Trash2, X } from '../../ui/icons'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
+import { ArrowDown, ArrowUp, ChevronDown, CornerDownRight, FileText, Loader2, Paperclip, Pencil, Picture, Plus, Shield, Square, Target, Trash2, X } from '../../ui/icons'
 import { api } from '../../api'
 import { agentActions } from '../../commands/agent'
 import { commandRegistry } from '../../commands/app'
@@ -22,6 +22,20 @@ import { sendAction, sendKeys } from './send-key'
 import { runSlash } from './slash'
 import { conversationStats } from './stats'
 import { errorText } from '../../ipc-error'
+import {
+  attachmentName,
+  kindOf,
+  looksBinary,
+  MAX_MEDIA,
+  MAX_PDF_BYTES,
+  MAX_PICTURE_BYTES,
+  MAX_TEXT_BYTES,
+  pdfData,
+  pictureName,
+  preparePicture,
+  sizeText,
+  type ComposerAttachment,
+} from './attachments'
 
 const MAX_LINES = 12
 const LINE = 22
@@ -104,6 +118,30 @@ function useSkillList(wanted: boolean): SkillLike[] {
   return skills
 }
 
+/** An attachment in the chat box: a picture's thumbnail, or a file's name; either can be taken off. */
+function AttachmentTile({ item, onRemove }: { item: ComposerAttachment; onRemove: () => void }) {
+  const name = attachmentName(item)
+  if (item.kind === 'picture') {
+    return (
+      <span className="attachment-picture" title={`${name}, ${item.width} × ${item.height}`}>
+        <img src={item.preview} alt={name} draggable={false} />
+        <button type="button" className="attachment-remove" onClick={onRemove} aria-label={`Remove ${name}`} title="Remove">
+          <X size={10} />
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span className="attachment-chip" title={item.kind === 'file' ? item.path : `${name}, ${sizeText(item.bytes)}`}>
+      {item.kind === 'pdf' ? <FileText size={12} /> : <Paperclip size={11} />}
+      <span className="attachment-name">{name}</span>
+      <button type="button" className="chip-remove" onClick={onRemove} aria-label={`Remove ${name}`} title="Remove">
+        <X size={10} />
+      </button>
+    </span>
+  )
+}
+
 export default function Composer() {
   const draft = useChat((state) => state.draft)
   const setDraft = useChat((state) => state.setDraft)
@@ -133,7 +171,14 @@ export default function Composer() {
   const stopArmed = useUi((state) => state.stopArmed)
   const policyRequest = useUi((state) => (state.menuRequest?.menu === 'policy' ? state.menuRequest.id : undefined))
 
-  const [attachments, setAttachments] = useState<{ path: string; content: string }[]>([])
+  const attachments = useChat((state) => state.attachments)
+  const attach = useChat((state) => state.attach)
+  const detach = useChat((state) => state.detach)
+  /** Pictures and files still being read, so that Send waits for them. */
+  const [reading, setReading] = useState(0)
+  /** A file is dragged over the chat box. */
+  const [dropping, setDropping] = useState(false)
+  const pickerRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
 
@@ -264,17 +309,113 @@ export default function Composer() {
       notify('info', 'Open a file to attach it as context.')
       return
     }
-    if (attachments.some((file) => file.path === activePath)) return
+    if (attachments.some((item) => item.kind === 'file' && item.path === activePath)) return
     try {
       const file = await api.workspace.read(activePath)
       if (file.binary) {
         notify('info', 'Binary files cannot be attached as text context.')
         return
       }
-      setAttachments((previous) => [...previous, { path: activePath, content: file.content }])
+      attach([{ id: crypto.randomUUID(), kind: 'file', path: activePath, content: file.content }])
     } catch (error) {
       notify('error', errorText(error))
     }
+  }
+
+  /**
+   * Pictures, PDFs and text files from the computer (ADR 0113), pasted, dropped or picked. Each is read here and goes
+   * with the message; what cannot go is said, one note for all of it.
+   */
+  const addFiles = async (files: readonly File[], pasted = false) => {
+    if (!files.length) return
+    const refused: string[] = []
+    let media = useChat.getState().attachments.filter((item) => item.kind !== 'file').length
+    let pictures = useChat.getState().attachments.filter((item) => item.kind === 'picture').length
+    setReading((count) => count + files.length)
+    for (const file of files) {
+      try {
+        const kind = kindOf(file)
+        const name = file.name || 'file'
+        if (kind === 'other') {
+          refused.push(`${name} is not a picture, a PDF or a text file`)
+          continue
+        }
+        if (kind === 'text') {
+          if (file.size > MAX_TEXT_BYTES) {
+            refused.push(`${name} is ${sizeText(file.size)}; text files go up to ${sizeText(MAX_TEXT_BYTES)}`)
+            continue
+          }
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          if (looksBinary(bytes)) {
+            refused.push(`${name} is not a picture, a PDF or a text file`)
+            continue
+          }
+          attach([{ id: crypto.randomUUID(), kind: 'file', path: name, content: new TextDecoder().decode(bytes) }])
+          continue
+        }
+        if (media >= MAX_MEDIA) {
+          refused.push(`${name}: a message takes ${MAX_MEDIA} pictures and PDFs at most`)
+          continue
+        }
+        if (kind === 'pdf') {
+          if (file.size > MAX_PDF_BYTES) {
+            refused.push(`${name} is ${sizeText(file.size)}; PDFs go up to ${sizeText(MAX_PDF_BYTES)}`)
+            continue
+          }
+          media++
+          attach([{ id: crypto.randomUUID(), kind: 'pdf', name, data: await pdfData(file), bytes: file.size }])
+          continue
+        }
+        if (file.size > MAX_PICTURE_BYTES) {
+          refused.push(`${name} is ${sizeText(file.size)}; pictures go up to ${sizeText(MAX_PICTURE_BYTES)}`)
+          continue
+        }
+        const picture = await preparePicture(file, file.type)
+        if (!picture) {
+          refused.push(`${name} is not a picture eNCode can open`)
+          continue
+        }
+        media++
+        attach([{ id: crypto.randomUUID(), kind: 'picture', name: pictureName(name, pasted, ++pictures), ...picture }])
+      } catch {
+        refused.push(`${file.name || 'A file'} could not be read`)
+      } finally {
+        setReading((count) => count - 1)
+      }
+    }
+    if (refused.length) notify('info', `Not attached: ${refused.join('; ')}.`)
+  }
+
+  /** Files on the clipboard are attached; text on it is pasted as usual, even beside a picture of it (a copied table). */
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = [...event.clipboardData.files]
+    if (!files.length || event.clipboardData.getData('text/plain')) return
+    event.preventDefault()
+    void addFiles(files, true)
+  }
+
+  const carriesFiles = (event: DragEvent) => [...event.dataTransfer.types].includes('Files')
+  const dropHandlers = {
+    onDragEnter: (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      setDropping(true)
+    },
+    onDragOver: (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    },
+    onDragLeave: (event: DragEvent) => {
+      // Leaving for a child of the box is not leaving the box.
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false)
+    },
+    onDrop: (event: DragEvent) => {
+      if (!carriesFiles(event)) return
+      event.preventDefault()
+      setDropping(false)
+      void addFiles([...event.dataTransfer.files])
+    },
   }
 
   /** Types `@` or `$` at the caret, as its own word, so that its picker opens. */
@@ -289,7 +430,10 @@ export default function Composer() {
   /** Sends the draft. While the agent works, the send key does what the follow-up setting says and `other` the other one. */
   const submit = (other = false) => {
     const text = draft.trim()
-    if (!text) return
+    if (!text) {
+      if (attachments.length) notify('info', 'Say what to do with what you attached, then send.')
+      return
+    }
     if (ask) {
       void answer(text)
       setDraft('')
@@ -320,19 +464,33 @@ export default function Composer() {
       return
     }
     // While the agent works, a message either waits in the queue for it to be done, or goes to it now, read after its step.
+    if (reading) {
+      notify('info', 'Still reading what you attached. Send again in a moment.')
+      return
+    }
     if (running) {
-      if ((followUp === 'steer') !== other) steer(message)
+      // A running request reads words only, so a message with pictures or files waits in the queue.
+      if (attachments.length) {
+        enqueue(message, { attachments })
+        if ((followUp === 'steer') !== other) notify('info', 'Queued: pictures and files go with a new request, once eNCode is done.')
+      } else if ((followUp === 'steer') !== other) steer(message)
       else enqueue(message)
       return
     }
     send(message, attachments)
-    setAttachments([])
   }
 
   const addEntries = (): MenuEntry[] => [
     { kind: 'group', id: 'g-add', label: 'Add' },
     { id: 'file', label: 'The open file', description: activePath ?? 'Open a file in the editor first', disabled: !activePath, onSelect: () => void attachActiveFile() },
     { id: 'mention', label: 'A file from the project…', description: 'It comes with the message', shortcut: '@', disabled: !workspace, onSelect: () => typeSign('@') },
+    {
+      id: 'upload',
+      label: 'Pictures or files from this PC…',
+      description: 'Or paste a screenshot, or drop files on the chat box',
+      icon: <Picture size={14} />,
+      onSelect: () => pickerRef.current?.click(),
+    },
     { id: 'skill', label: 'A skill…', description: 'Its instructions come with the message', shortcut: '$', onSelect: () => typeSign('$') },
     { id: 'goal', label: 'A goal for a long task…', icon: <Target size={14} />, onSelect: () => void agentActions.setGoal() },
     { kind: 'separator', id: 'sep-add' },
@@ -398,6 +556,12 @@ export default function Composer() {
               <span className="queue-text" title={item.text}>
                 {item.text}
               </span>
+              {item.attachments?.length ? (
+                <span className="queue-attached" title={item.attachments.map(attachmentName).join(', ')}>
+                  <Paperclip size={11} />
+                  {item.attachments.length}
+                </span>
+              ) : null}
               <span className="queue-actions">
                 <IconButton label={running ? 'Steer now: the agent reads it after its step' : 'Send now'} size="sm" onClick={() => sendQueued(item.id)}>
                   {running ? <CornerDownRight size={14} /> : <ArrowUp size={14} />}
@@ -420,25 +584,38 @@ export default function Composer() {
         </div>
       )}
 
-      {attachments.length > 0 && (
-        <div className="composer-attachments">
-          {attachments.map((file) => (
-            <span className="attachment-chip" key={file.path} title={file.path}>
-              <Paperclip size={11} />
-              {file.path.split('/').pop()}
-              <button
-                className="chip-remove"
-                onClick={() => setAttachments((previous) => previous.filter((item) => item.path !== file.path))}
-                title="Remove attachment"
-              >
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className={cx('composer-card', running && 'is-running')}>
+      <div className={cx('composer-card', running && 'is-running', dropping && 'is-dropping')} {...dropHandlers}>
+        {dropping && (
+          <div className="composer-drop" aria-hidden="true">
+            <Picture size={18} />
+            Drop to attach pictures, PDFs or text files
+          </div>
+        )}
+        <input
+          ref={pickerRef}
+          type="file"
+          multiple
+          hidden
+          data-testid="composer-picker"
+          onChange={(event) => {
+            const files = [...(event.currentTarget.files ?? [])]
+            event.currentTarget.value = ''
+            void addFiles(files)
+          }}
+        />
+        {(attachments.length > 0 || reading > 0) && (
+          <div className="composer-attachments" aria-label="Attached to the message">
+            {attachments.map((item) => (
+              <AttachmentTile key={item.id} item={item} onRemove={() => detach(item.id)} />
+            ))}
+            {reading > 0 && (
+              <span className="attachment-chip is-reading">
+                <Loader2 size={11} className="spin" />
+                Reading…
+              </span>
+            )}
+          </div>
+        )}
         {pickerOpen && kind && <ComposerPicker kind={kind} options={options} index={active} listId={listId} {...(note ? { note } : {})} onPick={choose} onHover={setPick} />}
         {stopArmed && running && !pickerOpen && (
           <div className="composer-hint" role="status">
@@ -462,6 +639,7 @@ export default function Composer() {
             setCaret(event.target.selectionStart)
           }}
           onSelect={followCaret}
+          onPaste={onPaste}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return
             if (pickerOpen) {

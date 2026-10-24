@@ -2640,3 +2640,21 @@ keys, its files, its network or its other folders.
 - `electron/browser/rules.test.ts`: the addresses the agent's tab holds while the folder is on a machine.
 - The end-to-end run's `remote` part: the provider receives the key, no file on the machine holds it, and a page of
   this PC opened by the agent there is held.
+
+## Pictures and files attached to a message
+
+Written with the pull request that adds it ([0113](../adr/0113-pictures-and-files-go-with-a-message.md)).
+
+What is new: the renderer reads files the person pastes, drops or picks, and sends them to the agent host with the
+message, pictures as base64 and a JPEG thumbnail, PDFs as base64, text as text. The agent host reads the PDFs with
+eNCode's own reader and stores the message, pictures included, in the session's log.
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| AT1 | A new channel lets the renderer read any file by its path | None is added: the renderer reads only the `File` objects the person pasted, dropped or picked in the system dialog; the agent host gets bytes, never a path to read. | Mitigated |
+| AT2 | A crafted request floods the agent host (huge or many items, odd types) | The host-api schema: at most 10 items, five media types, base64 only and at most 14 M characters each, a thumbnail only as `data:image/jpeg;base64`; the session drops a picture over 5 MB with a note. Long strings are measured without spreading them into an array. | Mitigated |
+| AT3 | A file name closes the tag it sits in and writes instructions | The name is kept to one line without control characters, `<`, `>`, `"` or `&`, at most 120 characters, before it goes in `<attached_picture name="…" />` or a file header. | Mitigated |
+| AT4 | A hostile PDF stalls or exhausts the PDF reader | The same reader as Read, with its time limit (20 s), page limit (20) and decode budgets; a failure is a line of text in the request. | Mitigated |
+| AT5 | Text in a picture or a file steers the agent | What the person attaches is theirs, like what they type; a picture is content to the model, and the permission policy decides what any resulting tool call may do. | Accepted |
+| AT6 | A picture the model cannot see is dropped without a word | The model gets a note in its place and the person is told once which model could not see it. | Mitigated |
+
