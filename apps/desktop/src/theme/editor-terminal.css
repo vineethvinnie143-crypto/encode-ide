@@ -98,43 +98,43 @@
   --enc-term-line-height: 19px;
 
   /* ANSI: black, red, green, yellow, blue, magenta, cyan, white, then the bright eight */
-  --enc-term-ansi-0: #2a2f3b;
+  --enc-term-ansi-0: #2e2e2e;
   --enc-term-ansi-1: #ff6b6b;
   --enc-term-ansi-2: #3ccb7f;
   --enc-term-ansi-3: #f5b54a;
   --enc-term-ansi-4: #6b98ff;
   --enc-term-ansi-5: #c5a3ff;
   --enc-term-ansi-6: #3fd6ee;
-  --enc-term-ansi-7: #c9d0dc;
-  --enc-term-ansi-8: #5a6274;
+  --enc-term-ansi-7: #d0d0d0;
+  --enc-term-ansi-8: #6b6b6b;
   --enc-term-ansi-9: #ff8f8f;
   --enc-term-ansi-10: #6ee7a6;
   --enc-term-ansi-11: #ffd27a;
   --enc-term-ansi-12: #9bb8ff;
   --enc-term-ansi-13: #dcc6ff;
   --enc-term-ansi-14: #7fe6f5;
-  --enc-term-ansi-15: #f5f7fa;
+  --enc-term-ansi-15: #f7f7f7;
 }
 
 :root[data-theme='light'] {
-  --enc-editor-sticky-shadow: 0 4px 6px -4px rgba(15, 20, 30, 0.18);
+  --enc-editor-sticky-shadow: 0 4px 6px -4px rgba(0, 0, 0, 0.16);
   --enc-editor-minimap-slider: color-mix(in srgb, var(--text-3) 14%, transparent);
   --enc-editor-minimap-slider-hover: color-mix(in srgb, var(--text-3) 26%, transparent);
   --enc-editor-inlay-bg: color-mix(in srgb, var(--text-3) 10%, transparent);
-  --enc-term-ansi-0: #1f2430;
+  --enc-term-ansi-0: #1f1f1f;
   --enc-term-ansi-1: #c62828;
   --enc-term-ansi-2: #1a7f4b;
   --enc-term-ansi-3: #8a5a00;
   --enc-term-ansi-4: #2f5fe0;
   --enc-term-ansi-5: #7c3aed;
   --enc-term-ansi-6: #0b7e98;
-  --enc-term-ansi-7: #5c6370;
-  --enc-term-ansi-8: #4b5363;
+  --enc-term-ansi-7: #5e5e5e;
+  --enc-term-ansi-8: #4d4d4d;
   --enc-term-ansi-9: #e04848;
   --enc-term-ansi-10: #23a160;
   --enc-term-ansi-11: #a86f00;
   --enc-term-ansi-12: #4a77f2;
   --enc-term-ansi-13: #9157f5;
   --enc-term-ansi-14: #0d97b6;
-  --enc-term-ansi-15: #a2a9b6;
+  --enc-term-ansi-15: #a6a6a6;
 }

@@ -17,10 +17,12 @@
   flex-shrink: 0;
 }
 
-.logo-mark,
-.logo-glyph {
+.logo-mark {
   display: block;
   flex-shrink: 0;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .wordmark {
@@ -34,6 +36,14 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* Links in the Mono accent: silver sits close to the text, so a link carries an underline in it. */
+:root[data-accent='mono'] :is(.markdown a, .markup a, .search-link a, .connect-link a, .link-btn, .btn.inline-link) {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
 /* Icon buttons: 24 (default), 28 and 32 px squares */
@@ -227,6 +237,8 @@
 }
 .ui-toggle.is-on .ui-toggle-thumb {
   transform: translateX(14px);
+  /* The text colour of the fill under it: black on Mono's silver, white on a coloured accent. */
+  background: var(--on-accent);
 }
 
 /* Segmented control */

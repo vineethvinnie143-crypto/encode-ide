@@ -31,6 +31,7 @@ const MODES: SegmentedOption<ThemeMode>[] = [
 ]
 
 const ACCENT_OPTIONS: { value: Accent; label: string }[] = [
+  { value: 'mono', label: 'Mono' },
   { value: 'blue', label: 'Signal blue' },
   { value: 'cyan', label: 'Cyan' },
   { value: 'jade', label: 'Jade' },

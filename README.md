@@ -135,11 +135,11 @@ primary platform; the code stays cross-platform.
   the **Rewind** button on any of your requests can put the files back to before it, and the conversation with them if
   you like; a file you edited since is left alone unless you say otherwise, and **Undo** brings the changes back.
   Changes made by commands (installs, builds, git) are not recorded.
-- **Its own look.** Dark or light (or follow Windows), four accents, high contrast,
-  compact density and reduced motion, under **Settings → Appearance**. Text is in Windows' own
-  fonts at Codex's sizes (Segoe UI 14 px, Consolas 12 px); choose eNCode's Inter and
-  JetBrains Mono, any installed font, or other sizes there. The icons and the Trace N logo are
-  drawn for eNCode.
+- **Its own look.** Black and silver from the chrome dice logo, dark or light (or follow
+  Windows), the Mono accent or four colours, high contrast, compact density and reduced motion,
+  under **Settings → Appearance**. Text is in Windows' own fonts at Codex's sizes (Segoe UI
+  14 px, Consolas 12 px); choose eNCode's Inter and JetBrains Mono, any installed font, or other
+  sizes there. The icons are drawn for eNCode.
 - **Any model.** It works with any OpenAI-compatible endpoint and OpenRouter's catalog
   (including free models), with presets for DeepSeek, OpenAI, Ollama and LM Studio. Long
   sessions are compacted into a summary instead of failing at the context limit.
@@ -418,7 +418,8 @@ apps/desktop/                 the Electron app (@encode/desktop)
     styles/                   one stylesheet per area, in cascade order (index.css)
     ui/                       eNCode's icons, logo and shared controls
   shared/                     types and appearance rules shared by main, preload and renderer
-  build/                      the app icon: icon.svg and the script that renders it
+  build/                      the logo as supplied and the script that renders the app icon and marks
+  public/brand/               the logo's renders the app shows (title bar, empty chat, About)
   scripts/                    build, dev, e2e harness, smoke, fake provider
   test/fixtures/              the workspace the smoke opens (copied, never edited)
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)

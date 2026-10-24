@@ -37,7 +37,8 @@ describe('colour themes of your own', () => {
   it('start from the built-in themes as tokens.css has them, accents included', () => {
     for (const base of ['dark', 'light'] as const) {
       for (const [key, name] of Object.entries(VARIABLE) as [ThemeColor, string][]) assert.equal(BUILT_IN_COLORS[base][key], token(SELECTOR[base], name), `${base} ${key}`)
-      for (const accent of ['cyan', 'jade', 'amber'] as const) {
+      assert.equal(ACCENT_COLORS[base].mono, token(SELECTOR[base], '--accent'), `${base} mono`)
+      for (const accent of ['blue', 'cyan', 'jade', 'amber'] as const) {
         const selector = base === 'dark' ? `:root\\[data-accent='${accent}'\\]` : `:root\\[data-theme='light'\\]\\[data-accent='${accent}'\\]`
         assert.equal(ACCENT_COLORS[base][accent], token(selector, '--accent'), `${base} ${accent}`)
       }
@@ -60,9 +61,24 @@ describe('colour themes of your own', () => {
 
   it('give buttons a fill white text reads on, whatever the accent', () => {
     for (const accent of ['#f7be5c', '#ffff00', '#4edba0', '#2f5fe0']) {
-      const fill = themeVariables(newTheme('theme-a', 'A', 'dark', accent))['--accent-fill']!
-      assert.ok(contrastRatio('#ffffff', fill) >= 4.5, `${accent} -> ${fill}`)
+      const vars = themeVariables(newTheme('theme-a', 'A', 'dark', accent))
+      assert.equal(vars['--on-accent'], '#ffffff', accent)
+      assert.ok(contrastRatio('#ffffff', vars['--accent-fill']!) >= 4.5, `${accent} -> ${vars['--accent-fill']}`)
     }
+  })
+
+  it('fill a silver accent toward white under black text, as the Mono buttons are, and a black one under white', () => {
+    const silver = themeVariables(newTheme('theme-s', 'S', 'dark', '#d4d4d4'))
+    assert.equal(silver['--on-accent'], '#0a0a0a')
+    assert.ok(distance(silver['--accent-fill']!, token(SELECTOR.dark, '--accent-fill')!) <= 6, `${silver['--accent-fill']} for the built-in fill`)
+    assert.ok(contrastRatio(silver['--on-accent']!, silver['--accent-fill']!) >= 4.5)
+    const ink = themeVariables(newTheme('theme-k', 'K', 'light', '#111111'))
+    assert.equal(ink['--on-accent'], '#ffffff')
+    assert.equal(ink['--accent-fill'], '#111111')
+    // A grey too dark for black text and with no hue is darkened for white text, as a colour is.
+    const grey = themeVariables(newTheme('theme-g', 'G', 'dark', '#7a7a7a'))
+    assert.equal(grey['--on-accent'], '#ffffff')
+    assert.ok(contrastRatio('#ffffff', grey['--accent-fill']!) >= 4.5)
   })
 
   it('say what reads poorly', () => {

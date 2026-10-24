@@ -427,6 +427,15 @@ select.text-input:focus {
     0 0 0 2px var(--surface-1),
     0 0 0 4px var(--swatch);
 }
+/* Mono: the logo's chrome on dark, its black on light. */
+.accent-mono {
+  --swatch: #d4d4d4;
+  background-image: linear-gradient(135deg, #fafafa 0%, #bdbdbd 55%, #7a7a7a 100%);
+}
+:root[data-theme='light'] .accent-mono {
+  --swatch: #111111;
+  background-image: linear-gradient(135deg, #3a3a3a 0%, #111111 60%, #000000 100%);
+}
 .accent-blue {
   --swatch: #6b98ff;
 }
