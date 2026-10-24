@@ -11,7 +11,7 @@ import type { EngineLimits, EnginePolicy, SandboxEngine, SandboxStatus, SpawnSpe
 import { SandboxError } from './errors'
 import { createLinuxEngine } from './linux'
 import { createMacEngine } from './macos'
-import { buildPolicy, gitDirectories, type PolicyIo } from './policy'
+import { buildPolicy, gitDirectories, submoduleGitDirectories, type PolicyIo } from './policy'
 import { DEFAULT_SETTINGS, type SandboxSettings } from './settings'
 import { createWindowsEngine } from './windows/engine'
 
@@ -24,6 +24,8 @@ export interface SandboxOptions {
   engine?: SandboxEngine
   env?: Record<string, string | undefined>
   io?: PolicyIo
+  /** eNCode's own folders, which commands must not read where the engine can hide reads. The sandbox's own folders inside them stay usable. */
+  hidden?: readonly string[]
   warn?(message: string): void
 }
 
@@ -68,6 +70,17 @@ export const defaultIo: PolicyIo = {
       return fs.readFileSync(file, 'utf8')
     } catch {
       return undefined
+    }
+  },
+  folders(dir) {
+    try {
+      return fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .slice(0, 256)
+    } catch {
+      return []
     }
   },
 }
@@ -118,6 +131,11 @@ export class Sandbox {
     this.probed = undefined
     this.prepared.clear()
     return this.start()
+  }
+
+  /** The folders commands use as their own: the temp folder, and on Windows the package caches. */
+  ownFolders(): string[] {
+    return this.platform === 'win32' ? [this.temp, this.cacheRoot] : [this.temp]
   }
 
   /** The last answer: `unavailable` with "Not checked yet" before `start` has finished. */
@@ -207,7 +225,8 @@ export class Sandbox {
     // A repository without that folder gets an empty one first, as `git init` would have made it.
     for (const root of scope.roots()) {
       for (const gitDir of gitDirectories(this.io.realpath(root), this.io, this.platform)) {
-        if (this.io.stat(gitDir) === 'dir') await fs.promises.mkdir(path.join(gitDir, 'hooks')).catch(() => undefined)
+        if (this.io.stat(gitDir) !== 'dir') continue
+        for (const dir of [gitDir, ...submoduleGitDirectories(gitDir, this.io, this.platform)]) await fs.promises.mkdir(path.join(dir, 'hooks')).catch(() => undefined)
       }
     }
     return buildPolicy({
@@ -219,6 +238,7 @@ export class Sandbox {
       ...(this.platform === 'win32' ? { cacheRoot: this.io.realpath(this.cacheRoot) } : {}),
       env: this.env,
       io: this.io,
+      ...(this.options.hidden ? { hidden: this.options.hidden } : {}),
     })
   }
 

@@ -39,6 +39,7 @@ import {
   type BackgroundWork,
   type CodeIndex,
   type NativeDoc,
+  type OffLimits,
   type CodeIntelligence,
   type BrowserBackend,
   type DesktopServices,
@@ -218,6 +219,8 @@ export interface SessionEnv {
   userDir?: string
   /** Directories read without asking, besides the workspace. */
   readRoots?: () => readonly string[]
+  /** eNCode's own folders, which no call may name and no search enters, with the session's own results kept readable. */
+  offLimits?: OffLimits
   /** Where results too long for the model are kept whole (ADR 0093); the session's folder in it is one of its read roots. */
   outputs?: OutputStore
   beforeWrite?: ToolContext['beforeWrite']
@@ -1307,6 +1310,7 @@ export class AgentSession {
       root: env.root,
       home: env.home,
       platform: env.platform,
+      ...(env.offLimits ? { offLimits: env.offLimits } : {}),
       sessionId: this.id,
       files: this.files,
       shell: this.shell,
@@ -1336,7 +1340,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}), checks: this.checks },
+      services: { root: env.root, home: env.home, platform: env.platform, ...(env.offLimits ? { offLimits: env.offLimits } : {}), sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}), checks: this.checks },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {
@@ -1873,6 +1877,7 @@ export class AgentSession {
         root: worktree.path,
         home: env.home,
         platform: env.platform,
+        ...(env.offLimits ? { offLimits: env.offLimits } : {}),
         sessionId: this.id,
         files: createFileStateTracker(),
         shell,

@@ -40,6 +40,7 @@ import { hardToUndo, screenCommand, type Screened } from '@encode/permissions'
 import {
   excerpt,
   isInsideReal,
+  offLimitsFolder,
   readMentioned,
   realPathOf,
   loadedTools,
@@ -53,6 +54,7 @@ import {
   type FileStateTracker,
   type Goals,
   type JobManager,
+  type OffLimits,
   type ShellCommandAssessor,
   type Skills,
   type Subagents,
@@ -155,6 +157,8 @@ export interface LoopServices {
   home: string
   platform: NodeJS.Platform
   sessionId: string
+  /** eNCode's own folders, which no call may name and no search enters, under every policy. */
+  offLimits?: OffLimits
   files: FileStateTracker
   shell: AgentShell
   jobs: JobManager
@@ -867,7 +871,9 @@ export class AgentLoop {
   private async readableQuietly(file: string): Promise<boolean> {
     const { o } = this
     if (!path.isAbsolute(file)) return false
-    const verdict = o.rules?.evaluate({ type: 'read', paths: [await realPathOf(file)] })
+    const real = await realPathOf(file)
+    if (offLimitsFolder(o.services.offLimits, real)) return false
+    const verdict = o.rules?.evaluate({ type: 'read', paths: [real] })
     if (verdict) return verdict.decision === 'allow'
     for (const root of [o.services.root, ...(o.extraRoots?.() ?? []), ...(o.readRoots?.() ?? [])]) if (await isInsideReal(root, file)) return true
     return false
@@ -971,6 +977,7 @@ export class AgentLoop {
         home: o.services.home,
         platform: o.services.platform,
         readRoots: o.readRoots?.(),
+        ...(o.services.offLimits ? { offLimits: o.services.offLimits } : {}),
         ...(o.rules ? { rules: o.rules } : {}),
         ...(o.extraRoots ? { extraRoots: o.extraRoots() } : {}),
         tool: { name: call.name, ...specifierOf(call.name, call.input) },
@@ -1418,6 +1425,7 @@ export class AgentLoop {
       root: s.root,
       home: s.home,
       platform: s.platform,
+      ...(s.offLimits ? { offLimits: s.offLimits } : {}),
       sessionId: s.sessionId,
       agentId: o.agentId,
       mode: turn.mode,

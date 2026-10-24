@@ -1,14 +1,15 @@
 /**
  * Walks a directory tree for Glob and Grep: honours .gitignore files from the
  * workspace root down, never enters .git, does not follow directory links
- * (so a link cannot loop or lead out of the tree), reads several directories
- * at once, and stops when aborted or when it has found enough.
+ * (so a link cannot loop or lead out of the tree), leaves out folders that are
+ * off limits and links into them, reads several directories at once, and
+ * stops when aborted or when it has found enough.
  */
 import type { Dirent } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { ignoredBy, parseIgnoreFile, type IgnoreFile } from './ignore'
-import { toPosix } from './paths'
+import { offLimitsFolder, realPathOf, toPosix, type OffLimits } from './paths'
 
 export interface WalkEntry {
   absolute: string
@@ -28,6 +29,8 @@ export interface WalkOptions {
   caseInsensitive?: boolean
   /** Directory names never entered. Default: .git and node_modules. */
   skipNames?: readonly string[]
+  /** Folders never entered, nor files linked into them (eNCode's profile). */
+  offLimits?: OffLimits
   /** Return false to leave out a file, or a directory and everything in it. */
   include?(entry: WalkEntry): boolean
   /** Stop after this many files. */
@@ -82,8 +85,10 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
 
   const files: WalkEntry[] = []
   let truncated = false
-  type Job = { absolute: string; relative: string; ignores: IgnoreFile[] }
-  const queue: Job[] = [{ absolute: dir, relative: '', ignores: inherited }]
+  // Off-limits folders are matched on real paths: the walk keeps the real path of each folder next to the one it shows.
+  const limits = options.offLimits?.folders.length ? options.offLimits : undefined
+  type Job = { absolute: string; real: string; relative: string; ignores: IgnoreFile[] }
+  const queue: Job[] = [{ absolute: dir, real: limits ? await realPathOf(dir) : dir, relative: '', ignores: inherited }]
   let active = 0
 
   await new Promise<void>((resolve, reject) => {
@@ -142,10 +147,15 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
         }
         if (isDirectory && skip.has(dirent.name)) continue
         if (gitignore && ignores.length && ignoredBy(ignores, toIgnoreRelative(relative), isDirectory)) continue
+        let real = absolute
+        if (limits) {
+          real = isSymlink ? await realPathOf(absolute).catch(() => absolute) : path.join(job.real, dirent.name)
+          if (offLimitsFolder(limits, real)) continue
+        }
         const entry: WalkEntry = { absolute, relative, isDirectory, isSymlink }
         if (options.include && !options.include(entry)) continue
         if (isDirectory) {
-          if (!isSymlink) queue.push({ absolute, relative, ignores })
+          if (!isSymlink) queue.push({ absolute, real, relative, ignores })
         } else {
           files.push(entry)
           if (files.length >= limit) {

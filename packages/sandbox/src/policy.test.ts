@@ -84,6 +84,48 @@ describe('the policy for a session', () => {
     for (const name of ['SSH_AUTH_SOCK', 'DBUS_SESSION_BUS_ADDRESS']) assert.ok(policy.unset.includes(name), name)
   })
 
+  it('hides eNCode’s own folder whatever the settings say, and keeps the sandbox’s temp folder in it writable', () => {
+    const temp = '/home/u/.config/eNCode/sandbox/tmp'
+    const policy = buildPolicy({ ...base, temp, hidden: ['/home/u/.config/eNCode'], settings: settings({ caches: false, allowRead: ['/home/u/.config/eNCode'] }), io: fake({}) })
+    assert.ok(policy.unreadable.includes('/home/u/.config/eNCode'))
+    assert.ok(policy.writable.includes(temp))
+    const windows = buildPolicy({ ...base, platform: 'win32', home: 'C:\\Users\\u', roots: ['C:\\work\\p'], temp: 'C:\\t', hidden: ['C:\\Users\\u\\AppData\\Roaming\\eNCode'], settings: settings(), io: fake({}) })
+    assert.deepEqual(windows.unreadable, [], 'Windows holds writes only, so nothing is listed as hidden there')
+  })
+
+  it('keeps the hooks and configuration of every submodule read-only, nested ones and names in parts included', () => {
+    const tree: Record<string, string | null> = {
+      '/work/p/.git': null,
+      '/work/p/.git/modules': null,
+      '/work/p/.git/modules/lib': null,
+      '/work/p/.git/modules/lib/HEAD': 'ref: refs/heads/main\n',
+      '/work/p/.git/modules/lib/modules': null,
+      '/work/p/.git/modules/lib/modules/inner': null,
+      '/work/p/.git/modules/lib/modules/inner/HEAD': 'x',
+      '/work/p/.git/modules/vendor': null,
+      '/work/p/.git/modules/vendor/tools': null,
+      '/work/p/.git/modules/vendor/tools/HEAD': 'x',
+    }
+    const io = { ...fake(tree), folders: (dir: string) => [...new Set(Object.keys(tree).filter((item) => tree[item] === null && item.startsWith(`${dir}/`)).map((item) => item.slice(dir.length + 1).split('/')[0]))] }
+    const policy = buildPolicy({ ...base, settings: settings({ caches: false }), io })
+    for (const module of ['lib', 'lib/modules/inner', 'vendor/tools']) {
+      for (const item of ['hooks', 'config', 'config.worktree']) assert.ok(policy.protected.includes(`/work/p/.git/modules/${module}/${item}`), `${module}/${item}`)
+    }
+    assert.ok(!policy.protected.includes('/work/p/.git/modules/vendor/hooks'), 'a folder that only groups names is not a submodule')
+  })
+
+  it('keeps the hooks folder the configuration names read-only, and the folder above husky’s', () => {
+    const io = fake({ '/work/p/.git': null, '/work/p/.git/config': '[core]\n\trepositoryformatversion = 0\n\thooksPath = .husky/_\n[remote "origin"]\n\turl = x\n' })
+    const policy = buildPolicy({ ...base, settings: settings({ caches: false }), io })
+    assert.ok(policy.protected.includes('/work/p/.husky/_'))
+    assert.ok(policy.protected.includes('/work/p/.husky'))
+    const plain = buildPolicy({ ...base, settings: settings({ caches: false }), io: fake({ '/work/p/.git': null, '/work/p/.git/config': '[core]\n  HooksPath = "tools/hooks" ; shared\n' }) })
+    assert.ok(plain.protected.includes('/work/p/tools/hooks'))
+    assert.ok(!plain.protected.includes('/work/p/tools'))
+    const other = buildPolicy({ ...base, settings: settings({ caches: false }), io: fake({ '/work/p/.git': null, '/work/p/.git/config': '[alias]\n\thooksPath = nope\n' }) })
+    assert.ok(!other.protected.some((item) => item.endsWith('nope')), 'only the core section names hooks')
+  })
+
   it('lets the user take a credential folder off the hidden list, and add to it', () => {
     const policy = buildPolicy({ ...base, settings: settings({ caches: false, allowRead: ['~/.ssh'], denyRead: ['~/private', 'notes'] }), io: fake({}) })
     assert.ok(!policy.unreadable.includes('/home/u/.ssh'))

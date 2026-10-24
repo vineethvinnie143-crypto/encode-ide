@@ -168,3 +168,24 @@ describe('Grep', () => {
     assert.equal(grepRegex('(?i)abc', { ignoreCase: false, multiline: false }).flags.includes('i'), true)
   })
 })
+
+describe("eNCode's own folder", () => {
+  it('is never entered by Glob or Grep, nor read through a link, while the folders kept for the session are searched', async (t) => {
+    const root = await fs.realpath(await tempWorkspace({ 'src/a.ts': 'secret hit\n', 'profile/Cookies.ts': 'secret hit\n', 'profile/outputs/s1/Bash-1.ts': 'secret hit\n' }))
+    const profile = path.join(root, 'profile')
+    const ctx = testContext(root, { offLimits: { folders: [profile], except: [path.join(profile, 'outputs', 's1')] } })
+    let linked = true
+    try {
+      await fs.symlink(path.join(profile, 'Cookies.ts'), path.join(root, 'src', 'linked.ts'))
+    } catch {
+      linked = false
+    }
+    assert.equal(textOf((await globTool.run({ pattern: '**/*.ts' }, ctx)).content), 'src/a.ts')
+    assert.equal(textOf((await grepTool.run({ pattern: 'secret' }, ctx)).content).trim(), 'src/a.ts')
+    // The session's own results are searched where the search starts in them.
+    assert.match(textOf((await grepTool.run({ pattern: 'secret', path: path.join(profile, 'outputs', 's1') }, ctx)).content), /Bash-1\.ts/)
+    if (!linked) t.diagnostic('this system cannot make links: the link case was not run')
+    // Without the folder off limits, the same search sees all of it.
+    assert.match(textOf((await grepTool.run({ pattern: 'secret' }, testContext(root))).content), /Cookies\.ts/)
+  })
+})

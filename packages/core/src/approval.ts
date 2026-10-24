@@ -18,7 +18,8 @@
  * session (a URL can carry data out) and the first use of each application
  * on the desktop (the mouse and keyboard reach anything the user can).
  * Applications the Computer tool never operates are refused under every
- * policy, like a deny rule.
+ * policy, like a deny rule, and so is any call that names eNCode's own
+ * profile folder (its keys, the browser's sign-ins, every chat).
  *
  * A command that asks to run outside the sandbox (`unsandboxed`) is the
  * person's to allow, under every policy including Full access: the sandbox is
@@ -34,9 +35,9 @@
  * for (protected folders, a Read Only policy, desktop applications).
  */
 import path from 'node:path'
-import { assessCommand, checkFetchUrl, isGuardedPath, isProtectedPath, suggestRule, type RuleQuery, type RuleSuggestion, type RuleVerdict } from '@encode/permissions'
-import type { ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } from '@encode/tools'
-import { classifyApp, isInsideReal, realPathOf, searchPath, toPosix } from '@encode/tools'
+import { assessCommand, checkFetchUrl, isGuardedPath, isProtectedPath, suggestRule, wordsAsPaths, type RuleQuery, type RuleSuggestion, type RuleVerdict } from '@encode/permissions'
+import type { OffLimits, ShellAssessment, ShellCommandAssessor, ShellState, ToolAccess } from '@encode/tools'
+import { classifyApp, isInsideReal, offLimitsFolder, realPathOf, searchPath, toPosix } from '@encode/tools'
 import type { ApprovalPolicy } from './ui'
 
 export type ApprovalDecision =
@@ -80,6 +81,8 @@ export interface ApprovalContext {
   rules?: RuleJudge
   /** Folders outside the workspace the user listed as part of it: read and edited as if inside it. */
   extraRoots?: readonly string[]
+  /** eNCode's own folders, refused under every policy. */
+  offLimits?: OffLimits
   /** The tool being called, for rules that name a tool: `WebSearch`, `Skill(deploy)`, `Task(reviewer)`. */
   tool?: { name: string; specifier?: string }
   /** Sites the user already let the agent contact in this session. */
@@ -121,6 +124,62 @@ async function protectedTarget(paths: readonly string[], context: ApprovalContex
   return undefined
 }
 
+/**
+ * The off-limits folder a call names, if any. Paths are judged on their real paths. A command is judged on the words
+ * that could be paths and on its text, where the folder can also be spelled through a variable that holds one of its
+ * parents (`$HOME/.config/...`, `$env:APPDATA\\...`): a floor that a command building the name at run time gets past,
+ * which is why the sandbox also hides the folder where it can hide reads.
+ */
+async function offLimitsIn(access: ToolAccess, context: ApprovalContext): Promise<string | undefined> {
+  const limits = context.offLimits
+  if (!limits?.folders.length) return undefined
+  const windows = context.platform === 'win32'
+  const check = async (paths: readonly string[]) => {
+    for (const target of paths) {
+      const folder = offLimitsFolder(limits, await realPathOf(target))
+      if (folder) return folder
+    }
+    return undefined
+  }
+  switch (access.type) {
+    case 'read':
+    case 'write':
+      return check(access.paths)
+    case 'command': {
+      const named = await check(wordsAsPaths(access.command, context.shell.dialect, access.cwd, context.home, windows))
+      return named ?? limits.folders.find((folder) => spells(access.command, folder, context, windows))
+    }
+    default:
+      return undefined
+  }
+}
+
+/** Whether a command's text names `folder`: as it is, from `~`, or from a variable of the shell's that holds a parent of it. */
+function spells(command: string, folder: string, context: ApprovalContext, windows: boolean): boolean {
+  const api = windows ? path.win32 : path.posix
+  const plain = (text: string) => text.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+  const quoted = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const steps = (text: string) => plain(text).split('/').filter(Boolean).map(quoted).join('/+')
+  const holds = (parent: string) => {
+    const relative = api.relative(parent, folder)
+    return parent.length > 3 && !relative.startsWith('..') && !api.isAbsolute(relative)
+  }
+  const tail = (parent: string) => {
+    const rest = steps(api.relative(parent, folder))
+    return rest ? `["']?/+${rest}` : ''
+  }
+  // The folder's name ends where a path segment would: `eNCode-dev` is not `eNCode`.
+  const end = `(?![\\w.-])`
+  const sources = [`${plain(folder).startsWith('/') ? '/' : ''}${steps(folder)}${end}`]
+  if (holds(context.home)) sources.push(`~${tail(context.home)}${end}`)
+  for (const [name, value] of Object.entries(context.shell.env)) {
+    if (!value || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !api.isAbsolute(value) || !holds(value)) continue
+    sources.push(`(?:\\$\\{?(?:env:)?${name}\\}?|%${name}%)${tail(value)}${end}`)
+  }
+  const text = plain(command)
+  return sources.some((source) => new RegExp(source, windows ? 'i' : '').test(text))
+}
+
 /** The site a call would contact, as remembered for the session; null for addresses the tool refuses anyway. */
 export function hostOf(url: string): string | null {
   const checked = checkFetchUrl(url)
@@ -133,6 +192,8 @@ export function hostOf(url: string): string | null {
  * answers only the question of a first visit to a site.
  */
 export async function decideApproval(access: ToolAccess, context: ApprovalContext): Promise<ApprovalDecision> {
+  const barred = await offLimitsIn(access, context)
+  if (barred) return deny(`${barred} is eNCode's own folder, which holds its keys, the browser's sign-ins and every chat. The agent never reads or changes anything in it.`)
   const decided = await decideAccess(access, context)
   const named = context.tool && context.rules ? context.rules.evaluate({ type: 'tool', tool: context.tool.name, ...(context.tool.specifier !== undefined ? { specifier: context.tool.specifier } : {}) }) : null
   if (!named) return decided

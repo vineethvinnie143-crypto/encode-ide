@@ -141,6 +141,21 @@ describe('a real bubblewrap', { skip: !bwrapPath }, () => {
     assert.ok(!fs.existsSync(path.join(home, 'escape')))
   })
 
+  it('hides a folder and keeps a writable folder inside it usable: the temp folder in eNCode’s profile', async (t) => {
+    if (!works) return t.skip('no user namespaces')
+    const profile = path.join(base, 'profile')
+    const inner = path.join(profile, 'sandbox', 'tmp')
+    fs.mkdirSync(inner, { recursive: true })
+    fs.writeFileSync(path.join(profile, 'keys.json'), 'secret')
+    const result = await run(real, `! cat "${profile}/keys.json" 2>/dev/null && ! ls "${profile}" | grep -q keys && echo ok > "${inner}/t.txt" && cat "${inner}/t.txt"`, {
+      writable: [project, temp, inner],
+      unreadable: [profile],
+    })
+    assert.equal(result.code, 0, result.out)
+    assert.match(result.out, /ok/)
+    assert.ok(fs.existsSync(path.join(inner, 't.txt')))
+  })
+
   it('edits and removes files that were already there', async (t) => {
     if (!works) return t.skip('no user namespaces')
     fs.writeFileSync(path.join(project, 'old.txt'), 'old\n')

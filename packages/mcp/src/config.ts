@@ -224,7 +224,7 @@ export async function loadMcpConfig(options: { home: string; root: string; read:
   for (const { scope, file } of mcpConfigFiles(options.home, options.root, api)) {
     let text: string | null
     try {
-      text = await options.read(file)
+      text = await options.read(file, { fromProject: scope === 'project' })
     } catch (error) {
       problems.push(`${file}: could not be read: ${error instanceof Error ? error.message : String(error)}`)
       continue

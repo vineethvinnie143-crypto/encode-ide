@@ -54,7 +54,12 @@ export function seatbeltProfile(policy: EnginePolicy, isDir: (file: string) => b
     for (const item of policy.protected) for (const root of policy.writable) for (const dir of ancestorsBelow(root, item)) held.add(dir)
     if (held.size) lines.push(`(deny file-write-unlink\n  ${[...held].map((dir) => `(literal ${quote(dir)})`).join('\n  ')})`)
   }
-  if (policy.unreadable.length) lines.push(`(deny file-read*\n  ${policy.unreadable.map((item) => filter(item, isDir)).join('\n  ')})`)
+  if (policy.unreadable.length) {
+    lines.push(`(deny file-read*\n  ${policy.unreadable.map((item) => filter(item, isDir)).join('\n  ')})`)
+    // A writable folder inside a hidden one is readable again, as on Linux: the sandbox's temp folder in eNCode's profile.
+    const reopened = policy.writable.filter((folder) => policy.unreadable.some((hidden) => folder.startsWith(`${hidden}/`)))
+    if (reopened.length) lines.push(`(allow file-read*\n  ${reopened.map((folder) => `(subpath ${quote(folder)})`).join('\n  ')})`)
+  }
   if (!policy.network) lines.push('(deny network*)')
   return `${lines.join('\n')}\n`
 }

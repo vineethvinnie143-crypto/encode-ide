@@ -18,6 +18,7 @@ import type { LanguageServers, NativeDoc } from '@encode/lsp'
 import type { ToolDefinition, ToolResultContent } from '@encode/providers'
 import type { BrowserHandle } from './browser/tool'
 import type { DesktopHandle } from './computer/state'
+import type { OffLimits } from './paths'
 
 export type AgentMode = 'code' | 'ask' | 'plan'
 
@@ -536,6 +537,8 @@ export interface ToolContext {
   readonly cwd?: string
   readonly home: string
   readonly platform: NodeJS.Platform
+  /** eNCode's own folders, which searches never enter (approvals refuse a call that names them). */
+  readonly offLimits?: OffLimits
   readonly sessionId: string
   /** 'main', or the subagent's id. */
   readonly agentId: string

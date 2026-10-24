@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -270,17 +271,46 @@ describe('workspace trust', () => {
     assert.equal(trustWarning('/home/u/app', '/home/u', false), null)
   })
 
+  it('reads only a regular file of bounded size, does not block on a pipe, and follows no link a folder brings', async (t) => {
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'encode-read-')))
+    try {
+      const secret = path.join(dir, 'secret.json')
+      await fs.writeFile(secret, '{"key":"x"}')
+      const linked = path.join(dir, 'settings.json')
+      try {
+        await fs.symlink(secret, linked)
+        await assert.rejects(() => readText(linked, { fromProject: true }), /it is a link/)
+        assert.equal(await readText(linked), '{"key":"x"}', "the user's own files may be links")
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error
+        t.diagnostic('this system cannot make links: the link case was not run')
+      }
+      const big = path.join(dir, 'big.json')
+      await fs.writeFile(big, Buffer.alloc(5 * 1024 * 1024, 32))
+      await assert.rejects(() => readText(big), /larger than 4 MB/)
+      await assert.rejects(() => readText(dir), /not a regular file/)
+      if (process.platform !== 'win32') {
+        const pipe = path.join(dir, 'pipe.json')
+        execFileSync('mkfifo', [pipe])
+        // Nothing writes to the pipe: a reader that opened it the usual way would wait here for ever.
+        await assert.rejects(() => readText(pipe, { fromProject: true }), /not a regular file/)
+      }
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('reads a file again when it fails the way one being replaced does, and gives up on the rest', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'encode-read-'))
     const file = path.join(dir, 'settings.json')
     await fs.writeFile(file, '{"ok":true}')
-    const real = fs.readFile.bind(fs)
+    const real = fs.open.bind(fs)
     const failures = ['EBUSY', 'EPERM']
-    const spy = mock.method(fs, 'readFile', (async (target: Parameters<typeof fs.readFile>[0], options: Parameters<typeof fs.readFile>[1]) => {
+    const spy = mock.method(fs, 'open', (async (target: Parameters<typeof fs.open>[0], flags: Parameters<typeof fs.open>[1]) => {
       const code = failures.shift()
       if (code && target === file) throw Object.assign(new Error(code), { code })
-      return real(target, options)
-    }) as unknown as typeof fs.readFile)
+      return real(target, flags)
+    }) as unknown as typeof fs.open)
     try {
       assert.equal(await readText(file), '{"ok":true}')
       assert.equal(spy.mock.callCount(), 3)

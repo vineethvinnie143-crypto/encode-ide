@@ -527,7 +527,7 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
 | P24 | Text in the command or the files asks the Reviewer to approve ("the user already agreed") | The action is data in a tag with a random suffix, and the Reviewer's instructions say to ignore anything in it that addresses the Reviewer. It is not given files, tool results, web pages or the conversation, only the person's own words. A command that looks planted by what the agent read is to be declined, and the reasons are shown (0059). | Partial (RP9) |
 | P25 | The Reviewer is down, slow, off-format or declining everything, and the agent stalls or is waved through | Every failure puts the question to the person: no model for the role, 20 seconds without an answer, an answer that is not the format, a command too long to read. The Reviewer then stays quiet for 30 seconds, and three declines in a row stop it until the person answers one. Stopping the turn is not taken for a failure (0059). | Mitigated |
 | P26 | The agent writes invisible or look-alike characters into a file or a command and the person approves what they cannot read | The lines a call adds are scanned for direction controls, invisible, tag and control characters, stray variation selectors and look-alike letters. The findings are on the approval card, in the step and in a note to the model, and quote the text with markers instead of the characters (0060). | Partial (RP10) |
-| P27 | A cloned repository uses its agent, skill or instruction files to read another file on the disk (a link to a key), to hang eNCode (a named pipe) or to flood it (a huge file) | Those files are read as regular files of bounded size, without following links, without blocking, with at most 64 agent files per folder, and only if the folder stays inside the project once links are resolved. The user's own folders may use links (0061). | Partial (RP11) |
+| P27 | A cloned repository uses its agent, skill or instruction files to read another file on the disk (a link to a key), to hang eNCode (a named pipe) or to flood it (a huge file) | Those files are read as regular files of bounded size, without following links, without blocking, with at most 64 agent files per folder, and only if the folder stays inside the project once links are resolved. The user's own folders may use links (0061). Since 0106 its settings and server files are read the same way. | Mitigated (RP11 closed) |
 | P28 | A subagent definition from a repository grants more than the parent has or runs without end | A definition can only narrow its tools; the tools no subagent may have stay excluded; the mode, policy, approvals and Reviewer are the parent's; its step limit can shorten the run and never lengthen it past the person's own (0006, 0061). | Mitigated |
 | P29 | A command changes what lies outside the project: the person's documents and settings, what runs at sign-in, the registry | Every command the agent runs is confined by the operating system: only the project folders, their git directories, a temp folder and the package caches are writable, under every approval policy (0063). | Mitigated on Linux and Windows; macOS until it has run on a Mac (RP16) |
 | P30 | A command plants what runs later outside the sandbox: a git hook, git's configuration, the folder's settings, an MCP server | Those paths stay read-only inside the writable folders on every system. On Windows they are marked again before every command, and that hold is best effort, which the Sandbox screen says. A repository without a hooks folder gets an empty one first (0063). | Partial (RP12, RP14) |
@@ -574,10 +574,9 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
     code you do not trust under Workspace Write.
 - **RP10. The scan warns and does not refuse.** A file built by a shell command or a generator is outside it, and a
   person can approve a card that lists findings. The model is told to remove what it did not mean to write.
-- **RP11. Other files a repository can fill are not yet read with the same care.** `.encode/settings*.json` and
-  `.mcp.json` are read by `@encode/config` and `@encode/mcp` with a plain read: a link in them is followed and a named
-  pipe blocks the reader.
-  - Owner: the hardening step after the sandbox.
+- **RP11. Other files a repository can fill were not read with the same care.** Closed by 0106:
+  `.encode/settings*.json`, `.mcp.json` and `.encode/mcp.json` are read as regular files of at most 4 MB, opened so
+  that a pipe cannot block, and a link in a folder's files is refused.
 - **RP12. On Windows the sandbox holds writes only.** A command can read what the person can read, use the network and
   end the person's other programs, so a key or a file it can read it can also send. Its hold on the protected paths
   is best effort: they cannot be written, but the folders around them are the command's to change. The Sandbox screen
@@ -591,10 +590,10 @@ definitions with safe reads of repository files are P23 to P28 (0059 to 0061).
   - Owner: UI-6, a way to take the marks off from the Sandbox screen (`release` exists).
 - **RP14. What does not exist yet is not held.** A protected path that is missing when a command starts can be created
   by it. What it creates under `.encode/` or in `.mcp.json` waits for the person's approval anyway (0041, 0057), and a
-  missing hooks folder is made before the first command. Not yet protected: the git folders of submodules under
-  `.git/modules`, and hooks that a repository's git configuration places inside the project (husky's `.husky/`), whose
-  changes show in the diff.
-  - Owner: the hardening step.
+  missing hooks folder is made before the first command, for submodules too. Since 0106 the git folders of submodules
+  under `.git/modules` and the folder `core.hooksPath` names (with the folder above husky's `.husky/_`) are held as
+  well; a hooks folder the configuration names that does not exist yet is not.
+  - Owner: none planned; approvals and the diff show what a command created there.
 - **RP15. Git Bash on Windows is outside the sandbox.** With "Run commands in PowerShell" off, commands run in Git Bash
   unconfined, and the screen says so. Git's hook scripts and, by default, its ssh use Git Bash's runtime and can fail
   inside the sandbox while a Git Bash is open; the agent then asks to run that command outside.
@@ -2485,3 +2484,48 @@ What is new:
   (refused), a link to another host (held) and one on the same host (followed), reads the console, and its tab is not
   saved; a person's tab shows a failed load; `/side` answers in its own tab without adding to the chat; `/worktree`,
   bringing a file in, removing with confirmation, and `/local`.
+
+## eNCode's own folder, the files a folder brings, submodules and a stopped window (hardening)
+
+Written with the pull request that adds them ([0106](../adr/0106-encode-profile-is-off-limits-to-the-agent-and-files-a-folder-brings-are-read-with-care.md)).
+
+What is new:
+
+- the host keeps a list of off-limits folders, eNCode's profile, with the folders inside it that a session's agent
+  uses as its own (its long results, the sandbox's temp folder and caches);
+- approvals, Glob and Grep, the files re-read after a summary and, on Linux and macOS, the sandbox keep the agent out
+  of the profile;
+- `@encode/config` reads settings and server files as bounded regular files, and refuses a link a folder brings;
+- the sandbox holds submodules' hooks and configuration and the hooks folder git's configuration names;
+- a window whose page stopped says so and offers to reload.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| HD1 | An injected prompt has the agent read eNCode's keys, the browser's sign-ins or other chats from the profile | A read, an edit or a search that names the profile is refused under every policy, Full access and allow rules included; the refusal is checked on real paths, so a link into the profile does not help; Glob and Grep never enter it nor read a file linked into it. | Mitigated |
+| HD2 | A command reads the profile | A command whose path words or text name the profile (as it is, from `~`, or through a variable holding a parent) is refused under every policy. On Linux and macOS the sandbox also makes the profile unreadable to commands whatever the settings say. On Windows a command that builds the name at run time is held only by the approval policy. | Partial (RP12, HD-R1) |
+| HD3 | Keeping the agent out of the profile breaks what it needs there | The session's own long results and the sandbox's temp folder and caches are exceptions: readable by the file tools, searchable from inside, and mounted or allowed again inside the sandbox. Another session's results are not. | Mitigated |
+| HD4 | A repository's `.encode/settings*.json` or `.mcp.json` is a link to another file, a named pipe or a huge file | Read only as a regular file of at most 4 MB, opened without blocking; a link in a folder's files is refused, and a refused file is an unreadable source, which counts as unsafe. The person's own files may be links. | Mitigated |
+| HD5 | A command plants a hook in a submodule's git folder, or in the folder `core.hooksPath` names | Those are held read-only like `.git/hooks` and `.git/config`, nested submodules included (up to 64, 8 levels). | Partial (RP12, RP14) |
+| HD6 | A crashed page leaves the window blank, and the person quits and loses running work | The window says its page stopped, why, what is kept and what is lost, and reloads by default; after three stops in a minute it points to a diagnostics report. | Mitigated |
+
+### Residual risks
+
+- **HD-R1.** On Windows, under Full access or when Auto review passes a command, a command that assembles the profile's
+  path while it runs can read it; the sandbox there holds writes only (RP12).
+- The text check does not follow `cd`: a command that changes folder and then names the profile by a relative path
+  is not caught by the words check (the sandbox still hides the profile on Linux and macOS).
+
+### Verification
+
+- `approval.test.ts` (reads and edits refused under every policy and over an allow rule; the session's results and
+  the temp folder allowed, another session's refused; a link into the profile; commands naming it directly, from `~`,
+  by a relative path and through variables, on posix and in PowerShell and cmd forms, and names that only start the
+  same allowed), `search.test.ts` (Glob and Grep skip the profile and a file linked into it, and search the results
+  folder from inside), `host.test.ts` (a session under Full access is refused the profile and reads its own kept
+  result), `policy.test.ts`, `macos.test.ts` and `linux.test.ts` (the profile hidden whatever the settings say, a real
+  bubblewrap run that cannot read it and writes the temp folder inside it; submodules and `core.hooksPath` held),
+  `config.test.ts` (a link refused for a folder's file and followed for the person's, a 5 MB file, a folder and a
+  named pipe refused without blocking), `renderer-crash.test.ts`.
+- The desktop's end-to-end run ends by crashing the window's page: the window reports it and the app comes back.

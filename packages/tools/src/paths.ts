@@ -71,6 +71,23 @@ export async function isInsideReal(rootReal: string, absolute: string): Promise<
   return isInside(rootReal, await realPathOf(absolute), path)
 }
 
+/**
+ * Folders the agent never reads or changes under any policy: eNCode's own profile, which holds the keys, the sign-ins
+ * of the browser and every chat. `except` names folders inside them that are the session's own to read (its long
+ * results). Both as real paths.
+ */
+export interface OffLimits {
+  folders: readonly string[]
+  except: readonly string[]
+}
+
+/** The off-limits folder a real path lies in, if any: inside one of `folders` and none of `except`. */
+export function offLimitsFolder(limits: OffLimits | undefined, real: string): string | undefined {
+  if (!limits) return undefined
+  const folder = limits.folders.find((item) => isInside(item, real, path))
+  return folder && !limits.except.some((item) => isInside(item, real, path)) ? folder : undefined
+}
+
 /** POSIX separators, for matching globs on any platform. */
 export function toPosix(relative: string): string {
   return relative.replace(/\\/g, '/')

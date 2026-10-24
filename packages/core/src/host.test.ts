@@ -525,3 +525,30 @@ describe('wake-ups across a restart', () => {
     assert.equal(await second.host.resumeWakeups(), 0)
   })
 })
+
+describe("eNCode's own folder", () => {
+  it('is off limits to every session under Full access, but for the long results kept for that session', async () => {
+    const profile = await fs.realpath(await tempWorkspace({ 'keys.json': '{"key":"secret"}' }))
+    const dir = path.join(profile, 'sessions')
+    await fs.mkdir(dir)
+    let kept = ''
+    const files = [path.join(profile, 'keys.json'), '']
+    const h = await hostHarness({
+      settings: { policy: 'full-access' },
+      host: { dir, offLimits: { folders: [profile] } },
+      script: (request) => {
+        const results = request.payload.messages.flatMap((message) => (message.role === 'user' ? message.content.filter((block) => block.type === 'tool-result') : []))
+        return results.length < files.length ? { calls: [{ name: 'Read', input: { file_path: results.length ? kept : files[0] } }] } : { text: 'done' }
+      },
+    })
+    const session = await h.host.create()
+    kept = path.join(dir, 'outputs', session.id, 'Bash-1.txt')
+    await fs.mkdir(path.dirname(kept), { recursive: true })
+    await fs.writeFile(kept, 'the whole output\n')
+    await h.host.start(session.id, { text: 'read them', mode: 'code' })
+    const sent = JSON.stringify(h.client.requests.at(-1)!.payload.messages)
+    assert.match(sent, /eNCode's own folder/)
+    assert.doesNotMatch(sent, /secret/)
+    assert.match(sent, /the whole output/)
+  })
+})

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell as osShell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, Notification, powerSaveBlocker, protocol, safeStorage, screen, shell as osShell } from 'electron'
 import { appendFileSync, existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -12,6 +12,7 @@ import { aboutInfo, currentEnvironment } from './build-info'
 import { Banner, electronShortcuts } from './computer-overlay'
 import { registerIpc } from './ipc'
 import { registerAppProtocol } from './protocol'
+import { CrashCounter, crashPrompt, isCrash } from './renderer-crash'
 import { Attention, type Notice } from './services/attention'
 import { ComputerControl } from './services/computer-control'
 import { ComputerWatch } from './services/computer-watch'
@@ -232,6 +233,7 @@ if (!gotLock) {
         routerStateFile: path.join(userData, 'eNCode-models.json'),
         checkpointsDir: path.join(userData, 'checkpoints'),
         sandboxDir: path.join(userData, 'sandbox'),
+        profileDir: userData,
         toolsDir: path.join(userData, 'tools'),
         serverCacheDir: path.join(userData, 'server-cache'),
         ...(benchTasksDir() ? { benchTasksDir: benchTasksDir() } : {}),
@@ -309,8 +311,22 @@ if (!gotLock) {
       mainWindow = null
     })
 
+    // A page that stopped leaves the window blank: say so and offer to load it again (renderer-crash.ts). A test run
+    // writes what it would have asked to a file and reloads; a packaged build never does.
+    const crashes = new CrashCounter()
+    const crashLog = app.isPackaged ? undefined : process.env.ENCODE_CRASH_LOG
     win.webContents.on('render-process-gone', (_event, details) => {
       console.error('[eNCode] renderer process gone:', details.reason)
+      if (!isCrash(details.reason) || win.isDestroyed()) return
+      const prompt = crashPrompt(details.reason, crashes.record(Date.now()))
+      const answer = crashLog
+        ? Promise.resolve(appendFileSync(crashLog, `${JSON.stringify({ reason: details.reason, message: prompt.message, detail: prompt.detail })}\n`)).then(() => ({ response: 0 }))
+        : dialog.showMessageBox(win, { type: 'error', title: 'eNCode', message: prompt.message, detail: prompt.detail, buttons: prompt.buttons, defaultId: prompt.defaultId, cancelId: prompt.cancelId, noLink: true })
+      void answer.then(({ response }) => {
+        if (win.isDestroyed()) return
+        if (prompt.choices[response] === 'quit') app.quit()
+        else win.webContents.reload()
+      })
     })
     // The interface shows a fault in one sentence and prints the rest; the log, and so a diagnostics report, keeps it.
     win.webContents.on('console-message', (details) => {

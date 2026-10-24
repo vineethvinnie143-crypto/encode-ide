@@ -66,6 +66,8 @@ export interface HostInit {
   checkpointsDir?: string
   /** The sandbox's own folder (its temp folder, and on Windows its helper); without it commands run unconfined. */
   sandboxDir?: string
+  /** eNCode's profile folder, off limits to the agent (its keys, the browser's sign-ins, every chat). */
+  profileDir?: string
   /** Where eNCode installs language servers when asked, and where they keep their caches; without it none is installed. */
   toolsDir?: string
   serverCacheDir?: string
