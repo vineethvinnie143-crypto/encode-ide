@@ -90,6 +90,7 @@ interface GlobInput extends Record<string, unknown> {
 }
 
 export const globTool: Tool<GlobInput> = {
+  brief: 'Finds files by glob pattern ("**/*.ts", "src/**/*.{ts,tsx}"), newest first, at most 100, under path (default: the workspace root). Files .gitignore ignores, .git and node_modules are left out.',
   definition: {
     name: 'Glob',
     description: [
@@ -357,6 +358,8 @@ function matchLines(text: string, regex: RegExp, multiline: boolean): { lines: n
 }
 
 export const grepTool: Tool<GrepInput> = {
+  brief:
+    'Searches file contents with a JavaScript regular expression (close to ripgrep\'s; escape literal braces). Narrow with glob or type. output_mode: files_with_matches (default, newest first), content (matching lines; -n, -A/-B/-C, -i) or count. multiline lets "." match newlines. head_limit and offset page the output. Files .gitignore ignores are skipped.',
   definition: {
     name: 'Grep',
     description: [

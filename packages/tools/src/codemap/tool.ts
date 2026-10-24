@@ -39,6 +39,8 @@ function targetOf(input: CodeMapInput, ctx: ToolContext): string {
 }
 
 export const codeMapTool: Tool<CodeMapInput> = {
+  brief:
+    "Where things are defined, by line, without reading files (and FiveM events, commands, callbacks, exports). No input: the most used. path: a folder or a file. query: names to center on. symbol: one name's definition and users. package: an installed dependency's API (npm, Python, Rust, Go, FiveM) or FiveM's natives. Matches names, not meaning.",
   definition: {
     name: 'CodeMap',
     description: [

@@ -58,6 +58,23 @@ describe('the cost of a request before the first word', () => {
     for (const tool of payload.tools) assert.ok(toolChars(tool) <= 3_000, `${tool.name} is ${toolChars(tool)} characters; one tool may take at most 3000`)
   })
 
+  it('sends a model that needs no guide the short instructions and tools, under 17,500 characters (5,000 tokens) together', async () => {
+    const sizes = async (model: string, guide?: 'full') => {
+      const h = await sessionHarness({ script: [{ text: 'ok' }], client: { model }, ...(guide ? { settings: { guide } } : {}) })
+      await h.session.start({ text: 'Fix the failing test in src/utils.ts', mode: 'code' })
+      const { payload } = h.client.requests[0]
+      return { system: payload.system.reduce((sum, part) => sum + part.text.length, 0), tools: payload.tools.reduce((sum, tool) => sum + toolChars(tool), 0), names: payload.tools.map((tool) => tool.name) }
+    }
+    const short = await sizes('anthropic/claude-sonnet-4.5')
+    const full = await sizes('deepseek/deepseek-chat')
+    const chosen = await sizes('anthropic/claude-sonnet-4.5', 'full')
+    show('Short guide', [['instructions', short.system], ['tools', short.tools], ['together', short.system + short.tools], ['full guide, together', full.system + full.tools]])
+    assert.deepEqual(short.names, full.names, 'the same tools, described more briefly')
+    assert.ok(short.system + short.tools <= 17_500, `the short guide is ${short.system + short.tools} characters; the ceiling is 17500`)
+    assert.ok(short.system + short.tools < (full.system + full.tools) * 0.75)
+    assert.deepEqual(chosen, full, 'the person can choose the full guide for every model')
+  })
+
   it('keeps the largest built-in tool set (skills and the desktop included) inside its ceiling', () => {
     const tools = fullToolSet()
     const total = tools.reduce((sum, tool) => sum + toolChars(tool), 0)

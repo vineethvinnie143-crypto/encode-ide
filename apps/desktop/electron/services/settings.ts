@@ -7,7 +7,7 @@ import { cleanKeybindings } from '../../shared/keybindings'
 import { isInlineSuggest } from '../../shared/inline'
 import { cleanEfforts, cleanRoles, isLocalUrl } from '../../shared/models'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchProviderId, isKeyedSearchProvider, isSearchProviderId } from '../../shared/search'
-import type { AgentMode, ApprovalPolicy, ErrorGate, FollowUp, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
+import type { AgentMode, ApprovalPolicy, ErrorGate, FollowUp, Guide, ModelProfile, NotifyWhen, ProfileKind, SendKey, Settings } from '../../shared/types'
 import { secureExisting, writePrivateFile } from './private-file'
 import { type Cipher, KeyVault } from './secrets'
 
@@ -55,6 +55,7 @@ function defaults(): StoredSettings {
     formatOnType: false,
     inlineSuggest: 'auto',
     errorGate: 'auto',
+    guide: 'auto',
     notifyDone: 'background',
     notifyNeeds: 'background',
     flashTaskbar: true,
@@ -81,6 +82,7 @@ const isFollowUp = (value: unknown): value is FollowUp => value === 'queue' || v
 const isSendKey = (value: unknown): value is SendKey => value === 'enter' || value === 'ctrl-enter'
 const isNotifyWhen = (value: unknown): value is NotifyWhen => value === 'never' || value === 'background' || value === 'always'
 const isErrorGate = (value: unknown): value is ErrorGate => value === 'auto' || value === 'on' || value === 'off'
+const isGuide = (value: unknown): value is Guide => value === 'auto' || value === 'full'
 
 /** The longest folder path kept for chats; Windows' own limit for most programs is 260 characters. */
 const MAX_FOLDER_LENGTH = 1024
@@ -260,6 +262,7 @@ export class SettingsService {
       formatOnType: typeof input.formatOnType === 'boolean' ? input.formatOnType : base.formatOnType,
       inlineSuggest: isInlineSuggest(input.inlineSuggest) ? input.inlineSuggest : base.inlineSuggest,
       errorGate: isErrorGate(input.errorGate) ? input.errorGate : base.errorGate,
+      guide: isGuide(input.guide) ? input.guide : base.guide,
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
       flashTaskbar: typeof input.flashTaskbar === 'boolean' ? input.flashTaskbar : base.flashTaskbar,
@@ -308,6 +311,7 @@ export class SettingsService {
       formatOnType: this.data.formatOnType,
       inlineSuggest: this.data.inlineSuggest,
       errorGate: this.data.errorGate,
+      guide: this.data.guide,
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
       flashTaskbar: this.data.flashTaskbar,
@@ -393,6 +397,7 @@ export class SettingsService {
     if (typeof patch.formatOnType === 'boolean') next.formatOnType = patch.formatOnType
     if (isInlineSuggest(patch.inlineSuggest)) next.inlineSuggest = patch.inlineSuggest
     if (isErrorGate(patch.errorGate)) next.errorGate = patch.errorGate
+    if (isGuide(patch.guide)) next.guide = patch.guide
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds
     if (typeof patch.flashTaskbar === 'boolean') next.flashTaskbar = patch.flashTaskbar

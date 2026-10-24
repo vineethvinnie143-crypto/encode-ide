@@ -40,6 +40,22 @@ export const KEEP_SHARE = 0.35
 export const MANUAL_KEEP_SHARE = 0.1
 /** Steps whose tool outputs stay verbatim when older ones are shortened. */
 export const RECENT_STEPS = 4
+/** Old results and arguments are cut to this many characters. */
+export const ELIDE_LIMIT = 1500
+/**
+ * Old results are shortened once the prompt passes this share of the window (or ELIDE_FLOOR, whichever is more),
+ * well before a summary is needed: every step pays for every token in it, a model reads a short prompt better, and
+ * each shortened result says where it is kept whole (ADR 0094).
+ */
+export const ELIDE_AT = 0.2
+export const ELIDE_FLOOR = 32_000
+/**
+ * Shortening rewrites the prompt from the first result it changes, and a provider's cache holds only the start that
+ * stayed the same: below the summary's limit it is done only when it saves at least this share of the window (or
+ * ELIDE_MIN_SAVING tokens), so that the cache is given up seldom and for much.
+ */
+export const ELIDE_SAVING = 0.1
+export const ELIDE_MIN_SAVING = 4_000
 /** Characters per token, a conservative average for code and prose. */
 export const CHARS_PER_TOKEN = 3.5
 /** What an image costs, whatever its size. */
@@ -50,6 +66,9 @@ export const MAX_SUMMARY_CHARS = 12_000
 
 export const NOT_RUN = 'Not run: the run ended before this call (it was stopped, or the task was already complete).'
 export const EARLIER_UNAVAILABLE = '(Earlier messages of this conversation are no longer available.)'
+/** Opens the block of files read again after a summary: eNCode's, not the user's words. */
+export const REREAD_OPEN = '<files_read_again>'
+export const REREAD_CLOSE = '</files_read_again>'
 const SUMMARY_OPEN = '<conversation_summary>'
 const SUMMARY_CLOSE = '</conversation_summary>'
 const REQUEST_OPEN = '<current_request>'
@@ -155,7 +174,13 @@ function hasVisibleContent(message: AssistantMessage): boolean {
 export function isReminder(block: UserBlock): boolean {
   if (block.type !== 'text') return false
   const text = block.text.trimStart()
-  return text.startsWith('<system-reminder>') || text.startsWith(OUTSIDE_NOTES_OPEN) || text.startsWith(MENTIONED_FILES_OPEN) || text.startsWith(INVOKED_SKILL_OPEN)
+  return (
+    text.startsWith('<system-reminder>') ||
+    text.startsWith(OUTSIDE_NOTES_OPEN) ||
+    text.startsWith(MENTIONED_FILES_OPEN) ||
+    text.startsWith(INVOKED_SKILL_OPEN) ||
+    text.startsWith(REREAD_OPEN)
+  )
 }
 
 function mergeInto(last: Message, next: Message): Message {
@@ -319,13 +344,33 @@ function afterRewrite(before: readonly Message[], after: Message[]): Message[] {
   return changed >= after.length ? after : dropThinkingFrom(after, changed)
 }
 
-/** Keeps the start and the end of a long text: command output often ends with what matters. */
-export function shorten(text: string, limit: number): string {
+/** Keeps the start and the end of a long text: command output often ends with what matters. `again` says how to have the rest. */
+export function shorten(text: string, limit: number, again = AGAIN): string {
   if (text.length <= limit) return text
   const head = Math.floor(limit * 0.4)
   const tail = Math.floor(limit * 0.2)
   const removed = text.length - head - tail
-  return `${text.slice(0, head)}\n[… ${removed} characters ${ELIDED}; run the tool again if you need them …]\n${text.slice(text.length - tail)}`
+  return `${text.slice(0, head)}\n[… ${removed} characters ${ELIDED}. ${again} …]\n${text.slice(text.length - tail)}`
+}
+
+/** How the model has a shortened result again, when nothing better is known. */
+const AGAIN = 'Run the tool again if you need them.'
+/** A Read's lines are in the file, which may have changed since. */
+const READ_AGAIN = 'Read the file again for them; it may have changed since.'
+/** The sentence that says where a result is kept whole (ADR 0093), here and in the loop's note on a long result. */
+export function keptAt(file: string): string {
+  return `All of it is in ${file}: Read it with offset and limit, or Grep it.`
+}
+/**
+ * The file a note of keptAt names, so a shortened excerpt still points at the whole. A tool's output can hold such a
+ * note too (a web page, a file that quotes one): `owns` says which files are the session's own, and a note that names
+ * another is not taken for one.
+ */
+export function keptPathIn(text: string, owns?: (file: string) => boolean): string | undefined {
+  for (const match of text.matchAll(/\[… [^\n]*?All of it is in (.+?): Read it with offset and limit, or Grep it\. …\]/g)) {
+    if (!owns || owns(match[1])) return match[1]
+  }
+  return undefined
 }
 
 /** Shortens long string fields of a tool call's input, keeping it an object. */
@@ -339,9 +384,33 @@ function shortenInput(input: Record<string, unknown>, limit: number): Record<str
   return { note: `${JSON.stringify(input).length} characters of arguments ${ELIDED}` }
 }
 
-function elideResult(block: ToolResultBlock, limit: number): ToolResultBlock {
+/** A text part of an old result that elision would shorten, and the call it answers. */
+export interface Elidable {
+  /** `<call id>:<part index>`, the key of `kept`. */
+  key: string
+  toolUseId: string
+  /** The part's place in the result. */
+  index: number
+  call: ToolUseBlock | undefined
+  text: string
+}
+
+/** What `kept` names the whole of, or how the call has them again. */
+function againFor(call: ToolUseBlock | undefined, text: string, kept: string | undefined, owns: ((file: string) => boolean) | undefined): string {
+  const file = kept ?? keptPathIn(text, owns)
+  if (file) return keptAt(file)
+  return call?.name === 'Read' ? READ_AGAIN : AGAIN
+}
+
+function elideResult(
+  block: ToolResultBlock,
+  limit: number,
+  call: ToolUseBlock | undefined,
+  kept: ReadonlyMap<string, string> | undefined,
+  owns: ((file: string) => boolean) | undefined,
+): ToolResultBlock {
   let changed = false
-  const content = block.content.map((part) => {
+  const content = block.content.map((part, index) => {
     if (part.type === 'image') {
       changed = true
       return textBlock(IMAGE_ELIDED)
@@ -352,29 +421,74 @@ function elideResult(block: ToolResultBlock, limit: number): ToolResultBlock {
     }
     if (part.text.length > limit) {
       changed = true
-      return textBlock(shorten(part.text, limit))
+      return textBlock(shorten(part.text, limit, againFor(call, part.text, kept?.get(`${block.toolUseId}:${index}`), owns)))
     }
     return part
   })
   return changed ? { ...block, content } : block
 }
 
+/** The indexes of the messages in every step but the last `recentSteps`. */
+function oldIndexes(messages: readonly Message[], recentSteps: number): Set<number> {
+  const steps = unitsOf(messages).filter((unit) => unit.kind === 'step')
+  const inOld = new Set<number>()
+  for (const unit of steps.slice(0, Math.max(0, steps.length - recentSteps))) for (let index = unit.start; index < unit.end; index++) inOld.add(index)
+  return inOld
+}
+
+function callsById(messages: readonly Message[]): Map<string, ToolUseBlock> {
+  const calls = new Map<string, ToolUseBlock>()
+  for (const message of messages) if (message.role === 'assistant') for (const call of toolUsesOf(message)) calls.set(call.id, call)
+  return calls
+}
+
+/**
+ * The text parts elideOldOutputs would shorten that are not kept anywhere yet, so the caller can keep them whole
+ * first: then the note in their place says where they are. A Read's lines are in their file, and are left out, as is
+ * a part whose note names a file `owns` (see keptPathIn).
+ */
+export function elidable(messages: readonly Message[], recentSteps = RECENT_STEPS, limit = ELIDE_LIMIT, owns?: (file: string) => boolean): Elidable[] {
+  const inOld = oldIndexes(messages, recentSteps)
+  const calls = callsById(messages)
+  const out: Elidable[] = []
+  for (const index of inOld) {
+    const message = messages[index]
+    if (message.role !== 'user') continue
+    for (const block of message.content) {
+      if (block.type !== 'tool-result') continue
+      const call = calls.get(block.toolUseId)
+      if (call?.name === 'Read') continue
+      block.content.forEach((part, at) => {
+        if (part.type === 'text' && part.text.length > limit && !keptPathIn(part.text, owns)) out.push({ key: `${block.toolUseId}:${at}`, toolUseId: block.toolUseId, index: at, call, text: part.text })
+      })
+    }
+  }
+  return out
+}
+
 /**
  * Shortens tool outputs and call arguments longer than `limit` characters, and
- * drops images, in every step but the last `recentSteps`. Messages are copied,
- * never mutated; the result is returned as is when nothing was long enough.
+ * drops images, in every step but the last `recentSteps`. A shortened output
+ * says how to have it again: the file `kept` names for it (by elidable's key),
+ * the file a note in it already names (one `owns`, when given), the file a
+ * Read read, or the tool. Messages are copied, never mutated; the result is
+ * returned as is when nothing was long enough.
  */
-export function elideOldOutputs(messages: readonly Message[], recentSteps = RECENT_STEPS, limit = 1500): Message[] {
-  const steps = unitsOf(messages).filter((unit) => unit.kind === 'step')
-  const old = steps.slice(0, Math.max(0, steps.length - recentSteps))
-  if (!old.length) return [...messages]
-  const inOld = new Set<number>()
-  for (const unit of old) for (let index = unit.start; index < unit.end; index++) inOld.add(index)
+export function elideOldOutputs(
+  messages: readonly Message[],
+  recentSteps = RECENT_STEPS,
+  limit = ELIDE_LIMIT,
+  kept?: ReadonlyMap<string, string>,
+  owns?: (file: string) => boolean,
+): Message[] {
+  const inOld = oldIndexes(messages, recentSteps)
+  if (!inOld.size) return [...messages]
+  const calls = callsById(messages)
 
   const out = messages.map((message, index): Message => {
     if (!inOld.has(index)) return message
     if (message.role === 'user') {
-      const content = message.content.map((block) => (block.type === 'tool-result' ? elideResult(block, limit) : block))
+      const content = message.content.map((block) => (block.type === 'tool-result' ? elideResult(block, limit, calls.get(block.toolUseId), kept, owns) : block))
       return content.some((block, i) => block !== message.content[i]) ? { role: 'user', content } : message
     }
     const content = message.content.map((block) => {
@@ -462,16 +576,53 @@ export function summaryBlock(summary: string, openRequest: string | null): strin
 
 /**
  * The compacted conversation: the summary (after `preface`, text that must
- * survive compaction, such as the project's memory files) in the first user
- * message, then the tail. No thinking survives: the prefix it was minted under
+ * survive compaction, such as the project's memory files, and before
+ * `appendix`, the files read again) in the first user message, then the tail. No thinking survives: the prefix it was minted under
  * is gone.
  */
-export function applyCompaction(plan: CompactionPlan, summary: string, preface: readonly string[] = []): Message[] {
-  const opening = [...preface, summaryBlock(summary, plan.openRequest)].map(textBlock)
+export function applyCompaction(plan: CompactionPlan, summary: string, preface: readonly string[] = [], appendix: readonly string[] = []): Message[] {
+  const opening = [...preface, summaryBlock(summary, plan.openRequest), ...appendix].map(textBlock)
   const [first, ...rest] = plan.kept
   const messages: Message[] =
     first?.role === 'user' ? [{ role: 'user', content: [...opening, ...first.content] }, ...rest] : [{ role: 'user', content: opening }, ...plan.kept]
   return dropThinkingFrom(messages, 0)
+}
+
+const REREAD_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit'])
+
+/**
+ * The files the summarized messages worked on, to be read again after the summary rather than described in it: the
+ * ones changed first, then the ones only read, latest first. A file the kept messages read or wrote whole is in them
+ * already.
+ */
+export function filesToReread(plan: Pick<CompactionPlan, 'dropped' | 'kept'>, max: number): string[] {
+  const fileOf = (call: ToolUseBlock) => (!call.invalid && REREAD_TOOLS.has(call.name) && typeof call.input.file_path === 'string' ? call.input.file_path : undefined)
+  const whole = new Set<string>()
+  for (const message of plan.kept) {
+    if (message.role !== 'assistant') continue
+    for (const call of toolUsesOf(message)) {
+      const file = fileOf(call)
+      if (file && (call.name === 'Write' || call.name === 'Read')) whole.add(file)
+    }
+  }
+  const changed: string[] = []
+  const read: string[] = []
+  for (let index = plan.dropped.length - 1; index >= 0; index--) {
+    const message = plan.dropped[index]
+    if (message.role !== 'assistant') continue
+    for (const call of toolUsesOf(message).reverse()) {
+      const file = fileOf(call)
+      if (!file || whole.has(file) || changed.includes(file)) continue
+      if (call.name === 'Read') {
+        if (!read.includes(file)) read.push(file)
+      } else {
+        changed.push(file)
+        const at = read.indexOf(file)
+        if (at !== -1) read.splice(at, 1)
+      }
+    }
+  }
+  return [...changed, ...read].slice(0, max)
 }
 
 // ---------------------------------------------------------------- summaries
@@ -481,7 +632,7 @@ export const SUMMARIZER = `You compact the conversation of a coding agent so tha
 Write a summary the agent can rely on instead of the transcript. Cover:
 - what the user asked for, including constraints and preferences, quoting exact wording where it matters;
 - decisions made and why;
-- files read, created or changed, and what changed in them;
+- the files read, created or changed, by path, and what changed in them; not their contents, which the agent reads again;
 - commands run and their results that still matter;
 - errors met and how they were resolved, or that they remain;
 - the current state of the work and the next steps.

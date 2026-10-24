@@ -66,6 +66,13 @@ function dollars(perToken: unknown): string {
   return Number.isFinite(n) ? `$${(n * 1_000_000).toFixed(2)}` : '?'
 }
 
+/** The listing's prices per token as dollars per million tokens, when both are numbers. */
+function pricePerMillion(pricing: Record<string, unknown>): { input: number; output: number } | undefined {
+  const input = Number(pricing.prompt)
+  const output = Number(pricing.completion)
+  return Number.isFinite(input) && Number.isFinite(output) && input >= 0 && output >= 0 ? { input: input * 1_000_000, output: output * 1_000_000 } : undefined
+}
+
 export class ModelsService {
   private cache: { at: number; models: ModelInfo[] } | null = null
 
@@ -99,12 +106,14 @@ export class ModelsService {
       const pricing = (m.pricing ?? {}) as Record<string, unknown>
       const free = freeVerdict(id, pricing).free
       const supported = Array.isArray(m.supported_parameters) ? (m.supported_parameters as unknown[]) : undefined
+      const price = free ? undefined : pricePerMillion(pricing)
       return {
         id,
         name: String(m.name ?? id),
         contextLength: typeof m.context_length === 'number' ? (m.context_length as number) : undefined,
         free,
         pricing: free ? 'free' : `${dollars(pricing.prompt)} in · ${dollars(pricing.completion)} out / 1M tok`,
+        ...(price ? { price } : {}),
         ...(supported ? { tools: supported.includes('tools') } : {}),
       }
     })

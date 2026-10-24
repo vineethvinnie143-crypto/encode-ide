@@ -145,6 +145,10 @@ function nameList(tools: readonly Tool[]): string {
 /** The tool that loads deferred tools. Register it only when `registry.deferred()` is not empty. */
 export function createToolSearchTool(registry: ToolRegistry): Tool<ToolSearchInput> {
   return {
+    brief: [
+      'Loads tools that are not in your list yet: query is words ("github issue") or "select:name1,name2". They can be called from the next step; load all a task needs at once. max_results: default 5, at most 10.',
+      nameList(registry.deferred()),
+    ].join('\n'),
     definition: {
       name: TOOL_SEARCH,
       description: [

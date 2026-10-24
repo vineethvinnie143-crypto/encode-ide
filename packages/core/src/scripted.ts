@@ -32,6 +32,8 @@ export interface ScriptedStep {
 }
 
 export interface ScriptedOptions {
+  /** The model the client says it would call. Default: scripted. */
+  model?: string
   contextWindow?: number
   maxOutputTokens?: number
   /** Whether the model reads images. Absent: the client cannot tell. */
@@ -84,7 +86,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
     requests,
     async budget(_role: ModelRole): Promise<ModelBudget> {
       return {
-        model: 'scripted',
+        model: options.model ?? 'scripted',
         contextWindow: options.contextWindow ?? 200_000,
         maxOutputTokens: options.maxOutputTokens ?? 8_192,
         ...(options.images !== undefined ? { images: options.images } : {}),

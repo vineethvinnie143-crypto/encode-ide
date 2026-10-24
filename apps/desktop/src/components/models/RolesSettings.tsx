@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { EFFORTS, EFFORT_INFO, FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO, freeProfile, isFreeRef, labelOfRef, mainPatch, mainRefs, withEffort } from '@shared/models'
+import { EFFORTS, EFFORT_INFO, FREE_REF, MAX_ROLE_MODELS, MODEL_ROLES, ROLE_INFO, freeProfile, isFreeRef, labelOfRef, mainPatch, mainRefs, parseRef, roleRefs, withEffort } from '@shared/models'
+import { applySmallRoles, smallRoleSuggestion } from '@shared/small-roles'
 import type { ModelRole, ModelStatus, ReasoningEffort, Settings } from '@shared/types'
 import { useModels } from '../../stores/models'
 import { Button, IconButton } from '../../ui/Button'
@@ -104,7 +105,10 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
         </div>
       </div>
       {refs.length === 0 ? (
-        <div className="role-follows">{info.follows ? `Uses ${ROLE_INFO[info.follows].label.toLowerCase()}.` : 'No model chosen.'}</div>
+        <div className="role-follows">
+          {info.follows ? `Uses ${ROLE_INFO[info.follows].label.toLowerCase()}.` : 'No model chosen.'}
+          {info.follows && roleRefs(draft, role).includes(FREE_REF) && ' That includes the free models, whose providers may keep what they are sent.'}
+        </div>
       ) : (
         <ol className="role-models">
           {refs.map((ref, index) => {
@@ -141,6 +145,36 @@ function RoleRow({ draft, role, onChange }: { draft: Draft; role: ModelRole; onC
         </ol>
       )}
       {refs.length > 1 && <div className="role-order-note">Tried in this order; the next one runs when one fails.</div>}
+    </div>
+  )
+}
+
+/** Where the main model is not needed: a smaller model of its own family for Explore and Small tasks (ADR 0094). */
+function SmallRolesHint({ draft, onChange }: { draft: Settings; onChange: (patch: Partial<Settings>) => void }) {
+  const catalogs = useModels((state) => state.catalogs)
+  const main = parseRef(mainRefs(draft)[0] ?? '', draft.profiles)
+  const profile = main?.kind === 'model' ? draft.profiles.find((candidate) => candidate.id === main.profileId) : undefined
+  useEffect(() => {
+    if (profile) void useModels.getState().load(profile)
+  }, [profile])
+  const suggestion = smallRoleSuggestion(draft, (id) => catalogs[id]?.models)
+  if (!suggestion) return null
+  const roles = suggestion.roles.map((role) => ROLE_INFO[role].label).join(' and ')
+  const saving = suggestion.saving !== undefined && suggestion.saving >= 0.1 ? ` for about ${Math.round(suggestion.saving * 100)}% less per token` : ''
+  return (
+    <div className="roles-row roles-suggest" data-setting="roles.small">
+      <div className="roles-row-text">
+        <div className="roles-row-title">
+          {roles} could use {suggestion.model.name}
+        </div>
+        <div className="roles-row-hint">
+          These jobs now go to {suggestion.main.name}. Searching, reading and naming need no more than its smaller sibling on the same connection, which does them as well{saving}.
+          Compaction and Inline suggestions follow Small tasks.
+        </div>
+      </div>
+      <Button size="sm" onClick={() => onChange(applySmallRoles(draft, suggestion))}>
+        Use {suggestion.model.name}
+      </Button>
     </div>
   )
 }
@@ -268,9 +302,28 @@ export default function RolesSettings({ draft, onChange, onConnect }: { draft: S
           Each job takes a list. The first model that works answers; a role with no list uses the one named under its name. Effort is how hard a role’s models think, where a model has
           that dial; each role has its own, and Default leaves it to the model.
         </p>
+        <SmallRolesHint draft={draft} onChange={onChange} />
         {MODEL_ROLES.map((role) => (
           <RoleRow key={role} draft={draft} role={role} onChange={onChange} />
         ))}
+      </section>
+
+      <section className="roles-section" data-section="guide" data-setting="roles.guide">
+        <header className="roles-section-head">
+          <h3>Instructions</h3>
+        </header>
+        <div className="roles-row">
+          <div className="roles-row-text">
+            <label className="roles-row-title" htmlFor="short-guide">
+              Short instructions for strong models
+            </label>
+            <div className="roles-row-hint">
+              Claude Opus and Sonnet 4 and later, GPT-5, o3, Gemini Pro 2.5 and later and Grok 4 work as well from a shorter guide, which saves about 2,500 tokens on every step. Other
+              models always get the full guide; turn this off to give it to every model.
+            </div>
+          </div>
+          <Toggle id="short-guide" checked={draft.guide !== 'full'} onChange={(short) => onChange({ guide: short ? 'auto' : 'full' })} label="Short instructions for strong models" />
+        </div>
       </section>
 
       <ModelStatusBlock />

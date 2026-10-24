@@ -67,9 +67,30 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
   return lines.join('\n')
 }
 
+/** Bash's description for a model that needs no guide (ADR 0094): the shell's rules, without the advice. */
+function bashBrief(dialect: ShellDialect, platform: NodeJS.Platform, sandbox: BashSandbox | undefined, program: string | undefined): string {
+  const legacy = dialect === 'pwsh' && isWindowsPowerShell(program)
+  const shellName = dialect === 'bash' ? (platform === 'win32' ? 'Git Bash' : 'bash') : legacy ? 'Windows PowerShell' : 'PowerShell'
+  const lines = [
+    `Runs a command in ${shellName} and returns its output. Each command gets a fresh shell in the working directory: a change of directory carries over, other state does not. No terminal and no stdin: nothing interactive (pass --yes, git commit -m). timeout in ms, default ${DEFAULT_TIMEOUT_MS}, at most ${MAX_TIMEOUT_MS}. run_in_background for servers and watchers: read them with BashOutput, stop them with KillShell. Long output keeps its start and end, with a note on where the rest is.`,
+  ]
+  if (legacy) lines.push('Windows PowerShell has no && or ||: one command per line, checking $LASTEXITCODE.')
+  else if (dialect === 'pwsh') lines.push("This is PowerShell 7, not bash: use PowerShell syntax ($env:NAME = 'value', Remove-Item -Recurse -Force, Select-String).")
+  if (sandbox) {
+    lines.push(
+      'Commands run in a sandbox: they write only in the workspace and the temp folder; .git/hooks, .git/config, .encode and .mcp.json are read-only.' +
+        (sandbox.escapable ? ' If one fails for that reason (Operation not permitted, Read-only file system, Access is denied), retry with unsandboxed true (the person is asked); never on a first try.' : ''),
+    )
+  }
+  if (dialect === 'bash' && platform === 'win32') lines.push('Git Bash on Windows: paths look like /c/Users/me/project; .exe and .cmd programs run normally.')
+  lines.push('description: five to ten words on what the command does.')
+  return lines.join('\n')
+}
+
 /** `program` is the shell's own path: it tells Windows PowerShell from PowerShell 7. */
 export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform, sandbox?: BashSandbox, program?: string): Tool<BashInput> {
   return {
+    brief: bashBrief(dialect, platform, sandbox, program),
     definition: {
       name: 'Bash',
       description: bashDescription(dialect, platform, sandbox, program),
@@ -158,6 +179,7 @@ interface BashOutputInput extends Record<string, unknown> {
 }
 
 export const bashOutputTool: Tool<BashOutputInput> = {
+  brief: 'Reads what a background command (bash_id, from Bash) printed since the last read, whether it still runs, and its exit code. filter: a regular expression for the lines to return.',
   definition: {
     name: 'BashOutput',
     description: [

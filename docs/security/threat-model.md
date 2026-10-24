@@ -1979,3 +1979,55 @@ No new setting, IPC call or permission.
   back once and let through after; a placeholder that would lose lines turned back, one the file had not.
 - `session.test.ts`: each step's prompt is the start of the next one's, across requests and modes; what a request
   cost is added up on its message, live and stored, and a cost only when every call said one.
+
+## Old results shortened early, files read again, the short guide and small jobs (Efficiency 2)
+
+Written with the pull request that shortens old tool results early and seldom, reads files again after a summary,
+sends strong models a short guide, and suggests a small model for the small jobs
+([0094](../adr/0094-old-results-are-shortened-early-and-seldom-strong-models-get-a-short-guide-and-small-jobs-a-small-model.md)).
+
+What is new:
+
+- files the agent host writes: each old result it shortens, whole, in the session's `outputs/<session>/` folder of
+  0093 (before, only results long when they came in);
+- what the model is sent without a call of its own: up to five files the summarized part worked on, after a summary;
+- a setting, `guide` (`auto` or `full`), under Settings > Roles > Instructions;
+- a suggestion in Settings > Roles that writes two roles' model lists when the person clicks it.
+
+No new IPC call or permission.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| Z1 | A file read again after a summary is one the person's rules ask about or refuse, or one outside the workspace, so the model sees it without the question | A file comes back only when Read would read it without asking: the path is absolute, the rules' verdict on it, if any, is allow, and it is inside the workspace, a folder added to it or a read root. Any other is left for the model to Read, which asks as it always does. | Mitigated |
+| Z2 | Reading files again fills the window, or reads a huge or binary file | At most five, within 8% of the window, 60,000 characters in all and 20,000 each, through the same reader as a mentioned file: an image or binary file is not shown. | Mitigated |
+| Z3 | More results at rest on disk: every old result the agent shortens is now kept, not only the long ones | The same store and controls as D1 to D3: the owner's only, in the profile folder, 64 MB a session and 512 MB in all, gone with the session or after two weeks, never in a Diagnostics export or a report. | Mitigated |
+| Z4 | An output quotes the note that says where a result is kept, naming a file of its choosing (`~/.ssh/id_rsa`), so that the shortened result points the model there and the real output is lost | A note counts as eNCode's only when it names a file in the session's own folder, with no `..` in it; any other is the output's text, and the output is kept whole and named like any other. A Read the model makes of a named file asks as always. | Mitigated |
+| Z5 | The short guide leaves out a rule, and a strong model does what the full guide forbids | The tools, their schemas and their permission checks are the same: a rule the code enforces holds for every model. The briefs keep each tool's rules and leave out the advice. Settings gives every model the full guide. | Mitigated |
+| Z6 | A role nobody set sends code to the free models, whose providers may keep it, while the person pays for Main | A role without a list follows Main, never the free pool unless Main or the role names it; a router test holds this for every role, tool and subagent, and one for the desktop's settings with a free connection set up beside a billed Main. Roles says so when a role follows one that lists the free models. | Mitigated |
+| Z7 | The small-model suggestion picks a free model, another provider's, or one that cannot call tools | It looks only on Main's own connection, never at a free or local one, nor while only free models may run; the model must call tools, must not be free, and must cost less where prices are listed. It changes nothing until the person clicks it, and only the roles that follow Main. | Mitigated |
+| Z8 | A file read again holds a prompt injection that now reaches the model without a step of its own | They are files the model read or changed earlier in the session, so nothing new reaches it; the block says they are the project's text, not instructions, as for a mentioned file. | Accepted |
+
+### Residual risks
+
+- A strong model named in the list may keep the rules less well from the short guide than we measured; the model
+  families step measures each on the benchmark.
+- A file read again is shown as it is now, which may differ from what the summary says of it; the block says it is
+  what Read shows now.
+
+### Verification
+
+- `compaction.test.ts`: each shortened result says where its whole is (the kept file, the file a Read read, the tool);
+  a note a tool's output holds that names another file is not taken for eNCode's; the files to read again, changed
+  first, without those the kept part read or wrote whole.
+- `context-cost.test.ts`: 50-step sessions in 64,000, 128,000 and 200,000-token windows within their input and uncached
+  ceilings, shortened results kept in the session's folder; an output holding a planted note kept whole and named by
+  its own file; no rewrite while shortening would save little.
+- `loop.test.ts`: after a summary the files are read again and a Read of one answers that it is unchanged; a file that
+  could not be read again is shown in full by the next Read.
+- `guide.test.ts` and `budget.test.ts`: which models get the short guide, the setting that gives every model the full
+  one, and the short guide's size.
+- `config.test.ts` (router) and `router-settings.test.ts` (desktop): no role reaches the free models with a billed
+  Main unless it names them.
+- `small-roles.test.ts`: the suggestion's model for each family, and none for a free, local, small or toolless model.

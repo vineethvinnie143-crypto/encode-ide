@@ -108,6 +108,11 @@ export interface Tool<Input extends Record<string, unknown> = Record<string, unk
   readonly defer?: boolean | 'always'
   /** Its results keep within a size of their own, which says how to read on (Read): never kept in a file for being long (ADR 0093). */
   readonly bounded?: boolean
+  /**
+   * The description sent to a model that needs no guide (ADR 0094): what the tool does and the rules a call must keep,
+   * without the advice such a model follows unasked. Absent: the description is sent to every model.
+   */
+  readonly brief?: string
   /** Rules the schema cannot express, checked after it passes. Returns what is wrong. */
   check?(input: Input): string | undefined
   /** What the call would touch, with paths resolved against the context. */

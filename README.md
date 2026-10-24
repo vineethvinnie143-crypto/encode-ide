@@ -72,6 +72,12 @@ primary platform; the code stays cross-platform.
   The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars
   when the provider says.
 
+  In a long session the outputs of old steps are shortened early and seldom, so the prompt cache keeps working, and
+  each says where the whole of it is; after a summary the files the agent worked on are read again for it. Strong
+  models (Claude Opus and Sonnet, GPT-5, Gemini Pro, Grok 4) get short instructions with the same rules, and
+  **Settings → Roles** suggests the smaller model of Main's family for the small jobs. Roles nobody set follow Main, so
+  they never go to the free models unless you choose them.
+
   It works in Code, Ask and Plan modes. It runs in its own process, so a hung tool cannot freeze
   the window, and every session is an append-only log that survives a crash and can be forked.
 - **Computer use (Windows).** Off until you turn it on under **Settings → Agent**. The agent can then look at an

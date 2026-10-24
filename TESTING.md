@@ -331,6 +331,25 @@ after the work was gone.
 What is most useful to hear: a long output the agent did not read on when it should have, a read that ran
 on page after page of a long file, and a cost that does not match your provider's dashboard.
 
+## Long sessions, short instructions and small jobs
+
+- Keep one session going for a long task: 40 or more steps of reading, editing and running tests. The cost on the work
+  log's head should grow more slowly than before as the session goes on, and the cached share should stay high. When
+  the agent needs an old output again, it should read it from the file its note names, not run the command again.
+- Go on until the notice "Compacted … earlier messages into a summary" appears, or type `/compact`. The agent's next
+  step should edit the files it was working on straight away, without reading them again first.
+- With a strong model as Main (Claude Sonnet 4.5, GPT-5, Gemini 2.5 Pro), the agent should behave as before. If it
+  starts to skip a rule (edits without reading, guesses a path), turn off **Settings → Roles → Instructions → Short
+  instructions for strong models** and tell us which model it was.
+- With a paid Main, **Settings → Roles** offers the smaller model of its family for Explore and Small tasks ("Use
+  Claude Haiku 4.5"). Take it, and check that session names and searches still work and that the cost drops.
+- With a paid Main and a free connection set up as well, no role you did not set should show the free models; Roles
+  says so when a role follows one that lists them.
+
+What is most useful to hear: a step that ran a command again to see an output it already had, a summary after which
+the agent read a file it had just changed, a rule a strong model stopped keeping, and a small-model suggestion that
+named the wrong model.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries

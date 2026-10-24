@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { check, gen, type Gen } from '@encode/testkit'
-import { DEFAULT_LIMITS, defaultRouterConfig, normalizeBaseUrl, parseRouterConfig, resolveModelList } from './config'
+import { BUILT_IN_ROLES, DEFAULT_LIMITS, defaultRouterConfig, normalizeBaseUrl, parseRouterConfig, resolveModelList } from './config'
 import { FREE_POOL, parseModelRef, splitKey } from './refs'
 
 describe('parseRouterConfig', () => {
@@ -142,6 +142,19 @@ describe('resolveModelList', () => {
     assert.deepEqual(resolveModelList(config, { role: 'explore' }).refs, ['anthropic:claude-sonnet-5', '@free'])
     assert.deepEqual(resolveModelList(config, { role: 'summarizer' }).refs, ['openrouter:google/gemma:free'])
     assert.deepEqual(resolveModelList(config, { role: 'custom-role' }).refs, ['anthropic:claude-sonnet-5', '@free'])
+  })
+
+  it('never sends a role nobody configured to the free pool while Main lists only billed models (ADR 0094)', () => {
+    const { config: billed } = parseRouterConfig({
+      providers: { openrouter: { type: 'openrouter' }, anthropic: { type: 'anthropic' } },
+      roles: { main: ['anthropic:claude-sonnet-5'] },
+      freePool: { providers: ['openrouter'] },
+    })
+    for (const role of [...BUILT_IN_ROLES, 'custom-role']) {
+      assert.deepEqual(resolveModelList(billed, { role }).refs, ['anthropic:claude-sonnet-5'], role)
+      assert.deepEqual(resolveModelList(billed, { role, tool: 'WebFetch' }).refs, ['anthropic:claude-sonnet-5'], `${role}, for a tool`)
+      assert.deepEqual(resolveModelList(billed, { role, agent: 'Explore' }).refs, ['anthropic:claude-sonnet-5'], `${role}, for a subagent`)
+    }
   })
 
   it('lets an agent win over a tool, and a tool over the role', () => {

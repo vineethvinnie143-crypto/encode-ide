@@ -525,7 +525,7 @@ describe('the context window', () => {
     assert.deepEqual(h.client.requests.map((request) => request.role), ['main'])
   })
 
-  it('shows a file again after a compaction, because the output a repeated Read would point to is gone', async () => {
+  it('reads the files a compaction summarized away again, so a repeated Read points at what the conversation now holds', async () => {
     const file = Array.from({ length: 60 }, (_, index) => `line ${index + 1} of a file long enough to be worth pointing back to`).join('\n')
     let main = 0
     const h = await loopHarness({
@@ -548,11 +548,37 @@ describe('the context window', () => {
     const { removed } = await h.loop.compact({ signal: new AbortController().signal, turnId: 'c1' })
     assert.ok(removed > 0)
     assert.ok(!resultsOf(h.conversation.messages()).some((result) => result.text.startsWith('     1\tline 1')), 'the first output was summarized away')
+    const opening = h.conversation.messages()[0].content.map((block) => (block.type === 'text' ? block.text : '')).join('\n')
+    assert.ok(opening.indexOf('SUMMARY') < opening.indexOf('<files_read_again>'), 'after the summary')
+    assert.ok(opening.includes(`<file path="${path.join(h.root, 'a.txt')}">\n     1\tline 1 of`), 'the file as it is now')
     await h.run('read it again')
-    const second = resultsOf(h.conversation.messages()).at(-1)!
-    assert.match(second.text, /^ {5}1\tline 1 of/, 'shown in full, not pointed back to')
-    await h.run('and once more')
     assert.match(resultsOf(h.conversation.messages()).at(-1)!.text, /^Unchanged: lines 1-60 of a\.txt/)
+  })
+
+  it('shows a file again after a compaction that could not read it again, because the output a repeated Read would point to is gone', async () => {
+    const file = Array.from({ length: 60 }, (_, index) => `line ${index + 1} of a file long enough to be worth pointing back to`).join('\n')
+    let main = 0
+    const h = await loopHarness({
+      files: { 'a.txt': file },
+      client: { contextWindow: 40_000, maxOutputTokens: 1_000 },
+      scriptFor: (root) => (request) => {
+        if (request.role === 'summarizer') return { text: 'SUMMARY' }
+        const read = { calls: [{ name: 'Read', input: { file_path: path.join(root, 'a.txt') } }] }
+        return [read, { text: 'one' }, read, { text: 'two' }][main++]
+      },
+    })
+    await h.run('read it')
+    for (let i = 0; i < 3; i++) {
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(3_000)}`), { turnId: `f${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(3_000)}`)] }, { turnId: `f${i}` })
+    }
+    // Gone by the time of the summary, then back.
+    await fs.rename(path.join(h.root, 'a.txt'), path.join(h.root, 'b.txt'))
+    await h.loop.compact({ signal: new AbortController().signal, turnId: 'c1' })
+    assert.ok(!JSON.stringify(h.conversation.messages()).includes('<files_read_again>'))
+    await fs.rename(path.join(h.root, 'b.txt'), path.join(h.root, 'a.txt'))
+    await h.run('read it again')
+    assert.match(resultsOf(h.conversation.messages()).at(-1)!.text, /^ {5}1\tline 1 of/, 'shown in full, not pointed back to')
   })
 
   it('compacts on request, keeping only the latest messages, with the user\'s instructions for the summary', async () => {

@@ -70,7 +70,7 @@ import { AgentLoop, type LoopServices } from './loop'
 import type { OutputStore } from './outputs'
 import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -1061,6 +1061,11 @@ export class AgentSession {
     return this.env.system ?? systemParts()
   }
 
+  /** The short instructions, unless the host set instructions of its own (ADR 0094). */
+  private get shortSystem(): SystemPart[] | undefined {
+    return this.env.system ? undefined : shortSystemParts()
+  }
+
   /** Whether Bash is told it runs in a sandbox, and whether it may ask to leave it. */
   private sandboxOfShell(): { escapable: boolean } | undefined {
     const view = this.shell.state().sandbox
@@ -1209,6 +1214,7 @@ export class AgentSession {
       client: env.client,
       registry,
       system: this.system,
+      ...(this.shortSystem ? { shortSystem: this.shortSystem } : {}),
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
@@ -1243,6 +1249,7 @@ export class AgentSession {
       client: env.client,
       registry,
       system: this.system,
+      ...(this.shortSystem ? { shortSystem: this.shortSystem } : {}),
       settings: env.settings,
       hooks: env.hooks,
       surface: this.surface,

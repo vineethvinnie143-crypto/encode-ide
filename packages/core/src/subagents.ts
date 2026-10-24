@@ -450,6 +450,8 @@ export interface SubagentsOptions {
   client: ModelClient
   registry: ToolRegistry
   system: SystemPart[]
+  /** The main agent's instructions for a model that needs no guide (ADR 0094). */
+  shortSystem?: SystemPart[]
   settings: () => AgentSettings
   hooks: AgentHooks
   /** The main agent's surface: approvals, questions, usage and file changes go through it. */
@@ -593,7 +595,8 @@ export function createSubagents(options: SubagentsOptions): Subagents {
   ): Promise<SubagentResult> {
     const conversation = pool.conversation(info.id)
     const shell = await options.createShell()
-    const system = [...options.system, { text: [SUBAGENT_PROMPT, definition.prompt].filter(Boolean).join('\n\n') }]
+    const own = { text: [SUBAGENT_PROMPT, definition.prompt].filter(Boolean).join('\n\n') }
+    const system = [...options.system, own]
     let files = pool.trackers.get(info.id)
     if (!files) pool.trackers.set(info.id, (files = cloneTracker(options.files)))
     const loop = new AgentLoop({
@@ -603,6 +606,7 @@ export function createSubagents(options: SubagentsOptions): Subagents {
       registry: options.registry,
       tools: allowedTools(definition, options.registry),
       system,
+      ...(options.shortSystem ? { shortSystem: [...options.shortSystem, own] } : {}),
       settings: options.settings,
       hooks: options.hooks,
       surface: new SubagentSurface(options.parent, {
