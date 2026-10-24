@@ -47,6 +47,7 @@ const settings: Settings = {
   inlineSuggest: 'auto',
   errorGate: 'auto',
   guide: 'auto',
+  checkGate: 'auto',
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,

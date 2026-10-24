@@ -16,6 +16,7 @@ const config: HostConfig = {
   languageServers: false,
   errorGate: 'auto',
   guide: 'auto',
+  checkGate: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

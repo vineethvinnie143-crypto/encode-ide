@@ -70,6 +70,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   computer: config.computer,
   errorGate: config.errorGate,
   guide: config.guide,
+  checkGate: config.checkGate,
 })
 
 const NO_MODEL_BUDGET: ModelBudget = { model: 'none', contextWindow: 128_000, maxOutputTokens: 8_192 }

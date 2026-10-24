@@ -60,6 +60,7 @@ import {
   type Worktrees,
 } from '@encode/tools'
 import { SessionCodeMap } from './code-map'
+import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
 import { estimateTokens, requestText } from './compaction'
 import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
@@ -180,6 +181,8 @@ export interface SessionEnv {
   codeIndex?: () => CodeIndex | undefined
   /** FiveM's natives, when eNCode installed them (ADR 0091). */
   natives?: () => readonly NativeDoc[] | undefined
+  /** The commands the settings files name as the project's checks, in place of those eNCode finds (ADR 0095). */
+  checks?: () => readonly string[] | undefined
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -426,6 +429,20 @@ export class AgentSession {
   private readonly openedAt = Date.now()
   /** CodeMap and the map in the first message (ADR 0090). */
   private readonly codeMap: SessionCodeMap
+  /**
+   * The project's typecheck and tests, and the record of their runs (ADR 0095). They run where the agent's shell is, so
+   * they are found there or in the nearest folder above it within the workspace; with the shell outside it, none run.
+   */
+  private readonly checks: ProjectChecks = {
+    ledger: new CheckLedger(),
+    list: async () => {
+      const top = this.workdir()
+      const cwd = this.shell.state().cwd
+      if (!isWithin(top, cwd)) return []
+      const configured = this.env.checks?.()
+      return detectChecks(cwd, { platform: this.env.platform, top, ...(configured ? { configured } : {}) })
+    },
+  }
 
   constructor(
     private readonly log: SessionLog,
@@ -1208,6 +1225,7 @@ export class AgentSession {
       ...(code ? { code } : {}),
       codeMap: this.codeMap,
       ...(env.outputs ? { outputs: env.outputs } : {}),
+      checks: this.checks,
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -1218,7 +1236,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}) },
+      services: { root: env.root, home: env.home, platform: env.platform, sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}), checks: this.checks },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {

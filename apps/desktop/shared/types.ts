@@ -67,6 +67,12 @@ export type ErrorGate = 'auto' | 'on' | 'off'
 export type Guide = 'auto' | 'full'
 
 /**
+ * When the agent ends a request that changed code: `auto` runs the project's typecheck and tests and sends it back up to
+ * twice for what its changes broke, `on` up to four times, `off` runs nothing and leaves its reply unchecked (ADR 0095).
+ */
+export type CheckGate = 'auto' | 'on' | 'off'
+
+/**
  * Suggestions as you type, drawn faded at the cursor (ADR 0087). `auto`: on, except while the Inline suggestions role
  * would use the free models, whose requests a day are few and kept for the agent. `on`: on whatever the role uses.
  * `off`: never. See shared/inline.ts.
@@ -115,6 +121,8 @@ export interface Settings {
   errorGate: ErrorGate
   /** See Guide. Default `auto`. */
   guide: Guide
+  /** See CheckGate. Default `auto`. */
+  checkGate: CheckGate
   /** A notice when a request finishes. Default `background`. */
   notifyDone: NotifyWhen
   /** A notice when the agent needs you: an approval, a question or a plan to look at. Default `background`. */
@@ -1180,6 +1188,8 @@ export interface ConversationEntry {
     review?: ToolReview
     /** Hidden or look-alike characters found in what the call wrote, one line each. */
     warnings?: string[]
+    /** `encode`: a call eNCode made itself, such as a check before the agent finishes (ADR 0095). */
+    by?: 'encode'
   }
   /** On an error: what kind it is and what can be done about it. */
   problem?: EntryProblem

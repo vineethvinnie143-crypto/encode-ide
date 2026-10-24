@@ -1,17 +1,24 @@
 import { useState } from 'react'
 import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
-import type { Settings } from '@shared/types'
+import type { CheckGate, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
 import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { cx } from '../../ui/cx'
+import { Segmented, type SegmentedOption } from '../../ui/Segmented'
 import { Toggle } from '../../ui/Toggle'
 import { SearchSettings } from '../search/SearchSettings'
 import { CommitInput, SettingRow, SettingsGroup } from './Section'
 
-/** Settings > Agent: what it may do without asking, the computer, web search and its limits. */
+const CHECK_GATES: SegmentedOption<CheckGate>[] = [
+  { value: 'auto', label: 'Up to twice' },
+  { value: 'on', label: 'Up to 4 times' },
+  { value: 'off', label: 'Never' },
+]
+
+/** Settings > Agent: what it may do without asking, the computer, web search, checks before it finishes and its limits. */
 export function AgentSection({ settings }: { settings: Settings }) {
   const save = useSettings((state) => state.save)
   const setSearchKey = useSettings((state) => state.setSearchKey)
@@ -102,6 +109,16 @@ export function AgentSection({ settings }: { settings: Settings }) {
           result={result}
         />
       </section>
+
+      <SettingsGroup title="Checks">
+        <SettingRow
+          id="agent.checks"
+          label="Check the agent's work before it finishes"
+          help="When a request changed code, eNCode runs the project's typecheck and tests (from package.json, Cargo.toml, go.mod or pytest's settings, or the checks list in .encode/settings.json) and sends the agent back for what its changes broke; failures that were there before are left alone. Each run needs what the agent's own command would. It also checks the reply: a claim that the tests pass with no passing run, a file that is not there, or a name a file does not hold sends the agent back once."
+        >
+          <Segmented label="Check the agent's work before it finishes" value={settings.checkGate} options={CHECK_GATES} onChange={(checkGate) => void save({ checkGate })} />
+        </SettingRow>
+      </SettingsGroup>
 
       <SettingsGroup title="Limits">
         <SettingRow id="agent.limits" htmlFor="max-steps" label="Max agent steps" help="How many steps one request may take before the agent stops and asks you to go on. 1 to 100.">

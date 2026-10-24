@@ -765,6 +765,7 @@ export class Workspaces {
       external: hub,
       ...(code ? { code: () => (code.available().ok ? code : undefined) } : {}),
       codeIndex: () => this.codeIndex(config.root),
+      checks: () => config.current().effective.checks,
       natives: () => {
         const dir = this.options.languageServers?.tools?.dir
         return dir ? installedNatives(dir) : undefined

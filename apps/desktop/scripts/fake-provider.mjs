@@ -193,6 +193,12 @@ const SCENARIOS = {
     { text: 'Swapping the operands.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + b', new_string: 'return b + a' } } },
     { text: 'Mention check finished.' },
   ],
+  // A change to code, then a reply that says the tests pass: eNCode runs the demo's npm test before the turn ends (ADR 0095).
+  'check-gate': [
+    { text: 'Reading it first.', call: { name: 'Read', args: { file_path: 'src/utils.ts' } } },
+    { text: 'Swapping them.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a * b', new_string: 'return b * a' } } },
+    { text: 'Swapped them; all tests pass.' },
+  ],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
   'slow-reply': [{ text: longReply(), streamDelayMs: 40 }],
   // A long markdown answer streamed in small pieces at about 300 a second, for scripts/perf.mjs.

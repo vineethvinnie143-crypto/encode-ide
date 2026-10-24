@@ -37,6 +37,7 @@ const config = (languageServers: boolean): HostConfig => ({
   languageServers,
   errorGate: 'auto',
   guide: 'auto',
+  checkGate: 'auto',
   model: 'none',
   router: { providers: {}, roles: {}, freeOnly: true, freePool: { providers: [] } },
   providers: {},

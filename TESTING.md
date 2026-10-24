@@ -350,6 +350,27 @@ What is most useful to hear: a step that ran a command again to see an output it
 the agent read a file it had just changed, a rule a strong model stopped keeping, and a small-model suggestion that
 named the wrong model.
 
+## Checks before the agent finishes
+
+- In a project with tests (`npm test`, `pnpm test`, `cargo test`, `go test`, `pytest`), ask for a small change and
+  don't mention the tests. When the agent finishes, eNCode runs the project's typecheck and tests if the agent did not
+  run them after its last change; under Workspace Write it asks first ("Check the changes: tests", `npm test`). The run
+  shows in the work log, and the agent's answer stays below it.
+- Ask for a change that breaks a test. The agent should be sent back with what failed ("The project's checks failed
+  after the agent's changes, so it goes on to fix them.") and fix it, at most twice by default.
+- In a project whose tests already fail, ask for an unrelated change. The agent should not try to fix the old failures;
+  a note says "`npm test` fails as it did before this request." If the agent runs the tests before it starts, eNCode
+  can tell the old failures from new ones; otherwise it tells the agent it cannot.
+- Without running anything, ask "do the tests pass?" in Ask mode. If the agent answers "all tests pass" without a run,
+  it should be sent back once to run them or say it did not.
+- **Settings → Agent → Checks** sets how often: up to twice (default), up to 4 times, or never. A project can name its
+  own in a settings file: `"checks": ["pnpm -r typecheck", "pnpm test"]` (at most four; an empty list runs none). A
+  folder's own settings file needs the folder trusted and its settings approved before its list counts.
+
+What is most useful to hear: a check eNCode found that is not the project's real one (or missed one), a failure the
+agent was sent back for that was there before, an answer sent back for a claim that was true, and a check that took
+too long or asked too often.
+
 ## Language servers
 
 The editor marks errors as you type, and the agent checks its own edits, through language servers. eNCode carries
