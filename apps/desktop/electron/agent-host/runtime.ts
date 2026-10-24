@@ -392,6 +392,12 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
         log(`could not import the earlier sessions: ${describe(error)}`)
       }
     }
+    // Side chats are not kept (ADR 0104): one left open when eNCode last closed is gone now.
+    try {
+      await created.removeSideChats()
+    } catch (error) {
+      log(`could not remove the earlier side chats: ${describe(error)}`)
+    }
     host = created
     tester = createModelTester({
       ...(init.benchTasksDir ? { tasksDir: init.benchTasksDir } : {}),

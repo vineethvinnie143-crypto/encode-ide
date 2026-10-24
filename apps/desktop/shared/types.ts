@@ -1521,6 +1521,8 @@ export interface SessionSummary {
   wakeAt?: number
   /** The worktree the agent works in (EnterWorktree), by name. */
   worktree?: string
+  /** The session this one is a side chat of (ADR 0104); lists leave side chats out. */
+  sideOf?: string
 }
 
 /** What the renderer may change about a session. */
@@ -1735,6 +1737,8 @@ export interface EncodeApi {
     reset(sessionId?: string): Promise<void>
     remove(sessionId: string): Promise<void>
     fork(sessionId: string): Promise<SessionSummary>
+    /** A side chat of the session (ADR 0104): a copy of it to ask about it on the side; lists leave it out. */
+    side(sessionId: string): Promise<SessionSummary>
     rename(sessionId: string, title: string): Promise<void>
     goal(sessionId: string): Promise<SessionGoal | null>
     setGoal(sessionId: string, goal: SessionGoal | null): Promise<void>

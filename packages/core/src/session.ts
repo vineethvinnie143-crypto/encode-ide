@@ -91,7 +91,7 @@ import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { saveConventions } from './conventions'
 import { memoryConversation } from './conversation'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -421,6 +421,8 @@ interface TurnState {
   root?: string
   /** The worktree the model was last told it works in ('' for none). */
   worktree?: string
+  /** A side chat's model was told it is one. */
+  side?: boolean
 }
 
 
@@ -676,6 +678,7 @@ export class AgentSession {
       entryCount: snapshot.entries.length,
       ...(snapshot.wakeup ? { wakeAt: snapshot.wakeup.at } : {}),
       ...(this.worktree ? { worktree: this.worktree.name } : {}),
+      ...(snapshot.header.sideOf ? { sideOf: snapshot.header.sideOf } : {}),
     }
   }
 
@@ -1527,6 +1530,11 @@ export class AgentSession {
 
     if (this.turn.mode !== mode && !(first && mode === 'code')) add(modeReminder(mode))
     this.turn.mode = mode
+
+    if (!this.turn.side && this.log.snapshot().header.sideOf) {
+      add(sideReminder())
+      this.turn.side = true
+    }
 
     if (this.goalState?.status === 'active') add(goalReminder(this.goalState))
 

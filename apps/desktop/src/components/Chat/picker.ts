@@ -84,6 +84,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'init', description: 'Write project instructions (AGENTS.md) for this project' },
   { name: 'new', description: 'Start a new session in this project' },
   { name: 'fork', description: 'Copy this session into a new one' },
+  { name: 'side', args: '[question]', description: 'Ask about this chat on the side, without adding to it' },
   { name: 'rename', args: '[name]', description: 'Rename this session' },
   { name: 'pin', description: 'Pin or unpin this session' },
   { name: 'archive', description: 'Archive this session' },

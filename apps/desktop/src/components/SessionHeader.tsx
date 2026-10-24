@@ -122,6 +122,7 @@ export default function SessionHeader() {
         },
       },
       { id: 'fork', label: 'Fork session', onSelect: () => void sessionActions.fork(session) },
+      { id: 'side', label: 'Side chat', description: 'Ask about this chat on the side; nothing goes back to it.', onSelect: () => void sessionActions.side(session) },
       { id: 'export', label: 'Export session…', onSelect: () => void sessionActions.export(session) },
       { kind: 'separator', id: 'sep-b' },
       { id: 'archive', label: 'Archive', shortcut: commandRegistry.shortcut('session.archive'), onSelect: () => void sessionActions.archive(session) },

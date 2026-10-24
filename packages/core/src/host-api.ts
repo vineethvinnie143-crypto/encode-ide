@@ -53,6 +53,7 @@ export type HostRequests = {
   reset: { params: { sessionId?: string } | undefined; result: void }
   remove: { params: { sessionId: string }; result: void }
   fork: { params: { sessionId: string }; result: SessionSummary }
+  side: { params: { sessionId: string }; result: SessionSummary }
   rename: { params: { sessionId: string; title: string }; result: void }
   goal: { params: { sessionId: string }; result: SessionGoal | null }
   setGoal: { params: { sessionId: string; goal: SessionGoal | null }; result: void }
@@ -223,6 +224,7 @@ export const HOST_SCHEMAS: { [M in keyof HostRequests]?: JsonSchema } = {
   reset: { type: ['object', 'null'], properties: optionalSessionId },
   remove: object(sessionId, ['sessionId']),
   fork: object(sessionId, ['sessionId']),
+  side: object(sessionId, ['sessionId']),
   rename: object({ ...sessionId, title: text(400) }, ['sessionId', 'title']),
   goal: object(sessionId, ['sessionId']),
   setGoal: object({ ...sessionId, goal: nullable(GOAL) }, ['sessionId', 'goal']),
@@ -273,6 +275,7 @@ export function serveHost(server: HostServer, host: AgentHost): () => void {
   on('reset', (params) => host.reset(params?.sessionId || undefined))
   on('remove', ({ sessionId }) => host.remove(sessionId))
   on('fork', ({ sessionId }) => host.fork(sessionId))
+  on('side', ({ sessionId }) => host.side(sessionId))
   on('rename', ({ sessionId, title }) => host.rename(sessionId, title))
   on('goal', ({ sessionId }) => host.goal(sessionId))
   on('setGoal', ({ sessionId, goal }) => host.setGoal(sessionId, goal))
@@ -328,6 +331,7 @@ export interface HostClient {
   reset(sessionId?: string): Promise<void>
   remove(sessionId: string): Promise<void>
   fork(sessionId: string): Promise<SessionSummary>
+  side(sessionId: string): Promise<SessionSummary>
   rename(sessionId: string, title: string): Promise<void>
   goal(sessionId: string): Promise<SessionGoal | null>
   setGoal(sessionId: string, goal: SessionGoal | null): Promise<void>
@@ -372,6 +376,7 @@ export function createHostClient(caller: HostCaller): HostClient {
     reset: (sessionId) => caller.request('reset', sessionId ? { sessionId } : undefined),
     remove: (sessionId) => caller.request('remove', { sessionId }),
     fork: (sessionId) => caller.request('fork', { sessionId }),
+    side: (sessionId) => caller.request('side', { sessionId }),
     rename: (sessionId, title) => caller.request('rename', { sessionId, title }),
     goal: (sessionId) => caller.request('goal', { sessionId }),
     setGoal: (sessionId, goal) => caller.request('setGoal', { sessionId, goal }),

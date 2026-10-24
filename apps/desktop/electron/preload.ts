@@ -222,6 +222,7 @@ const api: EncodeApi = {
     reset: (sessionId?: string) => invoke('agent:reset', sessionId),
     remove: (sessionId: string) => invoke('agent:remove', sessionId),
     fork: (sessionId: string) => invoke('agent:fork', sessionId),
+    side: (sessionId: string) => invoke('agent:side', sessionId),
     rename: (sessionId: string, title: string) => invoke('agent:rename', sessionId, title),
     goal: (sessionId: string) => invoke('agent:goal', sessionId),
     setGoal: (sessionId: string, goal: SessionGoal | null) => invoke('agent:set-goal', sessionId, goal),

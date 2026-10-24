@@ -280,6 +280,8 @@ export interface SessionSummary {
   wakeAt?: number
   /** The worktree the agent works in (EnterWorktree), by name. */
   worktree?: string
+  /** The session this one is a side chat of (ADR 0104); lists leave side chats out. */
+  sideOf?: string
 }
 
 /** What a client may change about a session. */

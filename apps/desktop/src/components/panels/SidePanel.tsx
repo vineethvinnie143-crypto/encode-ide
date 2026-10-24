@@ -4,6 +4,7 @@ import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Columns2, Maximize2, PanelRightClose } from '../../ui/icons'
 import BrowserPanel from '../BrowserPanel'
+import SideChatPanel from '../SideChatPanel'
 import ReviewPane from '../review/ReviewPane'
 import TerminalPanel from '../Terminal/TerminalPanel'
 import TrajectoryView from '../TrajectoryView'
@@ -32,6 +33,8 @@ export function PaneFor({ tab }: { tab: PanelTab }) {
       return <JobsPane />
     case 'problems':
       return <ProblemsPane />
+    case 'chat':
+      return <SideChatPanel tabId={tab.id} />
   }
 }
 

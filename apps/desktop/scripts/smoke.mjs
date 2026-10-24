@@ -669,6 +669,7 @@ async function runProviderPhase() {
   await runProblemChecks()
   await runWebChecks()
   await runAgentBrowserChecks()
+  await runSideChatChecks()
   await runSearchChecks()
   await runPermissionChecks()
   await runAutoReviewChecks()
@@ -974,6 +975,45 @@ async function runAgentBrowserChecks() {
   // Closed again, so the panel checks find the tabs they expect.
   if (!(await click('.side-panel .panel-tab.is-active .panel-tab-close'))) throw new Error('The agent’s tab has no close button')
   await waitFor("!document.querySelector('.browser-agent-chip')", 4000, 'the agent’s tab closes')
+}
+
+/**
+ * A side chat (ADR 0104): /side opens a copy of the chat in a side tab, asks there in Ask mode, and nothing goes back to
+ * the chat; the sidebar does not list it; closing the tab deletes it.
+ */
+async function runSideChatChecks() {
+  console.log('[smoke] --- side chat ---')
+  // The chat open now is the one used last.
+  const chat = await evaluate('window.eNCode.agent.sessions().then((list) => list[0] ? { id: list[0].id, title: list[0].title } : null)')
+  const history = () => evaluate(`window.eNCode.agent.history(${JSON.stringify(chat.id)}).then((history) => history.entries.map((entry) => ({ kind: entry.kind, text: entry.text ?? '' })))`)
+  let entries = await history()
+  if (!entries.some((entry) => entry.kind === 'user')) {
+    await sendPrompt('[scenario:side-check] Remember the word pelican.')
+    await driveAgent('15b-side-parent', 30000)
+    entries = await history()
+  }
+  const asked = entries.find((entry) => entry.kind === 'user').text.slice(0, 40)
+  await sendPrompt('/side [scenario:side-check] What did the chat above write?')
+  await waitFor("document.querySelector('.side-panel .panel-pane.is-active .side-chat .msg-assistant')?.textContent?.includes('Side answer')", 30000, 'the side chat answers')
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const sent = JSON.stringify(request.messages)
+  if (!sent.includes('This is a side chat')) throw new Error('The side chat’s model was not told it is one')
+  if (!sent.includes(JSON.stringify(asked).slice(1, -1))) throw new Error('The side chat did not get a copy of the conversation')
+  const shown = await evaluate(`(() => {
+    const pane = document.querySelector('.side-panel .panel-pane.is-active .side-chat')
+    return { bubbles: pane?.querySelectorAll('.chat-user-bubble').length ?? 0, of: pane?.querySelector('.side-chat-of')?.textContent ?? '' }
+  })()`)
+  console.log('[smoke] side chat:', JSON.stringify(shown))
+  if (shown.bubbles !== 1) throw new Error(`The side chat shows the chat's messages too, or not its own: ${JSON.stringify(shown)}`)
+  if (!shown.of.includes(chat.title)) throw new Error(`The side chat is not of the chat open now: ${JSON.stringify(shown)}`)
+  await screenshot('ui-dark-side-chat.png')
+  const after = (await history()).length
+  if (after !== entries.length) throw new Error(`The side chat added to the chat: ${entries.length} entries before, ${after} after`)
+  const listed = await evaluate("window.eNCode.agent.sessions().then((list) => list.filter((session) => session.sideOf || session.title === 'Side chat').length)")
+  if (listed) throw new Error('The sidebar lists the side chat')
+  if (JSON.stringify(await evaluate("JSON.parse(localStorage.getItem('eNCode.panels.v1') ?? '{}')")).includes('"chat"')) throw new Error('The side chat was saved with the tabs')
+  if (!(await click('.side-panel .panel-tab.is-active .panel-tab-close'))) throw new Error('The side chat has no close button')
+  await waitFor("!document.querySelector('.side-chat')", 4000, 'the side chat closes')
 }
 
 /**
@@ -5694,7 +5734,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, panels: runPanelChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, panels: runPanelChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

@@ -74,6 +74,8 @@ export const sessionActions = {
     await sessions().update(session.id, { unread: !session.unread })
   },
   fork: (session: SessionSummary) => sessions().fork(session.id),
+  /** A side chat of the session (ADR 0104), with a first question or none. */
+  side: (session: SessionSummary, question?: string) => usePanels.getState().openSideChat(session.id, question),
   async export(session: SessionSummary): Promise<void> {
     try {
       const target = await api.agent.export(session.id)
@@ -215,6 +217,7 @@ function createAppActions(): AppActions {
     archiveSession: withActive(sessionActions.archive),
     markUnread: withActive(sessionActions.toggleUnread),
     forkSession: withActive(sessionActions.fork),
+    sideChat: withActive((session) => void sessionActions.side(session)),
     exportSession: withActive(sessionActions.export),
     deleteSession: withActive(sessionActions.remove),
     back: () => void sessions().back(),

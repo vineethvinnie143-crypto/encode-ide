@@ -453,6 +453,7 @@ export function registerIpc(deps: IpcDeps): void {
     deps.onSessionRemoved?.(String(sessionId))
   })
   handle('agent:fork', (sessionId: string) => host.fork(String(sessionId)))
+  handle('agent:side', (sessionId: string) => host.side(String(sessionId)))
   handle('agent:rename', (sessionId: string, title: string) => host.rename(String(sessionId), String(title)))
   handle('agent:goal', (sessionId: string) => host.goal(String(sessionId)))
   handle('agent:set-goal', (sessionId: string, goal: SessionGoal | null) => host.setGoal(String(sessionId), goal ?? null))

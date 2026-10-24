@@ -36,6 +36,8 @@ const SCENARIOS = {
       text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
+  // A side chat's question (ADR 0104): one answer, which says what the copy of the conversation held.
+  'side-check': [{ text: 'Side answer: the chat above wrote provider-check.txt.' }],
   // A file written with an error in it: the language server says so after the step, and the error gate sends the agent
   // back when it wants to finish, so it writes the file again without the error.
   'lsp-gate': [

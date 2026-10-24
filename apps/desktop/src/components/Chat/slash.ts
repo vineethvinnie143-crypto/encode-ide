@@ -5,7 +5,7 @@
 import { EFFORT_INFO, isEffort } from '@shared/models'
 import type { ReasoningEffort } from '@shared/types'
 import { agentActions } from '../../commands/agent'
-import { commandRegistry } from '../../commands/app'
+import { commandRegistry, sessionActions } from '../../commands/app'
 import type { ScopeKind } from '../../stores/review'
 import { useSessions } from '../../stores/sessions'
 import { useSettings } from '../../stores/settings'
@@ -98,6 +98,12 @@ export const SLASH_RUNNERS: Readonly<Record<string, (args: string) => void | Pro
   init: () => agentActions.writeInstructions(),
   new: () => run('file.newSession'),
   fork: () => run('session.fork'),
+  side: async (args) => {
+    const { sessions, activeId } = useSessions.getState()
+    const current = sessions.find((session) => session.id === activeId)
+    if (current) await sessionActions.side(current, args || undefined)
+    else ui().notify('info', 'Open a session to start a side chat of it.')
+  },
   rename: async (args) => {
     const { activeId, rename } = useSessions.getState()
     if (args && activeId) await rename(activeId, args)

@@ -298,6 +298,49 @@ describe('forking', () => {
   })
 })
 
+describe('side chats', () => {
+  it('copy the conversation to ask about it on the side: left out of lists, told what they are, and gone with their session', async () => {
+    const h = await hostHarness({ script: [{ text: 'ok' }] })
+    const original = await h.host.create()
+    await h.host.start(original.id, { text: 'build it', mode: 'code' })
+
+    const side = await h.host.side(original.id)
+    assert.equal(side.sideOf, original.id)
+    assert.equal(side.title, 'Side chat')
+    assert.deepEqual((await h.host.history(side.id)).entries.map((entry) => entry.text), ['build it', 'ok'])
+    assert.equal((await h.host.sessions()).some((entry) => entry.id === side.id), false, 'the sidebar does not list it')
+
+    await h.host.start(side.id, { text: 'why that way?', mode: 'ask' })
+    const sent = JSON.stringify(h.client.requests.at(-1)!.payload.messages)
+    assert.match(sent, /build it/)
+    assert.match(sent, /This is a side chat/)
+    assert.equal((await h.host.history(original.id)).entries.length, 2, 'nothing goes back to the chat')
+    assert.equal((await h.host.sessions()).find((entry) => entry.id === side.id), undefined)
+
+    // A side chat of a side chat belongs to the same chat.
+    const again = await h.host.side(side.id)
+    assert.equal(again.sideOf, original.id)
+
+    await h.host.remove(original.id)
+    await assert.rejects(h.host.history(side.id), /does not exist/)
+    await assert.rejects(h.host.history(again.id), /does not exist/)
+  })
+
+  it('left from before are deleted when the host starts again, and only those', async () => {
+    const h = await hostHarness({ script: [{ text: 'ok' }] })
+    const original = await h.host.create()
+    await h.host.start(original.id, { text: 'build it', mode: 'code' })
+    const left = await h.host.side(original.id)
+    assert.equal(await h.host.removeSideChats(), 0, 'one that is open stays')
+    await h.host.dispose()
+
+    const next = await hostHarness({ host: { dir: h.dir, workspace: h.root || null } })
+    assert.equal(await next.host.removeSideChats(), 1)
+    await assert.rejects(next.host.history(left.id), /does not exist/)
+    assert.equal((await next.host.history(original.id)).entries.length, 2)
+  })
+})
+
 describe('goals', () => {
   const goal = { text: 'Ship v1', status: 'active' as const, rounds: 0, createdAt: 1, updatedAt: 1 }
 

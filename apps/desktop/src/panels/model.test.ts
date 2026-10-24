@@ -18,6 +18,7 @@ import {
   savedPanels,
   setLayout,
   showAgentSide,
+  showChatSide,
   stepSide,
   toggleBottom,
   toggleFull,
@@ -325,5 +326,27 @@ describe('agent tabs', () => {
     const closed = closeSide(state, 'agent-1')
     assert.deepEqual(closed.side.closed, [])
     assert.deepEqual(kinds(reopenSide(closed, id())), ['files'])
+  })
+})
+
+describe('side chats', () => {
+  const chat = (session: string) => ({ session, of: 'parent', at: 1 })
+
+  it('open beside the others, numbered, and bring the panel back', () => {
+    let state = setLayout(openSide(defaultPanels(), 'new', id()), 'hidden')
+    state = showChatSide(state, chat('s1'), 'chat-1')
+    state = showChatSide(state, chat('s2'), 'chat-2')
+    assert.deepEqual(kinds(state), ['files', 'new', 'chat', 'chat'])
+    assert.deepEqual(state.side.tabs.slice(2).map((tab) => tab.title), ['Side chat', 'Side chat 2'])
+    assert.equal(state.side.activeId, 'chat-2')
+    assert.equal(state.side.layout, 'split')
+  })
+
+  it('are not saved and not reopened: closing one deletes it', () => {
+    const state = showChatSide(defaultPanels(), chat('s1'), 'chat-1')
+    assert.deepEqual(kinds(savedPanels(state)), ['files'])
+    const closed = closeSide(state, 'chat-1')
+    assert.deepEqual(closed.side.closed, [])
+    assert.deepEqual(kinds(normalizePanels(JSON.parse(JSON.stringify(state)))), ['files'], 'a saved one would not come back either')
   })
 })
