@@ -1,0 +1,50 @@
+{
+  "id": "rename-many-files",
+  "title": "Rename a function used across seventeen files",
+  "prompt": "Rename formatCents to formatMoney everywhere under src/: it formats any currency's minor units now, not only cents. Every report must show exactly what it shows today. formatCentsWidth in src/layout/columns.js is a different function: leave it and its file alone. Run node --test at the end.",
+  "tags": [
+    "javascript",
+    "refactor",
+    "long",
+    "multi-file"
+  ],
+  "maxSteps": 40,
+  "allow": [
+    "Bash(node --test:*)"
+  ],
+  "checks": [
+    {
+      "kind": "search",
+      "name": "no formatCents is left",
+      "paths": [
+        "src"
+      ],
+      "pattern": "\\bformatCents\\b",
+      "expect": "none"
+    },
+    {
+      "kind": "unchanged",
+      "name": "the column layout is left alone",
+      "paths": [
+        "src/layout/columns.js"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "every report shows what it showed before, under the new name",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/rename.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the project's own tests still pass",
+      "run": [
+        "{{node}}",
+        "--test"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,342 @@
+{
+  "steps": [
+    {
+      "text": "I'll find every use of formatCents first, look-alikes included.",
+      "calls": [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "formatCents",
+            "path": "src",
+            "output_mode": "count"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/money.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/index.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/billing/invoices.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/billing/receipts.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/billing/refunds.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/billing/credits.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/billing/fees.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/payouts/payouts.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/payouts/tips.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/payouts/payroll.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/reports/statements.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/reports/taxes.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/reports/ledger.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/reports/budgets.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/shop/discounts.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/shop/subscriptions.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/shop/shipping.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/money.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/index.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/billing/invoices.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/billing/receipts.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/billing/refunds.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/billing/credits.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/billing/fees.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/payouts/payouts.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/payouts/tips.js",
+            "old_string": "import { formatCents as cents }",
+            "new_string": "import { formatMoney as cents }"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/payouts/payroll.js",
+            "old_string": "money.formatCents(",
+            "new_string": "money.formatMoney(",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/reports/statements.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/reports/taxes.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/reports/ledger.js",
+            "old_string": "import { formatCents } from",
+            "new_string": "import { formatMoney } from"
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/reports/ledger.js",
+            "old_string": "formatCents(",
+            "new_string": "formatMoney(",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/reports/budgets.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/shop/discounts.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/shop/subscriptions.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/shop/shipping.js",
+            "old_string": "formatCents",
+            "new_string": "formatMoney",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "text": "Every file is renamed. ledger.js imports formatCentsWidth too, so there I renamed only the calls to the formatter.",
+      "calls": [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "\\bformatCents\\b",
+            "path": "src",
+            "output_mode": "files_with_matches"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node --test",
+            "description": "Run the tests"
+          }
+        }
+      ]
+    },
+    {
+      "text": "formatCents is formatMoney now in all seventeen files under src/, including the re-export in index.js, the alias import in tips.js and the namespace calls in payroll.js. formatCentsWidth and columns.js are as they were, and the tests pass."
+    }
+  ]
+}

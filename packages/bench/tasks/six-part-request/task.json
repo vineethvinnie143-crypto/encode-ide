@@ -1,0 +1,34 @@
+{
+  "id": "six-part-request",
+  "title": "Make six changes asked for in one message",
+  "prompt": "Six changes to the inventory service, please:\n\n1. stock.js: reserve must refuse a quantity above what is on hand with a RangeError, and change nothing when it does.\n2. pricing.js: bulk prices are 5% off from 50 units and 10% off from 200 units (today it is 5% from 100).\n3. report.js: sort the low-stock report by days of stock left, fewest first, ties by SKU.\n4. config.js: add a lowStockDays setting, 7 unless INVENTORY_LOW_STOCK_DAYS is a positive whole number, and have the low-stock report use it instead of its own 7.\n5. Record a reservation in the audit log the same way a restock is recorded (a refused one is not recorded).\n6. export.js: write the CSV with semicolons and a header row sku;name;on_hand;price, and quote a field that has a semicolon or a double quote in it.\n\nRun node --test when all six are done.",
+  "tags": [
+    "javascript",
+    "recall",
+    "long",
+    "multi-file"
+  ],
+  "maxSteps": 40,
+  "allow": [
+    "Bash(node --test:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "all six changes are made",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/six.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the project's own tests still pass",
+      "run": [
+        "{{node}}",
+        "--test"
+      ]
+    }
+  ]
+}

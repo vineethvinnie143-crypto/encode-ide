@@ -1,0 +1,72 @@
+{
+  "steps": [
+    {
+      "text": "I'll run the import to see what it skips.",
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node scripts/import.js",
+            "description": "Run the nightly import"
+          }
+        }
+      ]
+    },
+    {
+      "text": "One of 5,000 records is skipped, and the line that says which is somewhere in the middle. I'll pick it out.",
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node scripts/import.js | grep skipped",
+            "description": "Show only the skipped records"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/amount.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Row 2438 (R-02437) writes its amount as \"1,250.00\", with a thousands separator, and Number() cannot read that.",
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/amount.js",
+            "old_string": "  const value = Number(String(text).trim())\n  if (String(text).trim() === '' || !Number.isFinite(value)) return undefined",
+            "new_string": "  // The export writes a thousands separator in some amounts (\"1,250.00\"); only one between groups of three digits.\n  const plain = String(text).trim().replace(/(\\d),(?=\\d{3}(?:[.,]|$))/g, '$1')\n  const value = Number(plain)\n  if (plain === '' || !Number.isFinite(value)) return undefined"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node scripts/import.js",
+            "description": "Run the import again"
+          }
+        },
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node --test",
+            "description": "Run the tests"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Record R-02437 (row 2438 of the export) gives its amount as \"1,250.00\". `parseAmount` passed the text straight to `Number()`, which reads a thousands separator as not a number, so the record was skipped. It now drops a comma between digit groups before reading. All 5,000 records are booked and the tests pass."
+    }
+  ]
+}

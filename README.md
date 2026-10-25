@@ -555,7 +555,10 @@ when it is 25% cheaper per task solved at equal accuracy. `--window 16000` runs 
 compaction itself is measured (a report says how many calls rewrote the conversation and how many summaries ran),
 and every run's code is read for what a reviewer would send back: a file that no longer parses, a change several times
 the reference's, a stray file, an edited test, a debug print, a TODO; the `clean` column counts the runs with none,
-and the gate holds that too. A tester's **Report a problem with this request**
+and the gate holds that too. Four long tasks (`--tag long`,
+[ADR 0131](docs/adr/0131-long-tasks-measure-what-shortening-and-summaries-keep.md)) run past the point where old
+results are shortened: a rule read first and needed last, a rename across seventeen files, one bad record in 5,000
+lines of output, and six changes asked for in one message. A tester's **Report a problem with this request**
 file replays with `pnpm turn-report report.json`, call by call against what the tools did for the tester, without
 running its commands; `--save <name>` keeps it as a task whose replay the tests then hold to.
 

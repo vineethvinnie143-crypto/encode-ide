@@ -1,0 +1,41 @@
+{
+  "id": "recall-early-rule",
+  "title": "Apply a rule read at the start of a long task",
+  "prompt": "Read docs/PROTOCOL.md first. Then go through every handler in src/handlers/: each must throw a ProtocolError (from src/errors.js) when a message lacks a field its comment lists as required. When every handler is done, write encodeFrame in src/frame.js exactly as the protocol describes. Run node --test at the end.",
+  "tags": [
+    "javascript",
+    "recall",
+    "long",
+    "multi-file"
+  ],
+  "maxSteps": 40,
+  "allow": [
+    "Bash(node --test:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "every handler refuses a missing field, and frames are written as the protocol says",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/recall.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the project's own tests still pass",
+      "run": [
+        "{{node}}",
+        "--test"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the protocol is left alone",
+      "paths": [
+        "docs"
+      ]
+    }
+  ]
+}

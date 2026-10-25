@@ -1,0 +1,316 @@
+{
+  "steps": [
+    {
+      "text": "Six changes across six files. I'll list them, then read the files.",
+      "calls": [
+        {
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Refuse a reservation above what is on hand",
+                "activeForm": "Refusing a reservation above what is on hand",
+                "status": "in_progress"
+              },
+              {
+                "content": "Change the bulk prices",
+                "activeForm": "Changing the bulk prices",
+                "status": "pending"
+              },
+              {
+                "content": "Sort the low-stock report by days left",
+                "activeForm": "Sorting the low-stock report by days left",
+                "status": "pending"
+              },
+              {
+                "content": "Add the lowStockDays setting",
+                "activeForm": "Adding the lowStockDays setting",
+                "status": "pending"
+              },
+              {
+                "content": "Record reservations in the audit log",
+                "activeForm": "Recording reservations in the audit log",
+                "status": "pending"
+              },
+              {
+                "content": "Write the CSV with semicolons and a header",
+                "activeForm": "Writing the CSV with semicolons and a header",
+                "status": "pending"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/stock.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/pricing.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/report.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/config.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/audit.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/export.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/stock.js",
+            "old_string": "      checkQty(qty)\n      item.onHand -= qty\n      return item.onHand",
+            "new_string": "      checkQty(qty)\n      if (qty > item.onHand) throw new RangeError(`only ${item.onHand} of ${sku} on hand, not ${qty}`)\n      item.onHand -= qty\n      audit?.record({ action: 'reserve', sku, qty, at: now() })\n      return item.onHand"
+          }
+        },
+        {
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Refuse a reservation above what is on hand",
+                "activeForm": "Refusing a reservation above what is on hand",
+                "status": "completed"
+              },
+              {
+                "content": "Change the bulk prices",
+                "activeForm": "Changing the bulk prices",
+                "status": "in_progress"
+              },
+              {
+                "content": "Sort the low-stock report by days left",
+                "activeForm": "Sorting the low-stock report by days left",
+                "status": "pending"
+              },
+              {
+                "content": "Add the lowStockDays setting",
+                "activeForm": "Adding the lowStockDays setting",
+                "status": "pending"
+              },
+              {
+                "content": "Record reservations in the audit log",
+                "activeForm": "Recording reservations in the audit log",
+                "status": "pending"
+              },
+              {
+                "content": "Write the CSV with semicolons and a header",
+                "activeForm": "Writing the CSV with semicolons and a header",
+                "status": "pending"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/pricing.js",
+            "old_string": "export const BULK_FROM = 100\nexport const BULK_DISCOUNT = 0.05\n\n/** The price of `qty` units of an item, in whole cents, rounded to the nearest cent. */\nexport function priceFor(item, qty) {\n  const base = item.price * qty\n  return Math.round(qty >= BULK_FROM ? base * (1 - BULK_DISCOUNT) : base)\n}",
+            "new_string": "/** Bulk discounts, largest first: from how many units, and the share taken off. */\nexport const BULK = Object.freeze([\n  { from: 200, discount: 0.1 },\n  { from: 50, discount: 0.05 },\n])\n\n/** The price of `qty` units of an item, in whole cents, rounded to the nearest cent. */\nexport function priceFor(item, qty) {\n  const base = item.price * qty\n  const tier = BULK.find((entry) => qty >= entry.from)\n  return Math.round(tier ? base * (1 - tier.discount) : base)\n}"
+          }
+        },
+        {
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Refuse a reservation above what is on hand",
+                "activeForm": "Refusing a reservation above what is on hand",
+                "status": "completed"
+              },
+              {
+                "content": "Change the bulk prices",
+                "activeForm": "Changing the bulk prices",
+                "status": "completed"
+              },
+              {
+                "content": "Sort the low-stock report by days left",
+                "activeForm": "Sorting the low-stock report by days left",
+                "status": "in_progress"
+              },
+              {
+                "content": "Add the lowStockDays setting",
+                "activeForm": "Adding the lowStockDays setting",
+                "status": "pending"
+              },
+              {
+                "content": "Record reservations in the audit log",
+                "activeForm": "Recording reservations in the audit log",
+                "status": "pending"
+              },
+              {
+                "content": "Write the CSV with semicolons and a header",
+                "activeForm": "Writing the CSV with semicolons and a header",
+                "status": "pending"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/config.js",
+            "old_string": "  if (env.INVENTORY_TZ && /^[A-Za-z_]+(?:\\/[A-Za-z_]+)*$/.test(env.INVENTORY_TZ)) config.timezone = env.INVENTORY_TZ\n",
+            "new_string": "  if (env.INVENTORY_TZ && /^[A-Za-z_]+(?:\\/[A-Za-z_]+)*$/.test(env.INVENTORY_TZ)) config.timezone = env.INVENTORY_TZ\n  config.lowStockDays = /^[1-9]\\d*$/.test(env.INVENTORY_LOW_STOCK_DAYS ?? '') ? Number(env.INVENTORY_LOW_STOCK_DAYS) : 7\n"
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/report.js",
+            "old_string": "const LOW_STOCK_DAYS = 7\n\n",
+            "new_string": "/** The low-stock window when the settings name none (config.js reads INVENTORY_LOW_STOCK_DAYS). */\nconst LOW_STOCK_DAYS = 7\n\n"
+          }
+        },
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/report.js",
+            "old_string": "/** The items that run out within the low-stock window, by SKU, each with its whole days left. */\nexport function lowStockReport(items, config = {}) {\n  return items\n    .filter((item) => daysLeft(item) < LOW_STOCK_DAYS)\n    .sort((a, b) => a.sku.localeCompare(b.sku))",
+            "new_string": "/** The items that run out within the low-stock window, fewest days left first (ties by SKU), each with its whole days left. */\nexport function lowStockReport(items, config = {}) {\n  const window = config.lowStockDays ?? LOW_STOCK_DAYS\n  return items\n    .filter((item) => daysLeft(item) < window)\n    .sort((a, b) => daysLeft(a) - daysLeft(b) || a.sku.localeCompare(b.sku))"
+          }
+        },
+        {
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Refuse a reservation above what is on hand",
+                "activeForm": "Refusing a reservation above what is on hand",
+                "status": "completed"
+              },
+              {
+                "content": "Change the bulk prices",
+                "activeForm": "Changing the bulk prices",
+                "status": "completed"
+              },
+              {
+                "content": "Sort the low-stock report by days left",
+                "activeForm": "Sorting the low-stock report by days left",
+                "status": "completed"
+              },
+              {
+                "content": "Add the lowStockDays setting",
+                "activeForm": "Adding the lowStockDays setting",
+                "status": "completed"
+              },
+              {
+                "content": "Record reservations in the audit log",
+                "activeForm": "Recording reservations in the audit log",
+                "status": "completed"
+              },
+              {
+                "content": "Write the CSV with semicolons and a header",
+                "activeForm": "Writing the CSV with semicolons and a header",
+                "status": "in_progress"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/export.js",
+            "old_string": "/** One row per item: SKU, name, units on hand, price in cents. */\nexport function exportCsv(items) {\n  return items.map((item) => [item.sku, item.name, item.onHand, item.price].join(',')).join('\\n') + '\\n'\n}",
+            "new_string": "/** A field as the spreadsheet reads it: quoted, with its quotes doubled, when it holds a semicolon, a quote or a line break. */\nfunction field(value) {\n  const text = String(value)\n  return /[;\"\\r\\n]/.test(text) ? `\"${text.replace(/\"/g, '\"\"')}\"` : text\n}\n\n/** A header row, then one row per item: SKU, name, units on hand, price in cents, separated by semicolons. */\nexport function exportCsv(items) {\n  const rows = [['sku', 'name', 'on_hand', 'price'], ...items.map((item) => [item.sku, item.name, item.onHand, item.price])]\n  return rows.map((row) => row.map(field).join(';')).join('\\n') + '\\n'\n}"
+          }
+        },
+        {
+          "name": "TodoWrite",
+          "input": {
+            "todos": [
+              {
+                "content": "Refuse a reservation above what is on hand",
+                "activeForm": "Refusing a reservation above what is on hand",
+                "status": "completed"
+              },
+              {
+                "content": "Change the bulk prices",
+                "activeForm": "Changing the bulk prices",
+                "status": "completed"
+              },
+              {
+                "content": "Sort the low-stock report by days left",
+                "activeForm": "Sorting the low-stock report by days left",
+                "status": "completed"
+              },
+              {
+                "content": "Add the lowStockDays setting",
+                "activeForm": "Adding the lowStockDays setting",
+                "status": "completed"
+              },
+              {
+                "content": "Record reservations in the audit log",
+                "activeForm": "Recording reservations in the audit log",
+                "status": "completed"
+              },
+              {
+                "content": "Write the CSV with semicolons and a header",
+                "activeForm": "Writing the CSV with semicolons and a header",
+                "status": "completed"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node --test",
+            "description": "Run the tests"
+          }
+        }
+      ]
+    },
+    {
+      "text": "All six are done and the tests pass:\n\n1. `reserve` throws a RangeError for more than is on hand and changes nothing.\n2. Bulk prices are 5% off from 50 units and 10% from 200.\n3. The low-stock report goes by days left, fewest first, ties by SKU.\n4. `lowStockDays` comes from `INVENTORY_LOW_STOCK_DAYS` (7 otherwise), and the report uses it.\n5. A reservation is recorded in the audit log like a restock; a refused one is not.\n6. The CSV uses semicolons, has the header row, and quotes fields with a semicolon or a quote."
+    }
+  ]
+}

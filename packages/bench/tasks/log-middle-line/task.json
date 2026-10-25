@@ -1,0 +1,52 @@
+{
+  "id": "log-middle-line",
+  "title": "Find one bad record in a five-thousand-line output",
+  "prompt": "The nightly import (node scripts/import.js) says a record was skipped, so the books do not balance. Find out why and fix the code that reads amounts. The bank's export and the import script are as the bank and finance want them: leave data/ and scripts/ alone.",
+  "tags": [
+    "javascript",
+    "long-output",
+    "debugging",
+    "long"
+  ],
+  "maxSteps": 25,
+  "allow": [
+    "Bash(node scripts/import.js:*)",
+    "Bash(node --test:*)",
+    "Bash(grep:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "every record is booked",
+      "run": [
+        "{{node}}",
+        "scripts/import.js"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "amounts are read with or without a thousands separator",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/amount.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "the project's own tests still pass",
+      "run": [
+        "{{node}}",
+        "--test"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the export and the import script are left alone",
+      "paths": [
+        "data",
+        "scripts"
+      ]
+    }
+  ]
+}

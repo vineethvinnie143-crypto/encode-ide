@@ -1,0 +1,209 @@
+{
+  "steps": [
+    {
+      "text": "I'll read the protocol first.",
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "docs/PROTOCOL.md"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/errors.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/join.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/leave.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/chat.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/move.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/trade.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/emote.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/ping.js"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/handlers/report.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/join.js",
+            "old_string": "// Handles a \"join\" message. Required fields: room, name.\nexport function handleJoin(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"join\" message. Required fields: room, name.\nexport function handleJoin(message) {\n  for (const field of ['room', 'name']) {\n    if (message[field] === undefined) throw new ProtocolError(`join needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/leave.js",
+            "old_string": "// Handles a \"leave\" message. Required fields: room.\nexport function handleLeave(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"leave\" message. Required fields: room.\nexport function handleLeave(message) {\n  for (const field of ['room']) {\n    if (message[field] === undefined) throw new ProtocolError(`leave needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/chat.js",
+            "old_string": "// Handles a \"chat\" message. Required fields: room, text.\nexport function handleChat(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"chat\" message. Required fields: room, text.\nexport function handleChat(message) {\n  for (const field of ['room', 'text']) {\n    if (message[field] === undefined) throw new ProtocolError(`chat needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/move.js",
+            "old_string": "// Handles a \"move\" message. Required fields: x, y.\nexport function handleMove(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"move\" message. Required fields: x, y.\nexport function handleMove(message) {\n  for (const field of ['x', 'y']) {\n    if (message[field] === undefined) throw new ProtocolError(`move needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/trade.js",
+            "old_string": "// Handles a \"trade\" message. Required fields: to, items.\nexport function handleTrade(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"trade\" message. Required fields: to, items.\nexport function handleTrade(message) {\n  for (const field of ['to', 'items']) {\n    if (message[field] === undefined) throw new ProtocolError(`trade needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/emote.js",
+            "old_string": "// Handles a \"emote\" message. Required fields: name.\nexport function handleEmote(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"emote\" message. Required fields: name.\nexport function handleEmote(message) {\n  for (const field of ['name']) {\n    if (message[field] === undefined) throw new ProtocolError(`emote needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/ping.js",
+            "old_string": "// Handles a \"ping\" message. Required fields: at.\nexport function handlePing(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"ping\" message. Required fields: at.\nexport function handlePing(message) {\n  for (const field of ['at']) {\n    if (message[field] === undefined) throw new ProtocolError(`ping needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/handlers/report.js",
+            "old_string": "// Handles a \"report\" message. Required fields: player, reason.\nexport function handleReport(message) {\n",
+            "new_string": "import { ProtocolError } from '../errors.js'\n\n// Handles a \"report\" message. Required fields: player, reason.\nexport function handleReport(message) {\n  for (const field of ['player', 'reason']) {\n    if (message[field] === undefined) throw new ProtocolError(`report needs ${field}`)\n  }\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/frame.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Every handler refuses a missing field now. The frame, as the protocol's Framing section says: ENC7, version 3, a big-endian length, the payload, and an XOR checksum.",
+      "calls": [
+        {
+          "name": "Write",
+          "input": {
+            "file_path": "src/frame.js",
+            "content": "// Builds the frame that carries a message, as docs/PROTOCOL.md describes under Framing. Returns a Buffer.\nexport function encodeFrame(payload) {\n  const body = Buffer.from(JSON.stringify(payload), 'utf8')\n  let checksum = 0\n  for (const byte of body) checksum ^= byte\n  const header = Buffer.from([0x45, 0x4e, 0x43, 0x37, 3, 0, 0])\n  header.writeUInt16BE(body.length, 5)\n  return Buffer.concat([header, body, Buffer.from([checksum])])\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node --test",
+            "description": "Run the tests"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Each of the eight handlers throws a ProtocolError when a required field is missing, and `encodeFrame` writes `ENC7`, version 3, the payload length big-endian, the JSON payload and its XOR checksum. The tests pass."
+    }
+  ]
+}
