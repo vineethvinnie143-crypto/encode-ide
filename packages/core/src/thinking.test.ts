@@ -37,7 +37,8 @@ describe('ThinkingTicker', () => {
     // A thought longer than the line is shown by its end, marked as cut.
     now += THINKING_EVERY_MS
     ticker.add(' and more'.repeat(30))
-    assert.equal(sent.at(-1)?.cut, true)
+    // deepEqual above narrowed the list's type to entries without `cut`.
+    assert.equal((sent.at(-1) as ThinkingProgress | undefined)?.cut, true)
     ticker.end()
     assert.equal(sent.at(-1), null)
     assert.equal(sent.length, 4)
