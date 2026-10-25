@@ -72,15 +72,17 @@ def main(argv: list[str]) -> int:
     else:
         chosen = runnable
 
+    lines = [
+        f"### Tasks: {len(chosen)} of {len(tasks)}",
+        "",
+        f"{len(runnable)} can run on this machine. Chosen: {', '.join(chosen)}.",
+        "",
+    ]
+    if left_out:
+        lines += ["Left out:", ""] + [f"- {name}: {why}" for name, why in sorted(left_out.items())] + [""]
+    # Standard error, so a run's log says it too.
+    print("\n".join(lines), file=sys.stderr)
     if args.summary:
-        lines = [
-            f"### Tasks: {len(chosen)} of {len(tasks)}",
-            "",
-            f"{len(runnable)} can run on this machine. Chosen: {', '.join(chosen)}.",
-            "",
-        ]
-        if left_out:
-            lines += ["Left out:", ""] + [f"- {name}: {why}" for name, why in sorted(left_out.items())] + [""]
         with args.summary.open("a") as file:
             file.write("\n".join(lines) + "\n")
     # Harbor names a dataset's tasks <org>/<task>.

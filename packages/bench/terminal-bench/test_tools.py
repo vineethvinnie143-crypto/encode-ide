@@ -41,8 +41,9 @@ class ChooseTasksTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.split(), ["*/build-server", "*/count-words", "*/fix-git"])
         summary = self.root / "summary.md"
-        code, first, _ = run(choose_tasks.main, str(self.root), "--sample", "2", "--seed", "7", "--summary", str(summary))
+        code, first, said = run(choose_tasks.main, str(self.root), "--sample", "2", "--seed", "7", "--summary", str(summary))
         self.assertEqual(code, 0)
+        self.assertEqual(said.strip(), summary.read_text().strip(), "the log says what the summary says")
         self.assertEqual(len(first.split()), 2)
         self.assertEqual(run(choose_tasks.main, str(self.root), "--sample", "2", "--seed", "7")[1], first, "the same seed")
         text = summary.read_text()
