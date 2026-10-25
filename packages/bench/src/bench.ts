@@ -1,6 +1,7 @@
 /**
  * Runs tasks one after another, each as often as asked, into one report. One at a time: runs side by side would
- * share the machine and the provider's rate limits, and measure each other.
+ * share the machine and the provider's rate limits, and measure each other. Runs go in rounds, every task once a round,
+ * so a bench that stops early (a spending cap, ADR 0137) has measured every task about as often.
  */
 import { createScriptedClient, type AgentSettings } from '@encode/core'
 import type { ModelClient } from '@encode/providers'
@@ -8,6 +9,7 @@ import { findPrograms, type Programs } from './programs'
 import type { QualityFacts } from './quality'
 import type { BenchReport } from './report'
 import { runTask, skippedRun, type RunOptions, type TaskRun } from './run'
+import type { SpendingCap } from './spend'
 import type { BenchTask } from './task'
 
 export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | 'attempt'> {
@@ -16,7 +18,14 @@ export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | '
   /** What the report names as the model. */
   model: string
   repeat?: number
-  onRun?(run: TaskRun, task: BenchTask): void
+  /** A hard stop on what the runs spend, every run of every setup together (ADR 0137). */
+  cap?: SpendingCap
+  /** `setup`: which of runPair's two setups ran it; 0 for runBench. */
+  onRun?(run: TaskRun, task: BenchTask, setup: number): void
+  /** A round starts: 1 for the first. */
+  onRound?(round: number): void
+  /** After each run, the reports so far in hand: a reason to end the bench there, or undefined to go on. */
+  stopIf?(reports: readonly BenchReport[], round: number, roundDone: boolean): string | undefined
   now?: () => Date
 }
 
@@ -55,10 +64,25 @@ async function referenceFacts(task: BenchTask, options: BenchOptions, programs: 
 }
 
 export async function runBench(tasks: readonly BenchTask[], options: BenchOptions): Promise<BenchReport> {
-  const programs = await findPrograms(tasks.flatMap((task) => task.requires))
-  const window = options.settings?.contextCap
-  const effort = options.settings?.reasoning
-  const report: BenchReport = {
+  return (await runSetups(tasks, options, [options.settings]))[0]!
+}
+
+/**
+ * Every task run two ways, side by side: as `options.settings` say, and with `second` on top (ADR 0137). Each round
+ * runs a task both ways, one right after the other, so the two meet the same provider, the same hour and the same
+ * load; they take turns going first, since the second meets a provider cache the first may have warmed.
+ */
+export async function runPair(tasks: readonly BenchTask[], options: BenchOptions, second: Partial<AgentSettings>): Promise<[BenchReport, BenchReport]> {
+  const [first, other] = await runSetups(tasks, options, [options.settings, { ...options.settings, ...second }])
+  return [first!, other!]
+}
+
+const dollars = (value: number) => `$${value.toFixed(2)}`
+
+function emptyReport(options: BenchOptions, settings: Partial<AgentSettings> | undefined): BenchReport {
+  const window = settings?.contextCap
+  const effort = settings?.reasoning
+  return {
     kind: 'encode-bench',
     version: 1,
     model: options.model,
@@ -66,21 +90,54 @@ export async function runBench(tasks: readonly BenchTask[], options: BenchOption
     platform: process.platform,
     ...(window ? { window } : {}),
     ...(effort ? { effort } : {}),
-    ...(options.settings?.lightSteps ? { lightSteps: true as const } : {}),
+    ...(settings?.lightSteps ? { lightSteps: true as const } : {}),
     runs: [],
   }
+}
+
+async function runSetups(tasks: readonly BenchTask[], options: BenchOptions, setups: readonly (Partial<AgentSettings> | undefined)[]): Promise<BenchReport[]> {
+  const programs = await findPrograms(tasks.flatMap((task) => task.requires))
+  const reports = setups.map((settings) => emptyReport(options, settings))
+  const { cap } = options
+  const live = options.client === 'reference' ? 'reference' : cap ? cap.wrap(options.client) : options.client
+  const signal = cap ? (options.signal ? AbortSignal.any([options.signal, cap.signal]) : cap.signal) : options.signal
   const repeat = Math.max(1, Math.min(options.repeat ?? 1, 20))
-  for (const task of tasks) {
-    // A model's code is judged against what the task's own solution changes; that solution plays in a moment.
-    const reference = options.client === 'reference' ? undefined : await referenceFacts(task, options, programs)
-    for (let attempt = 1; attempt <= repeat; attempt++) {
-      if (options.signal?.aborted) return report
-      const client = options.client === 'reference' ? referenceClient(task) : options.client
-      const settings = options.client === 'reference' ? { ...options.settings, ...REFERENCE_SETTINGS } : options.settings
-      const run = client ? await runTask(task, { ...options, ...(settings ? { settings } : {}), client, programs, attempt, ...(reference ? { reference } : {}) }) : skippedRun(task, 'it has no reference solution', attempt)
-      report.runs.push(run)
-      options.onRun?.(run, task)
+  // A model's code is judged against what the task's own solution changes; that solution plays before the task's first run.
+  const references = new Map<string, QualityFacts | undefined>()
+  let ended: string | undefined
+  let lastRound = 0
+  rounds: for (let attempt = 1; attempt <= repeat; attempt++) {
+    // A round starts only when what is left pays for one like the last: a round cut short measures some tasks less.
+    if (cap && attempt > 1 && cap.spent() + lastRound > cap.limit) {
+      cap.stop(`round ${attempt} would cost about ${dollars(lastRound)}, and ${dollars(Math.max(0, cap.limit - cap.spent()))} of the spending cap is left`)
     }
+    if (signal?.aborted) break
+    options.onRound?.(attempt)
+    const before = cap?.spent() ?? 0
+    for (const [taskIndex, task] of tasks.entries()) {
+      if (live !== 'reference' && !references.has(task.id)) references.set(task.id, await referenceFacts(task, options, programs))
+      const reference = references.get(task.id)
+      const order = setups.map((_, index) => (attempt % 2 ? index : setups.length - 1 - index))
+      for (const [step, index] of order.entries()) {
+        if (signal?.aborted) break rounds
+        const client = live === 'reference' ? referenceClient(task) : live
+        const settings = live === 'reference' ? { ...setups[index], ...REFERENCE_SETTINGS } : setups[index]
+        const run = client
+          ? await runTask(task, { ...options, ...(settings ? { settings } : {}), ...(signal ? { signal } : {}), client, programs, attempt, ...(reference ? { reference } : {}) })
+          : skippedRun(task, 'it has no reference solution', attempt)
+        if (run.stopped === 'cancelled' && cap?.stopped() && !options.signal?.aborted) run.reason = `The benchmark stopped: ${cap.stopped()}.`
+        reports[index]!.runs.push(run)
+        options.onRun?.(run, task, index)
+        ended = options.stopIf?.(reports, attempt, taskIndex === tasks.length - 1 && step === order.length - 1)
+        if (ended) break rounds
+      }
+    }
+    lastRound = (cap?.spent() ?? 0) - before
   }
-  return report
+  const why = ended ?? cap?.stopped()
+  for (const report of reports) {
+    if (cap) report.spending = { limit: cap.limit, spent: cap.spent() }
+    if (why) report.endedEarly = why
+  }
+  return reports
 }

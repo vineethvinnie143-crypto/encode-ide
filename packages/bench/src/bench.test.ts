@@ -6,7 +6,7 @@ import { after, describe, test } from 'node:test'
 import { createScriptedClient, type ScriptedStep } from '@encode/core'
 import type { CompletionRequest, ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
-import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
+import { compareReports, dropChance, findPrograms, formatReport, gate, listedCost, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, spendingCap, summarize, TaskError, type BenchReport, type TaskRun } from './index'
 
 const TASKS = path.join(process.cwd(), 'packages', 'bench', 'tasks')
 const made: string[] = []
@@ -276,6 +276,51 @@ describe('what a run spent', () => {
   })
 })
 
+describe('a spending cap (ADR 0137)', () => {
+  const request = { role: 'main', payload: { system: [], messages: [], tools: [] }, requirements: {}, signal: new AbortController().signal } as unknown as CompletionRequest
+  const billed = (cost: number | undefined, price?: { input: number; output: number }): ModelClient => ({
+    budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000, ...(price ? { price, cache: { read: 0.1, write: 1, boundThinking: false, source: 'price' as const } } : {}) }),
+    complete: async () => ({
+      kind: 'done',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }], origin: { provider: 'openrouter', model: 'some/model', family: 'other' } },
+      usage: { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 800_000, cacheWriteTokens: 0, ...(cost !== undefined ? { cost } : {}) },
+      finish: 'stop',
+    }),
+  })
+
+  test('prices a call by the listed prices when the provider does not say', () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 800_000, cacheWriteTokens: 0 }
+    // 200k uncached at $0.30, 800k cached at a tenth of that, 100k written at $1.20.
+    assert.ok(Math.abs(listedCost(usage, { price: { input: 0.3, output: 1.2 }, cache: { read: 0.1, write: 1, boundThinking: false, source: 'price' } })! - (0.06 + 0.024 + 0.12)) < 1e-12)
+    assert.equal(listedCost(usage, {}), undefined)
+    assert.equal(listedCost(usage, { price: { input: 0, output: 0 } }), undefined, 'a price of nothing is no price')
+  })
+
+  test('refuses the call that could pass the limit, and stops the bench', async () => {
+    const cap = spendingCap(1)
+    const client = cap.wrap(billed(0.4))
+    await client.complete(request)
+    await client.complete(request)
+    assert.equal(cap.spent(), 0.8)
+    assert.equal(cap.signal.aborted, false)
+    await assert.rejects(client.complete(request), /The benchmark stopped: it reached its spending cap \(\$0\.80 of \$1\.00 spent; the next call could cost \$0\.40\)/)
+    assert.equal(cap.signal.aborted, true)
+    assert.equal(cap.spent(), 0.8, 'the refused call was never made')
+    await assert.rejects(client.complete(request), /stopped/)
+  })
+
+  test('counts a call the provider did not price by the listed prices, and stops when there are none', async () => {
+    const listed = spendingCap(5)
+    await listed.wrap(billed(undefined, { input: 0.3, output: 1.2 })).complete(request)
+    assert.ok(Math.abs(listed.spent() - 0.204) < 1e-12)
+    const unknown = spendingCap(5)
+    await unknown.wrap(billed(undefined)).complete(request)
+    assert.match(unknown.stopped() ?? '', /a call to some\/model said nothing of what it cost, and the model has no listed price/)
+    assert.equal(unknown.signal.aborted, true)
+    assert.throws(() => spendingCap(0), /above 0/)
+  })
+})
+
 describe('reports', () => {
   const run = (task: string, outcome: TaskRun['outcome'], metrics: Partial<TaskRun['metrics']> = {}): TaskRun => ({
     task,
@@ -396,9 +441,61 @@ describe('reports', () => {
     solved.solution = [{ calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] }]
     const seen: string[] = []
     const result = await runBench([task, solved], { client: 'reference', model: 'reference', repeat: 2, onRun: (done) => seen.push(`${done.task}#${done.attempt} ${done.outcome}`) })
-    assert.deepEqual(seen, ['sample#1 skipped', 'sample#2 skipped', 'solved#1 passed', 'solved#2 passed'])
+    // Round by round: every task once, then every task again.
+    assert.deepEqual(seen, ['sample#1 skipped', 'solved#1 passed', 'sample#2 skipped', 'solved#2 passed'])
     assert.equal(result.model, 'reference')
     assert.equal(parseReport(JSON.parse(JSON.stringify(result))).runs.length, 4)
+  })
+})
+
+describe('a bench that stops at its cap, and a pair of setups (ADR 0137)', () => {
+  /** Writes done.txt, then says so: two calls a run, each billed at `cost`. */
+  const writer = (cost: number) =>
+    createScriptedClient((request) => (request.payload.messages.some((message) => message.content.some((block) => block.type === 'tool-result')) ? { text: 'Done.' } : { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] }), { costPerCall: cost })
+  const tasks = async () => [await readTask(await makeTask(base)), await readTask(await makeTask({ ...base, id: 'other' }))]
+
+  test('stops the run whose next call could pass the cap, and makes no other', async () => {
+    const seen: string[] = []
+    const report = await runBench(await tasks(), { client: writer(0.1), model: 'm', repeat: 3, settings: REFERENCE_SETTINGS, cap: spendingCap(0.35), onRun: (done) => seen.push(`${done.task}#${done.attempt} ${done.outcome}`) })
+    assert.deepEqual(seen, ['sample#1 passed', 'other#1 error'])
+    assert.match(report.runs[1]!.reason ?? '', /^The benchmark stopped: it reached its spending cap \(\$0\.30 of \$0\.35 spent; the next call could cost \$0\.10\)\.$/)
+    assert.deepEqual(report.spending, { limit: 0.35, spent: 0.30000000000000004 })
+    assert.match(report.endedEarly ?? '', /spending cap/)
+    assert.match(formatReport(report), /^Spent \$0\.300 of the \$0\.350 cap$/m)
+  })
+
+  test('starts a round only when what is left pays for one like the last', async () => {
+    const report = await runBench(await tasks(), { client: writer(0.1), model: 'm', repeat: 5, settings: REFERENCE_SETTINGS, cap: spendingCap(1) })
+    // A round costs $0.40: two rounds leave $0.20.
+    assert.deepEqual(report.runs.map((done) => `${done.task}#${done.attempt} ${done.outcome}`), ['sample#1 passed', 'other#1 passed', 'sample#2 passed', 'other#2 passed'])
+    assert.equal(report.endedEarly, 'round 3 would cost about $0.40, and $0.20 of the spending cap is left')
+  })
+
+  test('runs every task both ways, taking turns to go first, and ends when told', async () => {
+    const seen: string[] = []
+    const rounds: boolean[] = []
+    const [plainReport, lightReport] = await runPair(
+      await tasks(),
+      {
+        client: writer(0.01),
+        model: 'm',
+        repeat: 3,
+        settings: { ...REFERENCE_SETTINGS, reasoning: 'high' },
+        onRun: (done, _task, setup) => seen.push(`${done.task}#${done.attempt}:${setup}`),
+        stopIf: (_reports, round, roundDone) => {
+          if (roundDone) rounds.push(true)
+          return round === 2 && roundDone ? 'enough' : undefined
+        },
+      },
+      { lightSteps: true },
+    )
+    assert.deepEqual(seen, ['sample#1:0', 'sample#1:1', 'other#1:0', 'other#1:1', 'sample#2:1', 'sample#2:0', 'other#2:1', 'other#2:0'])
+    assert.equal(rounds.length, 2)
+    assert.equal(plainReport.lightSteps, undefined)
+    assert.equal(lightReport.lightSteps, true)
+    assert.equal(lightReport.effort, 'high')
+    assert.equal(plainReport.endedEarly, 'enough')
+    assert.equal(lightReport.runs.length, 4)
   })
 })
 
@@ -488,6 +585,39 @@ describe('the command line', () => {
     assert.equal(report.effort, 'high')
     assert.equal(report.lightSteps, true)
     assert.match((await cli(['run', '--reference', '--effort', 'huge'])).text, /--effort is one of low, medium, high, xhigh, max/)
+  })
+
+  test('runs a pair into two reports and their comparison, under a cap (ADR 0137)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bench-cli-'))
+    made.push(dir)
+    const out = path.join(dir, 'pair.json')
+    const ran = await cli(['run', '--reference', '--only', 'json-config-edit', '--repeat', '2', '--pair', 'light-steps', '--max-cost', '2.90', '--out', out])
+    assert.equal(ran.code, 0, ran.text)
+    assert.match(ran.text, /^1 task, 2 runs each, on reference, with and without light-steps, stopping at \$2\.90$/m)
+    assert.match(ran.text, /^Round 2 of 2$/m)
+    assert.match(ran.text, /^✓ json-config-edit #1 light-off .*\[\$0\.00 of \$2\.90\]$/m)
+    assert.match(ran.text, /^✓ json-config-edit #2 light-on /m)
+    assert.match(ran.text, /^reference \(.*\) → reference with light steps \(/m)
+    assert.match(ran.text, /^Spent \$0\.00 of the \$2\.90 cap$/m)
+    const off = JSON.parse(await fs.readFile(path.join(dir, 'pair-light-off.json'), 'utf8'))
+    const on = JSON.parse(await fs.readFile(path.join(dir, 'pair-light-on.json'), 'utf8'))
+    assert.equal(off.lightSteps, undefined)
+    assert.equal(on.lightSteps, true)
+    assert.deepEqual(on.spending, { limit: 2.9, spent: 0 })
+  })
+
+  test('ends a pair whose light steps never happen', async () => {
+    const ran = await cli(['run', '--reference', '--only', 'json-config-edit,crlf-preserve', '--repeat', '3', '--pair', 'light-steps', '--out', path.join(os.tmpdir(), `bench-never-${process.pid}.json`)])
+    assert.match(ran.text, /^Ended early: no step was light in the runs with light steps/m)
+    assert.doesNotMatch(ran.text, /^Round 2/m)
+  })
+
+  test('refuses a cap, a pair or a gate it cannot keep', async () => {
+    assert.match((await cli(['run', '--reference', '--max-cost', '0'])).text, /--max-cost is a number of dollars above 0, such as 2\.90/)
+    assert.match((await cli(['run', '--reference', '--max-cost', 'lots'])).text, /--max-cost is a number of dollars/)
+    assert.match((await cli(['run', '--reference', '--pair', 'window'])).text, /--pair is one of light-steps/)
+    assert.match((await cli(['run', '--reference', '--pair', 'light-steps', '--light-steps'])).text, /leave out --light-steps/)
+    assert.match((await cli(['run', '--reference', '--gate', '25'])).text, /--gate goes with compare, or with run --pair/)
   })
 
   test('wants a key for a model, from the environment, and says which', async () => {

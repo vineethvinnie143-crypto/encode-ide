@@ -19,7 +19,10 @@
  * run held to that much context: with 16000, shortening and summaries run in every task, so a run compared with a
  * normal one shows what compaction costs in accuracy), --effort <low|medium|high|xhigh|max> (the reasoning effort every
  * step asks for), --light-steps (steps that read results think at low effort, ADR 0135: compared with a run at the same
- * --effort without it, it shows what that saves and whether the pass rate holds).
+ * --effort without it, it shows what that saves and whether the pass rate holds), --max-cost <dollars> (a hard stop on
+ * what the bench spends, ADR 0137: it adds up what the provider billed for every call and stops at the cap; a round
+ * starts only when what is left pays for one like the last), --pair light-steps (every task run with and without light
+ * steps, side by side, into two reports and their comparison; with --gate, it ends once the result is clear).
  *
  * Keys are read from the environment only: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, and
  * ENCODE_BENCH_API_KEY for --base-url. They are never printed, never given to the agent's commands, and taken out of
@@ -33,11 +36,12 @@ import type { ModelClient, ReasoningEffort } from '@encode/providers'
 import { createAnthropicAdapter, createOpenAICompatibleAdapter, createOpenRouterAdapter, redactSecrets } from '@encode/providers'
 import { createRouter, parseRouterConfig, staticKeys } from '@encode/router'
 import { Sandbox } from '@encode/sandbox'
-import { runBench } from './bench'
+import { runBench, runPair } from './bench'
 import { findPrograms } from './programs'
 import { formatReplay, replayReport, writeReplayTask } from './replay'
-import { compareReports, formatReport, gate, parseReport, type BenchReport } from './report'
+import { compareReports, formatReport, gate, MIN_RUNS, parseReport, type BenchReport } from './report'
 import type { TaskRun } from './run'
+import { spendingCap, type SpendingCap } from './spend'
 import { readTasks, type BenchTask } from './task'
 
 export interface CliContext {
@@ -63,7 +67,7 @@ interface Flags {
   switches: Set<string>
 }
 
-const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate', '--window', '--effort'])
+const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate', '--window', '--effort', '--max-cost', '--pair'])
 const SWITCHES = new Set(['--reference', '--keep', '--sandbox', '--fail-on-regression', '--light-steps', '--help', '-h'])
 const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -143,13 +147,46 @@ function count(flags: Flags, name: string, min: number, max: number): number | u
   return number
 }
 
+/** Dollars, for --max-cost: above 0 and at most 1,000. */
+function money(flags: Flags, name: string): number | undefined {
+  const value = flags.values.get(name)
+  if (value === undefined) return undefined
+  const number = Number(value.replace(/^\$/, ''))
+  if (!Number.isFinite(number) || number <= 0 || number > 1_000) throw new UsageError(`${name} is a number of dollars above 0, such as 2.90`)
+  return number
+}
+
+/** What a pair of runs compares (--pair): the setting the second run adds. */
+const PAIRS = { 'light-steps': { settings: { lightSteps: true }, names: ['light-off', 'light-on'] } } as const
+
+const NEVER_LIGHT =
+  'no step was light in the runs with light steps: the model cannot change its effort between steps without losing its cache, or it does not reason (ADR 0135)'
+
+/**
+ * When a pair has its answer: light steps that never happen leave nothing to compare, so after two runs that had a step
+ * to make light; and from MIN_RUNS rounds on, a pass rate that fell beyond chance, or, with --gate, a gate passed.
+ */
+function pairDecided(cut: number | undefined) {
+  return (reports: readonly BenchReport[], round: number, roundDone: boolean): string | undefined => {
+    const [before, after] = reports as [BenchReport, BenchReport]
+    if (round === 1 && !after.runs.some((run) => run.calls.some((call) => call.light)) && after.runs.filter((run) => run.metrics.requests > 2).length >= 2) return NEVER_LIGHT
+    if (!roundDone || round < MIN_RUNS) return undefined
+    const comparison = compareReports(before, after)
+    if (comparison.regressions.length) return `with light steps, tasks passed less often beyond chance (${comparison.regressions.join(', ')})`
+    if (cut !== undefined && gate(comparison, cut / 100).passed) return `light steps passed the gate: at least ${cut}% cheaper per task solved, at equal accuracy`
+    return undefined
+  }
+}
+
 const slugOf = (text: string) => text.replace(/[^A-Za-z0-9.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'model'
 
-function runLine(run: TaskRun): string {
+function runLine(run: TaskRun, label = '', cap?: SpendingCap): string {
   const mark = run.outcome === 'passed' ? '✓' : run.outcome === 'failed' ? '✗' : run.outcome === 'skipped' ? '–' : '!'
-  const facts = run.outcome === 'skipped' ? (run.reason ?? '') : `${run.metrics.requests} calls, ${Math.round(run.metrics.inputTokens / 1000)}k in, ${Math.round(run.metrics.outputTokens / 1000)}k out, ${(run.metrics.durationMs / 1000).toFixed(1)} s`
+  const cost = run.metrics.costReported ? `, $${run.metrics.cost.toFixed(4)}` : ''
+  const facts = run.outcome === 'skipped' ? (run.reason ?? '') : `${run.metrics.requests} calls, ${Math.round(run.metrics.inputTokens / 1000)}k in, ${Math.round(run.metrics.outputTokens / 1000)}k out${cost}, ${(run.metrics.durationMs / 1000).toFixed(1)} s`
   const why = run.outcome === 'failed' ? `: ${run.checks.filter((check) => !check.passed).map((check) => check.name).join('; ')}` : run.outcome === 'error' ? `: ${run.reason ?? 'error'}` : ''
-  return plain(`${mark} ${run.task} #${run.attempt}  ${facts}${why}`)
+  const spent = cap ? `  [$${cap.spent().toFixed(2)} of $${cap.limit.toFixed(2)}]` : ''
+  return plain(`${mark} ${run.task} #${run.attempt}${label}  ${facts}${why}${spent}`)
 }
 
 async function readReport(file: string): Promise<BenchReport> {
@@ -173,6 +210,13 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
   const effort = flags.values.get('--effort') as ReasoningEffort | undefined
   if (effort !== undefined && !EFFORTS.includes(effort)) throw new UsageError(`--effort is one of ${EFFORTS.join(', ')}`)
   const light = flags.switches.has('--light-steps')
+  const maxCost = money(flags, '--max-cost')
+  const pairName = flags.values.get('--pair')
+  if (pairName !== undefined && !Object.hasOwn(PAIRS, pairName)) throw new UsageError(`--pair is one of ${Object.keys(PAIRS).join(', ')}`)
+  const pair = pairName === undefined ? undefined : PAIRS[pairName as keyof typeof PAIRS]
+  if (pair && light) throw new UsageError('--pair light-steps runs every task with and without light steps: leave out --light-steps')
+  const cut = count(flags, '--gate', 1, 90)
+  if (cut !== undefined && !pair) throw new UsageError('--gate goes with compare, or with run --pair')
   const settings = { ...(window ? { contextCap: window } : {}), ...(effort ? { reasoning: effort } : {}), ...(light ? { lightSteps: true } : {}) }
   const dir = path.resolve(flags.values.get('--tasks') ?? path.join(context.root, 'packages', 'bench', 'tasks'))
   const { tasks, broken } = await readTasks(dir)
@@ -187,10 +231,11 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     if (status.state !== 'active') throw new UsageError(`there is no working sandbox here: ${status.reason ?? status.state}`)
   }
   const name = reference ? 'reference' : flags.values.get('--base-url') ? `${model} at ${flags.values.get('--base-url')}` : model!
-  const how = `${window ? `, in a ${Math.round(window / 1000)}k window` : ''}${effort ? `, at ${effort} effort` : ''}${light ? ', with light steps' : ''}`
-  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}${how}`)
-  const report = await runBench(chosen, {
-    client: live?.client ?? 'reference',
+  const how = `${window ? `, in a ${Math.round(window / 1000)}k window` : ''}${effort ? `, at ${effort} effort` : ''}${light ? ', with light steps' : ''}${pair ? `, with and without ${pairName}` : ''}`
+  const cap = maxCost === undefined ? undefined : spendingCap(maxCost)
+  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}${how}${cap ? `, stopping at $${cap.limit.toFixed(2)}` : ''}`)
+  const options = {
+    client: live?.client ?? ('reference' as const),
     model: name,
     repeat,
     ...(Object.keys(settings).length ? { settings } : {}),
@@ -199,18 +244,40 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     ...(sandbox ? { sandbox } : {}),
     ...(context.signal ? { signal: context.signal } : {}),
     ...(context.now ? { now: context.now } : {}),
-    onRun: (done) => context.print(runLine(done)),
-  })
-  const stamp = report.startedAt.replace(/[:.]/g, '-')
-  const out = path.resolve(flags.values.get('--out') ?? path.join('bench-results', `${slugOf(reference ? 'reference' : model!)}-${stamp}.json`))
-  await fs.mkdir(path.dirname(out), { recursive: true })
-  // A key can reach a report only by being echoed, by a provider or a model; it is taken out either way.
-  await fs.writeFile(out, `${redactSecrets(JSON.stringify(report, null, 2), live?.secrets ?? [])}\n`)
+    ...(cap ? { cap } : {}),
+    ...(repeat > 1 ? { onRound: (round: number) => context.print(`Round ${round} of ${repeat}`) } : {}),
+    onRun: (done: TaskRun, _task: BenchTask, setup: number) => context.print(runLine(done, pair ? ` ${pair.names[setup]}` : '', cap)),
+  }
+  const reports = pair ? await runPair(chosen, { ...options, stopIf: pairDecided(cut) }, pair.settings) : [await runBench(chosen, options)]
+  const stamp = reports[0]!.startedAt.replace(/[:.]/g, '-')
+  const given = flags.values.get('--out')
+  const base = path.resolve(given ?? path.join('bench-results', `${slugOf(reference ? 'reference' : model!)}-${stamp}.json`))
+  const outs = pair ? pair.names.map((suffix) => base.replace(/(\.json)?$/i, `-${suffix}.json`)) : [base]
+  await fs.mkdir(path.dirname(base), { recursive: true })
+  for (const [index, report] of reports.entries()) {
+    // A key can reach a report only by being echoed, by a provider or a model; it is taken out either way.
+    await fs.writeFile(outs[index]!, `${redactSecrets(JSON.stringify(report, null, 2), live?.secrets ?? [])}\n`)
+  }
   context.print('')
-  context.print(plain(formatReport(report)))
+  if (pair) {
+    const comparison = compareReports(reports[0]!, reports[1]!)
+    context.print(plain(comparison.text))
+    const { spending, endedEarly } = reports[0]!
+    if (spending) context.print(`Spent $${spending.spent.toFixed(2)} of the $${spending.limit.toFixed(2)} cap`)
+    if (endedEarly) context.print(plain(`Ended early: ${endedEarly}`))
+    const verdict = cut === undefined ? undefined : gate(comparison, cut / 100)
+    if (verdict) {
+      context.print('')
+      context.print(verdict.passed ? `Gate passed: at least ${cut}% cheaper per task solved, at equal accuracy.` : plain(`Gate not passed:\n${verdict.reasons.map((reason) => `- ${reason}`).join('\n')}`))
+    }
+    context.print('')
+    context.print(`Reports: ${outs.join(', ')}`)
+    return comparison.regressions.length || verdict?.passed === false ? 1 : 0
+  }
+  context.print(plain(formatReport(reports[0]!)))
   context.print('')
-  context.print(`Report: ${out}`)
-  return report.runs.some((done) => done.outcome === 'failed' || done.outcome === 'error') ? 1 : 0
+  context.print(`Report: ${outs[0]}`)
+  return reports[0]!.runs.some((done) => done.outcome === 'failed' || done.outcome === 'error') ? 1 : 0
 }
 
 /** The largest report read: its files are at most 4 MB, and its steps carry what the model sent. */

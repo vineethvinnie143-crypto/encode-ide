@@ -23,6 +23,8 @@ export interface ModelCall {
    * there. Counted for calls that offer tools, which are the agents' own; a summary or a title is a request of its own.
    */
   rewrote?: true
+  /** The step was light: it asked for low effort after steps that only read results (ADR 0135). */
+  light?: true
 }
 
 export interface MeteredClient extends ModelClient {
@@ -88,6 +90,7 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
           ...(usage?.cost !== undefined ? { cost: usage.cost } : {}),
           ms: now() - started,
           ...(rewrote ? { rewrote: true as const } : {}),
+          ...(request.light ? { light: true as const } : {}),
         })
         return outcome
       } catch (error) {
