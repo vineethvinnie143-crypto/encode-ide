@@ -75,6 +75,7 @@ const agentSettings = (config: HostConfig): AgentSettings => ({
   review: config.reviewWork,
   askAgain: config.askAgain,
   learnConventions: config.learnConventions,
+  lightSteps: config.lightSteps === 'on',
   smallerHelp: config.helpSmaller,
   offerStronger: config.offerStronger,
 })
@@ -262,8 +263,9 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     budget: (role: ModelRole, query?: BudgetQuery): Promise<ModelBudget> => pick().budget(role, query),
     async complete(request: CompletionRequest): Promise<CompletionOutcome> {
       const onEvent = request.onEvent
-      // The effort the person chose for the role wins over the one the caller asked for; the adapter drops it for a model without a dial.
-      const effort = (config?.efforts as Record<string, ReasoningEffort | undefined> | undefined)?.[request.role]
+      // The effort the person chose for the role wins over the one the caller asked for, except on a light step (ADR 0135);
+      // the adapter drops it for a model without a dial.
+      const effort = request.light ? undefined : (config?.efforts as Record<string, ReasoningEffort | undefined> | undefined)?.[request.role]
       const asked = effort ? { ...request, payload: { ...request.payload, reasoning: effort } } : request
       const outcome = await pick().complete(onEvent ? { ...asked, onEvent: (event) => onEvent(humanizeEvent(event)) } : asked)
       return outcome.kind === 'paused' ? { ...outcome, message: humanize(outcome.message), ...(outcome.detail ? { detail: humanize(outcome.detail) } : {}) } : outcome

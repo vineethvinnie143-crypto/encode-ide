@@ -53,6 +53,7 @@ const settings: Settings = {
   reviewWork: 'auto',
   askAgain: 'on',
   learnConventions: 'on',
+  lightSteps: 'off',
   helpSmaller: 'auto',
   offerStronger: 'ask',
   notifyDone: 'background',

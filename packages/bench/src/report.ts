@@ -2,6 +2,7 @@
  * A benchmark report: every run of every task, written as JSON so that two of them, before and after a change, can
  * be compared. Reports hold no machine's paths and no keys: what the agent replied, the checks, the counts.
  */
+import type { ReasoningEffort } from '@encode/providers'
 import type { RunMetrics, TaskRun } from './run'
 import { dropChance, meanInterval, ratioInterval, type Interval } from './stats'
 
@@ -14,6 +15,9 @@ export interface BenchReport {
   platform: string
   /** The context every run was held to, when the run squeezed it (`--window`): shortening and summaries run sooner. */
   window?: number
+  /** The reasoning effort every step asked for (`--effort`), and whether steps that read results asked for low (ADR 0135). */
+  effort?: ReasoningEffort
+  lightSteps?: true
   runs: TaskRun[]
 }
 
@@ -113,8 +117,9 @@ export function parseReport(json: unknown): BenchReport {
 
 const whole = (value: number) => Math.round(value).toLocaleString('en-US')
 const tenths = (value: number) => (Math.round(value * 10) / 10).toString()
-/** The model, and the window when the run squeezed it. */
-const nameOf = (report: BenchReport) => (report.window ? `${report.model} in a ${Math.round(report.window / 1000)}k window` : report.model)
+/** The model, and the window when the run squeezed it, the effort it asked for and whether its steps were light. */
+const nameOf = (report: BenchReport) =>
+  `${report.model}${report.window ? ` in a ${Math.round(report.window / 1000)}k window` : ''}${report.effort ? ` at ${report.effort} effort` : ''}${report.lightSteps ? ' with light steps' : ''}`
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const dollars = (value: number | undefined) => (value === undefined ? '-' : `$${value < 0.01 ? value.toFixed(4) : value.toFixed(3)}`)
 const cachedShare = (summary: Summary) => (summary.mean.inputTokens ? percent(summary.mean.cachedTokens / summary.mean.inputTokens) : '-')

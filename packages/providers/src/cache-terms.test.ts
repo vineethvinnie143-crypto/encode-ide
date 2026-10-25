@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { cacheTermsOf, CLAUDE_CACHE_TTL_MS } from './cache-terms'
+import { effortPerStep } from './families'
 
 describe('cache terms (ADR 0130)', () => {
   it("reads the cache's prices from a price list, as shares of an uncached token", () => {
@@ -35,5 +36,18 @@ describe('cache terms (ADR 0130)', () => {
     assert.equal(cacheTermsOf({ family: 'google', reasoning: true }).boundThinking, true)
     assert.equal(cacheTermsOf({ family: 'google', reasoning: false }).boundThinking, false)
     assert.equal(cacheTermsOf({ family: 'moonshot', reasoning: true }).boundThinking, false)
+  })
+})
+
+describe('an effort for each step (ADR 0135)', () => {
+  it('changes only where the prompt cache does not see it', () => {
+    assert.equal(effortPerStep('openai', 'openai/gpt-5-mini', true), true)
+    assert.equal(effortPerStep('deepseek', '@preset/deepseek-v4', true), true)
+    assert.equal(effortPerStep('moonshot', 'moonshotai/kimi-k2-thinking', true), true)
+    assert.equal(effortPerStep('openai', 'openai/gpt-oss-120b', true), false, 'gpt-oss writes its effort into the system message')
+    assert.equal(effortPerStep('anthropic', 'anthropic/claude-sonnet-4.5', true), false, "Claude's reasoning is checked against its request")
+    assert.equal(effortPerStep('google', 'google/gemini-2.5-pro', true), false)
+    assert.equal(effortPerStep('qwen', 'qwen/qwen3-coder', true), false, 'not known to keep its cache')
+    assert.equal(effortPerStep('openai', 'openai/gpt-4.1', false), false, 'a model that does not reason has no effort to change')
   })
 })

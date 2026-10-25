@@ -42,6 +42,7 @@ const config = (languageServers: boolean): HostConfig => ({
   reviewWork: 'auto',
   askAgain: 'on',
   learnConventions: 'on',
+  lightSteps: 'off',
   helpSmaller: 'auto',
   offerStronger: 'ask',
   model: 'none',

@@ -162,6 +162,8 @@ const TODO_NUDGE_STEPS = 6
 const SOLO_LOOK_STEPS = 3
 /** Calls that only read or search the project, and run together when one reply makes several. */
 const LOOKS = new Set(['Read', 'Grep', 'Glob', 'CodeMap'])
+/** Calls after which, when each worked, the next step may think at low effort (ADR 0135): reads, searches and commands. */
+const LIGHT_AFTER: ReadonlySet<string> = new Set([...LOOKS, 'LSP', 'Bash', 'BashOutput'])
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
 const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
 const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
@@ -485,6 +487,8 @@ export class AgentLoop {
   /** Steps in a row that each read or searched one thing, and whether the request was asked to batch them (ADR 0134). */
   private soloLooks = 0
   private batchAsked = false
+  /** The last step only read, searched or ran commands, and each worked: the next may think at low effort (ADR 0135). */
+  private lightNext = false
   private checkRuns = 0
   /** Once a request each (ADR 0096): the scan of the changes, the Reviewer's reading of them, and of a plan. */
   private scanned = false
@@ -581,6 +585,7 @@ export class AgentLoop {
     this.rewroteInRequest = false
     this.soloLooks = 0
     this.batchAsked = false
+    this.lightNext = false
     this.scanned = false
     this.reviewed = false
     this.planCritiqued = false
@@ -663,29 +668,39 @@ export class AgentLoop {
 
       const state: StepState = { results: new Map(), context: [] }
       let ran = false
+      /** Whether the next step may think at low effort: this one only looked, and nothing it found sends the model back. */
+      let light = false
       /** Why the request ends after this step with nothing written for the person: the reply after it is made with tools held back. */
       let closing: string | undefined
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
         this.toolsRan = true
+        light = calls.every((call) => LIGHT_AFTER.has(call.name) && state.results.get(call.id)?.isError !== true)
         const nudge = this.todoNudge(calls)
         if (nudge) state.context.push(nudge)
         const batch = this.batchNudge(calls)
         if (batch) state.context.push(batch)
         const found = await this.edits?.collect(STEP_WAIT_MS, signal)
-        if (found) state.context.push(found)
+        if (found) {
+          state.context.push(found)
+          light = false
+        }
         // A model that finishes with attempt_completion is held to what one that just stops talking is.
         if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
           const sent = (await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)) ?? this.staleTodos()
           if (sent) {
             state.context.push(`${sent}\n\n${ANSWER_AGAIN}`)
             state.stop = undefined
+            light = false
           }
         }
         if (state.stop === undefined) {
           const took = await this.offerStronger(turn)
-          if (took) state.context.push(took)
+          if (took) {
+            state.context.push(took)
+            light = false
+          }
         }
       } finally {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
@@ -706,6 +721,8 @@ export class AgentLoop {
         if (took) step = 0
         else if (ran) closing = state.stop === undefined ? (step >= maxSteps ? stepLimitNote(maxSteps) : undefined) : this.stopNote(state, message)
         if (closing) content.push(textBlock(reminder(closing)))
+        // A message of the person's, like the first of a request, is thought about at the effort set.
+        this.lightNext = ran && light && !took && !closing
         await o.conversation.add({ role: 'user', content }, { turnId: turn.turnId })
       }
       if (state.mode) mode = state.mode
@@ -809,6 +826,9 @@ export class AgentLoop {
     let overflows = 0
     let empties = 0
     let unseenRetry = false
+    // Each step takes the chance of a low effort once; a retry, a summary or a reply that ends the request thinks at the effort set.
+    let light = this.lightNext && !closing
+    this.lightNext = false
     for (;;) {
       // A conversation with pictures goes to a model of the role that sees them, where one is ready (ADR 0113).
       const query = { ...this.query(), ...(hasImages(o.conversation.messages()) ? { images: true } : {}) }
@@ -818,9 +838,12 @@ export class AgentLoop {
       const system = short && o.shortSystem ? o.shortSystem : helpsSmaller(o.settings().smallerHelp, expected) ? [...o.system, SMALLER_MODEL_PART] : o.system
       const tools = o.registry.visibleDefinitions(o.tools, loadedTools(o.conversation.messages(), o.registry), short)
       await this.noteContext(system, tools, turn)
-      await this.fit(turn)
+      if (await this.fit(turn)) light = false
       const settings = o.settings()
       const budget = await o.client.budget(this.callRole, query)
+      // After reads, searches and commands that worked, the step that reads their results thinks at low effort, where
+      // a changed effort keeps the prompt cache (ADR 0135).
+      const lighter = light && settings.lightSteps === true && budget.effortPerStep === true && settings.reasoning !== 'low'
       this.vision = budget.images
       this.documents = budget.documents
       // A model that cannot read images is sent none: a note stands in the place of each, and the person is told once.
@@ -839,7 +862,7 @@ export class AgentLoop {
         maxOutputTokens,
         // Listed still, so the cached prefix holds, but not to be called.
         ...(closing && tools.length ? { toolChoice: 'none' as const } : {}),
-        ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
+        ...(lighter ? { reasoning: 'low' as const } : settings.reasoning ? { reasoning: settings.reasoning } : {}),
         ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
         // The provider keeps the conversation where its cache is, and keeps that cache over the waits the session has (ADR 0128).
         ...(o.services.sessionId ? { cacheKey: cacheKeyOf(o.services.sessionId, o.agentId) } : {}),
@@ -855,6 +878,8 @@ export class AgentLoop {
             thought.add(event.text)
             return
           case 'text':
+            // A light step's text shows once its calls are known: a reply that would end the request is asked again.
+            if (lighter) return
             streaming ??= o.surface.entry({ kind: 'assistant', text: '', streaming: true })
             o.surface.delta(streaming, event.text)
             return
@@ -885,6 +910,7 @@ export class AgentLoop {
           sticky: o.services.sessionId,
           signal: turn.signal,
           onEvent,
+          ...(lighter ? { light: true as const } : {}),
           validateToolCall: (name, input) => {
             const repaired = o.registry.repair(name, input, this.offers)
             return o.registry.check(repaired.name ?? name, repaired.value)
@@ -912,6 +938,7 @@ export class AgentLoop {
         }
         if (outcome.used) this.meter.calibrate(sent, this.fixed, outcome.used)
         await this.fit(turn, { force: true, window: outcome.window })
+        light = false
         continue
       }
 
@@ -935,6 +962,11 @@ export class AgentLoop {
         if (closing) return { kind: 'reply', message, finish }
         if (empties++ < MAX_EMPTY_RETRIES) continue
         return { kind: 'end', end: { kind: 'failed', code: 'empty', message: 'The model kept sending empty replies. Try again, or choose another model.' } }
+      }
+      // A light step that calls nothing would answer, ask or stop: that reply is made again at the effort set (ADR 0135).
+      if (lighter && !toolUses(message).length) {
+        light = false
+        continue
       }
 
       this.meter.record(sent, this.fixed, usage)

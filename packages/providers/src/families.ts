@@ -36,6 +36,17 @@ export function effortWord(family: ModelFamily, effort: ReasoningEffort): string
 }
 
 /**
+ * Whether one step of a request may think at another effort than the last without costing the prompt cache (ADR 0135).
+ * OpenAI's, DeepSeek's and Kimi's effort is a field of the request, outside the prompt their caches match. Claude and
+ * Gemini check their reasoning against the request it was written under, gpt-oss writes its effort into the system
+ * message, and the rest are not known to keep their cache, so their effort stays as it is set.
+ */
+export function effortPerStep(family: ModelFamily, model: string, reasoning: boolean): boolean {
+  if (!reasoning || /gpt-oss/i.test(model)) return false
+  return family === 'openai' || family === 'deepseek' || family === 'moonshot'
+}
+
+/**
  * The window and output to assume for a model of a family whose models reason at length, when no catalog says:
  * their reasoning counts against the output limit, so the usual 8,192 cuts replies short. A server that allows less
  * says so, and the request is sent again with its limit (openai.ts); a smaller window is learned from the first

@@ -57,7 +57,18 @@ async function referenceFacts(task: BenchTask, options: BenchOptions, programs: 
 export async function runBench(tasks: readonly BenchTask[], options: BenchOptions): Promise<BenchReport> {
   const programs = await findPrograms(tasks.flatMap((task) => task.requires))
   const window = options.settings?.contextCap
-  const report: BenchReport = { kind: 'encode-bench', version: 1, model: options.model, startedAt: (options.now?.() ?? new Date()).toISOString(), platform: process.platform, ...(window ? { window } : {}), runs: [] }
+  const effort = options.settings?.reasoning
+  const report: BenchReport = {
+    kind: 'encode-bench',
+    version: 1,
+    model: options.model,
+    startedAt: (options.now?.() ?? new Date()).toISOString(),
+    platform: process.platform,
+    ...(window ? { window } : {}),
+    ...(effort ? { effort } : {}),
+    ...(options.settings?.lightSteps ? { lightSteps: true as const } : {}),
+    runs: [],
+  }
   const repeat = Math.max(1, Math.min(options.repeat ?? 1, 20))
   for (const task of tasks) {
     // A model's code is judged against what the task's own solution changes; that solution plays in a moment.

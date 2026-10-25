@@ -46,6 +46,8 @@ export interface HostConfig {
   reviewWork: ReviewSetting
   askAgain: 'on' | 'off'
   learnConventions: 'on' | 'off'
+  /** Steps that read results think at low effort (ADR 0135). */
+  lightSteps: 'on' | 'off'
   helpSmaller: SmallerHelp
   offerStronger: StrongerOffer
 }
