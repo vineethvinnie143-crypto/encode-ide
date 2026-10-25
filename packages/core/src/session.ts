@@ -1932,7 +1932,7 @@ export class AgentSession {
     }
     const registry = this.buildRegistry(this.definitions())
     const left = new Set(ATTEMPT_EXCLUDED)
-    if (!registry.deferred().some((tool) => !left.has(tool.definition.name))) left.add(TOOL_SEARCH)
+    if (!registry.searchable().some((tool) => !left.has(tool.definition.name))) left.add(TOOL_SEARCH)
     const note: SystemPart = { text: attemptNote({ n: attempt.n, total: attempt.total, path: worktree.path, root: env.root }) }
     const loop = new AgentLoop({
       agentId: `attempt-${attempt.n}`,

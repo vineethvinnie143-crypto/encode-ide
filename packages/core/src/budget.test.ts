@@ -10,7 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import type { ToolDefinition } from '@encode/providers'
-import { BUILTIN_SUBAGENT_TYPES, createToolRegistry } from '@encode/tools'
+import { addToolSearch, BUILTIN_SUBAGENT_TYPES, createToolRegistry } from '@encode/tools'
 import { outsideTools } from '@encode/tools/testing'
 import { CHARS_PER_TOKEN } from './compaction'
 import { closeHarnesses, sessionHarness } from './testing'
@@ -81,6 +81,22 @@ describe('the cost of a request before the first word', () => {
     show('Full built-in tool set', [['tools', total], ...tools.map((tool): [string, number] => [`  ${tool.name}`, toolChars(tool)])])
     assert.ok(total <= 30_000, `the full tool set is ${total} characters; the ceiling is 30000`)
     for (const tool of tools) assert.ok(toolChars(tool) <= 6_000, `${tool.name} is ${toolChars(tool)} characters; one tool may take at most 6000`)
+  })
+
+  it('sends a model without a cache its seldom needed tools only once ToolSearch loads them (ADR 0136)', async () => {
+    const sent = async (read: number) => {
+      const h = await sessionHarness({ script: [{ text: 'ok' }], client: { cache: { read, write: 1, boundThinking: false, source: 'price' } } })
+      await h.session.start({ text: 'Fix the failing test in src/utils.ts', mode: 'code' })
+      return h.client.requests[0].payload.tools.reduce((sum, tool) => sum + toolChars(tool), 0)
+    }
+    const cached = await sent(0.1)
+    const uncached = await sent(1)
+    const desktop = createToolRegistry({ dialect: 'bash', platform: 'linux', subagentTypes: BUILTIN_SUBAGENT_TYPES, computer: true, browser: true })
+    addToolSearch(desktop)
+    const chars = (lean: boolean) => desktop.visibleDefinitions(undefined, new Set(), false, lean).reduce((sum, tool) => sum + toolChars(tool), 0)
+    show('Without a cache', [['tools, cached', cached], ['tools, uncached', uncached], ['desktop, cached', chars(false)], ['desktop, uncached', chars(true)]])
+    assert.ok(uncached <= cached - 1_400, `a model without a cache is sent ${uncached} characters of tools, one with ${cached}`)
+    assert.ok(chars(true) <= chars(false) * 0.75, `with the desktop tools, ${chars(true)} against ${chars(false)}`)
   })
 
   it('sends the environment and the memory once, not with every turn', async () => {

@@ -44,6 +44,8 @@ import {
   readMentioned,
   realPathOf,
   loadedTools,
+  searchDeferred,
+  TOOL_SEARCH,
   truncateMiddle,
   type AgentMode,
   type AgentShell,
@@ -106,7 +108,7 @@ import {
 import type { AgentHooks, HookEvent } from './hooks'
 import { cacheKeyOf, type CacheClock } from './cache-hints'
 import { isEditMiss, keepingMore, type ContextSignal, type ContextWatch } from './context-signals'
-import { rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
+import { paysEveryToken, rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
@@ -164,6 +166,8 @@ const SOLO_LOOK_STEPS = 3
 const LOOKS = new Set(['Read', 'Grep', 'Glob', 'CodeMap'])
 /** Calls after which, when each worked, the next step may think at low effort (ADR 0135): reads, searches and commands. */
 const LIGHT_AFTER: ReadonlySet<string> = new Set([...LOOKS, 'LSP', 'Bash', 'BashOutput'])
+/** Times ToolSearch loads a tool in a session before the tool stays in the list, past compactions (ADR 0136). */
+const FETCHES_TO_KEEP = 2
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
 const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
 const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
@@ -489,6 +493,9 @@ export class AgentLoop {
   private batchAsked = false
   /** The last step only read, searched or ran commands, and each worked: the next may think at low effort (ADR 0135). */
   private lightNext = false
+  /** For the session: how often ToolSearch loaded each tool, and the tools that stay in the list for it (ADR 0136). */
+  private readonly fetches = new Map<string, number>()
+  private readonly keptTools = new Set<string>()
   private checkRuns = 0
   /** Once a request each (ADR 0096): the scan of the changes, the Reviewer's reading of them, and of a plan. */
   private scanned = false
@@ -677,6 +684,7 @@ export class AgentLoop {
         ran = true
         this.toolsRan = true
         light = calls.every((call) => LIGHT_AFTER.has(call.name) && state.results.get(call.id)?.isError !== true)
+        this.noteFetches(calls, state)
         const nudge = this.todoNudge(calls)
         if (nudge) state.context.push(nudge)
         const batch = this.batchNudge(calls)
@@ -759,6 +767,31 @@ export class AgentLoop {
     return todoReminder(todos)
   }
 
+  /** What the next request's tool list carries beyond the always listed: what the conversation loaded, and what stays. */
+  private toolsLoaded(): Set<string> {
+    const loaded = loadedTools(this.o.conversation.messages(), this.o.registry)
+    for (const name of this.keptTools) loaded.add(name)
+    return loaded
+  }
+
+  /**
+   * A tool ToolSearch loads FETCHES_TO_KEEP times in a session stays in the list from then on (ADR 0136): the model
+   * needs it again after compaction took its first load away, and each load costs a step.
+   */
+  private noteFetches(calls: readonly ToolUseBlock[], state: StepState): void {
+    for (const call of calls) {
+      if (call.name !== TOOL_SEARCH || state.results.get(call.id)?.isError === true) continue
+      const input = call.input as { query?: unknown; max_results?: unknown }
+      if (typeof input.query !== 'string') continue
+      for (const tool of searchDeferred(this.o.registry, input.query, input.max_results)) {
+        const name = tool.definition.name
+        const count = (this.fetches.get(name) ?? 0) + 1
+        this.fetches.set(name, count)
+        if (count >= FETCHES_TO_KEEP) this.keptTools.add(name)
+      }
+    }
+  }
+
   /**
    * Once a request, after SOLO_LOOK_STEPS steps in a row that each read or searched one thing: the model is asked to
    * make the reads and searches it already knows it needs in one reply, where they run together (ADR 0134). Every step
@@ -833,10 +866,12 @@ export class AgentLoop {
       // A conversation with pictures goes to a model of the role that sees them, where one is ready (ADR 0113).
       const query = { ...this.query(), ...(hasImages(o.conversation.messages()) ? { images: true } : {}) }
       // A model that needs no guide is sent the short one (ADR 0094), a smaller one its help (0100); the model the router expects decides.
-      const expected = (await o.client.budget(this.callRole, query)).model
+      const ahead = await o.client.budget(this.callRole, query)
+      const expected = ahead.model
       const short = shortGuide(o.settings().guide, expected)
       const system = short && o.shortSystem ? o.shortSystem : helpsSmaller(o.settings().smallerHelp, expected) ? [...o.system, SMALLER_MODEL_PART] : o.system
-      const tools = o.registry.visibleDefinitions(o.tools, loadedTools(o.conversation.messages(), o.registry), short)
+      // A model without a prompt cache pays for every definition on every step: the seldom needed ones wait for ToolSearch (ADR 0136).
+      const tools = o.registry.visibleDefinitions(o.tools, this.toolsLoaded(), short, paysEveryToken(ahead.cache))
       await this.noteContext(system, tools, turn)
       if (await this.fit(turn)) light = false
       const settings = o.settings()

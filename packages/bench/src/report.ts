@@ -18,6 +18,10 @@ export interface BenchReport {
   /** The reasoning effort every step asked for (`--effort`), and whether steps that read results asked for low (ADR 0135). */
   effort?: ReasoningEffort
   lightSteps?: true
+  /** The spending cap (--max-cost) and what every run of the bench spent under it, both setups of a pair together (ADR 0137). */
+  spending?: { limit: number; spent: number }
+  /** Why the bench ended before it made every run it was asked for. */
+  endedEarly?: string
   runs: TaskRun[]
 }
 
@@ -163,6 +167,8 @@ export function formatReport(report: BenchReport): string {
   )
   lines.push(`Context per run: ${tenths(mean.rewrites)} rewrites (old results shortened or steps summarized), ${tenths(mean.summaries)} summaries`)
   if (all.costPerSolved !== undefined) lines.push(`Cost per task solved: ${dollars(all.costPerSolved)}`)
+  if (report.spending) lines.push(`Spent ${dollars(report.spending.spent)} of the ${dollars(report.spending.limit)} cap`)
+  if (report.endedEarly) lines.push(`Ended early: ${report.endedEarly}`)
   const notes = report.runs.filter((run) => run.outcome !== 'passed' || run.quality?.issues.length)
   if (notes.length) lines.push('')
   for (const run of notes) {

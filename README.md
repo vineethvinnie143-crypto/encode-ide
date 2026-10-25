@@ -106,7 +106,9 @@ primary platform; the code stays cross-platform.
   **Think less on steps that read results** (Settings → Agent, off until the benchmark shows it keeps the pass rate)
   has a step that only reads what reads, searches and passing commands found think at low effort, on OpenAI, DeepSeek
   and Kimi models whose cache that keeps; the first step, the one after a failure or an edit, and the answer keep the
-  role's effort.
+  role's effort. A model without a prompt cache, which pays for the whole tool list on every step, gets the Computer
+  tool, the Browser, the goal tools and EnterPlanMode from ToolSearch when it needs them; a tool any model loads twice
+  stays in its list.
   The line under each finished request's answer shows what it cost: tokens, how much came from the prompt cache, and
   dollars when the provider says.
 
@@ -564,7 +566,10 @@ when it is 25% cheaper per task solved at equal accuracy. `--window 16000` runs 
 compaction itself is measured (a report says how many calls rewrote the conversation and how many summaries ran),
 and every run's code is read for what a reviewer would send back: a file that no longer parses, a change several times
 the reference's, a stray file, an edited test, a debug print, a TODO; the `clean` column counts the runs with none,
-and the gate holds that too. Four long tasks (`--tag long`,
+and the gate holds that too. `--max-cost 2.90` stops the bench at that many dollars, as the provider bills them, and
+`--pair light-steps` runs every task with and without light steps side by side, round by round, into two reports and
+their comparison, ending once the result is clear
+([ADR 0137](docs/adr/0137-a-benchmark-run-stops-at-a-spending-cap-and-runs-two-setups-side-by-side.md)). Four long tasks (`--tag long`,
 [ADR 0131](docs/adr/0131-long-tasks-measure-what-shortening-and-summaries-keep.md)) run past the point where old
 results are shortened: a rule read first and needed last, a rename across seventeen files, one bad record in 5,000
 lines of output, and six changes asked for in one message. A tester's **Report a problem with this request**

@@ -580,7 +580,7 @@ function allowedTools(definition: SubagentDefinition, registry: ToolRegistry): s
   const wanted = definition.tools ? definition.tools.map(named).filter((name): name is string => name !== undefined) : offered
   const denied = new Set([...SUBAGENT_EXCLUDED, ...(definition.disallowedTools ?? []).map(named).filter((name): name is string => name !== undefined)])
   // ToolSearch helps only when some tool it loads is one this subagent may use.
-  if (!registry.deferred().some((tool) => !denied.has(tool.definition.name) && wanted.includes(tool.definition.name))) denied.add(TOOL_SEARCH)
+  if (!registry.searchable().some((tool) => !denied.has(tool.definition.name) && wanted.includes(tool.definition.name))) denied.add(TOOL_SEARCH)
   return wanted.filter((name) => !denied.has(name))
 }
 
