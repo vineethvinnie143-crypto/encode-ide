@@ -15,6 +15,7 @@
  * fit, `paused` when no model can run now.
  */
 import type { AssistantMessage, ModelFamily, ModelRequest } from './messages'
+import type { CacheTerms } from './cache-terms'
 
 export type ProviderType = 'openai-compatible' | 'openrouter' | 'anthropic'
 
@@ -190,6 +191,8 @@ export interface ModelBudget {
   price?: { input: number; output: number }
   /** Free to call. */
   free?: boolean
+  /** What its prompt cache charges, for compaction to tell when a rewrite pays (ADR 0130); absent when the client cannot tell. */
+  cache?: CacheTerms
 }
 
 export interface BudgetQuery {

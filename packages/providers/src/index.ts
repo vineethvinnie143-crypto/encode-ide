@@ -1,5 +1,6 @@
 export * from './messages'
 export * from './contract'
+export * from './cache-terms'
 export * from './errors'
 export * from './assembler'
 export * from './json-repair'

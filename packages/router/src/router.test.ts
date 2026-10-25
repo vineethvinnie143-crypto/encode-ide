@@ -766,12 +766,22 @@ describe('ModelRouter: sessions, abort and budget', () => {
 
   it("reports the window of the model a call would use now", async () => {
     const world = new TestWorld({ catalogs: { openrouter: [catalogEntry(A, { contextWindow: 262_144, maxOutputTokens: 32_768 })] } })
-    assert.deepEqual(await world.router.budget('main'), { model: A, contextWindow: 262_144, maxOutputTokens: 32_768, images: false, documents: false, price: { input: 0, output: 0 }, free: true })
+    assert.deepEqual(await world.router.budget('main'), {
+      model: A,
+      contextWindow: 262_144,
+      maxOutputTokens: 32_768,
+      images: false,
+      documents: false,
+      price: { input: 0, output: 0 },
+      free: true,
+      cache: { read: 0.5, write: 1, boundThinking: false, source: 'family' },
+    })
     const priced = new TestWorld({
       settings: { providers: { openrouter: { type: 'openrouter' } }, roles: { main: ['openrouter:vendor/beta', 'openrouter:vendor/gamma'] } },
-      catalogs: { openrouter: [catalogEntry('vendor/beta', { price: { input: 3, output: 15 }, free: false }), catalogEntry('vendor/gamma', { free: false })] },
+      catalogs: { openrouter: [catalogEntry('vendor/beta', { price: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }, free: false }), catalogEntry('vendor/gamma', { free: false })] },
     })
     assert.deepEqual((await priced.router.budget('main')).price, { input: 3, output: 15 }, 'what the model costs, so a stronger one can be offered with its price')
+    assert.deepEqual((await priced.router.budget('main')).cache, { read: 0.1, write: 1.25, boundThinking: false, source: 'price' }, "the cache's prices, from the catalog (ADR 0130)")
     assert.equal((await priced.router.budget('main')).free, false)
     const seeing = new TestWorld({
       catalogs: { openrouter: [catalogEntry(A, { capabilities: { tools: true, parallelTools: true, images: true, documents: true, reasoning: false, promptCache: false } })] },

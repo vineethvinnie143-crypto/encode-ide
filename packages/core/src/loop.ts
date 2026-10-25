@@ -79,14 +79,13 @@ import {
   digest,
   dropThinkingFrom,
   elidable,
-  ELIDE_AT,
-  ELIDE_FLOOR,
   ELIDE_LIMIT,
   ELIDE_MIN_SAVING,
   ELIDE_SAVING,
   elideOldOutputs,
   estimateTokens,
   filesToReread,
+  firstDifference,
   KEEP_SHARE,
   keptAt,
   MANUAL_KEEP_SHARE,
@@ -95,14 +94,17 @@ import {
   planCompaction,
   RECENT_STEPS,
   repairPairing,
+  requestStarts,
   REREAD_CLOSE,
   REREAD_OPEN,
+  stepCount,
   summaryRequest,
   textTokens,
   type CompactionPlan,
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { cacheKeyOf, type CacheClock } from './cache-hints'
+import { rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
@@ -950,10 +952,11 @@ export class AgentLoop {
 
   /**
    * Makes the conversation valid and small enough for the next request. Old tool outputs are shortened once the prompt
-   * passes a share of the window, when that saves enough to be worth the cache it gives up; past the limit they are
-   * shortened whatever it saves, and if that is not enough the oldest whole units are summarized and the files they
-   * worked on read again. `force` compacts regardless of the estimate (the provider refused the prompt as too long);
-   * `manual` is the user's own request. Returns how many messages were summarized away.
+   * passes a share of the window, when that saves enough to be worth the cache it gives up, by the profile of the model
+   * the request goes to (ADR 0130); past the limit they are shortened whatever it saves, and if that is not enough the
+   * oldest whole units are summarized and the files they worked on read again. `force` compacts regardless of the
+   * estimate (the provider refused the prompt as too long); `manual` is the user's own request. Returns how many
+   * messages were summarized away.
    */
   private async fit(turn: Turn, options: FitOptions = {}): Promise<number> {
     const { o } = this
@@ -965,7 +968,8 @@ export class AgentLoop {
     // On a small window the answer's share is capped, or the limit would sit below the instructions and tools alone.
     const reserve = Math.min(budget.maxOutputTokens, OUTPUT_RESERVE, Math.floor(window * OUTPUT_RESERVE_SHARE))
     const limit = Math.max(Math.min(Math.floor(window * COMPACT_AT), window - reserve, cap), 2_000)
-    const soft = Math.min(limit, Math.max(ELIDE_FLOOR, Math.floor(window * ELIDE_AT)))
+    const policy = shorteningPolicy(budget.cache)
+    const soft = Math.min(limit, Math.max(policy.floor, Math.floor(window * policy.share)))
     const worth = Math.max(ELIDE_MIN_SAVING, Math.floor(window * ELIDE_SAVING))
 
     const original = o.conversation.messages()
@@ -982,11 +986,19 @@ export class AgentLoop {
     const trigger = options.manual ? 'manual' : 'auto'
     if (forced || size() > soft) {
       const over = forced || size() > limit
-      const elided = elideOldOutputs(messages)
-      // The cache holds the prompt up to the first result shortening changes: below the limit it goes only for a large saving.
+      const elided = elideOldOutputs(messages, policy.recent, policy.limit)
+      // The cache holds the prompt up to the first result shortening changes: below the limit it goes for a large
+      // saving, or when what it saves on the next requests is more than what it sends again now. A model whose provider
+      // binds its reasoning keeps that of the request's tool-call loop: the second only as a request starts.
+      const changed = firstDifference(messages, elided)
       const saved = (estimateTokens(messages) - estimateTokens(elided)) * this.meter.scale
-      if (elided.some((message, i) => message !== messages[i]) && (over || saved >= worth)) {
-        messages = await this.elide(messages)
+      const pays = () => {
+        if (policy.atRequestStart && !requestStarts(messages)) return false
+        const tail = estimateTokens(elided.slice(changed)) * this.meter.scale
+        return rewritePays(saved, tail, stepsAhead(stepCount(messages)), policy.terms, this.cacheExpired(policy))
+      }
+      if (changed < elided.length && (over || saved >= worth || pays())) {
+        messages = await this.elide(messages, policy.recent, policy.limit)
         rewritten = true
         this.meter.reset()
       }
@@ -1030,8 +1042,14 @@ export class AgentLoop {
     return removed
   }
 
+  /** The main agent's prompt cache has expired since its last request, where the provider says how long it lasts. */
+  private cacheExpired(policy: ShorteningPolicy): boolean {
+    const { cacheClock } = this.o.services
+    return policy.terms.ttlMs !== undefined && cacheClock !== undefined && cacheClock.expired(policy.terms.ttlMs)
+  }
+
   /** elideOldOutputs, with each result it shortens kept whole first where it can be, so that the note in its place says where. */
-  private async elide(messages: readonly Message[], recentSteps = RECENT_STEPS, limit = ELIDE_LIMIT): Promise<Message[]> {
+  private async elide(messages: readonly Message[], recentSteps: number | Recency = RECENT_STEPS, limit = ELIDE_LIMIT): Promise<Message[]> {
     const { outputs, sessionId } = this.o.services
     const kept = new Map<string, string>()
     // A note is the loop's own only when it names a file in this session's folder: one a tool's output holds is text.

@@ -33,6 +33,13 @@ function perMillion(value: unknown): number | undefined {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e12) / 1e6 : undefined
 }
 
+/** What OpenRouter lists for reading and writing the prompt cache, where it lists them (ADR 0130). */
+function cachePrices(pricing: Record<string, unknown>): { cacheRead?: number; cacheWrite?: number } {
+  const read = perMillion(pricing.input_cache_read)
+  const write = perMillion(pricing.input_cache_write)
+  return { ...(read !== undefined ? { cacheRead: read } : {}), ...(write !== undefined ? { cacheWrite: write } : {}) }
+}
+
 /** Fields of a `pricing` object that are not prices: a discount is a fraction off the price, not something charged. */
 const NOT_A_PRICE = new Set(['discount'])
 
@@ -140,7 +147,7 @@ export function parseOpenRouterCatalog(json: unknown): CatalogEntry[] {
         promptCache: pricing.input_cache_write !== undefined,
       },
       editFormat: inferEditFormat(family, id),
-      price: { input, output },
+      price: { input, output, ...cachePrices(pricing) },
       free: freeVerdict(id, pricing).free,
       created: created ? created * 1000 : undefined,
       expiresAt: Number.isFinite(expires) ? expires : undefined,

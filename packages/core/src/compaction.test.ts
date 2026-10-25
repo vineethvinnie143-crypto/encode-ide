@@ -4,6 +4,7 @@ import type { AssistantBlock, AssistantMessage, Message, ToolResultBlock, ToolUs
 import { textBlock, userText } from '@encode/providers'
 import {
   applyCompaction,
+  boundThinking,
   ContextMeter,
   digest,
   dropThinkingFrom,
@@ -18,8 +19,10 @@ import {
   NOT_RUN,
   planCompaction,
   repairPairing,
+  requestStarts,
   requestText,
   shorten,
+  stepCount,
   summaryRequest,
 } from './compaction'
 
@@ -223,6 +226,77 @@ describe('elideOldOutputs', () => {
     assert.ok(!(after[3] as AssistantMessage).content.some((block) => block.type === 'thinking'), 'after the change')
     assert.ok(!(after[5] as AssistantMessage).content.some((block) => block.type === 'thinking'), 'after the change')
     assert.ok(messages[3].content.some((block) => block.type === 'thinking'), 'the input is untouched')
+  })
+
+  it('keeps what the model finds code by and edits from whole for longer than a command (ADR 0130)', () => {
+    const messages: Message[] = [
+      userText('go'),
+      ...step('g0', long, 'Grep', { pattern: 'x' }),
+      ...step('b', long, 'Bash', { command: 'make' }),
+      ...step('g', long, 'Grep', { pattern: 'y' }),
+      ...step('r', long, 'Read', { file_path: '/a' }),
+      ...step('recent', long, 'Bash', { command: 'make test' }),
+    ]
+    const recent = { steps: 1, reads: 3 }
+    const after = elideOldOutputs(messages, recent)
+    const text = (index: number) => (((after[index] as UserMessage).content[0] as ToolResultBlock).content[0] as { text: string }).text
+    assert.match(text(2), /removed to save context/, 'a search four steps back')
+    assert.match(text(4), /removed to save context/, 'a command three steps back')
+    assert.equal(after[6], messages[6], 'a search two steps back stays whole')
+    assert.equal(after[8], messages[8], 'and a Read one step back')
+    assert.equal(after[10], messages[10])
+    assert.deepEqual(elidable(messages, recent).map((part) => part.key), ['g0:0', 'b:0'], 'kept in the folder first: what is shortened, but a Read')
+    assert.ok(isPaired(after))
+  })
+
+  it('keeps reasoning no provider binds in the request being worked on, and drops the rest after a rewrite (ADR 0130)', () => {
+    const deepseek = { provider: 'openrouter', model: 'deepseek/deepseek-v4', family: 'deepseek' as const }
+    const claude = { provider: 'anthropic', model: 'claude-x', family: 'anthropic' as const }
+    const thought: AssistantBlock = { type: 'thinking', text: 'because' }
+    const signed: AssistantBlock = { type: 'thinking', text: 'because', signature: 'sig' }
+    const by = (origin: AssistantMessage['origin'], ...content: (AssistantBlock | string)[]): AssistantMessage => ({ ...assistant(...content), origin })
+    const messages: Message[] = [
+      userText('first request'),
+      by(deepseek, thought, call('a', 'Bash', { command: 'make' })),
+      results(result('a', long)),
+      by(deepseek, thought, 'done'),
+      userText('second request'),
+      by(deepseek, thought, call('b', 'Bash', { command: 'make' })),
+      results(result('b', long)),
+      by(claude, signed, call('c', 'Bash', { command: 'make' })),
+      results(result('c', long)),
+      by(deepseek, thought, call('d', 'Bash', { command: 'make' })),
+      results(result('d', 'short')),
+    ]
+    const after = elideOldOutputs(messages, 1)
+    const thinks = (index: number) => (after[index] as AssistantMessage).content.some((block) => block.type === 'thinking')
+    assert.equal(thinks(1), true, 'before the change')
+    assert.equal(thinks(3), false, 'an earlier request')
+    assert.equal(thinks(5), true, "this request's, which DeepSeek reads back as text")
+    assert.equal(thinks(7), false, "Claude's signed thinking")
+    assert.equal(thinks(9), true)
+  })
+
+  it('takes reasoning for bound when its provider checks it, or nothing says it does not', () => {
+    const deepseek = { provider: 'openrouter', model: 'deepseek/deepseek-v4', family: 'deepseek' as const }
+    const by = (...content: AssistantBlock[]): AssistantMessage => ({ role: 'assistant', content, origin: deepseek })
+    const thinking = (extra: object): AssistantBlock => ({ type: 'thinking', text: 'because', ...extra })
+    assert.equal(boundThinking(by(thinking({}))), false)
+    assert.equal(boundThinking(by(thinking({ details: [{ type: 'reasoning.text', text: 'because', signature: null }] }))), false)
+    assert.equal(boundThinking(by(thinking({ details: [{ type: 'reasoning.encrypted', data: 'opaque' }] }))), true, 'encrypted')
+    assert.equal(boundThinking(by(thinking({ signature: 'sig' }))), true, 'signed')
+    assert.equal(boundThinking(by({ type: 'redacted-thinking', data: 'opaque' })), true, 'redacted')
+    assert.equal(boundThinking(by({ ...call('a'), extra: { google: { thought_signature: 's' } } })), true, 'a signature on a call')
+    assert.equal(boundThinking(assistant(thinking({}))), true, 'a model nobody knows')
+    assert.equal(boundThinking({ ...assistant(thinking({})), origin: { provider: 'google', model: 'gemini-x', family: 'google' } }), true)
+  })
+
+  it('counts steps, and tells the first request of a new request from the next step of one', () => {
+    const messages: Message[] = [userText('go'), ...step('a'), ...step('b'), assistant('done')]
+    assert.equal(stepCount(messages), 2)
+    assert.equal(requestStarts(messages.slice(0, 3)), false, 'after tool results')
+    assert.equal(requestStarts([...messages, userText('and now')]), true)
+    assert.equal(requestStarts([]), true)
   })
 })
 

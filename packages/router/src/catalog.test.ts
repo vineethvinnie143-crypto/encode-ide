@@ -81,7 +81,7 @@ describe('OpenRouter catalog', () => {
   it('prices per million tokens, and calls a model free only when its id says so and it costs nothing', () => {
     const models = parseOpenRouterCatalog({
       data: [
-        item('paid/model', { pricing: { prompt: '0.000003', completion: '0.0000002', input_cache_write: '0.00000375' } }),
+        item('paid/model', { pricing: { prompt: '0.000003', completion: '0.0000002', input_cache_read: '0.0000003', input_cache_write: '0.00000375' } }),
         item('promo/model'),
         item('odd/model:free', { pricing: { prompt: '0.000001', completion: '0' } }),
       ],
@@ -89,7 +89,7 @@ describe('OpenRouter catalog', () => {
     assert.deepEqual(
       models.map((model) => [model.model, model.price, model.free, model.capabilities.promptCache]),
       [
-        ['paid/model', { input: 3, output: 0.2 }, false, true],
+        ['paid/model', { input: 3, output: 0.2, cacheRead: 0.3, cacheWrite: 3.75 }, false, true],
         ['promo/model', { input: 0, output: 0 }, false, false],
         ['odd/model:free', { input: 1, output: 0 }, false, false],
       ],
