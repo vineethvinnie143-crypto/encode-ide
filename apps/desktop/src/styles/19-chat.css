@@ -215,6 +215,24 @@
   font-size: var(--fs-12);
   line-height: 18px;
 }
+/* The icon on the middle of the first line, however many lines follow. */
+.msg-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2.5px;
+}
+
+/* The request stopped at the step limit (ADR 0124): said a shade louder, with Continue under it while it ends the chat. */
+.msg-notice.is-step-limit {
+  color: var(--text-2);
+}
+.notice-actions {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
 
 /* A long word (a path, a link, a hash) wraps instead of pushing the chat sideways. */
 .markdown {

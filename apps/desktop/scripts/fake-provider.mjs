@@ -44,6 +44,14 @@ const SCENARIOS = {
       text: 'Provider path verified: streamed a tool call, wrote provider-check.txt, and ran a shell command.',
     },
   ],
+  // More steps than the smoke's limit of two (ADR 0124): the reply after the last is asked for with tools off
+  // (tool_choice none), and says how far the work got. Continue, as the step limit's button sends it, goes on with it.
+  'step-limit': [
+    { text: 'Listing the project.', call: { name: 'Glob', args: { pattern: '*' } } },
+    { text: 'Listing the notes.', call: { name: 'Glob', args: { pattern: '**/*.md' } } },
+    { text: 'Listing everything.', call: { name: 'Glob', args: { pattern: '**/*' } } },
+    { text: 'Listed it all.' },
+  ],
   // A side chat's question (ADR 0104): one answer, which says what the copy of the conversation held.
   'side-check': [{ text: 'Side answer: the chat above wrote provider-check.txt.' }],
   // A file written with an error in it: the language server says so after the step, and the error gate sends the agent
@@ -399,7 +407,7 @@ let lastConventions = null
 let lastBestOf = null
 /** The latest suggestion asked for as you type, for the smoke to check what was sent. */
 let lastInline = null
-const stats = { summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0, bestOfRequests: 0 }
+const stats = { closingRequests: 0, summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0, bestOfRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -465,7 +473,10 @@ function chunk(delta, finish = null) {
 const STEERED = 'sent the message below while you were working'
 const isSteer = (message) => message.role === 'user' && textOf(message.content).includes(STEERED)
 
-/** What eNCode tells the model within a turn of what the language servers or the Reviewer found, that a stronger model takes over, or to carry on after a compaction: the turn goes on. */
+/**
+ * What eNCode tells the model within a turn of what the language servers or the Reviewer found, that a stronger model
+ * takes over, to carry on after a compaction, or that the step limit is reached: the turn goes on.
+ */
 const LANGUAGE_SERVER_NEWS = [
   'The language servers found errors after your changes',
   'The language servers checked your changes again',
@@ -473,6 +484,7 @@ const LANGUAGE_SERVER_NEWS = [
   'The Reviewer read your changes before the person sees them',
   'A stronger model does the rest of this request',
   'The conversation was just compacted to fit the context window',
+  'That was the last step this request may take',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
 const REVIEWED = 'The Reviewer read your changes before the person sees them'
@@ -512,8 +524,14 @@ const BENCH_PROMPTS = [
   ['In config/features.json, turn newCheckout on for 10% of users', 'bench-json'],
 ]
 
+/** What a request asked with tools off says (ADR 0124): how far the work got, in the words of an agent at its step limit. */
+const CLOSING = 'Stopped at the step limit: listed the project and its notes; listing everything is left.'
+
 function scenarioOf(messages) {
-  const content = messages[lastUserIndex(messages)]?.content
+  const index = lastUserIndex(messages)
+  const content = messages[index]?.content
+  // Continue, as the step limit's button sends it (ADR 0124), carries on the request before it.
+  if (textOf(content).trim() === 'Continue.' && index > 0) return scenarioOf(messages.slice(0, index))
   // In parts when eNCode put a note before the person's words (the environment, on a session's first request).
   const match = /\[scenario:([a-z-]+)\]/.exec(textOf(content))
   if (match && SCENARIOS[match[1]]) return match[1]
@@ -887,6 +905,12 @@ document.getElementById('greet').addEventListener('click', () => {
       return
     }
     console.log(`[fake-provider] ${body.model ?? '?'} scenario=${check ? 'check' : scenarioOf(messages)} call=${step.call?.name ?? 'none'} stream=${Boolean(body.stream)}`)
+    // Like OpenAI, a request that forbids calls is answered in words.
+    if (body.tool_choice === 'none') {
+      stats.closingRequests += 1
+      await sendText(response, body, scenarioOf(messages) === 'step-limit' ? CLOSING : step.text)
+      return
+    }
     if (!step.call) {
       const told = step.answersSteer ? lastSteer(messages) : ''
       await sendText(response, body, told ? `Steered by: ${told} ${step.text}` : step.text, step.streamDelayMs)

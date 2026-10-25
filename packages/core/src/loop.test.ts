@@ -9,9 +9,10 @@ import type { Tool, ToolKind } from '@encode/tools'
 import { outsideTools } from '@encode/tools/testing'
 import { isPaired, NOT_RUN } from './compaction'
 import { createOutputStore } from './outputs'
-import { CONTINUE_AFTER_LENGTH } from './prompt'
+import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH } from './prompt'
 import { loopHarness, type Harness } from './testing'
 import { AgentAbortedError } from './types'
+import type { SessionGoal } from './ui'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -59,11 +60,84 @@ describe('a turn', () => {
     assert.equal(h.client.requests[1].payload.messages.length, 3, 'the second request carries the call and its result')
   })
 
-  it('stops after the step limit and leaves a valid conversation', async () => {
+  it('ends at the step limit with an answer written with tools held back, not on a step', async () => {
+    const h = await loopHarness({
+      script: (_request, step) => (step < 3 ? { text: 'Looking.', calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'Two files hold it; the third is left to check.' }),
+      maxSteps: 3,
+    })
+    assert.deepEqual(await h.run('loop'), { kind: 'max-steps', steps: 3, reply: 'Two files hold it; the third is left to check.' })
+    assert.equal(h.client.requests.length, 4)
+    assert.deepEqual(h.client.requests.map((request) => request.payload.toolChoice), [undefined, undefined, undefined, 'none'])
+    // The tools stay listed, so the cached prefix holds; the last step's results say why they are off.
+    assert.deepEqual(h.client.requests[3].payload.tools.map((tool) => tool.name), h.client.requests[2].payload.tools.map((tool) => tool.name))
+    const last = h.client.requests[3].payload.messages.at(-1) as UserMessage
+    assert.equal(last.content[0].type, 'tool-result')
+    assert.match(JSON.stringify(last.content.at(-1)), /That was the last step this request may take \(3 steps\), so tools are off for your next reply/)
+    assert.equal(h.surface.settled.at(-1)?.text, 'Two files hold it; the third is left to check.')
+    assert.ok(isPaired(h.conversation.messages()))
+  })
+
+  it('answers a call made at the step limit anyway, unrun, and leaves a valid conversation', async () => {
     const h = await loopHarness({ script: [{ calls: [{ name: 'Glob', input: { pattern: '*' } }] }], maxSteps: 3 })
     assert.deepEqual(await h.run('loop'), { kind: 'max-steps', steps: 3 })
+    assert.equal(h.client.requests.length, 4)
+    assert.equal(h.surface.tools().length, 3, 'the call made with tools off is not run')
+    assert.deepEqual(lastResults(h).map((result) => (result.content[0] as { text: string }).text), [NOT_RUN])
     assert.ok(isPaired(h.conversation.messages()))
-    assert.equal(h.client.requests.length, 3)
+  })
+
+  it('keeps no empty reply made at the step limit', async () => {
+    const h = await loopHarness({ script: (_request, step) => (step < 2 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : {}), maxSteps: 2 })
+    assert.deepEqual(await h.run('loop'), { kind: 'max-steps', steps: 2 })
+    assert.equal(h.client.requests.length, 3, 'an empty closing reply is not asked for again')
+    assert.equal(h.conversation.messages().at(-1)?.role, 'user')
+    assert.ok(isPaired(h.conversation.messages()))
+  })
+
+  it('leaves the answer standing when the agent was sent back from it at the step limit', async () => {
+    let stops = 0
+    const h = await loopHarness({
+      hooks: {
+        async beforeStop() {
+          stops++
+          return { continue: 'Check it once more.' }
+        },
+      },
+      script: [{ calls: [{ name: 'Glob', input: { pattern: '*' } }] }, { text: 'Found it.' }],
+      maxSteps: 2,
+    })
+    assert.deepEqual(await h.run('find it'), { kind: 'max-steps', steps: 2 })
+    assert.equal(stops, 1)
+    assert.equal(h.client.requests.length, 2, 'no closing reply: the answer came after the last step')
+    assert.equal(h.surface.settled.filter((entry) => entry.kind === 'assistant').at(-1)?.text, 'Found it.')
+  })
+
+  it('asks for the answer when a tool ends the request with no words for the person', async () => {
+    let goal: SessionGoal | null = { text: 'fix the pages', status: 'active', rounds: 0, createdAt: 1, updatedAt: 1 }
+    const h = await loopHarness({
+      services: { goals: { get: () => goal, set: (next) => (goal = next) } },
+      script: [{ calls: [{ name: 'UpdateGoal', input: { status: 'complete' } }] }, { text: 'All three pages load now; I checked each one.' }],
+    })
+    assert.deepEqual(await h.run('go'), { kind: 'stopped', summary: 'Goal complete.' })
+    assert.equal(goal?.status, 'complete')
+    assert.deepEqual(h.client.requests.map((request) => request.payload.toolChoice), [undefined, 'none'])
+    assert.match(JSON.stringify(h.client.requests[1].payload.messages.at(-1)), /Goal complete\. The request ends with your next reply, and tools are off for it\./)
+    assert.equal(h.surface.settled.at(-1)?.text, 'All three pages load now; I checked each one.')
+  })
+
+  it('shows the words that came with the call that ended the request as its answer', async () => {
+    let goal: SessionGoal | null = { text: 'fix the pages', status: 'active', rounds: 0, createdAt: 1, updatedAt: 1 }
+    const h = await loopHarness({
+      services: { goals: { get: () => goal, set: (next) => (goal = next) } },
+      script: [{ text: 'All three pages load now.', calls: [{ name: 'UpdateGoal', input: { status: 'complete' } }] }],
+    })
+    assert.deepEqual(await h.run('go'), { kind: 'stopped', summary: 'Goal complete.' })
+    assert.equal(h.client.requests.length, 1)
+    // Once before the step, which folds away with it, and again after it, where the answer is read.
+    assert.deepEqual(
+      h.surface.settled.filter((entry) => entry.kind === 'assistant' || entry.kind === 'tool').map((entry) => entry.tool?.name ?? entry.text),
+      ['All three pages load now.', 'UpdateGoal', 'All three pages load now.'],
+    )
   })
 
   it('reports a pause when no model can run', async () => {
@@ -442,6 +516,8 @@ describe('hooks', () => {
     const resultMessage = messages[2] as UserMessage
     assert.equal((resultMessage.content.at(-1) as { text: string }).text, '<system-reminder>\nRemember the changelog.\n</system-reminder>')
     assert.deepEqual((messages[4] as UserMessage).content[0], { type: 'text', text: 'Run the tests first.' })
+    // Sent back from its answer, the agent is told that answer folds away once it takes more steps.
+    assert.deepEqual((messages[4] as UserMessage).content[1], { type: 'text', text: `<system-reminder>\n${ANSWER_AGAIN}\n</system-reminder>` })
   })
 
   it('can reject a result', async () => {

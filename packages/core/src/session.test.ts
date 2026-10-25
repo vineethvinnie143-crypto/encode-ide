@@ -473,6 +473,20 @@ describe('steering a turn', () => {
     assert.ok(entries.some((entry) => entry.kind === 'notice' && /A hook refused this message: no secrets/.test(entry.text ?? '')))
   })
 
+  it('gives the request its whole step limit again once it takes a message', async () => {
+    const h = await sessionHarness({
+      settings: { maxSteps: 2 },
+      script: (_request, step) => {
+        if (step === 0) h.session.steer('also look at the tests')
+        return step < 3 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'Both are checked.' }
+      },
+    })
+    const end = await h.session.start({ text: 'look at the source', mode: 'code' })
+    // One step before the message and two after it, then the closing reply: not one step after it.
+    assert.deepEqual(end, { kind: 'max-steps', steps: 2, reply: 'Both are checked.' })
+    assert.deepEqual(h.client.requests.map((request) => request.payload.toolChoice), [undefined, undefined, undefined, 'none'])
+  })
+
   it('drops what a stopped turn did not take', async () => {
     const h = await sessionHarness({ client: { delayMs: 15 }, script: [{ text: 'one two three four five six seven eight nine ten eleven twelve' }, { text: 'next' }] })
     const running = h.session.start({ text: 'talk', mode: 'code' })
@@ -507,6 +521,34 @@ describe('steering a turn', () => {
     assert.equal(steer?.id, chosen)
     // Taken, the id names an entry, so it cannot steer again.
     assert.throws(() => h.session.steer('later', chosen), /cannot be used/)
+  })
+})
+
+describe('the step limit', () => {
+  it('ends with what the agent wrote with tools held back, and says why the request stopped and how it goes on', async () => {
+    const h = await sessionHarness({
+      settings: { maxSteps: 2 },
+      script: (_request, step) => (step < 2 ? { text: 'Looking.', calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'The setting is in config.json; the server still needs a restart.' }),
+    })
+    const end = await h.session.start({ text: 'find the setting', mode: 'code' })
+    assert.deepEqual(end, { kind: 'max-steps', steps: 2, reply: 'The setting is in config.json; the server still needs a restart.' })
+    const entries = h.session.history().entries
+    const [answer, notice] = entries.slice(-2)
+    assert.deepEqual([answer.kind, answer.text], ['assistant', 'The setting is in config.json; the server still needs a restart.'])
+    assert.equal(notice.kind, 'notice')
+    assert.equal(notice.stepLimit, 2)
+    assert.equal(notice.text, 'Stopped after 2 steps, the most one request may take. The limit is set to 2; unless set, it is 200. Send a message to let it go on.')
+    assert.ok(h.of('done').some((event) => event.summary === 'Stopped after 2 steps. Send a follow-up to continue.'))
+    // Kept with the conversation.
+    await h.reopen()
+    assert.equal(h.session.history().entries.at(-1)?.stepLimit, 2)
+  })
+
+  it('leaves out how to go on while a goal carries the work on by itself', async () => {
+    const h = await sessionHarness({ settings: { maxSteps: 1 }, script: (_request, step) => (step < 1 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'Halfway.' }) })
+    h.session.setGoal({ text: 'tidy the repo', status: 'active', rounds: 0, createdAt: 1, updatedAt: 1 })
+    await h.session.start({ text: 'go', mode: 'code' })
+    assert.equal(h.session.history().entries.at(-1)?.text, 'Stopped after 1 step, the most one request may take. The limit is set to 1; unless set, it is 200.')
   })
 })
 

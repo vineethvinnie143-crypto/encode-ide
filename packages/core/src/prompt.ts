@@ -114,6 +114,26 @@ export const CONTINUE_AFTER_LENGTH =
 export const RESUME_AFTER_COMPACTION =
   'The conversation was just compacted to fit the context window, and your reply would end the request here. If the request is finished, give your final answer to the user now. If it is not, carry on with the next step now; do not stop to report progress.'
 
+/**
+ * Goes with the results of the last step a request may take: the reply after it is made with tools held back, so the
+ * request ends with words for the user and not with a step (ADR 0124).
+ */
+export function stepLimitNote(steps: number): string {
+  return `That was the last step this request may take (${steps} steps), so tools are off for your next reply. Write to the user now, in plain words: what you found, what you changed and how far that got, and what is left to do. Do not say you will do more in this reply.`
+}
+
+/** Goes with the result of a tool that ended the request when the model wrote nothing with it (ADR 0124). */
+export function stoppedNote(summary: string): string {
+  return `${summary} The request ends with your next reply, and tools are off for it. Tell the user now, in plain words, what was done and how it was checked, or why it cannot go on.`
+}
+
+/**
+ * Goes with what sends the agent back to work after it gave its answer: once it takes more steps, that answer is
+ * folded away with them, and the person reads only the reply after its last step (ADR 0124).
+ */
+export const ANSWER_AGAIN =
+  'If you take more steps before you finish, end with your whole answer again, not only what changed since: the user sees only your last reply, and the one above is folded away with the steps.'
+
 /** Sent when the model answered with nothing to act on. */
 export const NUDGE_EMPTY = 'Your last reply was empty. Continue with the task, or say that it is finished.'
 

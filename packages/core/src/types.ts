@@ -184,8 +184,8 @@ export type TurnEnd =
   | { kind: 'done'; reply: string }
   /** A tool ended the turn (a completion report, a finished goal, a plan left for the user). */
   | { kind: 'stopped'; summary: string }
-  | { kind: 'max-steps'; steps: number }
-  /** No model could run now. */
+  /** The request took all the steps it may; `reply` is what the agent wrote then, with tools held back (ADR 0124). */
+  | { kind: 'max-steps'; steps: number; reply?: string }
   /** No model could run now. `message` is plain; `detail` the longer account (see CompletionOutcome). */
   | { kind: 'paused'; reason: PauseReason; message: string; detail?: string; retryAt?: number }
   /** The request cannot go on. `message` is plain, for the person; `code` what kind of trouble it is. */

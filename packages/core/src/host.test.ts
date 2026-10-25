@@ -352,7 +352,10 @@ describe('goals', () => {
     await h.host.setGoal(session.id, goal)
     await h.host.start(session.id, { text: 'work on it', mode: 'code' })
     await until(() => h.of('goal', session.id).some((event) => event.goal?.status === 'complete'))
-    assert.equal(h.client.requests.length, 3)
+    await until(() => h.of('done', session.id).length === 3)
+    // The call that marked it done said nothing, so the round ends with a reply written with tools held back (ADR 0124).
+    assert.deepEqual(h.client.requests.map((request) => request.payload.toolChoice), [undefined, undefined, undefined, 'none'])
+    assert.equal((await h.host.history(session.id)).entries.at(-1)?.text, 'round 3')
     assert.match(JSON.stringify(h.client.requests[1].payload.messages.at(-1)), /Continue working toward the active goal/)
     const done = await h.host.goal(session.id)
     assert.deepEqual({ status: done?.status, rounds: done?.rounds }, { status: 'complete', rounds: 2 })
