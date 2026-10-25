@@ -4,8 +4,10 @@ import { Loader2 } from '../../ui/icons'
 import { KeyField } from '../models/KeyField'
 
 export interface SearchSettingsProps {
-  /** The provider chosen in the draft. */
+  /** The provider chosen on the screen. */
   provider: SearchProviderId
+  /** The provider searches go to now: another one while the chosen one waits for its key. */
+  inUse: SearchProviderId
   /** The providers that have a key stored. */
   storedKeys: readonly SearchProviderId[]
   keyStorage?: KeyStorage
@@ -23,7 +25,7 @@ export interface SearchSettingsProps {
 }
 
 /** Settings > Agent > Web search: who answers the agent's searches, their key if they need one, and a test. */
-export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onProvider, onKeyInput, onSaveKey, onRemoveKey, onTest, testing, result }: SearchSettingsProps) {
+export function SearchSettings({ provider, inUse, storedKeys, keyStorage, keyInput, onProvider, onKeyInput, onSaveKey, onRemoveKey, onTest, testing, result }: SearchSettingsProps) {
   const info = searchProviderInfo(provider)
   const stored = storedKeys.includes(provider)
   return (
@@ -72,7 +74,20 @@ export function SearchSettings({ provider, storedKeys, keyStorage, keyInput, onP
               </a>
             )}
           </p>
+          {provider !== inUse && (
+            <p className="search-pending">
+              {info.name} is used once its key is saved. Until then, searches go to {searchProviderInfo(inUse).name}.
+            </p>
+          )}
         </div>
+      )}
+      {info.termsUrl && (
+        <p className="search-link">
+          <a href={info.termsUrl} target="_blank" rel="noreferrer">
+            {info.name}’s terms
+          </a>{' '}
+          apply to its free use.
+        </p>
       )}
 
       <div className="search-test">

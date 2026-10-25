@@ -7,7 +7,7 @@
  * is assignable to the renderer's, so the renderer keeps its API unchanged.
  */
 import type { PauseReason } from '@encode/providers'
-import type { AgentMode, DiffHunk, JobStatus } from '@encode/tools'
+import type { AgentMode, DiffHunk, JobStatus, ToolOffer } from '@encode/tools'
 
 export type { AgentMode, DiffHunk, DiffLine } from '@encode/tools'
 
@@ -68,6 +68,8 @@ export interface ConversationEntry {
     warnings?: string[]
     /** `encode`: a call eNCode made itself, such as a check before the agent finishes (ADR 0095), not the model. */
     by?: 'encode'
+    /** Something the app offers to do about the call: `search-key` after a free search failed (ADR 0123). */
+    offer?: ToolOffer
   }
   /** The model that wrote an assistant entry. */
   model?: string

@@ -25,6 +25,8 @@ interface StoredSettings extends Omit<Settings, 'profiles' | 'keyStorage' | 'com
   chatsFolder: string | null
   /** The person set the step limit themselves (so a new default does not replace it). */
   stepsChosen?: boolean
+  /** The person chose the search provider themselves (so a new default does not replace it). */
+  searchChosen?: boolean
 }
 
 /** The name a search key has in the vault; a profile's id is a UUID, so the two cannot meet. */
@@ -257,6 +259,8 @@ export class SettingsService {
 
     const active = profiles.find((p) => p.id === input.activeProfileId) ?? profiles[0]
     const stepsChosen = input.stepsChosen === true || (typeof input.maxSteps === 'number' && input.maxSteps !== 30)
+    // Before 0123 the default was DuckDuckGo, and every file holds it: only a provider the person chose is kept.
+    const searchChosen = input.searchChosen === true || (isSearchProviderId(input.searchProvider) && input.searchProvider !== 'duckduckgo')
     // A file from before the model router: whoever already ran a real model keeps being allowed to, and has set up.
     const usesRealModel = profiles.some((p) => p.kind !== 'demo' && (Boolean(p.apiKeyEnc) || isLocalUrl(p.baseUrl)))
     return {
@@ -300,7 +304,8 @@ export class SettingsService {
       freeOnly: typeof input.freeOnly === 'boolean' ? input.freeOnly : !usesRealModel,
       freeProfileId: freeProfileOf(input.freeProfileId, profiles),
       setupDone: typeof input.setupDone === 'boolean' ? input.setupDone : usesRealModel,
-      searchProvider: isSearchProviderId(input.searchProvider) ? input.searchProvider : base.searchProvider,
+      searchProvider: searchChosen && isSearchProviderId(input.searchProvider) ? input.searchProvider : base.searchProvider,
+      searchChosen,
       searchKeysEnc: storedSearchKeys(input.searchKeysEnc),
     }
   }
@@ -455,7 +460,10 @@ export class SettingsService {
     if (typeof patch.freeOnly === 'boolean') next.freeOnly = patch.freeOnly
     next.freeProfileId = freeProfileOf(patch.freeProfileId !== undefined ? patch.freeProfileId : next.freeProfileId, next.profiles)
     if (typeof patch.setupDone === 'boolean') next.setupDone = patch.setupDone
-    if (isSearchProviderId(patch.searchProvider)) next.searchProvider = patch.searchProvider
+    if (isSearchProviderId(patch.searchProvider)) {
+      next.searchProvider = patch.searchProvider
+      next.searchChosen = true
+    }
 
     this.data = next
     this.persist()

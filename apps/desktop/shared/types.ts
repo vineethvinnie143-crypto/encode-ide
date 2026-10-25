@@ -192,7 +192,7 @@ export interface Settings {
   freeProfileId: string | null
   /** The first-run dialog has been answered: a model connected, the demo chosen, or "not now". */
   setupDone: boolean
-  /** Who answers the agent's web searches; see shared/search.ts. Default DuckDuckGo, which needs no key. */
+  /** Who answers the agent's web searches; see shared/search.ts. Default Parallel, which needs no key. */
   searchProvider: SearchProviderId
   /** Read only: the search providers that have an API key stored. A key is set with settings.setSearchKey and never comes back. */
   searchKeys: SearchProviderId[]
@@ -1272,6 +1272,8 @@ export interface ConversationEntry {
     warnings?: string[]
     /** `encode`: a call eNCode made itself, such as a check before the agent finishes (ADR 0095). */
     by?: 'encode'
+    /** Something the app offers to do about the call: `search-key` after a free search failed (ADR 0123). */
+    offer?: 'search-key'
   }
   /** On an error: what kind it is and what can be done about it. */
   problem?: EntryProblem

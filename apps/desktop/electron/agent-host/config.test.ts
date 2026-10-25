@@ -22,11 +22,11 @@ describe('the host configuration', () => {
   })
 
   it('names the search provider, and carries nothing of its key', () => {
-    assert.equal(hostConfigOf(settings({})).searchProvider, 'duckduckgo', 'a settings object from before search providers')
+    assert.equal(hostConfigOf(settings({})).searchProvider, 'parallel', 'a settings object from before search providers')
     const config = hostConfigOf(settings({ searchProvider: 'brave', searchKeys: ['brave'] }))
     assert.equal(config.searchProvider, 'brave')
     assert.doesNotMatch(JSON.stringify(config), /searchKeys|"key"/)
-    assert.equal(hostConfigOf(settings({ searchProvider: 'bing' as never })).searchProvider, 'duckduckgo', 'an unknown provider is not passed on')
+    assert.equal(hostConfigOf(settings({ searchProvider: 'bing' as never })).searchProvider, 'parallel', 'an unknown provider is not passed on')
   })
 
   it('tells the host whether the Computer tool is on, and never on a computer that has no way to run it', () => {

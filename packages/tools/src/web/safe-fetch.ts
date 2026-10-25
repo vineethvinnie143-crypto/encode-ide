@@ -45,6 +45,8 @@ export type FetchOutcome =
       contentType: string
       text: string
       truncated: boolean
+      /** The response's headers, names in lower case, repeated ones joined with ", ". */
+      headers: Record<string, string>
     }
   /** The response is not text (an image, an archive); its body was not read. */
   | { kind: 'binary'; url: string; status: number; contentType: string }
@@ -155,6 +157,14 @@ async function readBody(response: IncomingMessage, maxBytes: number): Promise<{ 
   return { bytes: Buffer.concat(chunks, size), truncated }
 }
 
+function headersOf(response: IncomingMessage): Record<string, string> {
+  const headers: Record<string, string> = {}
+  for (const [name, value] of Object.entries(response.headers)) {
+    if (value !== undefined) headers[name] = Array.isArray(value) ? value.join(', ') : value
+  }
+  return headers
+}
+
 interface RequestInit {
   method: 'GET' | 'POST'
   /** Names in lower case. */
@@ -247,7 +257,7 @@ export async function safeFetch(rawUrl: string, options: FetchOptions = {}): Pro
     }
     try {
       const { bytes, truncated } = await readBody(response, maxBytes)
-      return { kind: 'response', url: url.href, status, contentType, text: decode(bytes, contentType), truncated }
+      return { kind: 'response', url: url.href, status, contentType, text: decode(bytes, contentType), truncated, headers: headersOf(response) }
     } catch (error) {
       throw failure(error)
     }

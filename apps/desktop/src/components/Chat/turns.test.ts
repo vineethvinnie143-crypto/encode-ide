@@ -10,6 +10,7 @@ import {
   formatUsage,
   isCommandTool,
   isSubagentTool,
+  latestSearchOffer,
   logItems,
   reuseTurns,
   stepKind,
@@ -98,6 +99,19 @@ describe('turns', () => {
     assert.deepEqual(turn.log, [call])
     assert.deepEqual(turn.reply, [failure])
     assert.deepEqual(buildTurns([], false), [])
+  })
+})
+
+describe('the offer of a free search key', () => {
+  it('goes to the last turn whose search a key would have made work, and to no turn without one', () => {
+    const offered = (extra: Partial<ConversationEntry['tool']> = {}) => tool('WebSearch', { query: 'q' }, { state: 'error', ok: false, offer: 'search-key', ...extra })
+    const turns = buildTurns(
+      [entry('user', { text: 'one' }), offered(), entry('user', { text: 'two' }), offered(), entry('assistant', { text: 'done' }), entry('user', { text: 'three' }), tool('Read')],
+      false,
+    )
+    assert.equal(latestSearchOffer(turns), turns[1])
+    assert.equal(latestSearchOffer(buildTurns([entry('user', { text: 'one' }), tool('WebSearch', { query: 'q' }, { state: 'error', ok: false })], false)), null)
+    assert.equal(latestSearchOffer([]), null)
   })
 })
 

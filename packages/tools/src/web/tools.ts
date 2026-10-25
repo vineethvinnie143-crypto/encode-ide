@@ -6,7 +6,7 @@
 import { truncateMiddle } from '../text'
 import type { Tool, ToolOutcome } from '../types'
 import { WebError, upgradeUrl } from './access'
-import { SEARCH_ENDPOINTS } from './search'
+import { SEARCH_ENDPOINTS, SearchError } from './search'
 
 const PAGE_FOR_MODEL = 100_000
 const PAGE_WITHOUT_SUMMARY = 20_000
@@ -158,7 +158,7 @@ export const webSearchTool: Tool<WebSearchInput> = {
   kind: 'web',
   readOnly: true,
   check: (input) => (input.allowed_domains?.length && input.blocked_domains?.length ? 'give allowed_domains or blocked_domains, not both.' : undefined),
-  access: (_input, ctx) => ({ type: 'web', url: ctx.web.searchTarget?.() ?? SEARCH_ENDPOINTS.duckduckgo }),
+  access: (_input, ctx) => ({ type: 'web', url: ctx.web.searchTarget?.() ?? SEARCH_ENDPOINTS.parallel }),
   describe: (input) => ({ title: `Search the web for ${input.query}` }),
   async run(input, ctx) {
     let hits
@@ -166,7 +166,9 @@ export const webSearchTool: Tool<WebSearchInput> = {
       hits = await ctx.web.search(input.query, { allowedDomains: input.allowed_domains, blockedDomains: input.blocked_domains, signal: ctx.signal })
     } catch (error) {
       if (ctx.signal.aborted) throw ctx.signal.reason
-      return fail(`The web search failed: ${error instanceof Error ? error.message : String(error)}\n${SEARCH_FAILED}`)
+      const failed = fail(`The web search failed: ${error instanceof Error ? error.message : String(error)}\n${SEARCH_FAILED}`)
+      // A free provider that cannot search from this computer: the app offers a free key of the person's own.
+      return error instanceof SearchError && error.keyHelps ? { ...failed, display: { offer: 'search-key' } } : failed
     }
     if (!hits.length) return { ok: true, content: `No results for "${input.query}". Try fewer or other words.` }
     const list = hits.map((hit, index) => `${index + 1}. ${hit.title}\n   ${hit.url}${hit.snippet ? `\n   ${hit.snippet}` : ''}`).join('\n')

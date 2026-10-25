@@ -1,6 +1,6 @@
 # 0122. The agent finds pages before it fetches them, and DuckDuckGo is asked one search at a time
 
-- Status: Accepted, builds on 0058
+- Status: Accepted, builds on 0058; Parallel replaces DuckDuckGo as the default in 0123
 - Date: 2026-10-25
 
 ## Context

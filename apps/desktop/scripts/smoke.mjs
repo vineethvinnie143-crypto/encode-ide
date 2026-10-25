@@ -1055,18 +1055,24 @@ async function runSearchChecks() {
 
   await evaluate('window.eNCode.agent.reset()')
   const initial = await evaluate('window.eNCode.settings.get()')
-  if (initial.searchProvider !== 'duckduckgo' || initial.searchKeys.length) throw new Error(`A new install searches with DuckDuckGo and holds no search key: ${JSON.stringify([initial.searchProvider, initial.searchKeys])}`)
-  await askedBy('duckduckgo', 'html.duckduckgo.com')
+  if (initial.searchProvider !== 'parallel' || initial.searchKeys.length) throw new Error(`A new install searches with Parallel and holds no search key: ${JSON.stringify([initial.searchProvider, initial.searchKeys])}`)
+  await askedBy('parallel', 'search.parallel.ai')
 
   // Settings > Agent: pick Brave Search. Its key field shows, and the test says there is no key without sending anything.
   await openSettings('Agent')
   await waitFor("!!document.querySelector('input[name=\"search-provider\"]')", 4000, 'the search providers')
   const options = await evaluate(`[...document.querySelectorAll('.policy-option')].filter((node) => node.querySelector('input[name="search-provider"]')).map((node) => node.querySelector('.policy-option-label')?.textContent ?? '')`)
   console.log('[smoke] search providers:', JSON.stringify(options))
-  if (options.join('|') !== 'DuckDuckGo|Brave Search Needs a key|Tavily Needs a key|Exa Needs a key') throw new Error(`The search providers read ${JSON.stringify(options)}`)
-  if (await evaluate("!!document.querySelector('.search-key')")) throw new Error('DuckDuckGo needs no key, so no key field should show')
+  if (options.join('|') !== 'Parallel|Tavily Needs a key|Exa Needs a key|Brave Search Needs a key|DuckDuckGo') throw new Error(`The search providers read ${JSON.stringify(options)}`)
+  if (await evaluate("!!document.querySelector('.search-key')")) throw new Error('Parallel needs no key, so no key field should show')
+  const terms = await evaluate("document.querySelector('.settings-web-search .search-link a')?.href ?? ''")
+  if (terms !== 'https://parallel.ai/customer-terms') throw new Error(`Parallel's terms are not linked: ${JSON.stringify(terms)}`)
   if (!(await click('input[name="search-provider"][value="brave"]'))) throw new Error('Brave Search is not offered')
   await waitFor("!!document.querySelector('.search-key .key-field')", 4000, 'the key field of Brave Search')
+  // Without a key it is only chosen on the screen: searches keep going to Parallel until the key is stored.
+  const pending = await evaluate("document.querySelector('.search-pending')?.textContent ?? ''")
+  if (pending !== 'Brave Search is used once its key is saved. Until then, searches go to Parallel.') throw new Error(`The screen does not say Brave Search waits for its key: ${JSON.stringify(pending)}`)
+  if ((await evaluate('window.eNCode.settings.get()')).searchProvider !== 'parallel') throw new Error('Brave Search was used before it had a key')
   const field = await evaluate(`({ label: document.querySelector('.search-key .key-field-label')?.textContent, note: document.querySelector('.search-key .key-field-note')?.textContent, link: document.querySelector('.search-link a')?.href })`)
   // Where there is no keychain the note says the key stays in memory; where there is one it says whom the key goes to.
   const noteOk = /sent only to Brave Search/.test(field.note) || /Kept in memory until eNCode closes/.test(field.note)
@@ -1079,14 +1085,16 @@ async function runSearchChecks() {
   await sleep(250)
   await screenshot('15-search-settings.png')
 
-  // Type a key and save it: the page learns only that one is stored, and the disk holds it sealed. The provider was
-  // kept when it was picked.
+  // Type a key and save it: the page learns only that one is stored, and the disk holds it sealed. The provider is
+  // used from then on.
   const secret = `brave-smoke-${Date.now().toString(36)}`
   if (!(await typeInto('.search-key .text-input', secret))) throw new Error('No key field')
   await waitFor("!!document.querySelector('.search-test .btn.primary')", 4000, 'a Save key button once a key is typed')
   if (!(await click('.search-test .btn.primary', 'Save key'))) throw new Error('No Save key button')
   await settingIs("settings.searchKeys.includes('brave')", 'the Brave Search key', 8000)
+  await settingIs("settings.searchProvider === 'brave'", 'Brave Search, once its key is stored', 8000)
   await waitFor("!document.querySelector('.search-test .btn.primary')", 4000, 'the field emptied once the key is stored')
+  await waitFor("!document.querySelector('.search-pending')", 4000, 'the note that Brave Search waits for its key goes')
   await closeSettings()
   const saved = await evaluate('window.eNCode.settings.get()')
   if (saved.searchProvider !== 'brave' || saved.searchKeys.join() !== 'brave') throw new Error(`Brave Search was not saved with its key: ${JSON.stringify([saved.searchProvider, saved.searchKeys])}`)
@@ -1106,7 +1114,7 @@ async function runSearchChecks() {
   await askedBy('tavily', 'api.tavily.com')
 
   // Tidy up: back to the default, and the key removed.
-  await evaluate("window.eNCode.settings.save({ searchProvider: 'duckduckgo' })")
+  await evaluate("window.eNCode.settings.save({ searchProvider: 'parallel' })")
   const after = await evaluate("window.eNCode.settings.setSearchKey('brave', '')")
   if (after.searchKeys.length) throw new Error(`The key was not removed: ${JSON.stringify(after.searchKeys)}`)
   await evaluate('window.eNCode.agent.reset()')

@@ -262,25 +262,33 @@ would run, and a server that would not start with no reason shown.
 
 ## Web search
 
-**Settings → Agent → Web search** chooses who answers the agent's searches. DuckDuckGo needs nothing but can fail or
-come back empty when it decides to slow searches from your computer. Brave Search, Tavily and Exa are steadier and
-need an API key of your own from their sites (the card links each one).
+**Settings → Agent → Web search** chooses who answers the agent's searches. **Parallel** is the default: free, with no
+account and no key, made for AI agents. Its free use has limits it does not publish. Tavily (a free plan of 1,000
+searches a month, no card), Exa and Brave Search need an API key of your own from their sites (the card links each
+one). DuckDuckGo needs nothing, but turns eNCode away from some computers with a picture puzzle.
 
-- Pick a provider with a key, paste the key and press **Test search**: it saves what you changed and makes one real
-  search the way the agent does. A wrong key, a spent allowance and a service that is down each say so, naming the
-  provider. **Remove the stored key** takes it away at once.
+- An install that searched with DuckDuckGo before moves to Parallel once; choose DuckDuckGo again and it stays.
+- **Test search** with Parallel should answer with results in a second or two.
+- Pick a provider with a key: it stays chosen on the screen, and searches keep going to the one before until its key is
+  saved (the card says so). Paste the key and press **Test search**: it saves the key, uses that provider from then on
+  and makes one real search the way the agent does. A wrong key, a spent allowance and a service that is down each say
+  so, naming the provider. **Remove the stored key** takes it away at once.
+- When a search without a key fails from your computer (Parallel or DuckDuckGo limits it, refuses it or is down), a
+  card under the request offers **Add a free Tavily key**: it opens Web search with Tavily chosen and its key field
+  ready. **Not now** keeps the card away until eNCode starts again.
 - The key is stored encrypted by your system keychain (kept only in memory where there is none, which the card says)
   and is sent to that provider only. It never shows again, in the settings or in a diagnostics report; the report
   names the provider and whether a key is stored.
 - Ask the agent something that needs the web. The first search in a chat asks and names the provider's address
-  (`api.search.brave.com`, `api.tavily.com`, `api.exa.ai`, `html.duckduckgo.com`); choosing another provider asks again.
+  (`search.parallel.ai`, `api.tavily.com`, `api.exa.ai`, `api.search.brave.com`, `html.duckduckgo.com`); choosing
+  another provider asks again.
   If a search fails it says why and does not use another provider instead.
 - Ask for something on a site's documentation ("how do I change DDoS protection settings in Gcore?"): the agent should
   search first and fetch what it found, not make up addresses. A page that does not exist tells it to search; tell us
   if it keeps guessing. With DuckDuckGo, several searches at once go one after another, a second or two apart, and one
   that DuckDuckGo slowed down is tried once more before the agent hears it failed. From some computers DuckDuckGo
-  answers every search with a picture puzzle: **Test search** then says it is blocking this computer, and Tavily (a
-  free key) is the way to search from there.
+  answers every search with a picture puzzle: **Test search** then says it is blocking this computer, and Parallel or
+  Tavily (a free key) is the way to search from there.
 - Whatever comes back is shown to the model as coming from outside. You can ask it to restrict a search to, or leave
   out, a website ("only from docs.python.org").
 

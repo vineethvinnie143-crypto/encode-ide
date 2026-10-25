@@ -6,9 +6,9 @@
  * No runtime dependencies: the main process, the agent host and the renderer all read this.
  */
 
-export type SearchProviderId = 'duckduckgo' | 'brave' | 'tavily' | 'exa'
+export type SearchProviderId = 'parallel' | 'duckduckgo' | 'brave' | 'tavily' | 'exa'
 
-export type KeyedSearchProviderId = Exclude<SearchProviderId, 'duckduckgo'>
+export type KeyedSearchProviderId = Exclude<SearchProviderId, 'parallel' | 'duckduckgo'>
 
 export interface SearchProviderInfo {
   id: SearchProviderId
@@ -19,19 +19,41 @@ export interface SearchProviderInfo {
   host: string
   /** Where the person gets a key; the Settings screen links it. */
   keyUrl?: string
+  /** The terms that come with a provider used without an account; the Settings screen links them. */
+  termsUrl?: string
   /** One or two sentences for the Settings screen. */
   summary: string
 }
 
-export const DEFAULT_SEARCH_PROVIDER: SearchProviderId = 'duckduckgo'
+export const DEFAULT_SEARCH_PROVIDER: SearchProviderId = 'parallel'
+
+/** The provider whose free plan the app offers when a search without a key could not be made (ADR 0123). */
+export const FREE_KEY_PROVIDER: KeyedSearchProviderId = 'tavily'
 
 export const SEARCH_PROVIDERS: readonly SearchProviderInfo[] = [
   {
-    id: 'duckduckgo',
-    name: 'DuckDuckGo',
+    id: 'parallel',
+    name: 'Parallel',
     needsKey: false,
-    host: 'html.duckduckgo.com',
-    summary: 'No account and no key. It reads DuckDuckGo’s web page, so it can fail or come back empty when DuckDuckGo decides to slow searches from this computer.',
+    host: 'search.parallel.ai',
+    termsUrl: 'https://parallel.ai/customer-terms',
+    summary: 'Free, with no account and no key: a search service made for AI agents, with relevant passages of each page. Its free use has limits it does not publish.',
+  },
+  {
+    id: 'tavily',
+    name: 'Tavily',
+    needsKey: true,
+    host: 'api.tavily.com',
+    keyUrl: 'https://app.tavily.com/',
+    summary: 'A search API made for AI agents, with short relevant passages. Its free plan gives 1,000 searches a month with no card; needs an API key.',
+  },
+  {
+    id: 'exa',
+    name: 'Exa',
+    needsKey: true,
+    host: 'api.exa.ai',
+    keyUrl: 'https://exa.ai/',
+    summary: 'Finds pages by meaning and returns the passages that answer the query. Needs an API key.',
   },
   {
     id: 'brave',
@@ -42,20 +64,11 @@ export const SEARCH_PROVIDERS: readonly SearchProviderInfo[] = [
     summary: 'Brave’s own index through an API made for programs. Steady results; needs an API key.',
   },
   {
-    id: 'tavily',
-    name: 'Tavily',
-    needsKey: true,
-    host: 'api.tavily.com',
-    keyUrl: 'https://tavily.com/',
-    summary: 'A search API made for AI agents, with short relevant passages. Needs an API key.',
-  },
-  {
-    id: 'exa',
-    name: 'Exa',
-    needsKey: true,
-    host: 'api.exa.ai',
-    keyUrl: 'https://exa.ai/',
-    summary: 'Finds pages by meaning and returns the passages that answer the query. Needs an API key.',
+    id: 'duckduckgo',
+    name: 'DuckDuckGo',
+    needsKey: false,
+    host: 'html.duckduckgo.com',
+    summary: 'No account and no key. It reads DuckDuckGo’s web page, which turns eNCode away from some computers with a picture puzzle only a person can solve.',
   },
 ]
 

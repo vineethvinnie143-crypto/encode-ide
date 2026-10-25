@@ -1,5 +1,6 @@
 import { memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, CornerDownRight, FileText, Flag, GitFork, Paperclip, Pencil, Picture, Undo2 } from '../../ui/icons'
+import { Check, ChevronDown, Copy, CornerDownRight, FileText, Flag, GitFork, Globe, Paperclip, Pencil, Picture, Undo2 } from '../../ui/icons'
+import { FREE_KEY_PROVIDER, isKeyedSearchProvider, searchProviderInfo } from '@shared/search'
 import type { ConversationEntry, RequestUsage } from '@shared/types'
 import { sessionActions } from '../../commands/app'
 import { getActiveSessionId } from '../../stores/active'
@@ -7,6 +8,7 @@ import { useChat } from '../../stores/chat'
 import { useReview } from '../../stores/review'
 import { useRewind } from '../../stores/rewind'
 import { useSessions } from '../../stores/sessions'
+import { useSettings } from '../../stores/settings'
 import { useUi } from '../../stores/ui'
 import { copyText } from '../../copy'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
@@ -247,11 +249,44 @@ function ResultCard({ turn, latest }: { turn: Turn; latest: boolean }) {
 }
 
 /**
+ * A search that needs no key could not be made from this computer: the provider limited it, refused it or was down.
+ * While search still goes to such a provider, the card offers a free key of the person's own, which Settings takes
+ * with the provider chosen and its key field ready (ADR 0123). "Not now" keeps it away until eNCode starts again.
+ */
+function SearchKeyCard() {
+  const provider = useSettings((state) => state.settings?.searchProvider)
+  const dismissed = useUi((state) => state.searchOfferDismissed)
+  if (!provider || isKeyedSearchProvider(provider) || dismissed) return null
+  const free = searchProviderInfo(FREE_KEY_PROVIDER).name
+  return (
+    <div className="search-offer" role="status">
+      <span className="search-offer-icon">
+        <Globe size={15} />
+      </span>
+      <span className="search-offer-text">
+        <span className="search-offer-title">Web search did not work from this computer</span>
+        <span className="search-offer-detail">
+          {searchProviderInfo(provider).name} limited or refused the search. A free {free} key (1,000 searches a month, no card) keeps search working.
+        </span>
+      </span>
+      <span className="search-offer-actions">
+        <Button size="sm" variant="primary" onClick={() => useUi.getState().addSearchKey(FREE_KEY_PROVIDER)}>
+          Add a free {free} key
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => useUi.getState().dismissSearchOffer()}>
+          Not now
+        </Button>
+      </span>
+    </div>
+  )
+}
+
+/**
  * One turn: your message, its parts (the work log and reply after it, and after each message you sent while the agent
  * worked), what it changed, and (on hover) copy, fork, time and model. `latest` marks the last turn that edited files,
- * whose change card offers Undo.
+ * whose change card offers Undo; `offerSearchKey` the last one whose search a free key would have made work.
  */
-function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
+function TurnView({ turn, latest = false, offerSearchKey = false }: { turn: Turn; latest?: boolean; offerSearchKey?: boolean }) {
   const live = turn.active ? turn.parts[turn.parts.length - 1] : undefined
   // Only the turn that runs follows the chat's status, so a finished one is not drawn again when it changes.
   const status = useChat((state) => (turn.active ? state.status : undefined))
@@ -267,6 +302,8 @@ function TurnView({ turn, latest = false }: { turn: Turn; latest?: boolean }) {
       ))}
 
       <ResultCard turn={turn} latest={latest} />
+
+      {offerSearchKey && <SearchKeyCard />}
 
       {live && <LiveLine status={status} log={live.log} reply={live.reply} startedAt={live.startedAt} usage={turn.user?.usage} />}
 

@@ -1,3 +1,4 @@
+import type { KeyedSearchProviderId } from '@shared/search'
 import { create } from '../store'
 
 export type SidebarView = 'explorer' | 'search' | 'git'
@@ -94,6 +95,13 @@ interface UiStore {
   editorIssueFor: string | null
   /** The request a report is being made of (Report a problem with this request), or null. */
   turnReportFor: TurnReportTarget | null
+  /**
+   * A search provider whose key Settings > Agent > Web search is asked to take: that screen chooses it there, with its
+   * key field ready, and takes the request away (ADR 0123).
+   */
+  searchKeyFor: KeyedSearchProviderId | null
+  /** "Not now" on the offer of a free search key: it stays away until eNCode starts again. */
+  searchOfferDismissed: boolean
   /** The session's status: model, permissions, context and tokens (/status). */
   statusOpen: boolean
   /** The latest request to open a menu of the message box; `id` grows with each request. */
@@ -113,6 +121,9 @@ interface UiStore {
   openSettings(section: SettingsSection, setting?: string): void
   /** Another section of the open page, from its list of sections. */
   setSettingsSection(section: SettingsSection): void
+  /** Opens Settings on web search with that provider chosen and its key field ready. */
+  addSearchKey(provider: KeyedSearchProviderId): void
+  dismissSearchOffer(): void
   setConnectOpen(open: boolean): void
   setAutomationOpen(open: boolean): void
   setQuickOpenOpen(open: boolean, query?: string): void
@@ -182,6 +193,8 @@ export const useUi = create<UiStore>((set, get) => ({
   aboutOpen: false,
   editorIssueFor: null,
   turnReportFor: null,
+  searchKeyFor: null,
+  searchOfferDismissed: false,
   statusOpen: false,
   menuRequest: null,
   stopArmed: false,
@@ -205,6 +218,11 @@ export const useUi = create<UiStore>((set, get) => ({
   openSettings: (section, setting) =>
     set((state) => ({ settingsSection: section, settingsOpen: true, settingsFocus: { setting: setting ?? null, id: (state.settingsFocus?.id ?? 0) + 1 } })),
   setSettingsSection: (section) => set({ settingsSection: section }),
+  addSearchKey: (provider) => {
+    set({ searchKeyFor: provider })
+    get().openSettings('agent', 'agent.search')
+  },
+  dismissSearchOffer: () => set({ searchOfferDismissed: true }),
   setConnectOpen: (open) => set({ connectOpen: open }),
   setAutomationOpen: (open) => set({ automationOpen: open }),
   setQuickOpenOpen: (open, query = '') =>
