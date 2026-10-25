@@ -19,3 +19,6 @@ screenshots/
 Thumbs.db
 # Benchmark reports (scripts/bench.mjs): each machine its own.
 bench-results/
+# Python test runs, and Harbor jobs run from the checkout (ADR 0138).
+__pycache__/
+/jobs/

@@ -112,7 +112,13 @@ export async function runPrint(options: CliOptions, prompt: string, model: Model
     const before = new Set((await runtime.host.history(session.id)).entries.map((entry) => entry.id))
     const host = runtime.host
     stopListening = io.onInterrupt(() => host.cancel(session.id))
-    await host.start(session.id, { text: prompt, mode: options.mode })
+    // The cap refuses the call that could pass it; the request stops there, and says why.
+    const capped = () => {
+      failure = `Stopped: ${model.cap?.stopped() ?? 'the spending cap was reached'}.`
+      host.cancel(session.id)
+    }
+    model.cap?.signal.addEventListener('abort', capped, { once: true })
+    await host.start(session.id, { text: prompt, mode: options.mode }).finally(() => model.cap?.signal.removeEventListener('abort', capped))
 
     const added = [...entries.values()].filter((entry) => !before.has(entry.id))
     const reply = scrub(plain(added.filter((entry) => entry.kind === 'assistant' && entry.text?.trim()).at(-1)?.text?.trim() ?? ''))

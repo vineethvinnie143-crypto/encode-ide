@@ -3,6 +3,7 @@
  * touches the disk, the network or a key.
  */
 import { MAX_STEPS_LIMIT, type AgentMode, type ApprovalPolicy } from '@encode/core'
+import type { ReasoningEffort } from '@encode/providers'
 
 export type OutputFormat = 'text' | 'json' | 'stream-json'
 
@@ -30,6 +31,10 @@ export interface CliOptions {
   /** Trust the folder without asking, so its own settings, hooks and servers may apply. */
   trust: boolean
   maxSteps?: number
+  /** The reasoning effort every step asks for; the model's own when not given. */
+  effort?: ReasoningEffort
+  /** Dollars: the request stops before a call could pass it (ADR 0138). */
+  maxCost?: number
   /** In --print, also write what the agent does to standard error. */
   verbose: boolean
   /** true or false when --color or --no-color was given. */
@@ -40,6 +45,7 @@ export class UsageError extends Error {}
 
 export const POLICIES: readonly ApprovalPolicy[] = ['read-only', 'workspace-write', 'full-access', 'auto-review']
 export const MODES: readonly AgentMode[] = ['code', 'ask', 'plan']
+export const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const FORMATS: readonly OutputFormat[] = ['text', 'json', 'stream-json']
 
 const VALUED: Record<string, string> = {
@@ -54,6 +60,8 @@ const VALUED: Record<string, string> = {
   '--cwd': '--cwd',
   '--output-format': '--output-format',
   '--max-steps': '--max-steps',
+  '--effort': '--effort',
+  '--max-cost': '--max-cost',
 }
 
 const SWITCHES: Record<string, string> = {
@@ -114,6 +122,10 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = {}):
   const maxSteps = values.get('--max-steps')
   const steps = maxSteps === undefined ? undefined : Number(maxSteps)
   if (steps !== undefined && (!Number.isInteger(steps) || steps < 1 || steps > MAX_STEPS_LIMIT)) throw new UsageError(`--max-steps is a whole number from 1 to ${MAX_STEPS_LIMIT}`)
+  const maxCost = values.get('--max-cost')
+  const dollars = maxCost === undefined ? undefined : Number(maxCost.replace(/^\$/, ''))
+  if (dollars !== undefined && (!Number.isFinite(dollars) || dollars <= 0 || dollars > 1_000)) throw new UsageError('--max-cost is a number of dollars above 0, such as 0.50')
+  const effort = values.get('--effort')
   if (switches.has('--color') && switches.has('--no-color')) throw new UsageError('give --color or --no-color, not both')
   if (switches.has('--continue') && values.has('--resume')) throw new UsageError('give --continue or --resume, not both')
 
@@ -141,6 +153,8 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = {}):
     sandbox: !switches.has('--no-sandbox'),
     trust: switches.has('--trust'),
     ...(steps !== undefined ? { maxSteps: steps } : {}),
+    ...(effort !== undefined ? { effort: oneOf('--effort', effort, EFFORTS) } : {}),
+    ...(dollars !== undefined ? { maxCost: dollars } : {}),
     verbose: switches.has('--verbose'),
     ...(switches.has('--color') ? { color: true } : switches.has('--no-color') ? { color: false } : {}),
   }
@@ -171,6 +185,8 @@ Session:
   --mode <code|ask|plan>       code (default) changes files; ask only reads; plan proposes a plan first
   --policy <policy>            read-only, workspace-write (default), full-access or auto-review
   --max-steps <n>              steps per request, 1 to 1000 (default 200)
+  --effort <effort>            low, medium, high, xhigh or max: how long a reasoning model thinks (default: its own)
+  --max-cost <dollars>         stop before a model call could take the run past this many dollars
   -C, --cwd <folder>           work in this folder instead of the current one
   --trust                      trust the folder without asking (its settings, hooks and servers apply)
   --no-sandbox                 run commands outside the operating-system sandbox

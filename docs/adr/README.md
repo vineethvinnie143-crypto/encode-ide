@@ -127,6 +127,7 @@ say so.
 | [0135](0135-steps-that-read-results-think-at-low-effort-where-the-cache-keeps.md) | Steps that read results think at low effort, where the cache keeps | Accepted, off by default until the benchmark shows the pass rate holds; builds on 0067, 0099, 0129 and 0130 |
 | [0136](0136-a-model-without-a-cache-gets-seldom-needed-tools-from-toolsearch-and-a-tool-loaded-twice-stays.md) | A model without a cache gets seldom needed tools from ToolSearch, and a tool loaded twice stays | Accepted, builds on 0062 and 0130 |
 | [0137](0137-a-benchmark-run-stops-at-a-spending-cap-and-runs-two-setups-side-by-side.md) | A benchmark run stops at a spending cap, and runs two setups side by side | Accepted, builds on 0092, 0129 and 0135 |
+| [0138](0138-the-command-line-runs-terminal-bench-through-harbor-held-to-a-spending-cap.md) | The command line runs Terminal-Bench through Harbor, held to a spending cap | Accepted, builds on 0092, 0108 and 0137 |
 
 ## Template
 

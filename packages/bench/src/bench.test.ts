@@ -4,9 +4,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, describe, test } from 'node:test'
 import { createScriptedClient, type ScriptedStep } from '@encode/core'
-import type { CompletionRequest, ModelClient } from '@encode/providers'
+import { spendingCap, type CompletionRequest, type ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
-import { compareReports, dropChance, findPrograms, formatReport, gate, listedCost, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, spendingCap, summarize, TaskError, type BenchReport, type TaskRun } from './index'
+import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
 
 const TASKS = path.join(process.cwd(), 'packages', 'bench', 'tasks')
 const made: string[] = []
@@ -273,51 +273,6 @@ describe('what a run spent', () => {
     await client.complete(request('main', [text('summary of a'), text('b'), text('c')]))
     await client.complete(request('explore', [text('x'), text('y')], 'explore-1'))
     assert.deepEqual(client.calls.map((call) => call.rewrote ?? false), [false, false, false, false, false, false, true, false])
-  })
-})
-
-describe('a spending cap (ADR 0137)', () => {
-  const request = { role: 'main', payload: { system: [], messages: [], tools: [] }, requirements: {}, signal: new AbortController().signal } as unknown as CompletionRequest
-  const billed = (cost: number | undefined, price?: { input: number; output: number }): ModelClient => ({
-    budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000, ...(price ? { price, cache: { read: 0.1, write: 1, boundThinking: false, source: 'price' as const } } : {}) }),
-    complete: async () => ({
-      kind: 'done',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }], origin: { provider: 'openrouter', model: 'some/model', family: 'other' } },
-      usage: { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 800_000, cacheWriteTokens: 0, ...(cost !== undefined ? { cost } : {}) },
-      finish: 'stop',
-    }),
-  })
-
-  test('prices a call by the listed prices when the provider does not say', () => {
-    const usage = { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 800_000, cacheWriteTokens: 0 }
-    // 200k uncached at $0.30, 800k cached at a tenth of that, 100k written at $1.20.
-    assert.ok(Math.abs(listedCost(usage, { price: { input: 0.3, output: 1.2 }, cache: { read: 0.1, write: 1, boundThinking: false, source: 'price' } })! - (0.06 + 0.024 + 0.12)) < 1e-12)
-    assert.equal(listedCost(usage, {}), undefined)
-    assert.equal(listedCost(usage, { price: { input: 0, output: 0 } }), undefined, 'a price of nothing is no price')
-  })
-
-  test('refuses the call that could pass the limit, and stops the bench', async () => {
-    const cap = spendingCap(1)
-    const client = cap.wrap(billed(0.4))
-    await client.complete(request)
-    await client.complete(request)
-    assert.equal(cap.spent(), 0.8)
-    assert.equal(cap.signal.aborted, false)
-    await assert.rejects(client.complete(request), /The benchmark stopped: it reached its spending cap \(\$0\.80 of \$1\.00 spent; the next call could cost \$0\.40\)/)
-    assert.equal(cap.signal.aborted, true)
-    assert.equal(cap.spent(), 0.8, 'the refused call was never made')
-    await assert.rejects(client.complete(request), /stopped/)
-  })
-
-  test('counts a call the provider did not price by the listed prices, and stops when there are none', async () => {
-    const listed = spendingCap(5)
-    await listed.wrap(billed(undefined, { input: 0.3, output: 1.2 })).complete(request)
-    assert.ok(Math.abs(listed.spent() - 0.204) < 1e-12)
-    const unknown = spendingCap(5)
-    await unknown.wrap(billed(undefined)).complete(request)
-    assert.match(unknown.stopped() ?? '', /a call to some\/model said nothing of what it cost, and the model has no listed price/)
-    assert.equal(unknown.signal.aborted, true)
-    assert.throws(() => spendingCap(0), /above 0/)
   })
 })
 

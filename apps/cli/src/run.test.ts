@@ -5,7 +5,7 @@ import path from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import { after, describe, it } from 'node:test'
 import { createScriptedClient, type ScriptedClient, type ScriptedStep } from '@encode/core'
-import type { ModelClient } from '@encode/providers'
+import { spendingCap, type ModelClient } from '@encode/providers'
 import { parseArgs, UsageError } from './args'
 import { main, readAll, type MainIo } from './main'
 import type { ModelChoice } from './model'
@@ -51,6 +51,29 @@ async function print(argv: string[], script: ScriptedStep[] | ModelClient, secre
 }
 
 describe('print mode', () => {
+  it('stops at the spending cap, says so, and exits 1 (ADR 0138)', async () => {
+    const where = await place()
+    const reads = createScriptedClient([{ calls: [{ name: 'Read', input: { file_path: 'a.txt' } }] }], { costPerCall: 0.3 })
+    const cap = spendingCap(0.5)
+    let stdout = ''
+    let stderr = ''
+    const options = parseArgs(['-p', '--no-sandbox', '--output-format', 'json', '--max-cost', '0.5', 'read it again and again'])
+    const code = await runPrint(options, options.prompt, { ...choice(cap.wrap(reads)), cap }, where.project, {
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+      stderrTty: false,
+      env: {},
+      home: where.home,
+      profile: where.profile,
+      onInterrupt: () => () => {},
+    })
+    assert.equal(code, 1)
+    assert.equal(reads.requests.length, 1, 'the second call could have passed $0.50, so it was never made')
+    const result = JSON.parse(stdout) as PrintResult
+    assert.equal(result.error, 'Stopped: it reached its spending cap ($0.30 of $0.50 spent; the next call could cost $0.30).')
+    assert.equal(cap.spent(), 0.3)
+  })
+
   it('writes the reply, and only the reply, to standard output', async () => {
     const run = await print(['read a.txt'], [{ calls: [{ name: 'Read', input: { file_path: 'a.txt' } }] }, { text: 'It says hello.' }])
     assert.equal(run.code, 0)

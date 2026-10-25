@@ -6,7 +6,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createDemoClient } from '@encode/core'
-import { redactSecrets } from '@encode/providers'
+import { redactSecrets, spendingCap } from '@encode/providers'
 import type { ServerTools } from '@encode/workspace'
 import { USAGE, UsageError, parseArgs, type CliOptions } from './args'
 import { chooseModel } from './model'
@@ -146,8 +146,11 @@ export async function main(io: MainIo): Promise<number> {
     if (print && !prompt.trim()) throw new UsageError('print mode needs a request: encode -p "what to do", or one on standard input')
 
     const warn = (text: string) => void io.stderr.write(`${errStyle.dim(`encode: ${plain(text)}`)}\n`)
-    const model = await chooseModel(options.model, options.baseUrl, io.env, warn)
-    secrets = model.secrets
+    const chosen = await chooseModel(options.model, options.baseUrl, io.env, warn)
+    secrets = chosen.secrets
+    // Every call of the run, the agent's and its helpers', counts against one cap (ADR 0138).
+    const cap = options.maxCost === undefined ? undefined : spendingCap(options.maxCost)
+    const model = cap ? { ...chosen, client: cap.wrap(chosen.client), cap } : chosen
     if (print) {
       if (model.free) warn(FREE_WARNING)
       return await runPrint(options, prompt, model, root, {

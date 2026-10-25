@@ -1,21 +1,22 @@
 /**
- * A hard stop on what a benchmark spends (--max-cost, ADR 0137). Every model call of every run goes through one cap,
- * which adds up what each call cost: what the provider billed, or, where it did not say, the model's listed prices over
- * the call's tokens. Before a call, the cap adds the dearest call so far to what was spent; when that reaches the
- * limit, the call is refused and the bench stops. The run that was going is stopped and left out of the pass rate.
+ * A hard stop on what a run spends (ADR 0137, 0138): every model call goes through one cap, which adds up what each
+ * call cost: what the provider billed, or, where it did not say, the model's listed prices over the call's tokens.
+ * Before a call, the cap adds the dearest call so far to what was spent; when that reaches the limit, the call is
+ * refused and the cap's signal aborts, so whatever runs on it stops. The benchmark keeps one for every run of a bench,
+ * the command line one for its request.
  */
-import type { CompletionOutcome, CompletionRequest, ModelBudget, ModelClient, Usage } from '@encode/providers'
+import type { CompletionOutcome, CompletionRequest, ModelBudget, ModelClient, Usage } from './contract'
 
 export interface SpendingCap {
   /** US dollars. */
   readonly limit: number
-  /** What every call of every run has cost so far. */
+  /** What every call has cost so far. */
   spent(): number
-  /** Why the cap stopped the bench; undefined while it has not. */
+  /** Why the cap stopped; undefined while it has not. */
   stopped(): string | undefined
-  /** Stops the bench without a call refused: what is left would not pay for what comes next. */
+  /** Stops without a call refused: what is left would not pay for what comes next. */
   stop(reason: string): void
-  /** Aborted once the cap stops the bench. */
+  /** Aborted once the cap stops. */
   readonly signal: AbortSignal
   /** `inner`, each of its calls counted against the cap. */
   wrap(inner: ModelClient): ModelClient
@@ -67,7 +68,7 @@ export function spendingCap(limit: number): SpendingCap {
         budget: (role, query) => inner.budget(role, query),
         async complete(request) {
           if (!reason && spent + dearest >= limit) stop(`it reached its spending cap (${dollars(spent)} of ${dollars(limit)} spent; the next call could cost ${dollars(dearest)})`)
-          if (reason) throw new Error(`The benchmark stopped: ${reason}.`)
+          if (reason) throw new Error(`Stopped: ${reason}.`)
           const outcome = await inner.complete(request)
           await count(inner, request, outcome)
           return outcome

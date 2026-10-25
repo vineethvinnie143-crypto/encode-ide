@@ -1,0 +1,224 @@
+name: Terminal-Bench
+
+# eNCode's command line on Terminal-Bench, through Harbor (ADR 0138).
+#
+# A pull request that touches the command line or the adapter runs the free check: the adapter's tests, Terminal-Bench
+# 4.0's list of tasks, and a small task run in a container twice, by Harbor's own solution and by eNCode on its offline
+# demo model. No model is paid for.
+#
+# A scored run on a paid model is started by hand: Actions > Terminal-Bench > Run workflow. It needs the repository
+# secret OPENROUTER_API_KEY, and it is held to a budget: it refuses to start when its tasks times the cap per task
+# come to more than the budget, and each task stops before a model call could take it past its cap.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/cli/**'
+      - 'packages/bench/terminal-bench/**'
+      - 'scripts/cli-bundle.mjs'
+      - '.github/workflows/terminal-bench.yml'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Model, as provider/model'
+        default: 'openrouter/@preset/deepseek-v4-1-1017'
+      effort:
+        description: 'How long the model thinks'
+        type: choice
+        options: [low, medium, high, xhigh, max]
+        default: max
+      tasks:
+        description: 'Number of tasks, chosen at random from those this runner can run'
+        default: '10'
+      names:
+        description: 'Or these tasks, by name, separated by spaces (overrides the number)'
+        default: ''
+      seed:
+        description: 'The same seed chooses the same tasks'
+        default: '1'
+      max-cost:
+        description: 'Dollars each task may spend'
+        default: '0.10'
+      budget:
+        description: 'Dollars the whole run may spend, at most 2.00'
+        default: '1.00'
+      concurrency:
+        description: 'Tasks at once'
+        default: '2'
+
+permissions:
+  contents: read
+
+# A pull request's check gives way to a newer push; a scored run waits for the one before it, never cancels it.
+concurrency:
+  group: terminal-bench-${{ github.event.pull_request.number || 'score' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  HARBOR_TELEMETRY: '0'
+  DATASET: terminal-bench/terminal-bench@4.0.0
+  TB: packages/bench/terminal-bench
+
+jobs:
+  check:
+    name: Adapter check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # Third-party code is pinned to full commit hashes; the comments name the releases.
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install dependencies
+        run: corepack enable && pnpm install --frozen-lockfile
+
+      - name: Bundle the command line
+        run: node scripts/cli-bundle.mjs "$TB/dist/encode.mjs"
+
+      # Every package at the version and hash the requirements name.
+      - name: Install Harbor
+        run: |
+          python3 -m venv "$RUNNER_TEMP/harbor"
+          "$RUNNER_TEMP/harbor/bin/pip" install --quiet --require-hashes -r "$TB/requirements.txt"
+          echo "$RUNNER_TEMP/harbor/bin" >> "$GITHUB_PATH"
+
+      - name: Adapter tests
+        working-directory: ${{ env.TB }}
+        run: python -m unittest discover -s . -v
+
+      - name: Terminal-Bench 4.0's tasks
+        run: |
+          harbor download "$DATASET" -o "$RUNNER_TEMP/tasks"
+          python "$TB/choose_tasks.py" "$RUNNER_TEMP/tasks" --summary "$GITHUB_STEP_SUMMARY" > /dev/null
+
+      - name: The small task, by Harbor's own solution
+        run: |
+          harbor run -p "$TB/smoke-task" -a oracle -o jobs --job-name oracle -y -q
+          python "$TB/report.py" jobs/oracle --summary "$GITHUB_STEP_SUMMARY" --require-reward 1
+
+      # The demo model does not solve it; this checks that eNCode is installed, runs, and says what it used.
+      - name: The small task, by eNCode on its demo model
+        env:
+          PYTHONPATH: ${{ env.TB }}
+        run: |
+          harbor run -p "$TB/smoke-task" -a encode_agent:Encode -m demo --ak effort=max -o jobs --job-name encode-demo -y -q
+          python "$TB/report.py" jobs/encode-demo --summary "$GITHUB_STEP_SUMMARY" --require-ran
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: terminal-bench-check
+          path: jobs/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  score:
+    name: Scored run
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      MODEL: ${{ inputs.model }}
+      EFFORT: ${{ inputs.effort }}
+      TASKS: ${{ inputs.tasks }}
+      NAMES: ${{ inputs.names }}
+      SEED: ${{ inputs.seed }}
+      MAX_COST: ${{ inputs.max-cost }}
+      BUDGET: ${{ inputs.budget }}
+      CONCURRENT: ${{ inputs.concurrency }}
+    steps:
+      - name: Hold the run to its budget
+        env:
+          HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          number='^[0-9]+([.][0-9]+)?$'
+          for value in "$TASKS" "$SEED" "$MAX_COST" "$BUDGET" "$CONCURRENT"; do
+            [[ $value =~ $number ]] || { echo "::error::$value is not a number."; exit 1; }
+          done
+          count=$TASKS
+          [[ -n ${NAMES// /} ]] && count=$(wc -w <<< "$NAMES")
+          awk -v b="$BUDGET" 'BEGIN { exit !(b > 0 && b <= 2.00) }' || { echo "::error::The budget is above 0 and at most \$2.00."; exit 1; }
+          awk -v n="$count" -v c="$MAX_COST" -v b="$BUDGET" 'BEGIN { exit !(c > 0 && n * c <= b + 1e-9) }' || {
+            echo "::error::$count tasks at \$$MAX_COST each could spend more than the \$$BUDGET budget."; exit 1; }
+          [[ $HAS_KEY == true || $MODEL != openrouter/* ]] || { echo "::error::Add the repository secret OPENROUTER_API_KEY first."; exit 1; }
+          echo "$count tasks, at most \$$MAX_COST each, within \$$BUDGET." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install dependencies
+        run: corepack enable && pnpm install --frozen-lockfile
+
+      - name: Bundle the command line
+        run: node scripts/cli-bundle.mjs "$TB/dist/encode.mjs"
+
+      - name: Install Harbor
+        run: |
+          python3 -m venv "$RUNNER_TEMP/harbor"
+          "$RUNNER_TEMP/harbor/bin/pip" install --quiet --require-hashes -r "$TB/requirements.txt"
+          echo "$RUNNER_TEMP/harbor/bin" >> "$GITHUB_PATH"
+
+      # The tasks' images take room; the runner's preinstalled SDKs are not needed here.
+      - name: Make room
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Choose the tasks
+        run: |
+          set -euo pipefail
+          harbor download "$DATASET" -o "$RUNNER_TEMP/tasks"
+          if [[ -n ${NAMES// /} ]]; then pick=(--names "$NAMES"); else pick=(--sample "$TASKS" --seed "$SEED"); fi
+          python "$TB/choose_tasks.py" "$RUNNER_TEMP/tasks" "${pick[@]}" --summary "$GITHUB_STEP_SUMMARY" > "$RUNNER_TEMP/chosen.txt"
+
+      - name: Run
+        env:
+          PYTHONPATH: ${{ env.TB }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          include=()
+          while read -r pattern; do include+=(-i "$pattern"); done < "$RUNNER_TEMP/chosen.txt"
+          harbor run -d "$DATASET" "${include[@]}" -a encode_agent:Encode -m "$MODEL" \
+            --ak "effort=$EFFORT" --ak "max_cost=$MAX_COST" -n "$CONCURRENT" -k 1 -r 0 -o jobs --job-name score -y -q
+
+      - name: Report
+        if: always()
+        run: python "$TB/report.py" jobs/score --summary "$GITHUB_STEP_SUMMARY"
+
+      # Public results: the key must not be in them. eNCode keeps it from its commands and its output; this checks.
+      - name: Check the results for the key
+        if: always()
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [[ -n $OPENROUTER_API_KEY && -d jobs ]] && grep -rqF -- "$OPENROUTER_API_KEY" jobs; then
+            rm -rf jobs
+            echo "::error::The key appears in the results, which are not kept."
+            exit 1
+          fi
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: terminal-bench-${{ github.run_number }}
+          path: jobs/
+          retention-days: 14
+          if-no-files-found: ignore

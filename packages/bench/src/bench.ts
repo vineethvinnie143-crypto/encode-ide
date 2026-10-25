@@ -4,12 +4,11 @@
  * so a bench that stops early (a spending cap, ADR 0137) has measured every task about as often.
  */
 import { createScriptedClient, type AgentSettings } from '@encode/core'
-import type { ModelClient } from '@encode/providers'
+import type { ModelClient, SpendingCap } from '@encode/providers'
 import { findPrograms, type Programs } from './programs'
 import type { QualityFacts } from './quality'
 import type { BenchReport } from './report'
 import { runTask, skippedRun, type RunOptions, type TaskRun } from './run'
-import type { SpendingCap } from './spend'
 import type { BenchTask } from './task'
 
 export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | 'attempt'> {

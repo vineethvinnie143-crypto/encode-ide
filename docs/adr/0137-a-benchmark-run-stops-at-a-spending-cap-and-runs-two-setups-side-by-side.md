@@ -18,7 +18,7 @@ Two separate runs, one for each side of an A/B, have more problems:
 
 ## Decision
 
-- **A spending cap** (`--max-cost <dollars>`, `spendingCap` in `packages/bench/src/spend.ts`). Every model call of
+- **A spending cap** (`--max-cost <dollars>`, `spendingCap`, now in `packages/providers/src/spending-cap.ts` (0138)). Every model call of
   every run goes through one cap, which adds up what each call cost:
   - what the provider billed (OpenRouter reports it for every call);
   - or, when a call does not say, the model's listed prices over its tokens, with the cache's share;
