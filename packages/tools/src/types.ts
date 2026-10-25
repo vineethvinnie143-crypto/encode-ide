@@ -94,6 +94,11 @@ export interface ToolOutcome {
   stop?: { summary: string }
   /** The session continues in this mode (EnterPlanMode, and ExitPlanMode once the plan is approved). */
   mode?: AgentMode
+  /**
+   * What the model reads in place of `content` when the loop can keep `content` whole in a file: a command's output made
+   * smaller by what the command is (ADR 0133). `note` says what it left out; the loop adds where the whole is.
+   */
+  digest?: { content: string; note: string }
 }
 
 /** A call read in a tool's shape (Tool.reshape): the input, what was changed, and the tool that runs it if another one. */

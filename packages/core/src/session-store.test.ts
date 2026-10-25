@@ -321,7 +321,7 @@ describe('marks and summaries', () => {
     await log.append({ type: 'entry', entry: { id: 'u2', kind: 'user', text: 'two', createdAt: day + 1, usage: { ...used, context: { rewrites: 2, summaries: 0, readBacks: 2, editMisses: 1, checkBounces: 0, claimBounces: 1 } } } })
     await log.append({ type: 'entry', entry: { id: 'u3', kind: 'user', text: 'three', createdAt: next, usage: used } })
     const [usage] = await store.usage()
-    assert.deepEqual(usage.days['2026-10-24']!.context, { rewrites: 5, summaries: 1, readBacks: 3, editMisses: 1, checkBounces: 1, claimBounces: 1 })
+    assert.deepEqual(usage.days['2026-10-24']!.context, { rewrites: 5, summaries: 1, readBacks: 3, editMisses: 1, checkBounces: 1, claimBounces: 1, digests: 0, digestReadBacks: 0 })
     assert.equal('context' in usage.days['2026-10-25']!, false)
   })
 

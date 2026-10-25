@@ -4,7 +4,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { globBase, globToRegExp } from './glob'
 import { ignoredBy, parseIgnoreFile } from './ignore'
-import { globTool, grepRegex, grepTool } from './search'
+import { globTool, GREP_FILE_LINES, grepRegex, grepTool } from './search'
 import { tempWorkspace, testContext, textOf } from './testing'
 
 describe('globToRegExp', () => {
@@ -105,7 +105,8 @@ describe('Grep', () => {
     const listed = await grepTool.run({ pattern: 'start', '-i': true }, ctx)
     assert.deepEqual(textOf(listed.content).split('\n').sort(), ['README.md', 'src/app.ts', 'src/util.py'])
     const content = await grepTool.run({ pattern: 'Error', output_mode: 'content', '-B': 1 }, ctx)
-    assert.equal(content.content, 'src/app.ts-2-function start() {\nsrc/app.ts:3:  log("Error: boom")')
+    // A file with several lines heads them with its name (ADR 0133).
+    assert.equal(content.content, 'src/app.ts\n2-function start() {\n3:  log("Error: boom")')
     const counted = await grepTool.run({ pattern: 'start', output_mode: 'count', type: 'py' }, ctx)
     assert.equal(counted.content, 'src/util.py:1')
     const globbed = await grepTool.run({ pattern: 'start', glob: '*.ts' }, ctx)
@@ -116,9 +117,26 @@ describe('Grep', () => {
     const root = await tempWorkspace(files)
     const ctx = testContext(root)
     const spanning = await grepTool.run({ pattern: 'start\\(\\) \\{.*boom', multiline: true, output_mode: 'content' }, ctx)
-    assert.equal(spanning.content, 'src/app.ts:2:function start() {\nsrc/app.ts:3:  log("Error: boom")')
-    const paged = await grepTool.run({ pattern: '.', output_mode: 'content', path: 'src/app.ts', head_limit: 1, offset: 1 }, ctx)
-    assert.equal(paged.content, 'app.ts:2:function start() {\n(2 more lines; raise offset or head_limit, or narrow the search.)'.replace('app.ts', 'src/app.ts'))
+    assert.equal(spanning.content, 'src/app.ts\n2:function start() {\n3:  log("Error: boom")')
+    const paged = await grepTool.run({ pattern: '.', output_mode: 'content', path: 'src/app.ts', head_limit: 1, offset: 2 }, ctx)
+    assert.equal(paged.content, 'src/app.ts (continued)\n2:function start() {\n(2 more lines; raise offset or head_limit, or narrow the search.)')
+  })
+
+  it('shows each file\'s first lines when one of several is full of matches, and counts the rest', async () => {
+    const root = await tempWorkspace({ 'a.txt': 'hit\n'.repeat(GREP_FILE_LINES + 12), 'b.txt': 'miss\nhit\n' })
+    const ctx = testContext(root)
+    const text = textOf((await grepTool.run({ pattern: 'hit', output_mode: 'content' }, ctx)).content)
+    const lines = text.split('\n')
+    assert.equal(lines[0], 'a.txt')
+    assert.equal(lines[GREP_FILE_LINES], `${GREP_FILE_LINES}:hit`)
+    assert.equal(lines[GREP_FILE_LINES + 1], '… (12 more matching lines here; Grep this file alone for them)')
+    assert.deepEqual(lines.slice(GREP_FILE_LINES + 2), ['', 'b.txt', '2:hit'])
+    // A search of the one file shows them all.
+    const alone = textOf((await grepTool.run({ pattern: 'hit', output_mode: 'content', path: 'a.txt' }, ctx)).content).split('\n')
+    assert.equal(alone.length, GREP_FILE_LINES + 13)
+    // A page that starts on the blank line between two files starts with the next file's name.
+    const next = textOf((await grepTool.run({ pattern: 'hit', output_mode: 'content', offset: GREP_FILE_LINES + 2 }, ctx)).content)
+    assert.equal(next, 'b.txt\n2:hit')
   })
 
   it('searches an older ANSI file, and gives up on a binary file after its first 8 KB', async () => {
@@ -154,7 +172,7 @@ describe('Grep', () => {
     const root = await tempWorkspace(tree)
     const outcome = await grepTool.run({ pattern: 'hit', output_mode: 'content', head_limit: 2 }, testContext(root))
     const text = textOf(outcome.content)
-    assert.ok(text.startsWith('part00.txt:1:hit\npart00.txt:2:hit\n'))
+    assert.ok(text.startsWith('part00.txt\n1:hit\n('), text.slice(0, 80))
     const stopped = /\(The search stopped after ([\d,]+) lines? of matches; narrow the pattern, path or glob\.\)/.exec(text)
     assert.ok(stopped, text.slice(-200))
     const kept = Number(stopped[1].replace(/,/g, ''))

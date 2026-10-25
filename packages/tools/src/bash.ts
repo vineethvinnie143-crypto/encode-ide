@@ -4,8 +4,9 @@
  * description tells the model which one it is talking to, and whether the
  * commands are confined by a sandbox it may ask to leave.
  */
-import { collapseRepeats } from './text'
+import { collapseProgress, collapseRepeats } from './text'
 import type { ShellDialect, Tool, ToolOutcome } from './types'
+import { digestOutput } from './shell/digest'
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from './shell/run'
 import { BLIND_WAIT_SECONDS, blindWait, blindWaitAdvice } from './shell/waits'
 
@@ -45,7 +46,7 @@ function bashDescription(dialect: ShellDialect, platform: NodeJS.Platform, sandb
     '- Commands cannot be interactive: there is no terminal and stdin is closed. Pass flags such as --yes, and never open an editor or a pager (use git commit -m).',
     `- timeout is in milliseconds: default ${DEFAULT_TIMEOUT_MS} (${DEFAULT_TIMEOUT_MS / 60_000} minutes), at most ${MAX_TIMEOUT_MS} (${MAX_TIMEOUT_MS / 60_000} minutes).`,
     '- For servers, watchers and other commands that keep running, set run_in_background to true instead of adding &. You get an id at once; read new output with BashOutput and stop the command with KillShell.',
-    '- Long output is cut to its start and end; a note says where the rest is.',
+    '- Long or noisy output is cut; a note says where the whole is.',
     legacy ? '- Windows PowerShell has no && or ||: run commands that depend on each other one per line and check $LASTEXITCODE between them.' : '- Chain commands that depend on each other with &&.',
   ]
   if (sandbox) {
@@ -154,7 +155,7 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
 
       const result = await ctx.shell.run(input.command, { timeoutMs: input.timeout, signal: ctx.signal, onOutput: ctx.progress, ...(unsandboxed ? { unsandboxed } : {}) })
       const parts: string[] = []
-      const body = collapseRepeats(result.output.replace(/\s+$/, ''))
+      const body = collapseProgress(collapseRepeats(result.output.replace(/\s+$/, '')))
       // Whole: the loop keeps a long output in a file and shows its start and end (ADR 0093).
       parts.push(body || '(no output)')
       if (result.timedOut) {
@@ -169,10 +170,13 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
       if (view?.active && view.allowUnsandboxed && !unsandboxed && result.exitCode !== 0 && !result.timedOut && !result.interrupted && BLOCKED.test(body)) {
         parts.push('This may be the sandbox. If the command needs more than the workspace and the temp folder, retry it with unsandboxed true (the person is asked first).')
       }
+      // A run that ended by itself may go in as a digest, the whole of it kept in a file (ADR 0133).
+      const digest = result.timedOut || result.interrupted ? undefined : digestOutput(input.command, body, result.exitCode)
       return {
         ok: result.exitCode === 0 && !result.timedOut && !result.interrupted,
         content: parts.join('\n\n'),
         display: { output: parts.join('\n\n') },
+        ...(digest ? { digest: { content: [digest.text, ...parts.slice(1)].join('\n\n'), note: digest.note } } : {}),
       }
     },
   }

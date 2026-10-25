@@ -20,6 +20,11 @@ const GREP_MAX_LINE = 500
 const GREP_CONCURRENCY = 16
 /** Lines of matches held in memory; a search that finds more stops there and says so. */
 const GREP_KEEP_LINES = 100_000
+/**
+ * Lines of one file a content search shows when it found several (ADR 0133): one file full of matches does not push
+ * the others off the page. The rest are counted, and a search of that file alone shows them.
+ */
+export const GREP_FILE_LINES = 30
 const WALK_LIMIT = 200_000
 
 function fail(content: string): ToolOutcome {
@@ -242,8 +247,15 @@ function clip(line: string): string {
 interface FileMatches {
   file: WalkEntry
   count: number
-  /** The lines to show for this file (content mode only). */
-  block: string[]
+  /** The lines to show for this file, without its name (content mode only). */
+  block: ContentLines
+}
+
+/** A file's lines in a content search: each as it shows under the file's name, and what follows the name when on its own line. */
+interface ContentLines {
+  rows: string[]
+  /** ':' for a match, '-' for context, '' for the `--` between groups. */
+  seps: string[]
 }
 
 /**
@@ -300,21 +312,61 @@ async function eachInPool<T>(items: readonly T[], limit: number, signal: AbortSi
 }
 
 /** The lines Grep prints for one file: each match with its context, groups apart marked by `--`. */
-function contentLines(name: string, found: { lines: number[]; split: string[] }, before: number, after: number, numbers: boolean): string[] {
+function contentLines(found: { lines: number[]; split: string[] }, before: number, after: number, numbers: boolean): ContentLines {
   const shown = new Set<number>()
   for (const line of found.lines) {
     for (let index = Math.max(0, line - before); index <= Math.min(found.split.length - 1, line + after); index++) shown.add(index)
   }
   const hits = new Set(found.lines)
-  const out: string[] = []
+  const out: ContentLines = { rows: [], seps: [] }
   let previous = -2
   for (const index of [...shown].sort((a, b) => a - b)) {
-    if ((before || after) && previous >= 0 && index > previous + 1) out.push('--')
+    if ((before || after) && previous >= 0 && index > previous + 1) {
+      out.rows.push('--')
+      out.seps.push('')
+    }
     const separator = hits.has(index) ? ':' : '-'
-    out.push(`${name}${numbers ? `${separator}${index + 1}` : ''}${separator}${clip(found.split[index])}`)
+    out.rows.push(`${numbers ? `${index + 1}${separator}` : ''}${clip(found.split[index])}`)
+    out.seps.push(separator)
     previous = index
   }
   return out
+}
+
+/**
+ * A content search's lines (ADR 0133). When some file has several, each file's name heads its lines, as ripgrep's
+ * --heading prints them, rather than starting each; a file's lines past GREP_FILE_LINES are counted when there are
+ * other files. Otherwise one line a file, `name:line:text`. `heads` says, for each line, which line holds its file's
+ * name, so a page that starts inside a file can say whose lines they are.
+ */
+function contentOutput(matches: readonly FileMatches[], name: (match: FileMatches) => string): { out: string[]; heads: number[] } {
+  const out: string[] = []
+  const heads: number[] = []
+  if (!matches.some((match) => match.block.rows.length > 1)) {
+    for (const match of matches) {
+      out.push(...match.block.rows.map((row, index) => (match.block.seps[index] ? `${name(match)}${match.block.seps[index]}${row}` : row)))
+    }
+    return { out, heads: out.map(() => -1) }
+  }
+  for (const match of matches) {
+    if (out.length) {
+      out.push('')
+      heads.push(-1)
+    }
+    const head = out.length
+    let { rows, seps } = match.block
+    let more = 0
+    if (matches.length > 1 && rows.length > GREP_FILE_LINES) {
+      const cut = seps[GREP_FILE_LINES - 1] ? GREP_FILE_LINES : GREP_FILE_LINES - 1
+      more = seps.slice(cut).filter((sep) => sep === ':').length
+      rows = rows.slice(0, cut)
+      seps = seps.slice(0, cut)
+    }
+    const lines = [name(match), ...rows, ...(more ? [`… (${plural(more, 'more matching line')} here; Grep this file alone for them)`] : [])]
+    out.push(...lines)
+    heads.push(...lines.map(() => head))
+  }
+  return { out, heads }
 }
 
 function matchLines(text: string, regex: RegExp, multiline: boolean): { lines: number[]; count: number; split: string[] } {
@@ -468,8 +520,8 @@ export const grepTool: Tool<GrepInput> = {
       if (!decoded) return
       const hit = matchLines(decoded.text, regex, multiline)
       if (!hit.count) return
-      const block = inContent ? contentLines(shownPath(file.absolute, ctx), hit, before, after, numbers) : []
-      kept += block.length
+      const block = inContent ? contentLines(hit, before, after, numbers) : { rows: [], seps: [] }
+      kept += block.rows.length
       found[index] = { file, count: hit.count, block }
     })
     const matches = found.filter((match): match is FileMatches => match !== undefined)
@@ -485,12 +537,19 @@ export const grepTool: Tool<GrepInput> = {
         })()
 
     const name = (match: FileMatches) => shownPath(match.file.absolute, ctx)
-    const out = mode === 'files_with_matches' ? ordered.map(name) : mode === 'count' ? ordered.map((match) => `${name(match)}:${match.count}`) : ordered.flatMap((match) => match.block)
+    const { out, heads } =
+      mode === 'content'
+        ? contentOutput(ordered, name)
+        : { out: mode === 'files_with_matches' ? ordered.map(name) : ordered.map((match) => `${name(match)}:${match.count}`), heads: [] }
 
     const offset = input.offset ?? 0
     const limit = input.head_limit ?? GREP_DEFAULT_LIMIT
     const page = out.slice(offset, offset + limit)
     const remaining = out.length - offset - page.length
+    // A page that starts inside a file's lines says whose they are.
+    const head = heads[offset] ?? -1
+    if (head >= 0 && head !== offset) page.unshift(`${out[head]} (continued)`)
+    else if (page[0] === '' && heads.length) page.shift()
     const total = inContent ? plural(ordered.reduce((sum, match) => sum + match.count, 0), 'match', 'matches') : plural(ordered.length, 'file')
     const tail = remaining > 0 ? `\n(${stoppedEarly ? 'at least ' : ''}${remaining} more ${inContent ? 'lines' : 'entries'}; raise offset or head_limit, or narrow the search.)` : ''
     const stopped = stoppedEarly ? `\n(The search stopped after ${plural(kept, 'line')} of matches; narrow the pattern, path or glob.)` : ''

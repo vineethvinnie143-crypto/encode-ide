@@ -26,14 +26,18 @@ export interface ContextSignals {
   checkBounces: number
   /** Times the check of what its reply claims sent it back (ADR 0095). */
   claimBounces: number
+  /** Command outputs that went in as a digest, the whole kept in a file (ADR 0133). */
+  digests: number
+  /** Digests whose whole output the model read. */
+  digestReadBacks: number
 }
 
 export type ContextSignal = keyof ContextSignals
 
-export const SIGNALS: readonly ContextSignal[] = ['rewrites', 'summaries', 'readBacks', 'editMisses', 'checkBounces', 'claimBounces']
+export const SIGNALS: readonly ContextSignal[] = ['rewrites', 'summaries', 'readBacks', 'editMisses', 'checkBounces', 'claimBounces', 'digests', 'digestReadBacks']
 
 export function noSignals(): ContextSignals {
-  return { rewrites: 0, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0 }
+  return { rewrites: 0, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0, digests: 0, digestReadBacks: 0 }
 }
 
 /** The two added, a missing or malformed count as none. */
@@ -52,6 +56,8 @@ const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(
 
 /** Read-backs in a session after which it keeps more of each old output. */
 export const READ_BACKS_TO_KEEP_MORE = 3
+/** Digests read back whole in a session after which its commands' outputs go in whole (ADR 0133). */
+export const DIGEST_READ_BACKS_TO_STOP = 3
 
 /** An Edit's error when its old text is not in the file. */
 const NOT_FOUND = /old_string was not found/
@@ -69,7 +75,10 @@ export class ContextWatch {
   private readonly kept = new Set<string>()
   /** Files whose latest Read was shortened, not changed since. */
   private readonly reads = new Set<string>()
+  /** Files that keep a command's whole output in place of its digest. */
+  private readonly digests = new Set<string>()
   private backs = 0
+  private digestBacks = 0
 
   /** How many shortened outputs the model read again in this session. */
   get readBacks(): number {
@@ -81,33 +90,57 @@ export class ContextWatch {
     return this.backs >= READ_BACKS_TO_KEEP_MORE ? 1 : 0
   }
 
+  /** Whether the session's command outputs go in whole: the model read enough digests' whole outputs back. */
+  get wholeOutputs(): boolean {
+    return this.digestBacks >= DIGEST_READ_BACKS_TO_STOP
+  }
+
+  /** A command's output went in as a digest, the whole of it kept in `file`. */
+  digested(file: string, root: string): void {
+    this.digests.add(resolved(file, root))
+  }
+
   /** A rewrite shortened these: the files that keep outputs whole, and the files whose Reads it cut. */
   shortened(found: { files: readonly string[]; reads: readonly string[] }, root: string): void {
     for (const file of found.files) this.kept.add(resolved(file, root))
     for (const file of found.reads) this.reads.add(resolved(file, root))
   }
 
-  /** A call of the main agent's ran; true when it read a shortened output back, which is then counted, once for each output. */
-  called(name: string, input: Record<string, unknown>, root: string): boolean {
+  /**
+   * A call of the main agent's ran. When it read a shortened output back, or the whole of a digest, that is counted,
+   * once for each output, and its signal returned.
+   */
+  called(name: string, input: Record<string, unknown>, root: string): 'readBacks' | 'digestReadBacks' | undefined {
     const target = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : undefined
     if (CHANGES.has(name)) {
       if (target) this.reads.delete(resolved(target, root))
-      return false
+      return undefined
     }
-    let back = false
-    if (name === 'Read' && target) {
-      const file = resolved(target, root)
-      back = this.kept.delete(file) || this.reads.delete(file)
-    } else if ((name === 'Grep' || name === 'Glob') && typeof input.path === 'string') {
-      back = this.kept.delete(resolved(input.path, root))
-    } else if (name === 'Bash' && typeof input.command === 'string') {
-      const command = input.command
-      const file = [...this.kept].find((kept) => command.includes(kept) || command.includes(kept.replace(/\\/g, '/')))
-      back = file !== undefined && this.kept.delete(file)
+    // A digest's file that a rewrite then shortened is the rewrite's to answer for.
+    const kept = taken(this.kept, name, input, target, root)
+    if (kept !== undefined || (name === 'Read' && target && this.reads.delete(resolved(target, root)))) {
+      if (kept !== undefined) this.digests.delete(kept)
+      this.backs++
+      return 'readBacks'
     }
-    if (back) this.backs++
-    return back
+    if (taken(this.digests, name, input, target, root) !== undefined) {
+      this.digestBacks++
+      return 'digestReadBacks'
+    }
+    return undefined
   }
+}
+
+/** The one of `files` the call names, by Read, Grep or Glob's path, or in a command; it is taken out of them. */
+function taken(files: Set<string>, name: string, input: Record<string, unknown>, target: string | undefined, root: string): string | undefined {
+  let file: string | undefined
+  if (name === 'Read' && target) file = resolved(target, root)
+  else if ((name === 'Grep' || name === 'Glob') && typeof input.path === 'string') file = resolved(input.path, root)
+  else if (name === 'Bash' && typeof input.command === 'string') {
+    const command = input.command
+    file = [...files].find((kept) => command.includes(kept) || command.includes(kept.replace(/\\/g, '/')))
+  }
+  return file !== undefined && files.delete(file) ? file : undefined
 }
 
 function resolved(file: string, root: string): string {

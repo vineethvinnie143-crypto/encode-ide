@@ -1426,6 +1426,10 @@ export interface ContextSignals {
   checkBounces: number
   /** Times the check of what its reply claims sent it back. */
   claimBounces: number
+  /** Command outputs that went in as a digest, the whole kept in a file (ADR 0133). Missing in records older than it. */
+  digests?: number
+  /** Digests whose whole output the model read. */
+  digestReadBacks?: number
 }
 
 /** One day of a session's requests, by the day each began on this computer's clock. */

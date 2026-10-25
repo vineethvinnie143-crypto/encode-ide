@@ -5,7 +5,7 @@ import path from 'node:path'
 import { after, describe, it } from 'node:test'
 import type { CompletionRequest, Message } from '@encode/providers'
 import type { Tool } from '@encode/tools'
-import { addSignals, anySignals, ContextWatch, isEditMiss, keepingMore, READ_BACKS_TO_KEEP_MORE } from './context-signals'
+import { addSignals, anySignals, ContextWatch, DIGEST_READ_BACKS_TO_STOP, isEditMiss, keepingMore, READ_BACKS_TO_KEEP_MORE } from './context-signals'
 import { shortenedBy, ELIDE_LIMIT } from './compaction'
 import { createOutputStore } from './outputs'
 import { shorteningPolicy } from './shortening'
@@ -27,6 +27,8 @@ describe('context signals (ADR 0132)', () => {
       editMisses: 0,
       checkBounces: 0,
       claimBounces: 0,
+      digests: 0,
+      digestReadBacks: 0,
     })
     assert.equal(anySignals(undefined), false)
     assert.equal(anySignals({ rewrites: 0 }), false)
@@ -47,22 +49,22 @@ describe('the watch on what shortening cut', () => {
     const watch = new ContextWatch()
     const kept = [1, 2, 3].map((n) => path.join(os.tmpdir(), 'outputs', `Bash-call_${n}.txt`))
     watch.shortened({ files: kept, reads: [] }, root)
-    assert.equal(watch.called('Read', { file_path: kept[0], offset: 200 }, root), true)
-    assert.equal(watch.called('Read', { file_path: kept[0], offset: 400 }, root), false, 'reading on in the same output is the same need')
-    assert.equal(watch.called('Grep', { pattern: 'FAIL', path: kept[1] }, root), true)
-    assert.equal(watch.called('Bash', { command: `grep -n FAIL ${kept[2]}` }, root), true)
-    assert.equal(watch.called('Read', { file_path: 'src/other.js' }, root), false)
-    assert.equal(watch.called('Grep', { pattern: 'FAIL', path: 'src' }, root), false)
+    assert.equal(watch.called('Read', { file_path: kept[0], offset: 200 }, root), 'readBacks')
+    assert.equal(watch.called('Read', { file_path: kept[0], offset: 400 }, root), undefined, 'reading on in the same output is the same need')
+    assert.equal(watch.called('Grep', { pattern: 'FAIL', path: kept[1] }, root), 'readBacks')
+    assert.equal(watch.called('Bash', { command: `grep -n FAIL ${kept[2]}` }, root), 'readBacks')
+    assert.equal(watch.called('Read', { file_path: 'src/other.js' }, root), undefined)
+    assert.equal(watch.called('Grep', { pattern: 'FAIL', path: 'src' }, root), undefined)
     assert.equal(watch.readBacks, 3)
   })
 
   it('counts reading a file again after its Read was shortened, once, and not after the file was changed', () => {
     const watch = new ContextWatch()
     watch.shortened({ files: [], reads: ['src/a.js', path.join(root, 'src', 'b.js')] }, root)
-    assert.equal(watch.called('Read', { file_path: path.join(root, 'src', 'a.js') }, root), true)
-    assert.equal(watch.called('Read', { file_path: 'src/a.js' }, root), false, 'counted once')
-    assert.equal(watch.called('Edit', { file_path: 'src/b.js', old_string: 'a', new_string: 'b' }, root), false)
-    assert.equal(watch.called('Read', { file_path: 'src/b.js' }, root), false, 'changed since, so reading it is no sign')
+    assert.equal(watch.called('Read', { file_path: path.join(root, 'src', 'a.js') }, root), 'readBacks')
+    assert.equal(watch.called('Read', { file_path: 'src/a.js' }, root), undefined, 'counted once')
+    assert.equal(watch.called('Edit', { file_path: 'src/b.js', old_string: 'a', new_string: 'b' }, root), undefined)
+    assert.equal(watch.called('Read', { file_path: 'src/b.js' }, root), undefined, 'changed since, so reading it is no sign')
     assert.equal(watch.readBacks, 1)
   })
 
@@ -206,5 +208,76 @@ describe('a session that reads shortened output back', () => {
     assert.ok(signals.includes('rewrites'), signals.join(', '))
     assert.equal(signals.filter((kind) => kind === 'editMisses').length, 1, signals.join(', '))
     assert.ok(signals.indexOf('editMisses') > signals.indexOf('rewrites'))
+  })
+})
+
+/** A tool whose output comes with a digest, as Bash's does for a long test run (ADR 0133). */
+const digester: Tool = {
+  definition: {
+    name: 'Digester',
+    description: 'Runs the tests.',
+    inputSchema: { type: 'object', properties: { tag: { type: 'string' } }, required: ['tag'], additionalProperties: false },
+  },
+  kind: 'read',
+  readOnly: true,
+  access: () => ({ type: 'none' }),
+  describe: () => ({ title: 'Digester' }),
+  run: async (input) => {
+    const { tag } = input as { tag: string }
+    const whole = [...Array.from({ length: 200 }, (_, n) => `${tag} ok ${n}`), `${tag} FAILED one`].join('\n')
+    return { ok: false, content: whole, digest: { content: `${tag} FAILED one`, note: 'The digest leaves out the lines of 200 passing tests.' } }
+  },
+}
+
+describe('a session whose commands come with digests (ADR 0133)', () => {
+  it('sends the digest with where the whole is kept, and the whole once the model has read enough of them back', async () => {
+    const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'encode-digests-')))
+    made.push(dir)
+    const watch = new ContextWatch()
+    const read = new Set<string>()
+    let runs = 0
+    const h = await loopHarness({
+      extraTools: [digester],
+      services: { outputs: createOutputStore({ dir }), contextWatch: watch },
+      maxSteps: 20,
+      script: (request, step) => {
+        if (request.role !== 'main') return { text: 'SUMMARY' }
+        const back = keptIn(request).find((file) => !read.has(file))
+        if (back) {
+          read.add(back)
+          return { calls: [{ name: 'Read', input: { file_path: back }, id: `read_${step}` }] }
+        }
+        if (runs > DIGEST_READ_BACKS_TO_STOP) return { text: 'done' }
+        runs++
+        return { calls: [{ name: 'Digester', input: { tag: `run${runs}` }, id: `run_${runs}` }] }
+      },
+    })
+    await h.run('run the tests')
+    const results = h.conversation
+      .messages()
+      .flatMap((message) => (typeof message.content === 'string' ? [] : message.content))
+      .flatMap((block) => (block.type === 'tool-result' && block.toolUseId.startsWith('run_') ? [block.content.map((part) => (part.type === 'text' ? part.text : '')).join('')] : []))
+    assert.equal(results.length, DIGEST_READ_BACKS_TO_STOP + 1)
+    for (const result of results.slice(0, -1)) {
+      assert.match(result, /^run\d FAILED one\n\n\[… The digest leaves out the lines of 200 passing tests\. All of it is in .+: Read it with offset and limit, or Grep it\. …\]$/)
+    }
+    const [first] = [...read]
+    assert.equal(await fs.readFile(first!, 'utf8'), (await digester.run({ tag: 'run1' }, {} as never)).content)
+    // Three digests read back whole: the fourth run goes in whole.
+    assert.ok(results.at(-1)!.includes('run4 ok 150') && !results.at(-1)!.includes('digest'))
+    assert.equal(watch.wholeOutputs, true)
+    assert.equal(h.surface.signals.filter((kind) => kind === 'digests').length, DIGEST_READ_BACKS_TO_STOP)
+    assert.equal(h.surface.signals.filter((kind) => kind === 'digestReadBacks').length, DIGEST_READ_BACKS_TO_STOP)
+    assert.equal(h.surface.signals.includes('readBacks'), false, 'a digest read back is not a shortened output read back')
+  })
+
+  it('sends the whole when there is no folder to keep it in', async () => {
+    let runs = 0
+    const h = await loopHarness({
+      extraTools: [digester],
+      script: () => (runs++ ? { text: 'done' } : { calls: [{ name: 'Digester', input: { tag: 'run1' }, id: 'run_1' }] }),
+    })
+    await h.run('run the tests')
+    assert.ok(JSON.stringify(h.conversation.messages()).includes('run1 ok 150'))
   })
 })

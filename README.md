@@ -98,7 +98,9 @@ primary platform; the code stays cross-platform.
   want, which Undo and Rewind can take back like any of the agent's changes. Discard all removes them.
 
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
-  range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
+  range when it needs the middle. A test run reaches the model as its failures and totals, a build as its errors and
+  first warnings, an install as its errors and last lines, git log as a line a commit and git diff with each file's
+  counts first; a search groups its lines under each file's name. A long file read whole shows its start and a list of what the rest defines, by line.
   The line under each finished request's answer shows what it cost: tokens, how much came from the prompt cache, and
   dollars when the provider says.
 

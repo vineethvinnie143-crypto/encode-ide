@@ -183,6 +183,31 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     assert.match(result.output, /ok/)
   })
 
+  it('hands a long test run on whole, with a digest of its failures and totals for the model (ADR 0133)', async () => {
+    const script = [
+      "console.log('TAP version 13')",
+      "for (let n = 1; n <= 400; n++) console.log(`# Subtest: case ${n}\\nok ${n} - case ${n}\\n  ---\\n  duration_ms: 0.1\\n  ...`)",
+      "console.log('# Subtest: broken\\nnot ok 401 - broken\\n  ---\\n  error: \\'4 !== 5\\'\\n  ...\\n1..401\\n# tests 401\\n# pass 400\\n# fail 1')",
+      'process.exitCode = 1',
+    ].join('\n')
+    const { root, shell } = await shellIn({ 'run.mjs': script })
+    const ctx = testContext(root, { shell, jobs: createJobManager(shell) })
+    const bash = createBashTool(shell.dialect, process.platform)
+    const outcome = await bash.run({ command: 'node run.mjs' }, ctx)
+    assert.equal(outcome.ok, false)
+    const whole = textOf(outcome.content)
+    assert.ok(whole.includes('ok 200 - case 200') && whole.endsWith('Exit code 1'), whole.slice(-200))
+    assert.equal(outcome.display?.output, whole)
+    const digest = outcome.digest!
+    assert.ok(digest.content.length < whole.length / 10, `${digest.content.length} of ${whole.length}`)
+    assert.ok(!digest.content.includes('ok 200 - case 200'))
+    assert.ok(digest.content.includes("not ok 401 - broken") && digest.content.includes("error: '4 !== 5'") && digest.content.includes('# fail 1'))
+    assert.ok(digest.content.endsWith('Exit code 1'), 'what the tool adds stays')
+    assert.match(digest.note, /400 passing tests/)
+    const listed = await bash.run({ command: shell.dialect === 'pwsh' ? 'Get-Content run.mjs' : 'cat run.mjs' }, ctx)
+    assert.equal(listed.digest, undefined)
+  })
+
   it('refuses a long wait on its own, and runs a short one or one in the background', async () => {
     const { root, shell } = await shellIn()
     const jobs = createJobManager(shell)
