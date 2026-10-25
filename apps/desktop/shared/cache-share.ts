@@ -50,7 +50,7 @@ export interface CacheRow extends Counted {
 }
 
 /** "2026-10-19": the local day `days - 1` days before `today`, the first of a range of `days` that ends with it. */
-function firstDay(today: Date, days: number): string {
+export function firstDay(today: Date, days: number): string {
   const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1))
   return `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(first.getDate()).padStart(2, '0')}`
 }

@@ -214,6 +214,16 @@ describe('diagnostics report', () => {
     assert.ok(!diagnosticsReport(input()).includes('Prompt cache'))
   })
 
+  it('says what compaction did this week, and when the model read back too much of what it cut (ADR 0132)', () => {
+    const week = { requests: 412, rewrites: 38, summaries: 2, readBacks: 3, editMisses: 1, checkBounces: 4, claimBounces: 1 }
+    const text = diagnosticsReport(input({ context: { ...week, verdict: 'ok' } }))
+    assert.match(text, /Context, last 7 days\n  412 requests, 38 rewrites \(2 summaries\)\n  a shortened output read back 3 times, 1 edit missing its text after a rewrite\n  the project's checks sent the agent back 4 times, the check of its claims 1 time\n/)
+    assert.match(diagnosticsReport(input({ context: { ...week, rewrites: 10, verdict: 'high' } })), /after a rewrite \(HIGH\): shortening cut/)
+    assert.match(diagnosticsReport(input({ context: { requests: 3, rewrites: 0, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0, verdict: 'none' } })), /Context, last 7 days\n  3 requests, 0 rewrites \(0 summaries\)\n\n/)
+    assert.match(diagnosticsReport(input({ context: null })), /Context, last 7 days\n  could not read/)
+    assert.ok(!diagnosticsReport(input()).includes('Context, last'))
+  })
+
   it('copes with what it was not told', () => {
     const text = diagnosticsReport(input({ agentHost: null, sessions: null, environment: [], logLines: [], about: { ...about, build: 0, commit: '', builtAt: '', packaged: false } }))
     assert.match(text, /eNCode 0\.1\.0 tester, no commit recorded\n/)

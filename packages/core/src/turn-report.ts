@@ -11,6 +11,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { RuleJudge } from './approval'
+import { addSignals, type ContextSignals } from './context-signals'
 import type { MessageRecord } from './session-records'
 import type { ApprovalPolicy, TurnFileChange } from './ui'
 
@@ -64,6 +65,8 @@ export interface TurnRecord {
   models: string[]
   /** The main agent's calls to the model for the request. */
   usage: { requests: number; inputTokens: number; cachedTokens: number; outputTokens: number }
+  /** What compaction did in the request, and the signs it cut what the model needed (ADR 0132); absent when none. */
+  context?: ContextSignals
   steps: TurnReportStep[]
   results: TurnReportResult[]
   files: TurnReportFile[]
@@ -356,11 +359,12 @@ const TOOL_NAME = /^[A-Za-z][\w-]{0,63}$/
 export function readTurnReport(value: unknown): TurnReport | string {
   if (!isObject(value) || value.kind !== TURN_REPORT_KIND) return 'This is not a report of a request.'
   if (value.version !== 1) return `This report is version ${String(value.version)}; this eNCode reads version 1.`
-  const { createdAt, build, system, description, scrambled, prompt, policy, models, usage, steps, results, files, left } = value
+  const { createdAt, build, system, description, scrambled, prompt, policy, models, usage, context, steps, results, files, left } = value
   if (!isText(createdAt, 40) || !isText(build, 200) || !isText(system, 200) || !isText(description, TURN_REPORT_LIMITS.description) || typeof scrambled !== 'boolean') return 'The report is missing what it is about.'
   if (!isText(prompt, TURN_REPORT_LIMITS.prompt) || !['read-only', 'workspace-write', 'full-access', 'auto-review'].includes(policy as string)) return 'The report has no request.'
   if (!Array.isArray(models) || models.length > 20 || !models.every((model) => isText(model, 200))) return 'The report lists its models wrongly.'
   if (!isObject(usage) || !['requests', 'inputTokens', 'cachedTokens', 'outputTokens'].every((key) => Number.isFinite(usage[key]))) return 'The report has no usage.'
+  if (context !== undefined && !isObject(context)) return 'The report says what compaction did wrongly.'
   if (!Array.isArray(steps) || !steps.length || steps.length > TURN_REPORT_LIMITS.steps) return `The report must hold 1 to ${TURN_REPORT_LIMITS.steps} steps.`
   for (const [index, step] of steps.entries()) {
     if (!isObject(step) || (step.text !== undefined && typeof step.text !== 'string')) return `Step ${index + 1} is not a step.`
@@ -398,6 +402,7 @@ export function readTurnReport(value: unknown): TurnReport | string {
     policy: policy as ApprovalPolicy,
     models: [...(models as string[])],
     usage: { requests: counts.requests, inputTokens: counts.inputTokens, cachedTokens: counts.cachedTokens, outputTokens: counts.outputTokens },
+    ...(context !== undefined ? { context: addSignals(context as Partial<ContextSignals>, undefined) } : {}),
     steps: (steps as Record<string, unknown>[]).map((step): TurnReportStep => ({
       ...(step.text !== undefined ? { text: step.text as string } : {}),
       ...(step.calls !== undefined

@@ -35,6 +35,7 @@ import { AgentSession, type SessionEnv } from './session'
 import { createSessionStore, type FileSessionStore } from './session-store'
 import { memoryConversation, type MemoryConversation } from './conversation'
 import type { AgentHooks } from './hooks'
+import type { ContextSignal } from './context-signals'
 import { AgentLoop, type LoopServices } from './loop'
 import { systemParts } from './prompt'
 import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOptions } from './scripted'
@@ -63,6 +64,8 @@ export class RecordingSurface implements Surface {
   todos: TodoInput[] = []
   /** What the live line was told of the model's thinking, in order (ADR 0125). */
   readonly thoughts: (ThinkingProgress | null)[] = []
+  /** The context signals the loop counted, in order (ADR 0132). */
+  readonly signals: ContextSignal[] = []
   /** How the test answers an approval request. */
   decide: (prompt: ApprovalPrompt, signal: AbortSignal) => boolean | ApprovalResult | Promise<boolean | ApprovalResult> = () => true
   answer: (question: Question) => string = (question) => question.options[0]?.label ?? ''
@@ -77,6 +80,10 @@ export class RecordingSurface implements Surface {
 
   thinking(progress: ThinkingProgress | null): void {
     this.thoughts.push(progress)
+  }
+
+  signal(kind: ContextSignal): void {
+    this.signals.push(kind)
   }
 
   entry(entry: NewEntry): ConversationEntry {

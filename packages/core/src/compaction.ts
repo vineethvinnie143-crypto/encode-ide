@@ -418,6 +418,38 @@ export function keptPathIn(text: string, owns?: (file: string) => boolean): stri
   return undefined
 }
 
+/**
+ * What a rewrite shortened (ADR 0132): the files that keep the outputs it cut whole, and the files whose Reads it cut.
+ * `owns` says which kept files are the session's own, as for keptPathIn.
+ */
+export function shortenedBy(before: readonly Message[], after: readonly Message[], owns?: (file: string) => boolean): { files: string[]; reads: string[] } {
+  const was = new Map<string, ToolResultBlock>()
+  for (const message of before) {
+    if (message.role !== 'user') continue
+    for (const block of message.content) if (block.type === 'tool-result') was.set(block.toolUseId, block)
+  }
+  const textOf = (block: ToolResultBlock) => block.content.map((part) => (part.type === 'text' ? part.text : '')).join('')
+  const calls = callsById(after)
+  const files = new Set<string>()
+  const reads = new Set<string>()
+  for (const message of after) {
+    if (message.role !== 'user') continue
+    for (const block of message.content) {
+      if (block.type !== 'tool-result') continue
+      const old = was.get(block.toolUseId)
+      if (!old || old === block) continue
+      const text = textOf(block)
+      if (text.length >= textOf(old).length) continue
+      const file = keptPathIn(text, owns)
+      if (file) files.add(file)
+      const call = calls.get(block.toolUseId)
+      const read = call?.name === 'Read' ? fileOf(call) : undefined
+      if (read) reads.add(read)
+    }
+  }
+  return { files: [...files], reads: [...reads] }
+}
+
 /** Shortens long string fields of a tool call's input, keeping it an object. */
 function shortenInput(input: Record<string, unknown>, limit: number): Record<string, unknown> {
   const fields: Record<string, unknown> = {}

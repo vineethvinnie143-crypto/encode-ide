@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { WorktreeInfo } from '@encode/tools'
+import { addSignals, anySignals } from './context-signals'
 import { previewOf, type ConversationEntry, type DayUsage, type ModelUsage, type PlanRequest, type RequestUsage, type SessionGoal, type SessionSummary, type SessionUsage, type TodoItem, type UsageTally } from './ui'
 import {
   SESSION_FORMAT,
@@ -205,6 +206,7 @@ export function usageByDay(entries: Iterable<ConversationEntry>): Record<string,
       addTally(day, used)
       addTally((day.models[name] ??= emptyTally()), used)
     }
+    if (anySignals(usage.context)) day.context = addSignals(day.context, usage.context)
   }
   return days
 }

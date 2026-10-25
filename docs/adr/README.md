@@ -121,6 +121,7 @@ say so.
 | [0129](0129-a-cost-change-is-measured-beyond-noise-in-a-small-window-and-by-the-code-it-leaves.md) | A cost change is measured beyond noise, in a small window, and by the code it leaves | Accepted, builds on 0092 |
 | [0130](0130-old-results-are-shortened-by-what-the-models-cache-charges.md) | Old results are shortened by what the model's cache charges | Accepted, builds on 0094 and 0128 |
 | [0131](0131-long-tasks-measure-what-shortening-and-summaries-keep.md) | Long tasks measure what shortening and summaries keep | Accepted, builds on 0092, 0129 and 0130 |
+| [0132](0132-a-session-counts-what-shortening-cut-and-keeps-more-when-the-model-reads-it-back.md) | A session counts what shortening cut, and keeps more when the model reads it back | Accepted, builds on 0093, 0095, 0130 and 0131 |
 
 ## Template
 
