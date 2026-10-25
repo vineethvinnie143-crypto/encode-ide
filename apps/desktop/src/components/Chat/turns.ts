@@ -312,6 +312,99 @@ export function logItems(log: readonly ConversationEntry[]): LogItem[] {
   return items
 }
 
+/**
+ * The work log as the agent told it (ADR 0126): its words between steps, the notices among them, and each batch of steps
+ * between two of those as one block, which the chat folds to a line.
+ */
+export type LogBlock =
+  | { type: 'text'; entry: ConversationEntry }
+  | { type: 'notice'; entry: ConversationEntry }
+  | { type: 'batch'; entries: ConversationEntry[] }
+
+export function logBlocks(log: readonly ConversationEntry[]): LogBlock[] {
+  const blocks: LogBlock[] = []
+  let steps: ConversationEntry[] = []
+  const close = () => {
+    if (steps.length) blocks.push({ type: 'batch', entries: steps })
+    steps = []
+  }
+  for (const entry of log) {
+    if (entry.kind === 'tool' && entry.tool) {
+      steps.push(entry)
+      continue
+    }
+    // A call with no words before it keeps its batch going.
+    if (entry.kind === 'assistant' && !entry.text?.trim() && !entry.streaming) continue
+    close()
+    blocks.push({ type: entry.kind === 'assistant' ? 'text' : 'notice', entry })
+  }
+  close()
+  return blocks
+}
+
+export const baseName = (file: string) => file.split(/[\\/]/).filter(Boolean).pop() ?? file
+
+/** "loop.ts", "loop.ts and ui.ts", or "3 files": the files some steps touched, by name while there are one or two. */
+function filesOf(steps: readonly ConversationEntry[]): string {
+  const files = [...new Set(steps.map((step) => (step.tool && toolPath(step.tool.input)) || step.id))]
+  return files.length <= 2 ? files.map(baseName).join(' and ') : `${files.length} files`
+}
+
+const TASK_LIST = new Set(['TodoWrite', 'todo_write'])
+
+/**
+ * What a batch of steps did, in the order each kind began, naming one or two files: "Read loop.ts, ran 2 commands",
+ * "Edited prompt.ts and ui.ts". The line a folded batch shows once it is done (ADR 0126).
+ */
+export function batchSummary(steps: readonly ConversationEntry[]): string {
+  const kinds = new Map<StepKind, ConversationEntry[]>()
+  for (const step of steps) {
+    if (!step.tool) continue
+    const kind = stepKind(step.tool.name)
+    kinds.set(kind, [...(kinds.get(kind) ?? []), step])
+  }
+  const parts: string[] = []
+  for (const [kind, list] of kinds) {
+    const count = list.length
+    switch (kind) {
+      case 'read':
+        parts.push(`read ${filesOf(list)}`)
+        break
+      case 'edit':
+        parts.push(`edited ${filesOf(list)}`)
+        break
+      case 'search':
+        parts.push(count === 1 ? 'searched the code' : `searched the code ${count} times`)
+        break
+      case 'shell': {
+        const commands = list.filter((step) => isCommandTool(step.tool!.name)).length
+        if (commands) parts.push(commands === 1 ? 'ran a command' : `ran ${commands} commands`)
+        if (commands < count) parts.push(list.some((step) => step.tool!.name === 'KillShell') ? 'stopped a command' : 'read command output')
+        break
+      }
+      case 'web':
+        parts.push(count > 1 ? `used the web ${count} times` : /search/i.test(list[0].tool!.name) ? 'searched the web' : 'fetched a page')
+        break
+      case 'subagent':
+        parts.push(count === 1 ? 'delegated a task' : `delegated ${count} tasks`)
+        break
+      case 'ask':
+        parts.push(count === 1 ? 'asked you a question' : `asked you ${count} questions`)
+        break
+      case 'computer':
+        parts.push(count === 1 ? 'used the computer' : `used the computer ${count} times`)
+        break
+      default: {
+        const tasks = list.filter((step) => TASK_LIST.has(step.tool!.name)).length
+        if (tasks) parts.push('updated the task list')
+        if (tasks < count) parts.push(count - tasks === 1 ? 'used a tool' : `used ${count - tasks} tools`)
+      }
+    }
+  }
+  const text = parts.join(', ')
+  return text ? text[0].toUpperCase() + text.slice(1) : ''
+}
+
 /** The tool calls of a turn, in order. */
 export function stepsOf(turn: Pick<Turn, 'log'>): ConversationEntry[] {
   return turn.log.filter((entry) => entry.kind === 'tool' && entry.tool)

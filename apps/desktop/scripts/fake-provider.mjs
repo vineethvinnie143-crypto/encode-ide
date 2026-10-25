@@ -88,6 +88,18 @@ const SCENARIOS = {
     },
     { text: 'Looked at the project and waited for the build by checking for it.' },
   ],
+  // The agent says what it found before each batch of steps, the chat folds each batch to a line, and an answer that
+  // leaves a check to the person goes back once for the agent to make it (ADR 0126).
+  story: [
+    { text: 'Looking at the server notes first.', call: { name: 'Read', args: { file_path: 'README.md' } } },
+    { text: 'The notes name port 7777. Next I probe both ports.', call: { name: 'Bash', args: { command: 'echo 7777-open', description: 'Probe the game port' } } },
+    { text: '', call: { name: 'Bash', args: { command: 'echo 30001-closed' } } },
+    {
+      text: 'Port 7777 answers and 30001 does not. I have not tested a real join, so that last mile needs you.',
+      handBack: { text: 'Joining as a test client to check it myself.', call: { name: 'Bash', args: { command: 'echo joined', description: 'Join as a test client' } } },
+    },
+    { text: 'Port 7777 answers and a test client joined it; 30001 has nothing listening.' },
+  ],
   // A side chat's question (ADR 0104): one answer, which says what the copy of the conversation held.
   'side-check': [{ text: 'Side answer: the chat above wrote provider-check.txt.' }],
   // A file written with an error in it: the language server says so after the step, and the error gate sends the agent
@@ -522,10 +534,12 @@ const LANGUAGE_SERVER_NEWS = [
   'The conversation was just compacted to fit the context window',
   'That was the last step this request may take',
   'Before you finish: the task list the person sees',
+  'Your answer leaves a check to the user',
   'The task list the person sees has not changed',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
 const TODO_BACK = 'Before you finish: the task list the person sees'
+const HAND_BACK = 'Your answer leaves a check to the user'
 const REVIEWED = 'The Reviewer read your changes before the person sees them'
 function isLanguageServerNews(message) {
   if (message.role !== 'user') return false
@@ -598,6 +612,8 @@ function stepOf(messages) {
   if (step.gated && last?.role === 'user' && textOf(last.content).includes(GATED)) return step.gated
   // Sent back to bring the task list up to date before it ends (ADR 0125).
   if (step.todoBack && last?.role === 'user' && textOf(last.content).includes(TODO_BACK)) return step.todoBack
+  // Sent back to make the check its answer left to the person (ADR 0126).
+  if (step.handBack && last?.role === 'user' && textOf(last.content).includes(HAND_BACK)) return step.handBack
   // Sent back by the Reviewer before the person sees the reply (ADR 0096).
   return step.reviewed && last?.role === 'user' && textOf(last.content).includes(REVIEWED) ? step.reviewed : step
 }

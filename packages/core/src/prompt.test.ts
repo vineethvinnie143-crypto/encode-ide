@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BUILTIN_SUBAGENT_TYPES, createToolRegistry } from '@encode/tools'
-import { SYSTEM_PROMPT, environmentReminder, systemParts } from './prompt'
+import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, systemParts } from './prompt'
 
 /** Every request carries the system prompt, so growing it is a decision, not an accident. */
-const PROMPT_BUDGET_CHARS = 5_600
+// ADR 0126 raised it from 5,600: the agent says what it found before each batch, and checks the outcome itself.
+const PROMPT_BUDGET_CHARS = 6_100
 
 const info = { root: '/work/app', platform: 'linux' as const, arch: 'x64', shell: 'bash', cwd: '/work/app', date: '2026-10-22', topLevel: ['src/', 'package.json'] }
 
@@ -35,9 +36,19 @@ describe('the system prompt', () => {
     assert.match(SYSTEM_PROMPT, /short, natural reply/)
     assert.match(SYSTEM_PROMPT, /Never answer with a list of what you can do, a status line/)
     assert.match(SYSTEM_PROMPT, /never recite the environment/)
-    assert.match(SYSTEM_PROMPT, /one short sentence/)
+    assert.match(SYSTEM_PROMPT, /one to three sentences: what the last steps showed/)
     assert.match(SYSTEM_PROMPT, /result first/)
     assert.match(SYSTEM_PROMPT, /path:line/)
+  })
+
+  it('asks the agent to check the outcome itself, and to leave the user only what needs them (ADR 0126)', () => {
+    for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) {
+      assert.match(text, /the outcome/)
+      assert.match(text, /harmless probes of the user's own systems[^.]*need no asking/i)
+      assert.match(text, /Leave a check to the user only when it truly needs them/)
+      assert.match(text, /reaches other people/)
+      assert.match(text, /messaging people/)
+    }
   })
 
   it('asks the agent to spend context carefully without giving up on reading before it edits', () => {

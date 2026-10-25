@@ -438,7 +438,8 @@ after the work was gone.
   it from the file eNCode kept, without asking you. That file lives in the session's folder and goes with the session.
 - Ask about one function of a file of a few thousand lines. The agent's first read should show the file's start and a
   list of what the rest defines, by line, and its next read should go straight to the function.
-- The head of each work log shows what the request cost: "Worked for 1m 12s  18.4k tokens · 72% cached · $0.031".
+- The line under each finished request's answer shows what it cost: "Worked for 1m 12s  18.4k tokens · 72% cached ·
+  $0.031".
   The cost shows for providers that report it (OpenRouter does, and its free models read "free"); the others show
   tokens only.
 
@@ -871,6 +872,11 @@ back and it follows again, and so does sending a message. A task list the agent
 finishes folds away a moment after its last tick; one it left unfinished stays. The rolling dice sits on the last
 line of the running turn, under the latest step, and says what is happening there (Thinking, Working, Writing, or
 waiting for you).
+Before each group of steps the agent should say, in a sentence or three, what the last steps showed and what it does
+next, and why; each group of steps between two of those is one grey line ("Ran 4 commands", "Edited loop.ts +12 −3")
+that opens on a click. Nothing folds when the request ends. Ask it to fix something it can check (a port, a page, a
+command): it should check the result itself, not leave it to you. When its answer still leaves a check to you ("I
+have not tested..."), a note says it goes back once to try that check itself first.
 
 What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
 the tools you use now.

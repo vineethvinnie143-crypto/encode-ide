@@ -7,7 +7,8 @@
  * - a name in a file ("added `validateToken()` to `src/auth.ts`") that the file does not contain.
  *
  * Each is read conservatively: a hedged sentence ("should pass", "run the tests to confirm") claims nothing, and a
- * sentence about removing or renaming says nothing about what a file holds now.
+ * sentence about removing or renaming says nothing about what a file holds now. The same reading finds an answer that
+ * leaves a check to the person (ADR 0126).
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -126,6 +127,32 @@ export async function fileHolds(file: string, name: string): Promise<boolean> {
   const text = await fs.readFile(file, 'utf8').catch(() => undefined)
   if (text === undefined) return true
   return new RegExp(`(?:^|[^\\w$])${escape(name)}(?:[^\\w$]|$)`).test(text)
+}
+
+/**
+ * Words that leave a check to the person instead of making it (ADR 0126): the agent says it did not test or confirm
+ * something, or that the person has to. Suggestions ("you can try it with npm start") are not among them.
+ */
+const HAND_BACKS = [
+  /\bI\s+(?:have\s+not|haven't|did\s+not|didn't|could\s+not|couldn't|cannot|can't|can\s+not|was\s+not\s+able\s+to|wasn't\s+able\s+to|was\s+unable\s+to|am\s+unable\s+to|will\s+not|won't)\s+(?:yet\s+|actually\s+|fully\s+|been\s+able\s+to\s+)?(?:test|verify|check|confirm|try|reproduce)\w*/i,
+  /\b(?:you(?:'ll|\s+will)?|he|she|they|the user|the person)\s+(?:will\s+)?(?:need|needs|have|has|must)\s+to\s+(?:test|verify|check|confirm|reproduce)\b/i,
+  /\bneeds?\s+(?:you|him|her|them)\s+to\s+(?:test|verify|check|confirm|try)\b/i,
+  /\blast mile\b/i,
+]
+
+/** The first sentence of the reply that leaves a check to the person, if one does. */
+export function handBack(reply: string): string | undefined {
+  return sentences(reply).find((sentence) => HAND_BACKS.some((words) => words.test(sentence)))
+}
+
+/** Sends the agent back to make the check its answer left to the person, or to say why only the person can. */
+export function handBackReminder(sentence: string): string {
+  const quoted = sentence.length > 240 ? `${sentence.slice(0, 239)}…` : sentence
+  return [
+    `Your answer leaves a check to the user: "${quoted}"`,
+    "Before you finish, make that check yourself if any harmless way exists: run the program, send a test request, probe the port or the service, read its logs, reproduce the case. Read-only probes of the user's own systems need no asking.",
+    'Then report what it showed. Leave the check to the user only when it truly needs them (their device, their account, a real customer), and say why in one line.',
+  ].join('\n')
 }
 
 export function claimsReminder(found: readonly string[]): string {

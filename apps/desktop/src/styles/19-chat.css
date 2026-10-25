@@ -323,27 +323,89 @@
   background: none;
 }
 
-/* The work log: "Worked for 2m 14s" folds everything the agent did */
+/*
+ * The work log, the way the agent told it (ADR 0126): what it said between its steps, in the voice and size of its
+ * answer, and each batch of steps between two of those folded to one quiet line.
+ */
 .worklog {
   display: flex;
   flex-direction: column;
-}
-.worklog-head {
-  display: flex;
-  align-items: center;
   gap: 10px;
-  width: 100%;
-  height: 28px;
-  color: var(--text-3);
-  font-size: var(--fs-13);
-  text-align: left;
-}
-.worklog-head:hover .worklog-label {
-  color: var(--text-2);
 }
 .worklog-label {
   flex: none;
   transition: color var(--dur-1) var(--ease-out);
+}
+.step-batch {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.step-batch-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 26px;
+  margin-right: auto;
+  padding: 0;
+  color: var(--text-3);
+  font-size: var(--fs-13);
+  text-align: left;
+  transition: color var(--dur-1) var(--ease-out);
+}
+.step-batch-head:hover,
+.step-batch-head[aria-expanded='true'] {
+  color: var(--text-2);
+}
+.step-batch-words {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* A file by its name, a command as it was typed: the part of the line that says which. */
+.step-batch-detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.step-batch-failed {
+  display: inline-flex;
+  flex: none;
+  color: var(--danger);
+}
+.step-batch-state,
+.step-batch-chevron {
+  flex: none;
+}
+.step-batch-chevron {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.step-batch-chevron.is-open {
+  transform: rotate(90deg);
+}
+.step-batch-body {
+  margin: 4px 0 4px 6px;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 1px solid var(--border);
+}
+/* Under a finished turn: how long it worked and what it used, where the live line was. */
+.turn-worked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  color: var(--text-3);
+  font-size: var(--fs-12);
 }
 /* The line under the latest step while the agent works (ADR 0116): the dice, what it is doing, the clock. */
 .turn-live {
@@ -392,18 +454,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.worklog-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--border-subtle);
-}
-.worklog-chevron {
-  flex: none;
-  transition: transform var(--dur-2) var(--ease-out);
-}
-.worklog-chevron.is-open {
-  transform: rotate(90deg);
-}
 .worklog-label.shimmer {
   background: linear-gradient(90deg, var(--text-3) 0%, var(--text-1) 50%, var(--text-3) 100%) 0 0 / 200% 100%;
   -webkit-background-clip: text;
@@ -418,24 +468,6 @@
   to {
     background-position: -200% 0;
   }
-}
-
-.worklog-body {
-  margin: 6px 0 4px 6px;
-  padding-left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border-left: 1px solid var(--border);
-}
-.worklog-text {
-  margin: 4px 0;
-  color: var(--text-2);
-  font-size: var(--fs-13);
-  line-height: 20px;
-}
-.worklog-text .markdown p {
-  margin-bottom: 8px;
 }
 .worklog-notice {
   display: flex;
