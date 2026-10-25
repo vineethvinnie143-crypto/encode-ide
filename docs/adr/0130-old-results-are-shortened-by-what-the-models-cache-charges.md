@@ -53,6 +53,11 @@ The owner set a target of 25% lower cost at the same accuracy (the review of 202
   - A rewrite saving under 1,000 tokens is never made.
   - 0094's rule (a tenth of the window) still applies on top, so no prompt grows longer than before. Past the limit
     everything works as before.
+- **What is never shortened**, in every profile:
+  - the plan, the task list and a goal (the inputs of ExitPlanMode, TodoWrite, CreateGoal and UpdateGoal);
+  - the person's answers (AskUserQuestion's result);
+  - the latest Read of each file in the request being worked on, until the file is changed. The model edits from it.
+    Only when a prompt does not fit at all does that read give way too.
 - **A model keeps its own reasoning** through a rewrite where no provider binds it, within the request it is working
   on. Reasoning that is signed, encrypted, redacted or of unknown origin is still dropped, as is reasoning from earlier
   requests.

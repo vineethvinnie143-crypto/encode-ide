@@ -483,16 +483,53 @@ function oldIndexes(messages: readonly Message[], recentSteps: number): Set<numb
 
 /** What the model finds code by and edits from: their outputs are wanted for several steps (ADR 0130). */
 export const LOCATING_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LSP'])
+/** Calls whose input is the plan, the task list or a goal: never shortened. */
+const KEPT_INPUTS: ReadonlySet<string> = new Set(['TodoWrite', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal'])
+/** Calls whose result is the person's own words: never shortened. */
+const KEPT_RESULTS: ReadonlySet<string> = new Set(['AskUserQuestion'])
+/** Calls that change a file, after which what an earlier Read showed of it is out of date. */
+const FILE_CHANGES: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'LSPEdit'])
 
 const recencyOf = (recent: number | Recency): Recency => (typeof recent === 'number' ? { steps: recent, reads: recent } : recent)
 
-/** Which old results may be shortened: a locating tool's outside the last `reads` steps, any other outside the last `steps`. */
+const fileOf = (call: ToolUseBlock): string | undefined => {
+  const file = call.input.file_path ?? call.input.notebook_path
+  return typeof file === 'string' && file ? file : undefined
+}
+
+/** The calls of the latest Read of each file in the request being worked on whose file has not been changed since. */
+function workingReads(messages: readonly Message[]): Set<string> {
+  const latest = new Map<string, string>()
+  for (const message of messages.slice(requestStart(messages) + 1)) {
+    if (message.role !== 'assistant') continue
+    for (const call of toolUsesOf(message)) {
+      const file = fileOf(call)
+      if (!file) continue
+      if (call.name === 'Read') latest.set(file, call.id)
+      else if (FILE_CHANGES.has(call.name)) latest.delete(file)
+    }
+  }
+  return new Set(latest.values())
+}
+
+/**
+ * Which old results may be shortened: a locating tool's outside the last `reads` steps, any other outside the last
+ * `steps`; with `files`, never the latest Read of a file the request has not changed since. The plan, the task list,
+ * a goal and the person's answers are never shortened.
+ */
 function oldResults(messages: readonly Message[], recent: number | Recency): { inOld: Set<number>; old: (index: number, call: ToolUseBlock | undefined) => boolean } {
-  const { steps, reads } = recencyOf(recent)
+  const { steps, reads, files } = recencyOf(recent)
   const other = oldIndexes(messages, steps)
   const read = reads === steps ? other : oldIndexes(messages, reads)
   const inOld = read.size > other.size ? read : other
-  return { inOld, old: (index, call) => (call && LOCATING_TOOLS.has(call.name) ? read : other).has(index) }
+  const working = files ? workingReads(messages) : new Set<string>()
+  return {
+    inOld,
+    old: (index, call) => {
+      if (call && (KEPT_INPUTS.has(call.name) || KEPT_RESULTS.has(call.name) || working.has(call.id))) return false
+      return (call && LOCATING_TOOLS.has(call.name) ? read : other).has(index)
+    },
+  }
 }
 
 function callsById(messages: readonly Message[]): Map<string, ToolUseBlock> {

@@ -249,6 +249,37 @@ describe('elideOldOutputs', () => {
     assert.ok(isPaired(after))
   })
 
+  it("never shortens the plan, the task list or the person's answers, nor a file the request reads and has not changed (ADR 0130)", () => {
+    const todos = { todos: Array.from({ length: 40 }, (_, i) => ({ content: `task ${i} ${'t'.repeat(40)}`, status: 'pending' })) }
+    const messages: Message[] = [
+      userText('earlier request'),
+      ...step('old', long, 'Read', { file_path: '/src/a.ts' }),
+      assistant('read it'),
+      userText('go'),
+      ...step('todo', 'ok', 'TodoWrite', todos),
+      ...step('plan', 'ok', 'ExitPlanMode', { plan: 'p'.repeat(4000) }),
+      ...step('ask', `The person answered: ${'a'.repeat(4000)}`, 'AskUserQuestion', { questions: [] }),
+      ...step('ra', long, 'Read', { file_path: '/src/a.ts' }),
+      ...step('rb', long, 'Read', { file_path: '/src/b.ts' }),
+      ...step('eb', 'ok', 'Edit', { file_path: '/src/b.ts', old_string: 'x', new_string: 'y' }),
+      ...step('rc', long, 'Read', { file_path: '/src/c.ts' }),
+      ...step('rc2', long, 'Read', { file_path: '/src/c.ts' }),
+      ...step('recent', 'ok', 'Bash', { command: 'make' }),
+    ]
+    const at = (id: string) => messages.findIndex((message) => message.role === 'user' && message.content.some((block) => block.type === 'tool-result' && block.toolUseId === id))
+    const after = elideOldOutputs(messages, { steps: 0, reads: 0, files: true })
+    const same = (id: string) => after[at(id)] === messages[at(id)]
+    assert.equal(same('old'), false, 'a read of an earlier request')
+    assert.equal(((after[at('todo') - 1] as AssistantMessage).content[1] as ToolUseBlock).input, todos, 'the task list')
+    assert.equal(after[at('plan') - 1], messages[at('plan') - 1], 'the plan')
+    assert.equal(same('ask'), true, "the person's answer")
+    assert.equal(same('ra'), true, 'a file read and not changed since')
+    assert.equal(same('rb'), false, 'a file changed after it was read')
+    assert.equal(same('rc'), false, 'a read that a later one of the same file stands for')
+    assert.equal(same('rc2'), true)
+    assert.equal(elideOldOutputs(messages, 0)[at('ra')] === messages[at('ra')], false, 'when a prompt does not fit, a read gives way too')
+  })
+
   it('keeps reasoning no provider binds in the request being worked on, and drops the rest after a rewrite (ADR 0130)', () => {
     const deepseek = { provider: 'openrouter', model: 'deepseek/deepseek-v4', family: 'deepseek' as const }
     const claude = { provider: 'anthropic', model: 'claude-x', family: 'anthropic' as const }

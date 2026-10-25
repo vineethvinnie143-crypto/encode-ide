@@ -9,7 +9,7 @@ describe('shortening profiles (ADR 0130)', () => {
   it('shortens in bulk, two steps behind and to 800 characters, where the provider binds the reasoning', () => {
     const policy = shorteningPolicy(terms({ read: 0.1, write: 1.25, boundThinking: true }))
     assert.equal(policy.profile, 'bound')
-    assert.deepEqual(policy.recent, { steps: 2, reads: 2 })
+    assert.deepEqual(policy.recent, { steps: 2, reads: 2, files: true })
     assert.equal(policy.limit, BOUND_LIMIT)
     assert.equal(policy.atRequestStart, true)
     assert.equal(policy.floor, 32_000)
@@ -18,7 +18,7 @@ describe('shortening profiles (ADR 0130)', () => {
   it('rolls a step behind where a rewrite costs little, keeping what the model finds code by for three', () => {
     const policy = shorteningPolicy(terms({ read: 0.25 }))
     assert.equal(policy.profile, 'rolling')
-    assert.deepEqual(policy.recent, { steps: 1, reads: 3 })
+    assert.deepEqual(policy.recent, { steps: 1, reads: 3, files: true })
     assert.equal(policy.atRequestStart, false)
     assert.equal(policy.floor, ROLLING_FLOOR)
     assert.equal(policy.share, 0.1)

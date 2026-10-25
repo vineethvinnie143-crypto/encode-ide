@@ -26,10 +26,15 @@ import { ELIDE_AT, ELIDE_FLOOR, ELIDE_LIMIT } from './compaction'
 
 export type ShorteningProfile = 'bound' | 'rolling' | 'uncached'
 
-/** How many steps of the most recent stay whole: the output of a tool of LOCATING_TOOLS by `reads`, every other by `steps`. */
+/**
+ * How many steps of the most recent stay whole: the output of a tool of LOCATING_TOOLS by `reads`, every other by
+ * `steps`. `files`: the latest Read of each file in the request being worked on also stays whole, until the file is
+ * edited, as the model edits from it.
+ */
 export interface Recency {
   steps: number
   reads: number
+  files?: boolean
 }
 
 export interface ShorteningPolicy {
@@ -70,8 +75,8 @@ const UNKNOWN_TERMS: CacheTerms = { read: 0.1, write: 1, boundThinking: false, s
 
 export function shorteningPolicy(cache: CacheTerms | undefined): ShorteningPolicy {
   const terms = cache ?? UNKNOWN_TERMS
-  if (terms.boundThinking) return { profile: 'bound', recent: { steps: 2, reads: 2 }, limit: BOUND_LIMIT, atRequestStart: true, floor: ELIDE_FLOOR, share: ELIDE_AT, terms }
-  const rolling = { recent: { steps: 1, reads: 3 }, limit: ELIDE_LIMIT, atRequestStart: false, floor: ROLLING_FLOOR, terms }
+  if (terms.boundThinking) return { profile: 'bound', recent: { steps: 2, reads: 2, files: true }, limit: BOUND_LIMIT, atRequestStart: true, floor: ELIDE_FLOOR, share: ELIDE_AT, terms }
+  const rolling = { recent: { steps: 1, reads: 3, files: true }, limit: ELIDE_LIMIT, atRequestStart: false, floor: ROLLING_FLOOR, terms }
   if (terms.read >= UNCACHED_READ) return { profile: 'uncached', ...rolling, share: 0 }
   return { profile: 'rolling', ...rolling, share: ROLLING_AT }
 }
