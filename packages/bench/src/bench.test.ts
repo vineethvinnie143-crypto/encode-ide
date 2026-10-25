@@ -253,6 +253,27 @@ describe('what a run spent', () => {
     assert.equal(client.calls.length, 2)
     assert.deepEqual(client.calls[0], { role: 'main', model: 'openrouter:some/model', outcome: 'done', inputTokens: 1_000, cachedTokens: 800, cacheWriteTokens: 0, outputTokens: 50, reasoningTokens: 0, cost: 0.002, ms: client.calls[0]!.ms })
   })
+
+  test("counts a call whose agent's history was rewritten, not one that only grew, nor a summary's own", async () => {
+    const inner: ModelClient = {
+      budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000 }),
+      complete: async () => ({ kind: 'done', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }, usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, finish: 'stop' }),
+    }
+    const client = meteredClient(inner)
+    const tools = [{ name: 'Read', description: 'Read a file', inputSchema: {} }]
+    const request = (role: string, messages: CompletionRequest['payload']['messages'], agent?: string): CompletionRequest =>
+      ({ role, ...(agent ? { agent } : {}), payload: { system: [], messages, tools: role === 'summarizer' ? [] : tools }, requirements: {}, signal: new AbortController().signal }) as unknown as CompletionRequest
+    const text = (words: string) => ({ role: 'user' as const, content: [{ type: 'text' as const, text: words }] })
+    await client.complete(request('main', [text('a')]))
+    await client.complete(request('main', [text('a'), text('b')]))
+    await client.complete(request('main', [text('a'), text('b')]))
+    await client.complete(request('explore', [text('x')], 'explore-1'))
+    await client.complete(request('summarizer', [text('summarize a and b')]))
+    await client.complete(request('summarizer', [text('summarize more')]))
+    await client.complete(request('main', [text('summary of a'), text('b'), text('c')]))
+    await client.complete(request('explore', [text('x'), text('y')], 'explore-1'))
+    assert.deepEqual(client.calls.map((call) => call.rewrote ?? false), [false, false, false, false, false, false, true, false])
+  })
 })
 
 describe('reports', () => {
@@ -266,7 +287,7 @@ describe('reports', () => {
     calls: [],
     tools: [],
     metrics: {
-      requests: 4, byRole: { main: 4 }, inputTokens: 10_000, cachedTokens: 6_000, cacheWriteTokens: 0, outputTokens: 500, reasoningTokens: 0, cost: 0.01, costReported: 4, models: ['x:y'],
+      requests: 4, byRole: { main: 4 }, inputTokens: 10_000, cachedTokens: 6_000, cacheWriteTokens: 0, outputTokens: 500, reasoningTokens: 0, rewrites: 0, summaries: 0, cost: 0.01, costReported: 4, models: ['x:y'],
       toolCalls: 5, toolFailures: 0, commandFailures: 0, byTool: {}, editMisses: 0, readChars: 2_000, toolChars: 3_000, declined: 0, questions: 0, durationMs: 4_000, ...metrics,
     },
   })
@@ -290,7 +311,7 @@ describe('reports', () => {
   test('prints a table and why each run that did not pass did not', () => {
     const text = formatReport(report('openrouter:some/model', [run('a', 'passed'), run('b', 'failed')]))
     assert.match(text, /^openrouter:some\/model, 2026-10-24/)
-    assert.match(text, /\ba\s+1\/1\s+4\s+10,000\s+60%/)
+    assert.match(text, /\ba\s+1\/1\s+1\/1\s+4\s+10,000\s+60%/)
     assert.match(text, /b #1 failed: the tests pass: exit code 1$/m)
   })
 
@@ -442,6 +463,19 @@ describe('the command line', () => {
     assert.match((await cli(['compare', before, after, '--gate', '95'])).text, /--gate is a whole number from 1 to 90/)
   })
 
+  test('holds every run to a squeezed window when asked, and says so', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bench-cli-'))
+    made.push(dir)
+    const out = path.join(dir, 'squeezed.json')
+    const ran = await cli(['run', '--reference', '--only', 'json-config-edit', '--window', '16000', '--out', out])
+    assert.equal(ran.code, 0, ran.text)
+    assert.match(ran.text, /^1 task, on reference, in a 16k window$/m)
+    assert.match(ran.text, /^reference in a 16k window, /m)
+    assert.match(ran.text, /^Context per run: 0 rewrites/m)
+    assert.equal(JSON.parse(await fs.readFile(out, 'utf8')).window, 16_000)
+    assert.match((await cli(['run', '--reference', '--window', '4000'])).text, /--window is a whole number from 12000 to 1000000/)
+  })
+
   test('wants a key for a model, from the environment, and says which', async () => {
     const missing = await cli(['run', '--model', 'openrouter:qwen/qwen3-coder', '--only', 'json-config-edit'])
     assert.equal(missing.code, 2)
@@ -451,6 +485,7 @@ describe('the command line', () => {
     assert.match((await cli(['run', '--reference', '--only', 'no-such-task'])).text, /no task no-such-task/)
     assert.match((await cli(['run', '--base-url', 'file:///x', '--model', 'm'])).text, /must be an http or https address/)
     assert.match((await cli(['run', '--reference', '--repeat', '0'])).text, /--repeat is a whole number from 1 to 20/)
+    assert.match((await cli(['run', '--reference', '--out', ''])).text, /--out needs a value/, 'an empty path is not the folder it runs in')
   })
 
   test('prints what a run wrote as plain text', () => {

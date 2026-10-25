@@ -12,6 +12,8 @@ export interface BenchReport {
   model: string
   startedAt: string
   platform: string
+  /** The context every run was held to, when the run squeezed it (`--window`): shortening and summaries run sooner. */
+  window?: number
   runs: TaskRun[]
 }
 
@@ -33,8 +35,10 @@ export interface Summary {
   passEvery: number
   /** The fewest measured runs of a task: the k of pass^k. */
   fewestRuns: number
+  /** Of the runs measured, the share that passed with code a reviewer would not send back (quality.ts). */
+  cleanRate: number
   /** Means over the runs measured. */
-  mean: Pick<RunMetrics, 'requests' | 'inputTokens' | 'cachedTokens' | 'cacheWriteTokens' | 'outputTokens' | 'reasoningTokens' | 'toolCalls' | 'toolFailures' | 'commandFailures' | 'editMisses' | 'readChars' | 'durationMs'>
+  mean: Pick<RunMetrics, 'requests' | 'inputTokens' | 'cachedTokens' | 'cacheWriteTokens' | 'outputTokens' | 'reasoningTokens' | 'rewrites' | 'summaries' | 'toolCalls' | 'toolFailures' | 'commandFailures' | 'editMisses' | 'readChars' | 'durationMs'>
   /** Dollars over all measured runs, when every call said what it cost; per task solved, when any was. */
   cost?: number
   costPerSolved?: number
@@ -43,9 +47,11 @@ export interface Summary {
 /** What every report has; a report must hold them to be read. */
 const MEAN_KEYS = ['requests', 'inputTokens', 'cachedTokens', 'outputTokens', 'toolCalls', 'toolFailures', 'commandFailures', 'editMisses', 'readChars', 'durationMs'] as const
 /** Counted later than the first reports: 0 in a report written before them. */
-const LATER_KEYS = ['cacheWriteTokens', 'reasoningTokens'] as const
+const LATER_KEYS = ['cacheWriteTokens', 'reasoningTokens', 'rewrites', 'summaries'] as const
 
 const isMeasured = (run: TaskRun) => run.outcome === 'passed' || run.outcome === 'failed'
+/** Passed, and its code has nothing a reviewer would send back. */
+const isClean = (run: TaskRun) => run.outcome === 'passed' && !run.quality?.issues.length
 
 /** Every run of a task passed, of the tasks with a measured run: by task, 1 or 0. */
 function everyPassed(runs: readonly TaskRun[]): number {
@@ -77,6 +83,7 @@ function summaryOf(task: string, runs: readonly TaskRun[]): Summary {
     passRate: measured.length ? passed / measured.length : 0,
     passEvery: everyPassed(runs),
     fewestRuns: fewestRuns(runs),
+    cleanRate: measured.length ? measured.filter(isClean).length / measured.length : 0,
     mean,
     ...(cost !== undefined ? { cost } : {}),
     ...(cost !== undefined && passed ? { costPerSolved: cost / passed } : {}),
@@ -105,6 +112,9 @@ export function parseReport(json: unknown): BenchReport {
 }
 
 const whole = (value: number) => Math.round(value).toLocaleString('en-US')
+const tenths = (value: number) => (Math.round(value * 10) / 10).toString()
+/** The model, and the window when the run squeezed it. */
+const nameOf = (report: BenchReport) => (report.window ? `${report.model} in a ${Math.round(report.window / 1000)}k window` : report.model)
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const dollars = (value: number | undefined) => (value === undefined ? '-' : `$${value < 0.01 ? value.toFixed(4) : value.toFixed(3)}`)
 const cachedShare = (summary: Summary) => (summary.mean.inputTokens ? percent(summary.mean.cachedTokens / summary.mean.inputTokens) : '-')
@@ -120,6 +130,7 @@ function row(summary: Summary): string[] {
   return [
     summary.task,
     pass,
+    measured ? `${Math.round(summary.cleanRate * measured)}/${measured}` : '-',
     whole(summary.mean.requests),
     whole(summary.mean.inputTokens),
     cachedShare(summary),
@@ -132,12 +143,12 @@ function row(summary: Summary): string[] {
   ]
 }
 
-const HEADER = ['task', 'passed', 'calls', 'input', 'cached', 'output', 'tool fails', 'edit misses', 'read chars', 'cost', 'time']
+const HEADER = ['task', 'passed', 'clean', 'calls', 'input', 'cached', 'output', 'tool fails', 'edit misses', 'read chars', 'cost', 'time']
 
 /** The report as a table, a task a row and the means per run, then why each run that did not pass did not. */
 export function formatReport(report: BenchReport): string {
   const { tasks, all } = summarize(report)
-  const lines = [`${report.model}, ${report.startedAt}, ${report.platform}`, '', table([HEADER, ...tasks.map(row), row(all)])]
+  const lines = [`${nameOf(report)}, ${report.startedAt}, ${report.platform}`, '', table([HEADER, ...tasks.map(row), row(all)])]
   const measuredTasks = tasks.filter((summary) => summary.passed + summary.failed > 0).length
   lines.push('', `Every run passed: ${Math.round(all.passEvery * measuredTasks)} of ${measuredTasks} tasks (pass^${all.fewestRuns})`)
   if (all.fewestRuns < MIN_RUNS) lines.push(`Too few runs to tell a change from noise: run each task ${MIN_RUNS} times or more (--repeat 5).`)
@@ -145,11 +156,16 @@ export function formatReport(report: BenchReport): string {
   lines.push(
     `Tokens per run: ${whole(mean.inputTokens)} read, ${whole(mean.inputTokens - mean.cachedTokens)} of them not from the cache, ${whole(mean.cacheWriteTokens)} written to it; ${whole(mean.outputTokens)} written, ${whole(mean.reasoningTokens)} of them reasoning`,
   )
+  lines.push(`Context per run: ${tenths(mean.rewrites)} rewrites (old results shortened or steps summarized), ${tenths(mean.summaries)} summaries`)
   if (all.costPerSolved !== undefined) lines.push(`Cost per task solved: ${dollars(all.costPerSolved)}`)
-  const notes = report.runs.filter((run) => run.outcome !== 'passed')
+  const notes = report.runs.filter((run) => run.outcome !== 'passed' || run.quality?.issues.length)
   if (notes.length) lines.push('')
   for (const run of notes) {
     const failed = run.checks.filter((check) => !check.passed)
+    if (run.outcome === 'passed') {
+      lines.push(`${run.task} #${run.attempt} passed, but its code ${run.quality!.issues.join('; ')}`)
+      continue
+    }
     const why = run.outcome === 'failed' ? failed.map((check) => `${check.name}${check.detail ? `: ${check.detail.split('\n')[0]}` : ''}`).join('; ') : (run.reason ?? run.outcome)
     lines.push(`${run.task} #${run.attempt} ${run.outcome}${run.stopped ? ` (${run.stopped})` : ''}: ${why}`)
   }
@@ -175,6 +191,8 @@ export interface Comparison {
   passChange?: Interval
   /** The change in pass^k: tasks whose every run passed, after less before. */
   passEveryChange?: Interval
+  /** The change in the share of runs that passed with clean code, after less before. */
+  cleanChange?: Interval
   /** Each task's cost per run, after over before, as a geometric mean with its 95% interval. */
   costRatio?: Interval
   costPerSolved: { before?: number; after?: number }
@@ -208,6 +226,7 @@ export function compareReports(before: BenchReport, after: BenchReport): Compari
   const enoughRuns = pairs.length > 0 && pairs.every(([x, y]) => measured(x) >= MIN_RUNS && measured(y) >= MIN_RUNS)
   const passChange = meanInterval(pairs.map(([x, y]) => y.passRate - x.passRate))
   const passEveryChange = meanInterval(pairs.map(([x, y]) => y.passEvery - x.passEvery))
+  const cleanChange = meanInterval(pairs.map(([x, y]) => y.cleanRate - x.cleanRate))
   const costRatio = ratioInterval(pairs.flatMap(([x, y]) => (x.cost !== undefined && y.cost !== undefined && x.cost > 0 ? [y.cost / measured(y) / (x.cost / measured(x))] : [])))
 
   const regressions: string[] = []
@@ -236,12 +255,14 @@ export function compareReports(before: BenchReport, after: BenchReport): Compari
   for (const [x, y] of pairs) line(x, y)
   line(a.all, b.all)
   const only = (left: Summary[], right: Summary[]) => left.filter((summary) => !right.some((other) => other.task === summary.task)).map((summary) => summary.task)
-  const lines = [`${before.model} (${before.startedAt}) → ${after.model} (${after.startedAt})`, '', table(rows), '']
+  const lines = [`${nameOf(before)} (${before.startedAt}) → ${nameOf(after)} (${after.startedAt})`, '', table(rows), '']
   if (enoughRuns) {
     if (passChange) lines.push(`Pass rate: ${interval(passChange)}`)
     if (passEveryChange) lines.push(`Every run passed: ${interval(passEveryChange)}`)
+    if (cleanChange) lines.push(`Passed with clean code: ${interval(cleanChange)}`)
     if (costRatio) lines.push(`Cost per run: ${ratio(costRatio)}`)
   }
+  lines.push(`Context per run: ${tenths(a.all.mean.rewrites)} → ${tenths(b.all.mean.rewrites)} rewrites, ${tenths(a.all.mean.summaries)} → ${tenths(b.all.mean.summaries)} summaries`)
   const costPerSolved = { ...(a.all.costPerSolved !== undefined ? { before: a.all.costPerSolved } : {}), ...(b.all.costPerSolved !== undefined ? { after: b.all.costPerSolved } : {}) }
   if (costPerSolved.before !== undefined && costPerSolved.after !== undefined) lines.push(`Cost per task solved: ${dollars(costPerSolved.before)} → ${dollars(costPerSolved.after)} (${change(costPerSolved.before, costPerSolved.after)})`)
   if (!enoughRuns) lines.push(`Too few runs to tell a change from noise: every drop counts. Run each task ${MIN_RUNS} times or more (--repeat 5).`)
@@ -250,7 +271,7 @@ export function compareReports(before: BenchReport, after: BenchReport): Compari
   if (gone.length) lines.push('', `Only before: ${gone.join(', ')}`)
   if (added.length) lines.push('', `Only after: ${added.join(', ')}`)
   if (regressions.length) lines.push('', `${enoughRuns ? 'Passed less often, beyond chance' : 'Passed less often'}: ${regressions.join(', ')}`)
-  return { text: lines.join('\n'), regressions, enoughRuns, ...(passChange ? { passChange } : {}), ...(passEveryChange ? { passEveryChange } : {}), ...(costRatio ? { costRatio } : {}), costPerSolved }
+  return { text: lines.join('\n'), regressions, enoughRuns, ...(passChange ? { passChange } : {}), ...(passEveryChange ? { passEveryChange } : {}), ...(cleanChange ? { cleanChange } : {}), ...(costRatio ? { costRatio } : {}), costPerSolved }
 }
 
 export interface GateVerdict {
@@ -268,6 +289,7 @@ export function gate(comparison: Comparison, cut: number): GateVerdict {
   if (!comparison.enoughRuns) reasons.push(`Each task needs ${MIN_RUNS} runs or more in both reports.`)
   if (comparison.regressions.length) reasons.push(`Passed less often: ${comparison.regressions.join(', ')}.`)
   if (comparison.passEveryChange && comparison.passEveryChange.high < 0) reasons.push('Fewer tasks passed on every run, beyond chance.')
+  if (comparison.cleanChange && comparison.cleanChange.high < 0) reasons.push('Fewer runs passed with clean code, beyond chance.')
   const { before, after } = comparison.costPerSolved
   if (before === undefined || after === undefined) reasons.push('Both reports need what every call cost.')
   else if (after > before * (1 - cut)) reasons.push(`The cost per task solved fell ${Math.round((1 - after / before) * 100)}%, short of ${Math.round(cut * 100)}%.`)

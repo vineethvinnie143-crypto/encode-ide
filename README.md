@@ -549,7 +549,11 @@ or `ENCODE_BENCH_API_KEY`, and writes a report to `bench-results/`: pass rate, c
 `pnpm bench compare before.json after.json` sets two side by side. With `--repeat 5` (3 runs a task at least) it
 tells a change from noise: a task counts as passing less often only when the drop is beyond chance (Fisher's exact
 test), the whole pass rate and pass^k (every run passed) come with 95% intervals, and `--gate 25` passes a change only
-when it is 25% cheaper per task solved at equal accuracy. A tester's **Report a problem with this request**
+when it is 25% cheaper per task solved at equal accuracy. `--window 16000` runs the tasks in a 16k context so the
+compaction itself is measured (a report says how many calls rewrote the conversation and how many summaries ran),
+and every run's code is read for what a reviewer would send back: a file that no longer parses, a change several times
+the reference's, a stray file, an edited test, a debug print, a TODO; the `clean` column counts the runs with none,
+and the gate holds that too. A tester's **Report a problem with this request**
 file replays with `pnpm turn-report report.json`, call by call against what the tools did for the tester, without
 running its commands; `--save <name>` keeps it as a task whose replay the tests then hold to.
 
