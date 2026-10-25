@@ -4,6 +4,7 @@
  * a session uses the desktop (see build.ts), so the program that runs is always one whose source is in this repository.
  */
 import actions from './helper/Actions.cs'
+import apps from './helper/Apps.cs'
 import errors from './helper/Errors.cs'
 import frames from './helper/Frames.cs'
 import geometry from './helper/Geometry.cs'
@@ -26,6 +27,7 @@ export interface SourceFile {
 
 export const HELPER_FILES: readonly SourceFile[] = [
   { name: 'Actions.cs', text: actions },
+  { name: 'Apps.cs', text: apps },
   { name: 'Errors.cs', text: errors },
   { name: 'Frames.cs', text: frames },
   { name: 'Geometry.cs', text: geometry },

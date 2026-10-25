@@ -16,6 +16,7 @@ import {
   type Outline,
   type Performed,
   type Point,
+  type StartApp,
   type WindowInfo,
 } from '../contract'
 
@@ -186,4 +187,23 @@ export function asInfo(value: unknown): BackendInfo {
     scale: integer(source.scale, 'ready.scale'),
     monitors: list(source.monitors, 'ready.monitors').map((item, index) => asBox(item, `ready.monitors[${index}]`)),
   }
+}
+
+/** The Start menu's applications: at most a few thousand, each with a name and the shell's id for it. */
+export function asApps(value: unknown, where = 'apps'): StartApp[] {
+  const items = list(value, where)
+  if (items.length > 5_000) bad(where)
+  return items.map((item, index) => {
+    const source = record(item, `${where}[${index}]`)
+    const name = text(source.name, `${where}[${index}].name`)
+    const id = text(source.id, `${where}[${index}].id`)
+    const app = optionalText(source.app, `${where}[${index}].app`)
+    if (!name.trim() || !id || id.length > 2_048 || name.length > 512) bad(`${where}[${index}]`)
+    return { name, id, ...(app ? { app } : {}) }
+  })
+}
+
+/** The window an application showed when it was opened, or null when none did in time. */
+export function asOpened(value: unknown): WindowInfo | null {
+  return value === null ? null : asWindow(value, 'opened')
 }

@@ -20,15 +20,17 @@ import {
   type DesktopBackend,
   type Look,
   type LookRequest,
+  type OpenRequest,
   type Outline,
   type Point,
+  type StartApp,
   type WindowId,
   type WindowInfo,
 } from '../contract'
 import { matchElements } from '../outline'
 import { ensureHelper, type BuildOptions, type HelperBuild } from './build'
 import { HelperClient } from './client'
-import { asAct, asInfo, asLook, asPoint, asWindow, asWindows } from './validate'
+import { asAct, asApps, asInfo, asLook, asOpened, asPoint, asWindow, asWindows } from './validate'
 
 export interface WindowsDesktopOptions {
   /** Where compiled helpers are kept. Default: eNCode's folder under the user's local application data. */
@@ -51,7 +53,7 @@ export interface WindowsDesktopOptions {
 }
 
 /** The longest each kind of request may take before the helper is told to stop, ms. Settling time is added where it applies. */
-export const REQUEST_TIMEOUTS = { ready: 30_000, windows: 10_000, focus: 15_000, look: 30_000, act: 45_000, cursor: 5_000 } as const
+export const REQUEST_TIMEOUTS = { ready: 30_000, windows: 10_000, focus: 15_000, look: 30_000, act: 45_000, cursor: 5_000, apps: 30_000, open: 30_000 } as const
 
 /** Elements a search reads before it filters: more than any outline lists, so a name deep in a big window is still found. */
 const SEARCH_SCAN = 2_500
@@ -308,6 +310,17 @@ export class WindowsDesktop implements DesktopBackend {
 
   async cursor(signal: AbortSignal): Promise<Point> {
     return this.call('cursor', {}, signal, REQUEST_TIMEOUTS.cursor, (value) => asPoint(value, 'cursor'))
+  }
+
+  async apps(signal: AbortSignal): Promise<StartApp[]> {
+    return this.call('apps', {}, signal, REQUEST_TIMEOUTS.apps, asApps)
+  }
+
+  async open(request: OpenRequest, signal: AbortSignal): Promise<WindowInfo | null> {
+    const waitMs = Math.round(request.waitMs)
+    const window = await this.call('open', { id: request.id, name: request.name, waitMs }, signal, REQUEST_TIMEOUTS.open + waitMs, asOpened)
+    if (window) this.note([window])
+    return window
   }
 
   async dispose(): Promise<void> {

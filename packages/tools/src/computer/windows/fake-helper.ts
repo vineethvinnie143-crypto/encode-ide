@@ -86,6 +86,9 @@ function handle(message) {
     case 'act':
       return write({ id, ok: true, result: { performed: args.steps.map((step) => ({ kind: step.kind, via: step.kind === 'type' || step.kind === 'key' ? 'keys' : 'mouse' })), look: look(args.look), opened: [windowOf(first + 2, 'dialog.exe', 'Save')], closed: [], cursor: [220, 330] } })
     case 'cursor': return write({ id, ok: true, result: [10, 20] })
+    case 'apps': return write({ id, ok: true, result: [{ name: 'Discord', id: 'com.squirrel.Discord.Discord', app: 'discord.exe' }, { name: 'Calculator', id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App' }] })
+    case 'open': return write({ id, ok: true, result: args.id === 'com.squirrel.Discord.Discord' ? windowOf(first + 3, 'discord.exe', 'Discord') : null })
+    case 'bad-apps': return write({ id, ok: true, result: [{ name: '', id: 'x' }] })
     case 'bad-look': return write({ id, ok: true, result: { window: 'nope' } })
     default: return write({ id, ok: false, error: { code: 'failed', message: 'Unknown request: ' + op } })
   }

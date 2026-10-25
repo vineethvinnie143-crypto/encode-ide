@@ -39,7 +39,7 @@ say so.
 | [0042](0042-hooks-in-claude-codes-format-fail-closed.md) | Hooks in Claude Code's format, and a broken guard denies | Accepted |
 | [0043](0043-checkpoints-record-what-the-file-tools-change.md) | Checkpoints record what the file tools change, and rewinding never overwrites silently | Accepted |
 | [0044](0044-an-in-house-mcp-client-with-per-server-approval.md) | An in-house MCP client, with per-server approval | Accepted |
-| [0050](0050-the-desktop-is-used-through-one-tool-one-application-and-one-chat-at-a-time.md) | The desktop is used through one tool, one application and one chat at a time | Accepted |
+| [0050](0050-the-desktop-is-used-through-one-tool-one-application-and-one-chat-at-a-time.md) | The desktop is used through one tool, one application and one chat at a time | Accepted; `open` and the pointer's trip are added by 0120 |
 | [0051](0051-tester-builds-carry-their-commit-keep-a-scrubbed-log-and-report-in-one-file.md) | Tester builds carry their commit, keep a scrubbed log and report in one file | Accepted |
 | [0052](0052-every-model-call-goes-through-the-router-keys-are-asked-for-by-origin.md) | Every model call goes through the router, and keys are asked for by origin | Accepted |
 | [0053](0053-the-windows-desktop-helper-is-our-own-program-built-on-the-machine-from-source-in-the-repository.md) | The Windows desktop helper is our own program, built on the machine from source in the repository | Accepted |
@@ -109,6 +109,7 @@ say so.
 | [0117](0117-a-preset-is-known-by-the-model-that-answers-for-it.md) | A preset is known by the model that answers for it | Accepted, builds on 0035 and 0113 |
 | [0118](0118-fix-this-folder-gives-your-account-full-control-after-an-administrators-yes.md) | Fix this folder gives your account Full control after an administrator's yes | Accepted, builds on 0063 and 0110 |
 | [0119](0119-toolchain-installs-read-encodes-own-package-sources-and-clean-up-what-go-leaves-read-only.md) | Toolchain installs read eNCode's own package sources, and clean up what Go leaves read-only | Accepted, builds on 0114 |
+| [0120](0120-the-computer-tool-opens-applications-from-the-start-menu-and-the-pointer-goes-where-it-acts.md) | The Computer tool opens applications from the Start menu, and the pointer goes where it acts | Accepted, builds on 0050 and 0054 |
 
 ## Template
 

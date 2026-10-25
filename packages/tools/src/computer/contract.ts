@@ -211,6 +211,25 @@ export interface ActResult {
   cursor: Point
 }
 
+/** An application the person can start from the Start menu: a program, or an app from the Store. */
+export interface StartApp {
+  /** As the Start menu shows it: "Discord". */
+  name: string
+  /** The shell's own id for it, which is what starts it. Never a command line. */
+  id: string
+  /** The program it runs, when the shell says: "discord.exe". A Store app has none. */
+  app?: AppId
+}
+
+export interface OpenRequest {
+  /** The id of an application from `apps`. */
+  id: string
+  /** For the answer: "Discord". */
+  name: string
+  /** How long to wait for a window of it, ms. */
+  waitMs: number
+}
+
 export interface BackendInfo {
   platform: NodeJS.Platform
   /** The backend's version, so a stale copy is told from a fresh one. */
@@ -268,6 +287,14 @@ export interface DesktopBackend {
   act(request: ActRequest, signal: AbortSignal): Promise<ActResult>
   /** The cursor, in screen pixels. */
   cursor(signal: AbortSignal): Promise<Point>
+  /** The applications of the Start menu that can be started. */
+  apps(signal: AbortSignal): Promise<StartApp[]>
+  /**
+   * Starts an application the way the Start menu does: the shell starts it, so it is the person's own program and not
+   * eNCode's, and one that already runs, in the notification area or behind other windows, shows its window again.
+   * Resolves with that window once it shows, or null when none did in time.
+   */
+  open(request: OpenRequest, signal: AbortSignal): Promise<WindowInfo | null>
   dispose(): Promise<void>
 }
 

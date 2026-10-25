@@ -19,6 +19,7 @@ export interface ComputerStepText {
 
 const LABELS: Record<string, string> = {
   windows: 'Looked at the windows',
+  open: 'Opened',
   focus: 'Switched to',
   screenshot: 'Looked at',
   zoom: 'Zoomed in',
@@ -102,6 +103,8 @@ export function computerStep(input: Record<string, unknown>, output: string | un
       return { label, detail: own || text(input.window) }
     case 'zoom':
       return { label, detail: '' }
+    case 'open':
+      return { label: failed ? 'Tried to open' : label, detail: text(input.text) }
     case 'find':
       return { label, detail: failed ? aimOf(input) : [aimOf(input), own].filter(Boolean).join(' · ') }
     case 'wait':

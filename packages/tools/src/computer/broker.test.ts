@@ -88,6 +88,8 @@ describe('desktop broker', () => {
       look: (request) => backend.look(request),
       act: () => new Promise<ActResult>((resolve) => (finish = resolve)),
       cursor: () => backend.cursor(),
+      apps: () => backend.apps(),
+      open: (request) => backend.open(request),
       dispose: () => backend.dispose(),
     }
     const broker = createDesktopBroker(slow, { idleMs: 1_000, now: () => now })
@@ -123,6 +125,8 @@ describe('desktop broker', () => {
       look: (request) => backend.look(request),
       act: () => new Promise<ActResult>((resolve) => (finish = resolve)),
       cursor: () => backend.cursor(),
+      apps: () => backend.apps(),
+      open: (request) => backend.open(request),
       dispose: () => backend.dispose(),
     }
     const second = createDesktopBroker(hold)

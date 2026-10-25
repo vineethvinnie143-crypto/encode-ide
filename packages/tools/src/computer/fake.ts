@@ -20,8 +20,10 @@ import {
   type ElementState,
   type Look,
   type LookRequest,
+  type OpenRequest,
   type Performed,
   type Point,
+  type StartApp,
   type Step,
   type Target,
   type WindowId,
@@ -62,7 +64,7 @@ interface Entry {
 }
 
 export interface FakeCall {
-  op: 'ready' | 'windows' | 'focus' | 'look' | 'act' | 'cursor'
+  op: 'ready' | 'windows' | 'focus' | 'look' | 'act' | 'cursor' | 'apps' | 'open'
   request?: unknown
 }
 
@@ -74,6 +76,7 @@ export class FakeDesktop implements DesktopBackend {
   readonly covers: Box[] = []
   cursorAt: Point = [0, 0]
   private readonly entries = new Map<WindowId, Entry>()
+  private readonly startMenu: { app: StartApp; opens?: FakeWindow }[] = []
   private readonly refs = new Map<FakeElement, string>()
   private readonly byRef = new Map<string, FakeElement>()
   private windowCount = 0
@@ -107,6 +110,11 @@ export class FakeDesktop implements DesktopBackend {
     this.entries.set(id, { info, elements: window.elements, version: 1, seen: 0, captures: new Map() })
     this.foreground = id
     return id
+  }
+
+  /** Puts an application in the Start menu; opening it shows `opens`, or no window at all. */
+  addStartApp(app: StartApp, opens?: FakeWindow): void {
+    this.startMenu.push({ app, ...(opens ? { opens } : {}) })
   }
 
   close(id: WindowId): void {
@@ -384,6 +392,22 @@ export class FakeDesktop implements DesktopBackend {
   async cursor(): Promise<Point> {
     this.calls.push({ op: 'cursor' })
     return this.cursorAt
+  }
+
+  async apps(): Promise<StartApp[]> {
+    this.calls.push({ op: 'apps' })
+    this.throwPending()
+    return this.startMenu.map((item) => ({ ...item.app }))
+  }
+
+  async open(request: OpenRequest): Promise<WindowInfo | null> {
+    this.calls.push({ op: 'open', request })
+    this.throwPending()
+    const item = this.startMenu.find((entry) => entry.app.id === request.id)
+    if (!item) throw new DesktopError('no-element', `${request.name} is not in the Start menu any more.`)
+    if (!item.opens) return null
+    const id = this.add(item.opens)
+    return { ...this.entry(id).info, foreground: true }
   }
 
   async dispose(): Promise<void> {

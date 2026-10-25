@@ -148,6 +148,30 @@ namespace Encode.Desktop
             return landing;
         }
 
+        /// <summary>
+        /// Before an element is used through its own interface, the pointer travels to it at a person's pace, so whoever watches sees
+        /// what is about to be pressed. It never stops the step: an element out of view, or under another window, is used all the same.
+        /// The person's own hand on the mouse still stops it, as it stops every input.
+        /// </summary>
+        private void Show(WindowRecord window, ElementEntry entry, bool smooth, Cancel cancel)
+        {
+            if (!smooth) return;
+            Dictionary<string, object> target = new Dictionary<string, object>();
+            target["element"] = entry.Ref;
+            try
+            {
+                input.AssertIdle(false, true);
+                Landing landing = TargetOf(window, target, cancel);
+                Land(window, landing.X, landing.Y);
+                input.MoveTo(landing.X, landing.Y, true, cancel);
+            }
+            catch (HelperException error)
+            {
+                if (cancel != null && cancel.IsCancelled) throw;
+                if (error.Code == "interrupted" || error.Code == "unavailable") throw;
+            }
+        }
+
         private Landing Aim(WindowRecord window, Dictionary<string, object> target, bool smooth, Cancel cancel)
         {
             Landing landing = TargetOf(window, target, cancel);
@@ -171,7 +195,7 @@ namespace Encode.Desktop
                 case "scroll": return Scroll(window, step, smooth, cancel);
                 case "type": return TypeText(window, step, smooth, cancel);
                 case "key": return PressKeys(window, step, cancel);
-                case "set_value": return SetValue(window, step, cancel);
+                case "set_value": return SetValue(window, step, smooth, cancel);
                 case "select": return Select(window, step, smooth, cancel);
                 default: throw new HelperException("failed", "Unknown step: " + kind);
             }
@@ -192,6 +216,7 @@ namespace Encode.Desktop
                 if (button == "left" && count == 1 && (now.Invoke || now.Toggle))
                 {
                     string how = now.Invoke ? "invoke" : "toggle";
+                    Show(window, entry, smooth, cancel);
                     try
                     {
                         uia.Invoke(entry, how, cancel);
@@ -318,6 +343,7 @@ namespace Encode.Desktop
                     bool textual = entry.Role == "edit" || entry.Role == "document" || entry.Role == "combobox";
                     if (!textual && now.CanFocus)
                     {
+                        Show(window, entry, smooth, cancel);
                         uia.Focus(entry, cancel);
                     }
                     else
@@ -371,7 +397,7 @@ namespace Encode.Desktop
             return Performed("key", "keys", null);
         }
 
-        private Dictionary<string, object> SetValue(WindowRecord window, Dictionary<string, object> step, Cancel cancel)
+        private Dictionary<string, object> SetValue(WindowRecord window, Dictionary<string, object> step, bool smooth, Cancel cancel)
         {
             ElementEntry entry = uia.Entry(Args.Str(step, "element", null), window.Id);
             ElementNow now = uia.Now(entry, cancel);
@@ -379,6 +405,7 @@ namespace Encode.Desktop
             if (!now.Enabled) throw new HelperException("failed", Describe(entry) + " is disabled.");
             if (!now.Value && !now.Range) throw new HelperException("failed", Describe(entry) + " cannot be set directly. Click it and type instead.");
             if (now.Value && now.ValueReadOnly) throw new HelperException("failed", Describe(entry) + " is read-only.");
+            Show(window, entry, smooth, cancel);
             uia.SetValue(entry, Args.Str(step, "text", ""), cancel);
             return Performed("set_value", "value", null);
         }
@@ -388,6 +415,7 @@ namespace Encode.Desktop
             ElementEntry entry = uia.Entry(Args.Str(step, "element", null), window.Id);
             ElementNow now = uia.Now(entry, cancel);
             if (!now.Enabled) throw new HelperException("failed", Describe(entry) + " is disabled.");
+            if (now.Select || now.Invoke) Show(window, entry, smooth, cancel);
             if (now.Select)
             {
                 uia.Invoke(entry, "select", cancel);

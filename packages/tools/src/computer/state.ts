@@ -3,7 +3,7 @@
  * what it last saw of each (so a coordinate means the pixel the model looked at), and how many inputs
  * the turn has made. The backend is shared by every session; this is the session's own.
  */
-import type { AppId, Capture, DesktopBackend, DesktopOptions, Element, Look, Point, WindowId, WindowInfo } from './contract'
+import type { AppId, Capture, DesktopBackend, DesktopOptions, Element, Look, Point, StartApp, WindowId, WindowInfo } from './contract'
 
 /** A capture without its image: enough to map a coordinate. */
 export type CaptureRef = Omit<Capture, 'data' | 'mediaType'>
@@ -15,6 +15,8 @@ export class ComputerState {
   takenOverIn: string | undefined
   /** Where the agent left the cursor, and in which turn. */
   cursor: { at: Point; turnId: string; time: number } | undefined
+  /** The Start menu as last read, and when: asked before an open is approved and again when it runs. */
+  startMenu: { apps: StartApp[]; at: number } | undefined
 
   private readonly windows = new Map<WindowId, WindowInfo>()
   private readonly captures = new Map<WindowId, CaptureRef>()

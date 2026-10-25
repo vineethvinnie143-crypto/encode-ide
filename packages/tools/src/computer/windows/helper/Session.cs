@@ -67,6 +67,8 @@ namespace Encode.Desktop
                 case "look": return Look(args, cancel);
                 case "act": return Act(args, cancel);
                 case "cursor": return CursorAt();
+                case "apps": return Apps(cancel);
+                case "open": return Open(args, cancel);
                 default: throw new HelperException("failed", "Unknown request: " + op);
             }
         }

@@ -1,6 +1,6 @@
 # 0050. The desktop is used through one tool, one application and one chat at a time
 
-- Status: Accepted
+- Status: Accepted; `open` and the pointer's trip are added by 0120
 - Date: 2026-10-22
 
 ## Context

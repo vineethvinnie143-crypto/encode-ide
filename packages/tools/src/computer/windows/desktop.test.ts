@@ -122,6 +122,20 @@ describe('the Windows desktop backend', () => {
     assert.equal(focused.foreground, true)
   })
 
+  it('lists the Start menu and opens an application from it, waiting as long as it was asked to', async () => {
+    const { desktop, sent } = scene()
+    assert.deepEqual(await desktop.apps(never()), [
+      { name: 'Discord', id: 'com.squirrel.Discord.Discord', app: 'discord.exe' },
+      { name: 'Calculator', id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App' },
+    ])
+    const opened = await desktop.open({ id: 'com.squirrel.Discord.Discord', name: 'Discord', waitMs: 15_000 }, never())
+    assert.deepEqual([opened?.id, opened?.app], ['w4', 'discord.exe'])
+    assert.equal(await desktop.open({ id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App', name: 'Calculator', waitMs: 1_500.4 }, never()), null, 'no window showed')
+    const [first, second] = await sent('open')
+    assert.deepEqual(first.args, { id: 'com.squirrel.Discord.Discord', name: 'Discord', waitMs: 15_000 })
+    assert.equal((second.args as { waitMs: number }).waitMs, 1_500)
+  })
+
   it('asks for the picture and the outline the request names', async () => {
     const { desktop, sent } = scene()
     const look = await desktop.look({ ...LOOK, settleMs: 400, zoom: { capture: 's1', box: [1, 2, 30, 40] } }, never())
@@ -253,6 +267,8 @@ describe('the Windows desktop backend', () => {
     const error = await failure(backend.call('bad-look', {}, never(), 5_000, asLook))
     assert.equal(error.code, 'failed')
     assert.match(error.message, /look\.window/)
+    const { asApps } = await import('./validate')
+    assert.match((await failure(backend.call('bad-apps', {}, never(), 5_000, asApps))).message, /apps\[0\]/)
   })
 
   it('stops waiting when the caller does, and the helper still starts for the next', async () => {
