@@ -21,6 +21,11 @@ export interface AgentSettings {
   /** How many times an active goal restarts the agent on its own. */
   maxGoalRounds: number
   reasoning?: ReasoningEffort
+  /**
+   * A step that only reads the results of reads, searches and commands that worked thinks at low effort, on models
+   * whose cache a changed effort keeps; the first step, one after a failure and the answer keep the effort set (ADR 0135).
+   */
+  lightSteps?: boolean
   temperature?: number
   /** Offer attempt_completion, for models that do not end a turn by themselves. */
   completionTool?: boolean

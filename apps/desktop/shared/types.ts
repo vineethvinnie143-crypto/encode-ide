@@ -87,6 +87,12 @@ export type AskAgain = 'on' | 'off'
 export type LearnConventions = 'on' | 'off'
 
 /**
+ * `on`: a step that reads what reads, searches and commands that worked found thinks at low effort, on models whose
+ * prompt cache a changed effort keeps; the first step, one after a failure and the answer keep the role's (ADR 0135).
+ */
+export type LightSteps = 'on' | 'off'
+
+/**
  * `auto`: a model that is not one of the strong ones gets a few lines of help after the instructions, and its first
  * change in a request waits until it has said what will change (ADR 0100). `off`: no model does.
  */
@@ -157,6 +163,8 @@ export interface Settings {
   askAgain: AskAgain
   /** See LearnConventions. Default `on`. */
   learnConventions: LearnConventions
+  /** See LightSteps. Default `off`, until the benchmark shows it keeps the pass rate. */
+  lightSteps: LightSteps
   /** See HelpSmaller. Default `auto`. */
   helpSmaller: HelpSmaller
   /** See OfferStronger. Default `ask`. */

@@ -122,6 +122,7 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Reviewer before finishing', settings.reviewWork],
     ['Hard-to-undo commands asked again', settings.askAgain],
     ['Offer what a request taught', settings.learnConventions],
+    ['Light steps', settings.lightSteps],
     ['Help for smaller models', `${settings.helpSmaller}, stronger model offered ${settings.offerStronger}`],
     ['Suggestions as you type', `${settings.inlineSuggest}, ${inlineState(settings).on ? 'on' : 'off'}`],
     ['Web search', `${search.name}${search.needsKey ? (settings.searchKeys.includes(search.id) ? ', key stored' : ', NO KEY') : ', needs no key'}`],

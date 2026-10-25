@@ -17,7 +17,9 @@
  * Run options: --tasks <folder> (default: the built-in tasks), --keep (leave each run's folder, to look at what the
  * agent did), --sandbox (commands in the operating-system sandbox), --timeout <seconds> per run, --window <tokens> (every
  * run held to that much context: with 16000, shortening and summaries run in every task, so a run compared with a
- * normal one shows what compaction costs in accuracy).
+ * normal one shows what compaction costs in accuracy), --effort <low|medium|high|xhigh|max> (the reasoning effort every
+ * step asks for), --light-steps (steps that read results think at low effort, ADR 0135: compared with a run at the same
+ * --effort without it, it shows what that saves and whether the pass rate holds).
  *
  * Keys are read from the environment only: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, and
  * ENCODE_BENCH_API_KEY for --base-url. They are never printed, never given to the agent's commands, and taken out of
@@ -27,7 +29,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { readTurnReport, type TurnReport } from '@encode/core'
-import type { ModelClient } from '@encode/providers'
+import type { ModelClient, ReasoningEffort } from '@encode/providers'
 import { createAnthropicAdapter, createOpenAICompatibleAdapter, createOpenRouterAdapter, redactSecrets } from '@encode/providers'
 import { createRouter, parseRouterConfig, staticKeys } from '@encode/router'
 import { Sandbox } from '@encode/sandbox'
@@ -61,8 +63,9 @@ interface Flags {
   switches: Set<string>
 }
 
-const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate', '--window'])
-const SWITCHES = new Set(['--reference', '--keep', '--sandbox', '--fail-on-regression', '--help', '-h'])
+const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate', '--window', '--effort'])
+const SWITCHES = new Set(['--reference', '--keep', '--sandbox', '--fail-on-regression', '--light-steps', '--help', '-h'])
+const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 function parseFlags(argv: readonly string[]): Flags {
   const flags: Flags = { positional: [], values: new Map(), switches: new Set() }
@@ -167,6 +170,10 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
   const repeat = count(flags, '--repeat', 1, 20) ?? 1
   const timeout = count(flags, '--timeout', 10, 3_600)
   const window = count(flags, '--window', 12_000, 1_000_000)
+  const effort = flags.values.get('--effort') as ReasoningEffort | undefined
+  if (effort !== undefined && !EFFORTS.includes(effort)) throw new UsageError(`--effort is one of ${EFFORTS.join(', ')}`)
+  const light = flags.switches.has('--light-steps')
+  const settings = { ...(window ? { contextCap: window } : {}), ...(effort ? { reasoning: effort } : {}), ...(light ? { lightSteps: true } : {}) }
   const dir = path.resolve(flags.values.get('--tasks') ?? path.join(context.root, 'packages', 'bench', 'tasks'))
   const { tasks, broken } = await readTasks(dir)
   for (const error of broken) context.print(plain(`skipping ${error.message}`))
@@ -180,12 +187,13 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     if (status.state !== 'active') throw new UsageError(`there is no working sandbox here: ${status.reason ?? status.state}`)
   }
   const name = reference ? 'reference' : flags.values.get('--base-url') ? `${model} at ${flags.values.get('--base-url')}` : model!
-  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}${window ? `, in a ${Math.round(window / 1000)}k window` : ''}`)
+  const how = `${window ? `, in a ${Math.round(window / 1000)}k window` : ''}${effort ? `, at ${effort} effort` : ''}${light ? ', with light steps' : ''}`
+  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}${how}`)
   const report = await runBench(chosen, {
     client: live?.client ?? 'reference',
     model: name,
     repeat,
-    ...(window ? { settings: { contextCap: window } } : {}),
+    ...(Object.keys(settings).length ? { settings } : {}),
     ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
     ...(flags.switches.has('--keep') ? { keep: true, onKept: (kept: string) => context.print(`  kept in ${kept}`) } : {}),
     ...(sandbox ? { sandbox } : {}),

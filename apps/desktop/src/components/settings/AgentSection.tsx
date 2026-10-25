@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CONTEXT_CAPS } from '@shared/models'
 import { isKeyedSearchProvider, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '@shared/search'
-import type { AskAgain, CheckGate, LearnConventions, ReviewWork, Settings } from '@shared/types'
+import type { AskAgain, CheckGate, LearnConventions, LightSteps, ReviewWork, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
 import { ALWAYS_ASKS_NOTE, POLICY_DESCRIPTIONS, POLICY_LABELS, POLICY_OPTIONS } from '../../policies'
@@ -32,6 +32,11 @@ const ASK_AGAIN: SegmentedOption<AskAgain>[] = [
 const LEARN: SegmentedOption<LearnConventions>[] = [
   { value: 'on', label: 'Offer to keep' },
   { value: 'off', label: 'Never' },
+]
+
+const LIGHT: SegmentedOption<LightSteps>[] = [
+  { value: 'on', label: 'Think less there' },
+  { value: 'off', label: 'Same effort' },
 ]
 
 /** Settings > Agent: what it may do without asking, web search, checks before it finishes and its limits. */
@@ -184,6 +189,13 @@ export function AgentSection({ settings }: { settings: Settings }) {
               if (text.trim() && Number.isFinite(steps)) void save({ maxSteps: Math.max(1, Math.min(1000, steps)) })
             }}
           />
+        </SettingRow>
+        <SettingRow
+          id="agent.lightSteps"
+          label="Think less on steps that read results"
+          help="After steps that only read, searched or ran commands, and each worked, the next step thinks at low effort: it is mostly reading what they found. The first step of a request, the one after a failure or an edit, and the answer keep the effort set for the role; a step that would answer is asked again at that effort. Only for OpenAI, DeepSeek and Kimi models that reason, where a changed effort keeps the prompt cache. Off until the benchmark shows it keeps the pass rate."
+        >
+          <Segmented label="Think less on steps that read results" value={settings.lightSteps} options={LIGHT} onChange={(lightSteps) => void save({ lightSteps })} />
         </SettingRow>
         <SettingRow
           id="agent.contextCap"

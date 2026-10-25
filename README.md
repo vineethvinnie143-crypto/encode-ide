@@ -103,6 +103,10 @@ primary platform; the code stays cross-platform.
   counts first; a search groups its lines under each file's name. A long file read whole shows its start and a list
   of what the rest defines, by line. After three steps that each read one thing, the agent is asked to make the reads
   it knows of in one reply, and when Explore runs on a model at most half Main's price, wide searches go to it.
+  **Think less on steps that read results** (Settings → Agent, off until the benchmark shows it keeps the pass rate)
+  has a step that only reads what reads, searches and passing commands found think at low effort, on OpenAI, DeepSeek
+  and Kimi models whose cache that keeps; the first step, the one after a failure or an edit, and the answer keep the
+  role's effort.
   The line under each finished request's answer shows what it cost: tokens, how much came from the prompt cache, and
   dollars when the provider says.
 

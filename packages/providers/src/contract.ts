@@ -150,6 +150,8 @@ export interface CompletionRequest {
   signal: AbortSignal
   onEvent?: (event: ClientEvent) => void
   validateToolCall?: ToolCallValidator
+  /** A step that only reads what the last one found: its low effort stands over the role's (ADR 0135). */
+  light?: true
 }
 
 export type PauseReason =
@@ -193,6 +195,8 @@ export interface ModelBudget {
   free?: boolean
   /** What its prompt cache charges, for compaction to tell when a rewrite pays (ADR 0130); absent when the client cannot tell. */
   cache?: CacheTerms
+  /** A step may think at low effort without costing the prompt cache (ADR 0135); absent when it may not. */
+  effortPerStep?: true
 }
 
 export interface BudgetQuery {

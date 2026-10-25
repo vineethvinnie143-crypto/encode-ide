@@ -112,6 +112,7 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'agent.review', section: 'agent', label: "Have the Reviewer read the agent's work", keywords: 'reviewer review plan critique second opinion edge cases tests' },
   { id: 'agent.learnConventions', section: 'agent', label: 'Keep what a request taught', keywords: 'conventions learn rules memory instructions encode.md agents.md claude.md lessons remember' },
   { id: 'agent.limits', section: 'agent', label: 'Max agent steps', keywords: 'limits steps rounds' },
+  { id: 'agent.lightSteps', section: 'agent', label: 'Think less on steps that read results', keywords: 'effort reasoning thinking light steps cost tokens output' },
   { id: 'agent.contextCap', section: 'agent', label: 'Summarize the conversation past', keywords: 'context window size tokens compaction compact cap long conversations cost' },
   { id: 'computer.enabled', section: 'computer', label: 'Let the agent use this computer', keywords: 'computer use gui mouse keyboard turn on' },
   { id: 'computer.stop', section: 'computer', label: 'Stop the agent using the computer', keywords: 'ctrl alt esc banner emergency' },

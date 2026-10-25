@@ -82,6 +82,7 @@ function config(patch: { model?: HostConfig['model']; keyRevision?: number | nul
     reviewWork: 'auto',
     askAgain: 'on',
     learnConventions: 'on',
+    lightSteps: 'off',
     helpSmaller: 'auto',
     offerStronger: 'ask',
     model: patch.model ?? 'router',
@@ -222,6 +223,22 @@ describe('the effort chosen for a role', () => {
     f.service.configure(thinking({ main: 'max' }))
     await turn(f, 'again')
     assert.deepEqual(sent(), ['low', 'high'])
+  })
+
+  it('gives way on a light step, which thinks at low effort (ADR 0135)', async () => {
+    let calls = 0
+    reply = (request, response) => {
+      if (!chat(request.url) || calls++ > 0) return say('Found it')(request, response)
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'Glob', arguments: '{"pattern":"*"}' } }] } }] })}\n\n`)
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}\n\n`)
+      response.end('data: [DONE]\n\n')
+    }
+    const f = await fixture()
+    f.service.configure({ ...thinking({ main: 'max' }), lightSteps: 'on' })
+    assert.equal((await turn(f)).reply, 'Found it')
+    // The first step at the role's effort; after the Glob, low; its answer asked again at the role's effort.
+    assert.deepEqual(sent(), ['high', 'low', 'high'])
   })
 
   it('is left to the model while the role has none, whatever another role is set to', async () => {

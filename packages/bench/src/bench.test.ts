@@ -476,6 +476,20 @@ describe('the command line', () => {
     assert.match((await cli(['run', '--reference', '--window', '4000'])).text, /--window is a whole number from 12000 to 1000000/)
   })
 
+  test('asks every step for an effort, and steps that read results for low, when asked (ADR 0135)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bench-cli-'))
+    made.push(dir)
+    const out = path.join(dir, 'light.json')
+    const ran = await cli(['run', '--reference', '--only', 'json-config-edit', '--effort', 'high', '--light-steps', '--out', out])
+    assert.equal(ran.code, 0, ran.text)
+    assert.match(ran.text, /^1 task, on reference, at high effort, with light steps$/m)
+    assert.match(ran.text, /^reference at high effort with light steps, /m)
+    const report = JSON.parse(await fs.readFile(out, 'utf8'))
+    assert.equal(report.effort, 'high')
+    assert.equal(report.lightSteps, true)
+    assert.match((await cli(['run', '--reference', '--effort', 'huge'])).text, /--effort is one of low, medium, high, xhigh, max/)
+  })
+
   test('wants a key for a model, from the environment, and says which', async () => {
     const missing = await cli(['run', '--model', 'openrouter:qwen/qwen3-coder', '--only', 'json-config-edit'])
     assert.equal(missing.code, 2)
