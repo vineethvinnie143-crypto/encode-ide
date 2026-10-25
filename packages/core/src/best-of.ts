@@ -367,7 +367,7 @@ function ended(end: TurnEnd): { state: BestAttempt['state']; reply: string; erro
     case 'stopped':
       return { state: 'done', reply: end.summary, words: 'finished' }
     case 'max-steps':
-      return { state: 'failed', reply: '', error: `It ran out of steps (${end.steps}) before it finished.`, words: `ran out of steps (${end.steps}) before it finished` }
+      return { state: 'failed', reply: end.reply ?? '', error: `It ran out of steps (${end.steps}) before it finished.`, words: `ran out of steps (${end.steps}) before it finished` }
     case 'paused':
     case 'failed':
       return { state: 'failed', reply: '', error: end.message, words: `stopped on a problem: ${flat(end.message)}` }

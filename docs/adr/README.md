@@ -113,6 +113,7 @@ say so.
 | [0121](0121-the-computer-tool-numbers-what-it-shows-and-checks-what-it-hits.md) | The Computer tool numbers what it shows, and checks what it hits | Accepted, builds on 0050 and 0120 |
 | [0122](0122-the-agent-finds-pages-before-it-fetches-them-and-duckduckgo-is-asked-one-search-at-a-time.md) | The agent finds pages before it fetches them, and DuckDuckGo is asked one search at a time | Accepted, builds on 0058; Parallel replaces DuckDuckGo as the default in 0123 |
 | [0123](0123-parallel-answers-searches-for-free-and-a-free-tavily-key-is-offered-when-it-cannot.md) | Parallel answers searches for free, and a free Tavily key is offered when it cannot | Accepted, builds on 0058 and 0122 |
+| [0124](0124-a-request-always-ends-with-words-for-the-person-also-at-the-step-limit.md) | A request always ends with words for the person, also at the step limit | Accepted, builds on 0095 and 0109 |
 
 ## Template
 

@@ -85,6 +85,8 @@ export interface ConversationEntry {
   suggestion?: EntrySuggestion
   /** On a notice: the attempts of a best-of-N request, and which to keep (ADR 0098). */
   best?: EntryBest
+  /** On a notice: the request stopped at the step limit, this many steps since the person's last message (ADR 0124). */
+  stepLimit?: number
   createdAt: number
 }
 

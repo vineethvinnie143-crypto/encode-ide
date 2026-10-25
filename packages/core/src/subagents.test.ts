@@ -163,18 +163,20 @@ describe('subagents in a session', () => {
     for (const gone of ['Write', 'Edit', 'Bash', 'Task']) assert.ok(!names.includes(gone), gone)
   })
 
-  it('stops a subagent after the turns its definition allows', async () => {
-    const { h } = await run({ 'short.md': agent({ description: 'Short', maxTurns: '2' }) }, 'short', () => ({ calls: [{ name: 'Glob', input: { pattern: '*' } }] }))
+  it('stops a subagent after the turns its definition allows, with what it found by then', async () => {
+    const sub = (step: number): ScriptedStep => (step < 2 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'Half done: the config is in a.json.' })
+    const { h } = await run({ 'short.md': agent({ description: 'Short', maxTurns: '2' }) }, 'short', sub)
     const subagentCalls = h.client.requests.filter(isSubagent)
-    assert.equal(subagentCalls.length, 2)
+    // Two steps, and the report after them with tools held back (ADR 0124).
+    assert.deepEqual(subagentCalls.map((request) => request.payload.toolChoice), [undefined, undefined, 'none'])
     const result = JSON.stringify(h.client.requests.at(-1)!.payload.messages.at(-1))
-    assert.match(result, /ran out of steps \(2\)/)
+    assert.match(result, /ran out of steps \(2\)[^"]*Its last message was:\\nHalf done: the config is in a\.json\./)
   })
 
   it('never lets a definition run longer than the person\'s own limit of steps', async () => {
     const files = { 'long.md': agent({ description: 'Long', maxTurns: '90' }) }
     const { h } = await run(files, 'long', () => ({ calls: [{ name: 'Glob', input: { pattern: '*' } }] }), { maxSteps: 3 })
-    assert.equal(h.client.requests.filter(isSubagent).length, 3)
+    assert.equal(h.client.requests.filter(isSubagent).length, 4, 'three steps and the closing reply')
     assert.match(JSON.stringify(h.client.requests.at(-1)!.payload.messages.at(-1)), /ran out of steps \(3\)/)
   })
 

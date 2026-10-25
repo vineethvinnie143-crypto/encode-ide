@@ -108,7 +108,7 @@ import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, na
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
-import { CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder } from './prompt'
+import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
@@ -148,6 +148,8 @@ const REREAD_FILE_CHARS = 20_000
 const REREAD_MIN_CHARS = 2_000
 const MAX_UI_STRING = 8_000
 const MAX_PREVIEW_HUNKS = 4
+/** Tools whose end of a request the app shows itself: the result of attempt_completion as the answer, a plan on its card. */
+const SHOWN_STOPS: ReadonlySet<string> = new Set(['attempt_completion', 'ExitPlanMode'])
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
 const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
 const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
@@ -561,7 +563,12 @@ export class AgentLoop {
       return true
     }
 
-    for (let step = 0; step < maxSteps; step++) {
+    /** Steps since the person's latest message: each message they send gives the request the whole limit again (ADR 0124). */
+    let step = 0
+    for (;;) {
+      // Only a reply the agent was sent back from reaches the limit here: its answer stands, after its last step.
+      if (step >= maxSteps) return { kind: 'max-steps', steps: maxSteps }
+      step++
       this.checkAbort(signal)
       o.surface.status('thinking')
       const response = await this.complete({ ...turn, mode })
@@ -577,7 +584,10 @@ export class AgentLoop {
           await o.conversation.add(userText(CONTINUE_AFTER_LENGTH), { turnId: turn.turnId })
           continue
         }
-        if (await steered()) continue
+        if (await steered()) {
+          step = 0
+          continue
+        }
         // A summary in place of the work so far reads like a fresh start, and a weaker model may answer it with a
         // progress report: asked once whether the request is finished, it carries on.
         if (afterCompaction && !resumed) {
@@ -589,21 +599,26 @@ export class AgentLoop {
         const sent = await this.beforeFinish({ ...turn, mode }, reply)
         if (sent) {
           const took = await this.offerStronger(turn)
-          await o.conversation.add(userText(reminder(took ? `${sent}\n\n${took}` : sent)), { turnId: turn.turnId })
+          await o.conversation.add(userText(reminder(`${took ? `${sent}\n\n${took}` : sent}\n\n${ANSWER_AGAIN}`)), { turnId: turn.turnId })
           continue
         }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
-          await o.conversation.add(userText(stop.continue), { turnId: turn.turnId })
+          await o.conversation.add({ role: 'user', content: [textBlock(stop.continue), textBlock(reminder(ANSWER_AGAIN))] }, { turnId: turn.turnId })
           continue
         }
-        if (await steered()) continue
+        if (await steered()) {
+          step = 0
+          continue
+        }
         this.answered = true
         return { kind: 'done', reply }
       }
 
       const state: StepState = { results: new Map(), context: [] }
       let ran = false
+      /** Why the request ends after this step with nothing written for the person: the reply after it is made with tools held back. */
+      let closing: string | undefined
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
@@ -613,7 +628,7 @@ export class AgentLoop {
         if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
           const sent = await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)
           if (sent) {
-            state.context.push(sent)
+            state.context.push(`${sent}\n\n${ANSWER_AGAIN}`)
             state.stop = undefined
           }
         }
@@ -625,23 +640,73 @@ export class AgentLoop {
         // Every call gets exactly one result, also when the run ends early: strict providers refuse the next request otherwise.
         const content: UserBlock[] = calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN))
         for (const text of state.context) content.push(textBlock(reminder(text)))
-        // What the user sent while the step ran goes with its results, so the model reads it before its next move. Not
-        // when the turn ends here anyway: unread, it would be lost; left waiting, it becomes the next request.
-        if (ran && state.stop === undefined && step + 1 < maxSteps && o.steers?.waiting()) content.push(...(await o.steers.take(signal)))
+        // What the user sent while the step ran goes with its results, so the model reads it before its next move, and
+        // the request has its whole step limit again. Not when a tool ends the turn here anyway: unread, it would be
+        // lost; left waiting, it becomes the next request.
+        let took = false
+        if (ran && state.stop === undefined && o.steers?.waiting()) {
+          const blocks = await o.steers.take(signal)
+          content.push(...blocks)
+          took = blocks.length > 0
+        }
+        if (took) step = 0
+        else if (ran) closing = state.stop === undefined ? (step >= maxSteps ? stepLimitNote(maxSteps) : undefined) : this.stopNote(state, message)
+        if (closing) content.push(textBlock(reminder(closing)))
         await o.conversation.add({ role: 'user', content }, { turnId: turn.turnId })
       }
       if (state.mode) mode = state.mode
       if (state.stop !== undefined) {
         if (state.stopBy === 'attempt_completion') this.answered = true
+        else if (closing) {
+          const closed = await this.closingReply({ ...turn, mode })
+          if (closed.kind === 'end') return closed.end
+        } else if (!SHOWN_STOPS.has(state.stopBy ?? '')) this.answerAgain(message)
         return { kind: 'stopped', summary: state.stop }
       }
+      if (closing) {
+        const closed = await this.closingReply({ ...turn, mode })
+        if (closed.kind === 'end') return closed.end
+        return { kind: 'max-steps', steps: maxSteps, ...(closed.reply ? { reply: closed.reply } : {}) }
+      }
     }
-    return { kind: 'max-steps', steps: maxSteps }
+  }
+
+  /**
+   * What goes to the model when a tool ended the request and nothing in the message that called it is for the person:
+   * the reply after it is made with tools held back (ADR 0124). A tool whose end the app shows itself needs none.
+   */
+  private stopNote(state: StepState, message: AssistantMessage): string | undefined {
+    if (state.stop === undefined || SHOWN_STOPS.has(state.stopBy ?? '') || messageText(message).trim()) return undefined
+    return stoppedNote(state.stop)
+  }
+
+  /** The words that came with the call that ended the request, again after it: the person reads them as the answer, not folded in the steps. */
+  private answerAgain(message: AssistantMessage): void {
+    const text = messageText(message).trim()
+    if (!text) return
+    const model = message.origin?.model
+    this.o.surface.settle(this.o.surface.entry({ kind: 'assistant', text, ...(model ? { model } : {}) }))
+  }
+
+  /**
+   * The reply after the last step of a request that would end with nothing written for the person: at the step limit,
+   * or on a tool that ended it (ADR 0124). Tools are held back; a call the model makes anyway is answered, unrun, so the
+   * conversation stays valid for the next request. An empty reply leaves the person the session's own words.
+   */
+  private async closingReply(turn: Turn): Promise<{ kind: 'reply'; reply: string } | { kind: 'end'; end: LoopEnd }> {
+    this.o.surface.status('thinking')
+    const response = await this.complete(turn, true)
+    if (response.kind === 'end') return response
+    const { message } = response
+    const calls = toolUses(message)
+    if (calls.length) await this.o.conversation.add({ role: 'user', content: calls.map((call) => failed(call.id, NOT_RUN)) }, { turnId: turn.turnId })
+    return { kind: 'reply', reply: messageText(message).trim() }
   }
 
   // ------------------------------------------------------------ one model call
 
-  private async complete(turn: Turn): Promise<{ kind: 'reply'; message: AssistantMessage; finish: FinishReason } | { kind: 'end'; end: LoopEnd }> {
+  /** One model call. `closing`: the reply that ends the request, with tools held back (ADR 0124). */
+  private async complete(turn: Turn, closing = false): Promise<{ kind: 'reply'; message: AssistantMessage; finish: FinishReason } | { kind: 'end'; end: LoopEnd }> {
     const { o } = this
     let overflows = 0
     let empties = 0
@@ -674,6 +739,8 @@ export class AgentLoop {
         messages: [...sent],
         tools,
         maxOutputTokens,
+        // Listed still, so the cached prefix holds, but not to be called.
+        ...(closing && tools.length ? { toolChoice: 'none' as const } : {}),
         ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
         ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
       }
@@ -744,6 +811,7 @@ export class AgentLoop {
       // Not markup the model only copied from what it read: that is a file's or a page's words, not a call.
       const message =
         (tools.length &&
+          !closing &&
           recoverTextCalls(
             outcome.message,
             (name) => tools.some((tool) => tool.name === name),
@@ -754,6 +822,8 @@ export class AgentLoop {
       o.surface.usage(usage, outcome.message.origin?.model)
       if (isEmptyReply(message)) {
         if (finish === 'content_filter') return { kind: 'end', end: { kind: 'failed', code: 'refused', message: "The provider's safety system stopped the reply." } }
+        // The work is done: an empty closing reply does not fail the request, and is not kept.
+        if (closing) return { kind: 'reply', message, finish }
         if (empties++ < MAX_EMPTY_RETRIES) continue
         return { kind: 'end', end: { kind: 'failed', code: 'empty', message: 'The model kept sending empty replies. Try again, or choose another model.' } }
       }

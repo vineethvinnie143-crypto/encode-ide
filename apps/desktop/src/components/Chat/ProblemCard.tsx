@@ -4,7 +4,7 @@ import { agentActions } from '../../commands/agent'
 import { helpActions } from '../../commands/app'
 import { useChat } from '../../stores/chat'
 import { useUi } from '../../stores/ui'
-import { AlertTriangle, Info, RotateCw } from '../../ui/icons'
+import { AlertTriangle, Info, Pause, Play, RotateCw } from '../../ui/icons'
 import { Button } from '../../ui/Button'
 import { cx } from '../../ui/cx'
 import { Details } from '../../ui/Details'
@@ -73,6 +73,37 @@ export function NoticeLine({ entry }: { entry: ConversationEntry }) {
       <div className="notice-body">
         <span>{entry.text}</span>
         {entry.details && <Details text={entry.details} />}
+      </div>
+    </div>
+  )
+}
+
+/** What Continue sends after the step limit: the agent reads it as the go-ahead to carry on (ADR 0124). */
+export const CONTINUE_MESSAGE = 'Continue.'
+
+/**
+ * The request stopped at the step limit, under what the agent wrote then (ADR 0124). While it ends the conversation
+ * and nothing runs, Continue lets the agent go on with the whole limit again, and the limit is a click away.
+ */
+export function StepLimitLine({ entry }: { entry: ConversationEntry }) {
+  const latest = useChat((state) => state.entries.at(-1)?.id === entry.id)
+  const running = useChat((state) => state.running)
+  const live = latest && !running
+  return (
+    <div className="msg msg-notice is-step-limit">
+      <Pause size={13} />
+      <div className="notice-body">
+        <span>{entry.text}</span>
+        {live && (
+          <div className="notice-actions">
+            <Button size="sm" variant="primary" icon={<Play size={12} />} onClick={() => useChat.getState().send(CONTINUE_MESSAGE, [], { keepDraft: true })}>
+              Continue
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => useUi.getState().openSettings('agent', 'agent.limits')}>
+              Change the limit
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

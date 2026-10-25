@@ -105,7 +105,7 @@ import type { SkillEntry } from './skills'
 import { builtinDefinitions, createSubagents, loadAgentDefinitions, SubagentPool, type AgentSource, type SubagentStore } from './subagents'
 import { cleanTitle, titleFrom, titlePrompt, TITLE_SYSTEM, worthNaming } from './title'
 import type { WorktreeGit } from './worktrees'
-import { AgentAbortedError, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
+import { AgentAbortedError, DEFAULT_MAX_STEPS, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type ApprovalResult, type Conversation, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
 import {
   previewOf,
   type AgentEvent,
@@ -1995,6 +1995,7 @@ export class AgentSession {
         this.send({ type: 'done', summary: end.summary })
         return
       case 'max-steps':
+        this.stepLimitReached(end.steps)
         this.setStatus('done')
         this.send({ type: 'done', summary: `Stopped after ${end.steps} steps. Send a follow-up to continue.` })
         return
@@ -2010,6 +2011,17 @@ export class AgentSession {
       case 'cancelled':
         return
     }
+  }
+
+  /**
+   * Says in the conversation that the request stopped at the step limit, under what the agent wrote then, and how it
+   * goes on: an active goal goes on by itself, anything else with a message (ADR 0124).
+   */
+  private stepLimitReached(steps: number): void {
+    const set = steps < DEFAULT_MAX_STEPS ? ` The limit is set to ${steps}; unless set, it is ${DEFAULT_MAX_STEPS}.` : ''
+    const next = this.goal()?.status === 'active' ? '' : ' Send a message to let it go on.'
+    const entry = this.addEntry({ kind: 'notice', text: `Stopped after ${steps} ${steps === 1 ? 'step' : 'steps'}, the most one request may take.${set}${next}`, stepLimit: steps })
+    this.settleEntry(entry)
   }
 
   /** Ends the request on a problem: an entry that says it plainly and offers what can be done, and the log keeps the details. */

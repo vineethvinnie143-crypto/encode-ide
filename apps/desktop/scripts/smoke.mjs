@@ -673,6 +673,7 @@ async function runProviderPhase() {
   await runSmallerModelChecks()
   await runModelTestChecks()
   await runStopChecks()
+  await runStepLimitChecks()
   await runAttachChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -4092,6 +4093,65 @@ async function runStopChecks() {
 }
 
 /**
+ * The step limit (ADR 0124). A request that takes every step it may ends with what the agent wrote with tools off, not
+ * on a step, and a line under it says it stopped there, with Continue and the way to the limit. Continue goes on with
+ * the whole limit again, and the line of the request before it keeps only its words.
+ */
+async function runStepLimitChecks() {
+  console.log('[smoke] --- the step limit ---')
+  const CLOSING = 'Stopped at the step limit: listed the project and its notes; listing everything is left.'
+  const LIMITED = 'Stopped after 2 steps, the most one request may take. The limit is set to 2; unless set, it is 200. Send a message to let it go on.'
+  const TURNS = `[...document.querySelectorAll('.chat-list .turn')].map((turn) => {
+    const notice = turn.querySelector('.msg-notice.is-step-limit')
+    return {
+      user: turn.querySelector('.chat-user-bubble')?.textContent ?? '',
+      log: turn.querySelector('.worklog-label')?.textContent ?? '',
+      open: turn.querySelector('.worklog-head')?.getAttribute('aria-expanded') ?? '',
+      answer: [...turn.querySelectorAll(':scope > .msg-assistant')].map((node) => node.textContent.trim()),
+      notice: notice?.textContent ?? '',
+      buttons: [...(notice?.querySelectorAll('.notice-actions button') ?? [])].map((button) => button.textContent.trim()),
+    }
+  })`
+  await evaluate('window.eNCode.agent.reset()')
+  await evaluate('window.eNCode.settings.save({ maxSteps: 2 })')
+  await settingIs('settings.maxSteps === 2', 'a step limit of two')
+  const before = (await providerStats()).closingRequests
+  await sendPrompt('[scenario:step-limit] List the project.')
+  await driveAgent('17-step-limit')
+  await waitFor("!!document.querySelector('.msg-notice.is-step-limit .notice-actions')", 5000, 'the step limit line with its buttons')
+  const [first] = await evaluate(TURNS)
+  console.log('[smoke] at the step limit:', JSON.stringify(first))
+  if (!/^Worked for /.test(first.log) || first.open !== 'false') throw new Error(`The steps did not fold away: ${JSON.stringify(first)}`)
+  if (first.answer.at(-1) !== CLOSING) throw new Error(`The request did not end with what the agent wrote with tools off: ${JSON.stringify(first.answer)}`)
+  if (!first.notice.includes(LIMITED)) throw new Error(`The step limit line reads "${first.notice}"`)
+  if (JSON.stringify(first.buttons) !== JSON.stringify(['Continue', 'Change the limit'])) throw new Error(`The step limit line offers ${JSON.stringify(first.buttons)}`)
+  if ((await providerStats()).closingRequests !== before + 1) throw new Error('The reply at the step limit was not asked for with tools off')
+  await screenshot('ui-dark-step-limit.png')
+
+  // Change the limit opens Settings where the limit is.
+  await click('.msg-notice.is-step-limit .notice-actions button', 'Change the limit')
+  await waitFor("document.querySelector('.settings-heading')?.textContent === 'Agent' && !!document.querySelector('#max-steps')", 6000, 'Settings > Agent with Max agent steps')
+  await closeSettings()
+
+  // Continue goes on with the whole limit: two steps more, and the reply after them with tools off again.
+  await click('.msg-notice.is-step-limit .notice-actions button', 'Continue')
+  await waitFor(`${TURNS}.length === 2`, 5000, 'Continue sent as a message')
+  await driveAgent('17-step-limit-continue')
+  await waitFor(`${TURNS}[1].notice !== ''`, 5000, 'the second request at its limit')
+  const [earlier, next] = await evaluate(TURNS)
+  console.log('[smoke] after Continue:', JSON.stringify(next))
+  if (next.user !== 'Continue.' || next.answer.at(-1) !== CLOSING || !next.notice.includes(LIMITED) || next.buttons.length !== 2) {
+    throw new Error(`Continue did not go on to the limit again: ${JSON.stringify(next)}`)
+  }
+  if (earlier.buttons.length) throw new Error('The earlier step limit line still offers its buttons')
+  if ((await providerStats()).closingRequests !== before + 2) throw new Error('Continue did not have the whole limit again')
+
+  await evaluate('window.eNCode.settings.save({ maxSteps: 12 })')
+  await settingIs('settings.maxSteps === 12', 'the step limit back to twelve')
+  console.log('[smoke] the step limit: ok')
+}
+
+/**
  * Pictures and files in the chat box (ADR 0113). A screenshot pasted into the box shows as a thumbnail; a PDF and a
  * text file dropped on it come by name, and a file it cannot take is named in one note. The message shows what came
  * with it. The mock model cannot see pictures: it is sent a note where the picture is, the PDF's text and the file's,
@@ -6271,7 +6331,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, attach: runAttachChecks, follow: runFollowChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, attach: runAttachChecks, follow: runFollowChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

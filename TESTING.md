@@ -359,7 +359,9 @@ mean to stop.
 
 While the agent works on something long, type a correction and press `Ctrl+Enter`: it should show as **Steering**,
 then appear in the conversation where the agent took it, and the agent should change course at its next step. `Enter`
-instead queues the message for after the turn (Settings → General swaps the two keys). Set **Effort** with the chip under
+instead queues the message for after the turn (Settings → General swaps the two keys). A message the agent takes gives
+the request its whole step limit again. When a request reaches the limit (Settings → Agent → Max agent steps), it should
+still end with an answer that says how far it got, and a line under it with **Continue** and **Change the limit**. Set **Effort** with the chip under
 the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High.
 
 `Ctrl+F` finds words in the session, inside folded steps and long command output too; `Enter` and `Shift+Enter` move
