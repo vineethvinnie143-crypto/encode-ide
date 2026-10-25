@@ -64,6 +64,10 @@ describe('deferring tools', () => {
     const registry = registryWith(['github', GITHUB, 900])
     assert.equal(addToolSearch(registry), false, 'already there')
     assert.equal(registry.get(TOOL_SEARCH)?.definition.name, TOOL_SEARCH)
+    // Seldom needed tools alone (ADR 0136) leave it out: a model with a cache would be sent a search with nothing to load.
+    const seldomOnly = new ToolRegistry()
+    seldomOnly.register({ ...outsideTools('x', ['one'])[0]!, defer: false, seldom: true })
+    assert.equal(addToolSearch(seldomOnly), false)
   })
 })
 

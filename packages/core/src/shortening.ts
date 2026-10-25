@@ -52,6 +52,11 @@ export interface ShorteningPolicy {
 
 /** A price list whose cached token costs this share of an uncached one or more has, in effect, no cache. */
 export const UNCACHED_READ = 0.9
+
+/** A model whose cached tokens cost about what any other does: every definition in a request is paid in full each step (ADR 0136). */
+export function paysEveryToken(cache: CacheTerms | undefined): boolean {
+  return cache !== undefined && cache.read >= UNCACHED_READ
+}
 /**
  * How many more requests a shortened prompt is expected to be sent on: as many as the conversation has had steps, as a
  * conversation that has gone on long tends to go on (a Lindy estimate), within these bounds.

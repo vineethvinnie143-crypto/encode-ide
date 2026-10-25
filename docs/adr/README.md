@@ -125,6 +125,7 @@ say so.
 | [0133](0133-a-commands-output-reaches-the-model-as-a-digest-of-what-it-is.md) | A command's output reaches the model as a digest of what it is | Accepted, builds on 0093 and 0132 |
 | [0134](0134-fewer-fuller-steps-reads-together-wide-searches-on-a-cheaper-explore-and-filters-after-an-allowed-command.md) | Fewer, fuller steps: reads together, wide searches on a cheaper Explore, and filters after an allowed command | Accepted, builds on 0040, 0061, 0062, 0131 and 0133 |
 | [0135](0135-steps-that-read-results-think-at-low-effort-where-the-cache-keeps.md) | Steps that read results think at low effort, where the cache keeps | Accepted, off by default until the benchmark shows the pass rate holds; builds on 0067, 0099, 0129 and 0130 |
+| [0136](0136-a-model-without-a-cache-gets-seldom-needed-tools-from-toolsearch-and-a-tool-loaded-twice-stays.md) | A model without a cache gets seldom needed tools from ToolSearch, and a tool loaded twice stays | Accepted, builds on 0062 and 0130 |
 
 ## Template
 

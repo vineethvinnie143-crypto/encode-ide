@@ -149,6 +149,8 @@ export const PLAN_MODE_ENTERED =
   'You are in plan mode now. Only the read-only tools work: read and search the code, run nothing that changes anything. Investigate until you can plan the change, then call ExitPlanMode with a concrete, ordered plan. The user reviews it before any work starts.'
 
 export const enterPlanModeTool: Tool<EnterPlanInput> = {
+  /** Seldom needed: a model without a prompt cache gets it from ToolSearch (ADR 0136). */
+  seldom: true,
   brief: 'Asks the user to switch to plan mode (read-only tools; then ExitPlanMode) before work worth agreeing on first: a feature, a change across files, a choice of approach.',
   definition: {
     name: 'EnterPlanMode',
@@ -357,6 +359,8 @@ interface UpdateGoalInput extends Record<string, unknown> {
 }
 
 export const createGoalTool: Tool<CreateGoalInput> = {
+  /** Seldom needed: a model without a prompt cache gets it from ToolSearch (ADR 0136). */
+  seldom: true,
   definition: {
     name: 'CreateGoal',
     description:
@@ -385,6 +389,8 @@ export const createGoalTool: Tool<CreateGoalInput> = {
 }
 
 export const updateGoalTool: Tool<UpdateGoalInput> = {
+  /** Seldom needed: a model without a prompt cache gets it from ToolSearch (ADR 0136). */
+  seldom: true,
   definition: {
     name: 'UpdateGoal',
     description:
@@ -415,6 +421,8 @@ export const updateGoalTool: Tool<UpdateGoalInput> = {
 }
 
 export const getGoalTool: Tool = {
+  /** Seldom needed: a model without a prompt cache gets it from ToolSearch (ADR 0136). */
+  seldom: true,
   definition: {
     name: 'GetGoal',
     description: 'Shows the session goal and its status, if one is set.',

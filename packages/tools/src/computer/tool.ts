@@ -629,6 +629,8 @@ function explain(inputs: ComputerInput): string {
 }
 
 export const computerTool: Tool<ComputerInput> = {
+  /** Seldom needed: a model without a prompt cache gets it from ToolSearch (ADR 0136). */
+  seldom: true,
   brief: BRIEF,
   definition: { name: 'Computer', description: DESCRIPTION, inputSchema: COMPUTER_SCHEMA },
   kind: 'other',

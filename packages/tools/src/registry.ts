@@ -92,17 +92,35 @@ export class ToolRegistry {
     return this.deferredSet().has(name)
   }
 
+  /** What ToolSearch can load: the deferred tools, and the seldom needed ones a model without a cache waits for (ADR 0136). */
+  searchable(): readonly Tool[] {
+    const names = this.deferredSet()
+    return [...this.tools.values()].filter((tool) => names.has(tool.definition.name) || tool.seldom)
+  }
+
+  isSearchable(name: string): boolean {
+    return this.isDeferred(name) || this.tools.get(name)?.seldom === true
+  }
+
   /**
    * What a request carries: every tool `allowed` names, except the deferred ones that were not loaded yet. An agent that
    * cannot search (ToolSearch is not among its tools) is sent what it may use in full, because it could not ask. `brief`:
-   * for a model that needs no guide, each tool's brief in place of its description.
+   * for a model that needs no guide, each tool's brief in place of its description. `lean`: for a model without a
+   * prompt cache, the seldom needed tools wait for ToolSearch too, and its description names them (ADR 0136).
    */
-  visibleDefinitions(allowed: readonly string[] | undefined, loaded: ReadonlySet<string>, brief = false): ToolDefinition[] {
+  visibleDefinitions(allowed: readonly string[] | undefined, loaded: ReadonlySet<string>, brief = false, lean = false): ToolDefinition[] {
     const names = this.deferredSet()
-    const searches = names.size > 0 && this.tools.has(TOOL_SEARCH) && (!allowed || allowed.includes(TOOL_SEARCH))
-    return this.list(allowed)
-      .filter((tool) => !searches || !names.has(tool.definition.name) || loaded.has(tool.definition.name))
-      .map((tool) => (brief && tool.brief ? { ...tool.definition, description: tool.brief } : tool.definition))
+    const searches = this.tools.has(TOOL_SEARCH) && (!allowed || allowed.includes(TOOL_SEARCH)) && (names.size > 0 || lean)
+    const waits = (tool: Tool) => names.has(tool.definition.name) || (lean && tool.seldom === true)
+    const listed = this.list(allowed)
+    const held = searches && lean ? listed.filter((tool) => tool.seldom && !names.has(tool.definition.name) && !loaded.has(tool.definition.name)) : []
+    return listed
+      .filter((tool) => !searches || !waits(tool) || loaded.has(tool.definition.name))
+      .map((tool) => {
+        const definition = brief && tool.brief ? { ...tool.definition, description: tool.brief } : tool.definition
+        if (!held.length || definition.name !== TOOL_SEARCH) return definition
+        return { ...definition, description: `${definition.description}\nAlso: ${held.map((each) => each.definition.name).join(', ')}` }
+      })
   }
 
   private deferredSet(): ReadonlySet<string> {

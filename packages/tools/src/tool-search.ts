@@ -44,12 +44,13 @@ function limitOf(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.min(MAX_RESULTS, Math.max(1, Math.floor(value))) : DEFAULT_RESULTS
 }
 
-function score(tool: Tool, query: readonly string[]): number {
+/** `described`: the words of the description count too; a seldom needed built-in is found by its name alone (ADR 0136). */
+function score(tool: Tool, query: readonly string[], described = true): number {
   const { server, short } = split(tool.definition.name)
   const parts = new Set(words(short))
   const lower = short.toLowerCase()
   const home = new Set(server ? words(server) : [])
-  const about = new Set(words(tool.definition.description.slice(0, 400)))
+  const about = new Set(described ? words(tool.definition.description.slice(0, 400)) : [])
   let total = 0
   for (const word of query) {
     if (parts.has(word)) total += 4
@@ -61,12 +62,12 @@ function score(tool: Tool, query: readonly string[]): number {
 }
 
 /**
- * The deferred tools a query finds. `select:a,b` names tools exactly (with or without the `mcp__server__` prefix);
- * anything else is words, matched against names, servers and descriptions. Deterministic for a registry, so it can be
- * repeated over a conversation to learn what was loaded.
+ * The tools a query finds among those ToolSearch loads (registry.searchable). `select:a,b` names tools exactly (with
+ * or without the `mcp__server__` prefix); anything else is words, matched against names, servers and descriptions.
+ * Deterministic for a registry, so it can be repeated over a conversation to learn what was loaded.
  */
 export function searchDeferred(registry: ToolRegistry, query: string, limit: unknown = DEFAULT_RESULTS): Tool[] {
-  const candidates = registry.deferred()
+  const candidates = registry.searchable()
   const max = limitOf(limit)
   let found: Tool[]
   const select = /^\s*select:(.*)$/is.exec(query)
@@ -82,7 +83,7 @@ export function searchDeferred(registry: ToolRegistry, query: string, limit: unk
   } else {
     const terms = [...new Set(words(query).filter((word) => word.length > 1 && !NOISE.has(word)))]
     found = candidates
-      .map((tool, index) => ({ tool, index, points: score(tool, terms) }))
+      .map((tool, index) => ({ tool, index, points: score(tool, terms, registry.isDeferred(tool.definition.name)) }))
       .filter((item) => item.points > 0)
       .sort((a, b) => b.points - a.points || a.index - b.index)
       .map((item) => item.tool)
@@ -100,7 +101,7 @@ export function searchDeferred(registry: ToolRegistry, query: string, limit: unk
 /** The deferred tools this conversation has loaded: those its ToolSearch calls found and those it called. */
 export function loadedTools(messages: readonly Message[], registry: ToolRegistry): Set<string> {
   const loaded = new Set<string>()
-  if (!registry.deferred().length) return loaded
+  if (!registry.searchable().length) return loaded
   for (const message of messages) {
     if (message.role !== 'assistant') continue
     for (const block of message.content) {
@@ -108,7 +109,7 @@ export function loadedTools(messages: readonly Message[], registry: ToolRegistry
       if (block.name === TOOL_SEARCH) {
         const input = block.input as { query?: unknown; max_results?: unknown }
         if (typeof input.query === 'string') for (const tool of searchDeferred(registry, input.query, input.max_results)) loaded.add(tool.definition.name)
-      } else if (registry.isDeferred(block.name)) loaded.add(block.name)
+      } else if (registry.isSearchable(block.name)) loaded.add(block.name)
     }
   }
   return loaded
@@ -193,7 +194,10 @@ export function createToolSearchTool(registry: ToolRegistry): Tool<ToolSearchInp
   }
 }
 
-/** Registers ToolSearch when some tools are deferred, once every tool is in. Returns whether it did. */
+/**
+ * Registers ToolSearch when some tools are deferred, once every tool is in. Returns whether it did. Seldom needed tools
+ * alone do not register it: a model with a cache would be sent a ToolSearch with nothing to load (ADR 0136).
+ */
 export function addToolSearch(registry: ToolRegistry): boolean {
   if (registry.has(TOOL_SEARCH) || !registry.deferred().length) return false
   registry.register(createToolSearchTool(registry))
