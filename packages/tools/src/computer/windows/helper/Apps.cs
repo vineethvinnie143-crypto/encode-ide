@@ -181,7 +181,7 @@ namespace Encode.Desktop
             foreach (WindowRecord record in windows.List())
             {
                 before.Add(record.Hwnd.ToInt64());
-                if (already == null && record.Blocked == null && Owns(record, entry)) already = record.Id;
+                if (already == null && record.Blocked == null && !record.Desktop && Owns(record, entry)) already = record.Id;
             }
             IntPtr frontBefore = Native.GetForegroundWindow();
             StartMenu.Start(entry.Id);
@@ -196,7 +196,7 @@ namespace Encode.Desktop
                 foreach (WindowRecord record in windows.List())
                 {
                     long handle = record.Hwnd.ToInt64();
-                    if (record.Blocked != null || record.App == "shell" || splashes.Contains(handle)) continue;
+                    if (record.Blocked != null || record.App == "shell" || record.App == "taskbar" || record.Desktop || splashes.Contains(handle)) continue;
                     bool inFront = WindowTable.Belongs(front, record.Hwnd);
                     bool owned = Owns(record, entry);
                     if (!before.Contains(handle))

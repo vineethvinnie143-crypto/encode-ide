@@ -30,7 +30,7 @@ import {
   type WindowInfo,
   type WindowState,
 } from './contract'
-import { contains, fitImage, sameBox, toScreen } from './geometry'
+import { contains, fitImage, fitZoom, sameBox, toScreen } from './geometry'
 import { matchElements } from './outline'
 
 export interface FakeElement {
@@ -232,11 +232,11 @@ export class FakeDesktop implements DesktopBackend {
     return { ...entry.info, foreground: true }
   }
 
-  private look_(entry: Entry, request: Pick<LookRequest, 'image' | 'outline' | 'maxElements' | 'maxImageEdge' | 'maxImagePixels'> & { zoom?: LookRequest['zoom'] }): Look {
+  private look_(entry: Entry, request: Pick<LookRequest, 'image' | 'outline' | 'maxElements' | 'maxImageEdge' | 'maxImagePixels' | 'marks'> & { zoom?: LookRequest['zoom'] }): Look {
     const changed = entry.version !== entry.seen
     entry.seen = entry.version
     const box = request.zoom ? this.zoomBox(entry, request.zoom) : entry.info.box
-    const fit = fitImage(box[2], box[3], request.maxImageEdge, request.maxImagePixels)
+    const fit = request.zoom ? fitZoom(box[2], box[3], request.maxImageEdge, request.maxImagePixels) : fitImage(box[2], box[3], request.maxImageEdge, request.maxImagePixels)
     const id = `s${++this.captureCount}`
     if (!request.zoom) entry.captures.set(id, box)
     const wantsImage = request.image === true || (request.image === 'changed' && changed) || Boolean(request.zoom)
@@ -251,6 +251,13 @@ export class FakeDesktop implements DesktopBackend {
       masked: 0,
     }
     const all = this.elementsOf(entry)
+    // Like the helper (ADR 0121): a zoom has a grid in the pixels of its screenshot; a screenshot numbers what acts, or has a grid of its own.
+    if (wantsImage && request.zoom) capture.grid = { step: 10, of: request.zoom.capture }
+    else if (wantsImage && request.marks && request.outline === 'full') {
+      const marks = all.filter((element) => element.can.some((action) => action !== 'scroll')).length
+      if (marks) capture.marks = marks
+      else capture.grid = { step: 100, of: id }
+    }
     let outline: Look['outline']
     if (request.outline === 'full') {
       outline = { elements: all.slice(0, request.maxElements), total: all.length, ...this.focusedRef(entry, all) }
@@ -295,6 +302,13 @@ export class FakeDesktop implements DesktopBackend {
     return { point, ...(hit ? { element: hit.element } : {}) }
   }
 
+  /** What is under a pixel, as the helper reports it for a coordinate (ADR 0121). */
+  private pointed(target: Target, element: FakeElement | undefined): Pick<Performed, 'on'> {
+    if ('element' in target || !element) return {}
+    const ref = this.refs.get(element)
+    return { on: { ...(ref ? { ref } : {}), role: element.role, name: element.name ?? '' } }
+  }
+
   private land(entry: Entry, point: Point): void {
     if (!contains(entry.info.box, point)) throw new DesktopError('covered', `(${point[0]}, ${point[1]}) is outside ${entry.info.id}.`)
     if (this.covers.some((box) => contains(box, point))) throw new DesktopError('covered', `Another window is on top of (${point[0]}, ${point[1]}).`)
@@ -307,7 +321,7 @@ export class FakeDesktop implements DesktopBackend {
         const { point, element } = this.screenPoint(entry, step.target)
         this.land(entry, point)
         this.cursorAt = point
-        if (step.kind === 'move') return { kind: 'move', via: 'mouse' }
+        if (step.kind === 'move') return { kind: 'move', via: 'mouse', ...this.pointed(step.target, element) }
         if (element) {
           if (element.states?.includes('disabled')) throw new DesktopError('failed', `${element.name ?? element.role} is disabled.`)
           for (const other of this.flatten(entry)) if (other.element.states?.includes('focused')) other.element.states = other.element.states.filter((state) => state !== 'focused')
@@ -318,7 +332,7 @@ export class FakeDesktop implements DesktopBackend {
           }
           element.invoke?.(this)
           entry.version++
-          return { kind: 'click', via: 'element' in step.target && invokes ? (element.can?.includes('toggle') ? 'toggle' : 'invoke') : 'mouse' }
+          return { kind: 'click', via: 'element' in step.target && invokes ? (element.can?.includes('toggle') ? 'toggle' : 'invoke') : 'mouse', ...this.pointed(step.target, element) }
         }
         return { kind: 'click', via: 'mouse' }
       }

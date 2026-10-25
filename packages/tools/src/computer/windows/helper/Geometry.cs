@@ -104,11 +104,45 @@ namespace Encode.Desktop
             scale = s;
         }
 
+        /// <summary>The largest a zoom enlarges what it shows (ADR 0121).</summary>
+        public const double MaxZoom = 4;
+
+        /// <summary>
+        /// The size a zoom of width x height screen pixels is sent at: as large as the budget allows, up to MaxZoom times the screen,
+        /// so a small area is shown big enough to point into; smaller than the screen only when it is too big to send whole.
+        /// </summary>
+        public static void FitZoom(int width, int height, int maxEdge, int maxPixels, out int outWidth, out int outHeight, out double scale)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                outWidth = 0;
+                outHeight = 0;
+                scale = 1;
+                return;
+            }
+            double byEdge = (double)maxEdge / Math.Max(width, height);
+            double byArea = Math.Sqrt((double)maxPixels / ((double)width * height));
+            double s = Math.Min(MaxZoom, Math.Min(byEdge, byArea));
+            outWidth = Math.Max(1, Round(width * s));
+            outHeight = Math.Max(1, Round(height * s));
+            scale = s;
+        }
+
         /// <summary>Where a point of the capture's image is on the screen.</summary>
         public static void ToScreen(int px, int py, Box captureBox, double scale, out int x, out int y)
         {
             x = captureBox.X + Round(px / scale);
             y = captureBox.Y + Round(py / scale);
+        }
+
+        /// <summary>A screen box in the capture's image, clipped to the image. Mirrors boxToImage in geometry.ts.</summary>
+        public static Box BoxToImage(Box box, Box captureBox, double scale, int width, int height)
+        {
+            int left = Math.Max(0, Round((box.X - captureBox.X) * scale));
+            int top = Math.Max(0, Round((box.Y - captureBox.Y) * scale));
+            int right = Math.Min(width, Round((box.X + box.W - captureBox.X) * scale));
+            int bottom = Math.Min(height, Round((box.Y + box.H - captureBox.Y) * scale));
+            return new Box(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
         }
     }
 }

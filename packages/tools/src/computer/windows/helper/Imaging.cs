@@ -96,26 +96,41 @@ namespace Encode.Desktop
             return frame;
         }
 
+        /// <summary>The picture at another size, or the picture itself when it is that size already: the caller disposes a new one.</summary>
+        public static Bitmap Resize(Bitmap source, int width, int height)
+        {
+            if (width == source.Width && height == source.Height) return source;
+            Bitmap scaled = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+            try
+            {
+                using (Graphics graphics = Graphics.FromImage(scaled))
+                {
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.SmoothingMode = SmoothingMode.HighQuality;
+                    graphics.CompositingQuality = CompositingQuality.HighQuality;
+                    using (ImageAttributes edges = new ImageAttributes())
+                    {
+                        // Without it the border pixels blend with nothing, and a picture enlarged by a zoom gets a faint frame.
+                        edges.SetWrapMode(WrapMode.TileFlipXY);
+                        graphics.DrawImage(source, new Rectangle(0, 0, width, height), 0, 0, source.Width, source.Height, GraphicsUnit.Pixel, edges);
+                    }
+                }
+                return scaled;
+            }
+            catch (Exception)
+            {
+                scaled.Dispose();
+                throw;
+            }
+        }
+
         /// <summary>The picture at the size it is sent, as base64: PNG, or JPEG when the window is a photograph and PNG would be huge.</summary>
         public static string Encode(Bitmap source, int width, int height, out string mediaType)
         {
-            Bitmap scaled = null;
-            Bitmap use = source;
+            Bitmap use = Resize(source, width, height);
             try
             {
-                if (width != source.Width || height != source.Height)
-                {
-                    scaled = new Bitmap(width, height, PixelFormat.Format24bppRgb);
-                    using (Graphics graphics = Graphics.FromImage(scaled))
-                    {
-                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                        graphics.SmoothingMode = SmoothingMode.HighQuality;
-                        graphics.CompositingQuality = CompositingQuality.HighQuality;
-                        graphics.DrawImage(source, new Rectangle(0, 0, width, height), 0, 0, source.Width, source.Height, GraphicsUnit.Pixel);
-                    }
-                    use = scaled;
-                }
                 using (MemoryStream stream = new MemoryStream())
                 {
                     use.Save(stream, ImageFormat.Png);
@@ -144,8 +159,101 @@ namespace Encode.Desktop
             }
             finally
             {
-                if (scaled != null) scaled.Dispose();
+                if (!ReferenceEquals(use, source)) use.Dispose();
             }
+        }
+
+        // ---------------------------------------------------------------- marks and grids (ADR 0121)
+
+        /// <summary>Dark enough for white digits, and far enough apart that two neighbours are told apart.</summary>
+        private static readonly Color[] MarkColors =
+        {
+            Color.FromArgb(0xD7, 0x26, 0x3D), Color.FromArgb(0x0F, 0x76, 0x6E), Color.FromArgb(0x25, 0x63, 0xEB), Color.FromArgb(0xC2, 0x41, 0x0C),
+            Color.FromArgb(0x7E, 0x22, 0xCE), Color.FromArgb(0x15, 0x80, 0x3D), Color.FromArgb(0xBE, 0x18, 0x5D), Color.FromArgb(0x0E, 0x74, 0x90)
+        };
+
+        /// <summary>The size of a digit in the font the numbers are drawn with, and the height of a number's tag, in image pixels.</summary>
+        public const int MarkCharWidth = 7;
+        public const int MarkTagHeight = 14;
+
+        private static Font LabelFont()
+        {
+            // GDI+ puts another sans-serif face in when Segoe UI is missing, as on a server without the desktop fonts.
+            return new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Pixel);
+        }
+
+        /// <summary>Draws each mark: a frame around the element when it is not too big to frame, and its number on a tag.</summary>
+        public static void DrawMarks(Bitmap image, IList<PlacedMark> marks)
+        {
+            if (marks.Count == 0) return;
+            using (Graphics graphics = Graphics.FromImage(image))
+            using (Font font = LabelFont())
+            using (StringFormat format = new StringFormat(StringFormatFlags.NoWrap | StringFormatFlags.NoClip))
+            {
+                graphics.SmoothingMode = SmoothingMode.None;
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                format.Alignment = StringAlignment.Center;
+                format.LineAlignment = StringAlignment.Center;
+                // Frames first, so that no frame runs across a number.
+                foreach (PlacedMark mark in marks)
+                {
+                    if (!mark.Border) continue;
+                    using (Pen pen = new Pen(Color.FromArgb(225, MarkColors[mark.Color % MarkColors.Length]), 2))
+                    {
+                        graphics.DrawRectangle(pen, mark.Box.X + 1, mark.Box.Y + 1, Math.Max(1, mark.Box.W - 2), Math.Max(1, mark.Box.H - 2));
+                    }
+                }
+                foreach (PlacedMark mark in marks)
+                {
+                    using (SolidBrush fill = new SolidBrush(MarkColors[mark.Color % MarkColors.Length]))
+                    {
+                        graphics.FillRectangle(fill, mark.Tag.X, mark.Tag.Y, mark.Tag.W, mark.Tag.H);
+                    }
+                    graphics.DrawString(mark.Label, font, Brushes.White, new RectangleF(mark.Tag.X, mark.Tag.Y, mark.Tag.W, mark.Tag.H), format);
+                }
+            }
+        }
+
+        /// <summary>Draws lines across the picture at the columns and rows given, each with its number at the top or the left edge.</summary>
+        public static void DrawGrid(Bitmap image, IList<GridLine> columns, IList<GridLine> rows)
+        {
+            if (columns.Count == 0 && rows.Count == 0) return;
+            using (Graphics graphics = Graphics.FromImage(image))
+            using (Pen pen = new Pen(Color.FromArgb(150, 0xFF, 0x00, 0xAA), 1))
+            using (Font font = LabelFont())
+            using (SolidBrush back = new SolidBrush(Color.FromArgb(215, 0x18, 0x18, 0x1B)))
+            {
+                graphics.SmoothingMode = SmoothingMode.None;
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                foreach (GridLine line in columns) graphics.DrawLine(pen, line.At, 0, line.At, image.Height - 1);
+                foreach (GridLine line in rows) graphics.DrawLine(pen, 0, line.At, image.Width - 1, line.At);
+                foreach (GridLine line in columns) Tag(graphics, font, back, line.Label, line.At + 2, 1, image);
+                foreach (GridLine line in rows) Tag(graphics, font, back, line.Label, 1, line.At + 2, image);
+            }
+        }
+
+        private static void Tag(Graphics graphics, Font font, Brush back, string text, int x, int y, Bitmap image)
+        {
+            SizeF size = graphics.MeasureString(text, font);
+            int width = (int)Math.Ceiling(size.Width) + 2;
+            int height = (int)Math.Ceiling(size.Height);
+            int left = Math.Max(0, Math.Min(image.Width - width, x));
+            int top = Math.Max(0, Math.Min(image.Height - height, y));
+            graphics.FillRectangle(back, left, top, width, height);
+            graphics.DrawString(text, font, Brushes.White, left + 1, top);
+        }
+    }
+
+    /// <summary>A line of a grid, in image pixels, and the number it is labelled with.</summary>
+    internal struct GridLine
+    {
+        public int At;
+        public string Label;
+
+        public GridLine(int at, string label)
+        {
+            At = at;
+            Label = label;
         }
     }
 }

@@ -26,6 +26,19 @@ export function fitImage(width: number, height: number, maxEdge = MAX_IMAGE_EDGE
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scale }
 }
 
+/** The largest a zoom enlarges what it shows (ADR 0121). */
+export const MAX_ZOOM = 4
+
+/**
+ * The size a zoom of `width` x `height` screen pixels is sent at: as large as the budget allows, up to MAX_ZOOM times the
+ * screen, so a small area is shown big enough to point into; smaller than the screen only when it is too big to send whole.
+ */
+export function fitZoom(width: number, height: number, maxEdge = MAX_IMAGE_EDGE, maxPixels = MAX_IMAGE_PIXELS): ImageFit {
+  if (width <= 0 || height <= 0) return { width: 0, height: 0, scale: 1 }
+  const scale = Math.min(MAX_ZOOM, maxEdge / Math.max(width, height), Math.sqrt(maxPixels / (width * height)))
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), scale }
+}
+
 /** Where a point of the capture's image is on the screen. */
 export function toScreen(point: Point, capture: Pick<Capture, 'box' | 'scale'>): Point {
   return [capture.box[0] + Math.round(point[0] / capture.scale), capture.box[1] + Math.round(point[1] / capture.scale)]

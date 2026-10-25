@@ -130,8 +130,19 @@ function asCapture(value: unknown): Capture {
   const mediaType = text(source.mediaType, 'capture.mediaType')
   if (mediaType !== 'image/png' && mediaType !== 'image/jpeg') bad('capture.mediaType')
   const scale = source.scale
-  if (typeof scale !== 'number' || !(scale > 0) || scale > 1) bad('capture.scale')
+  // A zoom enlarges up to four times (ADR 0121); a screenshot is never larger than the screen.
+  if (typeof scale !== 'number' || !(scale > 0) || scale > 4) bad('capture.scale')
   const data = optionalText(source.data, 'capture.data')
+  const marks = source.marks === undefined ? undefined : integer(source.marks, 'capture.marks')
+  if (marks !== undefined && marks < 0) bad('capture.marks')
+  let grid: Capture['grid']
+  if (source.grid !== undefined) {
+    const fields = record(source.grid, 'capture.grid')
+    const step = integer(fields.step, 'capture.grid.step')
+    const of = text(fields.of, 'capture.grid.of')
+    if (step <= 0 || !CAPTURE_ID.test(of)) bad('capture.grid')
+    grid = { step, of }
+  }
   return {
     id,
     box: asBox(source.box, 'capture.box'),
@@ -141,6 +152,8 @@ function asCapture(value: unknown): Capture {
     mediaType,
     ...(data ? { data } : {}),
     masked: integer(source.masked, 'capture.masked'),
+    ...(marks ? { marks } : {}),
+    ...(grid ? { grid } : {}),
   }
 }
 
@@ -165,7 +178,14 @@ function asPerformed(value: unknown, where: string): Performed {
   const via = text(source.via, `${where}.via`)
   if (!KINDS.has(kind) || !VIAS.has(via)) bad(where)
   const detail = optionalText(source.detail, `${where}.detail`)
-  return { kind: kind as Performed['kind'], via: via as Performed['via'], ...(detail ? { detail } : {}) }
+  let on: Performed['on']
+  if (source.on !== undefined) {
+    const fields = record(source.on, `${where}.on`)
+    const ref = optionalText(fields.ref, `${where}.on.ref`)
+    if (ref !== undefined && !ELEMENT_REF.test(ref)) bad(`${where}.on.ref`)
+    on = { ...(ref ? { ref } : {}), role: text(fields.role, `${where}.on.role`), name: text(fields.name, `${where}.on.name`) }
+  }
+  return { kind: kind as Performed['kind'], via: via as Performed['via'], ...(detail ? { detail } : {}), ...(on ? { on } : {}) }
 }
 
 export function asAct(value: unknown): ActResult {

@@ -35,6 +35,8 @@ namespace Encode.Desktop
         public bool Foreground;
         public string Blocked;
         public IntPtr Owner;
+        /// <summary>The desktop with its icons: File Explorer's program shows it, but it is not one of its folder windows.</summary>
+        public bool Desktop;
 
         public Dictionary<string, object> ToJson()
         {
@@ -166,6 +168,8 @@ namespace Encode.Desktop
             if (root == target || IsOwnedBy(root, target)) return true;
             if (PidOf(root) != PidOf(target)) return false;
             string cls = ClassOf(root);
+            // The taskbar runs in File Explorer's program but is an application of its own (ADR 0121).
+            if (IsTaskbarClass(cls) != IsTaskbarClass(ClassOf(target))) return false;
             if (cls == "#32768" || cls == "ComboLBox" || cls == "tooltips_class32") return true;
             uint ex = ExStyle(root);
             return (ex & (Const.WS_EX_TOOLWINDOW | Const.WS_EX_NOACTIVATE)) != 0 && (ex & Const.WS_EX_APPWINDOW) == 0;
@@ -269,16 +273,42 @@ namespace Encode.Desktop
             return found != 0 ? found : hostPid;
         }
 
+        /// <summary>The Start menu, search and the lock screen: typing there runs programs and commands, so they stay "shell" and refused.</summary>
         private static readonly HashSet<string> ShellPrograms = new HashSet<string>
         {
-            "startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "shellexperiencehost.exe", "shellhost.exe", "lockapp.exe"
+            "startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe", "lockapp.exe"
         };
 
-        private static bool IsShellWindow(string app, string cls, string title)
+        /// <summary>The flyouts the taskbar opens: quick settings, notifications, the calendar, the volume and network panels.</summary>
+        private static readonly HashSet<string> TaskbarPrograms = new HashSet<string> { "shellexperiencehost.exe", "shellhost.exe" };
+
+        /// <summary>The taskbar and the notification area, on every monitor, and the overflow of hidden icons.</summary>
+        public static bool IsTaskbarClass(string cls)
         {
-            if (cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" || cls == "NotifyIconOverflowWindow" || cls == "TopLevelWindowForOverflowXamlIsland") return true;
-            if (ShellPrograms.Contains(app)) return true;
-            return app == "explorer.exe" && cls == "#32770" && string.Equals(title, "Run", StringComparison.OrdinalIgnoreCase);
+            return cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd" || cls == "NotifyIconOverflowWindow" || cls == "TopLevelWindowForOverflowXamlIsland";
+        }
+
+        /// <summary>"taskbar" for the taskbar, the notification area and their flyouts (ADR 0121); "shell" for the Start menu, search and the Run box; null for everything else.</summary>
+        private static string ShellKind(string app, string cls, string title)
+        {
+            if (IsTaskbarClass(cls) || TaskbarPrograms.Contains(app)) return "taskbar";
+            if (ShellPrograms.Contains(app)) return "shell";
+            return app == "explorer.exe" && cls == "#32770" && string.Equals(title, "Run", StringComparison.OrdinalIgnoreCase) ? "shell" : null;
+        }
+
+        /// <summary>Whether a Progman or WorkerW window is the one that shows the desktop's icons.</summary>
+        private static bool ShowsIcons(IntPtr hwnd)
+        {
+            bool found = false;
+            EnumWindowsProc callback = delegate(IntPtr child, IntPtr lParam)
+            {
+                if (ClassOf(child) != "SHELLDLL_DefView") return true;
+                found = true;
+                return false;
+            };
+            Native.EnumChildWindows(hwnd, callback, IntPtr.Zero);
+            GC.KeepAlive(callback);
+            return found;
         }
 
         // ---------------------------------------------------------------- windows
@@ -304,13 +334,19 @@ namespace Encode.Desktop
             if (hwnd == IntPtr.Zero || !Native.IsWindow(hwnd)) return null;
             if (!Native.IsWindowVisible(hwnd) || IsCloaked(hwnd)) return null;
             string cls = ClassOf(hwnd);
-            if (cls == "Progman" || cls == "WorkerW") return null;
+            bool desktop = false;
+            if (cls == "Progman" || cls == "WorkerW")
+            {
+                // Of the windows behind everything, only the one that holds the icons is the desktop a person uses (ADR 0121).
+                if (!ShowsIcons(hwnd)) return null;
+                desktop = true;
+            }
             uint ex = ExStyle(hwnd);
             IntPtr owner = Native.GetWindow(hwnd, Const.GW_OWNER);
             string title = TitleOf(hwnd);
             bool menu = cls == "#32768";
             bool tray = cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd";
-            if (listing && !tray)
+            if (listing && !tray && !desktop)
             {
                 bool tool = (ex & Const.WS_EX_TOOLWINDOW) != 0;
                 bool appWindow = (ex & Const.WS_EX_APPWINDOW) != 0;
@@ -335,7 +371,13 @@ namespace Encode.Desktop
             rec.Box = box;
             rec.State = Native.IsIconic(hwnd) ? "minimized" : Native.IsZoomed(hwnd) ? "maximized" : "normal";
             rec.Foreground = hwnd == foreground || (foreground != IntPtr.Zero && Native.GetAncestor(foreground, Const.GA_ROOTOWNER) == hwnd);
-            if (IsShellWindow(proc.App, cls, title))
+            string shell = ShellKind(proc.App, cls, title);
+            if (shell == "taskbar")
+            {
+                rec.App = "taskbar";
+                rec.Label = "Taskbar";
+            }
+            else if (shell == "shell")
             {
                 rec.App = "shell";
                 rec.Label = "Windows shell";
@@ -344,6 +386,12 @@ namespace Encode.Desktop
             {
                 rec.App = proc.App;
                 rec.Label = proc.Label;
+            }
+            if (desktop)
+            {
+                rec.Desktop = true;
+                rec.Title = "Desktop";
+                rec.Label = "Desktop";
             }
             if (proc.Own) rec.Blocked = "it is eNCode's own window";
             else if (proc.Elevated && !AllowElevated) rec.Blocked = "it runs as administrator, and eNCode cannot send input to it";

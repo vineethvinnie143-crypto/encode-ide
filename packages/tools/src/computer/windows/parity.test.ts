@@ -12,14 +12,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import { promisify } from 'node:util'
-import { fitImage, toScreen } from '../geometry'
+import { boxToImage, fitImage, fitZoom, toScreen } from '../geometry'
 import { KEY_NAMES, parseKeys } from '../keys'
 import { findCompiler } from './build'
 import parityText from './parity/Parity.cs'
 import { HELPER_FILES } from './sources'
 
 const run = promisify(execFile)
-const PURE = ['Json.cs', 'Geometry.cs', 'Keys.cs', 'Outline.cs', 'Frames.cs']
+const PURE = ['Json.cs', 'Geometry.cs', 'Keys.cs', 'Outline.cs', 'Frames.cs', 'Marks.cs']
 
 type Cases = Record<string, unknown[]>
 type Answer = Record<string, any[]>
@@ -383,5 +383,94 @@ describe('the helper builds outlines by the rules the tool relies on', () => {
     assert.deepEqual(result.entries.map((entry) => entry[1]), ['g1', 'g2', 'g3'])
     assert.equal(result.cut, true)
     assert.ok(result.total > 3)
+  })
+})
+
+// ---------------------------------------------------------------- marks and grids (ADR 0121)
+
+type Mark = [string, number[], boolean, number[], number]
+type Candidate = [string, string | null, number[], boolean]
+
+const overlap = (a: number[], b: number[]) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+
+describe('the helper numbers elements and draws grids by the rules the tool describes', () => {
+  it('enlarges a zoom the way fitZoom does, up to four times, and shrinks only what is too big to send', async (t) => {
+    if (!harness) return t.skip(why)
+    const sizes = [[1, 1], [50, 20], [120, 80], [268, 134], [400, 300], [800, 600], [1920, 1080], [3840, 2160], [0, 5], [5, 0]]
+    const cases = sizes.flatMap(([w, h]) => [[w, h, 1568, 1_150_000], [w, h, 1000, 500_000]])
+    const { zoom } = await ask({ zoom: cases })
+    cases.forEach(([w, h, edge, pixels], index) => {
+      const expected = fitZoom(w, h, edge, pixels)
+      const [width, height, scale] = zoom[index]
+      assert.deepEqual([width, height], [expected.width, expected.height], `zoom of ${w}x${h} within ${edge} and ${pixels}`)
+      assert.ok(Math.abs(scale - expected.scale) < 1e-12, `zoom scale of ${w}x${h}`)
+      if (w > 0 && h > 0) assert.ok(scale <= 4 && width <= Math.max(edge, 4 * w) && width * height <= pixels + 2 * (width + height), `within the budget: ${width}x${height}`)
+    })
+    assert.equal(zoom[0][2], 4, 'a tiny area is shown four times larger, no more')
+  })
+
+  it('puts a screen box into a picture the way boxToImage does', async (t) => {
+    if (!harness) return t.skip(why)
+    const captures: [number[], number, number, number][] = [[[100, 50, 800, 600], 1, 800, 600], [[0, 0, 1920, 1080], 0.745, 1430, 805], [[-1920, 0, 1920, 1080], 0.5, 960, 540]]
+    const boxes = [[100, 50, 10, 10], [150, 80, 200, 30], [90, 40, 30, 30], [850, 600, 200, 200], [-1900, 10, 33, 17], [500, 500, 0, 0], [101, 51, 1, 1]]
+    const cases = captures.flatMap(([capture, scale, width, height]) => boxes.map((box) => [box, capture, scale, width, height]))
+    const { toImage } = await ask({ toImage: cases })
+    cases.forEach(([box, capture, scale, width, height], index) => {
+      const expected = boxToImage(box as unknown as [number, number, number, number], { box: capture as unknown as [number, number, number, number], scale: scale as number, width: width as number, height: height as number })
+      assert.deepEqual(toImage[index], [...expected], `${box} in ${capture} at ${scale}`)
+    })
+  })
+
+  it('numbers what a person would click, leaves containers and specks out, and keeps text areas however big', async (t) => {
+    if (!harness) return t.skip(why)
+    const candidates: Candidate[] = [
+      ['1', 'window', [0, 0, 800, 600], false],
+      ['2', 'pane', [0, 0, 400, 300], false],
+      ['3', 'button', [20, 40, 90, 28], true],
+      ['4', 'text', [20, 80, 90, 16], false],
+      ['5', 'link', [20, 100, 60, 16], false],
+      ['6', 'button', [200, 200, 3, 3], true],
+      ['7', 'document', [0, 30, 800, 560], false],
+      ['8', 'list', [300, 40, 200, 300], true],
+      ['9', 'pane', [500, 400, 300, 150], true],
+      ['10', 'list', [520, 40, 200, 300], false],
+      ['11', 'button', [900, 40, 50, 20], true],
+      ['12', null, [20, 140, 90, 28], true],
+    ]
+    const { marks } = await ask({ marks: [{ width: 800, height: 600, candidates }] })
+    const placed = marks[0] as Mark[]
+    assert.deepEqual(placed.map((mark) => mark[0]), ['3', '5', '7', '8', '9', '12'])
+    const byLabel = new Map(placed.map((mark) => [mark[0], mark]))
+    assert.equal(byLabel.get('7')![2], false, 'a text area that fills the window gets a number but no frame')
+    assert.equal(byLabel.get('3')![2], true)
+    assert.deepEqual(byLabel.get('3')![3], [20, 26, 11, 14], 'the number sits just above the top-left corner')
+    for (const [, , , tag] of placed) assert.ok(tag[0] >= 0 && tag[1] >= 0 && tag[0] + tag[2] <= 800 && tag[1] + tag[3] <= 600, `the tag ${tag} is inside the picture`)
+    assert.deepEqual(placed.map((mark) => mark[4]), [0, 1, 2, 3, 4, 5], 'neighbours get different colours')
+  })
+
+  it('moves a number that would hide another, and keeps at most the most it may, the ones that act first', async (t) => {
+    if (!harness) return t.skip(why)
+    const row: Candidate[] = Array.from({ length: 12 }, (_, n) => [String(100 + n), 'listitem', [10, 10 + n * 16, 300, 16], n % 2 === 0] as Candidate)
+    const { marks } = await ask({ marks: [{ width: 400, height: 400, candidates: row }, { width: 400, height: 400, max: 4, candidates: row }] })
+    const all = marks[0] as Mark[]
+    assert.equal(all.length, 12)
+    const tags = all.map((mark) => mark[3])
+    for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) assert.ok(!overlap(tags[i], tags[j]), `tags ${all[i][0]} and ${all[j][0]} do not overlap: ${tags[i]} ${tags[j]}`)
+    const few = marks[1] as Mark[]
+    assert.deepEqual(few.map((mark) => mark[0]), ['100', '102', '104', '106'], 'the ones that act, in outline order')
+  })
+
+  it('spaces grid lines so they are far enough apart and few enough, on round numbers', async (t) => {
+    if (!harness) return t.skip(why)
+    const { gridStep, gridLines } = await ask({
+      gridStep: [[200, 5.37, 48, 12], [1430, 1, 80, 16], [805, 1, 80, 16], [30, 20, 48, 12], [5000, 0.1, 48, 12], [0, 1, 48, 12], [100, 0, 48, 12]],
+      gridLines: [[0, 1430, 100], [37.5, 237.5, 25], [-10, 10, 5], [5, 5, 10], [0, 100, 0]],
+    })
+    assert.deepEqual(gridStep, [20, 100, 100, 5, 500, 2000, 2000])
+    assert.deepEqual(gridLines[0], [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400])
+    assert.deepEqual(gridLines[1], [50, 75, 100, 125, 150, 175, 200, 225])
+    assert.deepEqual(gridLines[2], [-5, 0, 5])
+    assert.deepEqual(gridLines[3], [])
+    assert.deepEqual(gridLines[4], [])
   })
 })

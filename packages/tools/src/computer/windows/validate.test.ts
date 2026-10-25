@@ -56,9 +56,24 @@ describe('what the helper says is checked', () => {
     assert.equal(asLook(look({ capture: capture({ data: 'AAAA', mediaType: 'image/jpeg', scale: 0.5, width: 400, height: 300 }) })).capture.data, 'AAAA')
   })
 
+  it('accepts a zoom enlarged up to four times, the marks counted and a grid (ADR 0121)', () => {
+    const zoomed = asLook(look({ capture: capture({ scale: 3.25, marks: 12, grid: { step: 25, of: 's3' } }) })).capture
+    assert.equal(zoomed.scale, 3.25)
+    assert.equal(zoomed.marks, 12)
+    assert.deepEqual(zoomed.grid, { step: 25, of: 's3' })
+    const plain = asLook(look()).capture
+    assert.equal(plain.marks, undefined)
+    assert.equal(plain.grid, undefined)
+  })
+
   it('refuses a look that would make a coordinate meaningless', () => {
     assert.match(problem(() => asLook(look({ capture: capture({ scale: 0 }) }))), /capture\.scale/)
-    assert.match(problem(() => asLook(look({ capture: capture({ scale: 1.5 }) }))), /capture\.scale/)
+    assert.match(problem(() => asLook(look({ capture: capture({ scale: 4.5 }) }))), /capture\.scale/)
+    assert.match(problem(() => asLook(look({ capture: capture({ marks: -1 }) }))), /capture\.marks/)
+    assert.match(problem(() => asLook(look({ capture: capture({ marks: 1.5 }) }))), /capture\.marks/)
+    assert.match(problem(() => asLook(look({ capture: capture({ grid: { step: 0, of: 's1' } }) }))), /capture\.grid/)
+    assert.match(problem(() => asLook(look({ capture: capture({ grid: { step: 10, of: 'w1' } }) }))), /capture\.grid/)
+    assert.match(problem(() => asLook(look({ capture: capture({ grid: 10 }) }))), /capture\.grid/)
     assert.match(problem(() => asLook(look({ capture: capture({ scale: 'one' }) }))), /capture\.scale/)
     assert.match(problem(() => asLook(look({ capture: capture({ id: 'capture-1' }) }))), /capture\.id/)
     assert.match(problem(() => asLook(look({ capture: capture({ mediaType: 'image/gif' }) }))), /capture\.mediaType/)
@@ -81,6 +96,16 @@ describe('what the helper says is checked', () => {
     assert.match(problem(() => asAct({ ...done, performed: [{ kind: 'click', via: 'telepathy' }] })), /act\.performed\[0\]/)
     assert.match(problem(() => asAct({ ...done, closed: [3] })), /act\.closed\[0\]/)
     assert.match(problem(() => asAct({ ...done, cursor: [1] })), /act\.cursor/)
+  })
+
+  it('accepts what the pointer went to, by ref or by role and name alone (ADR 0121)', () => {
+    const pointed = { performed: [{ kind: 'click', via: 'mouse', on: { ref: 'e31', role: 'button', name: 'Send' } }, { kind: 'move', via: 'mouse', on: { role: 'image', name: '' } }], look: null, opened: [], closed: [], cursor: [1, 2] }
+    const accepted = asAct(pointed)
+    assert.deepEqual(accepted.performed[0].on, { ref: 'e31', role: 'button', name: 'Send' })
+    assert.deepEqual(accepted.performed[1].on, { role: 'image', name: '' })
+    assert.match(problem(() => asAct({ ...pointed, performed: [{ kind: 'click', via: 'mouse', on: { ref: 'button-1', role: 'button', name: 'x' } }] })), /on\.ref/)
+    assert.match(problem(() => asAct({ ...pointed, performed: [{ kind: 'click', via: 'mouse', on: { role: 'button' } }] })), /on\.name/)
+    assert.match(problem(() => asAct({ ...pointed, performed: [{ kind: 'click', via: 'mouse', on: 'e1' }] })), /on/)
   })
 
   it('accepts the backend\'s description of the machine', () => {

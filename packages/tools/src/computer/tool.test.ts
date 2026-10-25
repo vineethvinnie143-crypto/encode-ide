@@ -370,6 +370,68 @@ describe('Computer: waiting and zooming', () => {
   })
 })
 
+describe('Computer: aiming (ADR 0121)', () => {
+  const looks = (backend: FakeDesktop) => backend.calls.filter((item) => item.op === 'look').map((item) => item.request as { marks?: boolean })
+
+  it('numbers the elements on the screenshot for a model that reads images, and not for one that does not', async () => {
+    const { call, backend } = setup([editor().window])
+    const outcome = await call({ action: 'screenshot', window: 'w1' })
+    assert.equal(looks(backend).at(-1)?.marks, true)
+    assert.match(textOf(outcome.content), /Coordinates are pixels of this screenshot\. 3 elements carry the number of their ref in a coloured tag beside it: 12 is e12\./)
+    await call({ action: 'left_click', element: 'e2' })
+    const act = backend.calls.filter((item) => item.op === 'act').at(-1)!.request as { look: { marks?: boolean } }
+    assert.equal(act.look.marks, true, 'the picture after an input is numbered too')
+    const blind = setup([editor().window], { permitted: NOTEPAD, vision: false })
+    const text = textOf((await blind.call({ action: 'screenshot', window: 'w1' })).content)
+    assert.equal(looks(blind.backend).at(-1)?.marks, undefined)
+    assert.doesNotMatch(text, /coloured tag/)
+  })
+
+  it('gives a window that lists nothing to number a grid in its own pixels', async () => {
+    const { call } = setup([{ app: 'notepad.exe', title: 'Game', elements: [{ role: 'pane', name: 'Board' }] }])
+    const text = textOf((await call({ action: 'screenshot', window: 'w1' })).content)
+    assert.match(text, /Nothing in this window is listed to number, so the screenshot has a grid labelled in its own pixels, every 100: read coordinates off it\./)
+  })
+
+  it('enlarges a zoom and labels its grid in the pixels of the screenshot it enlarges', async () => {
+    const { call, backend } = setup([editor().window])
+    await call({ action: 'screenshot', window: 'w1' })
+    const outcome = await call({ action: 'zoom', region: [0, 0, 200, 150] })
+    assert.equal(looks(backend).at(-1)?.marks, false, 'a zoom shows the window as it is, with no numbers over it')
+    assert.match(textOf(outcome.content), /shown 800x600 \(4\.0 times larger\)\. Its grid lines are labelled with pixels of screenshot s1, every 10: read a coordinate off them\./)
+    const big = setup([{ app: 'notepad.exe', title: 'Big', box: [0, 0, 3200, 1800], elements: [] }])
+    await big.call({ action: 'screenshot', window: 'w1' })
+    const whole = await big.call({ action: 'zoom', region: [0, 0, 1430, 804] })
+    assert.match(textOf(whole.content), /shown 1430x804\./)
+    assert.doesNotMatch(textOf(whole.content), /times larger/, 'an area too big to enlarge is not said to be')
+  })
+
+  it('says what a click by coordinate landed on', async () => {
+    const { call } = setup([editor().window])
+    await call({ action: 'screenshot', window: 'w1' })
+    // The File item is the second row, one level in: its box is [120, 134, 200, 22] on screen, (20, 54) from the window's corner.
+    const outcome = await call({ action: 'left_click', coordinate: [120, 65] })
+    assert.match(textOf(outcome.content), /^Clicked \(120, 65\) on e2 menuitem "File"\./)
+    const by = await call({ action: 'left_click', element: 'e2' })
+    assert.doesNotMatch(textOf(by.content), / on e2/, 'a click on an element names it once')
+  })
+
+  it('takes clicks on the taskbar and refuses keys there', async () => {
+    const taskbar: FakeWindow = { app: 'taskbar', label: 'Taskbar', title: '', box: [0, 1040, 1920, 40], elements: [{ role: 'button', name: 'Discord', can: ['invoke'], box: [600, 1044, 40, 32] }] }
+    const { call, backend } = setup([taskbar], { permitted: ['taskbar'] })
+    await call({ action: 'screenshot', window: 'w1' })
+    assert.equal((await call({ action: 'left_click', element: 'e1' })).ok, true)
+    const acts = () => backend.calls.filter((item) => item.op === 'act').length
+    const before = acts()
+    for (const input of [{ action: 'type', text: 'cmd' }, { action: 'key', text: 'enter' }, { action: 'set_value', element: 'e1', text: 'cmd' }] as ComputerInput[]) {
+      const refused = await call(input)
+      assert.equal(refused.ok, false)
+      assert.match(textOf(refused.content), /The taskbar takes clicks only: keys there could reach Windows search, which runs programs\. To start an application, use open\./)
+    }
+    assert.equal(acts(), before, 'nothing was sent')
+  })
+})
+
 describe('Computer: opening an application', () => {
   const discordWindow = (): FakeWindow => ({ app: 'discord.exe', label: 'Discord', title: 'Friends - Discord', elements: [{ role: 'button', name: 'Add Friend', can: ['invoke'] }] })
   const startMenu = (backend: FakeDesktop) => {
