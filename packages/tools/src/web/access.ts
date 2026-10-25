@@ -7,7 +7,7 @@
 import type { FetchedPage, WebAccess } from '../types'
 import { htmlToText, pageTitle } from './html'
 import { safeFetch, type FetchOptions } from './safe-fetch'
-import { duckDuckGoProvider, type SearchProvider } from './search'
+import { duckDuckGoProvider, type DuckDuckGoOptions, type SearchProvider } from './search'
 
 export { parseSearchResults } from './search'
 
@@ -32,6 +32,8 @@ export interface WebAccessOptions {
   searchUrl?: string
   /** Who answers a search, asked on every search so that a change in Settings applies at once. Default DuckDuckGo. */
   searchProvider?: () => SearchProvider
+  /** How the default DuckDuckGo provider spaces its searches; tests shorten the waits. */
+  duckDuckGo?: Pick<DuckDuckGoOptions, 'gapMs' | 'retryMs'>
   /** How long a fetched page is reused. Default 15 minutes. */
   cacheMs?: number
   now?: () => number
@@ -90,7 +92,11 @@ export function createWebAccess(options: WebAccessOptions = {}): WebAccess {
     return page
   }
 
-  const fallback = duckDuckGoProvider({ ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.searchUrl ? { endpoint: options.searchUrl } : {}) })
+  const fallback = duckDuckGoProvider({
+    ...options.duckDuckGo,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.searchUrl ? { endpoint: options.searchUrl } : {}),
+  })
   const provider = () => options.searchProvider?.() ?? fallback
 
   return {

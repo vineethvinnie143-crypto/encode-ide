@@ -24,6 +24,7 @@ interface Seen {
   path: string
   headers: http.IncomingHttpHeaders
   body: string
+  at: number
 }
 
 let server: http.Server
@@ -31,8 +32,9 @@ let elsewhere: http.Server
 let origin = ''
 let seen: Seen[] = []
 let elsewhereSeen: Seen[] = []
-/** What the next request to /answer gets. */
+/** What a request gets: the first of `replies` while there are any, else `reply`. */
 let reply: { status: number; type?: string; body: string } = { status: 200, body: '{}' }
+let replies: Array<typeof reply> = []
 
 const local = { fetch: { allowAddress: () => true } }
 const never = new AbortController().signal
@@ -57,20 +59,21 @@ function readBody(incoming: http.IncomingMessage): Promise<string> {
 
 before(async () => {
   const second = await listen(async (incoming, outgoing) => {
-    elsewhereSeen.push({ method: incoming.method ?? '', path: incoming.url ?? '', headers: incoming.headers, body: await readBody(incoming) })
+    elsewhereSeen.push({ method: incoming.method ?? '', path: incoming.url ?? '', headers: incoming.headers, body: await readBody(incoming), at: Date.now() })
     outgoing.writeHead(200, { 'content-type': 'application/json' })
     outgoing.end('{"web":{"results":[]}}')
   })
   elsewhere = second.server
   const first = await listen(async (incoming, outgoing) => {
-    seen.push({ method: incoming.method ?? '', path: incoming.url ?? '', headers: incoming.headers, body: await readBody(incoming) })
+    seen.push({ method: incoming.method ?? '', path: incoming.url ?? '', headers: incoming.headers, body: await readBody(incoming), at: Date.now() })
     if (incoming.url?.startsWith('/moved')) {
       outgoing.writeHead(307, { location: `${second.origin}/stolen` })
       outgoing.end()
       return
     }
-    outgoing.writeHead(reply.status, { 'content-type': reply.type ?? 'application/json' })
-    outgoing.end(reply.body)
+    const answer = replies.shift() ?? reply
+    outgoing.writeHead(answer.status, { 'content-type': answer.type ?? 'application/json' })
+    outgoing.end(answer.body)
   })
   server = first.server
   origin = first.origin
@@ -87,6 +90,7 @@ beforeEach(() => {
   seen = []
   elsewhereSeen = []
   reply = { status: 200, body: '{}' }
+  replies = []
 })
 
 const KEY_VALUE = 'secret-key'
@@ -303,16 +307,57 @@ describe('hits', () => {
 })
 
 describe('DuckDuckGo and the choice of provider', () => {
+  const RESULTS = {
+    status: 200,
+    type: 'text/html',
+    body: '<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fnodejs.org%2F">Node</a></div>',
+  }
+  const CHALLENGE = { status: 200, type: 'text/html', body: '<div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div><form id="challenge-form"></form>' }
+  // The address is read when a provider is made: the server has its port by then.
+  const ddg = (patch: { gapMs?: number } = {}) => duckDuckGoProvider({ ...local, endpoint: `${origin}/html/`, gapMs: 0, retryMs: 10, ...patch })
+
   it('reads result pages and says when the service limits it', async () => {
-    reply = {
-      status: 200,
-      type: 'text/html',
-      body: '<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fnodejs.org%2F">Node</a></div>',
-    }
-    const hits = await duckDuckGoProvider({ ...local, endpoint: `${origin}/html/` }).search(request())
+    reply = RESULTS
+    const hits = await ddg().search(request())
     assert.deepEqual(hits, [{ title: 'Node', url: 'https://nodejs.org/', snippet: '' }])
     reply = { status: 202, type: 'text/html', body: '' }
-    await assert.rejects(duckDuckGoProvider({ ...local, endpoint: `${origin}/html/` }).search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit')
+    await assert.rejects(ddg().search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /HTTP 202\). Try again in a few minutes/.test(error.message))
+  })
+
+  it('asks once more, after a wait, when it was slowed down, and reads a page that asks for a person as a limit', async () => {
+    replies = [{ status: 202, type: 'text/html', body: '' }, RESULTS]
+    assert.equal((await ddg().search(request())).length, 1)
+    assert.equal(seen.length, 2)
+    assert.ok(seen[1].at - seen[0].at >= 10, 'the second try waits')
+
+    seen = []
+    replies = [CHALLENGE, CHALLENGE]
+    await assert.rejects(ddg().search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /a page asking whether a person is searching/.test(error.message))
+    assert.equal(seen.length, 2, 'one retry, no more')
+
+    // A result about the challenge page is a result, not the challenge.
+    reply = { ...RESULTS, body: `${RESULTS.body}<p>bots use DuckDuckGo too</p>` }
+    assert.equal((await ddg().search(request())).length, 1)
+    // A page with no results that is not a challenge is no results.
+    reply = { status: 200, type: 'text/html', body: '<div class="no-results">No results.</div>' }
+    assert.deepEqual(await ddg().search(request()), [])
+  })
+
+  it('searches one at a time, a moment apart, so a burst is not taken for a robot', async () => {
+    reply = RESULTS
+    const provider = ddg({ gapMs: 120 })
+    const all = await Promise.all([provider.search(request()), provider.search(request({ query: 'two' })), provider.search(request({ query: 'three' }))])
+    assert.deepEqual(all.map((hits) => hits.length), [1, 1, 1])
+    assert.equal(seen.length, 3)
+    assert.ok(seen[1].at - seen[0].at >= 110 && seen[2].at - seen[1].at >= 110, `${seen.map((one) => one.at - seen[0].at).join(', ')} ms`)
+    // A search that fails does not hold up the next one, and one stopped while it waits stops at once.
+    replies = [{ status: 500, body: '' }]
+    await assert.rejects(provider.search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'unavailable')
+    const stop = new AbortController()
+    const waiting = provider.search(request({ signal: stop.signal }))
+    stop.abort(new Error('stopped'))
+    await assert.rejects(waiting, /stopped/)
+    assert.equal((await provider.search(request())).length, 1)
   })
 
   it('creates the provider for an id and falls back to DuckDuckGo', () => {

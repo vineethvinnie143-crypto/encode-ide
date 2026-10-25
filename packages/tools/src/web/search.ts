@@ -373,22 +373,77 @@ export function parseSearchResults(html: string): SearchHit[] {
   return hits
 }
 
-/** DuckDuckGo's HTML page: no account, no key, and results that are less stable than an API's. */
-export function duckDuckGoProvider(options: ProviderOptions = {}): SearchProvider {
+export interface DuckDuckGoOptions extends ProviderOptions {
+  /** The least time between two searches. Default 1.5 s. */
+  gapMs?: number
+  /** How long to wait before the one retry of a search DuckDuckGo slowed down. Default 4 s. */
+  retryMs?: number
+}
+
+/** What a page DuckDuckGo shows instead of results has, when it wants to know whether a person is asking. */
+const CHALLENGE = /anomaly-modal|challenge-form|bots use DuckDuckGo/i
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    const stop = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', stop)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', stop, { once: true })
+  })
+}
+
+/**
+ * DuckDuckGo's HTML page: no account, no key, and results that are less stable than an API's. It answers a burst of
+ * searches from one computer (a model that searches for three things at once) with HTTP 202 and no results, so
+ * searches go one at a time, a moment apart, and one that was slowed down is asked again once, after a wait.
+ */
+export function duckDuckGoProvider(options: DuckDuckGoOptions = {}): SearchProvider {
   const endpoint = options.endpoint ?? SEARCH_ENDPOINTS.duckduckgo
-  return {
-    id: 'duckduckgo',
-    endpoint,
-    async search(request) {
-      const outcome = await safeFetch(`${endpoint}?q=${encodeURIComponent(clipQuery(request.query))}`, { ...options.fetch, signal: request.signal })
+  const gapMs = options.gapMs ?? 1_500
+  const retryMs = options.retryMs ?? 4_000
+  let queue: Promise<unknown> = Promise.resolve()
+  let last = 0
+
+  const ask = (request: SearchRequest) => safeFetch(`${endpoint}?q=${encodeURIComponent(clipQuery(request.query))}`, { ...options.fetch, signal: request.signal })
+  // 202 or 429, or a page that asks whether a person is there instead of listing results.
+  const slowed = (outcome: Awaited<ReturnType<typeof ask>>) =>
+    outcome.kind === 'response' && (outcome.status === 202 || outcome.status === 429 || (!/result__a/.test(outcome.text) && CHALLENGE.test(outcome.text)))
+
+  async function searchNow(request: SearchRequest): Promise<SearchHit[]> {
+    const wait = last + gapMs - Date.now()
+    if (wait > 0) await pause(wait, request.signal)
+    try {
+      let outcome = await ask(request)
+      if (slowed(outcome)) {
+        await pause(retryMs, request.signal)
+        outcome = await ask(request)
+      }
       if (outcome.kind !== 'response') throw new SearchError('failed', `The search service could not be reached (${outcome.kind === 'refused' ? outcome.reason : outcome.kind}).`)
-      // DuckDuckGo answers 202 or 429 to a program it has decided to slow down.
-      if (outcome.status === 202 || outcome.status === 429) {
-        throw new SearchError('limit', `DuckDuckGo is limiting searches from this computer for now (HTTP ${outcome.status}). Try again later, or choose a search provider with a key in Settings.`)
+      if (slowed(outcome)) {
+        const answer = outcome.status === 200 ? 'a page asking whether a person is searching' : `HTTP ${outcome.status}`
+        throw new SearchError('limit', `DuckDuckGo is limiting searches from this computer for now (${answer}). Try again in a few minutes, or choose a search provider with a key in Settings.`)
       }
       if (outcome.status >= 500) throw new SearchError('unavailable', `DuckDuckGo is not available right now (HTTP ${outcome.status}).`)
       if (outcome.status !== 200) throw new SearchError('failed', `The search service answered HTTP ${outcome.status}.`)
       return toHits(parseSearchResults(outcome.text), request)
+    } finally {
+      last = Date.now()
+    }
+  }
+
+  return {
+    id: 'duckduckgo',
+    endpoint,
+    search(request) {
+      const result = queue.then(() => searchNow(request))
+      queue = result.catch(() => undefined)
+      return result
     },
   }
 }

@@ -275,6 +275,10 @@ need an API key of your own from their sites (the card links each one).
 - Ask the agent something that needs the web. The first search in a chat asks and names the provider's address
   (`api.search.brave.com`, `api.tavily.com`, `api.exa.ai`, `html.duckduckgo.com`); choosing another provider asks again.
   If a search fails it says why and does not use another provider instead.
+- Ask for something on a site's documentation ("how do I change DDoS protection settings in Gcore?"): the agent should
+  search first and fetch what it found, not make up addresses. A page that does not exist tells it to search; tell us
+  if it keeps guessing. With DuckDuckGo, several searches at once go one after another, a second or two apart, and one
+  that DuckDuckGo slowed down is tried once more before the agent hears it failed.
 - Whatever comes back is shown to the model as coming from outside. You can ask it to restrict a search to, or leave
   out, a website ("only from docs.python.org").
 

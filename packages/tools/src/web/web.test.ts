@@ -6,7 +6,7 @@ import { tempWorkspace, testContext, textOf } from '../testing'
 import type { WebAccess } from '../types'
 import { createWebAccess, parseSearchResults, upgradeUrl } from './access'
 import { htmlToText } from './html'
-import { untrustedWebContent, webFetchTool, webSearchTool } from './tools'
+import { statusAdvice, untrustedWebContent, webFetchTool, webSearchTool } from './tools'
 
 describe('htmlToText', () => {
   it('keeps headings, links, lists, emphasis and code, and drops scripts', () => {
@@ -79,7 +79,7 @@ describe('web access', () => {
   })
   after(() => new Promise<void>((resolve) => server.close(() => resolve())))
 
-  const local = () => createWebAccess({ fetch: { allowAddress: () => true }, searchUrl: `${origin}/search` })
+  const local = () => createWebAccess({ fetch: { allowAddress: () => true }, searchUrl: `${origin}/search`, duckDuckGo: { gapMs: 0 } })
 
   it('fetches pages as text with their title, and caches them', async () => {
     const web = local()
@@ -143,6 +143,23 @@ describe('WebFetch and WebSearch', () => {
     const root = await tempWorkspace()
     const outcome = await webFetchTool.run({ url: 'https://a.dev', prompt: 'x' }, testContext(root, { web }))
     assert.match(textOf(outcome.content), /<untrusted_web_content source="https:\/\/a\.dev\/">\nPage text\n<\/untrusted_web_content>/)
+  })
+
+  it('tells the model to search, not guess, when a page is missing or a search fails', async () => {
+    const root = await tempWorkspace()
+    const missing: WebAccess = { ...web, fetch: async () => ({ ...page, status: 404, text: 'Not found' }) }
+    const outcome = await webFetchTool.run({ url: 'https://a.dev/made/up', prompt: 'x' }, testContext(root, { web: missing }))
+    assert.equal(outcome.ok, false)
+    assert.match(textOf(outcome.content), /^HTTP 404 · https:\/\/a\.dev\/\nThere is no page at this address\. Do not guess another one: find the page with WebSearch/)
+    assert.match(statusAdvice(403), /turns programs away/)
+    assert.match(statusAdvice(503), /a problem right now/)
+
+    const failing: WebAccess = { ...web, search: async () => Promise.reject(new Error('DuckDuckGo is limiting searches from this computer for now (HTTP 202).')) }
+    const failed = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: failing }))
+    assert.equal(failed.ok, false)
+    assert.match(textOf(failed.content), /HTTP 202\)\.\nDo not guess page addresses instead\. Tell the user the search failed/)
+    const empty = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: { ...web, search: async () => [] } }))
+    assert.equal(textOf(empty.content), 'No results for "gcore ddos". Try fewer or other words.')
   })
 
   it('lists search results and neutralizes a closing tag inside them', async () => {
