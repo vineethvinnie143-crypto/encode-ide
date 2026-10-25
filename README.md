@@ -105,7 +105,8 @@ primary platform; the code stays cross-platform.
   In a long session the outputs of old steps are shortened by what the model's prompt cache charges: in bulk and as a
   request starts where the provider binds the model's reasoning (Claude, Gemini), a step or so behind where a rewrite
   costs little (DeepSeek, OpenAI and most others), and each says where the whole of it is; after a summary the files
-  the agent worked on are read again for it. Strong
+  the agent worked on are read again for it. A session that reads three shortened outputs back keeps more of them from
+  then on, and **Save diagnostics** says how often that happened this week. Strong
   models (Claude Opus and Sonnet, GPT-5, Gemini Pro, Grok 4) get short instructions with the same rules, and
   **Settings → Roles** suggests the smaller model of Main's family for the small jobs. Roles nobody set follow Main, so
   they never go to the free models unless you choose them.

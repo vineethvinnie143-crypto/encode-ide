@@ -97,6 +97,7 @@ import {
   requestStarts,
   REREAD_CLOSE,
   REREAD_OPEN,
+  shortenedBy,
   stepCount,
   summaryRequest,
   textTokens,
@@ -104,6 +105,7 @@ import {
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
 import { cacheKeyOf, type CacheClock } from './cache-hints'
+import { isEditMiss, keepingMore, type ContextSignal, type ContextWatch } from './context-signals'
 import { rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
@@ -198,6 +200,8 @@ export interface LoopServices {
   changes?: (turnId: string) => Promise<ChangedText[]>
   /** When the session's requests start, kept across its turns: after a long wait they ask for the hour-long cache (ADR 0128). */
   cacheClock?: CacheClock
+  /** What the session's shortening cut and the model read again, kept across its turns (ADR 0132); the main agent's only. */
+  contextWatch?: ContextWatch
 }
 
 export interface LoopOptions {
@@ -472,6 +476,8 @@ export class AgentLoop {
   private checkRounds = 0
   private checksRefused = false
   private claimChecked = false
+  /** The conversation was rewritten in this request: an edit that misses its text after it counts (ADR 0132). */
+  private rewroteInRequest = false
   private checkRuns = 0
   /** Once a request each (ADR 0096): the scan of the changes, the Reviewer's reading of them, and of a plan. */
   private scanned = false
@@ -565,6 +571,7 @@ export class AgentLoop {
     this.checkRounds = 0
     this.checksRefused = false
     this.claimChecked = false
+    this.rewroteInRequest = false
     this.scanned = false
     this.reviewed = false
     this.planCritiqued = false
@@ -968,7 +975,8 @@ export class AgentLoop {
     // On a small window the answer's share is capped, or the limit would sit below the instructions and tools alone.
     const reserve = Math.min(budget.maxOutputTokens, OUTPUT_RESERVE, Math.floor(window * OUTPUT_RESERVE_SHARE))
     const limit = Math.max(Math.min(Math.floor(window * COMPACT_AT), window - reserve, cap), 2_000)
-    const policy = shorteningPolicy(budget.cache)
+    // Once the model has read shortened outputs back, the session keeps more of them (ADR 0132).
+    const policy = keepingMore(shorteningPolicy(budget.cache), this.watch()?.level ?? 0)
     const soft = Math.min(limit, Math.max(policy.floor, Math.floor(window * policy.share)))
     const worth = Math.max(ELIDE_MIN_SAVING, Math.floor(window * ELIDE_SAVING))
 
@@ -983,6 +991,8 @@ export class AgentLoop {
     let removed = 0
     let summary = ''
     let forgotten = false
+    let shortened = false
+    let summarized = false
     const trigger = options.manual ? 'manual' : 'auto'
     if (forced || size() > soft) {
       const over = forced || size() > limit
@@ -1000,6 +1010,7 @@ export class AgentLoop {
       if (changed < elided.length && (over || saved >= worth || pays())) {
         messages = await this.elide(messages, policy.recent, policy.limit)
         rewritten = true
+        shortened = true
         this.meter.reset()
       }
       if (forced || size() > limit) {
@@ -1018,6 +1029,7 @@ export class AgentLoop {
           messages = repairPairing(applyCompaction(plan, written.text, preface, reread ? [reread] : []))
           removed = plan.dropped.length
           summary = written.text
+          summarized = true
           if (!options.manual && this.repliedThisTurn) this.compactedSinceReply = true
           rewritten = true
           this.meter.reset()
@@ -1029,6 +1041,7 @@ export class AgentLoop {
           if (trimmed.some((message, i) => message !== messages[i])) {
             messages = trimmed
             rewritten = true
+            shortened = true
             this.meter.reset()
           }
         }
@@ -1038,6 +1051,11 @@ export class AgentLoop {
       await o.conversation.replace(messages, { trigger, summary, removed, turnId: turn.turnId })
       // Read answers "unchanged" by pointing at its earlier output, which may now be shortened or gone.
       if (!forgotten) o.services.files.forgetSeen()
+      if (shortened || summarized) {
+        this.rewroteInRequest = true
+        this.signal('rewrites')
+        if (summarized) this.signal('summaries')
+      }
     }
     return removed
   }
@@ -1061,7 +1079,19 @@ export class AgentLoop {
         if (file) kept.set(part.key, file)
       }
     }
-    return elideOldOutputs(messages, recentSteps, limit, kept, owns)
+    const elided = elideOldOutputs(messages, recentSteps, limit, kept, owns)
+    this.watch()?.shortened(shortenedBy(messages, elided, owns), this.o.services.cwd?.() ?? this.o.services.root)
+    return elided
+  }
+
+  /** The session's watch on what its shortening cut (ADR 0132): the main agent's alone. */
+  private watch(): ContextWatch | undefined {
+    return this.o.agentId === 'main' ? this.o.services.contextWatch : undefined
+  }
+
+  /** One more of a signal for the request (ADR 0132), from the main agent alone. */
+  private signal(kind: ContextSignal): void {
+    if (this.o.agentId === 'main') this.o.surface.signal?.(kind)
   }
 
   /**
@@ -1521,6 +1551,8 @@ export class AgentLoop {
     const again = own ? undefined : this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
     if (again) content = [...content, textBlock(again)]
     if (!own) this.setbacks.call(block.name, block.input, isError ? textOf(content) : undefined)
+    if (!own && this.watch()?.called(block.name, block.input, o.services.cwd?.() ?? o.services.root)) this.signal('readBacks')
+    if (!own && this.rewroteInRequest && isError && isEditMiss(block.name, textOf(content))) this.signal('editMisses')
 
     state.results.set(block.id, { type: 'tool-result', toolUseId: block.id, content, ...(isError ? { isError: true } : {}) })
     this.settleEntry(entry, {
@@ -1901,6 +1933,8 @@ export class AgentLoop {
     }
     const setback = (gate: SentBack, notice: string, text: string) => {
       if (o.agentId === 'main') this.setbacks.sentBack(gate)
+      if (gate === 'checks') this.signal('checkBounces')
+      if (gate === 'claims') this.signal('claimBounces')
       return back(notice, text)
     }
     if (code) {

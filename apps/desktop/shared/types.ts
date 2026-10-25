@@ -1412,11 +1412,29 @@ export interface UsageTally {
   unpriced: number
 }
 
+/** What compaction did, and the signs that it cut what the model still needed (ADR 0132). */
+export interface ContextSignals {
+  /** Rewrites of the conversation: old outputs shortened, or old steps summarized. */
+  rewrites: number
+  /** Of those, the ones that summarized. */
+  summaries: number
+  /** Shortened outputs the model read again. */
+  readBacks: number
+  /** Edits whose old text was not found, after a rewrite in the same request. */
+  editMisses: number
+  /** Times the project's checks sent the agent back. */
+  checkBounces: number
+  /** Times the check of what its reply claims sent it back. */
+  claimBounces: number
+}
+
 /** One day of a session's requests, by the day each began on this computer's clock. */
 export interface DayUsage extends UsageTally {
   requests: number
   /** By the model that answered; "" for calls of requests stored before the model was kept. */
   models: Record<string, UsageTally>
+  /** The day's context signals (ADR 0132); absent when its requests had none. */
+  context?: ContextSignals
 }
 
 /** What one session's requests used, by day ("2026-10-24"). */

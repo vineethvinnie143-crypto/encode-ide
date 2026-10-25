@@ -62,6 +62,7 @@ export function turnReportFile(record: TurnRecord, draft: TurnReportDraft, conte
     policy: record.policy,
     models: record.models,
     usage: record.usage,
+    ...(record.context ? { context: record.context } : {}),
     steps: record.steps.map((step) => ({
       ...(step.text !== undefined ? { text: clean(step.text) } : {}),
       ...(step.calls

@@ -25,6 +25,7 @@ import { ComputerControl } from './services/computer-control'
 import { ComputerWatch } from './services/computer-watch'
 import { diagnosticsReport } from './services/diagnostics'
 import { cacheByModel } from '../shared/cache-share'
+import { contextOver } from '../shared/context-share'
 import { GitService } from './services/git'
 import { LogService } from './services/logs'
 import { ModelTestStore } from './services/model-tests'
@@ -404,6 +405,7 @@ if (!gotLock) {
         agentHost: agentHost.health(),
         sessions: sessions ? { total: sessions.length, archived: sessions.filter((session) => session.archived).length } : null,
         cache: usage ? cacheByModel(usage, { today: new Date(), days: 7 }) : null,
+        context: usage ? contextOver(usage, { today: new Date(), days: 7 }) : null,
         workspaceOpen: places?.workspace.current != null,
         remote: places?.remote
           ? {

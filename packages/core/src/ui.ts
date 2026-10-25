@@ -8,6 +8,7 @@
  */
 import type { PauseReason } from '@encode/providers'
 import type { AgentMode, DiffHunk, JobStatus, ToolOffer } from '@encode/tools'
+import type { ContextSignals } from './context-signals'
 
 export type { AgentMode, DiffHunk, DiffLine } from '@encode/tools'
 
@@ -178,6 +179,8 @@ export interface RequestUsage {
   cost?: number
   /** The same, by the model that answered (the Usage page); absent in requests stored before it was kept. */
   models?: Record<string, ModelUsage>
+  /** What compaction did in the request, and the signs it cut what the model needed (ADR 0132); absent when none. */
+  context?: ContextSignals
 }
 
 /** One model's calls in a request, or on a day. */
@@ -207,6 +210,8 @@ export interface DayUsage extends UsageTally {
   requests: number
   /** By the model that answered; "" for calls of requests stored before the model was kept. */
   models: Record<string, UsageTally>
+  /** The day's context signals (ADR 0132); absent when its requests had none. */
+  context?: ContextSignals
 }
 
 /** What one session's requests used, by day ("2026-10-24"). */

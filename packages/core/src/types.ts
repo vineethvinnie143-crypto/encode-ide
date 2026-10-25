@@ -7,6 +7,7 @@ import type { PauseReason, ReasoningEffort, SystemPart, ToolDefinition, Usage, U
 import type { AgentMode, DiffHunk, PlanConsent, PlanVerdict, Question, TodoInput } from '@encode/tools'
 import type { Message } from '@encode/providers'
 import type { CheckGate } from './checks'
+import type { ContextSignal } from './context-signals'
 import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
 import type { ReviewSetting } from './review'
@@ -145,6 +146,8 @@ export interface Surface {
   setTodos(todos: TodoInput[]): void
   /** While the model thinks before it writes: how much so far and its latest words; null once the call ends (ADR 0125). */
   thinking?(progress: ThinkingProgress | null): void
+  /** One more of a sign of what compaction did in the request, counted with its usage (ADR 0132). */
+  signal?(kind: ContextSignal): void
 }
 
 /** The messages the model reads. The loop only ever appends, except through `replace`. */

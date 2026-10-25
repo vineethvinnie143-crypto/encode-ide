@@ -80,6 +80,7 @@ import {
   type SeedingGit,
 } from './best-of'
 import { CacheClock } from './cache-hints'
+import { addSignals, ContextWatch, type ContextSignal } from './context-signals'
 import { SessionCodeMap } from './code-map'
 import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
 import type { ChangedText } from './diff-scan'
@@ -481,6 +482,8 @@ export class AgentSession {
   private loop: AgentLoop | undefined
   /** When the main agent's requests start, kept across loops: it chooses the cache's lifetime (ADR 0128). */
   private readonly cacheClock = new CacheClock()
+  /** What the main agent's shortening cut and the model read again, kept across loops: it keeps more after enough (ADR 0132). */
+  private readonly contextWatch = new ContextWatch()
   /** The settings the loop's tools were chosen by; a change builds a new loop between turns. */
   private loopKey = ''
   private desktop: DesktopServices | undefined
@@ -938,6 +941,15 @@ export class AgentSession {
     this.send({ type: 'entry', entry: structuredClone(entry) })
   }
 
+  /** One more of a context signal for the request that runs now (ADR 0132), stored with its usage. */
+  private countSignal(kind: ContextSignal): void {
+    const entry = this.requestEntry
+    if (!entry) return
+    const before: RequestUsage = entry.usage ?? { calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 }
+    entry.usage = { ...before, context: addSignals(before.context, { [kind]: 1 }) }
+    this.send({ type: 'entry', entry: structuredClone(entry) })
+  }
+
   /** The request ended: what it cost is stored with your message. */
   private settleUsage(): void {
     const entry = this.requestEntry
@@ -989,6 +1001,7 @@ export class AgentSession {
       })
       this.countUsage(usage, model)
     },
+    signal: (kind) => this.countSignal(kind),
     fileChanged: (path) => this.send({ type: 'file-changed', path }),
     approve: (prompt, signal) => this.requestApproval(prompt, signal),
     granted: (grant) => this.grants.has(grant),
@@ -1360,6 +1373,7 @@ export class AgentSession {
       checks: this.checks,
       ...(env.checkpoints?.changes ? { changes: this.requestChanges } : {}),
       cacheClock: this.cacheClock,
+      contextWatch: this.contextWatch,
     }
     const created = createSubagents({
       definitions: () => definitions,
@@ -2577,7 +2591,8 @@ export class AgentSession {
     const { root } = this.env
     const changes = this.env.checkpoints?.changes ? await this.turnChanges(entry.id, { maxFileBytes: TURN_REPORT_LIMITS.fileBytes, maxTotalBytes: TURN_REPORT_LIMITS.totalBytes }) : undefined
     const { files, left } = await gatherFiles(filesNamed(records, root), { root, ...(this.env.rules ? { rules: this.env.rules } : {}), changes: changes?.files ?? [] })
-    return { ok: true, record: turnRecord({ root, prompt: entry.text ?? '', policy: this.env.settings().policy, records, files, left }, options) }
+    const record = turnRecord({ root, prompt: entry.text ?? '', policy: this.env.settings().policy, records, files, left }, options)
+    return { ok: true, record: entry.usage?.context ? { ...record, context: entry.usage.context } : record }
   }
 
   /** Writes a file the agent changed, for the person; only while nothing runs, so that no tool writes under it. */

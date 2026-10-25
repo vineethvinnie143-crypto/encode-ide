@@ -1,6 +1,7 @@
 import type { AboutInfo, LanguageServersReport, Settings, UpdateStatus } from '../../shared/types'
 import { buildLine } from '../../shared/about'
 import { cacheAdvice, cachePercent, type CacheRow } from '../../shared/cache-share'
+import { contextLines, type ContextWeek } from '../../shared/context-share'
 import { updateLine } from '../../shared/updates'
 import { inlineState } from '../../shared/inline'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
@@ -33,6 +34,8 @@ export interface DiagnosticsInput {
   sessions: { total: number; archived: number } | null
   /** What each model read from its prompt cache in the last week (ADR 0128); null when the records could not be read. */
   cache?: CacheRow[] | null
+  /** What compaction did in the last week, and how often the model read back what it cut (ADR 0132); null when the records could not be read. */
+  context?: ContextWeek | null
   workspaceOpen: boolean
   /** A folder on another machine (ADR 0111): how its connection stands and what runs there, never the machine's name. */
   remote?: { status: string; node?: string; system?: string } | null
@@ -155,6 +158,12 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
       const after = row.verdict === 'few' ? ', too few calls to judge' : row.verdict === 'low' ? ` (LOW). ${advice}` : advice ? `. ${advice}` : ''
       out.push(`  ${row.model || 'before models were kept'}: ${row.calls.toLocaleString('en-US')} calls, ${row.inputTokens.toLocaleString('en-US')} tokens read, ${cachePercent(row)} from the cache${after}`)
     }
+  }
+
+  if (input.context !== undefined) {
+    out.push('', 'Context, last 7 days')
+    if (!input.context) out.push("  could not read the sessions' records")
+    else out.push(...contextLines(input.context))
   }
 
   const code = input.languageServers
