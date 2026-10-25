@@ -24,6 +24,7 @@ import type { ScheduleService } from './services/schedules'
 import type { SettingsService } from './services/settings'
 import type { InstructionsService } from './services/instructions'
 import type { SkillService } from './services/skills'
+import type { AppUpdater } from './updater'
 import type { FolderFiles } from './services/workspace'
 import { ConnectError } from './remote/machine'
 import type { FolderGit, FolderReview, FolderShell, Places } from './remote/places'
@@ -84,6 +85,8 @@ export interface IpcDeps {
   diagnostics: () => Promise<string>
   /** Shows a notice the way a finished request would. */
   testNotice: () => void
+  /** The tester builds' updates (ADR 0127). */
+  updates: AppUpdater
   /** What a log line goes through, for the text a person writes in a report. */
   redactReport: (text: string) => string
   /** A session was removed; whatever follows its events can let go of it. */
@@ -130,7 +133,7 @@ function hostFailure(error: unknown): Error {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { getWindow, settings, workspace, shell, schedules, skills, instructions, models, git, review, agent, places, modelTests, configureAgent, logs, diagnostics, testNotice, redactReport } = deps
+  const { getWindow, settings, workspace, shell, schedules, skills, instructions, models, git, review, agent, places, modelTests, configureAgent, logs, diagnostics, testNotice, updates, redactReport } = deps
   const host = agent.client
   /** The editor's suggestion running now, if any; see services/inline-suggest.ts. */
   const inline = new InlineRequests()
@@ -635,6 +638,13 @@ export function registerIpc(deps: IpcDeps): void {
     const failure = await osShell.openPath(logs.dir)
     if (failure) throw new Error(failure)
   })
+
+  handle('updates:status', () => updates.updater.status())
+  handle('updates:check', () => updates.updater.check())
+  handle('updates:install', () => updates.updater.install())
+  handle('updates:cancel', () => updates.updater.cancel())
+  handle('updates:open-page', (build: unknown) => updates.openPage(build))
+  handle('updates:outcome', () => updates.updater.outcome())
 
   handle('jobs:list', () => host.jobs())
   handle('jobs:output', (id: string) => host.jobOutput(String(id)))

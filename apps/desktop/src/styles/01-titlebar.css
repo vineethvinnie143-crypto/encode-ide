@@ -63,6 +63,32 @@
   align-self: stretch;
 }
 
+/* Restart to update (ADR 0127): a quiet outlined pill before the window buttons, the one thing in the bar that asks. */
+.tb-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin-right: 8px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-1);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+.tb-update:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--text-3);
+}
+.tb-update.is-waiting,
+.tb-update:disabled {
+  color: var(--text-2);
+}
+
 /* The window buttons where the system does not draw them: 46 x 44, with Windows' red on Close */
 .caption {
   display: flex;

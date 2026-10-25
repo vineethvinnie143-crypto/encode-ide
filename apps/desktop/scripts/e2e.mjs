@@ -113,6 +113,11 @@ const env = {
   ENCODE_NOTICES_FILE: path.join(sandbox, 'notices.jsonl'),
   // What the window would have said when its page stopped; it reloads without asking.
   ENCODE_CRASH_LOG: path.join(sandbox, 'crashes.jsonl'),
+  // The updater (ADR 0127) as an installed tester build whose release is the fake provider's; the restart is written
+  // here instead of closing the app and running the installer.
+  ENCODE_UPDATE_FEED: `http://127.0.0.1:${providerPort}/encode-update.json`,
+  ENCODE_UPDATE_AS_BUILD: '41',
+  ENCODE_UPDATE_LAUNCH_LOG: path.join(sandbox, 'update-launch.jsonl'),
   ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   ...(fakeSsh ? { ENCODE_SSH_PROGRAM: fakeSsh, ENCODE_FAKE_REMOTE_HOME: remoteHome } : {}),
 }

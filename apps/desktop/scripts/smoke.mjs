@@ -15,6 +15,7 @@
  * last the appearance settings, capturing dark and light at 1280 x 800 and 1920 x 1080.
  * Screenshots land in ./screenshots.
  */
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFileSync, execSync, spawn } from 'node:child_process'
@@ -6136,6 +6137,8 @@ async function runAboutChecks() {
   if (info.version !== pkg.version) throw new Error(`About says version ${info.version}, package.json says ${pkg.version}`)
   if (!['tester', 'dev'].includes(info.channel)) throw new Error(`unknown channel ${info.channel}`)
   if (process.env.ENCODE_COMMIT && info.commit !== process.env.ENCODE_COMMIT.toLowerCase()) throw new Error('the build does not carry the commit CI named')
+  // CI numbers its builds (ADR 0127); a build made elsewhere is build 0.
+  if (info.build !== (Number(process.env.ENCODE_BUILD) || 0)) throw new Error(`the build says it is build ${info.build}, CI named ${process.env.ENCODE_BUILD}`)
   if (info.commit && !/^[0-9a-f]{40}$/.test(info.commit)) throw new Error(`the commit is not a hash: ${info.commit}`)
   if (!info.electron || !info.os) throw new Error('About does not say what it runs on')
 
@@ -6149,6 +6152,7 @@ async function runAboutChecks() {
   await waitFor("!!document.querySelector('.about-dialog .about-facts')", 6000, 'About shows the build')
   const shown = await evaluate("document.querySelector('.about-dialog').innerText")
   if (!shown.includes(`Version ${info.version}`)) throw new Error(`About does not show the version: ${shown}`)
+  if (info.channel === 'tester' && info.build > 0 && !shown.includes(`Tester build ${info.build}`)) throw new Error(`About does not name the tester build: ${shown}`)
   if (info.commit && !shown.includes(info.commit.slice(0, 7))) throw new Error('About does not show the commit')
   await sleep(300)
   await screenshot('ui-dark-about.png')
@@ -6195,6 +6199,74 @@ const DOGFOOD_OPEN_MS = 6000
  * back to the bytes it had, and records it all so a report of it replays without a problem. Find in files searches
  * the whole copy. The copy is the files git tracks, so the run cannot change the checkout.
  */
+/**
+ * Updates (ADR 0127): the app goes by tester build 41 with the fake provider as its release (pnpm e2e sets
+ * ENCODE_UPDATE_*). A look finds the same build; then a newer one is published, and Check now downloads it with its
+ * bar showing and checks its fingerprint. Settings, About, a notice and the title bar offer the restart, and the
+ * restart is the installer, silent, into this program's folder: written to a file here instead of closing the app.
+ */
+async function runUpdateChecks() {
+  console.log('[smoke] --- updates ---')
+  await ensureFakeProvider()
+  const launchLog = process.env.ENCODE_UPDATE_LAUNCH_LOG
+  const own = Number(process.env.ENCODE_UPDATE_AS_BUILD)
+  if (!launchLog || !own) throw new Error('pnpm e2e sets ENCODE_UPDATE_LAUNCH_LOG and ENCODE_UPDATE_AS_BUILD')
+  const before = await evaluate('window.eNCode.updates.status()')
+  if (before.build !== own || before.state === 'off') throw new Error(`the updater is not on as build ${own}: ${JSON.stringify(before)}`)
+  if (await evaluate("!!document.querySelector('.tb-update')")) throw new Error('the title bar offers a restart before there is anything to restart into')
+
+  const row = '[data-setting="general.update"]'
+  const line = `document.querySelector('${row} .update-line')?.textContent ?? ''`
+  await openSettings('General')
+  await waitFor(`document.querySelector('${row} .settings-row-label')?.textContent === 'Tester build ${own}'`, 4000, 'Settings names this build')
+  if (!(await click(`${row} .btn`, 'Check now'))) throw new Error('no Check now button')
+  await waitFor(`(${line}).startsWith('Up to date. Looked just now.')`, 10000, 'the release is this build: up to date')
+
+  const published = await (await fetch(`http://127.0.0.1:${providerPort}/__update/publish`, { method: 'POST' })).json()
+  await click(`${row} .btn`, 'Check now')
+  await waitFor(`!!document.querySelector('${row} [role="progressbar"]') && (${line}).startsWith('Downloading build ${published.build}')`, 10000, 'the download, with its bar')
+  await waitFor(`(${line}).startsWith('Build ${published.build} is ready. Looked just now.')`, 20000, 'the new build downloaded and checked')
+  await waitFor(`[...document.querySelectorAll('.toast-text')].some((node) => node.textContent === 'Build ${published.build} is ready.')`, 6000, 'the notice that it is ready')
+  const notes = await evaluate(`[...document.querySelectorAll('${row} .update-notes li')].map((node) => node.textContent)`)
+  if (notes.length !== 2 || !notes[1].includes('update themselves')) throw new Error(`the new build's notes: ${JSON.stringify(notes)}`)
+  await waitFor("document.querySelector('.tb-update')?.textContent === 'Restart to update'", 4000, 'the title bar offers the restart')
+  await evaluate(`document.querySelector('${row}').scrollIntoView({ block: 'center' })`)
+  await sleep(300)
+  await screenshot('ui-dark-updates.png')
+  await closeSettings()
+
+  if (!(await click('.tb-menu', 'Help'))) throw new Error('Help menu not found')
+  await waitFor(menuOpen('Help'), 4000, 'Help menu')
+  await click('.ui-menu [role^="menuitem"]', 'About eNCode')
+  await waitFor(`(document.querySelector('.about-dialog .about-update')?.textContent ?? '').includes('Build ${published.build} is ready.')`, 6000, 'About says the new build is ready')
+  const about = await evaluate("document.querySelector('.about-dialog').innerText")
+  if (!about.includes('asks GitHub for a newer build')) throw new Error('About does not say the build asks GitHub for updates')
+  await screenshot('ui-dark-about-update.png')
+  await click('.about-dialog .ui-dialog-foot .btn', 'Close')
+  await waitFor("!document.querySelector('.about-dialog')", 4000, 'About closed')
+
+  if (!(await click('.tb-update'))) throw new Error('no restart button in the title bar')
+  let launched = null
+  const started = Date.now()
+  while (!launched && Date.now() - started < 10000) {
+    const text = await fs.readFile(launchLog, 'utf8').catch(() => '')
+    launched = text.trim() ? JSON.parse(text.trim().split('\n')[0]) : null
+    if (!launched) await sleep(200)
+  }
+  if (!launched) throw new Error('Restart to update ran no installer')
+  if (!launched.installer.endsWith(`eNCode-build-${published.build}-setup.exe`)) throw new Error(`the installer run: ${launched.installer}`)
+  const [updated, silent, forceRun, folder] = launched.args
+  if (updated !== '--updated' || silent !== '/S' || forceRun !== '--force-run' || !folder?.startsWith('/D=') || launched.args.length !== 4) {
+    throw new Error(`the installer's arguments: ${JSON.stringify(launched.args)}`)
+  }
+  const bytes = await fs.readFile(launched.installer)
+  if (createHash('sha256').update(bytes).digest('hex') !== published.sha256) throw new Error('the installer run is not the release\'s')
+  const record = JSON.parse(await fs.readFile(path.join(process.env.ENCODE_USER_DATA_DIR, 'eNCode-update.json'), 'utf8'))
+  if (record.attempt?.from !== own || record.attempt?.to !== published.build) throw new Error(`the record of the restart: ${JSON.stringify(record)}`)
+  await waitFor("document.querySelector('.tb-update')?.textContent === 'Restarting…'", 4000, 'the title bar says it restarts')
+  console.log(`[smoke] updates: build ${own} found build ${published.build}, downloaded and checked it, and ran its installer`)
+}
+
 async function runDogfoodChecks() {
   console.log('[smoke] --- dogfood: eNCode edits eNCode ---')
   const repo = path.resolve(root, '..', '..')
@@ -6464,7 +6536,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, story: runStoryChecks, attach: runAttachChecks, follow: runFollowChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, story: runStoryChecks, attach: runAttachChecks, follow: runFollowChecks, updates: runUpdateChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')
@@ -6787,6 +6859,8 @@ try {
   await runFontChecks()
   await runAppearanceChecks()
   await runDogfoodChecks()
+  // Near the end: the restart it asks for leaves the title bar saying so.
+  await runUpdateChecks()
 
   if (errors.length) {
     console.error('[smoke] renderer errors:\n' + errors.join('\n---\n'))

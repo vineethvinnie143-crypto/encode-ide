@@ -11,11 +11,13 @@ export interface BuildStamp {
   builtAt: string
   /** "tester" for the builds that are handed out, "dev" for the rest. */
   channel: string
+  /** CI's run number for a tester build, which grows with each one; 0 for a build made elsewhere. Missing before ADR 0127. */
+  build?: number
 }
 
 declare const __ENCODE_BUILD__: BuildStamp | undefined
 
-const UNSTAMPED: BuildStamp = { version: '0.0.0', commit: '', dirty: false, builtAt: '', channel: 'dev' }
+const UNSTAMPED: BuildStamp = { version: '0.0.0', commit: '', dirty: false, builtAt: '', channel: 'dev', build: 0 }
 
 /** The sources run unbuilt in unit tests, so the stamp may be missing. */
 export const BUILD: BuildStamp = typeof __ENCODE_BUILD__ === 'undefined' ? UNSTAMPED : __ENCODE_BUILD__
@@ -47,6 +49,7 @@ export function aboutInfo(env: AboutEnvironment, build: BuildStamp = BUILD): Abo
     dirty: build.dirty,
     builtAt: build.builtAt,
     channel: build.channel,
+    build: build.build ?? 0,
     packaged: env.isPackaged,
     platform: env.platform,
     arch: env.arch,

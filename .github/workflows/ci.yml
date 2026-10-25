@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Read-only token: CI never writes to the repository. The artifact storage job below is the one exception: it may
-# delete old artifacts of this repository's runs, and nothing else.
+# Read-only token: CI never writes to the repository. Two jobs below are the exceptions: the artifact storage job may
+# delete old artifacts of this repository's runs, and the release job may publish a tester build's release.
 permissions:
   contents: read
 
@@ -52,6 +52,8 @@ jobs:
     name: Windows
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      name: ${{ steps.build.outputs.name }}
     env:
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
       # The smoke must not depend on a third-party service being up.
@@ -60,6 +62,10 @@ jobs:
       # commit; the commit that matters is its head.
       ENCODE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
       ENCODE_CHANNEL: tester
+      # The tester build's number (ADR 0127): the run's, which grows with each run, so a newer release is a larger one.
+      ENCODE_BUILD: ${{ github.run_number }}
+      # The programs started here never look for updates on GitHub; the installer's round trip names a feed of its own.
+      ENCODE_UPDATE_FEED: 'off'
     steps:
       # Third-party code is pinned to full commit hashes; the comments name the releases.
       - name: Check out
@@ -126,7 +132,7 @@ jobs:
         working-directory: apps/desktop
         run: node scripts/packaged-smoke.mjs (Get-ChildItem release/*-portable.exe).FullName
 
-      - name: Installer installs, starts and uninstalls
+      - name: Installer installs, starts, updates itself and uninstalls
         working-directory: apps/desktop
         run: node scripts/installer-smoke.mjs
 
@@ -162,3 +168,59 @@ jobs:
             packages/editor-view/screenshots
           if-no-files-found: ignore
           retention-days: 3
+
+  # A build started by hand from main is published as a release, for the installed tester builds to update to (ADR 0127):
+  # the installer, the portable program and encode-update.json, which names the build and each file's SHA-256. This
+  # job alone may write to the repository, and only its releases; it never runs the programs it publishes.
+  release:
+    name: Publish the tester build
+    needs: windows
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # The whole history and its tags: what is new is read from the merges since the last release.
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Download the build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ needs.windows.outputs.name }}
+        run: gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$NAME" --dir "$RUNNER_TEMP/build"
+
+      - name: Describe the release
+        run: >-
+          node apps/desktop/scripts/release-manifest.mjs
+          --dir "$RUNNER_TEMP/build/apps/desktop/release"
+          --build "$GITHUB_RUN_NUMBER"
+          --commit "$GITHUB_SHA"
+          --out "$RUNNER_TEMP/release"
+
+      # Made as a draft and published once every file is up, so the newest release never names a file that is not there.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-$GITHUB_RUN_NUMBER"
+          files=("$RUNNER_TEMP"/build/apps/desktop/release/*-setup.exe "$RUNNER_TEMP"/build/apps/desktop/release/*-portable.exe "$RUNNER_TEMP/release/encode-update.json")
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+              --title "eNCode tester build $GITHUB_RUN_NUMBER" --notes-file "$RUNNER_TEMP/release/notes.md" "${files[@]}"
+          fi
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"

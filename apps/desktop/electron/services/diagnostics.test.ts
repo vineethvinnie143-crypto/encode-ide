@@ -14,6 +14,7 @@ const about: AboutInfo = {
   dirty: false,
   builtAt: '2026-10-22T06:12:00.000Z',
   channel: 'tester',
+  build: 291,
   packaged: true,
   platform: 'win32',
   arch: 'x64',
@@ -57,6 +58,7 @@ const settings: Settings = {
   notifyDone: 'background',
   notifyNeeds: 'always',
   flashTaskbar: false,
+  autoUpdate: true,
   chatsFolder: 'C:\\Users\\ana\\Documents\\eNCode',
   chatsFolderDefault: 'C:\\Users\\ana\\Documents\\eNCode',
   appearance: { ...DEFAULT_APPEARANCE },
@@ -92,7 +94,7 @@ function input(overrides: Partial<DiagnosticsInput> = {}): DiagnosticsInput {
 describe('diagnostics report', () => {
   it('says what build this is, what it runs on and how it is set up', () => {
     const text = diagnosticsReport(input())
-    assert.match(text, /^eNCode diagnostics\n=+\neNCode 0\.1\.0 tester, commit 502645e \(built 2026-10-22T06:12:00\.000Z\)\nReport made 2026-10-22T06:30:00\.000Z/)
+    assert.match(text, /^eNCode diagnostics\n=+\neNCode 0\.1\.0 tester build 291, commit 502645e \(built 2026-10-22T06:12:00\.000Z\)\nReport made 2026-10-22T06:30:00\.000Z/)
     assert.match(text, new RegExp(`Commit +${COMMIT}`))
     assert.match(text, /Operating system +Windows 11 \(10\.0\.26100\) x64/)
     assert.match(text, /Electron +44\.9\.2, Chromium 140\.0\.7339\.0, Node 22\.18\.0/)
@@ -104,6 +106,16 @@ describe('diagnostics report', () => {
     assert.match(text, /API keys +sealed by the operating system/)
     assert.match(text, /Process +running, 0 stops in a row, 1 sessions working/)
     assert.match(text, /Sessions +12 \(3 archived\)/)
+    assert.match(text, /Tester build +291/)
+  })
+
+  it('says where the updater is', () => {
+    const ready = diagnosticsReport(
+      input({ updates: { build: 291, auto: true, checkedAt: Date.UTC(2026, 9, 22, 6, 0, 0), state: 'ready', waiting: false, next: { build: 292, version: '0.1.0', size: 5, publishedAt: '', notes: [] } } }),
+    )
+    assert.match(ready, /Updates +looks by itself; Build 292 is ready\. \(last looked 2026-10-22T06:00:00\.000Z\)/)
+    const off = diagnosticsReport(input({ updates: { build: 0, auto: true, checkedAt: null, state: 'off', reason: 'Turned off for this run.' } }))
+    assert.match(off, /Updates +Turned off for this run\.\n/)
   })
 
   it('says which search provider answers and whether its key is stored, never the key', () => {
@@ -186,8 +198,9 @@ describe('diagnostics report', () => {
   })
 
   it('copes with what it was not told', () => {
-    const text = diagnosticsReport(input({ agentHost: null, sessions: null, environment: [], logLines: [], about: { ...about, commit: '', builtAt: '', packaged: false } }))
+    const text = diagnosticsReport(input({ agentHost: null, sessions: null, environment: [], logLines: [], about: { ...about, build: 0, commit: '', builtAt: '', packaged: false } }))
     assert.match(text, /eNCode 0\.1\.0 tester, no commit recorded\n/)
+    assert.ok(!text.includes('Tester build') && !text.includes('Updates'))
     assert.match(text, /Process +unknown/)
     assert.match(text, /Installed as a program +no, run from the sources/)
     assert.ok(!text.includes('Variables set'))

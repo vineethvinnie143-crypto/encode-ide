@@ -37,6 +37,7 @@ import { ShellService } from './services/shell'
 import { InstructionsService } from './services/instructions'
 import { SkillService, migrateLegacySkills } from './services/skills'
 import { WorkspaceService } from './services/workspace'
+import { createUpdater } from './updater'
 import { createMainWindow } from './window'
 import { buildLine } from '../shared/about'
 import { SEARCH_ENDPOINTS } from '@encode/tools'
@@ -233,6 +234,17 @@ if (!gotLock) {
     win.on('focus', () => attention.focusChanged(true))
     win.on('blur', () => attention.focusChanged(false))
 
+    // A tester build looks for a newer one, downloads it, and installs it when the person restarts for it, never while
+    // an agent works (ADR 0127).
+    const updates = createUpdater({
+      own: { build: about.build, channel: about.channel },
+      userData,
+      busy: () => attention.busy(),
+      autoCheck: () => settings.raw().autoUpdate,
+      onStatus: (status) => send('updates:status', status),
+    })
+    updates.updater.start()
+
     // The open folder's place (remote/places.ts), made once the services it switches between are.
     let places: Places | undefined
     // A key goes only to the server it was entered for: the host names the address it is about to call.
@@ -307,6 +319,7 @@ if (!gotLock) {
       // The agent on another machine has no screen of this PC to use.
       agentHost.configure(places?.remote ? { ...config, computer: false } : config)
       attention.settingsChanged()
+      updates.updater.settingsChanged()
     }
     configureAgent()
 
@@ -396,6 +409,7 @@ if (!gotLock) {
             }
           : null,
         languageServers,
+        updates: updates.updater.status(),
         environment: Object.keys(process.env).filter((name) => name.startsWith('ENCODE_')).sort(),
         logLines: logs.tail(400),
         logDir: logs.dir,
@@ -521,6 +535,7 @@ if (!gotLock) {
       logs,
       diagnostics,
       testNotice: () => attention.test(),
+      updates,
       redactReport: (text) => redact(text, { home, secrets: settings.secrets() }),
       onSessionRemoved: (sessionId) => {
         computerWatch.forget(sessionId)
@@ -535,6 +550,7 @@ if (!gotLock) {
       closing = true
       event.preventDefault()
       attention.dispose()
+      updates.updater.dispose()
       computerControl.dispose()
       banner.dispose()
       void agentHost.dispose().finally(() => {

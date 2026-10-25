@@ -156,6 +156,10 @@ try {
     throw new Error(`the build is from ${about.commit}, CI named ${process.env.ENCODE_COMMIT}`)
   }
   if (process.env.ENCODE_CHANNEL && about.channel !== process.env.ENCODE_CHANNEL) throw new Error(`the build says ${about.channel}, CI named ${process.env.ENCODE_CHANNEL}`)
+  if (process.env.ENCODE_BUILD && about.build !== Number(process.env.ENCODE_BUILD)) throw new Error(`the build says it is build ${about.build}, CI named ${process.env.ENCODE_BUILD}`)
+  // CI turns the updater off for this run (ENCODE_UPDATE_FEED=off), so a smoke never reaches GitHub; it says so.
+  const updates = await evaluate('window.eNCode.updates.status()')
+  if (process.env.ENCODE_UPDATE_FEED === 'off' && updates.state !== 'off') throw new Error(`the updater is ${updates.state} with its feed turned off`)
 
   await waitFor("!!document.querySelector('.titlebar') && !!document.querySelector('.icon-rail')", 30000, 'the interface')
 

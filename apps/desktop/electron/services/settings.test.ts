@@ -533,28 +533,27 @@ describe('SettingsService general and notices', () => {
     assert.equal(settings.notifyDone, 'background')
     assert.equal(settings.notifyNeeds, 'background')
     assert.equal(settings.flashTaskbar, true)
+    assert.equal(settings.autoUpdate, true)
   })
 
   it('saves each one, reads it back after a restart, and takes only the values it knows', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
-    settings.save({ sendKey: 'ctrl-enter', keepAwake: false, notifyDone: 'always', notifyNeeds: 'never', flashTaskbar: false })
+    settings.save({ sendKey: 'ctrl-enter', keepAwake: false, notifyDone: 'always', notifyNeeds: 'never', flashTaskbar: false, autoUpdate: false })
     const strange = settings.save({
       sendKey: 'shift-enter' as unknown as Settings['sendKey'],
       keepAwake: 'yes' as unknown as boolean,
       notifyDone: 'sometimes' as unknown as Settings['notifyDone'],
       notifyNeeds: 1 as unknown as Settings['notifyNeeds'],
       flashTaskbar: null as unknown as boolean,
+      autoUpdate: 'on' as unknown as boolean,
     })
-    assert.deepEqual(
-      [strange.sendKey, strange.keepAwake, strange.notifyDone, strange.notifyNeeds, strange.flashTaskbar],
-      ['ctrl-enter', false, 'always', 'never', false],
-      'a value that is not one of the choices changes nothing',
-    )
+    const picked = (from: Settings) => [from.sendKey, from.keepAwake, from.notifyDone, from.notifyNeeds, from.flashTaskbar, from.autoUpdate]
+    assert.deepEqual(picked(strange), ['ctrl-enter', false, 'always', 'never', false, false], 'a value that is not one of the choices changes nothing')
     const restarted = new SettingsService(dir, new FakeCipher(), 'win32').get()
-    assert.deepEqual([restarted.sendKey, restarted.keepAwake, restarted.notifyDone, restarted.notifyNeeds, restarted.flashTaskbar], ['ctrl-enter', false, 'always', 'never', false])
-    fs.writeFileSync(file(), JSON.stringify({ sendKey: 'tab', keepAwake: 0, notifyDone: [], notifyNeeds: {}, flashTaskbar: 'false' }))
+    assert.deepEqual(picked(restarted), ['ctrl-enter', false, 'always', 'never', false, false])
+    fs.writeFileSync(file(), JSON.stringify({ sendKey: 'tab', keepAwake: 0, notifyDone: [], notifyNeeds: {}, flashTaskbar: 'false', autoUpdate: 1 }))
     const damaged = new SettingsService(dir, new FakeCipher(), 'win32').get()
-    assert.deepEqual([damaged.sendKey, damaged.keepAwake, damaged.notifyDone, damaged.notifyNeeds, damaged.flashTaskbar], ['enter', true, 'background', 'background', true])
+    assert.deepEqual(picked(damaged), ['enter', true, 'background', 'background', true, true])
   })
 })
 

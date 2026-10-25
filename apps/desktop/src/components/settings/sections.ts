@@ -16,7 +16,7 @@ export interface SectionInfo {
 }
 
 export const SECTIONS: readonly SectionInfo[] = [
-  { id: 'general', title: 'General', description: 'How messages are sent, sleep while the agent works, and where chats keep their files.', keywords: 'enter send multiline steer queue follow-up sleep awake chats folder standalone' },
+  { id: 'general', title: 'General', description: 'How messages are sent, sleep while the agent works, where chats keep their files, and updates.', keywords: 'enter send multiline steer queue follow-up sleep awake chats folder standalone update' },
   {
     id: 'personalization',
     title: 'Personalization',
@@ -59,6 +59,8 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'general.followUp', section: 'general', label: 'While the agent works', keywords: 'queue steer follow-up enter' },
   { id: 'general.keepAwake', section: 'general', label: 'Keep the computer awake while the agent works', keywords: 'sleep power suspend' },
   { id: 'general.chats', section: 'general', label: 'Folder for chats', keywords: 'standalone sessions without a project documents' },
+  { id: 'general.autoUpdate', section: 'general', label: 'Look for updates by itself', keywords: 'update upgrade new version build automatic download' },
+  { id: 'general.update', section: 'general', label: 'Check for updates', keywords: 'update upgrade new version build restart install release' },
   { id: 'personalization.instructions', section: 'personalization', label: 'Your instructions', keywords: 'encode.md prompt rules about me every project' },
   { id: 'personalization.project', section: 'personalization', label: 'This project’s instructions', keywords: 'encode.md agents.md claude.md folder repository' },
   { id: 'notifications.done', section: 'notifications', label: 'When a request finishes', keywords: 'done notice toast' },

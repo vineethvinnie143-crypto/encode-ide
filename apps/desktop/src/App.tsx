@@ -31,6 +31,7 @@ import { useScreenReaderRunning } from './stores/editor-layout'
 import { useGit } from './stores/git'
 import { usePanels } from './stores/panels'
 import { useRemote } from './stores/remote'
+import { useUpdates } from './stores/updates'
 import { useSessions } from './stores/sessions'
 import { useSettings } from './stores/settings'
 import { useUi } from './stores/ui'
@@ -97,7 +98,13 @@ export default function App() {
     void useSessions.getState().init()
     void useGit.getState().refresh()
     // The connection of a folder on another machine, for the sidebar's badge.
-    return useRemote.getState().init()
+    const offRemote = useRemote.getState().init()
+    // A tester build's updates (ADR 0127): the title bar's button, Settings and About follow them.
+    const offUpdates = useUpdates.getState().init()
+    return () => {
+      offRemote()
+      offUpdates()
+    }
   }, [])
 
   useEffect(() => {

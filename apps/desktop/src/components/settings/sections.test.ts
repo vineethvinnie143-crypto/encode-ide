@@ -38,6 +38,7 @@ describe('searching the settings', () => {
   it('finds settings by their other words, and a section by its own', () => {
     assert.deepEqual(found('sleep'), [['general', ['general.keepAwake']]])
     assert.deepEqual(found('taskbar'), [['notifications', ['notifications.flash']]])
+    assert.deepEqual(found('update'), [['general', ['general.autoUpdate', 'general.update']]])
     const shortcuts = found('rebind')
     assert.deepEqual(shortcuts, [['shortcuts', ['shortcuts.list']]])
     assert.deepEqual(found('history'), [['archived', []]], 'the section itself, by its keywords')

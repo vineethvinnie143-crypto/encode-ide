@@ -30,6 +30,7 @@ import type {
   ShellCreateOptions,
   ShellPromptInfo,
   TodoItem,
+  UpdateStatus,
   WorktreeRequest,
   ZoomAction,
 } from '../shared/types'
@@ -59,6 +60,15 @@ const api: EncodeApi = {
     onOpenSession: (callback) => on<string>('app:open-session', callback),
     screenReader: () => invoke('app:screen-reader'),
     onScreenReader: (callback) => on<boolean>('app:screen-reader', callback),
+  },
+  updates: {
+    status: () => invoke('updates:status'),
+    check: () => invoke('updates:check'),
+    install: () => invoke('updates:install'),
+    cancel: () => invoke('updates:cancel'),
+    openPage: (build?: number) => invoke('updates:open-page', build),
+    outcome: () => invoke('updates:outcome'),
+    onStatus: (callback) => on<UpdateStatus>('updates:status', callback),
   },
   browser: {
     onOpenTab: (callback) => on<string>('browser:open-tab', callback),

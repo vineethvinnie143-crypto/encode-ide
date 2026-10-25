@@ -1,19 +1,37 @@
 # Testing eNCode
 
 This is for the people trying the tester builds: the owner and a few friends. A tester build changes often, is not
-signed and does not update itself. Windows 10 or 11, 64-bit.
+signed, and once installed updates itself when you restart for it. Windows 10 or 11, 64-bit.
 
 ## Get it
 
-A tester build comes from a CI run started by hand on `main` (GitHub → Actions → CI → *Run workflow*). It is kept
-for 14 days as an artifact of that run (GitHub → Actions → the run → *Artifacts*), named
-`eNCode-windows-<commit>-run<number>`; only the newest build is kept, to stay within the repository's storage. It
-holds:
+A tester build comes from a CI run started by hand on `main` (GitHub → Actions → CI → *Run workflow*). It is
+published as a release, `build-<number>` (GitHub → Releases), and kept for 14 days as an artifact of that run
+(GitHub → Actions → the run → *Artifacts*), named `eNCode-windows-<commit>-run<number>`. Both hold:
 
 | File | Use it when |
 | --- | --- |
 | `eNCode-<version>-setup.exe` | Normally. Installs for your user only, with no administrator prompt, and adds a Start menu entry. |
 | `eNCode-<version>-portable.exe` | You cannot or do not want to install. Nothing is installed, and it starts more slowly because it unpacks itself each time. |
+
+Install it once by hand. From then on an installed build gets the next one by itself (below). The eight builds
+handed out before this updater cannot look, so the first build with it is installed by hand too.
+
+## Updates
+
+An installed tester build looks on GitHub for a newer one 30 seconds after it starts and every four hours. It
+downloads it in the background and checks its SHA-256 against the release, then a **Restart to update** button shows in
+the title bar, with a notice. Click it: eNCode closes, the installer runs without asking anything, and eNCode starts
+again on the new build. A notice then says **Updated to build N**, and **Help → About eNCode** shows the new number.
+
+- Ask while the agent works: the button says **Restarts after the agents**, and eNCode restarts when they are done.
+  Click it again to stop waiting.
+- **Settings → General → Updates** shows this build's number, what it found and when, what is new in a newer build,
+  **Check now**, and a switch to stop looking by itself.
+- The portable program does not replace itself: it says a newer build is out and opens its release page.
+- Most useful to hear about: a download that fails or never finishes, a restart that leaves you on the old build (the
+  notice says so), the installer asking anything, or a shortcut or setting that is gone afterwards. Save diagnostics:
+  its **Updates** line says what the updater last did.
 
 ## First start
 
@@ -123,7 +141,8 @@ model does on your own work, a task that says it could not run, and how long it 
   To try it, ask it to read `%APPDATA%\eNCode\eNCode-settings.json`: it should say it cannot, and why.
 - Open a **copy** of a project you care about, not the only copy.
 - eNCode sends nothing anywhere except your requests to the model provider you chose and, when you approve it, the web
-  pages the agent fetches. There is no telemetry and no update check.
+  pages the agent fetches, plus the updater's look at GitHub's releases (Settings → General → Updates turns it off).
+  There is no telemetry.
 
 ## Permissions and trust
 
@@ -960,7 +979,8 @@ Updating means installing the next build over the last one: everything above sta
   folder it prepared keeps its marks after eNCode closes: they let programs that run at Windows' low integrity level,
   as the sandboxed commands do, write there.
 - Not signed, so SmartScreen warns on first start, and some antivirus programs look closely at a new program.
-- No automatic updates: a new build is a new download.
+- Updates check each download's SHA-256 against its release, but the release itself is not signed: whoever can
+  publish a release in the repository can ship a build.
 - A network that needs a proxy does not work yet for model requests.
 - A folder on another machine: signing in by key or ssh-agent only (no password or one-time code prompts); Linux and
   macOS machines only; a dropped connection ends what was running there (the conversation stays, ask again); such a
