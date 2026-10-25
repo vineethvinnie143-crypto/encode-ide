@@ -253,10 +253,13 @@ describe('a session whose commands come with digests (ADR 0133)', () => {
       },
     })
     await h.run('run the tests')
-    const results = h.conversation
-      .messages()
-      .flatMap((message) => (typeof message.content === 'string' ? [] : message.content))
-      .flatMap((block) => (block.type === 'tool-result' && block.toolUseId.startsWith('run_') ? [block.content.map((part) => (part.type === 'text' ? part.text : '')).join('')] : []))
+    const results: string[] = []
+    for (const message of h.conversation.messages()) {
+      if (message.role !== 'user' || typeof message.content === 'string') continue
+      for (const block of message.content) {
+        if (block.type === 'tool-result' && block.toolUseId.startsWith('run_')) results.push(block.content.map((part) => (part.type === 'text' ? part.text : '')).join(''))
+      }
+    }
     assert.equal(results.length, DIGEST_READ_BACKS_TO_STOP + 1)
     for (const result of results.slice(0, -1)) {
       assert.match(result, /^run\d FAILED one\n\n\[… The digest leaves out the lines of 200 passing tests\. All of it is in .+: Read it with offset and limit, or Grep it\. …\]$/)

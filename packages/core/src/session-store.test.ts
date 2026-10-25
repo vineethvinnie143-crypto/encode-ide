@@ -317,8 +317,8 @@ describe('marks and summaries', () => {
     const day = new Date(2026, 9, 24, 9, 30).getTime()
     const next = new Date(2026, 9, 25, 9, 30).getTime()
     const used = { calls: 1, inputTokens: 10, cachedTokens: 0, outputTokens: 1 }
-    await log.append({ type: 'entry', entry: { id: 'u1', kind: 'user', text: 'one', createdAt: day, usage: { ...used, context: { rewrites: 3, summaries: 1, readBacks: 1, editMisses: 0, checkBounces: 1, claimBounces: 0 } } } })
-    await log.append({ type: 'entry', entry: { id: 'u2', kind: 'user', text: 'two', createdAt: day + 1, usage: { ...used, context: { rewrites: 2, summaries: 0, readBacks: 2, editMisses: 1, checkBounces: 0, claimBounces: 1 } } } })
+    await log.append({ type: 'entry', entry: { id: 'u1', kind: 'user', text: 'one', createdAt: day, usage: { ...used, context: { rewrites: 3, summaries: 1, readBacks: 1, editMisses: 0, checkBounces: 1, claimBounces: 0, digests: 0, digestReadBacks: 0 } } } })
+    await log.append({ type: 'entry', entry: { id: 'u2', kind: 'user', text: 'two', createdAt: day + 1, usage: { ...used, context: { rewrites: 2, summaries: 0, readBacks: 2, editMisses: 1, checkBounces: 0, claimBounces: 1, digests: 0, digestReadBacks: 0 } } } })
     await log.append({ type: 'entry', entry: { id: 'u3', kind: 'user', text: 'three', createdAt: next, usage: used } })
     const [usage] = await store.usage()
     assert.deepEqual(usage.days['2026-10-24']!.context, { rewrites: 5, summaries: 1, readBacks: 3, editMisses: 1, checkBounces: 1, claimBounces: 1, digests: 0, digestReadBacks: 0 })
