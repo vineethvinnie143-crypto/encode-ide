@@ -1,4 +1,4 @@
-export type { EngineLimits, EngineName, EnginePolicy, EngineProbe, SandboxEngine, SandboxState, SandboxStatus, SpawnSpec } from './engine'
+export type { EngineLimits, EngineName, EnginePolicy, EngineProbe, GrantOutcome, SandboxEngine, SandboxState, SandboxStatus, SpawnSpec } from './engine'
 export { SandboxError } from './errors'
 export { PROTECTED_IN_PROJECT, buildPolicy, gitDirectories } from './policy'
 export type { PolicyInput, PolicyIo } from './policy'

@@ -725,6 +725,8 @@ export type SandboxAction =
   | { type: 'recheck' }
   /** Takes the marks off every folder, or only these. */
   | { type: 'unmark'; folders?: string[] }
+  /** Gives your account Full control of a folder in `blocked`, after Windows asks for an administrator, and marks it (ADR 0118). */
+  | { type: 'fix'; folder: string }
 
 /** The sandbox as it is after an action, with what happened in words. */
 export type SandboxOutcome = { ok: true; report: SandboxReport; note?: string } | { ok: false; reason: string; report: SandboxReport }
