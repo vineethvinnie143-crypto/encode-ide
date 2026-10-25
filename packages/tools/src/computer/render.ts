@@ -4,7 +4,7 @@
  * the next step can use, and nothing else.
  */
 import { classifyApp, labelFor } from './apps'
-import type { ActResult, Capture, Element, Look, WindowInfo } from './contract'
+import type { ActResult, Capture, Element, Look, Performed, WindowInfo } from './contract'
 import { diffOutlines, clip, formatOutline, untrustedScreenContent } from './outline'
 import type { DesktopHandle } from './state'
 
@@ -52,9 +52,16 @@ export function describeWindows(windows: readonly WindowInfo[], desktop: Desktop
   return lines.join('\n')
 }
 
+/** What the marks or the grid on an image say (ADR 0121). */
+export function annotationNote(capture: Capture): string {
+  if (capture.marks) return ` ${capture.marks === 1 ? 'One element carries the number of its ref' : `${capture.marks} elements carry the number of their ref`} in a coloured tag beside it: 12 is e12.`
+  if (capture.grid && capture.grid.of === capture.id) return ` Nothing in this window is listed to number, so the screenshot has a grid labelled in its own pixels, every ${capture.grid.step}: read coordinates off it.`
+  return ''
+}
+
 function imageNote(capture: Capture, attached: boolean, vision: boolean): string {
   const shrunk = capture.scale < 1 ? ` (the window is ${Math.round(capture.box[2])}x${Math.round(capture.box[3])}, sent smaller)` : ''
-  if (attached) return `Screenshot ${capture.id} is ${capture.width}x${capture.height} pixels${shrunk}. Coordinates are pixels of this screenshot.`
+  if (attached) return `Screenshot ${capture.id} is ${capture.width}x${capture.height} pixels${shrunk}. Coordinates are pixels of this screenshot.${annotationNote(capture)}`
   if (!vision) return `This model cannot read images, so there is no screenshot: use the refs. Positions written @x,y are pixels of the window (${capture.width}x${capture.height}).`
   return `Positions and coordinates are pixels of screenshot ${capture.id} (${capture.width}x${capture.height})${shrunk}.`
 }
@@ -124,12 +131,20 @@ export function describeChange(look: Look, before: readonly Element[] | undefine
   return { text: lines.join('\n'), changed: look.changed || !look.stable }
 }
 
+/** What the pointer went to, as Windows found it under the pixel (ADR 0121): ` on e31 button "Send"`. */
+function pointedAt(done: Performed): string {
+  const on = done.on
+  if (!on) return ''
+  const name = on.name ? ` "${clip(on.name, 50)}"` : ''
+  return ` on ${on.ref ? `${on.ref} ` : ''}${on.role}${name}`
+}
+
 /** What an input did: how it was done, what opened or closed, and what changed in the window. */
 export function describeAct(result: ActResult, before: readonly Element[] | undefined, subject: (index: number) => string): Described {
   const lines: string[] = []
   result.performed.forEach((done, index) => {
     const how = done.via === 'mouse' || done.via === 'keys' ? '' : ` through its own interface (${done.via})`
-    lines.push(`${VERBS[done.kind] ?? done.kind} ${subject(index)}${how}${done.detail ? ` (${done.detail})` : ''}.`)
+    lines.push(`${VERBS[done.kind] ?? done.kind} ${subject(index)}${how}${pointedAt(done)}${done.detail ? ` (${done.detail})` : ''}.`)
   })
   const look = result.look
   for (const window of result.opened) {

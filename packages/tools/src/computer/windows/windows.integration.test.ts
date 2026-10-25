@@ -934,3 +934,116 @@ describe('the Windows helper and the Start menu', { skip: onWindows ? false : 't
     }
   })
 })
+
+describe('the Windows helper aims precisely (ADR 0121)', { skip: onWindows ? false : 'these tests drive a real Windows desktop' }, () => {
+  let c: Fixture
+
+  before(async () => {
+    if (!onWindows) return
+    c = await launch('eNCode Fixture C', 80, 60)
+    const window = await c.window()
+    await desktop.focus({ window: window.id, allowed: [window.app] }, SIGNAL)
+    await c.until((now) => now.focused, 'the third window to be in front')
+  })
+
+  after(async () => {
+    if (!onWindows) return
+    c?.child.kill()
+  })
+
+  it('numbers what can be clicked on the picture, and the numbers never read as a change', async () => {
+    const window = await c.window()
+    const plain = await desktop.look(lookOf(window), SIGNAL)
+    const marked = await desktop.look(lookOf(window, { marks: true }), SIGNAL)
+    await keep('marked', marked)
+    assert.equal(marked.changed, false, 'the numbers are drawn after the change is measured')
+    assert.equal(plain.capture.marks, undefined, 'and only when asked for')
+    assert.ok((marked.capture.marks ?? 0) >= 6, `the buttons, fields, check box and list get numbers: ${marked.capture.marks}`)
+    const before = decodePng(plain.capture.data!)
+    const after = decodePng(marked.capture.data!)
+    assert.deepEqual([after.width, after.height], [before.width, before.height])
+    const add = named(marked, 'Add item')
+    const [left, top] = imagePoint(marked.capture, [add.box[0], add.box[1]])
+    let differ = 0
+    for (let y = Math.max(0, top - 16); y < Math.min(after.height, top + add.box[3]); y++) {
+      for (let x = left; x < Math.min(after.width, left + add.box[2]); x++) if (before.pixel(x, y).join() !== after.pixel(x, y).join()) differ++
+    }
+    assert.ok(differ > 40, `the number and the frame of "Add item" are drawn where it is: ${differ} pixels differ`)
+    const state = await c.state()
+    const [cx, cy] = imagePoint(marked.capture, [state.canvas[0] + Math.floor(state.canvas[2] / 2), state.canvas[1] + Math.floor(state.canvas[3] / 2)])
+    assert.deepEqual(after.pixel(cx, cy), [200, 220, 255], 'a plain area gets no number')
+  })
+
+  it('enlarges a zoom four times and draws a grid labelled in the pixels of the screenshot', async () => {
+    const window = await c.window()
+    const look = await desktop.look(lookOf(window, { outline: 'none' }), SIGNAL)
+    assert.equal(look.capture.scale, 1)
+    const zoom = await desktop.look(lookOf(window, { outline: 'none', zoom: { capture: look.capture.id, box: [0, 0, 100, 60] } }), SIGNAL)
+    await keep('zoom', zoom)
+    assert.equal(zoom.capture.scale, 4)
+    assert.deepEqual([zoom.capture.width, zoom.capture.height], [400, 240])
+    assert.deepEqual(zoom.capture.grid, { step: 20, of: look.capture.id })
+    const picture = decodePng(zoom.capture.data!)
+    assert.deepEqual([picture.width, picture.height], [400, 240])
+    // The line at x = 20 of the screenshot is x = 80 of the zoom: magenta over whatever is there.
+    const magenta = (pixel: number[]) => pixel[0] > pixel[1] + 60 && pixel[2] > pixel[1] + 40
+    let onLine = 0
+    for (let y = 20; y < 240; y++) if (magenta(picture.pixel(80, y))) onLine++
+    assert.ok(onLine > 150, `the grid line is drawn: ${onLine} of 220 pixels`)
+  })
+
+  it('says what a click by coordinate landed on, by its ref', async () => {
+    const window = await c.window()
+    const look = await desktop.look(lookOf(window), SIGNAL)
+    const add = named(look, 'Add item')
+    const centre: Point = [add.box[0] + Math.floor(add.box[2] / 2), add.box[1] + Math.floor(add.box[3] / 2)]
+    const result = await desktop.act(actOf(window, [clickPoint(look.capture, centre)]), SIGNAL)
+    assert.deepEqual(result.performed[0].on, { ref: add.ref, role: 'button', name: 'Add item' })
+    await c.until((now) => now.items.length === 1, 'the item to be added')
+  })
+
+  it('scrolls an item that is out of view back into view, and clicks it there', async () => {
+    const window = await c.window()
+    let look = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+    const add = named(look, 'Add item')
+    await desktop.act(actOf(window, Array.from({ length: 20 }, () => clickElement(add.ref)), { settleMs: 300 }), SIGNAL)
+    await c.until((now) => now.items.length >= 21, 'twenty more items')
+    look = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+    const first = named(look, 'Item 1')
+    const list = named(look, 'Items')
+    await desktop.act(actOf(window, [{ kind: 'scroll', target: { element: list.ref }, direction: 'down', amount: 15 }]), SIGNAL)
+    const scrolled = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+    assert.equal(scrolled.outline?.elements.some((element) => element.ref === first.ref), false, 'the first item is out of view')
+    const result = await desktop.act(actOf(window, [clickElement(first.ref, 'left', 2)]), SIGNAL)
+    assert.equal(result.performed[0].via, 'mouse')
+    assert.match(result.performed[0].detail ?? '', /scrolled into view first/)
+    await c.until((now) => now.selected === 'Item 1', 'the first item to be selected by the click')
+    assert.ok(result.look?.outline?.elements.some((element) => element.ref === first.ref), 'and it is in view again')
+  })
+
+  it('lists the taskbar as an application of its own, and the desktop under File Explorer', async (t) => {
+    const windows = await desktop.windows(SIGNAL)
+    const shell = windows.filter((window) => ['taskbar', 'shell', 'explorer.exe'].includes(window.app))
+    console.log(`[shell] ${shell.map((window) => `${window.id} ${window.app} "${window.label}" "${window.title}" [${window.box.join(', ')}]`).join('; ') || 'no shell windows'}`)
+    const taskbar = windows.find((window) => window.app === 'taskbar')
+    const icons = windows.find((window) => window.app === 'explorer.exe' && window.title === 'Desktop')
+    if (!taskbar && !icons) return t.skip('this desktop shows no taskbar and no desktop')
+    if (taskbar) {
+      assert.equal(taskbar.label, 'Taskbar')
+      assert.equal(taskbar.blocked, undefined)
+      const look = await desktop.look(lookOf(taskbar, { marks: true }), SIGNAL)
+      await keep('taskbar', look)
+      console.log(`[shell] the taskbar lists ${look.outline?.elements.length ?? 0} elements, ${look.capture.marks ?? 0} numbered: ${(look.outline?.elements ?? []).slice(0, 10).map((element) => `${element.role} "${element.name}"`).join(', ')}`)
+      assert.deepEqual(look.capture.box, taskbar.box)
+    }
+    if (icons) {
+      assert.equal(icons.label, 'Desktop')
+      assert.equal(icons.blocked, undefined)
+      const look = await desktop.look(lookOf(icons, { marks: true }), SIGNAL)
+      await keep('desktop', look)
+      console.log(`[shell] the desktop lists ${look.outline?.elements.length ?? 0} elements, ${look.capture.masked} areas painted over: ${(look.outline?.elements ?? []).slice(0, 10).map((element) => `${element.role} "${element.name}"`).join(', ')}`)
+      assert.ok(look.capture.masked >= 1, 'the windows of other programs in front of the desktop are painted over')
+      assert.equal(look.related.some((window) => window.title === 'Desktop'), false)
+    }
+  })
+})

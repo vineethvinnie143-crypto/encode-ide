@@ -26,6 +26,11 @@ internal static class Parity
         answer["json"] = RoundTrip(Args.Arr(cases, "json"));
         answer["outline"] = Outlines(Args.Arr(cases, "outline"));
         answer["diff"] = Diffs(Args.Arr(cases, "diff"));
+        answer["zoom"] = Zooms(Args.Arr(cases, "zoom"));
+        answer["toImage"] = ToImage(Args.Arr(cases, "toImage"));
+        answer["marks"] = Marks(Args.Arr(cases, "marks"));
+        answer["gridStep"] = GridSteps(Args.Arr(cases, "gridStep"));
+        answer["gridLines"] = GridLineCases(Args.Arr(cases, "gridLines"));
         StreamWriter writer = new StreamWriter(Console.OpenStandardOutput(), utf8);
         writer.Write(Json.Write(answer));
         writer.Flush();
@@ -195,6 +200,92 @@ internal static class Parity
             answer["cut"] = result.Cut;
             answer["passwords"] = passwords;
             results.Add(answer);
+        }
+        return results;
+    }
+
+    // ---------------------------------------------------------------- marks and grids (ADR 0121)
+
+    private static List<object> Zooms(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            int[] c = Args.Ints(item, 4);
+            int width;
+            int height;
+            double scale;
+            Geo.FitZoom(c[0], c[1], c[2], c[3], out width, out height, out scale);
+            results.Add(new object[] { width, height, scale });
+        }
+        return results;
+    }
+
+    private static List<object> ToImage(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            List<object> c = (List<object>)item;
+            Box box = Geo.BoxToImage(Box.FromJson(c[0]), Box.FromJson(c[1]), Convert.ToDouble(c[2]), Convert.ToInt32(c[3]), Convert.ToInt32(c[4]));
+            results.Add(box.ToJson());
+        }
+        return results;
+    }
+
+    /// <summary>Each case: { width, height, max, candidates: [[label, role, [x, y, w, h], acts]] }; the answer, each mark as [label, box, border, tag, color].</summary>
+    private static List<object> Marks(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            Dictionary<string, object> c = Args.Obj(item);
+            List<MarkCandidate> candidates = new List<MarkCandidate>();
+            foreach (object raw in Args.Arr(c, "candidates"))
+            {
+                List<object> fields = (List<object>)raw;
+                MarkCandidate candidate = new MarkCandidate();
+                candidate.Label = (string)fields[0];
+                candidate.Role = fields[1] as string;
+                candidate.Box = Box.FromJson(fields[2]);
+                candidate.Acts = (bool)fields[3];
+                candidates.Add(candidate);
+            }
+            List<object> marks = new List<object>();
+            foreach (PlacedMark mark in MarkPlan.Place(candidates, Args.Int(c, "width", 0), Args.Int(c, "height", 0), 7, 14, Args.Int(c, "max", MarkPlan.MaxMarks)))
+            {
+                marks.Add(new object[] { mark.Label, mark.Box.ToJson(), mark.Border, mark.Tag.ToJson(), mark.Color });
+            }
+            results.Add(marks);
+        }
+        return results;
+    }
+
+    private static List<object> GridSteps(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            List<object> c = (List<object>)item;
+            results.Add(GridPlan.Step(Convert.ToDouble(c[0]), Convert.ToDouble(c[1]), Convert.ToInt32(c[2]), Convert.ToInt32(c[3])));
+        }
+        return results;
+    }
+
+    private static List<object> GridLineCases(List<object> cases)
+    {
+        List<object> results = new List<object>();
+        if (cases == null) return results;
+        foreach (object item in cases)
+        {
+            List<object> c = (List<object>)item;
+            List<object> lines = new List<object>();
+            foreach (int line in GridPlan.Lines(Convert.ToDouble(c[0]), Convert.ToDouble(c[1]), Convert.ToInt32(c[2]))) lines.Add(line);
+            results.Add(lines);
         }
         return results;
     }

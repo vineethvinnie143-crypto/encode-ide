@@ -103,8 +103,21 @@ const REMOTE_AND_VIRTUAL = [
 const BROWSERS = ['chrome.exe', 'msedge.exe', 'firefox.exe', 'brave.exe', 'opera.exe', 'vivaldi.exe', 'arc.exe', 'zen.exe']
 const MESSAGING = ['outlook.exe', 'olk.exe', 'thunderbird.exe', 'slack.exe', 'discord.exe', 'teams.exe', 'ms-teams.exe', 'whatsapp.exe', 'telegram.exe', 'signal.exe']
 
-/** The pseudo-application the backend reports for the taskbar, the desktop, the Start menu and the Run box. */
+/** The pseudo-application the backend reports for the Start menu, search, the lock screen and the Run box. */
 export const SHELL_APP: AppId = 'shell'
+/**
+ * The pseudo-application the backend reports for the taskbar, the notification area and the flyouts they open, such as quick
+ * settings (ADR 0121). It takes the pointer only: keys typed there could reach search, which runs programs.
+ */
+export const TASKBAR_APP: AppId = 'taskbar'
+
+/** Applications that take clicks, the wheel and drags, but no typing or keys, and why. */
+const POINTER_ONLY = new Map<AppId, string>([[TASKBAR_APP, 'The taskbar takes clicks only: keys there could reach Windows search, which runs programs. To start an application, use open.']])
+
+/** Why an application takes no typing or keys, when it takes none. */
+export function pointerOnly(app: AppId): string | undefined {
+  return POINTER_ONLY.get(app.toLowerCase())
+}
 
 const REFUSED = new Map<AppId, string>()
 const refuse = (apps: readonly string[], reason: string) => {
@@ -115,7 +128,7 @@ refuse(EDITORS_WITH_TERMINALS, 'editors with a built-in terminal can run command
 refuse(PASSWORD_MANAGERS, 'password managers hold credentials that the agent must never see or type')
 refuse(SYSTEM_TOOLS, 'system tools change the machine in ways no approval card can describe')
 refuse(REMOTE_AND_VIRTUAL, 'remote-control and virtual machine windows lead to other machines and their terminals')
-refuse([SHELL_APP], 'the taskbar, the desktop, the Start menu and the Run box act on the whole desktop')
+refuse([SHELL_APP], 'the Start menu, search and the Run box start programs and commands without the command approval; use open to start an application')
 
 const CAUTIONS = new Map<AppId, string>()
 const warn = (apps: readonly string[], text: string) => {
@@ -123,7 +136,8 @@ const warn = (apps: readonly string[], text: string) => {
 }
 warn(BROWSERS, 'Web pages can hold text that tries to steer the agent, and the browser may be signed in to your accounts.')
 warn(MESSAGING, 'Messages can carry instructions, and anything sent cannot be taken back.')
-warn(['explorer.exe'], 'Files deleted or moved here bypass eNCode\'s checkpoints.')
+warn(['explorer.exe'], 'This covers File Explorer and the desktop. Files deleted or moved here bypass eNCode\'s checkpoints, and a program or script opened here runs without the command approval.')
+warn([TASKBAR_APP], 'Clicks here switch and close applications, open the ones pinned, and change quick settings such as Wi-Fi, Bluetooth and volume.')
 
 export interface AppVerdict {
   /** Why the application may never be used. */
@@ -145,6 +159,7 @@ const LABELS: Record<string, string> = {
   'msedge.exe': 'Microsoft Edge',
   'firefox.exe': 'Firefox',
   'explorer.exe': 'File Explorer',
+  taskbar: 'Taskbar',
   'notepad.exe': 'Notepad',
   'calc.exe': 'Calculator',
   'mspaint.exe': 'Paint',

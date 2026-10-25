@@ -39,6 +39,8 @@ namespace Encode.Desktop
         public string ZoomCapture;
         public Box ZoomBox;
         public int SettleMs;
+        /// <summary>Draw each listed element's number on the picture (ADR 0121); a window that lists none gets a grid instead.</summary>
+        public bool Marks;
     }
 
     /// <summary>The desktop as the contract describes it. One instance serves every request, one at a time.</summary>
@@ -228,6 +230,7 @@ namespace Encode.Desktop
             options.MaxImageEdge = Clamp(Args.Int(map, "maxImageEdge", Geo.MaxImageEdge), 64, 4096);
             options.MaxImagePixels = Clamp(Args.Int(map, "maxImagePixels", Geo.MaxImagePixels), 4096, 8000000);
             options.SettleMs = Clamp(Args.Int(map, "settleMs", 0), 0, 10000);
+            options.Marks = Args.Bool(map, "marks", false);
             Dictionary<string, object> zoom = Args.Obj(Args.Get(map, "zoom"));
             if (zoom != null)
             {
@@ -257,7 +260,9 @@ namespace Encode.Desktop
             {
                 if (hwnd == window.Hwnd) break;
                 if (!Native.IsWindowVisible(hwnd) || Native.IsIconic(hwnd) || WindowTable.IsCloaked(hwnd)) continue;
-                if (WindowTable.PidOf(hwnd) == ownerPid || WindowTable.IsOwnedBy(hwnd, window.Hwnd)) continue;
+                bool same = WindowTable.PidOf(hwnd) == ownerPid || WindowTable.IsOwnedBy(hwnd, window.Hwnd);
+                // The taskbar runs in the desktop's and File Explorer's program, but it is an application of its own (ADR 0121).
+                if (same && WindowTable.IsTaskbarClass(WindowTable.ClassOf(hwnd)) == WindowTable.IsTaskbarClass(window.ClassName)) continue;
                 uint style = WindowTable.ExStyle(hwnd);
                 if ((style & Const.WS_EX_TRANSPARENT) != 0) continue;
                 if ((style & Const.WS_EX_LAYERED) != 0)
@@ -303,9 +308,9 @@ namespace Encode.Desktop
 
             bool zoom = options.ZoomCapture != null;
             Box shot = area;
+            CaptureRecord source = null;
             if (zoom)
             {
-                CaptureRecord source;
                 if (!captures.TryGetValue(options.ZoomCapture, out source) || source.WindowId != w.Id) throw new HelperException("stale-capture", "Capture " + options.ZoomCapture + " is unknown.");
                 if (!source.WindowBox.Same(w.Box)) throw new HelperException("stale-capture", w.Id + " moved or changed size since screenshot " + source.Id + ".");
                 Box region = new Box(
@@ -335,11 +340,15 @@ namespace Encode.Desktop
             int imageWidth;
             int imageHeight;
             double scale;
-            Geo.FitImage(shot.W, shot.H, options.MaxImageEdge, options.MaxImagePixels, out imageWidth, out imageHeight, out scale);
+            if (zoom) Geo.FitZoom(shot.W, shot.H, options.MaxImageEdge, options.MaxImagePixels, out imageWidth, out imageHeight, out scale);
+            else Geo.FitImage(shot.W, shot.H, options.MaxImageEdge, options.MaxImagePixels, out imageWidth, out imageHeight, out scale);
 
             bool changed = false;
             string data = null;
             string mediaType = "image/png";
+            int marked = 0;
+            int gridStep = 0;
+            bool ownGrid = false;
             using (Bitmap bitmap = Imaging.Grab(shot))
             {
                 Imaging.Paint(bitmap, shot, masks);
@@ -363,7 +372,32 @@ namespace Encode.Desktop
                     memory[w.Id] = next;
                     Forget();
                 }
-                if (options.Image == "true" || (options.Image == "changed" && changed) || zoom) data = Imaging.Encode(bitmap, imageWidth, imageHeight, out mediaType);
+                if (options.Image == "true" || (options.Image == "changed" && changed) || zoom)
+                {
+                    // Marks and grids go on the picture as it is sent, after the change was measured, so they never read as a change.
+                    Bitmap shown = Imaging.Resize(bitmap, imageWidth, imageHeight);
+                    try
+                    {
+                        if (zoom)
+                        {
+                            gridStep = ZoomGrid(shown, source, shot, scale);
+                        }
+                        else if (options.Marks && outline != null)
+                        {
+                            marked = MarkElements(shown, outline, shot, scale, masks);
+                            if (marked == 0)
+                            {
+                                gridStep = OwnGrid(shown);
+                                ownGrid = true;
+                            }
+                        }
+                        data = Imaging.Encode(shown, imageWidth, imageHeight, out mediaType);
+                    }
+                    finally
+                    {
+                        if (!ReferenceEquals(shown, bitmap)) shown.Dispose();
+                    }
+                }
             }
 
             string id = "s" + (++captureCounter).ToString(CultureInfo.InvariantCulture);
@@ -389,11 +423,20 @@ namespace Encode.Desktop
             capture["mediaType"] = mediaType;
             if (data != null) capture["data"] = data;
             capture["masked"] = masks.Count;
+            if (marked > 0) capture["marks"] = marked;
+            if (gridStep > 0)
+            {
+                Dictionary<string, object> grid = new Dictionary<string, object>();
+                grid["step"] = gridStep;
+                grid["of"] = ownGrid ? id : source.Id;
+                capture["grid"] = grid;
+            }
 
             List<object> related = new List<object>();
             foreach (WindowRecord other in windows.List())
             {
-                if (other.Id != w.Id && other.App == w.App && other.Blocked == null) related.Add(other.ToJson());
+                // The desktop belongs to File Explorer's program, but it is not one of the folder windows a look is about.
+                if (other.Id != w.Id && other.App == w.App && other.Blocked == null && other.Desktop == w.Desktop) related.Add(other.ToJson());
             }
 
             Dictionary<string, object> look = new Dictionary<string, object>();
@@ -404,6 +447,75 @@ namespace Encode.Desktop
             look["changed"] = changed;
             look["stable"] = stable;
             return look;
+        }
+
+        // ---------------------------------------------------------------- marks and grids (ADR 0121)
+
+        private static bool Acts(string[] can)
+        {
+            foreach (string action in can) if (action != "scroll") return true;
+            return false;
+        }
+
+        /// <summary>Draws the number of each element worth a number on the picture, and says how many got one.</summary>
+        private int MarkElements(Bitmap image, OutlineResult outline, Box shot, double scale, List<Box> masks)
+        {
+            List<MarkCandidate> candidates = new List<MarkCandidate>();
+            foreach (OutlineEntry entry in outline.Entries)
+            {
+                NodeInfo node = entry.Node;
+                string reference = uia.RefOf(node);
+                if (reference == null || reference.Length < 2) continue;
+                // What another program covers is painted over, and a number there would point at what cannot be clicked.
+                bool hidden = false;
+                foreach (Box mask in masks)
+                {
+                    if (mask.Contains(node.Box.CenterX, node.Box.CenterY))
+                    {
+                        hidden = true;
+                        break;
+                    }
+                }
+                if (hidden) continue;
+                MarkCandidate candidate = new MarkCandidate();
+                candidate.Label = reference.Substring(1);
+                candidate.Role = node.Role;
+                candidate.Box = Geo.BoxToImage(node.Box, shot, scale, image.Width, image.Height);
+                candidate.Acts = Acts(node.Can);
+                candidates.Add(candidate);
+            }
+            List<PlacedMark> marks = MarkPlan.Place(candidates, image.Width, image.Height, Imaging.MarkCharWidth, Imaging.MarkTagHeight, MarkPlan.MaxMarks);
+            Imaging.DrawMarks(image, marks);
+            return marks.Count;
+        }
+
+        /// <summary>A grid on a zoom, labelled in the pixels of the screenshot it enlarges, and the spacing of its lines in those pixels.</summary>
+        private static int ZoomGrid(Bitmap image, CaptureRecord source, Box shot, double zoomScale)
+        {
+            // Pixel v of the screenshot is screen pixel source.Box.X + v / source.Scale, which is zoom pixel (that - shot.X) * zoomScale.
+            double fromX = (shot.X - source.Box.X) * source.Scale;
+            double toX = (shot.Right - source.Box.X) * source.Scale;
+            double fromY = (shot.Y - source.Box.Y) * source.Scale;
+            double toY = (shot.Bottom - source.Box.Y) * source.Scale;
+            double perUnit = zoomScale / source.Scale;
+            int step = GridPlan.Step(Math.Max(toX - fromX, toY - fromY), perUnit, 48, 12);
+            Imaging.DrawGrid(image, GridLines(fromX, toX, step, perUnit), GridLines(fromY, toY, step, perUnit));
+            return step;
+        }
+
+        /// <summary>A grid on a screenshot, labelled in its own pixels, for a window that lists nothing to put a number on.</summary>
+        private static int OwnGrid(Bitmap image)
+        {
+            int step = GridPlan.Step(Math.Max(image.Width, image.Height), 1, 80, 16);
+            Imaging.DrawGrid(image, GridLines(0, image.Width, step, 1), GridLines(0, image.Height, step, 1));
+            return step;
+        }
+
+        private static List<GridLine> GridLines(double from, double to, int step, double perUnit)
+        {
+            List<GridLine> lines = new List<GridLine>();
+            foreach (int value in GridPlan.Lines(from, to, step)) lines.Add(new GridLine(Geo.Round((value - from) * perUnit), value.ToString(CultureInfo.InvariantCulture)));
+            return lines;
         }
 
         private Dictionary<string, object> OutlineJson(OutlineResult outline)

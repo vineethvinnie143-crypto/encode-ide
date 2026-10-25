@@ -118,6 +118,14 @@ namespace Encode.Desktop
         public bool CanFocus;
     }
 
+    /// <summary>What is under a pixel (ADR 0121): the nearest listed element that holds it, by its ref, else the element Windows found there.</summary>
+    internal sealed class HitInfo
+    {
+        public string Ref;
+        public string Role;
+        public string Name;
+    }
+
     /// <summary>
     /// The window's accessibility tree: the outline the model reads, and the handles the helper keeps so that
     /// a ref the model names later still means the element it was given for.
@@ -244,6 +252,21 @@ namespace Encode.Desktop
             return false;
         }
 
+        /// <summary>The identity an element is registered under: its runtime id, which stays the same while the element lives. Null when it has none.</summary>
+        private static string KeyOf(AutomationElement element, string windowId)
+        {
+            try
+            {
+                int[] runtime = element.GetRuntimeId();
+                if (runtime == null || runtime.Length == 0) return null;
+                return windowId + ":" + string.Join(".", Array.ConvertAll(runtime, delegate(int n) { return n.ToString(System.Globalization.CultureInfo.InvariantCulture); }));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private static NodeInfo Read(AutomationElement element, string windowId)
         {
             NodeInfo node = new NodeInfo();
@@ -260,15 +283,7 @@ namespace Encode.Desktop
             node.Password = info.IsPassword;
             node.Focused = info.HasKeyboardFocus;
             node.Box = BoxOf(info.BoundingRectangle);
-            try
-            {
-                int[] runtime = element.GetRuntimeId();
-                if (runtime != null && runtime.Length > 0) node.Key = windowId + ":" + string.Join(".", Array.ConvertAll(runtime, delegate(int n) { return n.ToString(System.Globalization.CultureInfo.InvariantCulture); }));
-            }
-            catch (Exception)
-            {
-                node.Key = null;
-            }
+            node.Key = KeyOf(element, windowId);
 
             List<string> states = new List<string>();
             List<string> can = new List<string>();
@@ -501,6 +516,121 @@ namespace Encode.Desktop
                 }
                 return null;
             }, 3000, "Finding where " + entry.Ref + " is", cancel);
+        }
+
+        // ---------------------------------------------------------------- what is under a pixel (ADR 0121)
+
+        /// <summary>A question about the pointer that may go unanswered: an application that does not say is no reason to stop an input.</summary>
+        private static bool Unanswered(HelperException error, Cancel cancel)
+        {
+            if (cancel != null && cancel.IsCancelled) return false;
+            return error.Code == "hung" || error.Code == "failed" || error.Code == "stale-element";
+        }
+
+        private sealed class Found
+        {
+            public List<string> Keys = new List<string>();
+            public string Role;
+            public string Name;
+        }
+
+        /// <summary>
+        /// What Windows finds at the pixel, named by the nearest element of an outline that holds it (a button, when the pixel is on
+        /// its text). Null when the application does not say.
+        /// </summary>
+        public HitInfo At(int x, int y, string windowId, Cancel cancel)
+        {
+            Found found;
+            try
+            {
+                found = Worker.Run<Found>(delegate()
+                {
+                    AutomationElement element = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+                    if (element == null) return null;
+                    Found chain = new Found();
+                    AutomationElement.AutomationElementInformation info = element.Current;
+                    string role = null;
+                    ControlType type = info.ControlType;
+                    if (type != null) Roles.TryGetValue(type.Id, out role);
+                    chain.Role = role ?? "element";
+                    chain.Name = Clip(info.Name, 300) ?? "";
+                    TreeWalker walker = TreeWalker.ControlViewWalker;
+                    for (int depth = 0; element != null && depth < 12; depth++)
+                    {
+                        string key = KeyOf(element, windowId);
+                        if (key != null) chain.Keys.Add(key);
+                        element = walker.GetParent(element);
+                    }
+                    return chain;
+                }, 1500, "Reading what is under the pointer", cancel);
+            }
+            catch (HelperException error)
+            {
+                if (Unanswered(error, cancel)) return null;
+                throw;
+            }
+            if (found == null) return null;
+            HitInfo hit = new HitInfo();
+            hit.Role = found.Role;
+            hit.Name = found.Name;
+            // The tables are read here, on the caller's thread: a worker that was given up on may still be running.
+            foreach (string key in found.Keys)
+            {
+                string reference;
+                ElementEntry entry;
+                if (refOf.TryGetValue(key, out reference) && byRef.TryGetValue(reference, out entry) && entry.WindowId == windowId)
+                {
+                    hit.Ref = reference;
+                    hit.Role = entry.Role ?? hit.Role;
+                    hit.Name = entry.Name ?? hit.Name;
+                    break;
+                }
+            }
+            return hit;
+        }
+
+        /// <summary>Whether what Windows finds at the pixel is the element or a part of it. Null when the application does not say.</summary>
+        public bool? Covers(ElementEntry entry, int x, int y, Cancel cancel)
+        {
+            try
+            {
+                return Worker.Run<bool?>(delegate()
+                {
+                    AutomationElement element = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+                    TreeWalker walker = TreeWalker.ControlViewWalker;
+                    for (int depth = 0; element != null && depth < 25; depth++)
+                    {
+                        if (Automation.Compare(element, entry.Element)) return true;
+                        element = walker.GetParent(element);
+                    }
+                    return false;
+                }, 1500, "Checking what is over " + entry.Ref, cancel);
+            }
+            catch (HelperException error)
+            {
+                if (Unanswered(error, cancel)) return null;
+                throw;
+            }
+        }
+
+        /// <summary>Asks the element's list or tree to scroll it into view. False when it has no way to.</summary>
+        public bool ScrollIntoView(ElementEntry entry, Cancel cancel)
+        {
+            try
+            {
+                return Worker.Run<bool>(delegate()
+                {
+                    object pattern;
+                    if (!entry.Element.TryGetCurrentPattern(ScrollItemPattern.Pattern, out pattern)) return false;
+                    ((ScrollItemPattern)pattern).ScrollIntoView();
+                    return true;
+                }, 2500, "Scrolling " + entry.Ref + " into view", cancel);
+            }
+            catch (HelperException error)
+            {
+                if (Unanswered(error, cancel)) return false;
+                throw;
+            }
         }
 
         public void Invoke(ElementEntry entry, string how, Cancel cancel)

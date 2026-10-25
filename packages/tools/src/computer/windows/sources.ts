@@ -12,6 +12,7 @@ import imaging from './helper/Imaging.cs'
 import input from './helper/Input.cs'
 import json from './helper/Json.cs'
 import keys from './helper/Keys.cs'
+import marks from './helper/Marks.cs'
 import native from './helper/Native.cs'
 import outline from './helper/Outline.cs'
 import program from './helper/Program.cs'
@@ -35,6 +36,7 @@ export const HELPER_FILES: readonly SourceFile[] = [
   { name: 'Input.cs', text: input },
   { name: 'Json.cs', text: json },
   { name: 'Keys.cs', text: keys },
+  { name: 'Marks.cs', text: marks },
   { name: 'Native.cs', text: native },
   { name: 'Outline.cs', text: outline },
   { name: 'Program.cs', text: program },

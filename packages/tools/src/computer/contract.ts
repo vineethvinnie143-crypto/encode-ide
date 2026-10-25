@@ -110,13 +110,17 @@ export interface Capture {
   /** The image's size. */
   width: number
   height: number
-  /** Image pixels per screen pixel; 1 unless the area was too big to send whole. */
+  /** Image pixels per screen pixel: 1 unless the area was too big to send whole; above 1 for a zoom that enlarges (at most 4). */
   scale: number
   mediaType: 'image/png' | 'image/jpeg'
   /** Base64. Absent when no image was asked for: the numbers still say how coordinates map. */
   data?: string
   /** How many areas were painted over because they belong to other applications or are password fields. */
   masked: number
+  /** How many elements carry the number of their ref on the image (ADR 0121): "12" on an element is e12. */
+  marks?: number
+  /** A grid drawn on the image, every `step` pixels of capture `of`: the screenshot a zoom enlarges, or this capture itself. */
+  grid?: { step: number; of: CaptureId }
 }
 
 export interface Outline {
@@ -155,6 +159,11 @@ export interface LookRequest {
   zoom?: { capture: CaptureId; box: Box }
   /** Wait up to this long for the window to stop changing before looking. */
   settleMs?: number
+  /**
+   * Draw the number of each listed element's ref on the image, where the element is (ADR 0121), so the model reads which ref
+   * a thing on screen has. A window that lists nothing to number gets a grid labelled in the image's pixels instead.
+   */
+  marks?: boolean
 }
 
 /** Where an input goes: an element of the latest outline, or a pixel of a capture. */
@@ -185,7 +194,7 @@ export interface ActRequest {
   steps: readonly Step[]
   /** Where the agent left the cursor, when the same task is still going: anywhere else means the user moved it. */
   expectCursor?: Point
-  look: Pick<LookRequest, 'image' | 'outline' | 'maxElements' | 'maxImageEdge' | 'maxImagePixels'>
+  look: Pick<LookRequest, 'image' | 'outline' | 'maxElements' | 'maxImageEdge' | 'maxImagePixels' | 'marks'>
   /** The longest to wait for the window to stop changing after the input. */
   settleMs: number
   /** `smooth` moves the pointer along a path a person can follow; `instant` jumps (tests). */
@@ -198,6 +207,11 @@ export interface Performed {
   via: 'invoke' | 'toggle' | 'value' | 'select' | 'expand' | 'mouse' | 'keys'
   /** Something the model should know about how it went, such as why the mouse was used instead of the element's own interface. */
   detail?: string
+  /**
+   * What the pointer went to, as Windows found it under the pixel (ADR 0121): given when the target was a coordinate, or when it
+   * was not the element named. A ref when an outline lists it, or one that holds it.
+   */
+  on?: { ref?: ElementRef; role: string; name: string }
 }
 
 export interface ActResult {

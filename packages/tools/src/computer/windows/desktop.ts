@@ -280,6 +280,7 @@ export class WindowsDesktop implements DesktopBackend {
       maxImagePixels: request.maxImagePixels,
       ...(request.zoom ? { zoom: { capture: request.zoom.capture, box: [...request.zoom.box] } } : {}),
       ...(request.settleMs ? { settleMs: Math.round(request.settleMs) } : {}),
+      ...(request.marks ? { marks: true } : {}),
     }
     const look = await this.call('look', args, signal, REQUEST_TIMEOUTS.look + (request.settleMs ?? 0), asLook)
     return this.shaped(look, request.outline)
@@ -298,6 +299,7 @@ export class WindowsDesktop implements DesktopBackend {
         maxElements: typeof request.look.outline === 'object' ? SEARCH_SCAN : request.look.maxElements,
         maxImageEdge: request.look.maxImageEdge,
         maxImagePixels: request.look.maxImagePixels,
+        ...(request.look.marks ? { marks: true } : {}),
       },
       settleMs: Math.round(request.settleMs),
       pace: request.pace,

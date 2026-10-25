@@ -11,6 +11,12 @@ namespace Encode.Desktop
         public int Y;
         public ElementEntry Entry;
         public ElementNow Now;
+        /// <summary>The element was out of view and its list scrolled it in first.</summary>
+        public bool Scrolled;
+        /// <summary>Something else of the window was over the element at every pixel tried (ADR 0121).</summary>
+        public bool Covered;
+        /// <summary>Windows found the element itself, or a part of it, at the pixel.</summary>
+        public bool Inside;
     }
 
     internal sealed partial class Session
@@ -23,6 +29,30 @@ namespace Encode.Desktop
             done["kind"] = kind;
             done["via"] = via;
             if (detail != null) done["detail"] = detail;
+            return done;
+        }
+
+        /// <summary>
+        /// An input of the pointer and what it went to (ADR 0121): what Windows found under the pixel, said when the target was a
+        /// coordinate (the model learns what it hit) or when it is not the element the model named (something was over it).
+        /// </summary>
+        private Dictionary<string, object> Pointed(string kind, WindowRecord window, Landing landing, string detail, Cancel cancel)
+        {
+            List<string> notes = new List<string>();
+            if (detail != null) notes.Add(detail);
+            if (landing.Scrolled) notes.Add("it was scrolled into view first");
+            HitInfo hit = uia.At(landing.X, landing.Y, window.Id, cancel);
+            bool named = landing.Entry != null;
+            if (named && landing.Covered) notes.Add("something else of the window was over it at every point tried");
+            Dictionary<string, object> done = Performed(kind, "mouse", notes.Count > 0 ? string.Join("; ", notes.ToArray()) : null);
+            if (hit != null && (!named || landing.Covered || (hit.Ref != null && hit.Ref != landing.Entry.Ref && !landing.Inside)))
+            {
+                Dictionary<string, object> on = new Dictionary<string, object>();
+                if (hit.Ref != null) on["ref"] = hit.Ref;
+                on["role"] = hit.Role ?? "element";
+                on["name"] = hit.Name ?? "";
+                done["on"] = on;
+            }
             return done;
         }
 
@@ -116,7 +146,11 @@ namespace Encode.Desktop
             throw new HelperException("covered", other.Label + " is on top of (" + x + ", " + y + ").");
         }
 
-        private Landing TargetOf(WindowRecord window, Dictionary<string, object> target, Cancel cancel)
+        /// <summary>
+        /// Where an input goes. For an element, with `reach`, one out of view is scrolled into view by its list first, and the pixel is
+        /// one where Windows finds the element itself, not a tooltip or a pop-up over it (ADR 0121).
+        /// </summary>
+        private Landing TargetOf(WindowRecord window, Dictionary<string, object> target, bool reach, Cancel cancel)
         {
             if (target == null) throw new HelperException("no-element", "The step has no target.");
             Landing landing = new Landing();
@@ -126,14 +160,21 @@ namespace Encode.Desktop
                 ElementEntry entry = uia.Entry(reference, window.Id);
                 ElementNow now = uia.Now(entry, cancel);
                 landing.Entry = entry;
+                if (reach && (now.Offscreen || now.Box.IsEmpty || now.Box.Intersect(window.Box).IsEmpty) && uia.ScrollIntoView(entry, cancel))
+                {
+                    Cancel.Sleep(cancel, 150);
+                    now = uia.Now(entry, cancel);
+                    landing.Scrolled = true;
+                }
                 landing.Now = now;
-                if (now.Offscreen || now.Box.IsEmpty) throw new HelperException("failed", Describe(entry) + " is not in view. Scroll it into view, then take a new screenshot.");
+                if (now.Offscreen || now.Box.IsEmpty) throw new HelperException("failed", Describe(entry) + " is not in view, and its list cannot scroll it into view. Scroll to it, then take a new screenshot.");
                 Box visible = now.Box.Intersect(window.Box);
                 if (visible.IsEmpty) visible = now.Box;
                 Box clickable = uia.ClickableBox(entry, cancel) ?? new Box(visible.CenterX, visible.CenterY, 1, 1);
                 landing.X = clickable.X;
                 landing.Y = clickable.Y;
                 if (!visible.Contains(landing.X, landing.Y)) { landing.X = visible.CenterX; landing.Y = visible.CenterY; }
+                if (reach) OnTop(entry, visible, landing, cancel);
                 return landing;
             }
             int[] point = Args.Ints(Args.Get(target, "point"), 2);
@@ -149,6 +190,39 @@ namespace Encode.Desktop
         }
 
         /// <summary>
+        /// Keeps the pixel when Windows finds the element there; else tries the middle and the quarters of its box for one where it
+        /// does. When none is found, the first pixel stays and the answer says something was over the element. An application that
+        /// does not answer the question leaves the pixel as it was.
+        /// </summary>
+        private void OnTop(ElementEntry entry, Box visible, Landing landing, Cancel cancel)
+        {
+            bool? first = uia.Covers(entry, landing.X, landing.Y, cancel);
+            if (first != false)
+            {
+                landing.Inside = first == true;
+                return;
+            }
+            int[] parts = { 50, 25, 75 };
+            foreach (int down in parts)
+            {
+                foreach (int across in parts)
+                {
+                    int x = visible.X + (int)((long)visible.W * across / 100);
+                    int y = visible.Y + (int)((long)visible.H * down / 100);
+                    if ((x == landing.X && y == landing.Y) || !visible.Contains(x, y)) continue;
+                    if (uia.Covers(entry, x, y, cancel) == true)
+                    {
+                        landing.X = x;
+                        landing.Y = y;
+                        landing.Inside = true;
+                        return;
+                    }
+                }
+            }
+            landing.Covered = true;
+        }
+
+        /// <summary>
         /// Before an element is used through its own interface, the pointer travels to it at a person's pace, so whoever watches sees
         /// what is about to be pressed. It never stops the step: an element out of view, or under another window, is used all the same.
         /// The person's own hand on the mouse still stops it, as it stops every input.
@@ -161,7 +235,7 @@ namespace Encode.Desktop
             try
             {
                 input.AssertIdle(false, true);
-                Landing landing = TargetOf(window, target, cancel);
+                Landing landing = TargetOf(window, target, false, cancel);
                 Land(window, landing.X, landing.Y);
                 input.MoveTo(landing.X, landing.Y, true, cancel);
             }
@@ -174,7 +248,7 @@ namespace Encode.Desktop
 
         private Landing Aim(WindowRecord window, Dictionary<string, object> target, bool smooth, Cancel cancel)
         {
-            Landing landing = TargetOf(window, target, cancel);
+            Landing landing = TargetOf(window, target, true, cancel);
             Land(window, landing.X, landing.Y);
             input.MoveTo(landing.X, landing.Y, smooth, cancel);
             // The window under the pointer can change while the pointer travels (a tooltip, a window that came forward): look again where it is.
@@ -232,27 +306,29 @@ namespace Encode.Desktop
                 }
             }
             input.AssertIdle(false, true);
-            Aim(window, target, smooth, cancel);
+            Landing landing = Aim(window, target, smooth, cancel);
+            Dictionary<string, object> done = Pointed("click", window, landing, detail, cancel);
             input.Click(button, count, cancel);
-            return Performed("click", "mouse", detail);
+            return done;
         }
 
         private Dictionary<string, object> Move(WindowRecord window, Dictionary<string, object> step, bool smooth, Cancel cancel)
         {
             input.AssertIdle(false, true);
-            Aim(window, Args.Obj(Args.Get(step, "target")), smooth, cancel);
-            return Performed("move", "mouse", null);
+            Landing landing = Aim(window, Args.Obj(Args.Get(step, "target")), smooth, cancel);
+            return Pointed("move", window, landing, null, cancel);
         }
 
         private Dictionary<string, object> Drag(WindowRecord window, Dictionary<string, object> step, Cancel cancel)
         {
-            Landing from = TargetOf(window, Args.Obj(Args.Get(step, "from")), cancel);
-            Landing to = TargetOf(window, Args.Obj(Args.Get(step, "to")), cancel);
+            Landing from = TargetOf(window, Args.Obj(Args.Get(step, "from")), true, cancel);
+            Landing to = TargetOf(window, Args.Obj(Args.Get(step, "to")), true, cancel);
             Land(window, from.X, from.Y);
             Land(window, to.X, to.Y);
             input.AssertIdle(false, true);
             input.MoveTo(from.X, from.Y, true, cancel);
             Land(window, from.X, from.Y);
+            Dictionary<string, object> done = Pointed("drag", window, from, null, cancel);
             input.Down("left");
             try
             {
@@ -265,7 +341,7 @@ namespace Encode.Desktop
             {
                 input.Up("left");
             }
-            return Performed("drag", "mouse", null);
+            return done;
         }
 
         private Dictionary<string, object> Scroll(WindowRecord window, Dictionary<string, object> step, bool smooth, Cancel cancel)
@@ -274,9 +350,10 @@ namespace Encode.Desktop
             int amount = Clamp(Args.Int(step, "amount", 3), 1, 30);
             Dictionary<string, object> target = Args.Obj(Args.Get(step, "target"));
             input.AssertIdle(false, true);
+            Landing aimed = null;
             if (target != null)
             {
-                Aim(window, target, smooth, cancel);
+                aimed = Aim(window, target, smooth, cancel);
             }
             else
             {
@@ -295,8 +372,9 @@ namespace Encode.Desktop
             }
             bool horizontal = direction == "left" || direction == "right";
             int notches = direction == "up" || direction == "right" ? amount : -amount;
+            Dictionary<string, object> done = aimed != null ? Pointed("scroll", window, aimed, null, cancel) : Performed("scroll", "mouse", null);
             input.Wheel(horizontal, notches, cancel);
-            return Performed("scroll", "mouse", null);
+            return done;
         }
 
         /// <summary>The keyboard goes to the window in front, and a password field is never typed into.</summary>

@@ -290,7 +290,12 @@ use of each program asks. While it works, a banner at the bottom of the screen s
 - Ask it to open a program by the name the Start menu shows ("open Discord"): it starts it the way the Start menu does,
   or brings back the window of one that is already running, also from the notification area, and never ends a program
   to get its window. The pointer travels to each button before it is pressed, so you can follow what it does.
-
+- Its screenshots carry a small coloured number beside each button, box and item (12 is the outline's e12), and it
+  acts by those numbers. Where nothing can be numbered (a game, a drawing area), it zooms in on a grid labelled in
+  pixels before it clicks, and each click by position says what it hit. An item scrolled out of a list is scrolled
+  back into view first.
+- It can use the taskbar, the notification area and quick settings (clicks only, no typing), and desktop icons
+  (they ask as File Explorer). The Start menu, search and the Run box stay refused.
 - **Stop** on the banner, or **Ctrl+Alt+Esc** from any window, ends the turn. Using the mouse or keyboard yourself stops
   it too, and the agent waits for you to say whether to go on.
 - It never uses terminals, password managers, programs running as administrator or eNCode itself, and never types into a
@@ -298,8 +303,9 @@ use of each program asks. While it works, a banner at the bottom of the screen s
 - The first use builds a small helper program from source that ships with eNCode; it takes a few seconds. If an
   antivirus program blocks it, the message names the file to allow.
 
-What is most useful to hear: any click that landed in the wrong place, any step where it said it had done something
-that had not happened, and anything that kept the banner up when nothing was running.
+What is most useful to hear: any click that landed in the wrong place (and which number it was meant for), a number
+beside the wrong thing, any step where it said it had done something that had not happened, and anything that kept the
+banner up when nothing was running.
 
 ## The Review tab
 
