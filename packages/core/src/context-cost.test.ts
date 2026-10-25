@@ -206,7 +206,7 @@ describe('a long session', () => {
     const { cost, messages } = await session({ window: 128_000, steps: 50, requests: 5, cache: PRICES.Claude, model: 'claude-sonnet-x', thinking: true })
     show('50 steps in 5 requests, 128k window, Claude', cost)
     assert.ok(cost.rewrites <= 5, `${cost.rewrites} rewrites`)
-    const last = messages.findLast((message) => message.role === 'assistant' && message.content.some((block) => block.type === 'tool-use'))!
+    const last = messages.filter((message) => message.role === 'assistant' && message.content.some((block) => block.type === 'tool-use')).at(-1)!
     assert.ok(last.content.some((block) => block.type === 'thinking'), 'the last step keeps its thinking')
   })
 
