@@ -378,10 +378,16 @@ export interface DuckDuckGoOptions extends ProviderOptions {
   gapMs?: number
   /** How long to wait before the one retry of a search DuckDuckGo slowed down. Default 4 s. */
   retryMs?: number
+  /** How long searches fail without asking after DuckDuckGo showed its puzzle. Default 10 minutes. */
+  blockedMs?: number
+  now?: () => number
 }
 
 /** What a page DuckDuckGo shows instead of results has, when it wants to know whether a person is asking. */
 const CHALLENGE = /anomaly-modal|challenge-form|bots use DuckDuckGo/i
+
+const PUZZLE =
+  'DuckDuckGo is blocking searches from this computer: it answers every one with a picture puzzle to prove a person is searching, which eNCode cannot solve. Choose Tavily, Exa or Brave Search with a key in Settings > Agent > Web search.'
 
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -399,41 +405,52 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * DuckDuckGo's HTML page: no account, no key, and results that are less stable than an API's. It answers a burst of
- * searches from one computer (a model that searches for three things at once) with HTTP 202 and no results, so
- * searches go one at a time, a moment apart, and one that was slowed down is asked again once, after a wait.
+ * DuckDuckGo's HTML page: no account, no key, and results that are less stable than an API's.
+ *
+ * It slows down a burst of searches from one computer (a model that searches for three things at once) with HTTP 202,
+ * so searches go one at a time, a moment apart, and one that was slowed down is asked again once, after a wait. From
+ * some computers it answers every search, the first included, with a picture puzzle for a person to solve. Asking
+ * again does not help there, so that is said at once, and for a while searches fail without asking.
  */
 export function duckDuckGoProvider(options: DuckDuckGoOptions = {}): SearchProvider {
   const endpoint = options.endpoint ?? SEARCH_ENDPOINTS.duckduckgo
   const gapMs = options.gapMs ?? 1_500
   const retryMs = options.retryMs ?? 4_000
+  const blockedMs = options.blockedMs ?? 10 * 60_000
+  const now = options.now ?? Date.now
   let queue: Promise<unknown> = Promise.resolve()
   let last = 0
+  let blockedUntil = 0
 
   const ask = (request: SearchRequest) => safeFetch(`${endpoint}?q=${encodeURIComponent(clipQuery(request.query))}`, { ...options.fetch, signal: request.signal })
-  // 202 or 429, or a page that asks whether a person is there instead of listing results.
-  const slowed = (outcome: Awaited<ReturnType<typeof ask>>) =>
-    outcome.kind === 'response' && (outcome.status === 202 || outcome.status === 429 || (!/result__a/.test(outcome.text) && CHALLENGE.test(outcome.text)))
+  type Outcome = Awaited<ReturnType<typeof ask>>
+  // The puzzle comes with HTTP 202 (or 200); a page with results that mentions it is still results.
+  const puzzle = (outcome: Outcome) => outcome.kind === 'response' && !/result__a/.test(outcome.text) && CHALLENGE.test(outcome.text)
+  const slowed = (outcome: Outcome) => outcome.kind === 'response' && (outcome.status === 202 || outcome.status === 429)
 
   async function searchNow(request: SearchRequest): Promise<SearchHit[]> {
-    const wait = last + gapMs - Date.now()
+    if (now() < blockedUntil) throw new SearchError('limit', PUZZLE)
+    const wait = last + gapMs - now()
     if (wait > 0) await pause(wait, request.signal)
     try {
       let outcome = await ask(request)
-      if (slowed(outcome)) {
+      if (slowed(outcome) && !puzzle(outcome)) {
         await pause(retryMs, request.signal)
         outcome = await ask(request)
       }
       if (outcome.kind !== 'response') throw new SearchError('failed', `The search service could not be reached (${outcome.kind === 'refused' ? outcome.reason : outcome.kind}).`)
+      if (puzzle(outcome)) {
+        blockedUntil = now() + blockedMs
+        throw new SearchError('limit', PUZZLE)
+      }
       if (slowed(outcome)) {
-        const answer = outcome.status === 200 ? 'a page asking whether a person is searching' : `HTTP ${outcome.status}`
-        throw new SearchError('limit', `DuckDuckGo is limiting searches from this computer for now (${answer}). Try again in a few minutes, or choose a search provider with a key in Settings.`)
+        throw new SearchError('limit', `DuckDuckGo is limiting searches from this computer for now (HTTP ${outcome.status}). Try again in a few minutes, or choose Tavily, Exa or Brave Search with a key in Settings > Agent > Web search.`)
       }
       if (outcome.status >= 500) throw new SearchError('unavailable', `DuckDuckGo is not available right now (HTTP ${outcome.status}).`)
       if (outcome.status !== 200) throw new SearchError('failed', `The search service answered HTTP ${outcome.status}.`)
       return toHits(parseSearchResults(outcome.text), request)
     } finally {
-      last = Date.now()
+      last = now()
     }
   }
 

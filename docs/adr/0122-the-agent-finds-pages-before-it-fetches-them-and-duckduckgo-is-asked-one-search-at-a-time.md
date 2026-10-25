@@ -18,10 +18,13 @@ Three things made that turn likely:
 - **Nothing told the model not to guess.** WebFetch's description said only that `url` must be a full address.
 - **A failed page said nothing about what to do next.** A 404 came back as the site's own error page. The model's next
   step was to guess another path.
-- **A failed search sent it straight to guessing.** DuckDuckGo, the default provider, needs no key, and answers a
-  burst of searches from one computer with HTTP 202 and no results. A model that searches three things at once (the
-  searches run in parallel, as reads do) is such a burst. The error named the limit, but then the model guessed
-  addresses instead.
+- **A failed search sent it straight to guessing.** DuckDuckGo, the default provider, needs no key. A check from the
+  owner's computer, made the way eNCode searches, found it blocked: six searches all got HTTP 202 with DuckDuckGo's
+  picture puzzle ("Unfortunately, bots use DuckDuckGo too... Select all squares containing a duck") and no results.
+  The first search was blocked too, and a pause between searches made no difference. The error said "limiting
+  searches for now (HTTP 202)", and the model then guessed addresses.
+- DuckDuckGo also slows down bursts of searches with a plain 202 or 429. A model that searches for three things at
+  once (searches run in parallel, as reads do) is such a burst.
 
 ## Decision
 
@@ -41,11 +44,14 @@ Three things made that turn likely:
   page known to exist and follow its links. "No results" suggests fewer or other words.
 - **DuckDuckGo is asked one search at a time.**
   - The searches of a session go in a queue, at least 1.5 seconds apart.
-  - A search answered with HTTP 202 or 429 is asked once more, after 4 seconds. So is one answered with the page that
-    asks whether a person is searching (`anomaly-modal`, `challenge-form`, "bots use DuckDuckGo"), recognised only when
-    the page lists no results.
-  - A second refusal is a `limit` error that says so, and suggests trying again in a few minutes or a provider with a
-    key.
+  - A plain HTTP 202 or 429 is asked once more, after 4 seconds. A second refusal is a `limit` error that says so,
+    and suggests trying again in a few minutes or Tavily, Exa or Brave Search with a key.
+- **The puzzle is said at once.** A page with no results that has `anomaly-modal`, `challenge-form` or "bots use
+  DuckDuckGo" is the puzzle, whatever its status.
+  - It is not asked again, because no program can solve it.
+  - The error says DuckDuckGo is blocking searches from this computer with a picture puzzle eNCode cannot solve, and
+    names Settings > Agent > Web search and the keyed providers.
+  - For the next 10 minutes, DuckDuckGo searches fail with the same words without contacting it.
   - A search stopped while it waits in the queue stops at once. A failed search does not hold up the next one.
   - The request itself is unchanged: the same address, the same GET and eNCode's own user agent. The searches go only
     to the provider the person chose, as before (0058).
@@ -56,11 +62,15 @@ Three things made that turn likely:
   again. A turn like the reported one costs one search and one fetch instead of four fetches.
 - Parallel searches through DuckDuckGo take about 1.5 seconds longer each, after the first. A search DuckDuckGo
   slowed down takes about 4 seconds longer, and usually succeeds.
-- When DuckDuckGo keeps refusing, the person and the model read the same plain reason. The steady fix is still a
-  provider with a key (Brave Search, Tavily or Exa).
+- On a computer DuckDuckGo blocks, search does not work without a key. The person and the model read the same plain
+  reason, and the model is told not to guess. Tavily's free plan (1,000 searches a month, no card, checked
+  2026-10-25) is the easiest fix.
+- eNCode does not dress up as a browser or try to get around the puzzle. DuckDuckGo shows it on purpose, and the
+  request stays what it says it is.
 - Tests:
-  - `search.test.ts` covers the retry after a 202:
-    - a challenge page read as a limit, with one retry and no more;
+  - `search.test.ts` covers:
+    - a retry after a 202, and one retry and no more after a 429;
+    - the puzzle (202 or 200) said at once, nothing sent for 10 minutes, then asked again;
     - a result about the challenge page kept as a result;
     - a page with no results read as no results;
     - three searches at once spaced apart;

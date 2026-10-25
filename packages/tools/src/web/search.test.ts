@@ -312,9 +312,10 @@ describe('DuckDuckGo and the choice of provider', () => {
     type: 'text/html',
     body: '<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fnodejs.org%2F">Node</a></div>',
   }
-  const CHALLENGE = { status: 200, type: 'text/html', body: '<div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div><form id="challenge-form"></form>' }
+  // What a tester's computer got for every search, the first one included (2026-10-25).
+  const CHALLENGE = { status: 202, type: 'text/html', body: '<div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div><form id="challenge-form"></form>' }
   // The address is read when a provider is made: the server has its port by then.
-  const ddg = (patch: { gapMs?: number } = {}) => duckDuckGoProvider({ ...local, endpoint: `${origin}/html/`, gapMs: 0, retryMs: 10, ...patch })
+  const ddg = (patch: { gapMs?: number; now?: () => number } = {}) => duckDuckGoProvider({ ...local, endpoint: `${origin}/html/`, gapMs: 0, retryMs: 10, ...patch })
 
   it('reads result pages and says when the service limits it', async () => {
     reply = RESULTS
@@ -324,17 +325,35 @@ describe('DuckDuckGo and the choice of provider', () => {
     await assert.rejects(ddg().search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /HTTP 202\). Try again in a few minutes/.test(error.message))
   })
 
-  it('asks once more, after a wait, when it was slowed down, and reads a page that asks for a person as a limit', async () => {
+  it('asks once more, after a wait, when it was slowed down', async () => {
     replies = [{ status: 202, type: 'text/html', body: '' }, RESULTS]
     assert.equal((await ddg().search(request())).length, 1)
     assert.equal(seen.length, 2)
     assert.ok(seen[1].at - seen[0].at >= 10, 'the second try waits')
-
     seen = []
-    replies = [CHALLENGE, CHALLENGE]
-    await assert.rejects(ddg().search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /a page asking whether a person is searching/.test(error.message))
+    replies = [{ status: 429, body: '' }, { status: 429, body: '' }]
+    await assert.rejects(ddg().search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /HTTP 429/.test(error.message))
     assert.equal(seen.length, 2, 'one retry, no more')
+  })
 
+  it('says at once that a puzzle for a person blocks it, and asks nothing for a while after', async () => {
+    let clock = 1_000_000
+    const provider = ddg({ now: () => clock })
+    reply = CHALLENGE
+    await assert.rejects(provider.search(request()), (error: unknown) => error instanceof SearchError && error.kind === 'limit' && /blocking searches from this computer: it answers every one with a picture puzzle .* Settings > Agent > Web search/.test(error.message))
+    assert.equal(seen.length, 1, 'asking again does not solve a puzzle')
+    reply = RESULTS
+    await assert.rejects(provider.search(request()), /picture puzzle/)
+    assert.equal(seen.length, 1, 'nothing is sent while the block is remembered')
+    clock += 10 * 60_000
+    assert.equal((await provider.search(request())).length, 1, 'after ten minutes it asks again')
+    assert.equal(seen.length, 2)
+    // The same page with HTTP 200 is the same puzzle.
+    reply = { ...CHALLENGE, status: 200 }
+    await assert.rejects(ddg().search(request()), /picture puzzle/)
+  })
+
+  it('tells a page about the puzzle from the puzzle', async () => {
     // A result about the challenge page is a result, not the challenge.
     reply = { ...RESULTS, body: `${RESULTS.body}<p>bots use DuckDuckGo too</p>` }
     assert.equal((await ddg().search(request())).length, 1)
