@@ -98,11 +98,16 @@ export type ServerInstall =
   | {
       kind: 'toolchain'
       program: string
-      /** `{dir}` is the folder it installs into. */
+      /** `{dir}` is the folder it installs into, and `{<key>}` the path of the file `files` names by that key. */
       args: string[]
       version: string
       /** Environment for the installer; `{dir}` as above. */
       env?: Record<string, string>
+      /**
+       * Files the installer is pointed at, such as eNCode's own nuget.config. They are written to the installer's work
+       * folder, which is removed after it, and `about` says what they change for the person reading the plan.
+       */
+      files?: Record<string, { name: string; text: string; about: string }>
       /** For people: "Go". */
       needs: string
       /** The program it leaves in `{dir}`, or none when the toolchain keeps it on the PATH itself (rustup). */
@@ -428,7 +433,8 @@ async function planDownload(spec: Installable, install: DownloadInstall, context
 
 async function planToolchain(spec: Installable, install: ToolchainInstall, base: string, chain: Exclude<Toolchain, { kind: 'none' }>, context: InstallContext): Promise<InstallPlan> {
   const dir = path.join(base, install.version)
-  const command = [install.program, ...install.args.map((arg) => fill(arg, { dir }))].join(' ')
+  const files = Object.entries(install.files ?? {})
+  const command = [install.program, ...install.args.map((arg) => fill(arg, { dir, ...Object.fromEntries(files.map(([key, file]) => [key, file.name])) }))].join(' ')
   const steps: string[] = []
   let bytes: number | undefined
   if (chain.kind === 'fetch') {
@@ -436,6 +442,7 @@ async function planToolchain(spec: Installable, install: ToolchainInstall, base:
     steps.push(fetchStep(chain.download, chain.runtime, bytes), `Runs ${command}, with that copy.`)
   } else if (chain.kind === 'ours') steps.push(`Runs ${command}, with eNCode's own copy of ${chain.runtime.label} (${chain.version}).`)
   else steps.push(`Runs ${command}, with ${install.needs} from ${chain.program}.`)
+  for (const [, file] of files) steps.push(file.about)
   if (!install.bin) steps.push(`It adds the server to your ${install.needs} installation, where eNCode finds it.`)
   else steps.push(chain.kind === 'fetch' ? keepStep(spec, chain.runtime) : `Keeps the server in eNCode's own folder (${dir}).`)
   return { id: spec.id, label: spec.label, what: installName(spec), version: install.version, ...(bytes ? { bytes } : {}), dir, steps }
@@ -544,6 +551,7 @@ function ownRuntime(id: RuntimeId, toolsDir: string, context: LaunchContext): { 
 async function installRuntime(runtime: Runtime, download: RuntimeDownload, context: InstallContext): Promise<string> {
   const base = path.join(context.toolsDir, RUNTIMES_DIR, runtime.id)
   fs.mkdirSync(base, { recursive: true })
+  sweepLeftovers(base)
   const partial = path.join(base, `.partial-${randomBytes(6).toString('hex')}`)
   const archive = `${partial}.download`
   try {
@@ -573,8 +581,8 @@ async function installRuntime(runtime: Runtime, download: RuntimeDownload, conte
     if (context.signal?.aborted) throw new InstallFailed('The install was stopped.')
     throw error
   } finally {
-    fs.rmSync(partial, { recursive: true, force: true })
-    fs.rmSync(archive, { force: true })
+    removeQuietly(partial)
+    removeQuietly(archive)
   }
 }
 
@@ -644,6 +652,7 @@ export async function installServer(spec: Installable, context: InstallContext):
   }
   const base = path.join(context.toolsDir, spec.id)
   fs.mkdirSync(base, { recursive: true })
+  sweepLeftovers(base)
   const partial = path.join(base, `.partial-${randomBytes(6).toString('hex')}`)
   try {
     let version: string
@@ -675,7 +684,7 @@ export async function installServer(spec: Installable, context: InstallContext):
     if (context.signal?.aborted) throw new InstallFailed('The install was stopped.')
     throw error
   } finally {
-    fs.rmSync(partial, { recursive: true, force: true })
+    removeQuietly(partial)
   }
 }
 
@@ -684,10 +693,66 @@ function removeOthers(base: string, keep: string): void {
   for (const entry of safeReaddir(base)) {
     if (entry === keep || entry.startsWith('.partial-')) continue
     try {
-      fs.rmSync(path.join(base, entry), { recursive: true, force: true })
+      removeTree(path.join(base, entry))
     } catch {
       // A server from it still runs (Windows keeps a running program's files); it goes next time.
     }
+  }
+}
+
+/** A folder an install began and could not remove is taken away once it is a day old: no install runs that long. */
+const LEFTOVER_MS = 24 * 60 * 60_000
+
+function sweepLeftovers(base: string, now = Date.now()): void {
+  for (const entry of safeReaddir(base)) {
+    if (!entry.startsWith('.partial-')) continue
+    const where = path.join(base, entry)
+    try {
+      if (now - fs.lstatSync(where).mtimeMs < LEFTOVER_MS) continue
+    } catch {
+      continue
+    }
+    removeQuietly(where)
+  }
+}
+
+/**
+ * Removes a file or a folder with everything in it. Go keeps its module cache read-only, and on Windows a read-only
+ * file cannot be deleted (EPERM): what a first try leaves is made writable, without following links out of the
+ * folder, and removed again.
+ */
+function removeTree(target: string): void {
+  try {
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 })
+    return
+  } catch {
+    makeWritable(target)
+  }
+  fs.rmSync(target, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 })
+}
+
+function makeWritable(target: string): void {
+  let stat: fs.Stats
+  try {
+    stat = fs.lstatSync(target)
+  } catch {
+    return
+  }
+  if (stat.isSymbolicLink()) return
+  try {
+    fs.chmodSync(target, stat.isDirectory() ? 0o777 : 0o666)
+  } catch {
+    // Removing it says why, if it still cannot go.
+  }
+  if (stat.isDirectory()) for (const entry of safeReaddir(target)) makeWritable(path.join(target, entry))
+}
+
+/** Clean-up after an install, which never fails it: what it did, or why it failed, is what the person needs to hear. */
+function removeQuietly(target: string): void {
+  try {
+    removeTree(target)
+  } catch {
+    // A file a virus scanner still holds: the folder goes with a later install's sweep.
   }
 }
 
@@ -764,9 +829,16 @@ async function installToolchain(spec: Installable, install: ToolchainInstall, co
     if (!found) fail(`Installing ${installName(spec)} needs ${install.needs}: ${install.program} was not found on the PATH.`)
     program = found
   }
+  const files = Object.entries(install.files ?? {})
+  if (files.length) work ??= `${partial}-work`
   try {
     fs.mkdirSync(partial)
-    const values = { dir: partial }
+    const values: Record<string, string> = { dir: partial }
+    for (const [key, file] of files) {
+      fs.mkdirSync(work!, { recursive: true })
+      values[key] = path.join(work!, file.name)
+      fs.writeFileSync(values[key], file.text)
+    }
     const env = { ...context.env, ...extra, ...Object.fromEntries(Object.entries(install.env ?? {}).map(([key, value]) => [key, fill(value, values)])) }
     const run = context.run ?? runProgram
     const result = await run(program, install.args.map((arg) => fill(arg, values)), { env, cwd: partial, ...(context.signal ? { signal: context.signal } : {}) })
@@ -774,7 +846,7 @@ async function installToolchain(spec: Installable, install: ToolchainInstall, co
     if (install.bin && !fs.existsSync(path.join(partial, exe(install.bin, context.platform)))) fail(`${install.program} finished, but ${exe(install.bin, context.platform)} is not where it was asked to go.`)
     return install.version
   } finally {
-    if (work) fs.rmSync(work, { recursive: true, force: true })
+    if (work) removeQuietly(work)
   }
 }
 
@@ -873,5 +945,5 @@ export function installedLaunch(spec: ServerSpec, toolsDir: string, context: Lau
 /** Removes what eNCode installed for the server. */
 export function removeInstall(spec: Pick<Installable, 'id'>, toolsDir: string): void {
   const base = path.join(toolsDir, spec.id)
-  for (const entry of safeReaddir(base)) fs.rmSync(path.join(base, entry), { recursive: true, force: true })
+  for (const entry of safeReaddir(base)) removeTree(path.join(base, entry))
 }
