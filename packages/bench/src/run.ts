@@ -26,6 +26,7 @@ export interface RunMetrics {
   byRole: Record<string, number>
   inputTokens: number
   cachedTokens: number
+  cacheWriteTokens: number
   outputTokens: number
   reasoningTokens: number
   /** US dollars, summed over the calls whose provider said; `costReported` of `requests` did. */
@@ -116,6 +117,7 @@ function metricsOf(entries: Iterable<ConversationEntry>, client: Pick<MeteredCli
     byRole: {},
     inputTokens: 0,
     cachedTokens: 0,
+    cacheWriteTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
     cost: 0,
@@ -137,6 +139,7 @@ function metricsOf(entries: Iterable<ConversationEntry>, client: Pick<MeteredCli
     metrics.byRole[call.role] = (metrics.byRole[call.role] ?? 0) + 1
     metrics.inputTokens += call.inputTokens
     metrics.cachedTokens += call.cachedTokens
+    metrics.cacheWriteTokens += call.cacheWriteTokens
     metrics.outputTokens += call.outputTokens
     metrics.reasoningTokens += call.reasoningTokens
     if (call.cost !== undefined) {

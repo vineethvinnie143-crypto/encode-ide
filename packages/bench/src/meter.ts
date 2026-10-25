@@ -11,6 +11,8 @@ export interface ModelCall {
   outcome: CompletionOutcome['kind'] | 'failed'
   inputTokens: number
   cachedTokens: number
+  /** Written to the provider's cache, which some providers charge more for than a token read. */
+  cacheWriteTokens: number
   outputTokens: number
   reasoningTokens: number
   cost?: number
@@ -59,6 +61,7 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
           outcome: outcome.kind,
           inputTokens: usage?.inputTokens ?? 0,
           cachedTokens: usage?.cacheReadTokens ?? 0,
+          cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
           outputTokens: usage?.outputTokens ?? 0,
           reasoningTokens: usage?.reasoningTokens ?? 0,
           ...(usage?.cost !== undefined ? { cost: usage.cost } : {}),
@@ -66,7 +69,7 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
         })
         return outcome
       } catch (error) {
-        calls.push({ role: request.role, outcome: 'failed', inputTokens: 0, cachedTokens: 0, outputTokens: 0, reasoningTokens: 0, ms: now() - started })
+        calls.push({ role: request.role, outcome: 'failed', inputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0, ms: now() - started })
         throw error
       }
     },

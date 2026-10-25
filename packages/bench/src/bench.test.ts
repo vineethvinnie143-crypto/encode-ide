@@ -6,7 +6,7 @@ import { after, describe, test } from 'node:test'
 import { createScriptedClient, type ScriptedStep } from '@encode/core'
 import type { CompletionRequest, ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
-import { compareReports, findPrograms, formatReport, meteredClient, parseReport, parseTask, playReplay, readTask, readTasks, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
+import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
 
 const TASKS = path.join(process.cwd(), 'packages', 'bench', 'tasks')
 const made: string[] = []
@@ -251,7 +251,7 @@ describe('what a run spent', () => {
     await client.complete(request([call, result, { role: 'user', content: [{ type: 'text', text: 'more' }] }]))
     assert.deepEqual(client.resultChars, { Read: 120 })
     assert.equal(client.calls.length, 2)
-    assert.deepEqual(client.calls[0], { role: 'main', model: 'openrouter:some/model', outcome: 'done', inputTokens: 1_000, cachedTokens: 800, outputTokens: 50, reasoningTokens: 0, cost: 0.002, ms: client.calls[0]!.ms })
+    assert.deepEqual(client.calls[0], { role: 'main', model: 'openrouter:some/model', outcome: 'done', inputTokens: 1_000, cachedTokens: 800, cacheWriteTokens: 0, outputTokens: 50, reasoningTokens: 0, cost: 0.002, ms: client.calls[0]!.ms })
   })
 })
 
@@ -266,7 +266,7 @@ describe('reports', () => {
     calls: [],
     tools: [],
     metrics: {
-      requests: 4, byRole: { main: 4 }, inputTokens: 10_000, cachedTokens: 6_000, outputTokens: 500, reasoningTokens: 0, cost: 0.01, costReported: 4, models: ['x:y'],
+      requests: 4, byRole: { main: 4 }, inputTokens: 10_000, cachedTokens: 6_000, cacheWriteTokens: 0, outputTokens: 500, reasoningTokens: 0, cost: 0.01, costReported: 4, models: ['x:y'],
       toolCalls: 5, toolFailures: 0, commandFailures: 0, byTool: {}, editMisses: 0, readChars: 2_000, toolChars: 3_000, declined: 0, questions: 0, durationMs: 4_000, ...metrics,
     },
   })
@@ -294,12 +294,69 @@ describe('reports', () => {
     assert.match(text, /b #1 failed: the tests pass: exit code 1$/m)
   })
 
+  test('says how many tasks passed on every run, and where the tokens went', () => {
+    const text = formatReport(report('m', [run('a', 'passed', { cacheWriteTokens: 1_000, reasoningTokens: 200 }), run('a', 'failed'), run('b', 'passed'), run('b', 'passed')]))
+    assert.match(text, /Every run passed: 1 of 2 tasks \(pass\^2\)/)
+    assert.match(text, /Too few runs to tell a change from noise/)
+    assert.match(text, /Tokens per run: 10,000 read, 4,000 of them not from the cache, 250 written to it; 500 written, 50 of them reasoning/)
+  })
+
+  test('reads a report written before cache writes were counted', () => {
+    const old = report('m', [run('a', 'passed')])
+    delete (old.runs[0]!.metrics as Partial<TaskRun['metrics']>).cacheWriteTokens
+    const { all } = summarize(parseReport(JSON.parse(JSON.stringify(old))))
+    assert.equal(all.mean.cacheWriteTokens, 0)
+  })
+
+  /** `passes` of `runs` runs of a task, each costing `cost`. */
+  const runs = (task: string, passes: number, total: number, cost = 0.01) => Array.from({ length: total }, (_, index) => run(task, index < passes ? 'passed' : 'failed', { cost }))
+  const tasks = ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8']
+
+  test('with five runs a task, flags only a drop beyond chance', () => {
+    const before = report('before', tasks.flatMap((task) => runs(task, 5, 5)))
+    const afterward = report('after', [...runs('t1', 1, 5), ...runs('t2', 4, 5), ...tasks.slice(2).flatMap((task) => runs(task, 5, 5))])
+    const comparison = compareReports(before, afterward)
+    assert.equal(comparison.enoughRuns, true)
+    assert.deepEqual(comparison.regressions, ['t1'], 'five of five to four of five is noise; to one of five is not')
+    assert.ok(comparison.passChange!.low < 0 && comparison.passChange!.high > 0, 'one task in eight does not move the whole beyond its interval')
+    assert.match(comparison.text, /Pass rate: -12\.5 points \(95% interval -36\.0 to \+11\.0, 8 tasks\)/)
+    assert.match(comparison.text, /Passed less often, beyond chance: t1/)
+    assert.doesNotMatch(comparison.text, /Too few runs/)
+  })
+
+  test('flags the whole when every task slips', () => {
+    const before = report('before', tasks.flatMap((task) => runs(task, 5, 5)))
+    const afterward = report('after', tasks.flatMap((task) => runs(task, 3, 5)))
+    const comparison = compareReports(before, afterward)
+    assert.deepEqual(comparison.regressions, ['all'], 'no task alone is beyond chance, all of them together are')
+    assert.ok(comparison.passEveryChange!.high < 0)
+  })
+
+  test('keeps a change by the gate only when it is 25% cheaper per task solved and costs nothing in accuracy', () => {
+    const before = report('before', tasks.flatMap((task) => runs(task, 5, 5, 0.02)))
+    const cheaper = report('after', tasks.flatMap((task, index) => runs(task, 5, 5, index % 2 ? 0.014 : 0.013)))
+    const kept = gate(compareReports(before, cheaper), 0.25)
+    assert.deepEqual(kept, { passed: true, reasons: [] })
+    const comparison = compareReports(before, cheaper)
+    assert.match(comparison.text, /Cost per run: -33% \(95% interval -35% to -30%, 8 tasks\)/)
+    assert.match(comparison.text, /Cost per task solved: \$0\.020 → \$0\.014 \(-32%\)/)
+
+    const notEnough = report('after', tasks.flatMap((task) => runs(task, 5, 5, 0.017)))
+    assert.deepEqual(gate(compareReports(before, notEnough), 0.25).reasons, ['The cost per task solved fell 15%, short of 25%.'])
+    const worse = report('after', [...runs('t1', 0, 5, 0.01), ...tasks.slice(1).flatMap((task) => runs(task, 5, 5, 0.01))])
+    assert.deepEqual(gate(compareReports(before, worse), 0.25).reasons, ['Passed less often: t1.'])
+    const once = report('after', tasks.map((task) => run(task, 'passed', { cost: 0.01 })))
+    assert.match(gate(compareReports(before, once), 0.25).reasons[0]!, /3 runs or more/)
+  })
+
   test('compares before and after, and names the tasks that passed less often', () => {
     const before = report('before', [run('a', 'passed'), run('b', 'passed'), run('gone', 'passed')])
     const afterward = report('after', [run('a', 'passed', { inputTokens: 5_000 }), run('b', 'failed'), run('new', 'passed')])
     const { text, regressions } = compareReports(before, afterward)
     assert.deepEqual(regressions, ['b', 'all'])
-    assert.match(text, /\ba\s+100% → 100%\s+=\s+-50%/)
+    assert.match(text, /\ba\s+100% → 100%\s+yes → yes\s+=\s+-50%/)
+    assert.doesNotMatch(text, /95% interval/, 'one run a task gives no interval worth printing')
+    assert.match(text, /Too few runs to tell a change from noise: every drop counts/)
     assert.match(text, /Only before: gone/)
     assert.match(text, /Only after: new/)
   })
@@ -321,6 +378,37 @@ describe('reports', () => {
     assert.deepEqual(seen, ['sample#1 skipped', 'sample#2 skipped', 'solved#1 passed', 'solved#2 passed'])
     assert.equal(result.model, 'reference')
     assert.equal(parseReport(JSON.parse(JSON.stringify(result))).runs.length, 4)
+  })
+})
+
+describe('telling a change from noise', () => {
+  test("uses Student's t for few tasks and the normal point past thirty", () => {
+    assert.equal(t95(1), 12.706)
+    assert.equal(t95(7), 2.365)
+    assert.equal(t95(31), 1.96)
+  })
+
+  test('gives a mean and its 95% interval, and nothing for one value', () => {
+    assert.equal(meanInterval([0.2]), undefined)
+    const same = meanInterval([0.5, 0.5, 0.5])!
+    assert.deepEqual([same.low, same.mean, same.high], [0.5, 0.5, 0.5])
+    const spread = meanInterval([-1, 0, 0, 0, 0, 0, 0, 0])!
+    assert.equal(spread.mean, -0.125)
+    assert.ok(Math.abs(spread.high - (-0.125 + 2.365 * Math.sqrt(0.125 / 8))) < 1e-9)
+  })
+
+  test('averages ratios on their logarithms, leaving out what is not a ratio', () => {
+    const halves = ratioInterval([0.5, 0.5, 0, Number.NaN])!
+    assert.equal(halves.n, 2)
+    assert.ok(Math.abs(halves.mean - 0.5) < 1e-12)
+    assert.ok(Math.abs(ratioInterval([0.25, 4])!.mean - 1) < 1e-12, 'a quarter and four times cancel out')
+  })
+
+  test("gives Fisher's chance of a drop at least this large", () => {
+    assert.ok(Math.abs(dropChance(5, 5, 1, 5) - 5 / 210) < 1e-12)
+    assert.ok(Math.abs(dropChance(5, 5, 2, 5) - 10 / 120) < 1e-12)
+    assert.equal(dropChance(5, 5, 5, 5), 1)
+    assert.equal(dropChance(0, 5, 0, 5), 1)
   })
 })
 
@@ -348,6 +436,10 @@ describe('the command line', () => {
     assert.equal(compared.code, 1)
     assert.match(compared.text, /Passed less often: json-config-edit, all/)
     assert.equal((await cli(['compare', before, after])).code, 0)
+    const gated = await cli(['compare', before, after, '--gate', '25'])
+    assert.equal(gated.code, 1)
+    assert.match(gated.text, /Gate not passed:\n- Each task needs 3 runs or more in both reports\.\n- Passed less often: json-config-edit, all\./)
+    assert.match((await cli(['compare', before, after, '--gate', '95'])).text, /--gate is a whole number from 1 to 90/)
   })
 
   test('wants a key for a model, from the environment, and says which', async () => {

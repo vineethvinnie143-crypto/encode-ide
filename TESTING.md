@@ -90,7 +90,7 @@ To score a model on your own key, from a checkout of the repository (the key com
 written down):
 
 ```
-pnpm bench run --model openrouter:deepseek/deepseek-v3.2          # OPENROUTER_API_KEY
+pnpm bench run --model openrouter:deepseek/deepseek-v3.2 --repeat 5   # OPENROUTER_API_KEY; 5 runs a task tell a change from noise
 pnpm bench run --base-url https://api.deepseek.com --model deepseek-reasoner   # ENCODE_BENCH_API_KEY
 pnpm bench compare bench-results/<before>.json bench-results/<after>.json
 ```

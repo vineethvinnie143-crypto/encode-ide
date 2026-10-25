@@ -8,7 +8,9 @@
  *   bench run --model anthropic:<id> | openai:<id>
  *   bench run --base-url http://localhost:11434/v1 --model qwen2.5-coder   any OpenAI-compatible server
  *   bench show report.json
- *   bench compare before.json after.json [--fail-on-regression]
+ *   bench compare before.json after.json [--fail-on-regression] [--gate 25]
+ *                                                with 3 runs a task or more, only a drop beyond chance counts; --gate
+ *                                                passes a change that is 25% cheaper per task solved at equal accuracy
  *   bench replay report.json [--save <name>]    a report of a request (ADR 0092), played again on this eNCode; with
  *                                                --save, kept as the task replay-<name> (also: pnpm turn-report)
  *
@@ -30,7 +32,7 @@ import { Sandbox } from '@encode/sandbox'
 import { runBench } from './bench'
 import { findPrograms } from './programs'
 import { formatReplay, replayReport, writeReplayTask } from './replay'
-import { compareReports, formatReport, parseReport, type BenchReport } from './report'
+import { compareReports, formatReport, gate, parseReport, type BenchReport } from './report'
 import type { TaskRun } from './run'
 import { readTasks, type BenchTask } from './task'
 
@@ -57,7 +59,7 @@ interface Flags {
   switches: Set<string>
 }
 
-const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save'])
+const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate'])
 const SWITCHES = new Set(['--reference', '--keep', '--sandbox', '--fail-on-regression', '--help', '-h'])
 
 function parseFlags(argv: readonly string[]): Flags {
@@ -269,7 +271,7 @@ export async function main(argv: readonly string[], context: CliContext): Promis
     const [command, ...rest] = argv
     const flags = parseFlags(rest)
     if (!command || command === '--help' || command === '-h' || flags.switches.has('--help') || flags.switches.has('-h')) {
-      context.print('Usage: bench list | run (--reference | --model <model>) [options] | show <report> | compare <before> <after> [--fail-on-regression] | replay <request report> [--save <name>]. See packages/bench/src/cli.ts.')
+      context.print('Usage: bench list | run (--reference | --model <model>) [options] | show <report> | compare <before> <after> [--fail-on-regression] [--gate <percent>] | replay <request report> [--save <name>]. See packages/bench/src/cli.ts.')
       return command ? 0 : 2
     }
     switch (command) {
@@ -284,8 +286,15 @@ export async function main(argv: readonly string[], context: CliContext): Promis
       }
       case 'compare': {
         if (flags.positional.length !== 2) throw new UsageError('compare takes two reports, before and after')
+        const cut = count(flags, '--gate', 1, 90)
         const comparison = compareReports(await readReport(flags.positional[0]!), await readReport(flags.positional[1]!))
         context.print(plain(comparison.text))
+        if (cut !== undefined) {
+          const verdict = gate(comparison, cut / 100)
+          context.print('')
+          context.print(verdict.passed ? `Gate passed: at least ${cut}% cheaper per task solved, at equal accuracy.` : plain(`Gate not passed:\n${verdict.reasons.map((reason) => `- ${reason}`).join('\n')}`))
+          if (!verdict.passed) return 1
+        }
         return flags.switches.has('--fail-on-regression') && comparison.regressions.length ? 1 : 0
       }
       case 'replay':
