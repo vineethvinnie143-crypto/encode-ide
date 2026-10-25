@@ -91,12 +91,19 @@ describe('C#: the .NET SDK', () => {
     'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json': { body: releases(hash, url) },
     [zipUrl]: { body: sdk },
   })
-  // `dotnet tool install csharp-ls --version 0.28.0 --tool-path <dir>` leaves csharp-ls.exe in <dir>.
+  // `dotnet tool install csharp-ls --version 0.28.0 --tool-path <dir> --configfile <file>` leaves csharp-ls.exe in <dir>.
+  const configs: string[] = []
   const toolInstall = (runs: Parameters<Run>[]): Run => async (program, args, options) => {
     runs.push([program, args, options])
-    if (args[0] === 'tool') fs.writeFileSync(path.join(args[args.indexOf('--tool-path') + 1]!, 'csharp-ls.exe'), 'MZ csharp-ls')
+    if (args[0] !== 'tool') return { code: 0, output: '' }
+    const config = fs.readFileSync(args[args.indexOf('--configfile') + 1]!, 'utf8')
+    configs.push(config)
+    // As dotnet says on a computer whose NuGet settings list no source.
+    if (!config.includes('https://api.nuget.org/v3/index.json')) return { code: 1, output: 'error NU1100: No NuGet sources are defined or enabled.' }
+    fs.writeFileSync(path.join(args[args.indexOf('--tool-path') + 1]!, 'csharp-ls.exe'), 'MZ csharp-ls')
     return { code: 0, output: '' }
   }
+  const command = (where: string) => `dotnet tool install csharp-ls --version 0.28.0 --tool-path ${where} --configfile nuget.config`
 
   it('fetches the .NET SDK into its own folder when the computer has none, installs csharp-ls with it, and starts the server with it', async () => {
     const csharp = server('csharp')
@@ -106,8 +113,9 @@ describe('C#: the .NET SDK', () => {
     const plan = planned(await planInstall(csharp, ctx))
     assert.equal(plan.bytes, sdk.length)
     assert.match(plan.steps[0]!, /^Downloads the \.NET SDK 10\.0\.402 \(\d+ KB\) from Microsoft \(builds\.dotnet\.microsoft\.com\) and checks it against the SHA-512 Microsoft publishes for it\.$/)
-    assert.equal(plan.steps[1], `Runs dotnet tool install csharp-ls --version 0.28.0 --tool-path ${path.join(tools, 'csharp', '0.28.0')}, with that copy.`)
-    assert.match(plan.steps[2]!, /Nothing is installed for the whole computer, no administrator is asked for, and the PATH stays as it is: this copy of the \.NET SDK is for the language server alone\. To build C# programs yourself, install the \.NET SDK from https:\/\/dotnet\.microsoft\.com\/download\.$/)
+    assert.equal(plan.steps[1], `Runs ${command(path.join(tools, 'csharp', '0.28.0'))}, with that copy.`)
+    assert.equal(plan.steps[2], "Takes it from nuget.org alone, through eNCode's own nuget.config, whatever package sources this computer's NuGet settings list.")
+    assert.match(plan.steps[3]!, /Nothing is installed for the whole computer, no administrator is asked for, and the PATH stays as it is: this copy of the \.NET SDK is for the language server alone\. To build C# programs yourself, install the \.NET SDK from https:\/\/dotnet\.microsoft\.com\/download\.$/)
 
     const installed = await installServer(csharp, ctx)
     const home = path.join(tools, 'runtimes', 'dotnet', '10.0.402')
@@ -115,6 +123,12 @@ describe('C#: the .NET SDK', () => {
     const [program, args, options] = runs.at(-1)!
     assert.equal(program, path.join(home, 'dotnet.exe'))
     assert.deepEqual(args.slice(0, 5), ['tool', 'install', 'csharp-ls', '--version', '0.28.0'])
+    // The package sources are eNCode's own, written to the work folder: nuget.org, and only it.
+    const configFile = args[args.indexOf('--configfile') + 1]!
+    assert.equal(configFile, path.join(`${options.cwd}-work`, 'nuget.config'))
+    const config = configs.at(-1)!
+    assert.match(config, /<packageSources>\s*<clear \/>\s*<add key="nuget\.org" value="https:\/\/api\.nuget\.org\/v3\/index\.json" protocolVersion="3" \/>\s*<\/packageSources>/)
+    assert.match(config, /<disabledPackageSources>\s*<clear \/>\s*<\/disabledPackageSources>/)
     assert.equal(options.env.DOTNET_ROOT, home)
     assert.equal(options.env.Path, `${home};C:\\Windows\\System32`)
     assert.equal(options.env.PATH, undefined, 'one PATH key, as Windows spells it')
@@ -136,7 +150,7 @@ describe('C#: the .NET SDK', () => {
     // The SDK is asked about once and downloaded once; a second plan uses the copy in place.
     assert.equal(asked.filter((line) => line === `GET ${zipUrl}`).length, 1)
     const again = planned(await planInstall(csharp, ctx))
-    assert.equal(again.steps[0], `Runs dotnet tool install csharp-ls --version 0.28.0 --tool-path ${path.join(tools, 'csharp', '0.28.0')}, with eNCode's own copy of the .NET SDK (10.0.402).`)
+    assert.equal(again.steps[0], `Runs ${command(path.join(tools, 'csharp', '0.28.0'))}, with eNCode's own copy of the .NET SDK (10.0.402).`)
     assert.equal(again.bytes, undefined)
 
     // Without its SDK, the server says how to get it back rather than failing to start.
@@ -156,12 +170,27 @@ describe('C#: the .NET SDK', () => {
     }
     const which = (name: string) => (name === 'dotnet' ? system : null)
     const newer = planned(await planInstall(csharp, context(fakeFetch(routes()), { which, run: sdks('8.0.404 [C:\\Program Files\\dotnet\\sdk]\r\n10.0.100 [C:\\Program Files\\dotnet\\sdk]\r\n') })))
-    assert.equal(newer.steps[0], `Runs dotnet tool install csharp-ls --version 0.28.0 --tool-path ${path.join(tools, 'csharp', '0.28.0')}, with the .NET SDK from ${system}.`)
+    assert.equal(newer.steps[0], `Runs ${command(path.join(tools, 'csharp', '0.28.0'))}, with the .NET SDK from ${system}.`)
     const older = planned(await planInstall(csharp, context(fakeFetch(routes()), { which, run: sdks('8.0.404 [C:\\Program Files\\dotnet\\sdk]\r\n') })))
     assert.match(older.steps[0]!, /^Downloads the \.NET SDK 10\.0\.402/)
     // A dotnet with no SDK at all (only a runtime) lists none.
     const none = planned(await planInstall(csharp, context(fakeFetch(routes()), { which, run: sdks('') })))
     assert.match(none.steps[0]!, /^Downloads the \.NET SDK 10\.0\.402/)
+  })
+
+  it('gives the .NET SDK on the computer eNCode’s own package sources too, and removes them afterwards', async () => {
+    const system = 'C:\\Program Files\\dotnet\\dotnet.exe'
+    const runs: Parameters<Run>[] = []
+    const install = toolInstall(runs)
+    const run: Run = async (program, args, options) => (args[0] === '--list-sdks' ? { code: 0, output: '10.0.100 [C:\\Program Files\\dotnet\\sdk]\r\n' } : install(program, args, options))
+    const installed = await installServer(server('csharp'), context(fakeFetch(routes()), { which: (name) => (name === 'dotnet' ? system : null), run }))
+    assert.equal(fs.readFileSync(path.join(installed, 'csharp-ls.exe'), 'utf8'), 'MZ csharp-ls')
+    const [program, args, options] = runs.at(-1)!
+    assert.equal(program, system)
+    assert.equal(args[args.indexOf('--configfile') + 1], path.join(`${options.cwd}-work`, 'nuget.config'))
+    assert.equal(options.env.NUGET_PACKAGES, undefined, 'the computer’s own SDK keeps its own package cache')
+    assert.equal(fs.existsSync(`${options.cwd}-work`), false)
+    assert.deepEqual(fs.readdirSync(path.join(tools, 'csharp')), ['0.28.0'])
   })
 
   it('says where to get the .NET SDK where eNCode cannot fetch it, or cannot reach Microsoft', async () => {
@@ -289,6 +318,53 @@ describe('Go: the toolchain from the Go module proxy', () => {
     await assert.rejects(installServer(go, context(fakeFetch({ [zipUrl]: { status: 302, headers: { location: 'https://storage.googleapis.com/someone-else/go.zip' } } }), { run })), /does not download from storage\.googleapis\.com/)
     assert.deepEqual(fs.readdirSync(path.join(tools, 'runtimes', 'go')), [])
     assert.equal(runs.length, 0)
+  })
+
+  it('installs gopls with its own Go copy and removes the read-only module cache Go leaves, which Windows will not simply delete', async () => {
+    // eNCode's copy of Go from an earlier install.
+    const home = path.join(tools, 'runtimes', 'go', '1.27.3')
+    fs.mkdirSync(path.join(home, 'bin'), { recursive: true })
+    fs.writeFileSync(path.join(home, 'bin', 'go.exe'), 'MZ go')
+    fs.writeFileSync(path.join(home, 'encode-install.json'), JSON.stringify({ id: 'go', version: '1.27.3', kind: 'runtime' }))
+    const runs: Parameters<Run>[] = []
+    const run: Run = async (program, args, options) => {
+      runs.push([program, args, options])
+      // As `go install` leaves it: module files without write permission (read-only on Windows), and a build cache.
+      const module = path.join(options.env.GOMODCACHE!, 'golang.org', 'x', 'tools', 'gopls@v0.24.0')
+      fs.mkdirSync(module, { recursive: true })
+      fs.writeFileSync(path.join(module, 'go.mod'), 'module golang.org/x/tools/gopls\n')
+      fs.chmodSync(path.join(module, 'go.mod'), 0o444)
+      fs.mkdirSync(options.env.GOCACHE!, { recursive: true })
+      fs.writeFileSync(path.join(options.env.GOCACHE!, 'README'), 'cache')
+      fs.writeFileSync(path.join(options.env.GOBIN!, 'gopls.exe'), 'MZ gopls')
+      return { code: 0, output: '' }
+    }
+    const installed = await installServer(server('go'), context(fakeFetch({}), { run }))
+    assert.equal(fs.readFileSync(path.join(installed, 'gopls.exe'), 'utf8'), 'MZ gopls')
+    const [program, , options] = runs[0]!
+    assert.equal(program, path.join(home, 'bin', 'go.exe'))
+    assert.equal(options.env.GOFLAGS, '-modcacherw')
+    assert.ok(options.env.GOMODCACHE!.startsWith(`${options.cwd}-work`))
+    assert.equal(fs.existsSync(`${options.cwd}-work`), false, 'the work folder is gone, read-only files and all')
+    assert.deepEqual(fs.readdirSync(path.join(tools, 'go')), ['0.24.0'])
+  })
+
+  it('takes away what an install a day ago could not remove, and leaves one that may still be running', async () => {
+    const base = path.join(tools, 'go')
+    const stale = path.join(base, '.partial-0123456789ab-work')
+    const fresh = path.join(base, '.partial-ba9876543210')
+    fs.mkdirSync(path.join(stale, 'mod'), { recursive: true })
+    fs.writeFileSync(path.join(stale, 'mod', 'go.mod'), 'x')
+    fs.chmodSync(path.join(stale, 'mod', 'go.mod'), 0o444)
+    fs.mkdirSync(fresh, { recursive: true })
+    const old = new Date(Date.now() - 25 * 60 * 60_000)
+    fs.utimesSync(stale, old, old)
+    const go = path.join(tools, 'runtimes', 'go', '1.27.3')
+    fs.mkdirSync(path.join(go, 'bin'), { recursive: true })
+    fs.writeFileSync(path.join(go, 'encode-install.json'), JSON.stringify({ id: 'go', version: '1.27.3', kind: 'runtime' }))
+    const run: Run = async (_program, _args, options) => (fs.writeFileSync(path.join(options.env.GOBIN!, 'gopls.exe'), 'MZ'), { code: 0, output: '' })
+    await installServer(server('go'), context(fakeFetch({}), { run }))
+    assert.deepEqual(fs.readdirSync(base).sort(), ['.partial-ba9876543210', '0.24.0'])
   })
 
   it('uses a Go 1.21 or newer the computer has, since it fetches what gopls asks for itself', async () => {

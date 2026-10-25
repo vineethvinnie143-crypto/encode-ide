@@ -1,6 +1,6 @@
 # 0114. A server that needs a toolchain gets one in eNCode's own folder
 
-- Status: Accepted, builds on 0083
+- Status: Accepted, builds on 0083; the C# and Go installs on Windows are fixed by 0119
 - Date: 2026-10-24
 
 ## Context

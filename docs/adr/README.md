@@ -103,11 +103,12 @@ say so.
 | [0111](0111-a-folder-on-another-machine-opens-over-ssh-the-agent-works-there-and-the-keys-stay-on-the-pc.md) | A folder on another machine opens over SSH: the agent works there, and the keys stay on the PC | Accepted, builds on 0040, 0064, 0106 and 0108 |
 | [0112](0112-the-dice-rolls-while-the-agent-works.md) | The dice rolls while the agent works | Accepted, builds on 0107; where the dice sits superseded by 0116 |
 | [0113](0113-pictures-and-files-go-with-a-message.md) | Pictures and files go with a message: pasted, dropped or picked | Accepted, builds on 0054, 0069 and 0111 |
-| [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083 |
+| [0114](0114-a-server-that-needs-a-toolchain-gets-one-in-encodes-own-folder.md) | A server that needs a toolchain gets one in eNCode's own folder | Accepted, builds on 0083; the C# and Go installs on Windows are fixed by 0119 |
 | [0115](0115-a-finished-task-list-folds-away-and-the-thread-follows-until-you-scroll-up.md) | A finished task list folds away, and the thread follows until you scroll up | Accepted, builds on 0017 |
 | [0116](0116-the-dice-rolls-under-the-latest-step.md) | The dice rolls under the latest step | Accepted, builds on 0112 and 0115 |
 | [0117](0117-a-preset-is-known-by-the-model-that-answers-for-it.md) | A preset is known by the model that answers for it | Accepted, builds on 0035 and 0113 |
 | [0118](0118-fix-this-folder-gives-your-account-full-control-after-an-administrators-yes.md) | Fix this folder gives your account Full control after an administrator's yes | Accepted, builds on 0063 and 0110 |
+| [0119](0119-toolchain-installs-read-encodes-own-package-sources-and-clean-up-what-go-leaves-read-only.md) | Toolchain installs read eNCode's own package sources, and clean up what Go leaves read-only | Accepted, builds on 0114 |
 
 ## Template
 

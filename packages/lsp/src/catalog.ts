@@ -115,6 +115,21 @@ const TS_HINTS = {
 
 const JDTLS = 'jdt-language-server-1.63.0-202610191322.tar.gz'
 
+/** NuGet settings whose one package source is nuget.org, which nothing disables. */
+const NUGET_ORG_ONLY = [
+  '<?xml version="1.0" encoding="utf-8"?>',
+  '<configuration>',
+  '  <packageSources>',
+  '    <clear />',
+  '    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />',
+  '  </packageSources>',
+  '  <disabledPackageSources>',
+  '    <clear />',
+  '  </disabledPackageSources>',
+  '</configuration>',
+  '',
+].join('\n')
+
 /**
  * Eclipse's Java server is a Java program: started with the Java found through JAVA_HOME or the PATH, its shared
  * settings read from where it was installed, its own settings and the project's index kept in eNCode's cache.
@@ -311,7 +326,10 @@ export const LANGUAGE_SERVERS: readonly ServerSpec[] = [
     installer: {
       kind: 'toolchain',
       program: 'dotnet',
-      args: ['tool', 'install', 'csharp-ls', '--version', '0.28.0', '--tool-path', '{dir}'],
+      // With --configfile, dotnet reads that file's package sources alone: a computer whose NuGet settings list none,
+      // or only a company feed, still gets csharp-ls from nuget.org.
+      args: ['tool', 'install', 'csharp-ls', '--version', '0.28.0', '--tool-path', '{dir}', '--configfile', '{nugetConfig}'],
+      files: { nugetConfig: { name: 'nuget.config', text: NUGET_ORG_ONLY, about: "Takes it from nuget.org alone, through eNCode's own nuget.config, whatever package sources this computer's NuGet settings list." } },
       version: '0.28.0',
       needs: 'the .NET SDK',
       bin: 'csharp-ls',
