@@ -41,7 +41,14 @@ export function buildStamp(env = process.env) {
     builtAt: new Date().toISOString(),
     // CI sets "tester" for the builds that are handed out.
     channel: env.ENCODE_CHANNEL?.trim() || 'dev',
+    // CI's run number: it grows with each build, so a newer release is a larger one (ADR 0127). 0 elsewhere.
+    build: buildNumberOf(env),
   }
+}
+
+function buildNumberOf(env) {
+  const named = (env.ENCODE_BUILD ?? '').trim()
+  return /^[1-9]\d{0,8}$/.test(named) ? Number(named) : 0
 }
 
 export function mainBuildOptions({ production = true } = {}) {

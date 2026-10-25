@@ -299,6 +299,27 @@
   gap: 6px;
 }
 
+/* Updates (ADR 0127): the download's bar and the new build's notes, under the status line */
+.update-detail {
+  display: grid;
+  gap: 10px;
+}
+.update-detail .install-server-bar {
+  width: 100%;
+}
+.update-notes-title {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+.update-notes ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+
 .settings-aside {
   display: flex;
   flex-wrap: wrap;

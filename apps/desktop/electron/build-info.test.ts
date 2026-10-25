@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { buildLine } from '../shared/about'
 import { aboutInfo, BUILD, describeOs, type BuildStamp } from './build-info'
 
-const stamp: BuildStamp = { version: '0.1.0', commit: '502645ee4cfcac52646f6e6e2acc0bd9cabf7dce', dirty: false, builtAt: '2026-10-22T06:12:00.000Z', channel: 'tester' }
+const stamp: BuildStamp = { version: '0.1.0', commit: '502645ee4cfcac52646f6e6e2acc0bd9cabf7dce', dirty: false, builtAt: '2026-10-22T06:12:00.000Z', channel: 'tester', build: 291 }
 const versions = { electron: '44.9.2', chrome: '140.0.7339.0', node: '22.18.0' } as NodeJS.ProcessVersions
 
 describe('build information', () => {
@@ -24,6 +24,7 @@ describe('build information', () => {
       dirty: false,
       builtAt: stamp.builtAt,
       channel: 'tester',
+      build: 291,
       packaged: true,
       platform: 'win32',
       arch: 'x64',
@@ -36,13 +37,20 @@ describe('build information', () => {
 
   it('writes the line a bug report starts with', () => {
     const info = aboutInfo({ isPackaged: true, versions, platform: 'win32', arch: 'x64', release: '10.0.26100' }, stamp)
-    assert.equal(buildLine(info), 'eNCode 0.1.0 tester, commit 502645e (built 2026-10-22T06:12:00.000Z)')
-    assert.equal(buildLine({ ...info, dirty: true }), 'eNCode 0.1.0 tester, commit 502645e + local changes (built 2026-10-22T06:12:00.000Z)')
-    assert.equal(buildLine({ ...info, commit: '', builtAt: '' }), 'eNCode 0.1.0 tester, no commit recorded')
+    assert.equal(buildLine(info), 'eNCode 0.1.0 tester build 291, commit 502645e (built 2026-10-22T06:12:00.000Z)')
+    assert.equal(buildLine({ ...info, dirty: true }), 'eNCode 0.1.0 tester build 291, commit 502645e + local changes (built 2026-10-22T06:12:00.000Z)')
+    assert.equal(buildLine({ ...info, build: 0, commit: '', builtAt: '' }), 'eNCode 0.1.0 tester, no commit recorded')
   })
 
   it('has a stamp even when the sources run unbuilt', () => {
     assert.equal(BUILD.channel, 'dev')
     assert.equal(BUILD.commit, '')
+    assert.equal(BUILD.build, 0)
+  })
+
+  it('reads a stamp from before build numbers as build 0', () => {
+    const older: BuildStamp = { ...stamp }
+    delete older.build
+    assert.equal(aboutInfo({ isPackaged: true, versions, platform: 'win32', arch: 'x64', release: '10.0.26100' }, older).build, 0)
   })
 })

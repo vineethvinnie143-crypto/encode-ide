@@ -9,11 +9,15 @@ import { Button, IconButton } from '../../ui/Button'
 import { Dialog } from '../../ui/Dialog'
 import { Copy } from '../../ui/icons'
 import { LogoMark, Wordmark } from '../../ui/Logo'
+import { updateLine } from '@shared/updates'
+import { useUpdates } from '../../stores/updates'
+import { UpdateActions, UpdateDetail, hasUpdateDetail } from '../settings/UpdatesGroup'
 
 export function AboutDialog() {
   const open = useUi((state) => state.aboutOpen)
   const [info, setInfo] = useState<AboutInfo | null>(null)
   const [saving, setSaving] = useState(false)
+  const update = useUpdates((state) => state.status)
   useEffect(() => {
     if (!open) return
     void api.app
@@ -57,7 +61,7 @@ export function AboutDialog() {
         <Wordmark className="about-name" />
         <div className="about-version">
           Version {info?.version ?? '…'}
-          {info?.channel === 'tester' ? ' · Tester build' : ''}
+          {info?.channel === 'tester' ? (info.build > 0 ? ` · Tester build ${info.build}` : ' · Tester build') : ''}
         </div>
         {info && (
           <dl className="about-facts">
@@ -85,12 +89,22 @@ export function AboutDialog() {
                 Electron {info.electron} · Chromium {info.chrome.split('.')[0]}
               </dd>
             </div>
+            {update && update.state !== 'off' && (
+              <div className="about-update">
+                <dt>Updates</dt>
+                <dd>
+                  <span>{updateLine(update)}</span>
+                  <UpdateActions status={update} compact />
+                </dd>
+                {hasUpdateDetail(update) && <UpdateDetail status={update} />}
+              </div>
+            )}
           </dl>
         )}
         <p>An AI-first desktop IDE with an autonomous coding agent. Bring your own model and keep your files.</p>
         <p className="about-note">
-          Model calls go straight from this app to your provider, and nothing else leaves your computer. If something goes wrong, save diagnostics and send
-          the file: it has no keys, no code and no conversations.
+          eNCode talks only to the services you set up, such as your model provider and web search, and a tester build asks GitHub for a newer build. If
+          something goes wrong, save diagnostics and send the file: it has no keys, no code and no conversations.
         </p>
       </div>
     </Dialog>

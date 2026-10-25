@@ -217,6 +217,20 @@ describe('Attention keeping awake', () => {
     assert.deepEqual(h.awake, [true, false])
   })
 
+  it('is busy while an agent works or waits for the person, and for a moment after a request ends', async () => {
+    const h = harness()
+    assert.equal(h.attention.busy(), false)
+    h.status('s1', 'thinking')
+    assert.equal(h.attention.busy(), true)
+    h.status('s1', 'awaiting-approval')
+    assert.equal(h.attention.busy(), true, 'a request waiting for the person is not over')
+    h.status('s1', 'done')
+    h.event('s1', { type: 'done', summary: '' })
+    assert.equal(h.attention.busy(), true, 'it may start again at once')
+    await h.advance(DONE_SETTLE_MS)
+    assert.equal(h.attention.busy(), false)
+  })
+
   it('lets go of everything when a session goes away or eNCode closes', async () => {
     const h = harness()
     h.status('s1', 'awaiting-approval')

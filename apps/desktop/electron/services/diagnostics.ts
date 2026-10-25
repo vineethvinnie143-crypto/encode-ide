@@ -1,5 +1,6 @@
-import type { AboutInfo, LanguageServersReport, Settings } from '../../shared/types'
+import type { AboutInfo, LanguageServersReport, Settings, UpdateStatus } from '../../shared/types'
 import { buildLine } from '../../shared/about'
+import { updateLine } from '../../shared/updates'
 import { inlineState } from '../../shared/inline'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
 import { searchProviderInfo } from '../../shared/search'
@@ -34,6 +35,8 @@ export interface DiagnosticsInput {
   remote?: { status: string; node?: string; system?: string } | null
   /** The open folder's language servers, with the last lines of those that stopped or failed; null with no folder open. */
   languageServers: (LanguageServersReport & { logs?: Record<string, string[]> }) | null
+  /** Where the updater is (ADR 0127). */
+  updates?: UpdateStatus
   /** The names (never the values) of the ENCODE_* variables the process was started with. */
   environment: string[]
   /** The end of the log files, newest last. */
@@ -72,6 +75,10 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Commit', about.commit ? `${about.commit}${about.dirty ? ' + local changes' : ''}` : 'not recorded'],
     ['Built', about.builtAt || 'not recorded'],
     ['Installed as a program', about.packaged ? 'yes' : 'no, run from the sources'],
+    ...(about.build > 0 ? ([['Tester build', String(about.build)]] as [string, string][]) : []),
+    ...(input.updates
+      ? ([['Updates', `${input.updates.state === 'off' ? '' : input.updates.auto ? 'looks by itself; ' : 'only when asked; '}${updateLine(input.updates)}${input.updates.checkedAt ? ` (last looked ${new Date(input.updates.checkedAt).toISOString()})` : ''}`]] as [string, string][])
+      : []),
   ])
 
   section('System', [

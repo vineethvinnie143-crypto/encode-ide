@@ -283,6 +283,20 @@ button.shortcuts-keys:hover {
 .about-body .about-note {
   color: var(--text-3);
 }
+/* Updates (ADR 0127): the line, and its buttons under it when it is long */
+.about-update dd {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  row-gap: 6px;
+}
+.about-update dd > span {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.about-update .update-detail {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
 
 /* /status */
 .status-facts {

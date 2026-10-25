@@ -15,6 +15,7 @@
  * pair up, and a request without tools is answered as a summary request,
  * unless it asks for the name of a session.
  */
+import { createHash } from 'node:crypto'
 import http from 'node:http'
 
 const port = Number(process.env.FAKE_PROVIDER_PORT || 8787)
@@ -747,8 +748,50 @@ function inlineAnswer(user) {
 const namesSession = (messages) =>
   messages.some((message) => JSON.stringify(message.content ?? '').includes('You name a coding conversation'))
 
+/**
+ * A tester build's release (ADR 0127) for the smoke's updates part: the app goes by build ENCODE_UPDATE_AS_BUILD,
+ * and the release is that same build until the smoke publishes the next one. Its installer is a stand-in, sent in a
+ * few pieces so the download has a moment to show.
+ */
+const UPDATE_INSTALLER = Buffer.from(`MZ${'eNCode smoke installer '.repeat(20_000)}`)
+const UPDATE_SHA256 = createHash('sha256').update(UPDATE_INSTALLER).digest('hex')
+let updateBuild = Number(process.env.ENCODE_UPDATE_AS_BUILD || 41)
+const updateManifest = () => ({
+  schema: 1,
+  channel: 'tester',
+  version: '0.1.0',
+  build: updateBuild,
+  commit: 'c0ffee'.padEnd(40, '0'),
+  publishedAt: '2026-10-25T14:00:00Z',
+  notes: ['The agent tells its work and checks the outcome itself (#90)', 'Tester builds update themselves (#91)'],
+  installer: { name: 'eNCode-0.1.0-setup.exe', size: UPDATE_INSTALLER.length, sha256: UPDATE_SHA256 },
+})
+
+async function sendUpdateInstaller(response) {
+  response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': UPDATE_INSTALLER.length })
+  const piece = Math.ceil(UPDATE_INSTALLER.length / 8)
+  for (let at = 0; at < UPDATE_INSTALLER.length; at += piece) {
+    response.write(UPDATE_INSTALLER.subarray(at, at + piece))
+    await delay(150)
+  }
+  response.end()
+}
+
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.url === '/encode-update.json') {
+      sendJson(response, 200, updateManifest())
+      return
+    }
+    if (request.url === '/__update/publish' && request.method === 'POST') {
+      updateBuild += 1
+      sendJson(response, 200, { build: updateBuild, sha256: UPDATE_SHA256 })
+      return
+    }
+    if (request.url === `/download/build-${updateBuild}/eNCode-0.1.0-setup.exe`) {
+      await sendUpdateInstaller(response)
+      return
+    }
     if (request.url === '/health') {
       sendJson(response, 200, { ok: true })
       return

@@ -17,7 +17,7 @@ async function main() {
   console.log('[build] electron main, preload and agent host (esbuild)')
   await buildMain({ production: true })
   const stamp = buildStamp()
-  console.log(`[build] done: eNCode ${stamp.version} (${stamp.channel}) ${stamp.commit ? stamp.commit.slice(0, 7) : 'no commit'}${stamp.dirty ? ' + local changes' : ''}`)
+  console.log(`[build] done: eNCode ${stamp.version} (${stamp.channel}${stamp.build ? ` build ${stamp.build}` : ''}) ${stamp.commit ? stamp.commit.slice(0, 7) : 'no commit'}${stamp.dirty ? ' + local changes' : ''}`)
 }
 
 main().catch((err) => {

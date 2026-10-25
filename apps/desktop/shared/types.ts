@@ -168,6 +168,11 @@ export interface Settings {
   /** The taskbar button flashes while the agent needs you and eNCode is not in front. Default on. */
   flashTaskbar: boolean
   /**
+   * A tester build looks for a newer one at start and every four hours, and downloads it in the background; it installs
+   * only when the person restarts for it (ADR 0127). Default on.
+   */
+  autoUpdate: boolean
+  /**
    * Read only: the folder chats (sessions that belong to no project) work in, with the default filled in. Changed with
    * settings.chooseChatsFolder, which asks with the system's folder dialog, and settings.resetChatsFolder.
    */
@@ -1646,6 +1651,8 @@ export interface AboutInfo {
   builtAt: string
   /** "tester" for a build that is handed out, "dev" otherwise. */
   channel: string
+  /** A tester build's number, which grows with each one (ADR 0127); 0 for a build that has none. */
+  build: number
   /** Installed and run as a program, not started from the sources. */
   packaged: boolean
   platform: string
@@ -1655,6 +1662,41 @@ export interface AboutInfo {
   electron: string
   chrome: string
   node: string
+}
+
+/** A newer tester build, as its release describes it (ADR 0127). */
+export interface UpdateBuild {
+  build: number
+  version: string
+  /** Bytes of its installer. */
+  size: number
+  publishedAt: string
+  /** What changed, one line each, from the release; plain text. */
+  notes: string[]
+}
+
+/**
+ * Where the updater is (ADR 0127). `build` is this program's own tester build, 0 when it has none; `auto` is whether
+ * it looks by itself (Settings > General); `checkedAt` is when it last heard from the release, or null.
+ */
+export type UpdateStatus = { build: number; auto: boolean; checkedAt: number | null } & (
+  | { state: 'off'; reason: string }
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'downloading'; next: UpdateBuild; received: number }
+  /** Downloaded and checked; `waiting` while a restart the person asked for waits for the agents to finish. */
+  | { state: 'ready'; next: UpdateBuild; waiting: boolean }
+  /** Newer, but installed by hand from the release page: the portable program, or an update that did not take. */
+  | { state: 'manual'; next: UpdateBuild; reason: string }
+  | { state: 'installing'; next: UpdateBuild }
+  | { state: 'error'; message: string }
+)
+
+/** How the last restart to update ended, told once when eNCode starts again. */
+export interface UpdateOutcome {
+  updated: boolean
+  from: number
+  to: number
 }
 
 /** How saving a report of an editor issue ended. */
@@ -1690,6 +1732,21 @@ export interface EncodeApi {
     screenReader(): Promise<boolean>
     /** A screen reader started or stopped. */
     onScreenReader(cb: (active: boolean) => void): () => void
+  }
+  /** The tester builds' updates (ADR 0127). */
+  updates: {
+    status(): Promise<UpdateStatus>
+    /** Looks at the release now, and downloads a newer build. */
+    check(): Promise<UpdateStatus>
+    /** Closes eNCode and installs the downloaded build, which starts when it is done; waits while an agent works. */
+    install(): Promise<UpdateStatus>
+    /** Stops waiting to restart. */
+    cancel(): Promise<UpdateStatus>
+    /** Opens a build's release page in the browser: the one named, or the newer build's. */
+    openPage(build?: number): Promise<void>
+    /** How the last restart to update ended, once after it; null otherwise. */
+    outcome(): Promise<UpdateOutcome | null>
+    onStatus(cb: (status: UpdateStatus) => void): () => void
   }
   browser: {
     /** A page in one of the person's tabs opened a window: it becomes a new Browser tab. */

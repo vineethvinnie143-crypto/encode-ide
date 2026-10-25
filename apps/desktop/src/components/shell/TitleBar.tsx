@@ -6,9 +6,10 @@ import { useShortcuts } from '../../commands/useShortcuts'
 import { useSessions } from '../../stores/sessions'
 import { canGoBack, canGoForward } from '../../stores/history'
 import { useUi } from '../../stores/ui'
+import { useUpdates } from '../../stores/updates'
 import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { ArrowLeft, ArrowRight, Copy, Maximize2, Minus, PanelLeft, X } from '../../ui/icons'
+import { ArrowLeft, ArrowRight, Copy, Download, Loader2, Maximize2, Minus, PanelLeft, X } from '../../ui/icons'
 import { LogoMark } from '../../ui/Logo'
 import { MenuPanel } from '../../ui/Menu'
 import type { Rect } from '../../ui/place'
@@ -93,6 +94,36 @@ function MenuBar() {
 }
 
 /**
+ * A tester build that has downloaded and checked a newer one offers the restart here, where it is seen without being
+ * looked for (ADR 0127). While the agents work it waits for them, and a click stops waiting.
+ */
+function UpdateButton() {
+  const status = useUpdates((state) => state.status)
+  if (!status || (status.state !== 'ready' && status.state !== 'installing')) return null
+  const build = status.next.build
+  const waiting = status.state === 'ready' && status.waiting
+  const installing = status.state === 'installing'
+  const label = installing ? 'Restarting…' : waiting ? 'Restarts after the agents' : 'Restart to update'
+  const title = installing
+    ? `eNCode closes and installs build ${build}, then starts again.`
+    : waiting
+      ? `Build ${build} installs when the agents finish. Click to stop waiting.`
+      : `Build ${build} is downloaded and checked. eNCode closes, installs it and starts again.`
+  return (
+    <button
+      type="button"
+      className={cx('tb-update', waiting && 'is-waiting')}
+      title={title}
+      disabled={installing}
+      onClick={() => void (waiting ? useUpdates.getState().cancel() : useUpdates.getState().install())}
+    >
+      {installing || waiting ? <Loader2 size={13} className="spin" aria-hidden="true" /> : <Download size={13} aria-hidden="true" />}
+      <span>{label}</span>
+    </button>
+  )
+}
+
+/**
  * Windows draws the window buttons itself, over the right end of the title bar (see window.ts, which says so
  * in the page's address). Their corner is then not ours: the bar leaves it free (01-titlebar.css) and draws
  * no buttons of its own, not even in full screen, where the system hides its own.
@@ -151,6 +182,7 @@ export default function TitleBar() {
       <span className="tb-sep" />
       <MenuBar />
       <div className="tb-drag" />
+      <UpdateButton />
       {!NATIVE_CAPTIONS && <CaptionButtons />}
     </header>
   )

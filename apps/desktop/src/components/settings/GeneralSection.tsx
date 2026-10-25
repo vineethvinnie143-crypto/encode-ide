@@ -10,6 +10,7 @@ import { Segmented } from '../../ui/Segmented'
 import { Toggle } from '../../ui/Toggle'
 import { sendKeys } from '../Chat/send-key'
 import { SettingRow, SettingsGroup } from './Section'
+import { UpdatesGroup } from './UpdatesGroup'
 
 const SEND_KEYS = [
   { value: 'enter', label: 'Enter' },
@@ -21,7 +22,7 @@ const FOLLOW_UPS = [
   { value: 'steer', label: 'Steer' },
 ] as const satisfies readonly { value: FollowUp; label: string }[]
 
-/** Settings > General: how messages are sent, sleep while the agent works, and the folder chats work in. */
+/** Settings > General: how messages are sent, sleep while the agent works, the folder chats work in, and updates. */
 export function GeneralSection({ settings }: { settings: Settings }) {
   const save = useSettings((state) => state.save)
   const keys = sendKeys(settings.sendKey)
@@ -101,6 +102,8 @@ export function GeneralSection({ settings }: { settings: Settings }) {
           </div>
         </SettingRow>
       </SettingsGroup>
+
+      <UpdatesGroup settings={settings} />
     </>
   )
 }

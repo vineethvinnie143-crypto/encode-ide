@@ -71,6 +71,7 @@ function defaults(): StoredSettings {
     notifyDone: 'background',
     notifyNeeds: 'background',
     flashTaskbar: true,
+    autoUpdate: true,
     chatsFolder: null,
     appearance: { ...DEFAULT_APPEARANCE },
     roles: {},
@@ -296,6 +297,7 @@ export class SettingsService {
       notifyDone: isNotifyWhen(input.notifyDone) ? input.notifyDone : base.notifyDone,
       notifyNeeds: isNotifyWhen(input.notifyNeeds) ? input.notifyNeeds : base.notifyNeeds,
       flashTaskbar: typeof input.flashTaskbar === 'boolean' ? input.flashTaskbar : base.flashTaskbar,
+      autoUpdate: typeof input.autoUpdate === 'boolean' ? input.autoUpdate : base.autoUpdate,
       chatsFolder: this.fitForChats(chatsFolderOf(input.chatsFolder)),
       appearance: normalizeAppearance(input.appearance),
       roles: cleanRoles(input.roles, profiles),
@@ -353,6 +355,7 @@ export class SettingsService {
       notifyDone: this.data.notifyDone,
       notifyNeeds: this.data.notifyNeeds,
       flashTaskbar: this.data.flashTaskbar,
+      autoUpdate: this.data.autoUpdate,
       chatsFolder: this.chatsFolder(),
       chatsFolderDefault: this.defaultChatsFolder,
       appearance: { ...this.data.appearance },
@@ -449,6 +452,7 @@ export class SettingsService {
     if (isNotifyWhen(patch.notifyDone)) next.notifyDone = patch.notifyDone
     if (isNotifyWhen(patch.notifyNeeds)) next.notifyNeeds = patch.notifyNeeds
     if (typeof patch.flashTaskbar === 'boolean') next.flashTaskbar = patch.flashTaskbar
+    if (typeof patch.autoUpdate === 'boolean') next.autoUpdate = patch.autoUpdate
     // The chats folder is not taken from a patch: only the folder dialog, in this process, chooses one.
     // A partial appearance changes only the fields it names.
     if (patch.appearance !== undefined) next.appearance = normalizeAppearance(patch.appearance, next.appearance)

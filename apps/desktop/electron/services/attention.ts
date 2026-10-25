@@ -113,6 +113,16 @@ export class Attention {
     this.updateAwake()
   }
 
+  /**
+   * An agent is working or waiting for the person, or a request ended a moment ago and may go on (a goal's next round,
+   * a queued message): what a restart to update waits for (ADR 0127).
+   */
+  busy(): boolean {
+    if (this.settling.size > 0) return true
+    for (const status of this.statuses.values()) if (WORKING.has(status) || WAITING.has(status)) return true
+    return false
+  }
+
   /** A notice like a finished request's, whatever the settings say, so the person sees what Windows does with it. */
   test(): void {
     this.effects.notify({ sessionId: '', kind: 'test', title: 'eNCode', body: noticeBody('test') })

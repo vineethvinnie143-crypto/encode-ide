@@ -582,8 +582,10 @@ CI makes both for every run, starts each the way a tester does (`apps/desktop/sc
 and commit: **Help → About eNCode**, and the first line of **Help → Save diagnostics…**.
 [TESTING.md](TESTING.md) is what testers are given.
 
-Builds are unsigned, and there is no auto-update; both come with a public release, which also adds Electron
-fuses.
+A run started by hand on `main` is also published as a GitHub release, `build-<run number>`, with
+`encode-update.json` naming each program's SHA-256; an installed tester build downloads a newer one, checks it, and
+installs it when the person restarts for it ([ADR 0127](docs/adr/0127-tester-builds-update-themselves.md)). Builds
+are unsigned; signing comes with a public release, which also adds Electron fuses.
 
 ## License
 
