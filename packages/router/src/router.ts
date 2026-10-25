@@ -1,4 +1,5 @@
 import {
+  cacheTermsOf,
   isEmptyReply,
   repairJson as defaultRepairJson,
   userText,
@@ -229,8 +230,9 @@ function budgetOf(info: ModelInfo): ModelBudget {
     maxOutputTokens: info.maxOutputTokens,
     images: info.capabilities.images,
     documents: info.capabilities.documents === true,
-    ...(info.free || info.price.input > 0 || info.price.output > 0 ? { price: { ...info.price } } : {}),
+    ...(info.free || info.price.input > 0 || info.price.output > 0 ? { price: { input: info.price.input, output: info.price.output } } : {}),
     free: info.free,
+    cache: cacheTermsOf({ family: info.family, reasoning: info.capabilities.reasoning, price: info.price }),
   }
 }
 

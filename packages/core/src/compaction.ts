@@ -24,9 +24,10 @@
  * bind a thinking block to the conversation that minted it would reject them.
  */
 import type { AssistantBlock, AssistantMessage, DocumentBlock, Message, ModelRequest, ToolResultBlock, ToolUseBlock, UserBlock, UserMessage } from '@encode/providers'
-import { textBlock, userText } from '@encode/providers'
+import { BINDS_THINKING, requestStart, textBlock, userText } from '@encode/providers'
 import { OUTSIDE_NOTES_OPEN } from './external'
 import { INVOKED_SKILL_OPEN, MENTIONED_FILES_OPEN } from './mentions'
+import type { Recency } from './shortening'
 
 /** Used when the router has no better number. */
 export const DEFAULT_CONTEXT_WINDOW = 64_000
@@ -320,6 +321,19 @@ function unitsOf(messages: readonly Message[]): Unit[] {
   return units
 }
 
+/** How many steps the conversation holds: assistant messages with tool calls. */
+export function stepCount(messages: readonly Message[]): number {
+  let steps = 0
+  for (const message of messages) if (message.role === 'assistant' && message.content.some((block) => block.type === 'tool-use')) steps++
+  return steps
+}
+
+/** The next request is the first of a new request: the conversation ends with what the person (or eNCode) wrote, not with tool results. */
+export function requestStarts(messages: readonly Message[]): boolean {
+  const last = messages.at(-1)
+  return last === undefined || (last.role === 'user' && !isToolResultMessage(last))
+}
+
 // ---------------------------------------------------------------- rewrites
 
 /** The index of the first message that differs, by identity; the shorter length when one list is a prefix of the other. */
@@ -330,13 +344,30 @@ export function firstDifference(before: readonly Message[], after: readonly Mess
 }
 
 /**
+ * Whether a provider would refuse this message's reasoning in a prompt it was not written under: Claude's and
+ * Gemini's, anything signed, encrypted or redacted, and any whose model is not known. Plain reasoning from another
+ * family (DeepSeek's, Kimi's, GLM's) is read back as text (ADR 0130).
+ */
+export function boundThinking(message: AssistantMessage): boolean {
+  if (!message.origin || BINDS_THINKING.has(message.origin.family)) return true
+  return message.content.some(
+    (block) =>
+      block.type === 'redacted-thinking' ||
+      (block.type === 'tool-use' && block.extra !== undefined) ||
+      (block.type === 'thinking' && (block.signature !== undefined || (block.details ?? []).some((detail) => detail.type === 'reasoning.encrypted' || (detail.signature !== undefined && detail.signature !== null)))),
+  )
+}
+
+/**
  * Drops thinking from every assistant message from `index` on, and what a provider attached to their calls to have it
  * sent back (Gemini's signatures): both were minted for the conversation as it was. Messages without either are
- * returned as they are.
+ * returned as they are. `keepFrom`: from that message on, reasoning a provider does not bind (boundThinking) stays,
+ * so a model keeps its own reasoning of the request it is working on.
  */
-export function dropThinkingFrom(messages: readonly Message[], index: number): Message[] {
+export function dropThinkingFrom(messages: readonly Message[], index: number, keepFrom = Number.POSITIVE_INFINITY): Message[] {
   return messages.map((message, i) => {
     if (i < index || message.role !== 'assistant') return message
+    if (i >= keepFrom && !boundThinking(message)) return message
     if (!message.content.some((block) => block.type === 'thinking' || block.type === 'redacted-thinking' || (block.type === 'tool-use' && block.extra))) return message
     const content = message.content
       .filter((block) => block.type !== 'thinking' && block.type !== 'redacted-thinking')
@@ -349,10 +380,13 @@ export function dropThinkingFrom(messages: readonly Message[], index: number): M
   })
 }
 
-/** Applies a rewrite's thinking rule: everything after the first changed message loses its thinking. */
+/**
+ * Applies a rewrite's thinking rule: everything after the first changed message loses its thinking, except reasoning
+ * no provider binds in the request being worked on.
+ */
 function afterRewrite(before: readonly Message[], after: Message[]): Message[] {
   const changed = firstDifference(before, after)
-  return changed >= after.length ? after : dropThinkingFrom(after, changed)
+  return changed >= after.length ? after : dropThinkingFrom(after, changed, requestStart(after) + 1)
 }
 
 /** Keeps the start and the end of a long text: command output often ends with what matters. `again` says how to have the rest. */
@@ -447,6 +481,57 @@ function oldIndexes(messages: readonly Message[], recentSteps: number): Set<numb
   return inOld
 }
 
+/** What the model finds code by and edits from: their outputs are wanted for several steps (ADR 0130). */
+export const LOCATING_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LSP'])
+/** Calls whose input is the plan, the task list or a goal: never shortened. */
+const KEPT_INPUTS: ReadonlySet<string> = new Set(['TodoWrite', 'ExitPlanMode', 'CreateGoal', 'UpdateGoal'])
+/** Calls whose result is the person's own words: never shortened. */
+const KEPT_RESULTS: ReadonlySet<string> = new Set(['AskUserQuestion'])
+/** Calls that change a file, after which what an earlier Read showed of it is out of date. */
+const FILE_CHANGES: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'LSPEdit'])
+
+const recencyOf = (recent: number | Recency): Recency => (typeof recent === 'number' ? { steps: recent, reads: recent } : recent)
+
+const fileOf = (call: ToolUseBlock): string | undefined => {
+  const file = call.input.file_path ?? call.input.notebook_path
+  return typeof file === 'string' && file ? file : undefined
+}
+
+/** The calls of the latest Read of each file in the request being worked on whose file has not been changed since. */
+function workingReads(messages: readonly Message[]): Set<string> {
+  const latest = new Map<string, string>()
+  for (const message of messages.slice(requestStart(messages) + 1)) {
+    if (message.role !== 'assistant') continue
+    for (const call of toolUsesOf(message)) {
+      const file = fileOf(call)
+      if (!file) continue
+      if (call.name === 'Read') latest.set(file, call.id)
+      else if (FILE_CHANGES.has(call.name)) latest.delete(file)
+    }
+  }
+  return new Set(latest.values())
+}
+
+/**
+ * Which old results may be shortened: a locating tool's outside the last `reads` steps, any other outside the last
+ * `steps`; with `files`, never the latest Read of a file the request has not changed since. The plan, the task list,
+ * a goal and the person's answers are never shortened.
+ */
+function oldResults(messages: readonly Message[], recent: number | Recency): { inOld: Set<number>; old: (index: number, call: ToolUseBlock | undefined) => boolean } {
+  const { steps, reads, files } = recencyOf(recent)
+  const other = oldIndexes(messages, steps)
+  const read = reads === steps ? other : oldIndexes(messages, reads)
+  const inOld = read.size > other.size ? read : other
+  const working = files ? workingReads(messages) : new Set<string>()
+  return {
+    inOld,
+    old: (index, call) => {
+      if (call && (KEPT_INPUTS.has(call.name) || KEPT_RESULTS.has(call.name) || working.has(call.id))) return false
+      return (call && LOCATING_TOOLS.has(call.name) ? read : other).has(index)
+    },
+  }
+}
+
 function callsById(messages: readonly Message[]): Map<string, ToolUseBlock> {
   const calls = new Map<string, ToolUseBlock>()
   for (const message of messages) if (message.role === 'assistant') for (const call of toolUsesOf(message)) calls.set(call.id, call)
@@ -458,8 +543,8 @@ function callsById(messages: readonly Message[]): Map<string, ToolUseBlock> {
  * first: then the note in their place says where they are. A Read's lines are in their file, and are left out, as is
  * a part whose note names a file `owns` (see keptPathIn).
  */
-export function elidable(messages: readonly Message[], recentSteps = RECENT_STEPS, limit = ELIDE_LIMIT, owns?: (file: string) => boolean): Elidable[] {
-  const inOld = oldIndexes(messages, recentSteps)
+export function elidable(messages: readonly Message[], recent: number | Recency = RECENT_STEPS, limit = ELIDE_LIMIT, owns?: (file: string) => boolean): Elidable[] {
+  const { inOld, old } = oldResults(messages, recent)
   const calls = callsById(messages)
   const out: Elidable[] = []
   for (const index of inOld) {
@@ -468,7 +553,7 @@ export function elidable(messages: readonly Message[], recentSteps = RECENT_STEP
     for (const block of message.content) {
       if (block.type !== 'tool-result') continue
       const call = calls.get(block.toolUseId)
-      if (call?.name === 'Read') continue
+      if (call?.name === 'Read' || !old(index, call)) continue
       block.content.forEach((part, at) => {
         if (part.type === 'text' && part.text.length > limit && !keptPathIn(part.text, owns)) out.push({ key: `${block.toolUseId}:${at}`, toolUseId: block.toolUseId, index: at, call, text: part.text })
       })
@@ -479,7 +564,8 @@ export function elidable(messages: readonly Message[], recentSteps = RECENT_STEP
 
 /**
  * Shortens tool outputs and call arguments longer than `limit` characters, and
- * drops images, in every step but the last `recentSteps`. A shortened output
+ * drops images, in every step but the most recent: `recent` of them, or a
+ * Read's by `recent.reads` and every other by `recent.steps`. A shortened output
  * says how to have it again: the file `kept` names for it (by elidable's key),
  * the file a note in it already names (one `owns`, when given), the file a
  * Read read, or the tool. Messages are copied, never mutated; the result is
@@ -487,23 +573,27 @@ export function elidable(messages: readonly Message[], recentSteps = RECENT_STEP
  */
 export function elideOldOutputs(
   messages: readonly Message[],
-  recentSteps = RECENT_STEPS,
+  recent: number | Recency = RECENT_STEPS,
   limit = ELIDE_LIMIT,
   kept?: ReadonlyMap<string, string>,
   owns?: (file: string) => boolean,
 ): Message[] {
-  const inOld = oldIndexes(messages, recentSteps)
+  const { inOld, old } = oldResults(messages, recent)
   if (!inOld.size) return [...messages]
   const calls = callsById(messages)
 
   const out = messages.map((message, index): Message => {
     if (!inOld.has(index)) return message
     if (message.role === 'user') {
-      const content = message.content.map((block) => (block.type === 'tool-result' ? elideResult(block, limit, calls.get(block.toolUseId), kept, owns) : block))
+      const content = message.content.map((block) => {
+        if (block.type !== 'tool-result') return block
+        const call = calls.get(block.toolUseId)
+        return old(index, call) ? elideResult(block, limit, call, kept, owns) : block
+      })
       return content.some((block, i) => block !== message.content[i]) ? { role: 'user', content } : message
     }
     const content = message.content.map((block) => {
-      if (block.type !== 'tool-use' || block.invalid || JSON.stringify(block.input).length <= limit) return block
+      if (block.type !== 'tool-use' || block.invalid || !old(index, block) || JSON.stringify(block.input).length <= limit) return block
       return { ...block, input: shortenInput(block.input, limit) }
     })
     return content.some((block, i) => block !== message.content[i]) ? { ...message, content } : message

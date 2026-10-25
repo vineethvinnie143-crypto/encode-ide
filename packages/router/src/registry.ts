@@ -26,8 +26,8 @@ export interface ModelInfo {
   capabilities: ModelCapabilities
   /** Whether the model edits best by exact string replacement or by patches. */
   editFormat: EditFormat
-  /** USD per million tokens. */
-  price: { input: number; output: number }
+  /** USD per million tokens, with the prompt cache's prices where the catalog lists them (ADR 0130). */
+  price: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
   /** Free to call. On OpenRouter that is a `:free` id whose every price is zero (see freeVerdict); on a free provider, every model. */
   free: boolean
   /** When the provider published it, epoch ms. */

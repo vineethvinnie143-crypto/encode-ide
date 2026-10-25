@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { CacheClock, SHORT_CACHE_MS, cacheKeyOf } from './cache-hints'
+import { CacheClock, LONG_CACHE_MS, SHORT_CACHE_MS, cacheKeyOf } from './cache-hints'
 
 describe('cache hints (ADR 0128)', () => {
   it('keys each conversation of a session apart, stably, without naming the session', () => {
@@ -24,5 +24,21 @@ describe('cache hints (ADR 0128)', () => {
     assert.equal(clock.start(), true, 'the wait that outlived the cache')
     now += 2_000
     assert.equal(clock.start(), true, 'and every request after it, since the session waits')
+  })
+
+  it('tells a cache that has expired since the last request started (ADR 0130)', () => {
+    let now = 1_000_000
+    const clock = new CacheClock(() => now)
+    assert.equal(clock.expired(SHORT_CACHE_MS), false, 'nothing was cached yet')
+    clock.start()
+    now += SHORT_CACHE_MS
+    assert.equal(clock.expired(SHORT_CACHE_MS), false)
+    now += 1
+    assert.equal(clock.expired(SHORT_CACHE_MS), true)
+    clock.start()
+    now += 30 * 60_000
+    assert.equal(clock.expired(SHORT_CACHE_MS), false, 'the session asks for the hour now')
+    now += LONG_CACHE_MS
+    assert.equal(clock.expired(SHORT_CACHE_MS), true)
   })
 })

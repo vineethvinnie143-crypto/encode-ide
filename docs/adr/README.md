@@ -119,6 +119,7 @@ say so.
 | [0127](0127-tester-builds-update-themselves.md) | Tester builds update themselves | Accepted, builds on 0051 |
 | [0128](0128-a-conversation-stays-where-its-cache-is-and-the-usage-page-says-how-much-was-cached.md) | A conversation stays where its cache is, and Usage says how much was cached | Accepted, builds on 0062 and 0094 |
 | [0129](0129-a-cost-change-is-measured-beyond-noise-in-a-small-window-and-by-the-code-it-leaves.md) | A cost change is measured beyond noise, in a small window, and by the code it leaves | Accepted, builds on 0092 |
+| [0130](0130-old-results-are-shortened-by-what-the-models-cache-charges.md) | Old results are shortened by what the model's cache charges | Accepted, builds on 0094 and 0128 |
 
 ## Template
 

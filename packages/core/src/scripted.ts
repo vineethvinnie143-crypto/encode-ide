@@ -5,6 +5,7 @@
  */
 import type {
   AssistantBlock,
+  CacheTerms,
   CompletionOutcome,
   CompletionRequest,
   FinishReason,
@@ -12,6 +13,7 @@ import type {
   ModelClient,
   ModelRole,
 } from '@encode/providers'
+import { familyOf } from '@encode/providers'
 import { estimateTokens } from './compaction'
 
 export interface ScriptedCall {
@@ -46,6 +48,8 @@ export interface ScriptedOptions {
   delayMs?: number
   /** What each call says it cost, in US dollars, as OpenRouter does. */
   costPerCall?: number
+  /** What the model's prompt cache charges (ADR 0130). Absent: the client cannot tell. */
+  cache?: CacheTerms
 }
 
 export type Script = readonly ScriptedStep[] | ((request: CompletionRequest, step: number) => ScriptedStep)
@@ -93,6 +97,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
         maxOutputTokens: options.maxOutputTokens ?? 8_192,
         ...(options.images !== undefined ? { images: options.images } : {}),
         ...(options.documents !== undefined ? { documents: options.documents } : {}),
+        ...(options.cache ? { cache: options.cache } : {}),
       }
     },
     async complete(request): Promise<CompletionOutcome> {
@@ -115,6 +120,8 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
         }
       }
       const content: AssistantBlock[] = []
+      // Kept as an assembler keeps it, so what becomes of thinking in the conversation can be tested.
+      if (current.thinking) content.push({ type: 'thinking', text: current.thinking })
       if (current.text) content.push({ type: 'text', text: current.text })
       for (const [i, call] of (current.calls ?? []).entries()) {
         content.push({
@@ -125,7 +132,7 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
           ...(call.invalid ? { invalid: call.invalid } : {}),
         })
       }
-      const message = { role: 'assistant' as const, content, origin: { provider: 'scripted', model: options.model ?? 'scripted', family: 'other' as const } }
+      const message = { role: 'assistant' as const, content, origin: { provider: 'scripted', model: options.model ?? 'scripted', family: familyOf(options.model ?? 'scripted') } }
       const inputTokens = estimateTokens(request.payload.messages) + Math.ceil(JSON.stringify(request.payload.tools).length / 3.5)
       return {
         kind: 'done',

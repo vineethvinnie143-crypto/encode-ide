@@ -14,6 +14,8 @@ import { createHash } from 'node:crypto'
 
 /** Start to start, the longest wait the five-minute cache survives. */
 export const SHORT_CACHE_MS = 5 * 60_000
+/** And the hour-long one. */
+export const LONG_CACHE_MS = 60 * 60_000
 
 /** The key of one agent's conversation in a session: the main agent's, a subagent's or an attempt's. */
 export function cacheKeyOf(sessionId: string, agentId: string): string {
@@ -33,5 +35,14 @@ export class CacheClock {
     if (this.last !== undefined && now - this.last > SHORT_CACHE_MS) this.waits = true
     this.last = now
     return this.waits
+  }
+
+  /**
+   * Whether a cache that lasts `ttlMs` (the hour, once this session asks for it) has expired since the last request
+   * started, so the next one writes the whole prompt anyway (ADR 0130). False before the first request.
+   */
+  expired(ttlMs: number): boolean {
+    if (this.last === undefined) return false
+    return this.now() - this.last > (this.waits ? Math.max(ttlMs, LONG_CACHE_MS) : ttlMs)
   }
 }
