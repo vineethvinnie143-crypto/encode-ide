@@ -1,0 +1,9 @@
+{
+  "name": "nightly-import",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "import": "node scripts/import.js"
+  }
+}
