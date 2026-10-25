@@ -111,6 +111,7 @@ describe('diagnostics report', () => {
     const missing = diagnosticsReport(input({ settings: { ...settings, searchKeys: [] } }))
     assert.match(missing, /Web search +Brave Search, NO KEY/)
     assert.match(diagnosticsReport(input({ settings: { ...settings, searchProvider: 'duckduckgo', searchKeys: [] } })), /Web search +DuckDuckGo, needs no key/)
+    assert.match(diagnosticsReport(input({ settings: { ...settings, searchProvider: 'parallel', searchKeys: [] } })), /Web search +Parallel, needs no key/)
   })
 
   it('says how messages are sent, when notices show and whether the computer is kept awake, without the chats folder', () => {

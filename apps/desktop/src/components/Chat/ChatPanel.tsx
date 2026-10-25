@@ -15,7 +15,7 @@ import PlanCard from './PlanCard'
 import TodoCard from './TodoCard'
 import { WorkRoot } from './shown-path'
 import TurnView from './TurnView'
-import { buildTurns, latestEditTurn, reuseTurns, type Turn } from './turns'
+import { buildTurns, latestEditTurn, latestSearchOffer, reuseTurns, type Turn } from './turns'
 
 const SUGGESTIONS = [
   'Explain the structure of this project',
@@ -53,6 +53,8 @@ export default function ChatPanel() {
   const turns = useMemo(() => (shown.current = reuseTurns(shown.current, buildTurns(entries, running))), [entries, running])
   // The last request that edited files: its change card offers Undo.
   const latestEdit = useMemo(() => latestEditTurn(turns)?.id ?? null, [turns])
+  // The last request whose search a free key would have made work: it offers the key, once for the conversation.
+  const searchOffer = useMemo(() => latestSearchOffer(turns)?.id ?? null, [turns])
   // The last message you sent, at the start or while the agent worked: the thread goes down to it and follows on.
   const lastSent = useMemo(() => {
     for (let at = entries.length - 1; at >= 0; at--) if (entries[at].kind === 'user' || entries[at].kind === 'steer') return entries[at].id
@@ -188,7 +190,7 @@ export default function ChatPanel() {
 
             <WorkRoot.Provider value={workspace?.root ?? null}>
               {turns.map((turn) => (
-                <TurnView key={turn.id} turn={turn} latest={turn.id === latestEdit} />
+                <TurnView key={turn.id} turn={turn} latest={turn.id === latestEdit} offerSearchKey={turn.id === searchOffer} />
               ))}
             </WorkRoot.Provider>
           </div>

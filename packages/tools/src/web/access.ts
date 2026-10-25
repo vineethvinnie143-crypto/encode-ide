@@ -2,12 +2,13 @@
  * The agent's way onto the web: fetches through safeFetch (public addresses
  * only, checked after DNS; redirects to another host handed back), pages
  * converted to readable text and cached for a quarter of an hour, and a web
- * search through the provider the person chose (DuckDuckGo needs no account).
+ * search through the provider the person chose (Parallel and DuckDuckGo need
+ * no account).
  */
 import type { FetchedPage, WebAccess } from '../types'
 import { htmlToText, pageTitle } from './html'
 import { safeFetch, type FetchOptions } from './safe-fetch'
-import { duckDuckGoProvider, type DuckDuckGoOptions, type SearchProvider } from './search'
+import { parallelProvider, type SearchProvider } from './search'
 
 export { parseSearchResults } from './search'
 
@@ -28,12 +29,8 @@ export class WebError extends Error {
 export interface WebAccessOptions {
   /** Network settings for safeFetch; tests widen the address check. */
   fetch?: Omit<FetchOptions, 'signal'>
-  /** The search page of the default provider. Default: DuckDuckGo's HTML endpoint. */
-  searchUrl?: string
-  /** Who answers a search, asked on every search so that a change in Settings applies at once. Default DuckDuckGo. */
+  /** Who answers a search, asked on every search so that a change in Settings applies at once. Default Parallel. */
   searchProvider?: () => SearchProvider
-  /** How the default DuckDuckGo provider spaces its searches; tests shorten the waits. */
-  duckDuckGo?: Pick<DuckDuckGoOptions, 'gapMs' | 'retryMs'>
   /** How long a fetched page is reused. Default 15 minutes. */
   cacheMs?: number
   now?: () => number
@@ -92,11 +89,7 @@ export function createWebAccess(options: WebAccessOptions = {}): WebAccess {
     return page
   }
 
-  const fallback = duckDuckGoProvider({
-    ...options.duckDuckGo,
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-    ...(options.searchUrl ? { endpoint: options.searchUrl } : {}),
-  })
+  const fallback = parallelProvider(options.fetch ? { fetch: options.fetch } : {})
   const provider = () => options.searchProvider?.() ?? fallback
 
   return {

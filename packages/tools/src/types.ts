@@ -74,6 +74,9 @@ export interface ToolSummary {
   preview?: DiffHunk[]
 }
 
+/** Something the app can do about a step, offered beside it. `search-key`: add a free search key (ADR 0123). */
+export type ToolOffer = 'search-key'
+
 export interface ToolOutcome {
   /** False when the call failed; the model sees an error result. */
   ok: boolean
@@ -83,6 +86,7 @@ export interface ToolOutcome {
   display?: {
     output?: string
     diff?: DiffHunk[]
+    offer?: ToolOffer
   }
   /** Paths the call created, changed or deleted. */
   changed?: string[]

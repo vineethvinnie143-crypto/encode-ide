@@ -163,6 +163,14 @@ export function latestEditTurn<T extends Pick<Turn, 'user' | 'log'>>(turns: read
   return null
 }
 
+/** The last turn with a search that a free key would have made work: the one that offers to add the key (ADR 0123). */
+export function latestSearchOffer<T extends Pick<Turn, 'log'>>(turns: readonly T[]): T | null {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    if (turns[index].log.some((entry) => entry.tool?.offer === 'search-key')) return turns[index]
+  }
+  return null
+}
+
 /** The latest request of the conversation. */
 export function latestRequest<T extends Pick<Turn, 'user'>>(turns: readonly T[]): T | null {
   for (let index = turns.length - 1; index >= 0; index--) if (turns[index].user) return turns[index]

@@ -725,3 +725,32 @@ describe('deferred tools', () => {
     assert.ok(!sent(h, 3).includes('mcp__slack__post_message'))
   })
 })
+
+describe('what a step offers', () => {
+  it('passes a failed search that a free key would fix on to the step the app shows', async () => {
+    const searcher: Tool = {
+      definition: { name: 'Lookup', description: 'Looks up.', inputSchema: { type: 'object', properties: { again: { type: 'boolean' } }, additionalProperties: false } },
+      kind: 'read',
+      readOnly: true,
+      access: () => ({ type: 'none' }),
+      describe: () => ({ title: 'Lookup' }),
+      run: async (input) => (input.again ? { ok: true, content: 'found' } : { ok: false, content: 'The web search failed: limited.', display: { offer: 'search-key' } }),
+    }
+    let step = 0
+    const h = await loopHarness({
+      extraTools: [searcher],
+      script: () => {
+        step++
+        if (step === 1) return { calls: [{ name: 'Lookup', input: {}, id: 'call_1' }] }
+        if (step === 2) return { calls: [{ name: 'Lookup', input: { again: true }, id: 'call_2' }] }
+        return { text: 'done' }
+      },
+    })
+    await h.run('look it up')
+    const steps = h.surface.settled.filter((entry) => entry.kind === 'tool').map((entry) => [entry.tool!.ok, entry.tool!.offer, entry.tool!.output])
+    assert.deepEqual(steps, [
+      [false, 'search-key', 'The web search failed: limited.'],
+      [true, undefined, 'found'],
+    ])
+  })
+})

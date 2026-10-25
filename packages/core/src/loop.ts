@@ -1366,6 +1366,7 @@ export class AgentLoop {
       ok: outcome.ok,
       output: truncateMiddle(output, MAX_UI_OUTPUT),
       ...(outcome.display?.diff ? { diff: outcome.display.diff } : {}),
+      ...(outcome.display?.offer ? { offer: outcome.display.offer } : {}),
       ...(found ? { warnings: found.lines } : {}),
     })
     for (const file of outcome.changed ?? []) {

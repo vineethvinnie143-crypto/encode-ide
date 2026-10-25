@@ -6,6 +6,7 @@ import { tempWorkspace, testContext, textOf } from '../testing'
 import type { WebAccess } from '../types'
 import { createWebAccess, parseSearchResults, upgradeUrl } from './access'
 import { htmlToText } from './html'
+import { SearchError, duckDuckGoProvider } from './search'
 import { statusAdvice, untrustedWebContent, webFetchTool, webSearchTool } from './tools'
 
 describe('htmlToText', () => {
@@ -79,7 +80,11 @@ describe('web access', () => {
   })
   after(() => new Promise<void>((resolve) => server.close(() => resolve())))
 
-  const local = () => createWebAccess({ fetch: { allowAddress: () => true }, searchUrl: `${origin}/search`, duckDuckGo: { gapMs: 0 } })
+  const local = () => {
+    const fetch = { allowAddress: () => true }
+    const search = duckDuckGoProvider({ fetch, endpoint: `${origin}/search`, gapMs: 0 })
+    return createWebAccess({ fetch, searchProvider: () => search })
+  }
 
   it('fetches pages as text with their title, and caches them', async () => {
     const web = local()
@@ -160,6 +165,20 @@ describe('WebFetch and WebSearch', () => {
     assert.match(textOf(failed.content), /HTTP 202\)\.\nDo not guess page addresses instead\. Tell the user the search failed/)
     const empty = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: { ...web, search: async () => [] } }))
     assert.equal(textOf(empty.content), 'No results for "gcore ddos". Try fewer or other words.')
+  })
+
+  it('offers a free key in the app only when a provider without one could not search from this computer', async () => {
+    const root = await tempWorkspace()
+    const failing = (error: Error): WebAccess => ({ ...web, search: async () => Promise.reject(error) })
+    const limited = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: failing(new SearchError('limit', 'Limited.', true)) }))
+    assert.equal(limited.ok, false)
+    assert.equal(limited.display?.offer, 'search-key')
+    assert.equal(limited.display?.output, undefined, 'the step shows what the model reads')
+    // A key that was refused, or a network that is down, is not helped by another key.
+    const refused = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: failing(new SearchError('key', 'Refused.')) }))
+    assert.equal(refused.display, undefined)
+    const offline = await webSearchTool.run({ query: 'gcore ddos' }, testContext(root, { web: failing(new Error('getaddrinfo ENOTFOUND')) }))
+    assert.equal(offline.display, undefined)
   })
 
   it('lists search results and neutralizes a closing tag inside them', async () => {

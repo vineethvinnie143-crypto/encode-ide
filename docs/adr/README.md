@@ -47,7 +47,7 @@ say so.
 | [0055](0055-a-folders-permissions-are-one-snapshot-that-fails-closed.md) | A folder's permissions are one snapshot that fails closed | Accepted, builds on 0040 and 0041 |
 | [0056](0056-hooks-run-from-the-trusted-snapshot-and-every-write-is-kept-before-it-is-made.md) | Hooks run from the trusted snapshot, and every write is kept before it is made | Accepted, builds on 0042, 0043 and 0055 |
 | [0057](0057-mcp-servers-run-from-the-folders-files-one-hub-per-folder-and-looking-starts-nothing.md) | MCP servers run from the folder's files, one hub per folder, and looking starts nothing | Accepted, builds on 0044, 0055 and 0056 |
-| [0058](0058-web-search-goes-through-the-provider-the-person-chose-and-its-key-goes-to-that-provider-alone.md) | Web search goes through the provider the person chose, and its key goes to that provider alone | Accepted, builds on 0007, 0008 and 0052; DuckDuckGo's pacing and the advice after a failed search are added by 0122 |
+| [0058](0058-web-search-goes-through-the-provider-the-person-chose-and-its-key-goes-to-that-provider-alone.md) | Web search goes through the provider the person chose, and its key goes to that provider alone | Accepted, builds on 0007, 0008 and 0052; DuckDuckGo's pacing and the advice after a failed search are added by 0122; Parallel as the free default by 0123 |
 | [0059](0059-auto-review-asks-a-model-about-low-risk-commands-behind-checks-the-model-cannot-overrule.md) | Auto review asks a model about low-risk commands, behind checks the model cannot overrule | Accepted, builds on 0004, 0040 and 0055 |
 | [0060](0060-text-that-reads-differently-from-how-it-runs-is-shown-to-the-person-and-told-to-the-model.md) | Text that reads differently from how it runs is shown to the person and told to the model | Accepted, builds on 0004, 0012 and 0032 |
 | [0061](0061-subagents-are-defined-in-markdown-and-what-a-repository-fills-is-read-as-a-stranger-s-file.md) | Subagents are defined in Markdown, and what a repository fills is read as a stranger's file | Accepted, builds on 0006, 0041 and 0055 |
@@ -111,7 +111,8 @@ say so.
 | [0119](0119-toolchain-installs-read-encodes-own-package-sources-and-clean-up-what-go-leaves-read-only.md) | Toolchain installs read eNCode's own package sources, and clean up what Go leaves read-only | Accepted, builds on 0114 |
 | [0120](0120-the-computer-tool-opens-applications-from-the-start-menu-and-the-pointer-goes-where-it-acts.md) | The Computer tool opens applications from the Start menu, and the pointer goes where it acts | Accepted, builds on 0050 and 0054; numbers, grids and hit checks are added by 0121 |
 | [0121](0121-the-computer-tool-numbers-what-it-shows-and-checks-what-it-hits.md) | The Computer tool numbers what it shows, and checks what it hits | Accepted, builds on 0050 and 0120 |
-| [0122](0122-the-agent-finds-pages-before-it-fetches-them-and-duckduckgo-is-asked-one-search-at-a-time.md) | The agent finds pages before it fetches them, and DuckDuckGo is asked one search at a time | Accepted, builds on 0058 |
+| [0122](0122-the-agent-finds-pages-before-it-fetches-them-and-duckduckgo-is-asked-one-search-at-a-time.md) | The agent finds pages before it fetches them, and DuckDuckGo is asked one search at a time | Accepted, builds on 0058; Parallel replaces DuckDuckGo as the default in 0123 |
+| [0123](0123-parallel-answers-searches-for-free-and-a-free-tavily-key-is-offered-when-it-cannot.md) | Parallel answers searches for free, and a free Tavily key is offered when it cannot | Accepted, builds on 0058 and 0122 |
 
 ## Template
 

@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CONTEXT_CAPS } from '@shared/models'
-import { isKeyedSearchProvider, searchProviderInfo, type SearchCheckResult, type SearchProviderId } from '@shared/search'
+import { isKeyedSearchProvider, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '@shared/search'
 import type { AskAgain, CheckGate, LearnConventions, ReviewWork, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
@@ -41,24 +41,45 @@ export function AgentSection({ settings }: { settings: Settings }) {
   const [searchKey, setSearchKeyInput] = useState('')
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<SearchCheckResult | null>(null)
+  // A provider that needs a key and has none is chosen here first, and used once its key is stored: choosing it on
+  // the way to pasting a key does not stop the agent's searches meanwhile.
+  const [draft, setDraft] = useState<KeyedSearchProviderId | null>(null)
+  const shown: SearchProviderId = draft ?? settings.searchProvider
+  const keyFor = useUi((state) => state.searchKeyFor)
 
   const chooseProvider = (searchProvider: SearchProviderId) => {
     setSearchKeyInput('')
     setResult(null)
-    void save({ searchProvider })
+    if (isKeyedSearchProvider(searchProvider) && !settings.searchKeys.includes(searchProvider)) {
+      setDraft(searchProvider)
+      return
+    }
+    setDraft(null)
+    if (searchProvider !== settings.searchProvider) void save({ searchProvider })
   }
 
-  /** The key typed for the provider chosen, stored now; false when it was refused. */
+  // The offer of a free key in the chat opens this screen with that provider chosen.
+  useEffect(() => {
+    if (!keyFor) return
+    useUi.setState({ searchKeyFor: null })
+    chooseProvider(keyFor)
+  }, [keyFor])
+
+  /** The key typed for the provider chosen, stored now, and that provider used from then on; false when it was refused. */
   const storeKey = async (): Promise<boolean> => {
-    const provider = settings.searchProvider
+    const provider = shown
     if (!searchKey.trim() || !isKeyedSearchProvider(provider)) return true
     if (!(await setSearchKey(provider, searchKey.trim()))) return false
     setSearchKeyInput('')
+    if (draft === provider) {
+      setDraft(null)
+      await save({ searchProvider: provider })
+    }
     return true
   }
 
   const removeKey = async () => {
-    const provider = settings.searchProvider
+    const provider = shown
     if (!(await setSearchKey(provider, ''))) return
     setSearchKeyInput('')
     setResult(null)
@@ -68,6 +89,10 @@ export function AgentSection({ settings }: { settings: Settings }) {
   /** The agent's own way of searching, with what was typed stored first. */
   const test = async () => {
     setResult(null)
+    if (draft && !searchKey.trim()) {
+      setResult({ ok: false, message: `There is no API key for ${searchProviderInfo(draft).name}. Paste one above, then press Test search.` })
+      return
+    }
     setTesting(true)
     try {
       if (!(await storeKey())) return
@@ -106,7 +131,8 @@ export function AgentSection({ settings }: { settings: Settings }) {
 
       <section className="settings-group settings-web-search" data-setting="agent.search">
         <SearchSettings
-          provider={settings.searchProvider}
+          provider={shown}
+          inUse={settings.searchProvider}
           storedKeys={settings.searchKeys}
           keyStorage={settings.keyStorage}
           keyInput={searchKey}

@@ -251,10 +251,26 @@ describe('SettingsService defaults and secrets', () => {
 })
 
 describe('SettingsService web search', () => {
-  it('starts on DuckDuckGo, which needs no key, with no key stored', () => {
+  it('starts on Parallel, which needs no key, with no key stored', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32').get()
-    assert.equal(settings.searchProvider, 'duckduckgo')
+    assert.equal(settings.searchProvider, 'parallel')
     assert.deepEqual(settings.searchKeys, [])
+  })
+
+  it('moves a file that holds the old default, DuckDuckGo, to Parallel once, and keeps DuckDuckGo chosen since', () => {
+    // Every file from before 0123 holds DuckDuckGo, chosen or not: only a choice made since is kept.
+    fs.writeFileSync(file(), JSON.stringify({ policy: 'read-only', searchProvider: 'duckduckgo' }))
+    const moved = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.equal(moved.get().searchProvider, 'parallel')
+    moved.save({ maxSteps: 12 })
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'parallel', 'and written back as Parallel')
+
+    moved.save({ searchProvider: 'duckduckgo' })
+    assert.match(onDisk(), /"searchChosen": true/)
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'duckduckgo', 'chosen in Settings, it stays')
+
+    fs.writeFileSync(file(), JSON.stringify({ searchProvider: 'brave' }))
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'brave', 'a keyed provider was always a choice')
   })
 
   it('saves the provider, keeps it when a patch does not name it, and takes only a provider that exists', () => {
@@ -265,7 +281,7 @@ describe('SettingsService web search', () => {
     assert.equal(settings.save({ searchProvider: 7 as never }).searchProvider, 'tavily')
     assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'tavily', 'and still after a restart')
     fs.writeFileSync(file(), JSON.stringify({ searchProvider: 'evil' }))
-    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'duckduckgo', 'a file that names no provider we know falls back')
+    assert.equal(new SettingsService(dir, new FakeCipher(), 'win32').get().searchProvider, 'parallel', 'a file that names no provider we know falls back')
   })
 
   it('seals a key, shows only that there is one, and hands it over to the main process alone', () => {
@@ -295,8 +311,9 @@ describe('SettingsService web search', () => {
     assert.doesNotMatch(onDisk(), /brave-key/)
   })
 
-  it('has no key for DuckDuckGo, or for a name that is not a provider, and says so', () => {
+  it('has no key for Parallel or DuckDuckGo, or for a name that is not a provider, and says so', () => {
     const settings = new SettingsService(dir, new FakeCipher(), 'win32')
+    assert.throws(() => settings.setSearchKey('parallel', 'k-0001'), /does not use a key/)
     assert.throws(() => settings.setSearchKey('duckduckgo', 'k-0001'), /does not use a key/)
     assert.throws(() => settings.setSearchKey('search:brave' as never, 'k-0001'), /does not use a key/)
     assert.throws(() => settings.setSearchKey('__proto__' as never, 'k-0001'), /does not use a key/)
@@ -344,7 +361,7 @@ describe('SettingsService web search', () => {
   it('reads a settings file from before search providers, and one that keeps strange things where keys go', () => {
     fs.writeFileSync(file(), JSON.stringify({ policy: 'read-only' }))
     const old = new SettingsService(dir, new FakeCipher(), 'win32').get()
-    assert.equal(old.searchProvider, 'duckduckgo')
+    assert.equal(old.searchProvider, 'parallel')
     assert.deepEqual(old.searchKeys, [])
     fs.writeFileSync(file(), JSON.stringify({ searchKeysEnc: { brave: 5, exa: null, duckduckgo: 'enc:xx', evil: 'enc:yy' } }))
     const odd = new SettingsService(dir, new FakeCipher(), 'win32')

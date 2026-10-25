@@ -105,7 +105,7 @@ export const SETTINGS: readonly SettingInfo[] = [
   { id: 'roles.stronger', section: 'roles', label: 'Offer a stronger model when one fails twice', keywords: 'upgrade escalate stronger model failures retry cost ask' },
   { id: 'agent.policy', section: 'agent', label: 'Approvals', keywords: 'what eNCode may do without asking read only full access auto review policy' },
   { id: 'agent.askAgain', section: 'agent', label: 'Before a command that is hard to undo', keywords: 'irreversible destructive delete force push publish deploy drop confirm self-consistency full access' },
-  { id: 'agent.search', section: 'agent', label: 'Web search', keywords: 'brave tavily duckduckgo search key' },
+  { id: 'agent.search', section: 'agent', label: 'Web search', keywords: 'parallel brave tavily exa duckduckgo search key' },
   { id: 'agent.checks', section: 'agent', label: "Check the agent's work before it finishes", keywords: 'checks typecheck tests regression claims verify gate security scan fivem' },
   { id: 'agent.review', section: 'agent', label: "Have the Reviewer read the agent's work", keywords: 'reviewer review plan critique second opinion edge cases tests' },
   { id: 'agent.learnConventions', section: 'agent', label: 'Keep what a request taught', keywords: 'conventions learn rules memory instructions encode.md agents.md claude.md lessons remember' },

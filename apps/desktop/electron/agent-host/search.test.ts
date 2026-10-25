@@ -48,6 +48,15 @@ const json = (value: unknown) => (_request: Seen, response: http.ServerResponse)
 const BRAVE = { web: { results: [{ title: 'Brave <strong>result</strong>', url: 'https://example.com/brave', description: 'About things' }] } }
 const TAVILY = { results: [{ title: 'Tavily result', url: 'https://example.com/tavily', content: 'A passage' }] }
 const DUCK = '<div class="result results_links"><a class="result__a" href="https://example.com/duck">Duck result</a><a class="result__snippet">A line</a></div>'
+const PARALLEL = { results: [{ url: 'https://example.com/parallel', title: 'Parallel result', excerpts: ['A passage'] }] }
+
+/** Parallel's MCP server: a session, then these results for every web_search. */
+const mcp = (request: Seen, response: http.ServerResponse) => {
+  const message = JSON.parse(request.body) as { id?: number; method: string }
+  if (message.method === 'notifications/initialized') return void response.writeHead(202).end()
+  const result = message.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: {} } : { content: [], structuredContent: PARALLEL }
+  response.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'host-session' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
+}
 
 function config(searchProvider: SearchProviderId): HostConfig {
   return {
@@ -109,7 +118,7 @@ async function fixture(): Promise<Fixture> {
           // The providers are really at api.search.brave.com and the like; here they are this machine's server.
           search: {
             fetch: { allowAddress: () => true },
-            endpoints: { duckduckgo: `${origin}/duck`, brave: `${origin}/brave`, tavily: `${origin}/tavily`, exa: `${origin}/exa` },
+            endpoints: { parallel: `${origin}/parallel`, duckduckgo: `${origin}/duck`, brave: `${origin}/brave`, tavily: `${origin}/tavily`, exa: `${origin}/exa` },
           },
         }),
       )
@@ -176,10 +185,29 @@ describe('web search in the agent host', () => {
     assert.equal(JSON.parse(seen[0].body).query, 'node test runner')
   })
 
-  it('needs no key for DuckDuckGo, and asks the main process for none', async () => {
-    answer = (_request, response) => void response.writeHead(200, { 'content-type': 'text/html' }).end(DUCK)
+  it('needs no key for Parallel, the default, and asks the main process for none', async () => {
+    answer = mcp
     const f = await fixture()
     f.service.configure(config(DEFAULT_SEARCH_PROVIDER))
+    const result = await f.service.searchCheck()
+    assert.deepEqual([result.ok, result.message], [true, 'Parallel answered with 1 result.'])
+    assert.deepEqual(f.asked, [])
+    assert.deepEqual(
+      seen.map((call) => [call.method, call.url]),
+      [
+        ['POST', '/parallel'],
+        ['POST', '/parallel'],
+        ['POST', '/parallel'],
+      ],
+    )
+    for (const call of seen) assert.equal(call.headers.authorization, undefined)
+    assert.equal(JSON.parse(seen[2].body).params.arguments.objective, 'web search test')
+  })
+
+  it('needs no key for DuckDuckGo either', async () => {
+    answer = (_request, response) => void response.writeHead(200, { 'content-type': 'text/html' }).end(DUCK)
+    const f = await fixture()
+    f.service.configure(config('duckduckgo'))
     const result = await f.service.searchCheck()
     assert.deepEqual([result.ok, result.message], [true, 'DuckDuckGo answered with 1 result.'])
     assert.deepEqual(f.asked, [])
@@ -187,11 +215,10 @@ describe('web search in the agent host', () => {
     assert.equal(seen[0].headers.authorization, undefined)
   })
 
-  it('searches DuckDuckGo before the settings have been sent', async () => {
-    answer = (_request, response) => void response.writeHead(200, { 'content-type': 'text/html' }).end(DUCK)
+  it('searches Parallel before the settings have been sent', async () => {
     const f = await fixture()
     const web = await webOf(f)
-    assert.equal(web.searchTarget?.(), `${origin}/duck`)
+    assert.equal(web.searchTarget?.(), `${origin}/parallel`)
   })
 
   it('says what is wrong when there is no key or it was refused, and the agent is told where to add one', async () => {
@@ -223,12 +250,12 @@ describe('web search in the agent host', () => {
     assert.match(result.message, /found nothing for the test search/)
   })
 
-  it('searches through DuckDuckGo, and asks for no key, when it is told a provider nobody knows', async () => {
-    answer = (_request, response) => void response.writeHead(200, { 'content-type': 'text/html' }).end(DUCK)
+  it('searches through Parallel, and asks for no key, when it is told a provider nobody knows', async () => {
+    answer = mcp
     const f = await fixture()
     f.service.configure({ ...config('brave'), searchProvider: 'search:brave' as never })
     const result = await f.service.searchCheck()
-    assert.deepEqual([result.ok, result.message], [true, 'DuckDuckGo answered with 1 result.'])
+    assert.deepEqual([result.ok, result.message], [true, 'Parallel answered with 1 result.'])
     assert.deepEqual(f.asked, [])
   })
 })
