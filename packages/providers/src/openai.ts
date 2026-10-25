@@ -28,7 +28,7 @@ export interface OpenAICompatibleOptions {
 }
 
 type ChatPart =
-  | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
+  | { type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '1h' } }
   | { type: 'image_url'; image_url: { url: string } }
   | { type: 'file'; file: { filename: string; file_data: string } }
 
@@ -179,16 +179,18 @@ function userMessages(message: UserMessage, target: TransportTarget, mapId: (id:
 /**
  * Marks prompt-cache breakpoints for providers that take them through this
  * dialect (OpenRouter in front of Anthropic or Gemini): the system parts that
- * ask for one, then the last two conversational messages, four at most.
+ * ask for one, then the last two conversational messages, four at most. An hour
+ * long when the request asks for it and the model is Claude (ADR 0128).
  */
-function addCacheBreakpoints(messages: ChatMessage[], systemParts: ChatPart[] | undefined, request: ModelRequest): void {
+function addCacheBreakpoints(messages: ChatMessage[], systemParts: ChatPart[] | undefined, request: ModelRequest, target: TransportTarget): void {
+  const control = (): { type: 'ephemeral'; ttl?: '1h' } => (request.cacheTtl === '1h' && target.family === 'anthropic' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' })
   let budget = 4
   if (systemParts) {
     const marked = request.system.map((part, index) => (part.cache ? index : -1)).filter((index) => index >= 0)
     for (const index of marked.slice(-2)) {
       const part = systemParts[index]
       if (part?.type === 'text') {
-        part.cache_control = { type: 'ephemeral' }
+        part.cache_control = control()
         budget--
       }
     }
@@ -200,7 +202,7 @@ function addCacheBreakpoints(messages: ChatMessage[], systemParts: ChatPart[] | 
     if (typeof message.content === 'string') message.content = [{ type: 'text', text: message.content }]
     const last = message.content[message.content.length - 1]
     if (last?.type !== 'text') continue
-    last.cache_control = { type: 'ephemeral' }
+    last.cache_control = control()
     marked++
   }
 }
@@ -228,17 +230,18 @@ export function buildChatBody(target: TransportTarget, request: ModelRequest, op
       messages.push(...userMessages(message, target, mapId))
     }
   }
-  if (caching) addCacheBreakpoints(messages, systemParts, request)
+  if (caching) addCacheBreakpoints(messages, systemParts, request, target)
 
   const body: Record<string, unknown> = { model: target.model, messages, stream: true, stream_options: { include_usage: true } }
   if (request.tools.length) {
     body.tools = request.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } }))
     body.tool_choice = request.toolChoice ?? 'auto'
   }
+  const openAI = !openRouter && /(?:^|\.)openai\.com$/.test(hostOf(target.baseUrl))
   if (request.maxOutputTokens) {
     const limit = Math.max(1, Math.min(request.maxOutputTokens, target.maxOutputTokens))
     // OpenAI's reasoning models take only max_completion_tokens; everyone else knows max_tokens.
-    if (target.family === 'openai' && !openRouter && /(?:^|\.)openai\.com$/.test(hostOf(target.baseUrl))) body.max_completion_tokens = limit
+    if (target.family === 'openai' && openAI) body.max_completion_tokens = limit
     else body.max_tokens = limit
   }
   const temperature = request.temperature ?? codeTemperature(target.family, target.model)
@@ -253,6 +256,11 @@ export function buildChatBody(target: TransportTarget, request: ModelRequest, op
     if (fallbacks.length) body.models = [target.model, ...new Set(fallbacks)]
     if (target.dataCollection === 'deny') body.provider = { data_collection: 'deny' }
     body.usage = { include: true }
+    // The conversation stays on the provider that holds its cache from the first request, not from the first hit (ADR 0128).
+    if (request.cacheKey) body.session_id = request.cacheKey
+  } else if (openAI && request.cacheKey) {
+    // OpenAI's own servers send requests with the same key to the same cache. Other servers may refuse a field they do not know.
+    body.prompt_cache_key = request.cacheKey
   }
   return body
 }

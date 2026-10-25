@@ -79,6 +79,7 @@ import {
   type AttemptAgent,
   type SeedingGit,
 } from './best-of'
+import { CacheClock } from './cache-hints'
 import { SessionCodeMap } from './code-map'
 import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
 import type { ChangedText } from './diff-scan'
@@ -478,6 +479,8 @@ export class AgentSession {
   private readonly approvedHosts = new Set<string>()
   private readonly approvedApps = new Set<string>()
   private loop: AgentLoop | undefined
+  /** When the main agent's requests start, kept across loops: it chooses the cache's lifetime (ADR 0128). */
+  private readonly cacheClock = new CacheClock()
   /** The settings the loop's tools were chosen by; a change builds a new loop between turns. */
   private loopKey = ''
   private desktop: DesktopServices | undefined
@@ -1356,6 +1359,7 @@ export class AgentSession {
       ...(env.outputs ? { outputs: env.outputs } : {}),
       checks: this.checks,
       ...(env.checkpoints?.changes ? { changes: this.requestChanges } : {}),
+      cacheClock: this.cacheClock,
     }
     const created = createSubagents({
       definitions: () => definitions,

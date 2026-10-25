@@ -131,6 +131,15 @@ describe("OpenRouter's Messages API for a preset's server tool", () => {
     assert.deepEqual(call.body.tools[0].input_schema, request.tools[0].inputSchema)
   })
 
+  it("names the conversation in OpenRouter's x-session-id header there (ADR 0128)", async () => {
+    replies = { [CHAT]: [SHELL_REFUSED()], [MESSAGES]: [answer('ok')] }
+    await run(createOpenRouterAdapter(), target(), { ...request, cacheKey: 'encode-abc' })
+    const [chat, messages] = seen
+    assert.equal(chat.body.session_id, 'encode-abc')
+    assert.equal(messages.headers['x-session-id'], 'encode-abc')
+    assert.equal(messages.body.session_id, undefined)
+  })
+
   it('leaves out thinking, effort and sampling, which OpenRouter does not document for this endpoint', async () => {
     replies = { [CHAT]: [SHELL_REFUSED()], [MESSAGES]: [answer('ok')] }
     const claude = target({ model: 'anthropic/claude-opus-5-5', family: 'anthropic', capabilities: { tools: true, parallelTools: true, images: true, reasoning: true, promptCache: true } })

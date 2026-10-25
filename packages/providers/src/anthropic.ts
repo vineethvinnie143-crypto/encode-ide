@@ -32,7 +32,7 @@ export const ANTHROPIC_VERSION = '2023-06-01'
 /** Output budget when a request names none. */
 const DEFAULT_MAX_TOKENS = 32_000
 
-type CacheControl = { type: 'ephemeral' }
+type CacheControl = { type: 'ephemeral'; ttl?: '1h' }
 type WireBlock = Record<string, unknown> & { type: string; cache_control?: CacheControl }
 type WireMessage = { role: 'user' | 'assistant'; content: WireBlock[] }
 type WireTool = Record<string, unknown> & { cache_control?: CacheControl }
@@ -143,9 +143,11 @@ function effortFor(effort: ReasoningEffort, traits: AnthropicTraits): ReasoningE
  * Prompt-cache breakpoints, four at most: the system parts that ask for one
  * (the end of the system prompt if none does, which also caches the tools),
  * then the last two user turns, so each request reads what the previous one
- * wrote even when a step adds many blocks.
+ * wrote even when a step adds many blocks. Every mark has the same lifetime, an
+ * hour when the request asks for it and the model is Claude (ADR 0128).
  */
-function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: WireMessage[] }, request: ModelRequest): void {
+function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: WireMessage[] }, request: ModelRequest, target: TransportTarget): void {
+  const control = (): CacheControl => (request.cacheTtl === '1h' && target.family === 'anthropic' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' })
   let left = 4
   const system = body.system ?? []
   const wanted = request.system
@@ -159,11 +161,11 @@ function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: W
   })
   const marks = wanted.length ? wanted.slice(-2).map((index) => positions.get(index)!) : system.length ? [system.length - 1] : []
   for (const mark of marks) {
-    system[mark].cache_control = { type: 'ephemeral' }
+    system[mark].cache_control = control()
     left--
   }
   if (!marks.length && body.tools?.length) {
-    body.tools[body.tools.length - 1].cache_control = { type: 'ephemeral' }
+    body.tools[body.tools.length - 1].cache_control = control()
     left--
   }
   let marked = 0
@@ -172,7 +174,7 @@ function markCache(body: { system?: WireBlock[]; tools?: WireTool[]; messages: W
     if (message.role !== 'user') continue
     const last = message.content[message.content.length - 1]
     if (!last) continue
-    last.cache_control = { type: 'ephemeral' }
+    last.cache_control = control()
     marked++
   }
 }
@@ -215,7 +217,7 @@ export function buildAnthropicBody(target: TransportTarget, request: ModelReques
   }
   if (!plain && request.reasoning && traits.effort) body.output_config = { effort: effortFor(request.reasoning, traits) }
   if (!plain && request.temperature !== undefined && traits.samplingParameters && !thinking) body.temperature = request.temperature
-  if (target.capabilities.promptCache) markCache(body, request)
+  if (target.capabilities.promptCache) markCache(body, request, target)
   return body
 }
 
@@ -398,6 +400,8 @@ export function createMessagesStream(options: AnthropicOptions = {}): (input: St
       if (options.openRouter) headers.authorization = `Bearer ${target.apiKey}`
       else headers['x-api-key'] = target.apiKey
     }
+    // OpenRouter groups a conversation's requests by it; its Messages endpoint takes it as a header (ADR 0128).
+    if (options.openRouter && request.cacheKey) headers['x-session-id'] = request.cacheKey
     const body = buildAnthropicBody(target, request, options)
     let response: Response | undefined
     for (let tries = 0; !response; tries++) {

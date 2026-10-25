@@ -3392,6 +3392,7 @@ async function runMoreSettingsChecks() {
   const usage = await evaluate('window.eNCode.agent.usage()')
   if (!usage.some((session) => Object.values(session.days).some((day) => day.requests > 0 && Object.keys(day.models).length > 0))) throw new Error(`No request was counted: ${JSON.stringify(usage).slice(0, 400)}`)
   if (!(await evaluate("!!document.querySelector('[data-setting=\"usage.models\"] .usage-row[data-usage]')"))) throw new Error('The Usage page lists no model')
+  if (!(await evaluate("!!document.querySelector('[data-setting=\"usage.models\"] .usage-row[data-usage] .usage-cached[data-cache]')"))) throw new Error('The Usage page shows no cached share for a model')
   await screenshot('settings-usage.png')
 
   // The context size: kept at once, and sent to the agent.

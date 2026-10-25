@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { cacheAdvice, cachePercent, cacheVerdict } from '@shared/cache-share'
 import type { SessionUsage, Settings } from '@shared/types'
 import { api } from '../../api'
 import { errorText } from '../../ipc-error'
@@ -81,7 +82,7 @@ export function UsageSection({ settings }: { settings: Settings }) {
             <Tile
               label="Tokens read"
               value={formatTokens(view.total.inputTokens)}
-              note={view.total.inputTokens ? `${Math.round((view.total.cachedTokens / view.total.inputTokens) * 100)}% from the cache` : 'None yet'}
+              note={view.total.inputTokens ? `${cachePercent(view.total)} from the cache` : 'None yet'}
             />
             <Tile label="Tokens written" value={formatTokens(view.total.outputTokens)} note="The models’ answers" />
           </>
@@ -161,6 +162,19 @@ function DayBars({ days, metric }: { days: { day: string; tally: Tally }[]; metr
   )
 }
 
+/** The share read from the cache (ADR 0128), marked when it is low enough to cost money. */
+function CachedCell({ tally }: { tally: Tally }) {
+  const verdict = cacheVerdict(tally)
+  const percent = cachePercent(tally)
+  const advice = cacheAdvice(verdict)
+  return (
+    <span role="cell" className={cx('usage-cached', verdict === 'low' && 'is-low')} data-cache={verdict} title={advice ?? (tally.inputTokens ? `${percent} of what was read came from the cache` : undefined)}>
+      {verdict === 'low' && <AlertTriangle size={12} aria-label="Low" />}
+      {percent}
+    </span>
+  )
+}
+
 function UsageTable({ id, title, groups, unit }: { id: string; title: string; groups: UsageGroup[]; unit: 'calls' | 'requests' }) {
   const [all, setAll] = useState(false)
   const rows = all ? groups : groups.slice(0, TABLE_ROWS)
@@ -172,6 +186,7 @@ function UsageTable({ id, title, groups, unit }: { id: string; title: string; gr
           <span role="columnheader">{unit === 'calls' ? 'Model' : 'Project'}</span>
           <span role="columnheader">{unit === 'calls' ? 'Calls' : 'Requests'}</span>
           <span role="columnheader">Read</span>
+          <span role="columnheader">Cached</span>
           <span role="columnheader">Written</span>
           <span role="columnheader">Cost</span>
         </div>
@@ -182,9 +197,8 @@ function UsageTable({ id, title, groups, unit }: { id: string; title: string; gr
               <span className="usage-name-text">{group.label}</span>
             </span>
             <span role="cell">{(unit === 'calls' ? group.tally.calls : group.tally.requests).toLocaleString()}</span>
-            <span role="cell" title={group.tally.inputTokens ? `${Math.round((group.tally.cachedTokens / group.tally.inputTokens) * 100)}% from the cache` : undefined}>
-              {formatTokens(group.tally.inputTokens)}
-            </span>
+            <span role="cell">{formatTokens(group.tally.inputTokens)}</span>
+            <CachedCell tally={group.tally} />
             <span role="cell">{formatTokens(group.tally.outputTokens)}</span>
             <span role="cell" title={unpricedNote(group.tally) ?? undefined}>
               {group.tally.unpriced && !group.tally.cost ? '—' : formatCost(group.tally.cost)}

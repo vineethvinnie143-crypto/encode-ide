@@ -286,6 +286,34 @@ describe('buildChatBody', () => {
     assert.equal(body.messages[0].content[1].cache_control, undefined)
   })
 
+  it('keeps a conversation on its cache: session_id to OpenRouter, prompt_cache_key to OpenAI, nothing elsewhere (ADR 0128)', () => {
+    const keyed = { ...history, cacheKey: 'encode-0123456789abcdef0123456789abcdef' }
+    const viaOpenRouter = buildChatBody(target({ providerType: 'openrouter' }), keyed, true) as Record<string, unknown>
+    assert.equal(viaOpenRouter.session_id, 'encode-0123456789abcdef0123456789abcdef')
+    assert.equal(viaOpenRouter.prompt_cache_key, undefined)
+    const openAI = buildChatBody(target({ baseUrl: 'https://api.openai.com/v1', family: 'openai' }), keyed, false) as Record<string, unknown>
+    assert.equal(openAI.prompt_cache_key, 'encode-0123456789abcdef0123456789abcdef')
+    assert.equal(openAI.session_id, undefined)
+    const elsewhere = buildChatBody(target({ baseUrl: 'https://api.deepseek.com/v1', family: 'deepseek' }), keyed, false) as Record<string, unknown>
+    assert.equal(elsewhere.session_id, undefined, 'a server that does not document the field may refuse it')
+    assert.equal(elsewhere.prompt_cache_key, undefined)
+    const unkeyed = buildChatBody(target({ providerType: 'openrouter' }), history, true) as Record<string, unknown>
+    assert.equal(unkeyed.session_id, undefined)
+  })
+
+  it("asks for the hour-long cache on Claude's marks only, through OpenRouter (ADR 0128)", () => {
+    const caps = { tools: true, parallelTools: true, images: true, reasoning: true, promptCache: true }
+    const hour = { ...history, cacheTtl: '1h' as const }
+    const claude = buildChatBody(target({ providerType: 'openrouter', family: 'anthropic', capabilities: caps }), hour, true) as { messages: Array<Record<string, any>> }
+    const marks = [...JSON.stringify(claude.messages).matchAll(/"cache_control":(\{[^}]*\})/g)].map((match) => JSON.parse(match[1]!))
+    assert.ok(marks.length >= 2)
+    for (const mark of marks) assert.deepEqual(mark, { type: 'ephemeral', ttl: '1h' }, 'every mark has the same lifetime, so none is shorter than one after it')
+    const gemini = buildChatBody(target({ providerType: 'openrouter', family: 'google', capabilities: caps }), hour, true) as { messages: Array<Record<string, any>> }
+    assert.doesNotMatch(JSON.stringify(gemini.messages), /"ttl"/)
+    const usual = buildChatBody(target({ providerType: 'openrouter', family: 'anthropic', capabilities: caps }), history, true) as { messages: Array<Record<string, any>> }
+    assert.doesNotMatch(JSON.stringify(usual.messages), /"ttl"/)
+  })
+
   it('describes images as text for a model that cannot read them', () => {
     const body = buildChatBody(target(), history, false) as { messages: Array<Record<string, any>> }
     assert.match(JSON.stringify(body.messages[5]), /cannot read images/)

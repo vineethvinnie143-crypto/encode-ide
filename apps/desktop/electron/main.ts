@@ -24,6 +24,7 @@ import { Attention, type Notice } from './services/attention'
 import { ComputerControl } from './services/computer-control'
 import { ComputerWatch } from './services/computer-watch'
 import { diagnosticsReport } from './services/diagnostics'
+import { cacheByModel } from '../shared/cache-share'
 import { GitService } from './services/git'
 import { LogService } from './services/logs'
 import { ModelTestStore } from './services/model-tests'
@@ -383,6 +384,7 @@ if (!gotLock) {
 
     const diagnostics = async (): Promise<string> => {
       const sessions = await agentHost.client.sessions().catch(() => null)
+      const usage = await agentHost.client.usage().catch(() => null)
       const root = places?.workspace.current?.root
       const languageServers = root ? await agentHost.codeReport(root, { logs: 15 }).catch(() => null) : null
       const cpus = os.cpus()
@@ -401,6 +403,7 @@ if (!gotLock) {
         settings: settings.get(),
         agentHost: agentHost.health(),
         sessions: sessions ? { total: sessions.length, archived: sessions.filter((session) => session.archived).length } : null,
+        cache: usage ? cacheByModel(usage, { today: new Date(), days: 7 }) : null,
         workspaceOpen: places?.workspace.current != null,
         remote: places?.remote
           ? {

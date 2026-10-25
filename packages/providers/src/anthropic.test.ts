@@ -282,6 +282,15 @@ describe('buildAnthropicBody', () => {
     assert.deepEqual(body.messages[2].content[1].cache_control, { type: 'ephemeral' })
   })
 
+  it('gives every mark the hour-long lifetime when the request asks for it, and only for Claude (ADR 0128)', () => {
+    const body = buildAnthropicBody(target(), { ...history, cacheTtl: '1h' }) as Record<string, any>
+    const marks = [...JSON.stringify(body).matchAll(/"cache_control":(\{[^}]*\})/g)].map((match) => JSON.parse(match[1]!))
+    assert.equal(marks.length, 3)
+    for (const mark of marks) assert.deepEqual(mark, { type: 'ephemeral', ttl: '1h' })
+    const other = buildAnthropicBody(target({ family: 'deepseek' }), { ...history, cacheTtl: '1h' }) as Record<string, any>
+    assert.doesNotMatch(JSON.stringify(other), /"ttl"/, "another model behind a Messages endpoint is not asked for Claude's lifetime")
+  })
+
   it("asks for eager tool input streaming only from Anthropic's own endpoint", () => {
     const direct = buildAnthropicBody(target({ baseUrl: 'https://api.anthropic.com' }), history) as Record<string, any>
     assert.equal(direct.tools[0].eager_input_streaming, true)

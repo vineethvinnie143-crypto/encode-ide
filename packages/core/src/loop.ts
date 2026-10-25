@@ -102,6 +102,7 @@ import {
   type CompactionPlan,
 } from './compaction'
 import type { AgentHooks, HookEvent } from './hooks'
+import { cacheKeyOf, type CacheClock } from './cache-hints'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
@@ -193,6 +194,8 @@ export interface LoopServices {
   checks?: ProjectChecks
   /** What a request's file tools changed, as text: for the scan and the Reviewer before the turn ends (ADR 0096). */
   changes?: (turnId: string) => Promise<ChangedText[]>
+  /** When the session's requests start, kept across its turns: after a long wait they ask for the hour-long cache (ADR 0128). */
+  cacheClock?: CacheClock
 }
 
 export interface LoopOptions {
@@ -803,6 +806,9 @@ export class AgentLoop {
         ...(closing && tools.length ? { toolChoice: 'none' as const } : {}),
         ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
         ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
+        // The provider keeps the conversation where its cache is, and keeps that cache over the waits the session has (ADR 0128).
+        ...(o.services.sessionId ? { cacheKey: cacheKeyOf(o.services.sessionId, o.agentId) } : {}),
+        ...(o.services.cacheClock?.start() ? { cacheTtl: '1h' as const } : {}),
       }
 
       let streaming: ConversationEntry | undefined
