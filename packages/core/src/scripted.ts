@@ -24,6 +24,8 @@ export interface ScriptedCall {
 }
 
 export interface ScriptedStep {
+  /** Streamed as thinking before the text, in pieces. */
+  thinking?: string
   text?: string
   calls?: ScriptedCall[]
   finish?: FinishReason
@@ -100,6 +102,12 @@ export function createScriptedClient(script: Script, options: ScriptedOptions = 
       const current = typeof script === 'function' ? script(request, index) : script[Math.min(index, script.length - 1)]
       if (current.outcome) return current.outcome
 
+      if (current.thinking) {
+        for (const chunk of chunks(current.thinking)) {
+          request.onEvent?.({ type: 'thinking', text: chunk })
+          if (options.delayMs) await pause(options.delayMs, request.signal)
+        }
+      }
       if (current.text) {
         for (const chunk of chunks(current.text)) {
           request.onEvent?.({ type: 'text', text: chunk })

@@ -53,6 +53,17 @@
   font-family: var(--font-mono);
   font-size: var(--fs-11);
 }
+/* How long a running step has run (ADR 0125), at the end of the row beside its spinner. */
+.tool-row-clock {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.tool-row-clock + .tool-row-state {
+  margin-left: 8px;
+}
 .tool-row-state {
   margin-left: auto;
   flex-shrink: 0;

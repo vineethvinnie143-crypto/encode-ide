@@ -7,6 +7,7 @@
 import { collapseRepeats } from './text'
 import type { ShellDialect, Tool, ToolOutcome } from './types'
 import { DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } from './shell/run'
+import { BLIND_WAIT_SECONDS, blindWait, blindWaitAdvice } from './shell/waits'
 
 function fail(content: string): ToolOutcome {
   return { ok: false, content }
@@ -146,6 +147,10 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
           display: { output: `Background job ${job.id}` },
         }
       }
+
+      // A long sleep on its own holds the request with nothing to show: the model is told to wait for the thing itself (ADR 0125).
+      const waits = blindWait(input.command, dialect)
+      if (waits > BLIND_WAIT_SECONDS) return fail(blindWaitAdvice(waits, dialect))
 
       const result = await ctx.shell.run(input.command, { timeoutMs: input.timeout, signal: ctx.signal, onOutput: ctx.progress, ...(unsandboxed ? { unsandboxed } : {}) })
       const parts: string[] = []

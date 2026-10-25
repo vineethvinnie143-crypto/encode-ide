@@ -291,6 +291,7 @@ function TurnView({ turn, latest = false, offerSearchKey = false }: { turn: Turn
   const live = turn.active ? turn.parts[turn.parts.length - 1] : undefined
   // Only the turn that runs follows the chat's status, so a finished one is not drawn again when it changes.
   const status = useChat((state) => (turn.active ? state.status : undefined))
+  const thought = useChat((state) => (turn.active ? state.thinking : null))
   const answer = turn.reply.filter((entry) => entry.kind === 'assistant' && entry.text?.trim())
   const lastAnswer = answer[answer.length - 1]
   const answerText = answer.map((entry) => entry.text).join('\n\n')
@@ -306,7 +307,7 @@ function TurnView({ turn, latest = false, offerSearchKey = false }: { turn: Turn
 
       {offerSearchKey && <SearchKeyCard />}
 
-      {live && <LiveLine status={status} log={live.log} reply={live.reply} startedAt={live.startedAt} usage={turn.user?.usage} />}
+      {live && <LiveLine status={status} log={live.log} reply={live.reply} startedAt={live.startedAt} usage={turn.user?.usage} thought={thought} />}
 
       {!turn.active && lastAnswer && (
         <div className="msg-actions" data-find-skip>

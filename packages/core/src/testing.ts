@@ -38,8 +38,8 @@ import type { AgentHooks } from './hooks'
 import { AgentLoop, type LoopServices } from './loop'
 import { systemParts } from './prompt'
 import { createScriptedClient, type Script, type ScriptedClient, type ScriptedOptions } from './scripted'
-import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Surface, type TurnEnd } from './types'
-import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry } from './ui'
+import { DEFAULT_SETTINGS, type AgentSettings, type ApprovalPrompt, type ApprovalResult, type NewEntry, type Steers, type Surface, type TurnEnd } from './types'
+import type { AgentEvent, AgentStatus, BackgroundJob, ConversationEntry, ThinkingProgress } from './ui'
 
 /**
  * The Reviewer, the second look and the conventions offer would each take a scripted step of their own, and the scripted
@@ -61,6 +61,8 @@ export class RecordingSurface implements Surface {
   /** The reasons given for each EnterPlanMode the agent asked. */
   readonly planRequests: string[] = []
   todos: TodoInput[] = []
+  /** What the live line was told of the model's thinking, in order (ADR 0125). */
+  readonly thoughts: (ThinkingProgress | null)[] = []
   /** How the test answers an approval request. */
   decide: (prompt: ApprovalPrompt, signal: AbortSignal) => boolean | ApprovalResult | Promise<boolean | ApprovalResult> = () => true
   answer: (question: Question) => string = (question) => question.options[0]?.label ?? ''
@@ -71,6 +73,10 @@ export class RecordingSurface implements Surface {
 
   status(status: AgentStatus): void {
     this.statuses.push(status)
+  }
+
+  thinking(progress: ThinkingProgress | null): void {
+    this.thoughts.push(progress)
   }
 
   entry(entry: NewEntry): ConversationEntry {
@@ -210,6 +216,9 @@ export interface HarnessOptions {
   requests?: () => readonly string[]
   /** Lines already offered for the instructions file (ADR 0097). */
   suggested?: () => readonly string[]
+  steers?: Steers
+  /** The loop reads the task list the agent wrote, as the session's main agent does (ADR 0125). */
+  todoList?: boolean
 }
 
 export async function loopHarness(options: HarnessOptions): Promise<Harness> {
@@ -244,6 +253,8 @@ export async function loopHarness(options: HarnessOptions): Promise<Harness> {
     ...(options.reviewer ? { reviewer: options.reviewer } : {}),
     ...(options.requests ? { requests: options.requests } : {}),
     ...(options.suggested ? { suggested: options.suggested } : {}),
+    ...(options.steers ? { steers: options.steers } : {}),
+    ...(options.todoList ? { todos: () => surface.todos.map((todo, index) => ({ id: `todo-${index + 1}`, text: todo.content, status: todo.status })) } : {}),
     services: {
       root,
       home: os.homedir(),

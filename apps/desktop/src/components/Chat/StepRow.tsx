@@ -25,7 +25,8 @@ import { TAKEN_OVER, computerStep } from './computer-step'
 import DiffView, { shownDiffLines } from './DiffView'
 import { reviewLine } from './review-text'
 import { WorkRoot, shownPath } from './shown-path'
-import { stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
+import { formatClock, stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
+import { useNow } from '../../hooks/useNow'
 
 /** A step's name in each tense: done (`label`), under way (`doing`), and not yet done, refused or failed (`todo`). */
 type ToolMeta = { label: string; doing?: string; todo?: string; icon: typeof FileText }
@@ -257,6 +258,17 @@ export function foldedStep(entry: ConversationEntry): { head: string; body: stri
   return text
 }
 
+/** A step that has run this long says for how long, so a long command reads as one that runs and not as a stall (ADR 0125). */
+const SHOW_RUNNING_AFTER_MS = 5_000
+
+/** How long a running step has run: from when it was seen to start, or from its entry when it was already running. */
+function RunningFor({ since }: { since: number }) {
+  const now = useNow(true)
+  const elapsed = now - since
+  if (elapsed < SHOW_RUNNING_AFTER_MS) return null
+  return <span className="tool-row-clock">{formatClock(elapsed)}</span>
+}
+
 /** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
 function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
   const tool = entry.tool
@@ -267,6 +279,13 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
   const reveal = useCallback(() => setExpanded(true), [])
   const rowRef = useRevealRef(head, reveal)
   const { found, dismiss } = useFoldFind(useCallback((needle: string) => foldedStep(entry).body.includes(needle), [entry]))
+  // A step that waited for your approval starts its clock when it starts to run, not when it was asked.
+  const startedAt = useRef(entry.createdAt)
+  const lastState = useRef(tool?.state)
+  if (tool?.state !== lastState.current) {
+    if (tool?.state === 'running' && lastState.current === 'waiting') startedAt.current = Date.now()
+    lastState.current = tool?.state
+  }
 
   useEffect(() => {
     if (tool?.diff?.length) setExpanded(true)
@@ -331,6 +350,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
             )}
           </span>
         )}
+        {state === 'running' && <RunningFor since={startedAt.current} />}
         {(state === 'running' || state === 'reviewing') && <Loader2 size={13} className="spin tool-row-state" />}
         {state === 'waiting' && <ChevronRight size={13} className="tool-row-state" />}
         {(state === 'rejected' || state === 'error') && <XCircle size={13} className="tool-row-state is-bad" />}

@@ -674,6 +674,7 @@ async function runProviderPhase() {
   await runModelTestChecks()
   await runStopChecks()
   await runStepLimitChecks()
+  await runWaitChecks()
   await runAttachChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -4152,6 +4153,54 @@ async function runStepLimitChecks() {
 }
 
 /**
+ * What the agent waits on, shown (ADR 0125): the model's thinking under the live line while it thinks, a clock on a
+ * command that has run five seconds, a blind wait of 110 s refused with advice, and the task list it left open brought
+ * up to date before the request ends.
+ */
+async function runWaitChecks() {
+  console.log('[smoke] --- what the agent waits on ---')
+  const ANSWER = 'Looked at the project and waited for the build by checking for it.'
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:waits] Look at the project and wait for the build.')
+  await waitFor("(document.querySelector('.turn-thought')?.textContent ?? '').includes('then the build')", 10000, 'the thinking under the live line')
+  const thought = await evaluate("document.querySelector('.turn-thought').textContent")
+  console.log('[smoke] thinking shown:', JSON.stringify(thought))
+  await screenshot('ui-dark-thinking.png')
+  if (thought.startsWith('…')) throw new Error(`The whole thought so far is shown as cut: ${thought}`)
+  // The command may wait for its approval first: its clock starts when it runs.
+  const CLOCKED = "/^0:0[5-9]$/.test(document.querySelector('.tool-row-clock')?.textContent ?? '')"
+  const deadline = Date.now() + 25000
+  while (!(await evaluate(CLOCKED))) {
+    if (Date.now() > deadline) throw new Error('Timed out waiting for: a clock on the command that has run five seconds')
+    if (await evaluate("!!document.querySelector('.approval-card .btn.primary')")) {
+      await click('.approval-card .btn.primary')
+      if (await evaluate("!!document.querySelector('.tool-row-clock')")) throw new Error('The clock counted the wait for approval')
+    }
+    await sleep(250)
+  }
+  const clocked = await evaluate("document.querySelector('.tool-row-clock').closest('.tool-row').querySelector('.tool-row-detail')?.textContent ?? ''")
+  if (clocked !== 'sleep 7') throw new Error(`The clock is on "${clocked}", not on the running command`)
+  await screenshot('ui-dark-step-clock.png')
+  await driveAgent('18-waits')
+  if (await evaluate("!!document.querySelector('.turn-thought')")) throw new Error('The thinking line stayed after the request ended')
+  const steps = await evaluate(`window.eNCode.agent.history().then((history) => history.entries.filter((entry) => entry.tool).map((entry) => ({
+    name: entry.tool.name,
+    command: entry.tool.input.command ?? '',
+    state: entry.tool.state,
+    output: (entry.tool.output ?? '').slice(0, 80),
+    done: (entry.tool.input.todos ?? []).filter((todo) => todo.status === 'completed').length,
+  })))`)
+  console.log('[smoke] steps:', JSON.stringify(steps))
+  const blind = steps.find((step) => step.command === 'sleep 110')
+  if (blind?.state !== 'error' || !blind.output.startsWith('Not run: this command waits 110 s doing nothing')) throw new Error(`The blind wait was not refused: ${JSON.stringify(blind)}`)
+  const lists = steps.filter((step) => step.name === 'TodoWrite')
+  if (lists.length !== 2 || lists[1].done !== 2) throw new Error(`The task list was not brought up to date before the request ended: ${JSON.stringify(lists)}`)
+  const answers = await evaluate("[...document.querySelectorAll('.chat-list .turn')].at(-1).querySelectorAll(':scope > .msg-assistant').length ? [...[...document.querySelectorAll('.chat-list .turn')].at(-1).querySelectorAll(':scope > .msg-assistant')].map((node) => node.textContent.trim()) : []")
+  if (answers.at(-1) !== ANSWER) throw new Error(`The request ended with ${JSON.stringify(answers)}`)
+  console.log('[smoke] what the agent waits on: ok')
+}
+
+/**
  * Pictures and files in the chat box (ADR 0113). A screenshot pasted into the box shows as a thumbnail; a PDF and a
  * text file dropped on it come by name, and a file it cannot take is named in one note. The message shows what came
  * with it. The mock model cannot see pictures: it is sent a note where the picture is, the PDF's text and the file's,
@@ -6331,7 +6380,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, attach: runAttachChecks, follow: runFollowChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, attach: runAttachChecks, follow: runFollowChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

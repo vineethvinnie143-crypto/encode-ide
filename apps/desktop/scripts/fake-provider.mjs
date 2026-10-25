@@ -52,6 +52,42 @@ const SCENARIOS = {
     { text: 'Listing everything.', call: { name: 'Glob', args: { pattern: '**/*' } } },
     { text: 'Listed it all.' },
   ],
+  // What the person sees while the agent waits (ADR 0125): the model's thinking under the live line, a clock on a command
+  // that runs for a while, a blind wait refused, and the task list it left open brought up to date before it ends.
+  waits: [
+    {
+      thinking: 'Reading the layout first, then the build. The build takes a few seconds, so the agent waits for it and checks the result.',
+      thinkingDelayMs: 150,
+      text: 'Planning the work.',
+      call: {
+        name: 'TodoWrite',
+        args: {
+          todos: [
+            { content: 'Look at the project', status: 'in_progress', activeForm: 'Looking at the project' },
+            { content: 'Wait for the build', status: 'pending', activeForm: 'Waiting for the build' },
+          ],
+        },
+      },
+    },
+    { text: 'Waiting for the build.', call: { name: 'Bash', args: { command: 'sleep 7', description: 'Wait for the build' } } },
+    { text: 'Waiting a while longer.', call: { name: 'Bash', args: { command: 'sleep 110', description: 'Wait two minutes' } } },
+    {
+      text: 'The build finished.',
+      todoBack: {
+        text: 'Bringing the task list up to date.',
+        call: {
+          name: 'TodoWrite',
+          args: {
+            todos: [
+              { content: 'Look at the project', status: 'completed', activeForm: 'Looking at the project' },
+              { content: 'Wait for the build', status: 'completed', activeForm: 'Waiting for the build' },
+            ],
+          },
+        },
+      },
+    },
+    { text: 'Looked at the project and waited for the build by checking for it.' },
+  ],
   // A side chat's question (ADR 0104): one answer, which says what the copy of the conversation held.
   'side-check': [{ text: 'Side answer: the chat above wrote provider-check.txt.' }],
   // A file written with an error in it: the language server says so after the step, and the error gate sends the agent
@@ -485,8 +521,11 @@ const LANGUAGE_SERVER_NEWS = [
   'A stronger model does the rest of this request',
   'The conversation was just compacted to fit the context window',
   'That was the last step this request may take',
+  'Before you finish: the task list the person sees',
+  'The task list the person sees has not changed',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
+const TODO_BACK = 'Before you finish: the task list the person sees'
 const REVIEWED = 'The Reviewer read your changes before the person sees them'
 function isLanguageServerNews(message) {
   if (message.role !== 'user') return false
@@ -557,6 +596,8 @@ function stepOf(messages) {
   // Sent back by the error gate: the step it has for that.
   const last = messages.at(-1)
   if (step.gated && last?.role === 'user' && textOf(last.content).includes(GATED)) return step.gated
+  // Sent back to bring the task list up to date before it ends (ADR 0125).
+  if (step.todoBack && last?.role === 'user' && textOf(last.content).includes(TODO_BACK)) return step.todoBack
   // Sent back by the Reviewer before the person sees the reply (ADR 0096).
   return step.reviewed && last?.role === 'user' && textOf(last.content).includes(REVIEWED) ? step.reviewed : step
 }
@@ -945,6 +986,11 @@ document.getElementById('greet').addEventListener('click', () => {
     })
     const send = (delta, finish = null) => response.write(chunk(delta, finish))
 
+    // Thinking first, as a model that reasons streams it (reasoning_content), slowly enough to be seen.
+    for (const part of step.thinking?.match(/\S+\s*/g) ?? []) {
+      send({ reasoning_content: part })
+      await delay(step.thinkingDelayMs ?? 20)
+    }
     for (const part of step.text.match(/\S+\s*/g) ?? []) {
       send({ content: part })
       await delay(20)

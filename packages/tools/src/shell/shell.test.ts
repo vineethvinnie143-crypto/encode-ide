@@ -183,6 +183,24 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     assert.match(result.output, /ok/)
   })
 
+  it('refuses a long wait on its own, and runs a short one or one in the background', async () => {
+    const { root, shell } = await shellIn()
+    const jobs = createJobManager(shell)
+    const ctx = testContext(root, { shell, jobs })
+    const bash = createBashTool(shell.dialect, process.platform)
+    const long = shell.dialect === 'pwsh' ? 'Start-Sleep -Seconds 110; "waited"' : 'sleep 110; echo waited'
+    const started = Date.now()
+    const refused = await bash.run({ command: long }, ctx)
+    assert.equal(refused.ok, false)
+    assert.match(textOf(refused.content), /^Not run: this command waits 110 s doing nothing/)
+    assert.ok(Date.now() - started < 5_000, 'nothing waited')
+    const short = await bash.run({ command: shell.dialect === 'pwsh' ? 'Start-Sleep -Milliseconds 100; Write-Output ok' : 'sleep 0.1; echo ok' }, ctx)
+    assert.equal(short.ok, true)
+    const behind = await bash.run({ command: long, run_in_background: true }, ctx)
+    assert.equal(behind.ok, true)
+    await killShellTool.run({ shell_id: 'bash_1' }, ctx)
+  })
+
   it('runs background jobs, hands out new output once, and kills them', async () => {
     const { root, shell } = await shellIn()
     const jobs = createJobManager(shell)
