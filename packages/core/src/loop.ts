@@ -114,7 +114,7 @@ import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFindi
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { ThinkingTicker } from './thinking'
-import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
+import { ANSWER_AGAIN, BATCH_LOOKS, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
@@ -158,6 +158,10 @@ const MAX_PREVIEW_HUNKS = 4
 const SHOWN_STOPS: ReadonlySet<string> = new Set(['attempt_completion', 'ExitPlanMode'])
 /** Steps the task list may stay as it is, while it shows open items, before the model is reminded of it (ADR 0125). */
 const TODO_NUDGE_STEPS = 6
+/** Steps in a row that each read or searched one thing, after which the model is asked once to batch them (ADR 0134). */
+const SOLO_LOOK_STEPS = 3
+/** Calls that only read or search the project, and run together when one reply makes several. */
+const LOOKS = new Set(['Read', 'Grep', 'Glob', 'CodeMap'])
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
 const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
 const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
@@ -478,6 +482,9 @@ export class AgentLoop {
   private claimChecked = false
   /** The conversation was rewritten in this request: an edit that misses its text after it counts (ADR 0132). */
   private rewroteInRequest = false
+  /** Steps in a row that each read or searched one thing, and whether the request was asked to batch them (ADR 0134). */
+  private soloLooks = 0
+  private batchAsked = false
   private checkRuns = 0
   /** Once a request each (ADR 0096): the scan of the changes, the Reviewer's reading of them, and of a plan. */
   private scanned = false
@@ -572,6 +579,8 @@ export class AgentLoop {
     this.checksRefused = false
     this.claimChecked = false
     this.rewroteInRequest = false
+    this.soloLooks = 0
+    this.batchAsked = false
     this.scanned = false
     this.reviewed = false
     this.planCritiqued = false
@@ -662,6 +671,8 @@ export class AgentLoop {
         this.toolsRan = true
         const nudge = this.todoNudge(calls)
         if (nudge) state.context.push(nudge)
+        const batch = this.batchNudge(calls)
+        if (batch) state.context.push(batch)
         const found = await this.edits?.collect(STEP_WAIT_MS, signal)
         if (found) state.context.push(found)
         // A model that finishes with attempt_completion is held to what one that just stops talking is.
@@ -729,6 +740,21 @@ export class AgentLoop {
     if (++this.todoSteps < TODO_NUDGE_STEPS) return undefined
     this.todoSteps = 0
     return todoReminder(todos)
+  }
+
+  /**
+   * Once a request, after SOLO_LOOK_STEPS steps in a row that each read or searched one thing: the model is asked to
+   * make the reads and searches it already knows it needs in one reply, where they run together (ADR 0134). Every step
+   * sends the conversation again. Edits and the commands that test them are not asked to batch.
+   */
+  private batchNudge(calls: readonly ToolUseBlock[]): string | undefined {
+    if (calls.length !== 1 || !LOOKS.has(calls[0]!.name)) {
+      this.soloLooks = 0
+      return undefined
+    }
+    if (++this.soloLooks < SOLO_LOOK_STEPS || this.batchAsked) return undefined
+    this.batchAsked = true
+    return BATCH_LOOKS
   }
 
   /**

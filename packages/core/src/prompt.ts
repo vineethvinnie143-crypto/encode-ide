@@ -134,6 +134,10 @@ export function stoppedNote(summary: string): string {
 export const ANSWER_AGAIN =
   'If you take more steps before you finish, end with your whole answer again, not only what changed since: the user reads your last reply as the answer, and the one above becomes part of the work.'
 
+/** Goes with the third step in a row that read or searched one thing (ADR 0134), once a request. */
+export const BATCH_LOOKS =
+  'The last three steps each read or searched one thing. When you already know more files to read or searches to make, make all of those calls in one reply: they run together, and every step sends the whole conversation again. Edits and the tests after them stay one at a time.'
+
 /** Sent when the model answered with nothing to act on. */
 export const NUDGE_EMPTY = 'Your last reply was empty. Continue with the task, or say that it is finished.'
 
@@ -150,6 +154,8 @@ export interface EnvironmentInfo {
   topLevel: string[]
   /** The languages whose servers are installed and may run here, for the LSP tool. */
   languageServers?: string[]
+  /** Explore's model, when it costs well under what the agent's own does (ADR 0134); `share` is its price as a part of the agent's. */
+  explore?: { model: string; share: number }
 }
 
 const PLATFORM_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }
@@ -174,8 +180,15 @@ export function environmentReminder(info: EnvironmentInfo, previousRoot?: string
     `- Today's date: ${info.date}`,
     `- Top-level entries: ${entries}`,
     ...(info.languageServers?.length ? [`- Language servers: ${info.languageServers.join(', ')}. The LSP tool (ToolSearch select:LSP) finds definitions, references and errors exactly; LSPEdit renames across files.`] : []),
+    ...(info.explore ? [exploreLine(info.explore)] : []),
   ]
   return reminder(lines.join('\n'))
+}
+
+/** The environment's line on a cheaper Explore (ADR 0134): wide searches cost less there. */
+function exploreLine(explore: { model: string; share: number }): string {
+  const price = explore.share <= 0 ? 'at no cost' : `at ${Math.max(1, Math.round(explore.share * 100))}% of your model's price`
+  return `- Explore subagents (Task with subagent_type Explore) run on ${explore.model}, ${price}: hand them a search that would take several rounds of Grep and Read, and work from what they find.`
 }
 
 /**

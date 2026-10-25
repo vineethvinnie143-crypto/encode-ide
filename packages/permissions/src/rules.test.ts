@@ -128,6 +128,52 @@ describe('permission rules', () => {
     assert.equal(decide(set, "npm test 'a; rm -rf /'"), 'allow') // one quoted argument, not a second command
   })
 
+  it('lets an allowed command pipe into a filter that only reads what it is fed (ADR 0134)', () => {
+    const set = rules({ allow: ['Bash(npm test:*)'] })
+    for (const line of [
+      'npm test 2>&1 | tail -20',
+      'npm test | tail -n 40',
+      'npm test | head -n +5',
+      'npm test 2>&1 | grep -n FAIL',
+      'npm test | grep -v "^ok" | wc -l',
+      'npm test | grep -e FAIL -A 3',
+      'npm test | sort | uniq -c',
+      "npm test | cut -d: -f1 | tr -d '\\r'",
+      'npm test | cat -n',
+      "npm test --json | jq -r '.[] | .name'",
+    ]) {
+      assert.equal(decide(set, line), 'allow', line)
+    }
+    for (const line of [
+      'tail -20 secrets.txt',
+      'npm test | tail -20 secrets.txt',
+      'npm test | grep FAIL ~/.ssh/id_rsa',
+      'npm test | grep -e FAIL notes.txt',
+      'npm test | tail -f',
+      'npm test | sort -o out.txt',
+      'npm test | tee out.txt',
+      'npm test | sh',
+      'npm test | xargs rm',
+      'npm test | sed -n p',
+      'npm test | grep $PATTERN',
+      'npm test | tail < other.txt',
+      'cat secrets.txt | grep key',
+      'npm test | jq env',
+      "npm test | jq '$ENV.API_KEY'",
+      "npm test | jq 'include \"lib\"; .'",
+      'npm test | jq . other.json',
+    ]) {
+      assert.equal(decide(set, line), null, line)
+    }
+    const pwsh = rules({ allow: ['Bash(npm test:*)'] })
+    assert.equal(pwsh.evaluate({ type: 'command', line: 'npm test | Select-Object -Last 20', cwd: '/w', dialect: 'pwsh' })?.decision, 'allow')
+    assert.equal(pwsh.evaluate({ type: 'command', line: 'npm test | sls -Pattern FAIL', cwd: '/w', dialect: 'pwsh' })?.decision, 'allow')
+    assert.equal(pwsh.evaluate({ type: 'command', line: 'npm test | Select-String FAIL -Path secrets.txt', cwd: '/w', dialect: 'pwsh' }), null)
+    assert.equal(pwsh.evaluate({ type: 'command', line: 'npm test | Out-File out.txt', cwd: '/w', dialect: 'pwsh' }), null)
+    // Quoted, '-Pattern' is the pattern, and secrets.txt the file Select-String reads.
+    assert.equal(pwsh.evaluate({ type: 'command', line: "npm test | Select-String '-Pattern' secrets.txt", cwd: '/w', dialect: 'pwsh' }), null)
+  })
+
   it('lets words known only at run time satisfy a prefix or a wildcard, never a literal word', () => {
     const set = rules({ allow: ['Bash(npm run:*)', 'Bash(git log *)', 'Bash(echo hello)'] })
     assert.equal(decide(set, 'npm run $SCRIPT'), 'allow')

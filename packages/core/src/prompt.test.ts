@@ -75,6 +75,12 @@ describe('the environment reminder', () => {
     assert.match(text, /- Top-level entries: src\/, package\.json\n/)
   })
 
+  it('points wide searches at Explore only when its model is much cheaper (ADR 0134)', () => {
+    assert.ok(!environmentReminder(info).includes('Explore'))
+    assert.match(environmentReminder({ ...info, explore: { model: 'deepseek/deepseek-v4-flash', share: 0.18 } }), /\n- Explore subagents \(Task with subagent_type Explore\) run on deepseek\/deepseek-v4-flash, at 18% of your model's price: hand them a search that would take several rounds of Grep and Read/)
+    assert.match(environmentReminder({ ...info, explore: { model: 'local/qwen', share: 0 } }), /run on local\/qwen, at no cost:/)
+  })
+
   it('keeps that note when the workspace changed', () => {
     const text = environmentReminder(info, '/work/old')
     assert.match(text, /The workspace changed: this session was working in \/work\/old/)
