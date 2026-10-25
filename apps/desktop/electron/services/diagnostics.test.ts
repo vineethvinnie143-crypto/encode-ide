@@ -197,6 +197,23 @@ describe('diagnostics report', () => {
     assert.doesNotMatch(diagnosticsReport(input({ workspaceOpen: true })), /Other machine/)
   })
 
+  it("says how much each model read from its prompt cache this week, and which share is low (ADR 0128)", () => {
+    const text = diagnosticsReport(
+      input({
+        cache: [
+          { model: 'deepseek/deepseek-v4.1-flash', calls: 412, inputTokens: 18_400_000, cachedTokens: 18_100_000, verdict: 'good' },
+          { model: 'anthropic/claude-sonnet-5-5', calls: 60, inputTokens: 2_000_000, cachedTokens: 1_000_000, verdict: 'low' },
+          { model: 'local-model', calls: 3, inputTokens: 9_000, cachedTokens: 0, verdict: 'few' },
+        ],
+      }),
+    )
+    assert.match(text, /Prompt cache, last 7 days\n  deepseek\/deepseek-v4\.1-flash: 412 calls, 18,400,000 tokens read, 98% from the cache\n/)
+    assert.match(text, /claude-sonnet-5-5: 60 calls, 2,000,000 tokens read, 50% from the cache \(LOW\)\. Less than 80%/)
+    assert.match(text, /local-model: 3 calls, 9,000 tokens read, 0% from the cache, too few calls to judge/)
+    assert.match(diagnosticsReport(input({ cache: null })), /Prompt cache, last 7 days\n  could not read/)
+    assert.ok(!diagnosticsReport(input()).includes('Prompt cache'))
+  })
+
   it('copes with what it was not told', () => {
     const text = diagnosticsReport(input({ agentHost: null, sessions: null, environment: [], logLines: [], about: { ...about, build: 0, commit: '', builtAt: '', packaged: false } }))
     assert.match(text, /eNCode 0\.1\.0 tester, no commit recorded\n/)

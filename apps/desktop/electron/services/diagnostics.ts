@@ -1,5 +1,6 @@
 import type { AboutInfo, LanguageServersReport, Settings, UpdateStatus } from '../../shared/types'
 import { buildLine } from '../../shared/about'
+import { cacheAdvice, cachePercent, type CacheRow } from '../../shared/cache-share'
 import { updateLine } from '../../shared/updates'
 import { inlineState } from '../../shared/inline'
 import { MODEL_ROLES, freeProfile, labelOfRef, mainRefs } from '../../shared/models'
@@ -30,6 +31,8 @@ export interface DiagnosticsInput {
   agentHost: { running: boolean; failures: number; working: number } | null
   /** Counts only; what the conversations say never goes into a report. */
   sessions: { total: number; archived: number } | null
+  /** What each model read from its prompt cache in the last week (ADR 0128); null when the records could not be read. */
+  cache?: CacheRow[] | null
   workspaceOpen: boolean
   /** A folder on another machine (ADR 0111): how its connection stands and what runs there, never the machine's name. */
   remote?: { status: string; node?: string; system?: string } | null
@@ -142,6 +145,17 @@ export function diagnosticsReport(input: DiagnosticsInput): string {
     ['Process', agentHost ? `${agentHost.running ? 'running' : 'not running'}, ${agentHost.failures} stops in a row, ${agentHost.working} sessions working` : 'unknown'],
     ['Sessions', sessions ? `${sessions.total} (${sessions.archived} archived)` : 'unknown'],
   ])
+
+  if (input.cache !== undefined) {
+    out.push('', 'Prompt cache, last 7 days')
+    if (!input.cache) out.push('  could not read the sessions\' records')
+    else if (!input.cache.length) out.push('  no model calls')
+    for (const row of input.cache ?? []) {
+      const advice = cacheAdvice(row.verdict)
+      const after = row.verdict === 'few' ? ', too few calls to judge' : row.verdict === 'low' ? ` (LOW). ${advice}` : advice ? `. ${advice}` : ''
+      out.push(`  ${row.model || 'before models were kept'}: ${row.calls.toLocaleString('en-US')} calls, ${row.inputTokens.toLocaleString('en-US')} tokens read, ${cachePercent(row)} from the cache${after}`)
+    }
+  }
 
   const code = input.languageServers
   if (code) {

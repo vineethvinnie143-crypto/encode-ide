@@ -7,6 +7,7 @@ import type { Message, ToolResultBlock, UserMessage } from '@encode/providers'
 import { textBlock, userText } from '@encode/providers'
 import type { Tool, ToolKind } from '@encode/tools'
 import { outsideTools } from '@encode/tools/testing'
+import { CacheClock, cacheKeyOf } from './cache-hints'
 import { isPaired, NOT_RUN } from './compaction'
 import { createOutputStore } from './outputs'
 import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH } from './prompt'
@@ -99,6 +100,24 @@ describe('a turn', () => {
     })
     assert.deepEqual(await h.run('look'), { kind: 'done', reply: 'Done.' })
     assert.equal(h.client.requests.length, 2)
+  })
+
+  it("names the conversation for the provider's cache, and asks for the hour once a wait outlived five minutes (ADR 0128)", async () => {
+    let now = 5_000_000
+    const h = await loopHarness({
+      script: (_request, step) => {
+        // The first step's command runs for six minutes; the next starts soon after.
+        now += step === 0 ? 6 * 60_000 : 2_000
+        return step < 2 ? { text: 'Looking.', calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'Done.' }
+      },
+      services: { cacheClock: new CacheClock(() => now) },
+    })
+    assert.deepEqual(await h.run('look'), { kind: 'done', reply: 'Done.' })
+    assert.deepEqual(
+      h.client.requests.map((request) => request.payload.cacheKey),
+      [1, 2, 3].map(() => cacheKeyOf('test-session', 'main')),
+    )
+    assert.deepEqual(h.client.requests.map((request) => request.payload.cacheTtl), [undefined, '1h', '1h'])
   })
 
   it('runs a tool, feeds the result back and carries on until the model is done', async () => {

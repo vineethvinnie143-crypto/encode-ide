@@ -169,6 +169,13 @@ export interface ModelRequest {
   reasoning?: ReasoningEffort
   /** Ignored by models that reject sampling parameters. */
   temperature?: number
+  /**
+   * The conversation this request goes on with, as an opaque key that names nothing on this computer. A provider that
+   * routes by one keeps the conversation where its cache is: OpenRouter's `session_id`, OpenAI's `prompt_cache_key`.
+   */
+  cacheKey?: string
+  /** Keep the marked prompt cache for an hour instead of five minutes, where the marks take a lifetime (Claude). */
+  cacheTtl?: '1h'
 }
 
 export function textBlock(text: string): TextBlock {
