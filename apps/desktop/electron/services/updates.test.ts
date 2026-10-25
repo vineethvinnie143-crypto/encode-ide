@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 import type { UpdateStatus } from '../../shared/types'
 import {
   BUSY_POLL_MS,
@@ -14,6 +14,7 @@ import {
   installerArgs,
   parseManifest,
   RETRY_MS,
+  SWEEP_MS,
   Updater,
   type UpdateEffects,
   type UpdaterOptions,
@@ -361,6 +362,47 @@ describe('the updater', () => {
 
     const record = JSON.parse(fs.readFileSync(again.recordFile, 'utf8'))
     assert.deepEqual(record, { failed: [292] })
+  })
+
+  it('deletes the installer it ran once the installer lets go of it', async () => {
+    const test = harness()
+    const first = test.make()
+    first.start()
+    await first.check()
+    await first.install()
+
+    // The installer started the new copy and is still finishing, so its own file cannot be deleted yet.
+    const rmSync = fs.rmSync.bind(fs)
+    const held = new Set(['eNCode-build-292-setup.exe'])
+    mock.method(fs, 'rmSync', (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (held.has(path.basename(String(target)))) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+      return rmSync(target, options)
+    })
+    try {
+      const updated = test.make(292)
+      updated.start()
+      assert.deepEqual(fs.readdirSync(test.dir), ['eNCode-build-292-setup.exe'], 'what could go went')
+      assert.equal(test.fire(SWEEP_MS), 1)
+      assert.deepEqual(fs.readdirSync(test.dir), ['eNCode-build-292-setup.exe'], 'still held')
+      held.clear()
+      assert.equal(test.fire(SWEEP_MS * 2), 1, 'tried again, later')
+      assert.deepEqual(fs.readdirSync(test.dir), [])
+      assert.ok(![...test.timers.values()].some((timer) => timer.ms < FIRST_CHECK_MS), 'no more sweeps')
+      updated.dispose()
+
+      // Held for good: it gives up after six tries, and says so.
+      fs.writeFileSync(path.join(test.dir, 'stuck.exe'), 'x')
+      held.add('stuck.exe')
+      const stuck = test.make(292)
+      stuck.start()
+      let tries = 0
+      for (let ms = SWEEP_MS; test.fire(ms); ms *= 2) tries++
+      assert.equal(tries, 6)
+      assert.ok(test.logs.some((line) => /could not delete stuck\.exe from the download folder/.test(line)))
+      stuck.dispose()
+    } finally {
+      mock.restoreAll()
+    }
   })
 
   it('keeps a download that is still newer for the next run, without downloading it again', async () => {

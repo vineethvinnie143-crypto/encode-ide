@@ -38,7 +38,9 @@ outside libraries, so electron-updater is out.
     SHA-256 does not match, when it stalls for a minute, or when an answer comes from anywhere but GitHub over HTTPS
     (`github.com` and its `*.githubusercontent.com` storage). The release names files, not addresses: a file's
     address is made from the build number and a plain file name, so a release cannot point the app elsewhere.
-  - A download that is ready waits across restarts, and is checked again before it runs.
+  - A download that is ready waits across restarts, and is checked again before it runs. Once it has run, the next
+    start deletes it; the installer still holds its own file for a moment then, so what is held is tried again a few
+    times over the next two minutes.
   - **Restart to update** is in the title bar, in a notice, in Settings and in About. It never interrupts a request:
     while an agent works or waits for the person, the button says it restarts after the agents and a click stops
     waiting. Then eNCode closes as it always does (the agents and their commands first) and, as its last act, starts

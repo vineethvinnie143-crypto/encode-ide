@@ -147,8 +147,10 @@ async function updateRoundTrip() {
     if (!fs.existsSync(shortcut)) throw new Error('the update took the Start menu shortcut away')
     const record = JSON.parse(fs.readFileSync(recordFile, 'utf8'))
     if (record.attempt || record.failed?.length) throw new Error(`the record of the update: ${JSON.stringify(record)}`)
-    const left = fs.existsSync(downloads) ? fs.readdirSync(downloads) : []
-    if (left.length) throw new Error(`the download is still kept after the update: ${left.join(', ')}`)
+    // The installer holds its own file until it exits, a moment after it starts the program; then the program deletes it.
+    const kept = () => (fs.existsSync(downloads) ? fs.readdirSync(downloads) : [])
+    for (const until = Date.now() + 2 * 60_000; kept().length && Date.now() < until; ) await sleep(1000)
+    if (kept().length) throw new Error(`the download is still kept two minutes after the update: ${kept().join(', ')}`)
     console.log(`[installer] the installer ran silently over the installed copy and started it again, and it says: ${said}`)
   } finally {
     page?.ws.close()

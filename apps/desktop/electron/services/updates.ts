@@ -49,6 +49,12 @@ const MAX_PROGRAM_BYTES = 1024 ** 3
 const PROGRESS_EVERY_MS = 400
 /** Builds whose update did not take, remembered so that one is not offered again and again. */
 const FAILED_KEPT = 10
+/**
+ * The installer that updated this copy starts it before it exits, and holds its own file until then: what the start
+ * could not delete is tried again after 2 s, 4 s, 8 s and so on, six times in all.
+ */
+export const SWEEP_MS = 2_000
+const SWEEPS = 6
 
 /**
  * The feed a run uses, from ENCODE_UPDATE_FEED: unset is GitHub, "off" is none, and a page on this computer
@@ -196,6 +202,7 @@ export class Updater {
   private checkedAt: number | null = null
   private timer: unknown = null
   private busyTimer: unknown = null
+  private sweepTimer: unknown = null
   private running: Promise<UpdateStatus> | null = null
   private readonly abort = new AbortController()
   private downloaded: Downloaded | null = null
@@ -281,6 +288,8 @@ export class Updater {
     this.abort.abort()
     this.unschedule()
     this.stopWaiting()
+    if (this.sweepTimer !== null) this.effects.clearTimer(this.sweepTimer)
+    this.sweepTimer = null
   }
 
   private offReason(): string | null {
@@ -360,7 +369,7 @@ export class Updater {
   private async download(feed: UpdateFeed, manifest: UpdateManifest): Promise<void> {
     const { dir } = this.options
     const want = manifest.installer
-    this.clearDir()
+    if (this.clearDir().length) this.sweepLater()
     this.downloaded = null
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, `eNCode-build-${manifest.build}-setup.exe`)
@@ -512,26 +521,49 @@ export class Updater {
       kept = null
     }
     this.downloaded = kept
-    this.clearDir(kept ? [path.basename(kept.file), READY_FILE] : [])
+    if (this.clearDir(this.keptNames()).length) this.sweepLater()
   }
 
-  /** Empties the download folder, but for the files named. */
-  private clearDir(keep: string[] = []): void {
+  /** The files of the download that waits for the restart, which a clear leaves. */
+  private keptNames(): string[] {
+    return this.downloaded ? [path.basename(this.downloaded.file), READY_FILE] : []
+  }
+
+  /** Empties the download folder, but for the files named; returns what it could not delete. */
+  private clearDir(keep: string[] = []): string[] {
     const { dir } = this.options
     let names: string[] = []
     try {
       names = fs.readdirSync(dir)
     } catch {
-      return
+      return []
     }
+    const left: string[] = []
     for (const name of names) {
       if (keep.includes(name)) continue
       try {
         fs.rmSync(path.join(dir, name), { force: true, recursive: true })
       } catch {
-        // Held open by a scanner for a moment: the next clear takes it.
+        // Held open: by the installer that is still finishing, or by a scanner for a moment.
+        left.push(name)
       }
     }
+    return left
+  }
+
+  /** Clears the download folder again later, until what was held is gone. */
+  private sweepLater(attempt = 0): void {
+    if (this.disposed || this.sweepTimer !== null) return
+    this.sweepTimer = this.effects.setTimer(() => {
+      this.sweepTimer = null
+      if (this.disposed) return
+      // A look that is downloading owns the folder for now.
+      if (this.running) return this.sweepLater(attempt)
+      const left = this.clearDir(this.keptNames())
+      if (!left.length) return
+      if (attempt + 1 < SWEEPS) this.sweepLater(attempt + 1)
+      else this.effects.log(`[updates] could not delete ${left.join(', ')} from the download folder; the next start tries again`)
+    }, SWEEP_MS * 2 ** attempt)
   }
 
   private schedule(ms: number): void {
