@@ -4,7 +4,7 @@
  * them (packages/tools/src/shell/environment.ts takes every variable named like a key out).
  */
 import { createDemoClient } from '@encode/core'
-import type { ModelClient } from '@encode/providers'
+import type { ModelClient, SpendingCap } from '@encode/providers'
 import { createAnthropicAdapter, createOpenAICompatibleAdapter, createOpenRouterAdapter, redactSecrets } from '@encode/providers'
 import { createRouter, parseRouterConfig, staticKeys } from '@encode/router'
 import { UsageError } from './args'
@@ -35,6 +35,8 @@ export interface ModelChoice {
   secrets: string[]
   /** OpenRouter's free models: what they are sent may be kept by whoever serves them. */
   free: boolean
+  /** The spending cap `client` is held to (--max-cost, ADR 0138). */
+  cap?: SpendingCap
 }
 
 export const NO_MODEL = `Choose a model: --model openrouter:<id> (or anthropic:, openai:, deepseek:, ollama:, lmstudio:), --model @free for OpenRouter's free models, or --model demo to try eNCode offline. ENCODE_MODEL sets one for every run.`

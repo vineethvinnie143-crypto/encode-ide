@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import type { ConversationEntry, DiffHunk } from '@encode/core'
+import { DEFAULT_SETTINGS, type ConversationEntry, type DiffHunk } from '@encode/core'
 import { USAGE, UsageError, parseArgs } from './args'
 import { NO_MODEL, chooseModel, modelConfig } from './model'
 import { Renderer, describeTool, shownPath, toolOutcome, usageLine } from './render'
-import { ago } from './session'
+import { ago, settingsFor } from './session'
 import { COLOR, NO_COLOR, firstLine, plain, safeJson, styleFor } from './text'
 import { VERSION, versionLine } from './version'
 import { requestText } from './main'
@@ -45,6 +45,15 @@ describe('arguments', () => {
     assert.equal(options.color, false)
   })
 
+  it('reads an effort and a spending cap (ADR 0138)', () => {
+    const options = parseArgs(['-p', 'go', '--effort', 'max', '--max-cost', '0.15'])
+    assert.equal(options.effort, 'max')
+    assert.equal(options.maxCost, 0.15)
+    assert.equal(parseArgs(['--max-cost=$2']).maxCost, 2)
+    assert.equal(settingsFor(options).reasoning, 'max')
+    assert.equal(settingsFor(parseArgs([])).reasoning, DEFAULT_SETTINGS.reasoning, "the model's own effort when none is given")
+  })
+
   it('takes what follows -- as words, even when it looks like an option', () => {
     assert.equal(parseArgs(['-p', '--', '--explain', '-v']).prompt, '--explain -v')
   })
@@ -80,12 +89,15 @@ describe('arguments', () => {
       [['--color', '--no-color'], /not both/],
       [['-c', '-r', 'abc'], /not both/],
       [['--trust=yes'], /unknown option --trust=yes/],
+      [['--effort', 'huge'], /--effort is one of low, medium, high, xhigh, max/],
+      [['--max-cost', '0'], /--max-cost is a number of dollars above 0/],
+      [['--max-cost', 'lots'], /--max-cost is a number of dollars above 0/],
     ]
     for (const [argv, message] of wrong) assert.throws(() => parseArgs(argv), (error: unknown) => error instanceof UsageError && message.test(error.message), argv.join(' '))
   })
 
   it('has help that names every option it reads', () => {
-    for (const flag of ['--model', '--base-url', '--continue', '--resume', '--mode', '--policy', '--max-steps', '--cwd', '--trust', '--no-sandbox', '--print', '--output-format', '--verbose', '--no-color', '--help', '--version']) assert.ok(USAGE.includes(flag), flag)
+    for (const flag of ['--model', '--base-url', '--continue', '--resume', '--mode', '--policy', '--max-steps', '--effort', '--max-cost', '--cwd', '--trust', '--no-sandbox', '--print', '--output-format', '--verbose', '--no-color', '--help', '--version']) assert.ok(USAGE.includes(flag), flag)
   })
 
   it('has the version of its package', () => {

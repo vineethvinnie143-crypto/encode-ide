@@ -7,11 +7,12 @@ import type { Workspaces } from '@encode/workspace'
 import { UsageError, type CliOptions } from './args'
 import { firstLine, plain } from './text'
 
-export function settingsFor(options: Pick<CliOptions, 'policy' | 'maxSteps'>): AgentSettings {
+export function settingsFor(options: Pick<CliOptions, 'policy' | 'maxSteps' | 'effort'>): AgentSettings {
   return {
     ...DEFAULT_SETTINGS,
     policy: options.policy ?? DEFAULT_SETTINGS.policy,
     maxSteps: options.maxSteps ?? DEFAULT_SETTINGS.maxSteps,
+    ...(options.effort ? { reasoning: options.effort } : {}),
     // The Computer tool drives a desktop the app watches over; the command line has no banner to stop it from.
     computer: false,
   }

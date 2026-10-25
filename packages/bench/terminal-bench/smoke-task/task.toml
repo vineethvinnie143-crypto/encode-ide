@@ -1,0 +1,12 @@
+# A task small enough to run on every pull request (ADR 0138): it checks that Harbor can start a container, install
+# eNCode in it, run it and score what it did. Its image has no Node, so the agent copies one in.
+schema_version = "1.4"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 300.0
+
+[environment]
+build_timeout_sec = 300.0

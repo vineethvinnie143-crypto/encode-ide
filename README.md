@@ -421,6 +421,7 @@ encode -m @free "explain the build"          # start with a request; OpenRouter'
 encode -p -m anthropic:<model id> "why does the test fail?"   # one answer on standard output, then exit
 git diff | encode -p -m ollama:qwen2.5-coder "review this"     # a request on a pipe is print mode too
 encode -p --output-format json -m demo "look around"           # one result object; stream-json gives every event
+encode -p --effort max --max-cost 0.50 -m openrouter:<model id> "fix the build"   # think long, stop before $0.50
 encode -c                                    # carry on with this folder's latest session; encode sessions lists them
 ```
 
@@ -463,6 +464,7 @@ apps/cli/                     the command line: the app's agent host behind a pr
 apps/gateway/                 the free-tier gateway on Cloudflare Workers (@encode/gateway)
 packages/accounts/            GitHub sign-in, sessions and Connect OpenRouter for the app
 packages/bench/               the agent's benchmark: tasks with hidden checks, runs on the app's agent host, reports and their comparison, and the replay of a reported request (@encode/bench)
+  terminal-bench/             the Harbor agent that runs the command line on Terminal-Bench, its task picker and report (Python)
 packages/checkpoints/         what the file tools changed, saved before each change, and put back on request (the Rewind dialog's engine)
 packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
@@ -575,6 +577,14 @@ results are shortened: a rule read first and needed last, a rename across sevent
 lines of output, and six changes asked for in one message. A tester's **Report a problem with this request**
 file replays with `pnpm turn-report report.json`, call by call against what the tools did for the tester, without
 running its commands; `--save <name>` keeps it as a task whose replay the tests then hold to.
+
+Against other agents, the command line runs Terminal-Bench through Harbor
+([ADR 0138](docs/adr/0138-the-command-line-runs-terminal-bench-through-harbor-held-to-a-spending-cap.md)):
+`packages/bench/terminal-bench` holds a Harbor agent (`-a encode_agent:Encode`) that copies the command line into each
+task's container and runs it there, with `--ak effort=max --ak max_cost=0.10`. A pull request that touches it runs a
+free check in a container; a scored run is started by hand (Actions → Terminal-Bench → Run workflow) with the
+repository secret `OPENROUTER_API_KEY`, and refuses to start when its tasks times the cap per task come to more than
+its budget.
 
 CI runs all of the above on Windows for every pull request
 ([ADR 0012](docs/adr/0012-windows-first-ci.md)). Unit tests run in plain Node and may not
