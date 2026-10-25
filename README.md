@@ -100,7 +100,9 @@ primary platform; the code stays cross-platform.
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
   range when it needs the middle. A test run reaches the model as its failures and totals, a build as its errors and
   first warnings, an install as its errors and last lines, git log as a line a commit and git diff with each file's
-  counts first; a search groups its lines under each file's name. A long file read whole shows its start and a list of what the rest defines, by line.
+  counts first; a search groups its lines under each file's name. A long file read whole shows its start and a list
+  of what the rest defines, by line. After three steps that each read one thing, the agent is asked to make the reads
+  it knows of in one reply, and when Explore runs on a model at most half Main's price, wide searches go to it.
   The line under each finished request's answer shows what it cost: tokens, how much came from the prompt cache, and
   dollars when the provider says.
 
@@ -130,7 +132,7 @@ primary platform; the code stays cross-platform.
   Approval cards say why they ask, and edits show their diff first.
 - **Rules you set, and folders you trust.** **Always allow** on an approval saves a rule for exactly what you
   approved, in your private settings for the project unless you choose another place, and the same command runs
-  unasked from then on. **Settings → Permissions** lists the rules, takes new ones (allow, always ask, never allow)
+  unasked from then on, piped into filters that only read what it prints (`| tail -40`, `| grep FAIL`). **Settings → Permissions** lists the rules, takes new ones (allow, always ask, never allow)
   and shows whether the folder is trusted. A folder you open is not trusted: its own settings can take
   permissions away but cannot give any until you trust the folder and approve what they say, and a banner tells
   you when a pull changed them. If a settings file cannot be read, nothing runs in that folder until it is fixed.

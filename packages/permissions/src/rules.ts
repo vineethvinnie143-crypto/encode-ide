@@ -225,8 +225,9 @@ export class RuleSet {
       // What a redirect feeds the command is part of what it does, and is not in its words: it counts as one more word known only at run time.
       const text = split.fed[index] ? canonical([...command, DYNAMIC]) : canonical(command)
       const hit = relevant.find((entry) => entry.command?.(text))
-      if (!hit) return null
-      first ??= hit
+      if (hit) first ??= hit
+      // A filter a pipe feeds reads only what the allowed command before it printed (ADR 0134).
+      else if (!(split.piped[index] && !split.fed[index] && isPipeFilter(command, query.dialect))) return null
     }
     return first
   }
@@ -283,6 +284,8 @@ interface SplitLine {
    * allows a command by its exact words must not allow it fed from elsewhere.
    */
   fed: boolean[]
+  /** For each command, whether a pipe feeds it: a simple command after the first of its pipeline. */
+  piped: boolean[]
 }
 
 /** A command's text as rules see it: its words joined by single spaces. */
@@ -296,22 +299,26 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
     const parsed = parsePwsh(line)
     if (!parsed.ok) return null
     const commands: string[][] = []
+    const piped: boolean[] = []
     let writes = false
     for (const statement of parsed.script.statements) {
       for (const pipeline of statement.pipelines) {
-        for (const command of pipeline.commands) {
+        for (const [index, command] of pipeline.commands.entries()) {
           commands.push([command.name.value, ...command.args.map((arg) => arg.value)])
+          // A quoted '-Path' is a value to PowerShell, where a filter's check would read a parameter: no such command counts as one.
+          piped.push(index > 0 && !command.args.some((arg) => arg.quotedStart && arg.value.startsWith('-')))
           if (command.redirects.some((redirect) => redirect.target)) writes = true
         }
       }
     }
     // PowerShell has no input redirection.
-    return { commands, writes, fed: commands.map(() => false) }
+    return { commands, writes, fed: commands.map(() => false), piped }
   }
   const parsed = parseBash(line)
   if (!parsed.ok) return null
   const commands: string[][] = []
   const fed: boolean[] = []
+  const piped: boolean[] = []
   let writes = false
   const wordText = (word: BashWord) => {
     let value = ''
@@ -325,7 +332,7 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
   const visitWord = (word: BashWord) => {
     for (const part of word.parts) if (part.kind === 'command' || part.kind === 'process') visitScript(part.script)
   }
-  const visitCommand = (command: BashCommand, inherited: boolean) => {
+  const visitCommand = (command: BashCommand, inherited: boolean, fromPipe = false) => {
     let input = inherited
     for (const redirect of command.redirects) {
       visitWord(redirect.target)
@@ -347,13 +354,107 @@ export function splitCommands(line: string, dialect: 'bash' | 'pwsh'): SplitLine
     if (words.length) {
       commands.push(words)
       fed.push(input)
+      piped.push(fromPipe)
     }
   }
   const visitScript = (script: BashScript, input = false) => {
-    for (const list of script.lists) for (const pipeline of list.pipelines) for (const command of pipeline.commands) visitCommand(command, input)
+    for (const list of script.lists) {
+      for (const pipeline of list.pipelines) for (const [index, command] of pipeline.commands.entries()) visitCommand(command, input, index > 0)
+    }
   }
   visitScript(parsed.script)
-  return { commands, writes, fed }
+  return { commands, writes, fed, piped }
+}
+
+/**
+ * What a filter may be given. It takes these options and as many operands as named here, never a file: a file would be
+ * read where no rule said so. None of them writes or runs anything (no sort -o, tee, sed, awk or xargs), and none
+ * waits for more input (no tail -f).
+ */
+interface Filter {
+  flags: RegExp
+  /** Options whose value is the next word. */
+  valued?: RegExp
+  /** How many words that are not options it takes: grep's pattern, tr's sets, jq's filter. */
+  operands?: number
+  /** An option that gives the pattern instead, so one operand fewer: grep's -e. */
+  pattern?: RegExp
+  /** What an operand must not hold: jq's environment and modules read what the pipe did not feed it. */
+  reaches?: RegExp
+}
+
+const COUNT = /^[-+]?\d+$/
+const PIPE_FILTERS: Readonly<Record<string, Filter>> = {
+  head: { flags: /^(?:-[nc]?\d+|-[qv]|--(?:lines|bytes)=\d+|--(?:quiet|silent|verbose))$/, valued: /^-[nc]$/ },
+  tail: { flags: /^(?:-[nc]?\+?\d+|-[qv]|--(?:lines|bytes)=\+?\d+|--(?:quiet|silent|verbose))$/, valued: /^-[nc]$/ },
+  wc: { flags: /^(?:-[lwcmL]+|--(?:lines|words|bytes|chars|max-line-length))$/ },
+  sort: { flags: /^(?:-[nrufhVbMRdgis]+|--(?:numeric-sort|reverse|unique|ignore-case|human-numeric-sort|version-sort|stable)|--(?:key|field-separator)=\S+)$/, valued: /^-[kt]$/ },
+  uniq: { flags: /^(?:-[cdui]+|--(?:count|repeated|unique|ignore-case)|--(?:skip-fields|skip-chars|check-chars)=\d+)$/, valued: /^-[fsw]$/ },
+  cut: { flags: /^(?:-[dfcb]\S+|-s|--(?:delimiter|fields|characters|bytes)=\S+|--only-delimited|--complement)$/, valued: /^-[dfcb]$/ },
+  tr: { flags: /^-[dsc]+$/, operands: 2 },
+  grep: {
+    flags: /^(?:-[ivnchwxoqsEFGPaLl]+|-[ABCm]\d+|--(?:ignore-case|invert-match|line-number|count|word-regexp|line-regexp|only-matching|quiet|extended-regexp|fixed-strings|color(?:=\w+)?)|--(?:max-count|after-context|before-context|context|regexp)=\S+)$/,
+    valued: /^-[eABCm]$/,
+    operands: 1,
+    pattern: /^(?:-e|--regexp=.*)$/,
+  },
+  cat: { flags: /^-[nbsAETv]+$/ },
+  column: { flags: /^-t$/, valued: /^-[so]$/ },
+  jq: {
+    flags: /^(?:-[rcSjMCes]+|--(?:raw-output|compact-output|sort-keys|join-output|monochrome-output|color-output|exit-status|slurp))$/,
+    operands: 1,
+    reaches: /\$(?:ENV|__)|\b(?:env|import|include|input_filename|modulemeta|get_search_list|get_(?:prog|jq)_origin)\b/,
+  },
+}
+
+/** PowerShell's filters, by their parameters, under the same rule: what the pipeline feeds them, and no file. */
+const PWSH_FILTERS: Readonly<Record<string, Filter>> = {
+  'select-object': { flags: /^-(?:unique)$/i, valued: /^-(?:first|last|skip|index|expandproperty|property)$/i },
+  'select-string': { flags: /^-(?:simplematch|notmatch|casesensitive|allmatches|quiet)$/i, valued: /^-(?:pattern|context)$/i, operands: 1, pattern: /^-pattern$/i },
+  'measure-object': { flags: /^-(?:line|word|character|ignorewhitespace)$/i },
+  'sort-object': { flags: /^-(?:unique|descending|casesensitive)$/i, valued: /^-property$/i },
+  'out-string': { flags: /^-stream$/i, valued: /^-width$/i },
+}
+const PWSH_ALIASES: Readonly<Record<string, string>> = { select: 'select-object', sls: 'select-string', measure: 'measure-object', sort: 'sort-object' }
+
+function filterNamed(name: string, dialect: 'bash' | 'pwsh'): Filter | undefined {
+  if (dialect === 'pwsh') {
+    const lower = name.toLowerCase()
+    const full = Object.hasOwn(PWSH_ALIASES, lower) ? PWSH_ALIASES[lower] : lower
+    return Object.hasOwn(PWSH_FILTERS, full) ? PWSH_FILTERS[full] : undefined
+  }
+  const plain = name === 'egrep' || name === 'fgrep' ? 'grep' : name
+  return Object.hasOwn(PIPE_FILTERS, plain) ? PIPE_FILTERS[plain] : undefined
+}
+
+/**
+ * Whether a command is a filter that reads only what a pipe feeds it and prints (ADR 0134): every word known now, and
+ * only the options and operands its entry allows.
+ */
+function isPipeFilter(words: readonly string[], dialect: 'bash' | 'pwsh'): boolean {
+  if (words.some((word) => word === DYNAMIC)) return false
+  const [name, ...args] = words
+  const filter = name === undefined ? undefined : filterNamed(name, dialect)
+  if (!filter) return false
+  let operands = filter.operands ?? 0
+  const counts = name === 'head' || name === 'tail'
+  for (let index = 0; index < args.length; index++) {
+    const word = args[index]
+    if (filter.pattern?.test(word)) operands--
+    if (filter.valued?.test(word)) {
+      // The option's value: a count for head and tail, any word but an option for the rest.
+      const value = args[++index]
+      if (value === undefined) return false
+      if (counts ? !COUNT.test(value) : value.startsWith('-') && !COUNT.test(value)) return false
+      continue
+    }
+    if (word.startsWith('-') && word.length > 1) {
+      if (!filter.flags.test(word)) return false
+      continue
+    }
+    if (--operands < 0 || filter.reaches?.test(word)) return false
+  }
+  return true
 }
 
 /** Programs that run the command given in their arguments. */

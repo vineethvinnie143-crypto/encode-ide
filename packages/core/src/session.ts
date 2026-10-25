@@ -96,7 +96,7 @@ import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { saveConventions } from './conventions'
 import { memoryConversation } from './conversation'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, goalReminder, modeReminder, reminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, type EnvironmentInfo, goalReminder, modeReminder, reminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -172,6 +172,8 @@ function entryAttachments(input: AgentStartInput): EntryAttachment[] {
 const MAX_STEERS = 20
 const STEER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const JOB_PREVIEW_CHARS = 4_000
+/** Explore's price, as a part of Main's, at or under which the environment points wide searches at it (ADR 0134). */
+const EXPLORE_CHEAPER = 0.5
 const NAMING_TIMEOUT_MS = 20_000
 const CANCELLED = '(cancelled)'
 /** How long after a turn ends with nobody answering the Notification hooks hear that the agent waits (as in Claude Code). */
@@ -1265,9 +1267,27 @@ export class AgentSession {
     return registry
   }
 
+  /** Where the agent works, and Explore's model when it is much cheaper than Main's (ADR 0134). */
+  private async environment(): Promise<EnvironmentInfo> {
+    const [environment, explore] = await Promise.all([gatherEnvironment(this.env.root, this.shell, this.env.platform), this.cheaperExplore()])
+    return explore ? { ...environment, explore } : environment
+  }
+
+  /** Explore's model when it costs at most EXPLORE_CHEAPER of Main's to read with; both prices must be known. */
+  private async cheaperExplore(): Promise<EnvironmentInfo['explore']> {
+    try {
+      const [main, explore] = await Promise.all([this.env.client.budget('main', { sticky: this.id }), this.env.client.budget('explore', { sticky: this.id })])
+      if (explore.model === main.model || !main.price?.input || explore.price === undefined) return undefined
+      const share = explore.price.input / main.price.input
+      return share <= EXPLORE_CHEAPER ? { model: explore.model, share } : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /** Text that must survive a compaction: where the agent is, and the project's instructions. */
   private readonly preface = async (): Promise<string[]> => {
-    const environment = await gatherEnvironment(this.env.root, this.shell, this.env.platform)
+    const environment = await this.environment()
     const servers = this.env.code?.()?.status().filter((server) => server.state !== 'missing' && server.state !== 'off' && server.state !== 'failed').map((server) => server.label)
     const parts = [environmentReminder({ ...environment, ...(servers?.length ? { languageServers: servers } : {}) })]
     if (this.worktree) parts.push(worktreeReminder(this.worktree, this.env.root))
@@ -1550,11 +1570,11 @@ export class AgentSession {
     }
 
     if (first) {
-      add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform)))
+      add(environmentReminder(await this.environment()))
     } else {
       // The session may have been opened in another folder than the one the model was told about.
       this.turn.root ??= toldWorkspaceRoot(this.messages)
-      if (this.turn.root && this.turn.root !== env.root) add(environmentReminder(await gatherEnvironment(env.root, this.shell, env.platform), this.turn.root))
+      if (this.turn.root && this.turn.root !== env.root) add(environmentReminder(await this.environment(), this.turn.root))
     }
     this.turn.root = env.root
 

@@ -123,6 +123,7 @@ say so.
 | [0131](0131-long-tasks-measure-what-shortening-and-summaries-keep.md) | Long tasks measure what shortening and summaries keep | Accepted, builds on 0092, 0129 and 0130 |
 | [0132](0132-a-session-counts-what-shortening-cut-and-keeps-more-when-the-model-reads-it-back.md) | A session counts what shortening cut, and keeps more when the model reads it back | Accepted, builds on 0093, 0095, 0130 and 0131 |
 | [0133](0133-a-commands-output-reaches-the-model-as-a-digest-of-what-it-is.md) | A command's output reaches the model as a digest of what it is | Accepted, builds on 0093 and 0132 |
+| [0134](0134-fewer-fuller-steps-reads-together-wide-searches-on-a-cheaper-explore-and-filters-after-an-allowed-command.md) | Fewer, fuller steps: reads together, wide searches on a cheaper Explore, and filters after an allowed command | Accepted, builds on 0040, 0061, 0062, 0131 and 0133 |
 
 ## Template
 
