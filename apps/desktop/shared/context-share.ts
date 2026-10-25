@@ -13,25 +13,27 @@ export const CONTEXT_MIN_SIGNS = 3
 
 export type ContextVerdict = 'none' | 'ok' | 'high'
 
-export interface ContextWeek extends ContextSignals {
+export interface ContextWeek extends Required<ContextSignals> {
   /** The requests in the range, rewritten or not. */
   requests: number
   verdict: ContextVerdict
 }
 
+const KEYS = ['rewrites', 'summaries', 'readBacks', 'editMisses', 'checkBounces', 'claimBounces', 'digests', 'digestReadBacks'] as const
+
 /** The signals of the `days` days that end with `today` (this computer's clock), summed over every session. */
 export function contextOver(sessions: readonly SessionUsage[], range: { today: Date; days: number }): ContextWeek {
   const since = firstDay(range.today, range.days)
-  const sum: ContextSignals & { requests: number } = { requests: 0, rewrites: 0, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0 }
+  const sum: Required<ContextSignals> & { requests: number } = { requests: 0, rewrites: 0, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0, digests: 0, digestReadBacks: 0 }
   for (const session of sessions) {
     for (const [day, used] of Object.entries(session.days)) {
       if (day < since) continue
       sum.requests += used.requests
       const context = used.context
       if (!context) continue
-      for (const key of ['rewrites', 'summaries', 'readBacks', 'editMisses', 'checkBounces', 'claimBounces'] as const) {
+      for (const key of KEYS) {
         const value = context[key]
-        if (Number.isFinite(value) && value > 0) sum[key] += value
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) sum[key] += value
       }
     }
   }
@@ -52,6 +54,9 @@ export function contextLines(week: ContextWeek): string[] {
   if (week.rewrites) {
     const high = week.verdict === 'high' ? ' (HIGH): shortening cut what the model needed again. A session keeps more after three read-backs; a report of such a request helps tune it.' : ''
     lines.push(`  a shortened output read back ${times(week.readBacks, 'time', 'times')}, ${times(week.editMisses, 'edit', 'edits')} missing its text after a rewrite${high}`)
+  }
+  if (week.digests) {
+    lines.push(`  ${times(week.digests, 'command output', 'command outputs')} went in as a digest, ${times(week.digestReadBacks, 'read', 'read')} back whole`)
   }
   if (week.checkBounces || week.claimBounces) {
     lines.push(`  the project's checks sent the agent back ${times(week.checkBounces, 'time', 'times')}, the check of its claims ${times(week.claimBounces, 'time', 'times')}`)

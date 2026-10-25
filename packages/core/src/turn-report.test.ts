@@ -117,9 +117,9 @@ describe('a report read back', () => {
   })
 
   it('carries what compaction did in the request, counts only (ADR 0132)', () => {
-    const context = { rewrites: 4, summaries: 1, readBacks: 2, editMisses: 1, checkBounces: 0, claimBounces: 0 }
+    const context = { rewrites: 4, summaries: 1, readBacks: 2, editMisses: 1, checkBounces: 0, claimBounces: 0, digests: 3, digestReadBacks: 1 }
     assert.deepEqual((readTurnReport({ ...report, context }) as TurnRecord).context, context)
-    assert.deepEqual((readTurnReport({ ...report, context: { rewrites: 2, note: 'x', readBacks: -1 } }) as TurnRecord).context, { rewrites: 2, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0 })
+    assert.deepEqual((readTurnReport({ ...report, context: { rewrites: 2, note: 'x', readBacks: -1 } }) as TurnRecord).context, { rewrites: 2, summaries: 0, readBacks: 0, editMisses: 0, checkBounces: 0, claimBounces: 0, digests: 0, digestReadBacks: 0 })
     assert.match(readTurnReport({ ...report, context: 'many' }) as string, /what compaction did/)
     assert.equal('context' in (readTurnReport(report) as TurnRecord), false)
   })

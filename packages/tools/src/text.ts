@@ -229,6 +229,37 @@ export function collapseRepeats(text: string, minRun = 4): string {
   return out.length === lines.length && out.every((line, index) => line === lines[index]) ? text : out.join('\n')
 }
 
+/**
+ * A line that reports progress: one that starts with a percentage (webpack, gradle), holds a bar or wget's dots, or
+ * starts with a word such tools start their counts with.
+ */
+const PROGRESS =
+  /^[\s[(<]*[=\-#>\s]*\d{1,3}(?:\.\d+)?%|\[[=#>.\- ]{5,}\]|[█▉▊▋▌▍▎▏░▒▓]{3,}|\.{10} .*\d%|^\s*(?:Progress|Downloading|Downloaded|Receiving objects|Resolving deltas|Compressing objects|Counting objects|Writing objects|Unpacking objects|Extracting)\b/
+
+/**
+ * Collapses a run of progress lines that differ only in their numbers to the last of them, the way a terminal shows
+ * the final state of a counter that a tool not writing to one prints line by line. Other lines that differ only in
+ * numbers (errors, log records, test names) are left alone.
+ */
+export function collapseProgress(text: string, minRun = 4): string {
+  if (!text.includes('\n') || !/\d/.test(text)) return text
+  const lines = text.split('\n')
+  const shape = (line: string) => (PROGRESS.test(line) ? line.replace(/\d+/g, '#') : undefined)
+  const out: string[] = []
+  let changed = false
+  for (let i = 0; i < lines.length; ) {
+    const form = shape(lines[i])
+    let end = i + 1
+    if (form !== undefined) while (end < lines.length && shape(lines[end]) === form) end++
+    if (end - i >= minRun) {
+      out.push(`… (${end - i - 1} progress lines like the one below)`, lines[end - 1])
+      changed = true
+    } else for (let j = i; j < end; j++) out.push(lines[j])
+    i = end
+  }
+  return changed ? out.join('\n') : text
+}
+
 /** Removes terminal escape sequences: colours, cursor moves and window titles. */
 export function stripAnsi(text: string): string {
   return text.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[@-Z\\-_]/g, '')

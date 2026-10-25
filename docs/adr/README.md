@@ -122,6 +122,7 @@ say so.
 | [0130](0130-old-results-are-shortened-by-what-the-models-cache-charges.md) | Old results are shortened by what the model's cache charges | Accepted, builds on 0094 and 0128 |
 | [0131](0131-long-tasks-measure-what-shortening-and-summaries-keep.md) | Long tasks measure what shortening and summaries keep | Accepted, builds on 0092, 0129 and 0130 |
 | [0132](0132-a-session-counts-what-shortening-cut-and-keeps-more-when-the-model-reads-it-back.md) | A session counts what shortening cut, and keeps more when the model reads it back | Accepted, builds on 0093, 0095, 0130 and 0131 |
+| [0133](0133-a-commands-output-reaches-the-model-as-a-digest-of-what-it-is.md) | A command's output reaches the model as a digest of what it is | Accepted, builds on 0093 and 0132 |
 
 ## Template
 

@@ -1536,7 +1536,7 @@ export class AgentLoop {
 
     let parts = 0
     const keep = o.services.outputs && ((text: string) => o.services.outputs!.keep(o.services.sessionId, `${block.name}-${block.id}${parts++ ? `-${parts}` : ''}`, text))
-    let content = await modelContent(outcome, tool, keep)
+    let content = (await this.digestOf(outcome, keep)) ?? (await modelContent(outcome, tool, keep))
     let isError = !outcome.ok
     const output = outcome.display?.output ?? textOf(content)
     const found = this.scanWritten(outcome)
@@ -1551,7 +1551,8 @@ export class AgentLoop {
     const again = own ? undefined : this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
     if (again) content = [...content, textBlock(again)]
     if (!own) this.setbacks.call(block.name, block.input, isError ? textOf(content) : undefined)
-    if (!own && this.watch()?.called(block.name, block.input, o.services.cwd?.() ?? o.services.root)) this.signal('readBacks')
+    const back = own ? undefined : this.watch()?.called(block.name, block.input, o.services.cwd?.() ?? o.services.root)
+    if (back) this.signal(back)
     if (!own && this.rewroteInRequest && isError && isEditMiss(block.name, textOf(content))) this.signal('editMisses')
 
     state.results.set(block.id, { type: 'tool-result', toolUseId: block.id, content, ...(isError ? { isError: true } : {}) })
@@ -1584,6 +1585,21 @@ export class AgentLoop {
       if (first) state.context.push(first)
     }
     this.checkAbort(turn.signal)
+  }
+
+  /**
+   * What the model reads of an outcome that has a digest (ADR 0133): the digest, and where the whole is kept. Not when
+   * the whole cannot be kept, the digest is itself too long to go in whole, or the session's model has read enough
+   * digests back that its commands' outputs go in whole.
+   */
+  private async digestOf(outcome: ToolOutcome, keep: ((text: string) => Promise<string | undefined>) | undefined): Promise<ToolResultContent[] | undefined> {
+    const { digest } = outcome
+    if (!digest || !keep || typeof outcome.content !== 'string' || digest.content.length > KEEP_OVER_CHARS || this.watch()?.wholeOutputs) return undefined
+    const file = await keep(outcome.content)
+    if (!file) return undefined
+    this.watch()?.digested(file, this.o.services.cwd?.() ?? this.o.services.root)
+    this.signal('digests')
+    return [textBlock(`${digest.content}\n\n[… ${digest.note} ${keptAt(file)} …]`)]
   }
 
   /** A command that failed is kept with its error, and the next one that works is what the agent learned from it. */
