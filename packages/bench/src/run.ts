@@ -15,6 +15,7 @@ import { Workspaces } from '@encode/workspace'
 import { benchEnvironment, runChecks, type CheckResult } from './checks'
 import { meteredClient, type MeteredClient, type ModelCall } from './meter'
 import { changesBetween, copyProject, snapshot, type FileChanges } from './project'
+import { judgeQuality, qualityFacts, type Quality, type QualityFacts } from './quality'
 import type { ProgramEnv, Programs } from './programs'
 import type { BenchTask, ReplayResult } from './task'
 
@@ -26,8 +27,13 @@ export interface RunMetrics {
   byRole: Record<string, number>
   inputTokens: number
   cachedTokens: number
+  cacheWriteTokens: number
   outputTokens: number
   reasoningTokens: number
+  /** Calls before which the agent's conversation was shortened or summarized (see ModelCall.rewrote). */
+  rewrites: number
+  /** Summaries written, each replacing old steps of a conversation. */
+  summaries: number
   /** US dollars, summed over the calls whose provider said; `costReported` of `requests` did. */
   cost: number
   costReported: number
@@ -66,6 +72,8 @@ export interface TaskRun {
   calls: ModelCall[]
   /** Each tool call in order and whether it did its job; `declined` when the benchmark said no to it. */
   tools: (ReplayResult & { declined?: true })[]
+  /** How the code the run left reads, beyond its checks; absent for a run that was stopped or never ran. */
+  quality?: Quality
 }
 
 export interface RunOptions {
@@ -86,6 +94,8 @@ export interface RunOptions {
   onEvent?(event: AgentEvent): void
   /** Where a kept run's folder is said. */
   onKept?(dir: string): void
+  /** What the task's reference solution changes, for judging the run's code against it. */
+  reference?: QualityFacts
 }
 
 const DECLINED =
@@ -116,8 +126,11 @@ function metricsOf(entries: Iterable<ConversationEntry>, client: Pick<MeteredCli
     byRole: {},
     inputTokens: 0,
     cachedTokens: 0,
+    cacheWriteTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
+    rewrites: calls.filter((call) => call.rewrote).length,
+    summaries: calls.filter((call) => call.role === 'summarizer').length,
     cost: 0,
     costReported: 0,
     models: [],
@@ -137,6 +150,7 @@ function metricsOf(entries: Iterable<ConversationEntry>, client: Pick<MeteredCli
     metrics.byRole[call.role] = (metrics.byRole[call.role] ?? 0) + 1
     metrics.inputTokens += call.inputTokens
     metrics.cachedTokens += call.cachedTokens
+    metrics.cacheWriteTokens += call.cacheWriteTokens
     metrics.outputTokens += call.outputTokens
     metrics.reasoningTokens += call.reasoningTokens
     if (call.cost !== undefined) {
@@ -286,6 +300,8 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
           ...(options.programEnv ? { programEnv: options.programEnv } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         })
+  const changes = changesBetween(before, after)
+  const facts = stopped === 'cancelled' ? undefined : await qualityFacts(task, root, changes, options.programs, options.programEnv)
   const notMeasured = problem?.code !== undefined && NOT_MEASURED.has(problem.code)
   // A check that could not start says nothing about the model.
   const unrun = checks.find((check) => check.unrun)
@@ -305,10 +321,11 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
             : {}),
     ...(stopped ? { stopped } : {}),
     checks,
-    changes: changesBetween(before, after),
+    changes,
     reply: reply.length > 4_000 ? `${reply.slice(0, 4_000)}…` : reply,
     metrics,
     calls: client.calls,
     tools: toolsOf(entries.values()),
+    ...(facts ? { quality: { issues: judgeQuality(facts, options.reference), facts } } : {}),
   }
 }

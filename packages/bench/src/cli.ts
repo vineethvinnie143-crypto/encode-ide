@@ -8,12 +8,16 @@
  *   bench run --model anthropic:<id> | openai:<id>
  *   bench run --base-url http://localhost:11434/v1 --model qwen2.5-coder   any OpenAI-compatible server
  *   bench show report.json
- *   bench compare before.json after.json [--fail-on-regression]
+ *   bench compare before.json after.json [--fail-on-regression] [--gate 25]
+ *                                                with 3 runs a task or more, only a drop beyond chance counts; --gate
+ *                                                passes a change that is 25% cheaper per task solved at equal accuracy
  *   bench replay report.json [--save <name>]    a report of a request (ADR 0092), played again on this eNCode; with
  *                                                --save, kept as the task replay-<name> (also: pnpm turn-report)
  *
  * Run options: --tasks <folder> (default: the built-in tasks), --keep (leave each run's folder, to look at what the
- * agent did), --sandbox (commands in the operating-system sandbox), --timeout <seconds> per run.
+ * agent did), --sandbox (commands in the operating-system sandbox), --timeout <seconds> per run, --window <tokens> (every
+ * run held to that much context: with 16000, shortening and summaries run in every task, so a run compared with a
+ * normal one shows what compaction costs in accuracy).
  *
  * Keys are read from the environment only: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, and
  * ENCODE_BENCH_API_KEY for --base-url. They are never printed, never given to the agent's commands, and taken out of
@@ -30,7 +34,7 @@ import { Sandbox } from '@encode/sandbox'
 import { runBench } from './bench'
 import { findPrograms } from './programs'
 import { formatReplay, replayReport, writeReplayTask } from './replay'
-import { compareReports, formatReport, parseReport, type BenchReport } from './report'
+import { compareReports, formatReport, gate, parseReport, type BenchReport } from './report'
 import type { TaskRun } from './run'
 import { readTasks, type BenchTask } from './task'
 
@@ -57,7 +61,7 @@ interface Flags {
   switches: Set<string>
 }
 
-const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save'])
+const VALUED = new Set(['--model', '--base-url', '--tasks', '--only', '--tag', '--repeat', '--out', '--timeout', '--save', '--gate', '--window'])
 const SWITCHES = new Set(['--reference', '--keep', '--sandbox', '--fail-on-regression', '--help', '-h'])
 
 function parseFlags(argv: readonly string[]): Flags {
@@ -66,7 +70,7 @@ function parseFlags(argv: readonly string[]): Flags {
     const arg = argv[index]!
     if (VALUED.has(arg)) {
       const value = argv[++index]
-      if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value`)
+      if (value === undefined || !value.trim() || value.startsWith('--')) throw new UsageError(`${arg} needs a value`)
       flags.values.set(arg, value)
     } else if (SWITCHES.has(arg)) flags.switches.add(arg)
     else if (arg.startsWith('-')) throw new UsageError(`unknown option ${arg}`)
@@ -162,6 +166,7 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
   if (reference === Boolean(model)) throw new UsageError('give --model <model> or --reference')
   const repeat = count(flags, '--repeat', 1, 20) ?? 1
   const timeout = count(flags, '--timeout', 10, 3_600)
+  const window = count(flags, '--window', 12_000, 1_000_000)
   const dir = path.resolve(flags.values.get('--tasks') ?? path.join(context.root, 'packages', 'bench', 'tasks'))
   const { tasks, broken } = await readTasks(dir)
   for (const error of broken) context.print(plain(`skipping ${error.message}`))
@@ -175,11 +180,12 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     if (status.state !== 'active') throw new UsageError(`there is no working sandbox here: ${status.reason ?? status.state}`)
   }
   const name = reference ? 'reference' : flags.values.get('--base-url') ? `${model} at ${flags.values.get('--base-url')}` : model!
-  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}`)
+  context.print(`${chosen.length} ${chosen.length === 1 ? 'task' : 'tasks'}${repeat > 1 ? `, ${repeat} runs each` : ''}, on ${name}${window ? `, in a ${Math.round(window / 1000)}k window` : ''}`)
   const report = await runBench(chosen, {
     client: live?.client ?? 'reference',
     model: name,
     repeat,
+    ...(window ? { settings: { contextCap: window } } : {}),
     ...(timeout ? { timeoutMs: timeout * 1000 } : {}),
     ...(flags.switches.has('--keep') ? { keep: true, onKept: (kept: string) => context.print(`  kept in ${kept}`) } : {}),
     ...(sandbox ? { sandbox } : {}),
@@ -269,7 +275,7 @@ export async function main(argv: readonly string[], context: CliContext): Promis
     const [command, ...rest] = argv
     const flags = parseFlags(rest)
     if (!command || command === '--help' || command === '-h' || flags.switches.has('--help') || flags.switches.has('-h')) {
-      context.print('Usage: bench list | run (--reference | --model <model>) [options] | show <report> | compare <before> <after> [--fail-on-regression] | replay <request report> [--save <name>]. See packages/bench/src/cli.ts.')
+      context.print('Usage: bench list | run (--reference | --model <model>) [options] | show <report> | compare <before> <after> [--fail-on-regression] [--gate <percent>] | replay <request report> [--save <name>]. See packages/bench/src/cli.ts.')
       return command ? 0 : 2
     }
     switch (command) {
@@ -284,8 +290,15 @@ export async function main(argv: readonly string[], context: CliContext): Promis
       }
       case 'compare': {
         if (flags.positional.length !== 2) throw new UsageError('compare takes two reports, before and after')
+        const cut = count(flags, '--gate', 1, 90)
         const comparison = compareReports(await readReport(flags.positional[0]!), await readReport(flags.positional[1]!))
         context.print(plain(comparison.text))
+        if (cut !== undefined) {
+          const verdict = gate(comparison, cut / 100)
+          context.print('')
+          context.print(verdict.passed ? `Gate passed: at least ${cut}% cheaper per task solved, at equal accuracy.` : plain(`Gate not passed:\n${verdict.reasons.map((reason) => `- ${reason}`).join('\n')}`))
+          if (!verdict.passed) return 1
+        }
         return flags.switches.has('--fail-on-regression') && comparison.regressions.length ? 1 : 0
       }
       case 'replay':
