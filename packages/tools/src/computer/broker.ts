@@ -87,8 +87,10 @@ export function createDesktopBroker(backend: DesktopBackend, config: DesktopBrok
       windows: (signal) => looking(() => backend.windows(signal)),
       look: (request, signal) => looking(() => backend.look(request, signal)),
       cursor: (signal) => looking(() => backend.cursor(signal)),
+      apps: (signal) => looking(() => backend.apps(signal)),
       focus: (request, signal) => holding(() => backend.focus(request, signal)),
       act: (request, signal) => holding(() => backend.act(request, signal)),
+      open: (request, signal) => holding(() => backend.open(request, signal)),
       // A session closing its view lets go of the desktop; the backend belongs to the broker.
       dispose: async () => release(id),
     }

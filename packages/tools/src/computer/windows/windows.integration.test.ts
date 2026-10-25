@@ -496,6 +496,18 @@ describe('the Windows helper on real windows', { skip: onWindows ? false : 'thes
     assert.ok(Math.abs(eventPoint(up)[0] - to[0]) <= 1 && Math.abs(eventPoint(up)[1] - to[1]) <= 1, `let go at ${up}, aimed at ${to}`)
   })
 
+  it('moves the pointer to a button it uses through its own interface, at a person\'s pace, so whoever watches sees it', async () => {
+    const window = await a.window()
+    const look = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+    const add = named(look, 'Add item')
+    const before = (await a.state()).items.length
+    const result = await desktop.act(actOf(window, [clickElement(add.ref)], { pace: 'smooth', settleMs: 300 }), SIGNAL)
+    assert.deepEqual(result.performed.map((done) => [done.kind, done.via]), [['click', 'invoke']], 'still through its own interface')
+    const [x, y, width, height] = add.box
+    assert.ok(result.cursor[0] >= x && result.cursor[0] < x + width && result.cursor[1] >= y && result.cursor[1] < y + height, `the pointer ended on the button: ${result.cursor.join(',')} in ${add.box.join(',')}`)
+    await a.until((now) => now.items.length === before + 1, 'the item to be added')
+  })
+
   it('moves the pointer along a path a person could follow when asked to', async () => {
     const window = await a.window()
     const look = await desktop.look(lookOf(window, { image: false, outline: 'none' }), SIGNAL)
@@ -870,6 +882,55 @@ describe('the Windows helper and eNCode\'s own windows', { skip: onWindows ? fal
       }
     } finally {
       await strict.dispose()
+    }
+  })
+})
+
+describe('the Windows helper and the Start menu', { skip: onWindows ? false : 'these tests drive a real Windows desktop' }, () => {
+  it('lists the Start menu, opens an application from it through the shell, and answers with its window', { timeout: 120_000 }, async () => {
+    const title = 'eNCode Fixture Started'
+    const file = path.join(folder, 'state-started.json')
+    const programs = path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+    const shortcut = path.join(programs, 'eNCode Fixture Start.lnk')
+    // A shortcut as an installer leaves one. The values reach PowerShell as variables, never as part of the script.
+    await run(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', '$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:ENCODE_LNK); $s.TargetPath = $env:ENCODE_EXE; $s.Arguments = $env:ENCODE_ARGS; $s.Save()'],
+      { windowsHide: true, env: { ...process.env, ENCODE_LNK: shortcut, ENCODE_EXE: fixtureExe, ENCODE_ARGS: `"${file}" 620 320 "${title}"` } },
+    )
+    let pid = 0
+    try {
+      const entry = await eventually(async () => (await desktop.apps(SIGNAL)).find((app) => app.name === 'eNCode Fixture Start'), 'the shortcut to be in the Start menu', 60_000)
+      assert.equal(entry.app, 'fixture.exe', 'the program behind the shortcut is named')
+      const apps = await desktop.apps(SIGNAL)
+      console.log(`[start menu] ${apps.length} applications, for example ${apps.slice(0, 5).map((app) => `${app.name} (${app.app ?? app.id})`).join(', ')}`)
+      assert.equal(apps.some((app) => /\.(?:url|txt|chm|pdf)$/i.test(app.id)), false, 'documents and links are not applications')
+
+      const window = await desktop.open({ id: entry.id, name: entry.name, waitMs: 30_000 }, SIGNAL)
+      assert.ok(window, 'a window showed')
+      pid = window.pid
+      assert.equal(window.title, title)
+      assert.equal(window.app, 'fixture.exe')
+      const state = await eventually(() => readState(file), 'the started fixture to write its record')
+      assert.equal(state.pid, window.pid)
+      const look = await desktop.look(lookOf(window, { image: false }), SIGNAL)
+      named(look, 'Add item')
+
+      // Asked again while it runs, the shell starts another copy; the answer is a window of it, not one of the others.
+      const again = await desktop.open({ id: entry.id, name: entry.name, waitMs: 30_000 }, SIGNAL)
+      assert.ok(again)
+      assert.equal(again.app, 'fixture.exe')
+      if (again.pid !== pid) process.kill(again.pid)
+      assert.equal((await failure(desktop.open({ id: 'not-in-the-start-menu', name: 'Nothing', waitMs: 2_000 }, SIGNAL))).code, 'no-element')
+    } finally {
+      if (pid) {
+        try {
+          process.kill(pid)
+        } catch {
+          // Already gone.
+        }
+      }
+      await fs.rm(shortcut, { force: true })
     }
   })
 })

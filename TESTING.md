@@ -287,6 +287,10 @@ error that did not say what to do.
 something in a program that has no command line (change a setting, fill in a form, use a program's menus). The first
 use of each program asks. While it works, a banner at the bottom of the screen says so:
 
+- Ask it to open a program by the name the Start menu shows ("open Discord"): it starts it the way the Start menu does,
+  or brings back the window of one that is already running, also from the notification area, and never ends a program
+  to get its window. The pointer travels to each button before it is pressed, so you can follow what it does.
+
 - **Stop** on the banner, or **Ctrl+Alt+Esc** from any window, ends the turn. Using the mouse or keyboard yourself stops
   it too, and the agent waits for you to say whether to go on.
 - It never uses terminals, password managers, programs running as administrator or eNCode itself, and never types into a
@@ -551,7 +555,8 @@ dialog that does not say clearly what will happen):
   10.0.x". Open a `.cs` file in a project with a `.csproj`: marks and completion appear (the first load of a project
   takes a while). Go (Go 1.27.3, about 73 MB) and Java (Temurin, about 55 MB) work the same way. Java that was
   installed earlier but says it needs Java 21: **Install…** again fetches only Java. Rust without rustup downloads
-  rust-analyzer itself (a whole Cargo project still needs Rust's cargo).
+  rust-analyzer itself (a whole Cargo project still needs Rust's cargo). C# installs even where NuGet lists no package
+  source (it takes csharp-ls from nuget.org with eNCode's own settings), and Go no longer fails at the end with EPERM.
 - **Remove** on one of those servers removes eNCode's copy of its toolchain too. `dotnet`, `go` and `java` typed in a
   terminal are unchanged throughout.
 - With an older toolchain on the computer (.NET 8 only, Java 8 or 17), Install fetches eNCode's own copy instead of

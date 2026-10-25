@@ -19,6 +19,17 @@ namespace Encode.Desktop
 
         public static T Run<T>(Func<T> work, int timeoutMs, string what, Cancel cancel)
         {
+            return RunIn<T>(ApartmentState.MTA, work, timeoutMs, what, cancel);
+        }
+
+        /// <summary>For the shell's own objects, which live in a single-threaded apartment.</summary>
+        public static T RunSta<T>(Func<T> work, int timeoutMs, string what, Cancel cancel)
+        {
+            return RunIn<T>(ApartmentState.STA, work, timeoutMs, what, cancel);
+        }
+
+        private static T RunIn<T>(ApartmentState apartment, Func<T> work, int timeoutMs, string what, Cancel cancel)
+        {
             T result = default(T);
             Exception error = null;
             ManualResetEventSlim done = new ManualResetEventSlim(false);
@@ -39,7 +50,7 @@ namespace Encode.Desktop
             });
             thread.IsBackground = true;
             thread.Name = "encode-uia";
-            thread.SetApartmentState(ApartmentState.MTA);
+            thread.SetApartmentState(apartment);
             thread.Start();
             int waited = 0;
             while (!done.Wait(50))

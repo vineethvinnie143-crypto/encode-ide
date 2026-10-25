@@ -25,6 +25,12 @@ describe('how a Computer step reads in the work log', () => {
     assert.deepEqual(computerStep({ action: 'cursor_position' }, '(5, 6)', 'done'), { label: 'Read the pointer position', detail: '(5, 6)' })
   })
 
+  it('names the application it opened, and says when it only tried', () => {
+    assert.deepEqual(computerStep({ action: 'open', text: 'Discord' }, 'opened Discord', 'done'), { label: 'Opened', detail: 'Discord' })
+    assert.deepEqual(computerStep({ action: 'open', text: 'Discord' }, undefined, 'running'), { label: 'Opened', detail: 'Discord' })
+    assert.deepEqual(computerStep({ action: 'open', text: 'Discord' }, 'No window of Discord showed within 15 seconds.', 'error'), { label: 'Tried to open', detail: 'Discord' })
+  })
+
   it('describes a call that is still running or failed from what was asked, never from the long reason', () => {
     assert.deepEqual(computerStep({ action: 'left_click', element: 'e2' }, undefined, 'running'), { label: 'Clicked', detail: 'e2' })
     assert.deepEqual(computerStep({ action: 'left_click', coordinate: [3, 4] }, 'Another window is on top of (3, 4). Take a screenshot to see what is in the way.', 'error'), { label: 'Clicked', detail: '(3, 4)' })

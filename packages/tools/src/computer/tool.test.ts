@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import { createToolRegistry } from '../builtin'
 import { FakeDesktop, testContext, testDesktop, textOf, type FakeElement, type FakeWindow } from '../testing'
 import type { ToolContext, ToolOutcome } from '../types'
-import { computerTool, TAKEN_OVER_DISPLAY, type ComputerInput } from './tool'
+import { computerTool, startMatches, TAKEN_OVER_DISPLAY, type ComputerInput } from './tool'
 
 /** A text editor with a menu, an edit field and a status bar. */
 function editor(): { window: FakeWindow; menu: FakeElement; file: FakeElement; field: FakeElement; saveAs: FakeElement } {
@@ -370,6 +370,117 @@ describe('Computer: waiting and zooming', () => {
   })
 })
 
+describe('Computer: opening an application', () => {
+  const discordWindow = (): FakeWindow => ({ app: 'discord.exe', label: 'Discord', title: 'Friends - Discord', elements: [{ role: 'button', name: 'Add Friend', can: ['invoke'] }] })
+  const startMenu = (backend: FakeDesktop) => {
+    backend.addStartApp({ name: 'Discord', id: 'com.squirrel.Discord.Discord', app: 'discord.exe' }, discordWindow())
+    backend.addStartApp({ name: 'Uninstall Discord', id: '{GUID}\\Discord\\Update.exe', app: 'update.exe' })
+    backend.addStartApp({ name: 'Notepad', id: '{GUID}\\notepad.exe', app: 'notepad.exe' })
+    backend.addStartApp({ name: 'Calculator', id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App' })
+    backend.addStartApp({ name: 'Command Prompt', id: '{GUID}\\cmd.exe', app: 'cmd.exe' })
+    backend.addStartApp({ name: 'Terminal', id: 'Microsoft.WindowsTerminal_8wekyb3d8bbwe!App' })
+    backend.addStartApp({ name: 'Steam', id: 'C:\\Steam\\steam.exe', app: 'steam.exe' })
+    backend.addStartApp({ name: 'Microsoft Teams', id: 'MSTeams_8wekyb3d8bbwe!MSTeams' })
+    backend.addStartApp({ name: 'Microsoft Edge', id: 'MSEdge', app: 'msedge.exe' })
+  }
+
+  it('finds an application by the name the Start menu shows, by its program, or by the start of its name, and never an uninstaller', () => {
+    const apps = [
+      { name: 'Discord', id: 'a', app: 'discord.exe' },
+      { name: 'Uninstall Discord', id: 'b', app: 'update.exe' },
+      { name: 'Discord Setup', id: 'c', app: 'discordsetup.exe' },
+      { name: 'Visual Studio Code', id: 'd', app: 'code.exe' },
+      { name: 'Microsoft Teams', id: 'e' },
+      { name: 'Microsoft Edge', id: 'f', app: 'msedge.exe' },
+    ]
+    assert.deepEqual(startMatches('discord', apps).map((app) => app.id), ['a'])
+    assert.deepEqual(startMatches('  Discord ', apps).map((app) => app.id), ['a'])
+    assert.deepEqual(startMatches('code', apps).map((app) => app.id), ['d'], 'by its program when no name is that')
+    assert.deepEqual(startMatches('visual', apps).map((app) => app.id), ['d'])
+    assert.deepEqual(startMatches('microsoft', apps).map((app) => app.id), ['e', 'f'])
+    assert.deepEqual(startMatches('teams', apps).map((app) => app.id), ['e'], 'by a word inside the name last')
+    assert.deepEqual(startMatches('uninstall discord', apps), [])
+    assert.deepEqual(startMatches('discord setup', apps), [])
+  })
+
+  it('opens it through the Start menu, shows the window that came up, and works on it next', async () => {
+    const { backend, desktop, call } = setup([], { permitted: ['discord.exe'] })
+    startMenu(backend)
+    const outcome = await call({ action: 'open', text: 'discord' })
+    assert.equal(outcome.ok, true, textOf(outcome.content))
+    const text = textOf(outcome.content)
+    assert.match(text, /^Opened Discord\.\nw1 Discord "Friends - Discord" 800x600/)
+    assert.match(text, /button "Add Friend"/)
+    assert.equal(outcome.display?.output, 'opened Discord')
+    assert.equal(images(outcome).length, 1)
+    assert.deepEqual(backend.calls.find((entry) => entry.op === 'open')?.request, { id: 'com.squirrel.Discord.Discord', name: 'Discord', waitMs: 15_000 })
+    assert.equal(desktop.state.target, 'w1')
+    const click = await call({ action: 'left_click', element: 'e1' })
+    assert.equal(click.ok, true, textOf(click.content))
+  })
+
+  it('asks about the program it starts, and refuses terminals and system tools by their program or their name', async () => {
+    const { backend, context, call } = setup([], { permitted: [] })
+    startMenu(backend)
+    assert.deepEqual(await computerTool.access({ action: 'open', text: 'Discord' }, context()), { type: 'desktop', app: 'discord.exe', label: 'Discord', title: 'Start menu' })
+    assert.deepEqual(await computerTool.access({ action: 'open', text: 'Calculator' }, context()), { type: 'desktop', app: 'store:calculator', label: 'Calculator', title: 'Start menu' })
+    const cmd = await computerTool.access({ action: 'open', text: 'Command Prompt' }, context())
+    assert.equal(cmd.type === 'desktop' && cmd.blocked, 'terminals and shells run commands without the command approval; run commands with the Bash tool')
+    const terminal = await computerTool.access({ action: 'open', text: 'Terminal' }, context())
+    assert.match(terminal.type === 'desktop' ? (terminal.blocked ?? '') : '', /terminals and shells/)
+    assert.deepEqual(await computerTool.access({ action: 'open', text: 'Photoshop' }, context()), { type: 'none' })
+
+    const refused = await call({ action: 'open', text: 'Command Prompt' })
+    assert.equal(refused.ok, false)
+    assert.match(textOf(refused.content), /Command Prompt cannot be used: terminals and shells/)
+    const unasked = await call({ action: 'open', text: 'Discord' })
+    assert.match(textOf(unasked.content), /The user has not allowed Discord yet/)
+    assert.equal(backend.calls.some((entry) => entry.op === 'open'), false, 'nothing was started')
+  })
+
+  it('says what matches when a name is not clear, and what is missing when nothing does', async () => {
+    const { backend, call } = setup([], { permitted: 'all' })
+    startMenu(backend)
+    assert.match(textOf((await call({ action: 'open', text: 'microsoft' })).content), /Several applications match "microsoft": "Microsoft Teams", "Microsoft Edge"\. Open one by its full name\./)
+    assert.match(textOf((await call({ action: 'open', text: 'Photoshop' })).content), /Nothing in the Start menu is named like "Photoshop"/)
+  })
+
+  it('says so when no window shows, and that the program is not to be ended for one', async () => {
+    const { backend, call } = setup([], { permitted: 'all' })
+    startMenu(backend)
+    const outcome = await call({ action: 'open', text: 'Steam' })
+    assert.equal(outcome.ok, false)
+    assert.match(textOf(outcome.content), /no window of it showed within 15 seconds\. It may still be starting: call windows in a moment\. Do not end the program to get its window\./)
+  })
+
+  it('names a window it may not use yet rather than looking at it', async () => {
+    const { backend, call } = setup([], { permitted: ['store:calculator'] })
+    backend.addStartApp({ name: 'Calculator', id: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App' }, { app: 'calculatorapp.exe', label: 'Calculator', title: 'Calculator', elements: [] })
+    const outcome = await call({ action: 'open', text: 'Calculator' })
+    assert.equal(outcome.ok, true)
+    assert.match(textOf(outcome.content), /^Opened Calculator: w1 "Calculator" \(calculatorapp\.exe\)\. The user has not allowed Calculator yet\. Calling this again asks them\.$/)
+    assert.equal(backend.calls.some((entry) => entry.op === 'look'), false)
+  })
+
+  it('reads the Start menu once for the approval and the call that follows it', async () => {
+    const { backend, context } = setup([], { permitted: 'all' })
+    startMenu(backend)
+    const ctx = context()
+    await computerTool.access({ action: 'open', text: 'Discord' }, ctx)
+    await computerTool.run({ action: 'open', text: 'Discord' }, ctx)
+    assert.equal(backend.calls.filter((entry) => entry.op === 'apps').length, 1)
+  })
+
+  it('opens nothing once the user took over in the turn', async () => {
+    const { backend, desktop, call } = setup([], { permitted: 'all' })
+    startMenu(backend)
+    desktop.state.takenOverIn = 'turn-1'
+    const outcome = await call({ action: 'open', text: 'Discord' }, { turnId: 'turn-1' })
+    assert.equal(outcome.display?.output, TAKEN_OVER_DISPLAY)
+    assert.equal(backend.calls.some((entry) => entry.op === 'open'), false)
+  })
+})
+
 describe('Computer: approval', () => {
   it('names the application a call would reach, so the policy can decide', async () => {
     const { context } = setup([editor().window, { app: 'cmd.exe', label: 'Command Prompt', title: 'cmd', elements: [] }])
@@ -418,7 +529,10 @@ describe('Computer: the registry', () => {
     assert.equal(check({ action: 'windows' }), undefined)
     assert.equal(check({ action: 'left_click', element: 'e12' }), undefined)
     assert.equal(check({ action: 'left_click', coordinate: [10, 20] }), undefined)
-    assert.match(check({ action: 'dance' }) ?? '', /action must be one of: windows, focus, screenshot/)
+    assert.match(check({ action: 'dance' }) ?? '', /action must be one of: windows, open, focus, screenshot/)
+    assert.equal(check({ action: 'open', text: 'Discord' }), undefined)
+    assert.match(check({ action: 'open' }) ?? '', /open needs text: the application, by the name the Start menu shows/)
+    assert.match(check({ action: 'open', text: 'x'.repeat(201) }) ?? '', /the name of an application, not a command/)
     assert.match(check({ action: 'left_click' }) ?? '', /left_click needs element \(a ref\) or coordinate/)
     assert.match(check({ action: 'left_click', element: 'e1', coordinate: [1, 2] }) ?? '', /give element or coordinate, not both/)
     assert.match(check({ action: 'left_click', element: 'button' }) ?? '', /element is a ref from the outline, such as "e12"/)
