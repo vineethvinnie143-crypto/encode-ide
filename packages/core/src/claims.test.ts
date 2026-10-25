@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { fileHolds, nameClaims, pathsIn, successClaims } from './claims'
+import { fileHolds, handBack, nameClaims, pathsIn, successClaims } from './claims'
 
 describe('a reply that says the checks pass', () => {
   it('is a report, in its many forms', () => {
@@ -34,6 +34,33 @@ describe('a reply that says the checks pass', () => {
     }
     // Code blocks are the agent's example, not its claim.
     assert.deepEqual(successClaims('Output:\n```\nall tests passed\n```\nDone.'), [])
+  })
+})
+
+describe('a reply that leaves a check to the person', () => {
+  it('says it did not test or confirm something, or that the person has to', () => {
+    for (const [reply, sentence] of [
+      ["Transfer works now. I have not tested an actual player join \u2014 I won't send game traffic at these servers, so that last mile needs him.", "I have not tested an actual player join \u2014 I won't send game traffic at these servers, so that last mile needs him."],
+      ["I couldn't verify the fix on a real device.", "I couldn't verify the fix on a real device."],
+      ['Fixed the port. You will need to test it in game.', 'You will need to test it in game.'],
+      ['This needs you to confirm it with a real account.', 'This needs you to confirm it with a real account.'],
+      ['The rule is in. He has to check the panel afterwards.', 'He has to check the panel afterwards.'],
+    ]) {
+      assert.equal(handBack(reply), sentence, reply)
+    }
+  })
+
+  it('is not a suggestion, a report of a check made, or code', () => {
+    for (const reply of [
+      'You can try it with `npm start`.',
+      'I tested the join from outside and it answers.',
+      'If you want, check the logs tomorrow.',
+      'The parser has a check for empty input.',
+      "Didn't need to change the tests.",
+      'Example:\n```\nI have not tested this\n```\nDone.',
+    ]) {
+      assert.equal(handBack(reply), undefined, reply)
+    }
   })
 })
 

@@ -238,6 +238,49 @@ describe('the claim check', () => {
   })
 })
 
+describe('the hand-back check', () => {
+  const look = (root: string) => ({ calls: [{ name: 'Read', input: { file_path: path.join(root, 'server.cfg') } }] })
+
+  it('sends an answer that leaves a check to the person back once, to make it or say why it cannot', async () => {
+    const h = await loopHarness({
+      files: { 'server.cfg': 'port 7777\n' },
+      scriptFor: (root) => [
+        look(root),
+        { text: 'The port is 7777. I have not tested a real join, so that last mile needs you.' },
+        { text: 'Probed 7777 from outside: it answers the query. A real join needs your game client, which I do not have.' },
+      ],
+      services: { checks: checksOf([]) },
+    })
+    const end = await h.run('why can no one join?', 'code')
+    assert.equal(end.kind, 'done')
+    const [sent, ...more] = reminders(h)
+    assert.match(sent, /Your answer leaves a check to the user: "I have not tested a real join, so that last mile needs you\."/)
+    assert.match(sent, /make that check yourself if any harmless way exists/)
+    assert.match(sent, /say why in one line/)
+    assert.deepEqual(more, [], 'once a request')
+    assert.ok(h.surface.settled.some((entry) => entry.kind === 'notice' && /left a check to you/.test(entry.text ?? '')))
+  })
+
+  it('lets the second answer through, and stays quiet without steps, outside Code mode and when checks are off', async () => {
+    const twice = await loopHarness({
+      files: { 'server.cfg': 'port 7777\n' },
+      scriptFor: (root) => [look(root), { text: 'I could not test a join.' }, { text: 'I still could not test a join: it needs your client.' }],
+      services: { checks: checksOf([]) },
+    })
+    assert.deepEqual(await twice.run('go', 'code'), { kind: 'done', reply: 'I still could not test a join: it needs your client.' })
+    const glob = { calls: [{ name: 'Glob', input: { pattern: '*' } }] }
+    const chat = await loopHarness({ script: [{ text: 'I have not tested it; you will need to test it.' }], services: { checks: checksOf([]) } })
+    await chat.run('go', 'code')
+    assert.deepEqual(reminders(chat), [], 'no steps')
+    const ask = await loopHarness({ script: [glob, { text: 'I have not tested it.' }], services: { checks: checksOf([]) } })
+    await ask.run('go', 'ask')
+    assert.deepEqual(reminders(ask), [], 'Ask mode')
+    const off = await loopHarness({ script: [glob, { text: 'I have not tested it.' }], services: { checks: checksOf([]) }, settings: { checkGate: 'off' } })
+    await off.run('go', 'code')
+    assert.deepEqual(reminders(off), [], 'checks off')
+  })
+})
+
 describe('a session', () => {
   it("finds the project's checks where its shell is, and runs them for its agent; a settings list replaces them", async () => {
     const ran: string[] = []

@@ -675,6 +675,7 @@ async function runProviderPhase() {
   await runStopChecks()
   await runStepLimitChecks()
   await runWaitChecks()
+  await runStoryChecks()
   await runAttachChecks()
   await runSteerChecks()
   await runEffortChecks()
@@ -3510,6 +3511,7 @@ async function runComputerChecks() {
     console.log(`[smoke] banner (${label}):`, JSON.stringify(banner))
     if (banner.mode !== 'waiting' || banner.text !== 'eNCode is waiting for you' || !banner.stop) throw new Error(`The banner says ${JSON.stringify(banner)} while the agent waits for the person`)
     if (banner.hint !== 'Ctrl+Alt+Esc') throw new Error(`The banner shows no stop key: ${JSON.stringify(banner.hint)}`)
+    await openWorkLogs()
     const rows = await evaluate("[...document.querySelectorAll('.tool-row')].map((row) => row.textContent)")
     if (!rows.some((text) => text.startsWith('Looked at the windows'))) throw new Error(`The work log does not say what the agent looked at: ${JSON.stringify(rows)}`)
     await screenshot('computer-banner.png')
@@ -3826,7 +3828,7 @@ async function runWideLineChecks() {
   await driveAgent('15-wide-lines')
   for (let round = 0; round < 6; round++) {
     const opened = await evaluate(`(() => {
-      const closed = [...document.querySelectorAll('.chat-list .worklog-head[aria-expanded=false], .chat-list .tool-row-toggle[aria-expanded=false]')]
+      const closed = [...document.querySelectorAll('.chat-list .step-batch-head[aria-expanded=false], .chat-list .tool-row-toggle[aria-expanded=false]')]
       closed.forEach((button) => button.click())
       return closed.length
     })()`)
@@ -4040,7 +4042,7 @@ async function runFollowChecks() {
 
   // The step keeps how far the list got, and the session opened again shows no finished card.
   for (let round = 0; round < 4; round++) {
-    const opened = await evaluate("(() => { const closed = [...document.querySelectorAll('.chat-list .worklog-head[aria-expanded=false]')]; closed.forEach((button) => button.click()); return closed.length })()")
+    const opened = await evaluate("(() => { const closed = [...document.querySelectorAll('.chat-list .step-batch-head[aria-expanded=false]')]; closed.forEach((button) => button.click()); return closed.length })()")
     if (!opened) break
     await sleep(400)
   }
@@ -4066,7 +4068,7 @@ async function runStopChecks() {
     const line = document.querySelector('.chat-list .turn-live')
     const dice = line?.querySelector('.think-dice')
     const cube = dice?.querySelector('.think-dice-cube')
-    return line ? { words: line.querySelector('.worklog-label')?.textContent ?? '', clock: line.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0, last: line === line.parentElement.lastElementChild, headDice: !!document.querySelector('.worklog-head .think-dice') } : null
+    return line ? { words: line.querySelector('.worklog-label')?.textContent ?? '', clock: line.querySelector('.worklog-clock')?.textContent ?? '', rolling: !!dice?.classList.contains('is-rolling'), animation: cube ? getComputedStyle(cube).animationName : '', faces: dice?.querySelectorAll('.think-dice-face').length ?? 0, size: dice ? Math.round(dice.getBoundingClientRect().width) : 0, last: line === line.parentElement.lastElementChild, headDice: !!document.querySelector('.step-batch-head .think-dice') } : null
   })()`)
   console.log('[smoke] thinking:', JSON.stringify(thinking))
   if (!thinking || thinking.words !== 'Writing' || !/^\d+:\d\d$/.test(thinking.clock) || !thinking.rolling || thinking.animation !== 'think-dice-roll' || thinking.faces !== 6 || thinking.size < 14 || !thinking.last || thinking.headDice) {
@@ -4106,8 +4108,8 @@ async function runStepLimitChecks() {
     const notice = turn.querySelector('.msg-notice.is-step-limit')
     return {
       user: turn.querySelector('.chat-user-bubble')?.textContent ?? '',
-      log: turn.querySelector('.worklog-label')?.textContent ?? '',
-      open: turn.querySelector('.worklog-head')?.getAttribute('aria-expanded') ?? '',
+      log: turn.querySelector('.turn-worked')?.textContent ?? '',
+      open: turn.querySelector('.step-batch-head')?.getAttribute('aria-expanded') ?? '',
       answer: [...turn.querySelectorAll(':scope > .msg-assistant')].map((node) => node.textContent.trim()),
       notice: notice?.textContent ?? '',
       buttons: [...(notice?.querySelectorAll('.notice-actions button') ?? [])].map((button) => button.textContent.trim()),
@@ -4178,8 +4180,9 @@ async function runWaitChecks() {
     }
     await sleep(250)
   }
-  const clocked = await evaluate("document.querySelector('.tool-row-clock').closest('.tool-row').querySelector('.tool-row-detail')?.textContent ?? ''")
-  if (clocked !== 'sleep 7') throw new Error(`The clock is on "${clocked}", not on the running command`)
+  // The batch of the running command is one line that says what the agent said it does (ADR 0126), with the clock.
+  const clocked = await evaluate("(() => { const head = document.querySelector('.tool-row-clock').closest('.step-batch-head'); return { words: head?.querySelector('.step-batch-words')?.textContent ?? '', command: head?.title ?? '' } })()")
+  if (clocked.words !== 'Wait for the build' || clocked.command !== 'sleep 7') throw new Error(`The clock is on ${JSON.stringify(clocked)}, not on the running command`)
   await screenshot('ui-dark-step-clock.png')
   await driveAgent('18-waits')
   if (await evaluate("!!document.querySelector('.turn-thought')")) throw new Error('The thinking line stayed after the request ended')
@@ -4198,6 +4201,70 @@ async function runWaitChecks() {
   const answers = await evaluate("[...document.querySelectorAll('.chat-list .turn')].at(-1).querySelectorAll(':scope > .msg-assistant').length ? [...[...document.querySelectorAll('.chat-list .turn')].at(-1).querySelectorAll(':scope > .msg-assistant')].map((node) => node.textContent.trim()) : []")
   if (answers.at(-1) !== ANSWER) throw new Error(`The request ended with ${JSON.stringify(answers)}`)
   console.log('[smoke] what the agent waits on: ok')
+}
+
+/**
+ * The agent tells its work (ADR 0126). What it said between its steps reads like its answer; each batch of steps
+ * between two of those is one folded line: a file step by its name, a command by what the agent said it does, two
+ * commands in a row as "Ran 2 commands". A click opens a batch, nothing folds when the turn ends, and "Worked for" sits
+ * under the answer. The answer that left a check to the person went back once, and the agent made the check.
+ */
+async function runStoryChecks() {
+  console.log('[smoke] --- the agent tells its work ---')
+  const ANSWER = 'Port 7777 answers and a test client joined it; 30001 has nothing listening.'
+  // The hand-back check is one of the checks before the agent finishes, which the other steps keep off.
+  await evaluate("window.eNCode.settings.save({ checkGate: 'auto' })")
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:story] Why can no one join the server?')
+  await driveAgent('19-story')
+  await evaluate("window.eNCode.settings.save({ checkGate: 'off' })")
+  const TURN = `(() => {
+    const turn = [...document.querySelectorAll('.chat-list .turn')].at(-1)
+    const log = turn.querySelector('.worklog')
+    const children = [...turn.children]
+    const line = (head) => [head.querySelector('.step-batch-words')?.textContent, head.querySelector('.step-batch-detail')?.textContent].filter(Boolean).join(' ')
+    return {
+      blocks: [...log.children].map((node) => node.classList.contains('step-batch') ? 'batch: ' + line(node.querySelector('.step-batch-head')) : (node.classList.contains('worklog-say') ? 'say: ' : 'notice: ') + node.textContent.trim()),
+      sayFont: getComputedStyle(log.querySelector('.worklog-say')).fontSize,
+      answerFont: getComputedStyle(turn.querySelector(':scope > .msg-assistant')).fontSize,
+      open: log.querySelectorAll('.step-batch-head[aria-expanded="true"]').length,
+      rows: [...log.querySelectorAll('.tool-row')].map((row) => row.querySelector('.tool-row-detail')?.textContent ?? ''),
+      outputs: [...log.querySelectorAll('.tool-row-output')].map((node) => node.textContent.slice(0, 40)),
+      answer: [...turn.querySelectorAll(':scope > .msg-assistant')].map((node) => node.textContent.trim()),
+      worked: turn.querySelector(':scope > .turn-worked')?.textContent ?? '',
+      workedAfterAnswer: children.indexOf(turn.querySelector(':scope > .turn-worked')) > children.indexOf([...turn.querySelectorAll(':scope > .msg-assistant')].at(-1)),
+    }
+  })()`
+  const told = await evaluate(TURN)
+  console.log('[smoke] the story:', JSON.stringify(told))
+  const expected = [
+    'say: Looking at the server notes first.',
+    'batch: Read README.md',
+    'say: The notes name port 7777. Next I probe both ports.',
+    'batch: Ran 2 commands',
+    'say: Port 7777 answers and 30001 does not. I have not tested a real join, so that last mile needs you.',
+    'notice: The answer left a check to you, so the agent tries to make it itself first.',
+    'say: Joining as a test client to check it myself.',
+    'batch: Join as a test client',
+  ]
+  if (JSON.stringify(told.blocks) !== JSON.stringify(expected)) throw new Error(`The work log reads ${JSON.stringify(told.blocks, null, 1)}`)
+  if (told.sayFont !== told.answerFont) throw new Error(`What the agent says between steps is ${told.sayFont}, its answer ${told.answerFont}`)
+  if (told.open !== 0 || told.rows.length) throw new Error('A batch of the finished turn is open')
+  if (JSON.stringify(told.answer) !== JSON.stringify([ANSWER])) throw new Error(`The turn ends with ${JSON.stringify(told.answer)}`)
+  if (!/^Worked for \d/.test(told.worked) || !told.workedAfterAnswer) throw new Error(`"Worked for" is not under the answer: ${JSON.stringify(told.worked)}`)
+  await screenshot('ui-dark-story.png')
+  // A batch of two commands opens to both; a batch of one step opens to the step, open.
+  await click('.chat-list .step-batch-head', 'Ran 2 commands')
+  await click('.chat-list .step-batch-head', 'Read')
+  await waitFor("document.querySelectorAll('.chat-list .step-batch-body').length === 2", 4000, 'two batches open on a click')
+  await sleep(300)
+  const opened = await evaluate(TURN)
+  console.log('[smoke] opened:', JSON.stringify({ rows: opened.rows, outputs: opened.outputs }))
+  if (JSON.stringify(opened.rows) !== JSON.stringify(['README.md', 'echo 7777-open', 'echo 30001-closed'])) throw new Error(`The opened batches show ${JSON.stringify(opened.rows)}`)
+  // The Read step opens with its batch and says what it read; the commands of the other batch wait for their own click.
+  if (JSON.stringify(opened.outputs) !== JSON.stringify(['7 lines'])) throw new Error(`The only step of a batch did not open with it: ${JSON.stringify(opened.outputs)}`)
+  await screenshot('ui-dark-story-open.png')
+  console.log('[smoke] the agent tells its work: ok')
 }
 
 /**
@@ -5202,30 +5269,46 @@ async function runSettingsPageChecks() {
   console.log('[smoke] settings page checks passed')
 }
 
-/** Opens every folded work log ("Worked for 2m 14s"), so its steps are in the page. */
+/** Opens every folded batch of steps (ADR 0126), so their rows are in the page. */
 async function openWorkLogs() {
-  await evaluate(`(() => {
-    document.querySelectorAll('.worklog-head[aria-expanded="false"]').forEach((head) => head.click())
-    return true
-  })()`)
-  await sleep(250)
+  for (let round = 0; round < 3; round++) {
+    const opened = await evaluate(`(() => {
+      const closed = [...document.querySelectorAll('.step-batch-head[aria-expanded="false"]')]
+      closed.forEach((head) => head.click())
+      return closed.length
+    })()`)
+    await sleep(250)
+    if (!opened) break
+  }
 }
 
 /**
- * The session view after the demo run: a finished turn folds to "Worked for ...", opens on a click,
- * shows its result card, and the thread is 736 px of content in a wide window.
+ * The session view after the demo run (ADR 0126): what the agent said between its steps stays as it said it, each batch
+ * of steps is one folded line that opens on a click, "Worked for ..." sits under the answer, the result card shows, and
+ * the thread is 736 px of content in a wide window.
  */
 async function runSessionViewChecks() {
   console.log('[smoke] --- session view ---')
-  const head = await evaluate(`(() => {
-    const node = document.querySelector('.worklog-head')
-    return node ? { text: node.textContent, open: node.getAttribute('aria-expanded') } : null
+  const view = await evaluate(`(() => {
+    const turn = [...document.querySelectorAll('.chat-list .turn')].at(-1)
+    const children = [...turn.children]
+    return {
+      said: [...turn.querySelectorAll('.worklog-say')].map((node) => node.textContent.trim()),
+      batches: [...turn.querySelectorAll('.step-batch-head')].map((head) => [head.querySelector('.step-batch-words')?.textContent, head.querySelector('.step-batch-detail')?.textContent].filter(Boolean).join(' ')),
+      open: turn.querySelectorAll('.step-batch-head[aria-expanded="true"], .step-batch-body').length,
+      worked: turn.querySelector('.turn-worked')?.textContent ?? '',
+      workedAfterAnswer: children.indexOf(turn.querySelector(':scope > .turn-worked')) > children.indexOf([...turn.querySelectorAll(':scope > .msg-assistant')].at(-1)),
+    }
   })()`)
-  console.log('[smoke] work log header:', JSON.stringify(head))
-  if (!head || !/^Worked for \d/.test(head.text) || head.open !== 'false') throw new Error('a finished turn should fold to "Worked for ..."')
-  if ((await count('.worklog-body')) !== 0) throw new Error('a folded work log still shows its steps')
-  await click('.worklog-head')
-  await waitFor("document.querySelectorAll('.worklog-body .tool-row').length >= 2", 4000, 'the work log opens on a click')
+  console.log('[smoke] work log:', JSON.stringify(view))
+  if (view.said.length !== 3 || view.said[0] !== 'Let me look around the workspace first.') throw new Error(`what the agent said between its steps is not shown as it said it: ${JSON.stringify(view.said)}`)
+  if (JSON.stringify(view.batches) !== JSON.stringify(['Listed *', 'Wrote demo-note.md', 'Read demo-note.md'])) throw new Error(`the batches read ${JSON.stringify(view.batches)}`)
+  if (view.open !== 0) throw new Error('a batch of a finished turn is open')
+  if (!/^Worked for \d/.test(view.worked) || !view.workedAfterAnswer) throw new Error(`"Worked for ..." is not under the answer: ${JSON.stringify(view)}`)
+  await click('.step-batch-head', 'Wrote')
+  await waitFor("document.querySelectorAll('.step-batch-body .tool-row .diff-view').length === 1", 4000, 'the batch opens on a click, with the step in it open')
+  await click('.step-batch-head', 'Wrote')
+  await waitFor("document.querySelectorAll('.step-batch-body').length === 0", 4000, 'the batch folds on a second click')
   const card = await evaluate("document.querySelector('.result-card .result-title')?.textContent ?? ''")
   if (!card.startsWith('Edited 1 file')) throw new Error(`the result card says "${card}"`)
   if ((await evaluate("document.querySelector('.session-header')?.getBoundingClientRect().height")) !== 52) throw new Error('the session header is not 52 px')
@@ -5257,24 +5340,25 @@ const FIND_STATE = `(() => {
     count: document.querySelector('.find-bar-count')?.textContent ?? null,
     marks: marks?.size ?? 0,
     current: current ? [...current].map((range) => range.toString()).join('|') : '',
-    logOpen: document.querySelector('.worklog-head')?.getAttribute('aria-expanded'),
+    logOpen: [...document.querySelectorAll('.step-batch-head')].some((head) => head.getAttribute('aria-expanded') === 'true') ? 'true' : 'false',
     focus: document.activeElement?.className ?? '',
   }
 })()`
 
 /**
- * Ctrl+F in the session after the demo run: words that are only in the folded work log (the note the demo wrote, in
- * the Write step's diff) open it and are marked and counted; the note's path, named five times (twice in the Write step,
- * in the Read step, the reply and the change card's folded list of files), steps round with Enter and back with
- * Shift+Enter; words that are nowhere fold the log back; Esc closes the bar with the log left open
+ * Ctrl+F in the session after the demo run: words that are only in a folded batch of steps (the note the demo wrote,
+ * in the Write step's diff) open it and are marked and counted; the note's path, named seven times (on the lines of the
+ * Write and Read batches, twice in the Write step, in the Read step, the reply and the change card's folded list of
+ * files), steps round with Enter and back with Shift+Enter; words that are nowhere fold the batch back; Esc closes the
+ * bar with the batch left open
  * around the match it closed on and the focus back in the message box; Ctrl+F again keeps the words; and words
  * selected in the thread start a search.
  */
 async function runFindChecks() {
   console.log('[smoke] --- find in the session ---')
   const countIs = (text) => `document.querySelector('.find-bar-count')?.textContent === ${JSON.stringify(text)}`
-  if ((await evaluate("document.querySelector('.worklog-head')?.getAttribute('aria-expanded')")) === 'true') await click('.worklog-head')
-  await waitFor("document.querySelectorAll('.worklog-body').length === 0", 4000, 'the work log folds')
+  await evaluate("document.querySelectorAll('.step-batch-head[aria-expanded=\\'true\\']').forEach((head) => head.click())")
+  await waitFor("document.querySelectorAll('.step-batch-body').length === 0", 4000, 'the batches fold')
   await evaluate("document.querySelector('.composer-input')?.focus()")
   await pressKey('f', { ctrl: true })
   await waitFor("document.activeElement?.classList.contains('find-bar-input') === true", 4000, 'Ctrl+F opens the find bar with the cursor in it')
@@ -5288,13 +5372,13 @@ async function runFindChecks() {
   await screenshot('ui-dark-find.png')
 
   await typeInto('.find-bar-input', 'DEMO-NOTE.md')
-  await waitFor("/^[1-5] of 5$/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the note named five times')
+  await waitFor("/^[1-7] of 7$/.test(document.querySelector('.find-bar-count')?.textContent ?? '')", 4000, 'the note named seven times')
   if ((await evaluate(FIND_STATE)).current.toLowerCase() !== 'demo-note.md') throw new Error('the match in view is not marked')
   const first = await evaluate("document.querySelector('.find-bar-count').textContent")
   await pressKey('Enter')
   await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Enter moves to the next match')
-  for (let press = 0; press < 4; press++) await pressKey('Enter')
-  await waitFor(countIs(first), 4000, 'five presses of Enter go round to the same match')
+  for (let press = 0; press < 6; press++) await pressKey('Enter')
+  await waitFor(countIs(first), 4000, 'seven presses of Enter go round to the same match')
   await pressKey('Enter', { shift: true })
   await waitFor(`document.querySelector('.find-bar-count')?.textContent !== ${JSON.stringify(first)}`, 4000, 'Shift+Enter goes back')
 
@@ -6380,7 +6464,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, attach: runAttachChecks, follow: runFollowChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, story: runStoryChecks, attach: runAttachChecks, follow: runFollowChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

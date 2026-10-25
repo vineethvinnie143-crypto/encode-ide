@@ -104,7 +104,7 @@ import {
 import type { AgentHooks, HookEvent } from './hooks'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
-import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
+import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
@@ -486,6 +486,9 @@ export class AgentLoop {
   private todoSteps = 0
   private todoWritten = false
   private todoAsked = false
+  /** This request ran a tool; its answer was sent back once for a check it left to the person (ADR 0126). */
+  private toolsRan = false
+  private handBackAsked = false
   /** An automatic compaction happened since the model last replied: a reply that would end the request is asked about once. */
   private compactedSinceReply = false
   /** The model has replied in this request. */
@@ -569,6 +572,8 @@ export class AgentLoop {
     this.todoSteps = 0
     this.todoWritten = false
     this.todoAsked = false
+    this.toolsRan = false
+    this.handBackAsked = false
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -642,6 +647,7 @@ export class AgentLoop {
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
+        this.toolsRan = true
         const nudge = this.todoNudge(calls)
         if (nudge) state.context.push(nudge)
         const found = await this.edits?.collect(STEP_WAIT_MS, signal)
@@ -1883,11 +1889,25 @@ export class AgentLoop {
     }
     const claims = await this.claimCheck(reply)
     if (claims) return setback('claims', "eNCode could not confirm something the agent's reply says, so it checks it.", claims)
+    const handed = this.handBackCheck(turn, reply)
+    if (handed) return back('The answer left a check to you, so the agent tries to make it itself first.', handed)
     if (code) {
       const reviewed = await this.reviewGate(turn, reply)
       if (reviewed) return reviewed.serious ? setback('reviewer', reviewed.notice, reviewed.text) : back(reviewed.notice, reviewed.text)
     }
     return null
+  }
+
+  /**
+   * Once a request that ran tools in Code mode, unless checks are off (ADR 0126): an answer that leaves a check to the
+   * person ("I have not tested a real join") goes back to the agent, to make the check itself or say why it cannot.
+   */
+  private handBackCheck(turn: Turn, reply: string): string | null {
+    if (!this.gated || this.handBackAsked || !this.toolsRan || turn.mode !== 'code' || (this.o.settings().checkGate ?? 'auto') === 'off') return null
+    const sentence = handBack(reply)
+    if (!sentence) return null
+    this.handBackAsked = true
+    return handBackReminder(sentence)
   }
 
   /** Once a request, unless checks are off: the lines the request added, read for what is often a security bug. */

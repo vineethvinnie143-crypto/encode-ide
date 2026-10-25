@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ConversationEntry, DiffHunk } from '@shared/types'
 import {
+  batchSummary,
   buildTurns,
   editTotals,
   editedFiles,
@@ -11,6 +12,7 @@ import {
   isCommandTool,
   isSubagentTool,
   latestSearchOffer,
+  logBlocks,
   logItems,
   reuseTurns,
   stepKind,
@@ -308,6 +310,30 @@ describe('steps', () => {
     assert.equal(summarizeSteps(steps), 'Read 3 files, ran 1 command, edited 2 files, searched 1 time')
     assert.equal(summarizeSteps([]), '')
     assert.equal(summarizeSteps([tool('todo_write'), tool('todo_write')]), 'Used 2 other tools')
+  })
+
+  it('splits a log into what the agent said, its notices, and the batches of steps between them (ADR 0126)', () => {
+    const said = entry('assistant', { text: 'Port 30001 has nothing listening. Probing both ports next.' })
+    const quiet = entry('assistant', { text: '' })
+    const [a, b, c, d] = [tool('Read', { file_path: '/w/a' }), tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' }), tool('Edit', { file_path: '/w/a' })]
+    const notice = entry('notice', { text: 'The checks failed.' })
+    const blocks = logBlocks([a, said, b, quiet, c, notice, d])
+    assert.deepEqual(
+      blocks.map((block) => (block.type === 'batch' ? block.entries.map((step) => step.id) : block.type)),
+      [[a.id], 'text', [b.id, c.id], 'notice', [d.id]],
+      'a call with no words before it keeps its batch going',
+    )
+    assert.deepEqual(logBlocks([entry('assistant', { text: '', streaming: true })]).map((block) => block.type), ['text'])
+    assert.deepEqual(logBlocks([]), [])
+  })
+
+  it("says what a batch did, naming one or two files and counting more, in the order each kind began", () => {
+    assert.equal(batchSummary([tool('Read', { file_path: '/w/src/loop.ts' }), tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' })]), 'Read loop.ts, ran 2 commands')
+    assert.equal(batchSummary([tool('Write', { file_path: '/w/vm.py' }), tool('Edit', { file_path: '/w/vm.py' }), tool('Edit', { file_path: 'C:\\w\\ui.ts' })]), 'Edited vm.py and ui.ts')
+    assert.equal(batchSummary([tool('Read', { file_path: '/w/a/index.ts' }), tool('Read', { file_path: '/w/b/index.ts' }), tool('Read', { file_path: '/w/c.ts' })]), 'Read 3 files')
+    assert.equal(batchSummary([tool('Grep', { pattern: 'x' }), tool('WebSearch', { query: 'q' }), tool('TodoWrite', { todos: [] })]), 'Searched the code, searched the web, updated the task list')
+    assert.equal(batchSummary([tool('Bash', { command: 'make' }), tool('BashOutput', { bash_id: '1' }), tool('Task', { prompt: 'p' }), tool('mcp__x__y')]), 'Ran a command, read command output, delegated a task, used a tool')
+    assert.equal(batchSummary([tool('Glob', { pattern: '*' }), tool('Grep', { pattern: 'y' }), tool('WebFetch', { url: 'u' }), tool('WebFetch', { url: 'v' })]), 'Searched the code 2 times, used the web 2 times')
   })
 
   it('folds runs of reads, searches and web calls into one row, but not commands or edits', () => {

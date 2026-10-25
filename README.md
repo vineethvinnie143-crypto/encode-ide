@@ -99,8 +99,8 @@ primary platform; the code stays cross-platform.
 
   A long result (a build log, a test run) is kept whole in a file: the agent reads its start and end, and reads on by
   range when it needs the middle. A long file read whole shows its start and a list of what the rest defines, by line.
-  The head of each request's work log shows what it cost: tokens, how much came from the prompt cache, and dollars
-  when the provider says.
+  The line under each finished request's answer shows what it cost: tokens, how much came from the prompt cache, and
+  dollars when the provider says.
 
   In a long session the outputs of old steps are shortened early and seldom, so the prompt cache keeps working, and
   each says where the whole of it is; after a summary the files the agent worked on are read again for it. Strong

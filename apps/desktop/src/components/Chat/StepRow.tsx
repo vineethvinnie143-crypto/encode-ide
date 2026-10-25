@@ -25,7 +25,7 @@ import { TAKEN_OVER, computerStep } from './computer-step'
 import DiffView, { shownDiffLines } from './DiffView'
 import { reviewLine } from './review-text'
 import { WorkRoot, shownPath } from './shown-path'
-import { formatClock, stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
+import { baseName, formatClock, stepKind, summarizeSteps, toolPath, type StepKind } from './turns'
 import { useNow } from '../../hooks/useNow'
 
 /** A step's name in each tense: done (`label`), under way (`doing`), and not yet done, refused or failed (`todo`). */
@@ -258,34 +258,60 @@ export function foldedStep(entry: ConversationEntry): { head: string; body: stri
   return text
 }
 
+/**
+ * A step as the one line of a batch that holds only it, or of a batch at work on it (ADR 0126): a command by what the
+ * agent said it does, anything else by its name and what it was given, a file by its name.
+ */
+export function stepLine(entry: ConversationEntry, root: string | null): { words: string; detail: string; title?: string } {
+  const tool = entry.tool
+  if (!tool) return { words: '', detail: '' }
+  const parts = stepParts(entry, tool, root)
+  const described = parts.isShell && typeof tool.input.description === 'string' ? tool.input.description.trim() : ''
+  if (described) return { words: described, detail: '', title: parts.detail }
+  // A Glob's path is the folder it looked in: its pattern says more.
+  const kind = stepKind(tool.name)
+  const file = kind === 'read' || kind === 'edit' ? toolPath(tool.input ?? {}) : undefined
+  return file && parts.detail ? { words: parts.label, detail: baseName(file), title: file } : { words: parts.label, detail: parts.detail }
+}
+
+/** When a step started to run: when it was seen to start after it waited for approval, otherwise when it was made. */
+export function useRunningSince(entry: ConversationEntry | undefined): number {
+  const since = useRef({ id: entry?.id, at: entry?.createdAt ?? 0, state: entry?.tool?.state })
+  const seen = since.current
+  if (entry?.id !== seen.id) since.current = { id: entry?.id, at: entry?.createdAt ?? 0, state: entry?.tool?.state }
+  else if (entry?.tool?.state !== seen.state) {
+    if (entry?.tool?.state === 'running' && seen.state === 'waiting') seen.at = Date.now()
+    seen.state = entry?.tool?.state
+  }
+  return since.current.at
+}
+
 /** A step that has run this long says for how long, so a long command reads as one that runs and not as a stall (ADR 0125). */
 const SHOW_RUNNING_AFTER_MS = 5_000
 
 /** How long a running step has run: from when it was seen to start, or from its entry when it was already running. */
-function RunningFor({ since }: { since: number }) {
+export function RunningFor({ since }: { since: number }) {
   const now = useNow(true)
   const elapsed = now - since
   if (elapsed < SHOW_RUNNING_AFTER_MS) return null
   return <span className="tool-row-clock">{formatClock(elapsed)}</span>
 }
 
-/** One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found. */
-function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boolean }) {
+/**
+ * One step the agent took: a 26 px row that opens inline to its command and output, its diff, or what it found.
+ * `opened` starts it open: the only step of a batch someone opened (ADR 0126).
+ */
+function StepRowView({ entry, nested, opened }: { entry: ConversationEntry; nested?: boolean; opened?: boolean }) {
   const tool = entry.tool
   const root = useContext(WorkRoot)
   // A step the Reviewer declined opens by itself: the person was not asked, so the reason is the first thing they want.
-  const [expanded, setExpanded] = useState(Boolean(tool?.diff?.length) || tool?.state === 'waiting' || tool?.review?.verdict === 'declined')
+  const [expanded, setExpanded] = useState(Boolean(opened || tool?.diff?.length) || tool?.state === 'waiting' || tool?.review?.verdict === 'declined')
   const head = useRef<HTMLButtonElement>(null)
   const reveal = useCallback(() => setExpanded(true), [])
   const rowRef = useRevealRef(head, reveal)
   const { found, dismiss } = useFoldFind(useCallback((needle: string) => foldedStep(entry).body.includes(needle), [entry]))
   // A step that waited for your approval starts its clock when it starts to run, not when it was asked.
-  const startedAt = useRef(entry.createdAt)
-  const lastState = useRef(tool?.state)
-  if (tool?.state !== lastState.current) {
-    if (tool?.state === 'running' && lastState.current === 'waiting') startedAt.current = Date.now()
-    lastState.current = tool?.state
-  }
+  const startedAt = useRunningSince(entry)
 
   useEffect(() => {
     if (tool?.diff?.length) setExpanded(true)
@@ -350,7 +376,7 @@ function StepRowView({ entry, nested }: { entry: ConversationEntry; nested?: boo
             )}
           </span>
         )}
-        {state === 'running' && <RunningFor since={startedAt.current} />}
+        {state === 'running' && <RunningFor since={startedAt} />}
         {(state === 'running' || state === 'reviewing') && <Loader2 size={13} className="spin tool-row-state" />}
         {state === 'waiting' && <ChevronRight size={13} className="tool-row-state" />}
         {(state === 'rejected' || state === 'error') && <XCircle size={13} className="tool-row-state is-bad" />}
