@@ -354,6 +354,23 @@
   color: var(--text-3);
   font-size: var(--fs-13);
 }
+/* The model's latest thinking under the live line (ADR 0125): one quiet line, under the words, cut at its end. */
+.turn-thought {
+  margin: -4px 0 4px 26px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  font-style: italic;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  animation: turn-thought-in var(--dur-2) var(--ease-out);
+}
+@keyframes turn-thought-in {
+  from {
+    opacity: 0;
+  }
+}
 /* The rolling dice sits close to the words it goes with; its box is wider than the dice for the turns. */
 .worklog-dice {
   margin: 0 -5px 0 -4px;

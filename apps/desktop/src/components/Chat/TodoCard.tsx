@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TodoItem } from '@shared/types'
-import { CheckCircle2, Circle, ListTodo, Loader2 } from '../../ui/icons'
+import { CheckCircle2, Circle, CircleDot, ListTodo, Loader2 } from '../../ui/icons'
 import { Collapse } from '../../ui/Collapse'
+import { cx } from '../../ui/cx'
 import { finishedList, useChat } from '../../stores/chat'
 
 const ICONS = {
@@ -19,6 +20,8 @@ const LINGER_MS = 1200
  */
 export default function TodoCard() {
   const todos = useChat((state) => state.todos)
+  // Only a running request turns its item: once it ends, the item it left open is shown as left, not as under way (ADR 0125).
+  const running = useChat((state) => state.running)
   const finished = finishedList(todos)
   // The finished list that has folded away; a new list from the agent is another array, and shows.
   const [folded, setFolded] = useState<readonly TodoItem[] | null>(null)
@@ -47,10 +50,11 @@ export default function TodoCard() {
         </div>
         <div className="todo-list">
           {shown.map((todo) => {
-            const Icon = ICONS[todo.status]
+            const held = todo.status === 'in_progress' && !running
+            const Icon = held ? CircleDot : ICONS[todo.status]
             return (
-              <div className={`todo-item todo-${todo.status}`} key={todo.id}>
-                <Icon size={12} className={todo.status === 'in_progress' ? 'spin' : ''} />
+              <div className={cx('todo-item', `todo-${todo.status}`, held && 'is-held')} key={todo.id} title={held ? 'Left open when the request ended' : undefined}>
+                <Icon size={12} className={todo.status === 'in_progress' && !held ? 'spin' : ''} />
                 <span>{todo.text}</span>
               </div>
             )

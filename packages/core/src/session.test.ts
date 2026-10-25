@@ -31,7 +31,7 @@ describe('a session', () => {
       files: { 'a.txt': `${'alpha\n'.repeat(400)}` },
       scriptFor: (root) => [
         { calls: [{ name: 'Read', input: { file_path: `${root}/a.txt` } }] },
-        { calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', activeForm: 'Looking', status: 'in_progress' }] } }] },
+        { calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', activeForm: 'Looking', status: 'completed' }] } }] },
         // The same lines again: answered by pointing back, which rewrites nothing.
         { calls: [{ name: 'Read', input: { file_path: `${root}/a.txt` } }] },
         { text: 'Read it.' },
@@ -906,7 +906,7 @@ describe('what a session keeps', () => {
     assert.equal(h.session.goal()?.text, 'A goal')
     assert.equal(h.session.todos().length, 1)
     await h.session.start({ text: 'second request', mode: 'code' })
-    assert.equal(h.client.requests.at(-1)!.payload.messages.length, 1)
+    assert.equal(h.client.requests[1].payload.messages.length, 1)
   })
 
   it('goes back to before a request, and hands its text back', async () => {

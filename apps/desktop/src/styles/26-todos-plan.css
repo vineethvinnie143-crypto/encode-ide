@@ -50,6 +50,13 @@
 .todo-in_progress svg {
   color: var(--accent);
 }
+/* Left open when the request ended (ADR 0125): still the item it got to, no longer turning. */
+.todo-in_progress.is-held {
+  color: var(--text-2);
+}
+.todo-in_progress.is-held svg {
+  color: var(--text-3);
+}
 
 .plan-card {
   margin: 0 var(--thread-gutter) 8px;

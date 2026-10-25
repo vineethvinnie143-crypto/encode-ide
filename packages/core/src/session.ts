@@ -999,6 +999,7 @@ export class AgentSession {
     },
     setTodos: (inputs: TodoInput[]) =>
       this.setTodos(inputs.map((todo, index) => ({ id: `todo-${index + 1}`, text: todo.content, status: todo.status }))),
+    thinking: (progress) => this.send({ type: 'thinking', thinking: progress }),
   }
 
   /** Several can wait at once (subagents and parallel reads); the client shows them one after another. */
@@ -1415,6 +1416,7 @@ export class AgentSession {
       suggested: this.suggestedLines,
       preface: this.preface,
       steers: this.steering,
+      todos: () => this.todoList,
     })
   }
 

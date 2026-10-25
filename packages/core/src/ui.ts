@@ -276,6 +276,16 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed'
 }
 
+/** What the model has thought so far in the call under way, for the live line (ADR 0125). Never stored. */
+export interface ThinkingProgress {
+  /** Characters of thinking so far in this call. */
+  chars: number
+  /** Its latest words, on one line. */
+  latest: string
+  /** The latest words are the end of a longer thought. */
+  cut?: boolean
+}
+
 export interface PlanRequest {
   id: string
   plan: string
@@ -512,6 +522,8 @@ export type AgentEventBody =
   | { type: 'usage'; promptTokens: number; completionTokens: number; totalTokens: number; cachedTokens?: number }
   | { type: 'goal'; goal: SessionGoal | null }
   | { type: 'todos'; todos: TodoItem[] }
+  /** The model thinks before it writes: how far, in its words; null once the call ends (ADR 0125). */
+  | { type: 'thinking'; thinking: ThinkingProgress | null }
   | { type: 'plan'; plan: PlanRequest | null }
   /** The agent changed the session's mode itself (EnterPlanMode): the message box should follow. */
   | { type: 'mode'; mode: AgentMode }

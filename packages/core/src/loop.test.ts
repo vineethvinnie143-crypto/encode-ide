@@ -11,7 +11,7 @@ import { isPaired, NOT_RUN } from './compaction'
 import { createOutputStore } from './outputs'
 import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH } from './prompt'
 import { loopHarness, type Harness } from './testing'
-import { AgentAbortedError } from './types'
+import { AgentAbortedError, type Steers } from './types'
 import type { SessionGoal } from './ui'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -45,6 +45,62 @@ describe('a turn', () => {
     assert.equal(h.surface.statuses[0], 'thinking')
   })
 
+  it('shows what the model thinks before it writes on the live line, and clears it when the call ends', async () => {
+    const h = await loopHarness({ script: [{ thinking: 'The file is small, so reading it whole is fine.', calls: [{ name: 'Glob', input: { pattern: '*' } }] }, { text: 'Done.' }] })
+    assert.deepEqual(await h.run('look'), { kind: 'done', reply: 'Done.' })
+    assert.deepEqual(h.surface.thoughts, [{ chars: 'The file is '.length, latest: 'The file is' }, null])
+    // Thinking is shown, not kept: nothing of it reaches the transcript.
+    assert.ok(!h.surface.settled.some((entry) => /reading it whole/.test(entry.text ?? '')))
+  })
+
+  it('reminds the model of a task list it left as it was for six steps, and not of a finished one', async () => {
+    const list = (first: string) => ({
+      name: 'TodoWrite',
+      input: { todos: [{ content: 'Reconnect to the VM', status: first, activeForm: 'Reconnecting' }, { content: 'Fix it', status: 'pending', activeForm: 'Fixing it' }] },
+    })
+    const h = await loopHarness({
+      todoList: true,
+      script: (_request, step) => {
+        if (step === 0) return { calls: [list('in_progress')] }
+        if (step < 8) return { calls: [{ name: 'Glob', input: { pattern: '*' } }] }
+        if (step === 8) return { calls: [list('completed')] }
+        return { text: 'Reconnected; the fix is next.' }
+      },
+    })
+    await h.run('fix the VM')
+    const reminded = h.client.requests.map((request) => /has not changed for several steps/.test(JSON.stringify(request.payload.messages.at(-1))))
+    // Six steps after the list was written, and not before: one reminder, with the list as the person sees it.
+    assert.deepEqual(reminded.map((on, index) => (on ? index : -1)).filter((index) => index >= 0), [7])
+    assert.match(JSON.stringify(h.client.requests[7].payload.messages.at(-1)), /\[in progress\] Reconnect to the VM\\n- \[to do\] Fix it/)
+  })
+
+  it('sends the agent back once to bring an open task list up to date before it ends', async () => {
+    const h = await loopHarness({
+      todoList: true,
+      script: (_request, step) => {
+        if (step === 0) return { calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', status: 'in_progress', activeForm: 'Looking' }, { content: 'Fix', status: 'pending', activeForm: 'Fixing' }] } }] }
+        if (step === 1) return { text: 'Looked; nothing to fix.' }
+        if (step === 2) return { calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', status: 'completed', activeForm: 'Looking' }, { content: 'Fix', status: 'pending', activeForm: 'Fixing' }] } }] }
+        return { text: 'Looked; the fix is left for you to approve.' }
+      },
+    })
+    assert.deepEqual(await h.run('look and fix'), { kind: 'done', reply: 'Looked; the fix is left for you to approve.' })
+    // Asked once: the list still has an open item after the update, and the answer stands.
+    assert.equal(h.client.requests.length, 4)
+    const back = JSON.stringify(h.client.requests[2].payload.messages.at(-1))
+    assert.match(back, /Before you finish: the task list the person sees still shows 2 open items/)
+    assert.ok(back.includes(ANSWER_AGAIN.slice(0, 40)))
+    assert.deepEqual(h.surface.todos.map((todo) => todo.status), ['completed', 'pending'])
+  })
+
+  it('leaves the task list alone when the loop is not given it', async () => {
+    const h = await loopHarness({
+      script: [{ calls: [{ name: 'TodoWrite', input: { todos: [{ content: 'Look', status: 'in_progress', activeForm: 'Looking' }] } }] }, { text: 'Done.' }],
+    })
+    assert.deepEqual(await h.run('look'), { kind: 'done', reply: 'Done.' })
+    assert.equal(h.client.requests.length, 2)
+  })
+
   it('runs a tool, feeds the result back and carries on until the model is done', async () => {
     const h = await loopHarness({
       files: { 'a.txt': 'alpha\nbeta\n' },
@@ -75,6 +131,39 @@ describe('a turn', () => {
     assert.match(JSON.stringify(last.content.at(-1)), /That was the last step this request may take \(3 steps\), so tools are off for your next reply/)
     assert.equal(h.surface.settled.at(-1)?.text, 'Two files hold it; the third is left to check.')
     assert.ok(isPaired(h.conversation.messages()))
+  })
+
+  it('keeps the step limit while only background work reports, and renews it for a message of the person', async () => {
+    // A monitor with a line after every step: news alone must not keep the request going.
+    let theirs = 0
+    const steers: Steers = {
+      waiting: (at) => (at === 'end' ? theirs > 0 : true),
+      take: async () => {
+        const person = theirs > 0
+        theirs = 0
+        return [textBlock('Monitor 1 (dev server): a line'), ...(person ? [textBlock('also the tests')] : [])]
+      },
+      close: () => {},
+    }
+    const h = await loopHarness({
+      script: (_request, step) => (step < 6 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'never' }),
+      maxSteps: 2,
+      steers,
+    })
+    assert.deepEqual(await h.run('loop'), { kind: 'max-steps', steps: 2 })
+    assert.deepEqual(h.client.requests.map((request) => request.payload.toolChoice), [undefined, undefined, 'none'])
+
+    // The person's message during the first step gives the request two steps after it.
+    const again = await loopHarness({
+      script: (_request, step) => {
+        if (step === 0) theirs = 1
+        return step < 6 ? { calls: [{ name: 'Glob', input: { pattern: '*' } }] } : { text: 'never' }
+      },
+      maxSteps: 2,
+      steers,
+    })
+    assert.deepEqual(await again.run('loop'), { kind: 'max-steps', steps: 2 })
+    assert.deepEqual(again.client.requests.map((request) => request.payload.toolChoice), [undefined, undefined, undefined, 'none'])
   })
 
   it('answers a call made at the step limit anyway, unrun, and leaves a valid conversation', async () => {

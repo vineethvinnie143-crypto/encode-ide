@@ -108,7 +108,8 @@ import { claimsReminder, fileHolds, firstExisting, missingFiles, missingName, na
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
-import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote } from './prompt'
+import { ThinkingTicker } from './thinking'
+import { ANSWER_AGAIN, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
@@ -120,7 +121,7 @@ import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './
 import type { OutputStore } from './outputs'
 import { recoverTextCalls } from './text-calls'
 import { AgentAbortedError, DEFAULT_MAX_STEPS, MAX_STEPS_LIMIT, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
-import type { ConversationEntry, ToolReview } from './ui'
+import type { ConversationEntry, TodoItem, ToolReview } from './ui'
 
 /** What a call may ask of the model for its answer. */
 const MAX_OUTPUT_TOKENS = 32_000
@@ -150,6 +151,8 @@ const MAX_UI_STRING = 8_000
 const MAX_PREVIEW_HUNKS = 4
 /** Tools whose end of a request the app shows itself: the result of attempt_completion as the answer, a plan on its card. */
 const SHOWN_STOPS: ReadonlySet<string> = new Set(['attempt_completion', 'ExitPlanMode'])
+/** Steps the task list may stay as it is, while it shows open items, before the model is reminded of it (ADR 0125). */
+const TODO_NUDGE_STEPS = 6
 const REJECTED = 'The user rejected this action. Do not retry it unchanged. Ask what they would prefer or choose a different approach.'
 const DECLINED = 'The automatic reviewer declined this action, so the user was not asked.'
 const DECLINED_ADVICE = 'Do not retry it unchanged. Ask what the user would prefer or choose a different approach.'
@@ -233,6 +236,8 @@ export interface LoopOptions {
   suggested?: () => readonly string[]
   /** Messages the user sends while the turn runs; the main agent's only. */
   steers?: Steers
+  /** The task list the person sees (TodoWrite); the main agent's only. Kept current by reminders (ADR 0125). */
+  todos?: () => readonly TodoItem[]
   /**
    * Whether the checks, the claim check and the tests-first reminder hold this agent's work before it ends, as they
    * hold the main agent's (ADR 0095, 0097). Default: the main agent only; an attempt of best of N has them too (0098).
@@ -474,6 +479,13 @@ export class AgentLoop {
   /** What the request taught (ADR 0097): commands that failed and what worked after; whether it ended on an answer and was offered. */
   private lessons: Lesson[] = []
   private answered = false
+  /**
+   * Steps since the task list last changed while it showed open items; whether this request wrote the list, and was
+   * asked to bring it up to date before it ends (ADR 0125).
+   */
+  private todoSteps = 0
+  private todoWritten = false
+  private todoAsked = false
   /** An automatic compaction happened since the model last replied: a reply that would end the request is asked about once. */
   private compactedSinceReply = false
   /** The model has replied in this request. */
@@ -554,6 +566,9 @@ export class AgentLoop {
     this.lessons = []
     this.offered = false
     this.answered = false
+    this.todoSteps = 0
+    this.todoWritten = false
+    this.todoAsked = false
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -602,6 +617,11 @@ export class AgentLoop {
           await o.conversation.add(userText(reminder(`${took ? `${sent}\n\n${took}` : sent}\n\n${ANSWER_AGAIN}`)), { turnId: turn.turnId })
           continue
         }
+        const stale = this.staleTodos()
+        if (stale) {
+          await o.conversation.add(userText(reminder(`${stale}\n\n${ANSWER_AGAIN}`)), { turnId: turn.turnId })
+          continue
+        }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
           await o.conversation.add({ role: 'user', content: [textBlock(stop.continue), textBlock(reminder(ANSWER_AGAIN))] }, { turnId: turn.turnId })
@@ -622,11 +642,13 @@ export class AgentLoop {
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
+        const nudge = this.todoNudge(calls)
+        if (nudge) state.context.push(nudge)
         const found = await this.edits?.collect(STEP_WAIT_MS, signal)
         if (found) state.context.push(found)
         // A model that finishes with attempt_completion is held to what one that just stops talking is.
         if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
-          const sent = await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)
+          const sent = (await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)) ?? this.staleTodos()
           if (sent) {
             state.context.push(`${sent}\n\n${ANSWER_AGAIN}`)
             state.stop = undefined
@@ -645,9 +667,12 @@ export class AgentLoop {
         // lost; left waiting, it becomes the next request.
         let took = false
         if (ran && state.stop === undefined && o.steers?.waiting()) {
+          // Only a message of the person's renews the limit: news from background work alone (a monitor's lines) would
+          // keep a request going without end.
+          const theirs = o.steers.waiting('end')
           const blocks = await o.steers.take(signal)
           content.push(...blocks)
-          took = blocks.length > 0
+          took = theirs && blocks.length > 0
         }
         if (took) step = 0
         else if (ran) closing = state.stop === undefined ? (step >= maxSteps ? stepLimitNote(maxSteps) : undefined) : this.stopNote(state, message)
@@ -669,6 +694,35 @@ export class AgentLoop {
         return { kind: 'max-steps', steps: maxSteps, ...(closed.reply ? { reply: closed.reply } : {}) }
       }
     }
+  }
+
+  /**
+   * After steps that left the task list as it was while it shows open items: once every TODO_NUDGE_STEPS steps, the list
+   * goes to the model with the results, so the card the person watches moves with the work (ADR 0125).
+   */
+  private todoNudge(calls: readonly ToolUseBlock[]): string | undefined {
+    if (calls.some((call) => call.name === 'TodoWrite')) {
+      this.todoSteps = 0
+      this.todoWritten = true
+      return undefined
+    }
+    const todos = this.o.todos?.() ?? []
+    if (!todos.some((todo) => todo.status !== 'completed')) return undefined
+    if (++this.todoSteps < TODO_NUDGE_STEPS) return undefined
+    this.todoSteps = 0
+    return todoReminder(todos)
+  }
+
+  /**
+   * Once a request: the agent would end it while the task list it wrote in this request still shows open items, so it is
+   * sent back to update the list. A list left by an earlier request is only reminded of, while the agent works.
+   */
+  private staleTodos(): string | undefined {
+    if (this.todoAsked || !this.todoWritten) return undefined
+    const todos = this.o.todos?.() ?? []
+    if (!todos.some((todo) => todo.status !== 'completed')) return undefined
+    this.todoAsked = true
+    return todoFinishNote(todos)
   }
 
   /**
@@ -746,13 +800,19 @@ export class AgentLoop {
       }
 
       let streaming: ConversationEntry | undefined
+      // What the model thinks before it writes shows on the live line as it comes, so a long think is not taken for a stall (ADR 0125).
+      const thought = new ThinkingTicker((progress) => o.surface.thinking?.(progress))
       const onEvent = (event: ClientEvent) => {
         switch (event.type) {
+          case 'thinking':
+            thought.add(event.text)
+            return
           case 'text':
             streaming ??= o.surface.entry({ kind: 'assistant', text: '', streaming: true })
             o.surface.delta(streaming, event.text)
             return
           case 'discard':
+            thought.end()
             if (streaming) {
               streaming.text = ''
               o.surface.update(streaming)
@@ -769,19 +829,21 @@ export class AgentLoop {
         }
       }
 
-      const outcome = await o.client.complete({
-        role: this.callRole,
-        ...(o.agentId !== 'main' ? { agent: o.agentId } : {}),
-        payload,
-        requirements: { promptTokens: this.meter.estimate(sent, this.fixed), maxOutputTokens, tools: tools.length > 0, images: hasImages(sent) },
-        sticky: o.services.sessionId,
-        signal: turn.signal,
-        onEvent,
-        validateToolCall: (name, input) => {
-          const repaired = o.registry.repair(name, input, this.offers)
-          return o.registry.check(repaired.name ?? name, repaired.value)
-        },
-      })
+      const outcome = await o.client
+        .complete({
+          role: this.callRole,
+          ...(o.agentId !== 'main' ? { agent: o.agentId } : {}),
+          payload,
+          requirements: { promptTokens: this.meter.estimate(sent, this.fixed), maxOutputTokens, tools: tools.length > 0, images: hasImages(sent) },
+          sticky: o.services.sessionId,
+          signal: turn.signal,
+          onEvent,
+          validateToolCall: (name, input) => {
+            const repaired = o.registry.repair(name, input, this.offers)
+            return o.registry.check(repaired.name ?? name, repaired.value)
+          },
+        })
+        .finally(() => thought.end())
 
       if (outcome.kind === 'paused') {
         // Sent pictures, the model refused them (a preset not yet known to be one that reads them): now known, the call

@@ -11,7 +11,7 @@ import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
 import type { ReviewSetting } from './review'
 import type { SmallerHelp, StrongerOffer } from './smaller'
-import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode } from './ui'
+import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode, ThinkingProgress } from './ui'
 
 export interface AgentSettings {
   policy: ApprovalPolicy
@@ -143,6 +143,8 @@ export interface Surface {
   enterPlan(entryId: string, reason: string, signal: AbortSignal): Promise<PlanConsent>
   proposePlan(entryId: string, plan: string, signal: AbortSignal): Promise<PlanVerdict>
   setTodos(todos: TodoInput[]): void
+  /** While the model thinks before it writes: how much so far and its latest words; null once the call ends (ADR 0125). */
+  thinking?(progress: ThinkingProgress | null): void
 }
 
 /** The messages the model reads. The loop only ever appends, except through `replace`. */

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentStatus, ConversationEntry, RequestUsage } from '@shared/types'
+import type { AgentStatus, ConversationEntry, RequestUsage, ThinkingProgress } from '@shared/types'
 import { AlertTriangle, ChevronRight, Info } from '../../ui/icons'
 import { useFoldFind, useRevealRef } from '../../find/hooks'
 import { useNow } from '../../hooks/useNow'
@@ -125,17 +125,33 @@ export default memo(WorkLog)
  * used. It sits under the latest step and the answer streaming in, so it is where you look as the thread follows, at
  * every step and not only at the top of the turn.
  */
-export function LiveLine({ status, log, reply, startedAt, usage }: Pick<TurnPart, 'log' | 'reply' | 'startedAt'> & { status?: AgentStatus; usage?: RequestUsage }) {
+export function LiveLine({
+  status,
+  log,
+  reply,
+  startedAt,
+  usage,
+  thought,
+}: Pick<TurnPart, 'log' | 'reply' | 'startedAt'> & { status?: AgentStatus; usage?: RequestUsage; thought?: ThinkingProgress | null }) {
   const now = useNow(true)
   const writing = reply.some((entry) => entry.kind === 'assistant' && entry.streaming && Boolean(entry.text?.trim()))
   const phase = workPhase(status, log, writing)
   const spent = formatUsage(usage)
+  // While the model thinks before it writes, its latest words show under the line, so a long think reads as one (ADR 0125).
+  const thinking = status === 'thinking' && !writing && thought?.latest ? thought : null
   return (
-    <div className="turn-live">
-      <ThinkingDice rolling={phase.rolling} className="worklog-dice" />
-      <span className={cx('worklog-label', phase.rolling && 'shimmer')}>{phase.words}</span>
-      <span className="worklog-clock">{formatClock(now - startedAt)}</span>
-      {spent && <span className="worklog-usage">{spent}</span>}
-    </div>
+    <>
+      <div className="turn-live">
+        <ThinkingDice rolling={phase.rolling} className="worklog-dice" />
+        <span className={cx('worklog-label', phase.rolling && 'shimmer')}>{phase.words}</span>
+        <span className="worklog-clock">{formatClock(now - startedAt)}</span>
+        {spent && <span className="worklog-usage">{spent}</span>}
+      </div>
+      {thinking && (
+        <div className="turn-thought" title={thinking.latest}>
+          {thinking.cut ? `…${thinking.latest}` : thinking.latest}
+        </div>
+      )}
+    </>
   )
 }

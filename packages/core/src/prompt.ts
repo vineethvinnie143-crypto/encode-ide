@@ -10,7 +10,7 @@
  */
 import type { SystemPart } from '@encode/providers'
 import type { AgentMode, WorktreeInfo } from '@encode/tools'
-import type { SessionGoal } from './ui'
+import type { SessionGoal, TodoItem } from './ui'
 
 export const SYSTEM_PROMPT = `You are eNCode, a coding agent working in the user's project through the tools you are given, from the eNCode IDE or a terminal. Work like a capable, friendly colleague: talk plainly, get on with the job, and finish it.
 
@@ -198,4 +198,21 @@ export function sideReminder(): string {
 
 export function dateReminder(date: string): string {
   return reminder(`Today's date is now ${date}.`)
+}
+
+/** The task list as the model reads it in a reminder (ADR 0125). */
+function todoLines(todos: readonly TodoItem[]): string {
+  const mark = { completed: 'done', in_progress: 'in progress', pending: 'to do' } as const
+  return todos.map((todo) => `- [${mark[todo.status]}] ${todo.text}`).join('\n')
+}
+
+/** Goes with a step's results when the task list the person sees still has open items and has not changed for a while. */
+export function todoReminder(todos: readonly TodoItem[]): string {
+  return `The task list the person sees has not changed for several steps. It shows:\n${todoLines(todos)}\nIf any of it is done, or the plan changed, send the whole list again with TodoWrite now, then carry on. Do not mention this reminder.`
+}
+
+/** Sent back once when the agent answers while the task list still shows open items, so the list it leaves is true. */
+export function todoFinishNote(todos: readonly TodoItem[]): string {
+  const open = todos.filter((todo) => todo.status !== 'completed').length
+  return `Before you finish: the task list the person sees still shows ${open} open ${open === 1 ? 'item' : 'items'}:\n${todoLines(todos)}\nSend the whole list again with TodoWrite: mark completed what is done, remove what no longer applies, and leave open only what is really left. If something is left, say in your answer what and why.`
 }

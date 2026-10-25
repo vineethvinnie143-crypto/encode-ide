@@ -362,7 +362,11 @@ then appear in the conversation where the agent took it, and the agent should ch
 instead queues the message for after the turn (Settings → General swaps the two keys). A message the agent takes gives
 the request its whole step limit again. When a request reaches the limit (Settings → Agent → Max agent steps), it should
 still end with an answer that says how far it got, and a line under it with **Continue** and **Change the limit**. Set **Effort** with the chip under
-the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High.
+the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High. While it
+thinks, its latest words should show in a quiet line under **Thinking**, and a command that runs for five seconds or
+more should show a clock beside its spinner. A command that only sleeps for longer than 10 seconds is not run: the agent
+is told to check for what it waits on instead. The **Tasks** card should move as the agent works, and be up to date
+when the request ends; an item left open then stops turning.
 
 `Ctrl+F` finds words in the session, inside folded steps and long command output too; `Enter` and `Shift+Enter` move
 between matches and `Esc` closes the bar where you were. `Ctrl+/` lists the shortcuts: click one, press the new keys,

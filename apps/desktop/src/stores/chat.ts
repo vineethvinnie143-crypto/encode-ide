@@ -8,6 +8,7 @@ import type {
   ConversationEntry,
   PlanRequest,
   SessionGoal,
+  ThinkingProgress,
   TodoItem,
 } from '@shared/types'
 import { api } from '../api'
@@ -46,6 +47,8 @@ interface ChatStore {
   ask: AskState | null
   goal: SessionGoal | null
   todos: TodoItem[]
+  /** What the model has thought so far in the call under way, for the live line (ADR 0125). */
+  thinking: ThinkingProgress | null
   plan: PlanRequest | null
   usageTotals: { total: number; cached: number; prompt: number; completion: number }
   initialized: boolean
@@ -154,6 +157,7 @@ export const useChat = create<ChatStore>((set, get) => ({
   ask: null,
   goal: null,
   todos: [],
+  thinking: null,
   plan: null,
   usageTotals: NO_USAGE,
   initialized: false,
@@ -216,6 +220,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         ask: history.status === 'awaiting-user' ? (history.ask ?? null) : null,
         goal,
         todos: finishedList(todos) ? [] : todos,
+        thinking: null,
         plan,
         usageTotals: NO_USAGE,
         tokensPerSecond: 0,
@@ -406,6 +411,8 @@ export const useChat = create<ChatStore>((set, get) => ({
         set((state) => ({
           status: event.status,
           running: event.status === 'thinking' || event.status === 'running-tool' || event.status === 'awaiting-approval' || event.status === 'awaiting-user',
+          // A thought belongs to the model call under way: whatever comes next is not it.
+          ...(event.status === 'thinking' ? {} : { thinking: null }),
           // Cards leave when you answer them, or when the run ends (stopping, for one, ends the wait); a background
           // subagent's stay until it has its answer.
           ...(event.status === 'idle' || event.status === 'done' || event.status === 'error' ? outlives(state) : { approvals: state.approvals }),
@@ -436,6 +443,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           return {
             running: false,
             status: 'done',
+            thinking: null,
             ...outlives(state),
             tokensPerSecond: measured || state.tokensPerSecond,
             streamStartedAt: 0,
@@ -448,6 +456,7 @@ export const useChat = create<ChatStore>((set, get) => ({
         set((state) => ({
           running: false,
           status: 'error',
+          thinking: null,
           ...outlives(state),
           entries: event.entryId ? state.entries : withLocalProblem(state.entries, event.message, event.problem ?? HOST_PROBLEM),
         }))
@@ -461,6 +470,7 @@ export const useChat = create<ChatStore>((set, get) => ({
           running: false,
           approvals: [],
           ask: null,
+          thinking: null,
           usageTotals: NO_USAGE,
           tokensPerSecond: 0,
           streamStartedAt: 0,
@@ -472,6 +482,9 @@ export const useChat = create<ChatStore>((set, get) => ({
         break
       case 'todos':
         set({ todos: event.todos })
+        break
+      case 'thinking':
+        set({ thinking: event.thinking })
         break
       case 'plan':
         set({ plan: event.plan })

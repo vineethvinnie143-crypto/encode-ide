@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentEvent, AgentStatus, ApprovalRequest, ConversationEntry } from '@shared/types'
+import type { AgentEvent, AgentStatus, ApprovalRequest, ConversationEntry, ThinkingProgress } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
 import { usePanels } from '../stores/panels'
@@ -41,6 +41,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
   const root = parent?.projectRoot ?? open
   const [entries, setEntries] = useState<ConversationEntry[]>([])
   const [status, setStatus] = useState<AgentStatus>('idle')
+  const [thought, setThought] = useState<ThinkingProgress | null>(null)
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [ask, setAsk] = useState<Ask | null>(null)
   const [ended, setEnded] = useState(false)
@@ -78,6 +79,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
           break
         case 'status':
           setStatus(event.status)
+          if (event.status !== 'thinking') setThought(null)
           if (!RUNNING.includes(event.status)) {
             setApprovals([])
             setAsk(null)
@@ -88,6 +90,9 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
           break
         case 'ask':
           setAsk({ id: event.id, question: event.question, options: event.options })
+          break
+        case 'thinking':
+          setThought(event.thinking)
           break
         case 'done':
           setStatus('done')
@@ -184,7 +189,7 @@ export default function SideChatPanel({ tabId }: { tabId: string }) {
                   </div>
                 ),
               )}
-              {turn.active && <LiveLine status={status} log={turn.log} reply={turn.reply} startedAt={turn.startedAt} />}
+              {turn.active && <LiveLine status={status} log={turn.log} reply={turn.reply} startedAt={turn.startedAt} thought={thought} />}
             </section>
           ))}
           {approval && (
