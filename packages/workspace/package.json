@@ -15,6 +15,7 @@
     "@encode/checkpoints": "workspace:*",
     "@encode/config": "workspace:*",
     "@encode/core": "workspace:*",
+    "@encode/debug": "workspace:*",
     "@encode/hooks": "workspace:*",
     "@encode/lsp": "workspace:*",
     "@encode/mcp": "workspace:*",

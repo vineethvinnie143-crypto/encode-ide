@@ -139,7 +139,7 @@ const RENDERED_LINES = `[...document.querySelectorAll('.enc-line')]
   .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
   .map((line) => line.textContent)`
 
-const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F8: 119, F12: 123, '.': 190, '[': 219, ']': 221, '\\': 220 }
+const KEY_CODES = { Backspace: 8, End: 35, Home: 36, Insert: 45, Delete: 46, Escape: 27, Enter: 13, Tab: 9, Space: 32, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, F2: 113, F5: 116, F6: 117, F8: 119, F9: 120, F10: 121, F11: 122, F12: 123, '.': 190, '[': 219, ']': 221, '\\': 220 }
 /** Keys whose `key` is not their name. */
 const KEY_VALUES = { Space: ' ' }
 /** Keys whose physical key is not `Key` and their letter. */
@@ -692,6 +692,7 @@ async function runProviderPhase() {
   await runRewindChecks()
   await runMcpChecks()
   await runLanguageServerChecks()
+  await runDebugChecks()
   await runInlineSuggestionChecks()
   await runEditorIssueChecks()
   await runComputerChecks()
@@ -1923,6 +1924,166 @@ async function runLanguageServerChecks() {
  * package.json is checked against eNCode's schema, a CSS slip is named with the likely property, and the server is
  * shown as eNCode's in the footer.
  */
+/** The program the debugger checks run: a checkout over three items, line numbers as the checks expect them. */
+const DEBUG_PROGRAM = `// A small checkout, to try the debugger on.
+const items = [
+  { name: 'Coffee beans', price: 14.5, qty: 2 },
+  { name: 'Oat milk', price: 3.25, qty: 4 },
+  { name: 'Croissant', price: 2.8, qty: 6 },
+]
+
+function lineTotal(item) {
+  const total = item.price * item.qty
+  return Math.round(total * 100) / 100
+}
+
+function checkout(cart, discount) {
+  let sum = 0
+  for (const item of cart) {
+    sum += lineTotal(item)
+  }
+  const final = sum * (1 - discount)
+  console.log(\`Subtotal \${sum.toFixed(2)}, discount \${discount * 100}%\`)
+  return final
+}
+
+console.log('Checking out', items.length, 'items')
+const receipt = checkout(items, 0.1)
+console.log('Total', receipt.toFixed(2))
+`
+
+/**
+ * The debugger (ADR 0143), as a person uses it: a click in the gutter sets a breakpoint, the gutter's menu adds a log
+ * point, F5 starts the file and stops there, the panel shows the values and the editor the line, a hover reads a
+ * value, F10 steps, the console reads an expression, F9 takes the breakpoint away and the run ends with what it printed.
+ * Not trusted, the folder's code does not run.
+ */
+async function runDebugChecks() {
+  console.log('[smoke] --- debugger ---')
+  const file = 'debug-cart.js'
+  await evaluate(`window.eNCode.workspace.write(${JSON.stringify(file)}, ${JSON.stringify(DEBUG_PROGRAM)})`)
+  const wasTrusted = (await evaluate('window.eNCode.permissions.report()')).trusted
+  if (wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  const refused = await evaluate(`window.eNCode.debug.start('file', ${JSON.stringify(file)})`)
+  if (refused.ok) throw new Error('A folder that is not trusted ran its code in the debugger')
+  console.log('[smoke] debugger, not trusted:', refused.reason)
+  const trust = await evaluate("window.eNCode.permissions.act({ type: 'trust' })")
+  if (!trust.ok) throw new Error(`Trusting the folder failed: ${JSON.stringify(trust)}`)
+
+  await quickOpen(file, 'function lineTotal')
+  const debugState = () => evaluate('window.eNCode.debug.state()')
+  const gutterSpot = (line) =>
+    evaluate(`(() => {
+      const number = [...document.querySelectorAll('.code-editor .enc-gutter-num')].find((node) => node.textContent.trim() === ${JSON.stringify(String(line))})
+      const gutter = document.querySelector('.code-editor .enc-gutter')
+      if (!number || !gutter) return null
+      const box = number.getBoundingClientRect()
+      return { x: gutter.getBoundingClientRect().left + 8, y: box.top + box.height / 2 }
+    })()`)
+
+  // A click left of line 10's number: a breakpoint, drawn in the gutter.
+  const ten = await gutterSpot(10)
+  if (!ten) throw new Error('No line 10 in the gutter')
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: ten.x, y: ten.y, button: 'left', clickCount: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: ten.x, y: ten.y, button: 'left', clickCount: 1 })
+  await waitFor(`window.eNCode.debug.state().then((state) => (state.breakpoints[${JSON.stringify(file)}] ?? []).some((item) => item.line === 10))`, 8000, 'the breakpoint the click set')
+  await waitFor("[...document.querySelectorAll('.code-editor .enc-gutter-num.enc-bp')].some((node) => node.textContent.trim() === '10')", 8000, 'the breakpoint in the gutter')
+  if ((await evaluate("document.querySelector('.code-editor').textContent.includes('function lineTotal')")) !== true) throw new Error('The click moved the editor off the file')
+
+  // The gutter's menu on line 18: a log point, its message asked for.
+  const eighteen = await gutterSpot(18)
+  if (!eighteen) throw new Error('No line 18 in the gutter')
+  await evaluate(`[...document.querySelectorAll('.code-editor .enc-gutter-num')].find((node) => node.textContent.trim() === '18').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: ${eighteen.x}, clientY: ${eighteen.y} }))`)
+  await waitFor("[...document.querySelectorAll('.ui-menu-item')].some((item) => item.textContent.includes('Add log point'))", 6000, 'the breakpoint menu')
+  if (!(await click('.ui-menu-item', 'Add log point'))) throw new Error('No Add log point in the menu')
+  await waitFor("!!document.querySelector('.prompt-dialog input')", 6000, 'the log message prompt')
+  await typeInto('.prompt-dialog input', 'sum is {sum}')
+  await click('.prompt-dialog .btn.primary')
+  await waitFor(`window.eNCode.debug.state().then((state) => (state.breakpoints[${JSON.stringify(file)}] ?? []).some((item) => item.line === 18 && item.logMessage === 'sum is {sum}'))`, 8000, 'the log point')
+
+  // The Debug panel (Ctrl+Shift+D), set to run the file in the editor; F5 starts it, and it stops on line 10.
+  await pressKey('D', { ctrl: true, shift: true })
+  await waitFor("!!document.querySelector('.debug-pane .dp-config select')", 8000, 'the Debug panel with its configurations')
+  await selectOption('.debug-pane .dp-config select', 'file')
+  await evaluate("document.querySelector('.code-editor .enc-content')?.focus()")
+  await pressKey('F5')
+  const pausedOn = (name) => `[...document.querySelectorAll('.debug-pane .dp-var')].some((node) => node.textContent.includes(${JSON.stringify(name)}))`
+  await waitFor(`!!document.querySelector('.debug-pane .dp-frame.is-chosen') && ${pausedOn('Coffee beans')}`, 30000, 'the program paused on the first item').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await debugState()).slice(0, 1500)}`)
+  })
+  const top = await evaluate(`(() => {
+    // The paused line's band is drawn behind the text, level with the line.
+    const band = document.querySelector('.code-editor .enc-line-paused')?.getBoundingClientRect()
+    const text = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => node.textContent.includes('return Math.round'))?.getBoundingClientRect()
+    const arrow = [...document.querySelectorAll('.code-editor .enc-gutter-num.enc-frame-top')].map((node) => node.textContent.trim())
+    return { level: Boolean(band && text && Math.abs(band.top - text.top) < 2), arrow, frame: document.querySelector('.debug-pane .dp-frame.is-chosen')?.textContent ?? '' }
+  })()`)
+  console.log('[smoke] debugger paused:', JSON.stringify(top))
+  if (!top.level || top.arrow.join() !== '10' || !top.frame.includes('lineTotal')) throw new Error(`The pause is not shown on line 10: ${JSON.stringify(top)}`)
+  await screenshot('48-debugger-paused.png')
+
+  // A hover over item.price reads it in the paused frame.
+  const price = await evaluate(`(() => {
+    const line = [...document.querySelectorAll('.code-editor .enc-line')].find((node) => node.textContent.includes('const total = item.price'))
+    const walker = line && document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+    for (let node = walker?.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent.indexOf('price')
+      if (at < 0) continue
+      const range = document.createRange()
+      range.setStart(node, at + 2)
+      range.setEnd(node, at + 3)
+      const box = range.getBoundingClientRect()
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+    }
+    return null
+  })()`)
+  if (!price) throw new Error('item.price is not on screen')
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: price.x, y: price.y })
+  await waitFor("document.querySelector('.mark-card-value')?.textContent === 'item.price14.5'", 8000, 'the value of item.price on hover').catch(async (error) => {
+    throw new Error(`${error.message}: ${JSON.stringify(await evaluate("document.querySelector('.mark-card')?.textContent ?? null"))}`)
+  })
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 })
+
+  // F10 steps on (V8 stops again at the return of line 10, past its expression); F5 runs on to the second item.
+  const before = (await debugState()).runs.at(-1)
+  const from = before.threads[0].frames[0]
+  await pressKey('F10')
+  await waitFor(`window.eNCode.debug.state().then((state) => { const thread = state.runs.at(-1)?.threads[0]; const top = thread?.frames?.[0]; return thread?.state === 'paused' && thread.reason === 'step' && top?.name === 'lineTotal' && (top.line !== ${from.line} || top.column !== ${from.column}) })`, 15000, 'a step over').catch(async (error) => {
+    const thread = (await debugState()).runs.at(-1)?.threads[0]
+    throw new Error(`${error.message}: ${JSON.stringify({ state: thread?.state, reason: thread?.reason, top: thread?.frames?.[0] })}`)
+  })
+  await pressKey('F5')
+  await waitFor(`${pausedOn('Oat milk')} && window.eNCode.debug.state().then((state) => state.runs.at(-1)?.threads[0]?.reason === 'breakpoint')`, 15000, 'the second item')
+
+  // The console reads an expression in the paused frame.
+  await typeInto('.debug-pane .dp-input input', 'item.qty * 2')
+  await evaluate("document.querySelector('.debug-pane .dp-input input').focus()")
+  await pressKey('Enter')
+  await waitFor("[...document.querySelectorAll('.debug-pane .dp-line.is-result')].some((node) => node.textContent.trim() === '8')", 8000, 'the console answer')
+
+  // F9 on the paused line takes the breakpoint away; F5 runs to the end, the log point printing on the way.
+  await evaluate("document.querySelector('.code-editor .enc-content')?.focus()")
+  await pressKey('F9')
+  await waitFor(`window.eNCode.debug.state().then((state) => !(state.breakpoints[${JSON.stringify(file)}] ?? []).some((item) => item.line === 10))`, 8000, 'F9 taking the breakpoint away')
+  await pressKey('F5')
+  await waitFor(`window.eNCode.debug.state().then((state) => state.runs.find((run) => run.id === ${JSON.stringify(before.id)})?.state === 'ended')`, 20000, 'the run ending')
+  const printed = await evaluate("[...document.querySelectorAll('.debug-pane .dp-line')].map((node) => node.textContent)")
+  console.log('[smoke] debugger console:', JSON.stringify(printed))
+  for (const line of ['Checking out 3 items', 'sum is 58.8', 'Subtotal 58.80, discount 10%', 'Total 52.92']) {
+    if (!printed.some((text) => text.includes(line))) throw new Error(`The console is missing ${JSON.stringify(line)}: ${JSON.stringify(printed)}`)
+  }
+  const ended = (await debugState()).runs.find((run) => run.id === before.id)
+  if (ended.exitCode !== 0) throw new Error(`The run should end with code 0: ${JSON.stringify(ended)}`)
+  if (await evaluate("!!document.querySelector('.code-editor .enc-line-paused')")) throw new Error('The paused line is still drawn after the run ended')
+
+  // Put back as found.
+  await evaluate(`window.eNCode.debug.act(${JSON.stringify(before.id)}, { kind: 'dismiss' })`)
+  await evaluate(`window.eNCode.debug.setBreakpoints(${JSON.stringify(file)}, [])`)
+  if (!wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
+  await evaluate(`window.eNCode.workspace.delete(${JSON.stringify(file)}).catch(() => null)`)
+  console.log('[smoke] debugger: breakpoints, a log point, F5, hover, step, console, F9 and the end of the run')
+}
+
 async function runWebLanguageChecks() {
   console.log('[smoke] --- JSON, CSS and HTML ---')
   const marks = async (want, label) =>
@@ -6549,7 +6710,7 @@ try {
   // A full run, as CI makes, never sets it.
   const only = (process.env.ENCODE_SMOKE_ONLY ?? '').split(',').filter(Boolean)
   if (only.length) {
-    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, story: runStoryChecks, attach: runAttachChecks, follow: runFollowChecks, updates: runUpdateChecks }
+    const parts = { browser: runAgentBrowserChecks, side: runSideChatChecks, worktree: runChatWorktreeChecks, panels: runPanelChecks, crash: runCrashCheck, appearance: runAppearanceChecks, wide: runWideLineChecks, remote: runRemoteChecks, stop: runStopChecks, limit: runStepLimitChecks, waits: runWaitChecks, story: runStoryChecks, attach: runAttachChecks, follow: runFollowChecks, updates: runUpdateChecks, debug: runDebugChecks }
     await useTestProvider()
     await send('Page.reload')
     await waitFor("document.querySelectorAll('.tree-row').length > 0", 30000, 'tree after provider config')

@@ -313,9 +313,25 @@ closing it deletes it
 `Ctrl+Alt+B` hides it. A hidden panel stays alive: a browser keeps its page and a terminal its
 shell.
 
-`Ctrl+J` shows the bottom panel, which holds the terminal and the background jobs the agent
-started. Tabs, layout and widths are remembered between runs
+`Ctrl+J` shows the bottom panel, which holds the terminal, the background jobs the agent
+started, the problems the language servers found and the debugger. Tabs, layout and widths are remembered between runs
 ([ADR 0015](docs/adr/0015-one-tab-model-for-the-side-and-bottom-panels.md)).
+
+## The debugger
+
+Node.js and TypeScript programs are debugged in eNCode itself, with a client of its own
+([ADR 0143](docs/adr/0143-encode-debugs-nodejs-with-a-client-of-its-own-from-the-gutter-and-a-debug-panel.md)).
+
+- **Breakpoints.** Click left of a line number, or press `F9`. Right-click there for a breakpoint with a condition, one
+  that stops on some hits (`5`, `% 3`), or a log point that prints instead of stopping (`total is {total}`).
+- **Start.** `F5` starts what the Debug tab has chosen: the file in the editor, a script of `package.json`, a
+  configuration of the folder's `.encode/debug.json`, or a program already listening on port 9229. The programs a run
+  starts are debugged too, so `npm run dev` stops at a breakpoint in the server it starts. TypeScript stops on its own
+  lines through source maps.
+- **While paused.** The editor shows the line, and a hover shows the value under the pointer. The Debug tab
+  (`Ctrl+Shift+D`) shows the values, your watches, the call stack and the breakpoints, and its console evaluates in
+  the paused frame.
+- **Trust.** A run starts the folder's code, so it starts only in a folder you trust.
 
 ## The Review tab
 
@@ -387,7 +403,10 @@ The main ones as shipped:
 | Next session that needs you | `Ctrl+Alt+A` |
 | Rename, pin, archive, mark unread | `Ctrl+Alt+R`, `Ctrl+Alt+P`, `Ctrl+Shift+A`, `Ctrl+Shift+U` |
 | Zoom in, out, reset | `Ctrl+=`, `Ctrl+-`, `Ctrl+0` |
-| Full screen | `F11` |
+| Full screen | `F11` (when no program is paused) |
+| Start debugging or continue, stop, restart | `F5`, `Shift+F5`, `Ctrl+Shift+F5` |
+| Step over, into, out; pause | `F10`, `F11`, `Shift+F11`; `F6` |
+| Toggle a breakpoint, show the Debug tab | `F9`, `Ctrl+Shift+D` |
 | Find, replace in the file | `Ctrl+F`, `Ctrl+H` (in the editor) |
 | Go to a line, `line` or `line:column` | `Ctrl+G` (in the editor) |
 | Comment the line, indent, outdent | `Ctrl+/`, `Ctrl+]`, `Ctrl+[` (in the editor) |
@@ -468,6 +487,7 @@ packages/bench/               the agent's benchmark: tasks with hidden checks, r
 packages/checkpoints/         what the file tools changed, saved before each change, and put back on request (the Rewind dialog's engine)
 packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
+packages/debug/               the debugger's engine: a Chrome DevTools Protocol client, Node.js programs and the ones they start, source maps, values (@encode/debug)
 packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)
@@ -483,7 +503,7 @@ packages/router/              roles as ordered model lists, health and failover,
 packages/testkit/             seeded property testing that shrinks failures, and fuzzing
 packages/text/                the text model: an immutable line tree and change sets (@encode/text)
 packages/tools/               the agent's tools: files, search, the OS shell, jobs, the web (fetch, and search through Parallel, Tavily, Exa, Brave Search or DuckDuckGo), and the Computer tool with its Windows helper
-packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers with the changes they make for the editor
+packages/workspace/           a folder's permissions as one snapshot (settings, trust, rules, hooks), what the Permissions screen may do, the record behind Rewind, and the folder's MCP servers with what the MCP screen may do, and its language servers with the changes they make for the editor, and its debugger: the ways to run it, its breakpoints and its runs
 docs/adr/                     architecture decision records
 docs/gateway-protocol.md      the gateway protocol, in prose
 docs/security/                threat model

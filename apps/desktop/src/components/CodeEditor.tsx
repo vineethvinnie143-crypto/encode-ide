@@ -8,6 +8,7 @@ import type { CodeDiagnostic, EditorLocation } from '@shared/types'
 import { api } from '../api'
 import { modalOpen } from '../commands/useKeymap'
 import { setActiveEditor } from '../editor/active'
+import { breakpointMenu, EditorBreakpoints } from '../editor/breakpoints'
 import { askServers, forgetTriggers, lspAt } from '../editor/assist/ask'
 import { wordEnd, wordStart } from '../editor/assist/completion'
 import { EditorAssist } from '../editor/assist/controller'
@@ -26,7 +27,9 @@ import { tooLargeForServers } from '../editor/language'
 import { allMarks, decorationsOf, marksAt, marksOf, marksOnLine, onMarksChanged, positionOf, rangeOf, sourceOf } from '../editor/marks'
 import { problemFrom } from '../editor/problems'
 import { noAnswerReason } from '../panels/code'
+import { hoverExpression } from '../panels/debug'
 import { useCode } from '../stores/code'
+import { debugHoverValue } from '../stores/debug'
 import { accessOptions, textOptions, useEditorLayout, useScreenReaderRunning } from '../stores/editor-layout'
 import { useEditor, type Tab } from '../stores/editor'
 import { useSettings } from '../stores/settings'
@@ -82,7 +85,8 @@ const viewOptions = () => {
   const { folding, stickyScroll, bracketColors, minimap } = layout
   // Reduce motion set to On in Settings > Appearance stops the caret blinking (with System, the view follows Windows itself).
   const cursorBlink = useSettings.getState().settings?.appearance.motion !== 'reduce'
-  return { folding, stickyScroll, bracketColors, minimap, cursorBlink, ...textOptions(layout), ...accessOptions(layout, useScreenReaderRunning.getState().running) }
+  // The column left of the line numbers where a click sets a breakpoint (ADR 0143).
+  return { folding, stickyScroll, bracketColors, minimap, cursorBlink, breakpoints: true, ...textOptions(layout), ...accessOptions(layout, useScreenReaderRunning.getState().running) }
 }
 
 /** The blocks folded in the file a view shows, kept to fold them again when the file is shown next. */
@@ -135,6 +139,8 @@ interface Hover {
   items: CodeDiagnostic[]
   /** What the server says of the symbol, as markdown. */
   markdown?: string
+  /** While the program is paused, the value of what is under the pointer (ADR 0143). */
+  value?: { expression: string; text: string }
   anchor: { left: number; top: number; width: number; height: number }
 }
 
@@ -159,6 +165,12 @@ function HoverCard({ hover, language, onEnter, onLeave, onQuickFix }: { hover: H
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
     >
+      {hover.value && (
+        <div className="mark-card-value">
+          <span className="mark-card-expression">{hover.value.expression}</span>
+          <span className="mark-card-result">{hover.value.text}</span>
+        </div>
+      )}
       {hover.items.map((item, index) => {
         const Icon = SEVERITY_ICON[item.severity]
         const source = sourceOf(item)
@@ -205,11 +217,13 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
   const foldingRef = useRef<EditorFolding | null>(null)
   const inlaysRef = useRef<EditorInlays | null>(null)
   const semanticRef = useRef<EditorSemanticColours | null>(null)
+  const breakpointsRef = useRef<EditorBreakpoints | null>(null)
   /** The problem F8 went to, whose message shows once the editor is there. */
   const problemCard = useRef<{ path: string; line: number; character: number } | null>(null)
   const pathRef = useRef<string | null>(null)
   const [view, setView] = useState<EditorView | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  /** The context menu; `line` when it opened in the breakpoint column. */
+  const [menu, setMenu] = useState<{ x: number; y: number; line?: number } | null>(null)
   const [hover, setHover] = useState<Hover | null>(null)
   const [peek, setPeek] = useState<(PeekData & { from: Place }) | null>(null)
   const [calls, setCalls] = useState<(CallsData & { from: Place }) | null>(null)
@@ -304,6 +318,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       inlaysRef.current = null
       semanticRef.current?.dispose()
       semanticRef.current = null
+      breakpointsRef.current?.dispose()
+      breakpointsRef.current = null
       assistRef.current?.dispose()
       assistRef.current = null
       ghostRef.current?.dispose()
@@ -469,6 +485,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       foldingRef.current?.show(null)
       inlaysRef.current?.show(null)
       semanticRef.current?.show(null)
+      breakpointsRef.current?.show(null)
       return
     }
     if (current) {
@@ -487,6 +504,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       foldingRef.current = new EditorFolding(created, () => useEditorLayout.getState().folding)
       inlaysRef.current = new EditorInlays(created, () => useEditorLayout.getState().inlayHints)
       semanticRef.current = new EditorSemanticColours(created, () => useEditorLayout.getState().semanticHighlighting)
+      breakpointsRef.current = new EditorBreakpoints(created)
       const scroll = scrollOf(path!)
       if (scroll) created.setState(state, scroll)
       created.on('transaction', (tr) => {
@@ -505,7 +523,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
         const shown = pathRef.current
         if (shown) keepFolds(created, shown)
       })
-      created.on('contextmenu', ({ x, y }) => setMenu({ x, y }))
+      created.on('contextmenu', ({ x, y, line }) => setMenu(line === undefined ? { x, y } : { x, y, line }))
       created.on('request', (name) => {
         if (name === 'gotoLine') void goToLine(created)
       })
@@ -533,6 +551,7 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
     foldingRef.current?.show(path)
     inlaysRef.current?.show(path)
     semanticRef.current?.show(path)
+    breakpointsRef.current?.show(path)
     showMarks(current, path)
     reportCursor(state)
     reportInfo(state)
@@ -679,7 +698,25 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       if (token !== hoverAsk.current || viewRef.current !== current || current.state.doc !== doc || !answer?.markdown.trim()) return
       const start = answer.range ? positionOf(doc, answer.range.start.line, answer.range.start.character) : word.from
       const at = current.coordsAtPos(Math.max(doc.lineAt(word.from).from, Math.min(start, word.from)))
-      setHover({ items: marks?.items ?? [], markdown: answer.markdown, anchor: marks?.anchor ?? { left: at.left, top: at.top, width: 1, height: at.bottom - at.top } })
+      setHover((card) => ({ items: marks?.items ?? [], markdown: answer.markdown, anchor: marks?.anchor ?? { left: at.left, top: at.top, width: 1, height: at.bottom - at.top }, ...(card?.value ? { value: card.value } : {}) }))
+    })
+  }
+
+  /** While the program is paused in this file, the value of what is under the pointer, added to the card when it comes. */
+  const askValue = (word: { from: number; to: number }, marks: Hover | null) => {
+    const current = viewRef.current
+    const shown = pathRef.current
+    if (!current || !shown) return
+    const line = current.state.doc.lineAt(word.from)
+    const expression = hoverExpression(line.text, word.from - line.from, word.to - line.from)
+    if (!expression) return
+    // The same ask as the server's: a move of the pointer drops both.
+    const token = hoverAsk.current
+    const doc = current.state.doc
+    void debugHoverValue(shown, expression).then((text) => {
+      if (text === null || token !== hoverAsk.current || viewRef.current !== current || current.state.doc !== doc) return
+      const at = current.coordsAtPos(word.to - expression.length)
+      setHover((card) => ({ ...(card ?? { items: marks?.items ?? [], anchor: marks?.anchor ?? { left: at.left, top: at.top, width: 1, height: at.bottom - at.top } }), value: { expression, text } }))
     })
   }
 
@@ -696,7 +733,10 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
       const marks = marksUnder(clientX, clientY, target)
       setHover((current) => (marks ? marks : overCard.current ? current : null))
       const word = wordUnder(clientX, clientY, target)
-      if (word) askHover(word, marks)
+      if (word) {
+        askHover(word, marks)
+        askValue(word, marks)
+      }
     }, HOVER_MS)
   }
 
@@ -877,8 +917,8 @@ export default function CodeEditor({ tab }: { tab: Tab | null }) {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          entries={entries()}
-          label="Editor"
+          entries={menu.line !== undefined && pathRef.current ? breakpointMenu(pathRef.current, menu.line) : entries()}
+          label={menu.line !== undefined ? 'Breakpoint' : 'Editor'}
           onClose={(refocus) => {
             setMenu(null)
             // Escape or a choice hands focus back; a click elsewhere has put it where the user wanted.

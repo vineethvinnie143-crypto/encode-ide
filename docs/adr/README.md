@@ -132,6 +132,7 @@ say so.
 | [0140](0140-checks-run-when-a-step-is-done-a-missing-name-is-looked-up-and-a-stronger-model-first-reads-the-stuck-steps.md) | Checks run when a step is done, a missing name is looked up, and a stronger model first reads the stuck steps | Accepted, amends 0095 and 0100; builds on 0094, 0096 and 0139 |
 | [0141](0141-the-agent-has-a-scratch-folder-for-its-probes-and-tries-the-inputs-around-a-change.md) | The agent has a scratch folder for its probes, and tries the inputs around a change | Accepted, amends 0126; builds on 0063, 0093, 0095, 0100 and 0139 |
 | [0142](0142-a-model-family-gets-notes-of-its-own-each-measured-and-the-bench-keeps-the-calls-that-did-nothing.md) | A model family gets notes of its own, each measured, and the bench keeps the calls that did nothing | Accepted, builds on 0094, 0096, 0100, 0137 and 0139 |
+| [0143](0143-encode-debugs-nodejs-with-a-client-of-its-own-from-the-gutter-and-a-debug-panel.md) | eNCode debugs Node.js with a client of its own, from the gutter and a Debug panel | Accepted, builds on 0015, 0062, 0088 and 0111 |
 
 ## Template
 

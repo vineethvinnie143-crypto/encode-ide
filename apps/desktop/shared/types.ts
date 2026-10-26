@@ -1738,6 +1738,135 @@ export type BrowserKeyAction = 'address' | 'reload' | 'back' | 'forward' | 'clos
 /** The main process asks for a chat's agent tab (ADR 0103): show it (opening it when it is not open) or close it. */
 export type AgentTabRequest = { type: 'show' | 'close'; key: string }
 
+/**
+ * The debugger as the panel and the editor see it (ADR 0143), the same as the host's (contract.ts). Lines and columns
+ * are 1-based; files of the open folder are named by their paths in it, '/'-separated.
+ */
+export interface DebugBreakpoint {
+  id: string
+  line: number
+  column?: number
+  /** It stops only when this is true. */
+  condition?: string
+  /** `5`, `==5`, `>5`, `>=5`, `<5`, `<=5` or `%5`. */
+  hitCondition?: string
+  /** It prints this instead of stopping; `{expression}` is replaced by its value. */
+  logMessage?: string
+  enabled: boolean
+}
+
+/** A breakpoint with how it stands in the runs going on: placed (verified), not yet, or on another line. */
+export interface DebugFolderBreakpoint extends DebugBreakpoint {
+  verified?: boolean
+  placed?: number
+  message?: string
+}
+
+export interface DebugExceptionFilters {
+  uncaught: boolean
+  /** Also those that are caught. */
+  all: boolean
+}
+
+export type DebugPauseReason = 'breakpoint' | 'step' | 'exception' | 'pause' | 'entry' | 'debugger' | 'other'
+
+export interface DebugSource {
+  /** The whole path, or null for code that is not a file. */
+  path: string | null
+  name: string
+  /** Its path in the open folder, when it is the folder's. */
+  rel?: string
+}
+
+export interface DebugFrame {
+  id: number
+  name: string
+  source: DebugSource | null
+  line: number
+  column: number
+  async?: string
+  /** Code the person did not write: dimmed, stepped over. */
+  skipped?: boolean
+  noScopes?: boolean
+}
+
+export interface DebugThread {
+  id: number
+  name: string
+  state: 'running' | 'paused'
+  reason?: DebugPauseReason
+  exception?: string
+  frames?: DebugFrame[]
+}
+
+export interface DebugRun {
+  id: string
+  name: string
+  kind: 'launch' | 'attach'
+  state: 'starting' | 'running' | 'paused' | 'ended'
+  threads: DebugThread[]
+  exitCode?: number | null
+  message?: string
+  /** The configuration it was started from, and what it runs in a line. */
+  config: string
+  detail: string
+}
+
+export interface DebugState {
+  /** Debugging runs the folder's code: it waits for the folder to be trusted. */
+  trusted: boolean
+  breakpoints: Record<string, DebugFolderBreakpoint[]>
+  exceptions: DebugExceptionFilters
+  runs: DebugRun[]
+}
+
+export interface DebugConfigView {
+  /** `own:<index>`, `file`, `script:<name>`, `attach`. */
+  id: string
+  name: string
+  kind: 'launch' | 'attach'
+  detail: string
+  /** It debugs the file open in the editor. */
+  file?: true
+  /** It cannot run as written, and why. */
+  problem?: string
+}
+
+export interface DebugConfigs {
+  configs: DebugConfigView[]
+  /** What is wrong with `.encode/debug.json` as a whole. */
+  problem?: string
+}
+
+export type DebugStepKind = 'over' | 'into' | 'out'
+export type DebugAction = { kind: 'continue' | 'pause' | 'stop' | 'restart' | 'dismiss'; thread?: number } | { kind: 'step'; step: DebugStepKind; thread?: number }
+export type DebugResult = { ok: true } | { ok: false; reason: string }
+
+export interface DebugScope {
+  name: string
+  ref: number
+  expensive: boolean
+}
+
+export interface DebugVariable {
+  name: string
+  value: string
+  type?: string
+  ref?: number
+  /** A getter not run yet: opening it runs it. */
+  lazy?: boolean
+  kind?: 'property' | 'internal' | 'private' | 'chunk' | 'this' | 'return'
+}
+
+export type DebugEvaluateContext = 'repl' | 'watch' | 'hover'
+export type DebugEvaluateResult = { ok: true; value: string; type?: string; ref?: number } | { ok: false; message: string }
+
+export interface DebugOutputLine {
+  category: 'stdout' | 'stderr' | 'console' | 'error' | 'info'
+  text: string
+  source?: { path: string; line: number }
+}
+
 export interface EncodeApi {
   app: {
     about(): Promise<AboutInfo>
@@ -2050,5 +2179,23 @@ export interface EncodeApi {
     inline(request: InlineSuggestRequest): Promise<InlineSuggestAnswer>
     /** Stops the request `id` if it still runs; it answers `none`. */
     cancelInline(id: number): void
+  }
+  /** The open folder's debugger (ADR 0143); null or a reason when no folder is open or the agent is starting. */
+  debug: {
+    state(): Promise<DebugState | null>
+    configs(): Promise<DebugConfigs | null>
+    /** Starts a run; `file` is the file the editor shows, by its path in the folder. */
+    start(config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string }>
+    act(run: string, action: DebugAction): Promise<DebugResult | { ok: true; run: string }>
+    /** A file's breakpoints, all of them. */
+    setBreakpoints(file: string, breakpoints: DebugBreakpoint[]): Promise<DebugResult>
+    setExceptions(filters: DebugExceptionFilters): Promise<DebugResult>
+    scopes(run: string, frame: number): Promise<DebugScope[]>
+    variables(run: string, ref: number): Promise<DebugVariable[]>
+    evaluate(run: string, expression: string, options: { frame?: number; thread?: number; context: DebugEvaluateContext }): Promise<DebugEvaluateResult>
+    /** What the panel shows changed: ask for the state again. */
+    onChanged(cb: () => void): () => void
+    /** What a run printed, a batch at a time. */
+    onOutput(cb: (output: { run: string; lines: DebugOutputLine[] }) => void): () => void
   }
 }

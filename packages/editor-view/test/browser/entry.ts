@@ -4,7 +4,7 @@
  */
 import { EditorSelection, EditorState, Highlighter, SelectionRange, T, compileSearch, connectHighlighting, editorProblems, findNext, languageForPath, searchMatches, setHistoryClock, type HighlightConnection } from '@encode/editor'
 import { Text } from '@encode/text'
-import { EditorView, type EditorViewConfig } from '../../src/index'
+import { DecorationSet, EditorView, type EditorViewConfig } from '../../src/index'
 import '../../src/style.css'
 
 export interface MountOptions {
@@ -33,7 +33,7 @@ declare global {
   }
 }
 
-const api = { EditorSelection, EditorState, SelectionRange, T, Text, EditorView, Highlighter, compileSearch, editorProblems, findNext, searchMatches, languageForPath, setHistoryClock }
+const api = { EditorSelection, EditorState, SelectionRange, T, Text, EditorView, DecorationSet, Highlighter, compileSearch, editorProblems, findNext, searchMatches, languageForPath, setHistoryClock }
 window.enc = api
 
 let current: EditorView | null = null

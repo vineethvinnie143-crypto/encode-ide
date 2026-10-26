@@ -2736,3 +2736,56 @@ No new setting, IPC call or rule.
 - `apps/cli/src/scratch.test.ts`: from the command line, in the sandbox where there is one, a probe written in the
   folder imports the project's file, runs, and writes its output there; the project is left as it was.
 - `sandbox.test.ts`: the folder lies in the sandbox's temp folder, which is one of its own.
+
+
+## The debugger
+
+Written with the pull request that adds it
+([0143](../adr/0143-encode-debugs-nodejs-with-a-client-of-its-own-from-the-gutter-and-a-debug-panel.md)).
+
+What is new:
+
+- the agent host starts Node.js programs of the open folder when the person presses F5, or attaches to one on this
+  machine, and drives them over their inspector (the Chrome DevTools Protocol);
+- a boot script of eNCode's own goes into every Node.js program of a run through `NODE_OPTIONS`, from an owner-only
+  folder of the run;
+- the folder's `.encode/debug.json` names programs, arguments and environment to run;
+- the renderer sends breakpoints (with conditions and log messages) and expressions to evaluate, and gets values,
+  frames and what the program printed;
+- breakpoints are kept per folder in eNCode's profile.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| DB1 | Opening a folder runs its code, through a configuration of its own | A run starts only in a trusted folder, and only from the person's F5 or Start. The panel shows what a configuration runs before it starts. Not trusted, the start is refused with why. | Mitigated |
+| DB2 | A folder brings breakpoints whose conditions or log messages run code | Breakpoints are kept in eNCode's profile, by folder, never read from the folder. Only the person sets them. | Mitigated |
+| DB3 | Attaching reaches a program on another machine, or a configuration points the debugger at one | `attach` takes only `127.0.0.1` or `localhost`; any other host is refused before anything connects. A launched run connects only to the addresses its own programs wrote into its owner-only folder. | Mitigated |
+| DB4 | Another program of the user connects to a program's inspector while it runs, and runs code in it | The inspector listens on a random port of 127.0.0.1 only for the run, as `node --inspect` does. A program of the same user could connect meanwhile; it could already run code as that user. | Accepted |
+| DB5 | A hover changes the program, or runs something slow | A hover evaluates with V8's `throwOnSideEffect` and a 1 s limit, and only a name with the names before it (`a.b.c`), never a call or an index. | Mitigated |
+| DB6 | A crafted request from the renderer floods the host or escapes the folder | The main process checks run ids (`[\w-]{1,64}`), numbers, expression length (10,000) and resolves files inside the folder. The host checks breakpoints, actions and filters with the workspace's validators: 1,000 files, 500 breakpoints a file, 5,000 in all, a condition or message of 2,000 characters, an expression to evaluate of 8,000. | Mitigated |
+| DB7 | A program's output or values inject markup into the window | Output, values and names are text in React, never HTML. A value is cut to 1,000 characters, the console to its last 5,000 lines, the stack to 200 frames. | Mitigated |
+| DB8 | A hostile source map stalls the host or exhausts its memory | Maps of at most 50 MB, 64 M characters of mappings, 50,000 sources and 10,000 sections, read by eNCode's own parser with bounds on every number. | Mitigated |
+| DB9 | A run outlives eNCode or its folder, or a stopped run leaves programs behind | Stop ends the program's whole tree (its process group, or the tree on Windows). Opening another folder stops the runs of the one before; closing eNCode stops them all. | Partial (DB-R1) |
+
+### Residual risks
+
+- DB-R1: a program that leaves its process group on purpose (a daemon) outlives Stop, as it outlives Ctrl+C in a
+  terminal.
+- A run uses the person's environment and is not in the agent's sandbox, as a terminal is not.
+- With no Node.js installed, a run uses eNCode's own through `ELECTRON_RUN_AS_NODE` (see T14).
+
+### Verification
+
+- `packages/debug/src/session.test.ts`: against a real Node.js, a started program and the programs it starts, a
+  TypeScript program through its map, breakpoints with conditions, hits and log messages, stepping, exceptions,
+  values, a hover refused a side effect.
+- `packages/debug/src/sourcemap.test.ts`: maps read, bounds refused.
+- `packages/workspace/src/debug.test.ts`: not trusted refused, attach only to loopback, breakpoints kept per folder and
+  validated, configurations read from `.encode/debug.json` and `package.json`.
+- `apps/desktop/electron/agent-host/runtime.test.ts`: the host's requests and their validation.
+- `apps/desktop/src/panels/debug.test.ts`: the frame shown, breakpoints toggled and moved with their lines, the hover's
+  expression.
+- The end-to-end smoke (`runDebugChecks`), on Windows CI: not trusted refused; a click in the gutter and the gutter's
+  menu set a breakpoint and a log point; F5 stops on the line, a hover reads `item.price`, F10 steps, the console
+  evaluates, F9 removes the breakpoint, and the run ends with what it printed.

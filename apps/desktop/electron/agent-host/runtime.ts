@@ -29,7 +29,7 @@ import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, ty
 import { createWorktreeGit } from '@encode/git'
 import { SearchError, createSearchProvider, createWebAccess, realPathOf, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Sandbox } from '@encode/sandbox'
-import { Workspaces, type LanguageServerOptions } from '@encode/workspace'
+import { readBreakpoints, readDebugAction, readExceptions, Workspaces, type FolderDebugger, type LanguageServerOptions, type OutputLine } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
 import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
@@ -370,6 +370,30 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
           }
         },
       },
+      // The debugger (ADR 0143): eNCode's own Node.js runs a file when none is installed, as it runs the servers above.
+      ...(init.debugDir
+        ? {
+            debug: {
+              stateDir: path.join(init.debugDir, 'breakpoints'),
+              runDir: path.join(init.debugDir, 'runs'),
+              node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+              onChange: (root: string) => {
+                try {
+                  peer.notify('debug', { root })
+                } catch (error) {
+                  log(`could not pass on a change of the debugger: ${describe(error)}`)
+                }
+              },
+              onOutput: (root: string, run: string, lines: OutputLine[]) => {
+                try {
+                  peer.notify('debugOutput', { root, run, lines })
+                } catch (error) {
+                  log(`could not pass on what a debugged program printed: ${describe(error)}`)
+                }
+              },
+            },
+          }
+        : {}),
     })
     const created = new AgentHost({
       dir: init.dir,
@@ -462,6 +486,38 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
     if (!workspaces) return { ok: false as const, reason: 'The agent is still starting. Try again in a moment.' }
     return workspaces.removeServer(String(id))
   })
+
+  // The debugger of a folder, for the panel and the editor's breakpoints (ADR 0143).
+  const debuggerOf = async (root: string): Promise<FolderDebugger> => {
+    if (!workspaces) throw new RpcError('invalid-state', 'The agent is still starting. Try again in a moment.')
+    const found = await workspaces.folderDebugger(root)
+    if (!found) throw new RpcError('invalid-state', 'This eNCode has no debugger.')
+    return found
+  }
+  peer.handle('debugState', async ({ root }) => (await debuggerOf(root)).state())
+  peer.handle('debugConfigs', async ({ root }) => (await debuggerOf(root)).configs())
+  peer.handle('debugStart', async ({ root, config, file }) => (await debuggerOf(root)).start({ config, ...(file ? { file } : {}) }))
+  // What the window sent is checked here, where the debugger's own rules are.
+  peer.handle('debugAct', async ({ root, run, action }) => {
+    const checked = readDebugAction(action)
+    if (!checked) return { ok: false as const, reason: 'That is not something a run can do.' }
+    return (await debuggerOf(root)).act(run, checked)
+  })
+  peer.handle('debugBreakpoints', async ({ root, file, breakpoints }) => {
+    const checked = readBreakpoints(breakpoints)
+    if (!checked) return { ok: false as const, reason: 'Those breakpoints could not be read.' }
+    return (await debuggerOf(root)).setBreakpoints(file, checked)
+  })
+  peer.handle('debugExceptions', async ({ root, filters }) => {
+    const checked = readExceptions(filters)
+    if (!checked) return { ok: false as const, reason: 'Those settings could not be read.' }
+    return (await debuggerOf(root)).setExceptions(checked)
+  })
+  peer.handle('debugScopes', async ({ root, run, frame }) => (await debuggerOf(root)).scopes(run, frame))
+  peer.handle('debugVariables', async ({ root, run, ref }) => (await debuggerOf(root)).variables(run, ref))
+  peer.handle('debugEvaluate', async ({ root, run, expression, frame, thread, context }) =>
+    (await debuggerOf(root)).evaluate(run, expression, { context, ...(frame !== undefined ? { frame } : {}), ...(thread !== undefined ? { thread } : {}) }),
+  )
 
   peer.handle('modelStatus', async () => {
     // The lists are read when a request needs them; the page asks for them so it has something to show.

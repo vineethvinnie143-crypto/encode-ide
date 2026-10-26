@@ -277,6 +277,7 @@ if (!gotLock) {
         profileDir: userData,
         toolsDir: path.join(userData, 'tools'),
         serverCacheDir: path.join(userData, 'server-cache'),
+        debugDir: path.join(userData, 'debug'),
         ...(benchTasksDir() ? { benchTasksDir: benchTasksDir() } : {}),
       }),
       apiKey: (profileId, baseUrl) => {
@@ -302,6 +303,14 @@ if (!gotLock) {
       onSandbox: () => send('sandbox:changed', undefined),
       onCode: () => send('code:changed', undefined),
       onModelTest: (progress) => send('models:test-progress', progress),
+      // The panel asks again for the open folder; what a run printed goes to it only when the run is the open folder's.
+      onDebug: () => send('debug:changed', undefined),
+      onDebugOutput: (root, run, lines) => {
+        const paths = places?.remote ? path.posix : path
+        const real = places ? places.workspace.rootRealPath : workspace.rootRealPath
+        if (!real || paths.relative(real, root) !== '') return
+        send('debug:output', { run, lines })
+      },
       // The host names files by their real paths; the editor knows them by their paths in the open folder. Those of
       // another machine are POSIX paths.
       onDiagnostics: (root, file, diagnostics) => {

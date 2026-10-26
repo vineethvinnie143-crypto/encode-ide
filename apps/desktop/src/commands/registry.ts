@@ -26,6 +26,11 @@ export interface Command {
   palette?: boolean
   /** Still works while a dialog is open: quitting, zoom and full screen. */
   global?: boolean
+  /**
+   * The id of a command whose shortcut this one has while it is enabled; while it is not, the key does what that
+   * command does. F11 steps into a paused program, and is full screen otherwise.
+   */
+  takesKeyFrom?: string
   enabled?: () => boolean
   run: () => void | Promise<void>
 }
@@ -124,6 +129,8 @@ export class CommandRegistry {
       }
       this.effective.set(command.id, keys)
     }
+    // A command that takes a key from another while it is enabled is asked first.
+    this.bindings.sort((a, b) => Number(Boolean(b.command.takesKeyFrom)) - Number(Boolean(a.command.takesKeyFrom)))
     this.version++
     for (const listener of [...this.listeners]) listener()
   }
@@ -182,6 +189,11 @@ export class CommandRegistry {
       const ids = seen.get(name) ?? []
       if (!ids.includes(command.id)) seen.set(name, [...ids, command.id])
     }
-    return [...seen].filter(([, ids]) => ids.length > 1).map(([name, ids]) => `${name}: ${ids.join(', ')}`)
+    // A key one command takes from another while it is enabled is shared on purpose.
+    const shared = (ids: string[]) => {
+      const owners = ids.filter((id) => !this.commands.get(id)?.takesKeyFrom)
+      return owners.length === 1 && ids.every((id) => owners.includes(id) || this.commands.get(id)?.takesKeyFrom === owners[0])
+    }
+    return [...seen].filter(([, ids]) => ids.length > 1 && !shared(ids)).map(([name, ids]) => `${name}: ${ids.join(', ')}`)
   }
 }

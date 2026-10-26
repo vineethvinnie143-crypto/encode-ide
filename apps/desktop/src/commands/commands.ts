@@ -3,11 +3,11 @@
  * menus, the shortcut list and the keymap read one definition (and tests can
  * build them without Electron).
  */
-import type { SessionSummary, ZoomAction } from '@shared/types'
+import type { DebugAction, SessionSummary, ZoomAction } from '@shared/types'
 import type { EditorPart } from '../stores/editor-layout'
 import type { Command } from './registry'
 
-export const GROUPS = ['File', 'Edit', 'View', 'Go', 'Session', 'Help'] as const
+export const GROUPS = ['File', 'Edit', 'View', 'Go', 'Run', 'Session', 'Help'] as const
 
 export interface AppActions {
   activeSession(): SessionSummary | undefined
@@ -61,6 +61,15 @@ export interface AppActions {
   showTerminal(): void
   /** The Problems panel: what the language servers found in the folder's files. */
   showProblems(): void
+  /** The Debug panel (ADR 0143). */
+  showDebug(): void
+  /** What the debugger's run in front is doing: none, starting, running, or paused. */
+  debugMode(): 'idle' | 'starting' | 'running' | 'paused'
+  /** F5: continues a paused run, or starts the chosen configuration. */
+  debugContinue(): void
+  debugAct(action: DebugAction): void
+  /** F9: a breakpoint on the editor's line, or none any more. */
+  toggleBreakpoint(): void
   zoom(action: ZoomAction): void
   toggleFullScreen(): void
   showPalette(): void
@@ -215,6 +224,33 @@ function editorCommands(a: AppActions): Command[] {
   ]
 }
 
+/** The debugger's commands (ADR 0143), on the keys every debugger has. */
+function debugCommands(a: AppActions): Command[] {
+  const paused = () => a.debugMode() === 'paused'
+  const live = () => a.debugMode() !== 'idle'
+  const run: Pick<Command, 'group' | 'keywords'> = { group: 'Run', keywords: 'debug debugger' }
+  return [
+    {
+      id: 'debug.continue',
+      title: 'Start debugging',
+      label: () => (paused() ? 'Continue' : 'Start debugging'),
+      keys: ['F5'],
+      enabled: () => a.hasWorkspace() && (paused() || a.debugMode() === 'idle'),
+      run: () => a.debugContinue(),
+      ...run,
+      keywords: 'debug debugger run launch resume continue',
+    },
+    { id: 'debug.stop', title: 'Stop debugging', keys: ['Shift+F5'], enabled: live, run: () => a.debugAct({ kind: 'stop' }), ...run },
+    { id: 'debug.restart', title: 'Restart debugging', keys: ['Ctrl+Shift+F5'], enabled: live, run: () => a.debugAct({ kind: 'restart' }), ...run },
+    { id: 'debug.pause', title: 'Pause', keys: ['F6'], enabled: () => a.debugMode() === 'running', run: () => a.debugAct({ kind: 'pause' }), ...run },
+    { id: 'debug.stepOver', title: 'Step over', keys: ['F10'], enabled: paused, run: () => a.debugAct({ kind: 'step', step: 'over' }), ...run },
+    { id: 'debug.stepInto', title: 'Step into', keys: ['F11'], takesKeyFrom: 'view.fullScreen', enabled: paused, run: () => a.debugAct({ kind: 'step', step: 'into' }), ...run },
+    { id: 'debug.stepOut', title: 'Step out', keys: ['Shift+F11'], enabled: paused, run: () => a.debugAct({ kind: 'step', step: 'out' }), ...run },
+    { id: 'debug.toggleBreakpoint', title: 'Toggle breakpoint', keys: ['F9'], enabled: () => a.hasWorkspace() && a.hasEditor(), run: () => a.toggleBreakpoint(), ...run },
+    { id: 'view.debug', title: 'Show debug', group: 'View', keys: ['Ctrl+Shift+D'], keywords: 'debugger breakpoints call stack variables watch', run: () => a.showDebug() },
+  ]
+}
+
 export function buildCommands(a: AppActions): Command[] {
   const hasSession = () => a.activeSession() !== undefined
   const session: Pick<Command, 'group' | 'enabled'> = { group: 'Session', enabled: hasSession }
@@ -249,6 +285,7 @@ export function buildCommands(a: AppActions): Command[] {
     { id: 'edit.findNext', title: 'Find next', group: 'Edit', keys: ['F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(1) },
     { id: 'edit.findPrevious', title: 'Find previous', group: 'Edit', keys: ['Shift+F3'], palette: false, enabled: () => a.isFinding(), run: () => a.findStep(-1) },
     ...editorCommands(a),
+    ...debugCommands(a),
     {
       id: 'edit.searchInFiles',
       title: 'Search in files',

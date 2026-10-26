@@ -4,7 +4,7 @@
  * stores/panels.ts keeps the state and saves it.
  */
 
-export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'review' | 'terminal' | 'trajectory' | 'jobs' | 'problems' | 'chat'
+export type PanelTabKind = 'new' | 'browser' | 'files' | 'editor' | 'review' | 'terminal' | 'trajectory' | 'jobs' | 'problems' | 'debug' | 'chat'
 export type PanelLayout = 'split' | 'full' | 'hidden'
 
 export interface PanelTab {
@@ -42,10 +42,10 @@ export interface PanelsState {
 }
 
 export const SIDE_KINDS: readonly PanelTabKind[] = ['new', 'browser', 'files', 'editor', 'review', 'terminal', 'trajectory']
-export const BOTTOM_KINDS: readonly PanelTabKind[] = ['terminal', 'jobs', 'problems']
+export const BOTTOM_KINDS: readonly PanelTabKind[] = ['terminal', 'jobs', 'problems', 'debug']
 
 /** Kinds that exist once: opening one again shows the one that is open. */
-const SINGLE: readonly PanelTabKind[] = ['files', 'editor', 'review', 'trajectory', 'jobs', 'problems']
+const SINGLE: readonly PanelTabKind[] = ['files', 'editor', 'review', 'trajectory', 'jobs', 'problems', 'debug']
 
 const TITLES: Record<PanelTabKind, string> = {
   new: 'New tab',
@@ -57,6 +57,7 @@ const TITLES: Record<PanelTabKind, string> = {
   trajectory: 'Trajectory',
   jobs: 'Jobs',
   problems: 'Problems',
+  debug: 'Debug',
   chat: 'Side chat',
 }
 

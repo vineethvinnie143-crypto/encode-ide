@@ -9,6 +9,8 @@ import { api } from '../api'
 import { canReportIssue, hasShownEditor, runEditorCommand } from '../editor/surface'
 import { getActiveSessionId } from '../stores/active'
 import { useChat } from '../stores/chat'
+import { useDebug } from '../stores/debug'
+import { currentRun, toolbarMode } from '../panels/debug'
 import { useEditor } from '../stores/editor'
 import { focusBreadcrumbs, useEditorLayout } from '../stores/editor-layout'
 import { useFind } from '../stores/find'
@@ -269,6 +271,17 @@ function createAppActions(): AppActions {
     showReview: () => panels().open('review'),
     showTerminal: () => panels().openBottom('terminal'),
     showProblems: () => panels().openBottom('problems'),
+    showDebug: () => panels().openBottom('debug'),
+    debugMode: () => {
+      const { state, frame } = useDebug.getState()
+      return toolbarMode(currentRun(state, frame))
+    },
+    debugContinue: () => void useDebug.getState().continueOrStart(),
+    debugAct: (action) => void useDebug.getState().act(action),
+    toggleBreakpoint: () => {
+      const { activePath, cursor } = useEditor.getState()
+      if (activePath) useDebug.getState().toggleBreakpoint(activePath, cursor.line)
+    },
     zoom: (action) => void api.window.zoom(action),
     toggleFullScreen: () => void api.window.toggleFullScreen(),
     showPalette: () => ui().setPaletteOpen(true),

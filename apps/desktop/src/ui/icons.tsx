@@ -86,6 +86,33 @@ export const Play = icon('Play', <path d="M8 5.5v13l10-6.5z" />)
 export const Pause = icon('Pause', <path d="M9 6v12 M15 6v12" />)
 export const Square = icon('Square', <rect x="6" y="6" width="12" height="12" rx="2" />)
 
+// The debugger: its tab, and the steps of its toolbar (a dot is the line the program is on)
+export const Bug = icon(
+  'Bug',
+  <path d="M9 7.5V6a3 3 0 0 1 6 0v1.5 M7.5 9.5h9v5a4.5 4.5 0 0 1-9 0z M12 11v7.5 M4 12.5h3.5 M16.5 12.5H20 M4.5 8l3 1.5 M19.5 8l-3 1.5 M4.5 18l3.2-1.6 M19.5 18l-3.2-1.6" />,
+)
+export const StepOver = icon(
+  'StepOver',
+  <>
+    <path d="M5 13.5a7.2 7.2 0 0 1 13.2-4 M18.5 5v4.5H14" />
+    {dot(12, 18.5, 1.7)}
+  </>,
+)
+export const StepInto = icon(
+  'StepInto',
+  <>
+    <path d="M12 3.5v10 M8 9.5l4 4 4-4" />
+    {dot(12, 19, 1.7)}
+  </>,
+)
+export const StepOut = icon(
+  'StepOut',
+  <>
+    <path d="M12 14V4 M8 8l4-4 4 4" />
+    {dot(12, 19, 1.7)}
+  </>,
+)
+
 // Files and folders
 export const File = icon('File', page)
 export const FileText = icon('FileText', <>{page}<path d="M9.5 12.5h6 M9.5 16h4" /></>)

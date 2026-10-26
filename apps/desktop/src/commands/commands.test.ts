@@ -110,4 +110,24 @@ describe('command registry', () => {
     registry.register({ id: 'other', title: 'Other', group: 'View', keys: ['Ctrl+N'], run: () => {} })
     assert.deepEqual(registry.conflicts(), ['Ctrl+n: new, other'])
   })
+
+  it('lets a command take a key from another while it is enabled (F11: step into while paused, else full screen)', () => {
+    const registry = new CommandRegistry()
+    let paused = false
+    registry.register(
+      { id: 'view.fullScreen', title: 'Full screen', group: 'View', keys: ['F11'], global: true, run: () => {} },
+      { id: 'debug.stepInto', title: 'Step into', group: 'Run', keys: ['F11'], takesKeyFrom: 'view.fullScreen', enabled: () => paused, run: () => {} },
+    )
+    assert.deepEqual(registry.conflicts(), [])
+    assert.equal(registry.forEvent(press('F11', 'F11'), false)?.id, 'view.fullScreen')
+    paused = true
+    assert.equal(registry.forEvent(press('F11', 'F11'), false)?.id, 'debug.stepInto')
+    // A dialog keeps keys from all but the global commands.
+    assert.equal(registry.forEvent(press('F11', 'F11'), false, true)?.id, 'view.fullScreen')
+    assert.deepEqual(registry.keysOf('debug.stepInto'), ['F11'])
+    assert.deepEqual(registry.keysOf('view.fullScreen'), ['F11'])
+    // Taking the key from a command it does not name is a conflict like any other.
+    registry.register({ id: 'other', title: 'Other', group: 'View', keys: ['F11'], takesKeyFrom: 'nothing', run: () => {} })
+    assert.deepEqual(registry.conflicts(), ['f11: debug.stepInto, other, view.fullScreen'])
+  })
 })

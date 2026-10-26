@@ -1,0 +1,23 @@
+{
+  "name": "@encode/debug",
+  "version": "0.0.0",
+  "private": true,
+  "description": "eNCode's debugger: its own client of Node's inspector, source maps read by its own code, the programs a run starts followed, and one model of a paused program for the editor, the panel and the agent.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@encode/lsp": "workspace:*",
+    "@encode/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@encode/testkit": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}

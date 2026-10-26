@@ -7,7 +7,7 @@
 import type { CheckGate, ErrorGate, GuideSetting, HostEvents, HostRequests, ReviewSetting, SmallerHelp, StrongerOffer } from '@encode/core'
 import type { BrowserAnswer, BrowserRequest, CodeDiagnostic } from '@encode/tools'
 import type { InstallPlan } from '@encode/lsp'
-import type { EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, InstallResult, LanguageServersReport } from '@encode/workspace'
+import type { Breakpoint, DebugAction, DebugConfigs, DebugResult, DebugState, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, EditorDocumentChange, EvaluateContext, EvaluateResult, ExceptionFilters, InstallResult, LanguageServersReport, OutputLine, ScopeView, VariableView } from '@encode/workspace'
 import type { ModelMode } from '../../shared/models'
 import type { ModelTestPlan, ModelTestProgress, ModelTestResult } from '../../shared/model-tests'
 import type { KeyedSearchProviderId, SearchCheckResult, SearchProviderId } from '../../shared/search'
@@ -75,6 +75,8 @@ export interface HostInit {
   serverCacheDir?: string
   /** The benchmark's tasks, for Test this model (ADR 0101); without it no model can be tested. */
   benchTasksDir?: string
+  /** Where the debugger keeps each folder's breakpoints and makes each run's folder (ADR 0143); without it nothing is debugged. */
+  debugDir?: string
 }
 
 /** The result of a test call to one model. */
@@ -139,6 +141,21 @@ export type DesktopHostRequests = HostRequests & {
   codeChange: { params: { root: string; request: EditorChangeRequest }; result: EditorChangeResult }
   /** A suggestion at the editor's cursor from the model of the Inline suggestions role (ADR 0087); the caller cancels one it no longer wants. */
   inlineSuggest: { params: { root: string; request: InlineSuggestRequest }; result: InlineSuggestAnswer }
+  /** A folder's debugger as the panel shows it (ADR 0143): whether it may run, its breakpoints, its runs. */
+  debugState: { params: { root: string }; result: DebugState }
+  /** The ways a folder can be debugged. */
+  debugConfigs: { params: { root: string }; result: DebugConfigs }
+  /** Starts a run the person asked for; `file` is the editor's, by its path in the folder. */
+  debugStart: { params: { root: string; config: string; file?: string }; result: { ok: true; run: string } | { ok: false; reason: string } }
+  /** Continues, pauses, steps, stops, restarts or puts away a run. */
+  debugAct: { params: { root: string; run: string; action: DebugAction }; result: DebugResult | { ok: true; run: string } }
+  /** A file's breakpoints, all of them, by its path in the folder. */
+  debugBreakpoints: { params: { root: string; file: string; breakpoints: Breakpoint[] }; result: DebugResult }
+  debugExceptions: { params: { root: string; filters: ExceptionFilters }; result: DebugResult }
+  /** A paused frame's scopes, the variables of a scope or a value, and an expression in a paused frame. */
+  debugScopes: { params: { root: string; run: string; frame: number }; result: ScopeView[] }
+  debugVariables: { params: { root: string; run: string; ref: number }; result: VariableView[] }
+  debugEvaluate: { params: { root: string; run: string; expression: string; frame?: number; thread?: number; context: EvaluateContext }; result: EvaluateResult }
 }
 
 /** A file the editor shows, opened, changed or closed, in a folder named as the main process knows it. */
@@ -160,6 +177,10 @@ export type DesktopHostApi = {
     diagnostics: { root: string; file: string; diagnostics: CodeDiagnostic[] }
     /** How the model test that runs is going. */
     modelTest: ModelTestProgress
+    /** What the debug panel shows of a folder changed. */
+    debug: { root: string }
+    /** What a run printed, a batch at a time. */
+    debugOutput: { root: string; run: string; lines: OutputLine[] }
   }
 }
 
