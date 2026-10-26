@@ -430,11 +430,25 @@ function lldbDap(): string | null {
 const LLDB = lldbDap()
 const CC = searchPath('clang', process.env) ?? searchPath('cc', process.env)
 
+/**
+ * On Windows, LLVM's lldb-dap loads the Python its release was built with; python.org's installs of every version go on
+ * the end of its PATH, as eNCode puts the one it needs (packages/workspace, lldbPython).
+ */
+function lldbEnv(): Record<string, string> {
+  const env = environment()
+  const local = process.platform === 'win32' ? process.env.LOCALAPPDATA : undefined
+  const root = local ? path.join(local, 'Programs', 'Python') : ''
+  const pythons = root && existsSync(root) ? readdirSync(root).filter((name) => /^Python3\d+$/.test(name)).map((name) => path.join(root, name)) : []
+  if (!pythons.length) return env
+  const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH'
+  return { ...env, [key]: [env[key], ...pythons].filter(Boolean).join(';') }
+}
+
 function lldbPlan(dir: string, program: string, extra: Partial<DapPlan> = {}): DapPlan {
   return {
     kind: 'dap',
     profile: 'lldb',
-    adapter: { file: LLDB!, args: [], cwd: dir, env: environment(), transport: 'stdio' },
+    adapter: { file: LLDB!, args: [], cwd: dir, env: lldbEnv(), transport: 'stdio' },
     request: 'launch',
     arguments: { program, args: [], cwd: dir, env: [], stopOnEntry: false },
     runDir: path.join(dir, '.run'),

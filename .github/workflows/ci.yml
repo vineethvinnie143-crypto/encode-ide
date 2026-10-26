@@ -90,14 +90,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # LLVM's lldb-dap on Windows is linked to one Python's DLL (ADR 0144). The runner keeps its Pythons in its tool
-      # cache; their folders go on the end of the PATH, so lldb-dap finds the one it needs and `python` stays the
-      # runner's own.
-      - name: Pythons for lldb-dap
-        run: |
-          $dirs = Get-ChildItem "$env:RUNNER_TOOL_CACHE\Python\*\x64" -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName
-          if ($dirs) { "PATH=$env:PATH;$($dirs -join ';')" >> $env:GITHUB_ENV }
-          Get-Command lldb-dap -ErrorAction SilentlyContinue | ForEach-Object Source
+      # LLVM's lldb-dap on Windows is linked to one Python's DLL (ADR 0144). The runner's LLVM wants Python 3.10, which
+      # its tool cache lacks: it is installed as eNCode's message tells a person to, off the PATH, so the C and Rust
+      # runs prove that eNCode finds it where its installer put it. A newer LLVM names its own Python in the failure.
+      - name: Python for lldb-dap
+        run: winget install --id Python.Python.3.10 --exact --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
 
       - name: Unit tests
         env:
