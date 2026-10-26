@@ -758,24 +758,4 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     await boom.session.stop()
     await boom.session.settled
   })
-
-  // TEMPORARY, Windows only: what lldb reads of a `let` in a Rust program built with Microsoft's tools (its PDB).
-  it('TEMPORARY: what lldb sees of a let binding in a Rust function, from its PDB', { timeout: 240_000, skip: process.platform !== 'win32' }, async () => {
-    const greet = 'fn greet(name: &str) -> String {\n    let line = format!("hello {}", name);\n    let size = line.len();\n    println!("size {}", size);\n    line\n}\n\nfn main() {\n    println!("{}", greet("cart"));\n}\n'
-    const dir = await tempWorkspace({ 'Cargo.toml': '[package]\nname = "cart"\nversion = "0.1.0"\nedition = "2021"\n', 'src/main.rs': greet })
-    execFileSync(CARGO!, ['build', '--quiet'], { cwd: dir, env: environment(), timeout: 200_000, stdio: 'ignore' })
-    const file = path.join(dir, 'src', 'main.rs')
-    const r = run(lldbPlan(dir, path.join(dir, 'target', 'debug', process.platform === 'win32' ? 'cart.exe' : 'cart'), { rust: 'msvc' }), { [file]: [bp(3)] }, undefined, dir)
-    await r.session.start()
-    const thread = paused(await r.until((v) => !!paused(v), 'the breakpoint'))!
-    const dap = (r.session as unknown as { dap: { request(command: string, args: object, options: object): Promise<Record<string, unknown>> } }).dap
-    const raw = (command: string) => dap.request('evaluate', { expression: `\`${command}`, context: 'repl' }, { timeoutMs: 15_000 }).then((answer) => String(answer.result), (error: Error) => `failed: ${error.message}`)
-    const seen = [`locals at 3: ${(await localsOf(r, thread)).map((item) => `${item.name}=${item.value}`).join(', ')}`]
-    for (const command of ['version', 'image lookup -v -a $pc', 'frame variable', 'frame variable line']) seen.push(`${command}:\n${await raw(command)}`)
-    await r.session.step('over', thread.id)
-    const next = await r.until((v) => (paused(v)?.frames?.[0]?.line ?? 0) > 3, 'a step on').catch(() => null)
-    if (next) seen.push(`locals at ${paused(next)!.frames![0]!.line}: ${(await localsOf(r, paused(next)!)).map((item) => `${item.name}=${item.value}`).join(', ')}`, `image lookup there:\n${await raw('image lookup -v -a $pc')}`)
-    await r.session.stop()
-    assert.fail(seen.join('\n----\n'))
-  })
 })

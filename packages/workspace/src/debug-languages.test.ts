@@ -555,19 +555,14 @@ describe('a Rust program debugged', { skip: !LLDB || !CARGO ? 'no lldb-dap and c
     const env = environment(process.env.ENCODE_TEST_LLDB_DAP ? { PATH: `${path.dirname(LLDB!)}${path.delimiter}${process.env.PATH ?? ''}` } : {})
     const other = 'fn greet(name: &str) -> String {\n    let line = format!("hello {}", name);\n    let size = line.len();\n    println!("size {}", size);\n    line\n}\n\nfn main() {\n    println!("{}", greet("cart"));\n}\n'
     const { debug, output } = await debuggerFor({ 'Cargo.toml': '[package]\nname = "cart"\nversion = "0.1.0"\nedition = "2021"\n', 'src/main.rs': 'fn main() {}\n', 'src/bin/other.rs': other }, { env })
-    // Line 3, not 4: lldb places a breakpoint on each piece of code a macro's line (println!) makes, and stops at each.
-    await debug.setBreakpoints('src/bin/other.rs', [{ id: 'b1', line: 3, enabled: true }])
+    // Line 5, the function's last: not 4, as lldb places a breakpoint on each piece of code a macro's line (println!)
+    // makes and stops at each; not 3, whose first instruction Rust's debug information for Windows (a PDB) puts before
+    // `line` begins, so that lldb lists it there only after a step.
+    await debug.setBreakpoints('src/bin/other.rs', [{ id: 'b1', line: 5, enabled: true }])
     const paused = await pausedAt(debug, 'src/bin/other.rs')
-    assert.deepEqual([paused.top.source?.rel, paused.top.line], ['src/bin/other.rs', 3])
-    const line = paused.locals.find((item) => item.name === 'line')
-    const seen = async () => ({
-      top: paused.top,
-      scopes: await Promise.all((await debug.scopes(paused.run, paused.top.id)).map(async (scope) => `${scope.name}: ${(await debug.variables(paused.run, scope.ref)).slice(0, 12).map((item) => `${item.name}:${item.type ?? ''}=${item.value}`).join(', ')}`)),
-      evaluated: await debug.evaluate(paused.run, 'line', { frame: paused.top.id, context: 'watch' }),
-      parts: line?.ref ? (await debug.variables(paused.run, line.ref)).slice(0, 8) : [],
-      output: output.slice(-4),
-    })
-    if (!/hello cart/.test(line?.value ?? '')) assert.fail(JSON.stringify(await seen()))
+    assert.deepEqual([paused.top.source?.rel, paused.top.line], ['src/bin/other.rs', 5])
+    assert.match(paused.locals.find((item) => item.name === 'line')?.value ?? '', /hello cart/, JSON.stringify(paused.locals))
+    assert.equal(paused.locals.find((item) => item.name === 'size')?.value, '10')
     assert.deepEqual(await debug.act(paused.run, { kind: 'continue' }), { ok: true })
     await until(debug, (state) => state.runs[0]?.state === 'ended', 'the end')
     assert.ok(output.includes('Building other with cargo…'), output.join('\n'))

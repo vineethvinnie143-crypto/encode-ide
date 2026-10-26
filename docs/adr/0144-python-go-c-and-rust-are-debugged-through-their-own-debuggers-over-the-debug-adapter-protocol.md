@@ -94,6 +94,12 @@ C++ and Rust. The constraints stay 0143's:
   stops in `__cxa_throw`, which such a program has none of, and lldb does not stop there for a breakpoint on
   `rust_panic`. So on Windows "every exception" also sets a function breakpoint on `_CxxThrowException`, and a Rust
   program built so has its panics stop there instead of at `rust_panic`, never both, so that one panic stops once.
+  The stop is known as the exception by the breakpoint lldb-dap says it hit (`hitBreakpointIds`), else by the frame's
+  function.
+- **Rust's variables, on Windows**: lldb reads a Rust program built with Microsoft's tools from its PDB, where a `let`
+  can begin a few bytes into the next line (seen with Rust 1.99 and lldb 23.1: line 3's first instruction lay before
+  the block of the `let` on line 2). A breakpoint on the line right after a `let` lists that variable after one step;
+  every line after shows it.
 - **lldb-dap's Python, on Windows**: LLVM's Windows releases link lldb to one Python's DLL (`python311.dll`), and
   without it Windows ends lldb-dap before it says anything. Before a run starts, eNCode reads which Python DLL
   `liblldb.dll` imports (its PE import tables, a few kilobytes of the file) and looks for it: next to lldb-dap, in

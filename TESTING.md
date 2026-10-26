@@ -873,8 +873,9 @@ C++, tick **Stop on every exception, caught ones too** in the Debug panel and th
 at the throw, with your function a few frames down the stack.
 
 **Rust**: in a Cargo project, open `src/main.rs`, set a breakpoint and press `F5`. cargo builds it in the console, and a
-`String` or a `Vec` shows its contents. Index past the end of a `Vec`: the run stops at the panic, which it says, with
-the panic's message in the console.
+`String` or a `Vec` shows its contents. On Windows a variable can show only from the second line after its `let`, or
+after one step: that is how Rust's debug information there marks it. Index past the end of a `Vec`: the run stops at
+the panic, which it says, with the panic's message in the console.
 
 ## Worktrees
 
