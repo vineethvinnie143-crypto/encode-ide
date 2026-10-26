@@ -18,6 +18,8 @@ export interface BenchReport {
   /** The reasoning effort every step asked for (`--effort`), and whether steps that read results asked for low (ADR 0135). */
   effort?: ReasoningEffort
   lightSteps?: true
+  /** The notes for a model's family were left out (ADR 0142), for a comparison with the runs that had them. */
+  modelNotes?: 'off'
   /** The spending cap (--max-cost) and what every run of the bench spent under it, both setups of a pair together (ADR 0137). */
   spending?: { limit: number; spent: number }
   /** Why the bench ended before it made every run it was asked for. */
@@ -126,9 +128,9 @@ export function parseReport(json: unknown): BenchReport {
 
 const whole = (value: number) => Math.round(value).toLocaleString('en-US')
 const tenths = (value: number) => (Math.round(value * 10) / 10).toString()
-/** The model, and the window when the run squeezed it, the effort it asked for and whether its steps were light. */
+/** The model, and the window when the run squeezed it, the effort it asked for, whether its steps were light and whether it had its notes. */
 const nameOf = (report: BenchReport) =>
-  `${report.model}${report.window ? ` in a ${Math.round(report.window / 1000)}k window` : ''}${report.effort ? ` at ${report.effort} effort` : ''}${report.lightSteps ? ' with light steps' : ''}`
+  `${report.model}${report.window ? ` in a ${Math.round(report.window / 1000)}k window` : ''}${report.effort ? ` at ${report.effort} effort` : ''}${report.lightSteps ? ' with light steps' : ''}${report.modelNotes === 'off' ? ' without model notes' : ''}`
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const dollars = (value: number | undefined) => (value === undefined ? '-' : `$${value < 0.01 ? value.toFixed(4) : value.toFixed(3)}`)
 const cachedShare = (summary: Summary) => (summary.mean.inputTokens ? percent(summary.mean.cachedTokens / summary.mean.inputTokens) : '-')
@@ -177,6 +179,9 @@ export function formatReport(report: BenchReport): string {
   if (report.spending) lines.push(`Spent ${dollars(report.spending.spent)} of the ${dollars(report.spending.limit)} cap`)
   if (report.endedEarly) lines.push(`Ended early: ${report.endedEarly}`)
   if (report.partial) lines.push('Partial: written while the bench went on, which then did not finish.')
+  const reviewer = reviewerWords(report)
+  if (reviewer) lines.push(`Reviewer: ${reviewer}`)
+  lines.push(...wastedCalls(report))
   const notes = report.runs.filter((run) => run.outcome !== 'passed' || run.quality?.issues.length)
   if (notes.length) lines.push('')
   for (const run of notes) {
@@ -189,6 +194,65 @@ export function formatReport(report: BenchReport): string {
     lines.push(`${run.task} #${run.attempt} ${run.outcome}${run.stopped ? ` (${run.stopped})` : ''}: ${why}`)
   }
   return lines.join('\n')
+}
+
+/** The Reviewer's calls over the runs measured: how many, how many failed, and the median time and reasoning of those that answered. */
+function reviewerCalls(report: BenchReport): { calls: number; failed: number; ms?: number; reasoning?: number } | undefined {
+  const calls = report.runs.filter(isMeasured).flatMap((run) => run.calls.filter((call) => call.role === 'reviewer'))
+  if (!calls.length) return undefined
+  const answered = calls.filter((call) => call.outcome === 'done')
+  const median = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b)
+    const middle = sorted.length >> 1
+    return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2
+  }
+  return {
+    calls: calls.length,
+    failed: calls.length - answered.length,
+    ...(answered.length ? { ms: median(answered.map((call) => call.ms)), reasoning: median(answered.map((call) => call.reasoningTokens)) } : {}),
+  }
+}
+
+/** The Reviewer's calls in words: what the notes for DeepSeek's Reviewer are measured by (ADR 0142). */
+function reviewerWords(report: BenchReport): string | undefined {
+  const reviewer = reviewerCalls(report)
+  if (!reviewer) return undefined
+  const answered = reviewer.ms === undefined ? '' : `, a median of ${tenths(reviewer.ms / 1000)} s and ${whole(reviewer.reasoning!)} reasoning tokens for those that answered`
+  return `${reviewer.calls} ${reviewer.calls === 1 ? 'call' : 'calls'}, ${reviewer.failed} failed${answered}`
+}
+
+/** How many of the most frequent declined and failed calls a report lists. */
+const WASTED_LISTED = 8
+
+/**
+ * The calls that cost a step and did nothing, the most frequent first: those the benchmark declined, and the commands
+ * that failed. Each is named by its tool and what it was asked, with numbers in it made alike, so that the same
+ * command in another run counts as the same.
+ */
+function wastedCalls(report: BenchReport): string[] {
+  const lines: string[] = []
+  const tally = (pick: (call: TaskRun['tools'][number]) => boolean) => {
+    const counts = new Map<string, number>()
+    for (const run of report.runs.filter(isMeasured)) {
+      for (const call of run.tools) {
+        if (!pick(call) || call.input === undefined) continue
+        const key = `${call.byEncode ? 'eNCode ' : ''}${call.tool}: ${call.input.replace(/\s+/g, ' ').replace(/\d+/g, 'N')}`
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+    }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }
+  for (const [title, list] of [
+    ['Declined', tally((call) => call.declined === true)],
+    ['Failed commands', tally((call) => !call.ok && !call.declined && call.tool === 'Bash')],
+  ] as const) {
+    if (!list.length) continue
+    const total = list.reduce((all, [, count]) => all + count, 0)
+    lines.push('', `${title}: ${total}, the most frequent first`)
+    for (const [key, count] of list.slice(0, WASTED_LISTED)) lines.push(`  ${count}× ${key}`)
+    if (list.length > WASTED_LISTED) lines.push(`  and ${list.length - WASTED_LISTED} more`)
+  }
+  return lines
 }
 
 /** The fewest runs of every task, on both sides, for a comparison to tell a change from noise. */
@@ -284,6 +348,8 @@ export function compareReports(before: BenchReport, after: BenchReport): Compari
   lines.push(`Context per run: ${tenths(a.all.mean.rewrites)} → ${tenths(b.all.mean.rewrites)} rewrites, ${tenths(a.all.mean.summaries)} → ${tenths(b.all.mean.summaries)} summaries`)
   const costPerSolved = { ...(a.all.costPerSolved !== undefined ? { before: a.all.costPerSolved } : {}), ...(b.all.costPerSolved !== undefined ? { after: b.all.costPerSolved } : {}) }
   if (costPerSolved.before !== undefined && costPerSolved.after !== undefined) lines.push(`Cost per task solved: ${dollars(costPerSolved.before)} → ${dollars(costPerSolved.after)} (${change(costPerSolved.before, costPerSolved.after)})`)
+  const reviewers = [reviewerWords(before), reviewerWords(after)]
+  if (reviewers.some(Boolean)) lines.push(`Reviewer: ${reviewers[0] ?? 'no calls'} → ${reviewers[1] ?? 'no calls'}`)
   if (!enoughRuns) lines.push(`Too few runs to tell a change from noise: every drop counts. Run each task ${MIN_RUNS} times or more (--repeat 5).`)
   const gone = only(a.tasks, b.tasks)
   const added = only(b.tasks, a.tasks)

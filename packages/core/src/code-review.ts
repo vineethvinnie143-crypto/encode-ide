@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto'
 import { messageText, repairJson, textBlock, type ModelClient, type ModelRequest } from '@encode/providers'
 import { estimateTokens } from './compaction'
+import { reviewerSystem, type ModelNotesSetting } from './model-notes'
 
 export type FindingPriority = 'P0' | 'P1' | 'P2' | 'P3'
 
@@ -148,10 +149,11 @@ export function parseReview(reply: string, paths: readonly string[]): CodeReview
   return { summary, findings: findings.slice(0, MAX_FINDINGS) }
 }
 
-/** Asks the Reviewer. A model that cannot answer now says why, in the words the router gives. */
-export async function reviewChanges(client: ModelClient, input: CodeReviewInput, signal: AbortSignal): Promise<CodeReviewResult> {
+/** Asks the Reviewer, with the note for its model's family unless the notes are off. A model that cannot answer now says why, in the words the router gives. */
+export async function reviewChanges(client: ModelClient, input: CodeReviewInput, signal: AbortSignal, notes?: ModelNotesSetting): Promise<CodeReviewResult> {
+  const system = await reviewerSystem(client, REVIEW_SYSTEM, notes)
   const payload: ModelRequest = {
-    system: [{ text: REVIEW_SYSTEM }],
+    system,
     messages: [{ role: 'user', content: [textBlock(reviewPrompt(input))] }],
     tools: [],
     maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -162,7 +164,7 @@ export async function reviewChanges(client: ModelClient, input: CodeReviewInput,
     role: 'reviewer',
     tool: 'CodeReview',
     payload,
-    requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(REVIEW_SYSTEM.length / 4), maxOutputTokens: MAX_OUTPUT_TOKENS, tools: false, images: false },
+    requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(system.reduce((sum, part) => sum + part.text.length, 0) / 4), maxOutputTokens: MAX_OUTPUT_TOKENS, tools: false, images: false },
     signal,
   })
   if (outcome.kind === 'paused') throw new Error(outcome.message)

@@ -116,6 +116,27 @@ describe('the Reviewer before the agent finishes', () => {
     assert.equal(h.surface.usages.length, 4, "the Reviewer's call counts toward the request")
   })
 
+  it("tells a DeepSeek Reviewer to keep its reasoning short, after its instructions, unless the notes are off (ADR 0142)", async () => {
+    const answer = JSON.stringify({ summary: 'Right.', findings: [] })
+    const reviewed = async (model: string, modelNotes?: 'off') => {
+      const h = await loopHarness({
+        scriptFor: (root) => [write(root, 'src/stats.ts', STATS), { text: 'Added mean().' }, { text: answer }],
+        client: { model },
+        services: { changes: async () => [stats] },
+        settings: { review: 'on', ...(modelNotes ? { modelNotes } : {}) },
+      })
+      await h.run('add a mean function')
+      const call = h.client.requests.find((request) => request.tool === 'CompletionReview')!
+      return call.payload.system.map((part) => part.text)
+    }
+    const deepseek = await reviewed('deepseek/deepseek-v4.1-flash')
+    assert.equal(deepseek.length, 2)
+    assert.equal(deepseek[0], COMPLETION_SYSTEM)
+    assert.match(deepseek[1]!, /^# Keep your reasoning short\n\nRead each change once against the request/)
+    assert.deepEqual(await reviewed('deepseek/deepseek-v4.1-flash', 'off'), [COMPLETION_SYSTEM])
+    assert.deepEqual(await reviewed('anthropic/claude-sonnet-4.5'), [COMPLETION_SYSTEM], 'a family without notes')
+  })
+
   it('asks for tests of the cases none covers when the person asked for tests, the project has tests and the request added none', async () => {
     const answer = JSON.stringify({ summary: 'Right.', findings: [], untested: ['an empty list', 'negative numbers'] })
     const h = await loopHarness({

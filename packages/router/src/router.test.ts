@@ -775,6 +775,7 @@ describe('ModelRouter: sessions, abort and budget', () => {
       price: { input: 0, output: 0 },
       free: true,
       cache: { read: 0.5, write: 1, boundThinking: false, source: 'family' },
+      family: 'other',
     })
     const priced = new TestWorld({
       settings: { providers: { openrouter: { type: 'openrouter' } }, roles: { main: ['openrouter:vendor/beta', 'openrouter:vendor/gamma'] } },

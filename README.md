@@ -571,7 +571,10 @@ the reference's, a stray file, an edited test, a debug print, a TODO; the `clean
 and the gate holds that too. `--max-cost 2.90` stops the bench at that many dollars, as the provider bills them, and
 `--pair light-steps` runs every task with and without light steps side by side, round by round, into two reports and
 their comparison, ending once the result is clear
-([ADR 0137](docs/adr/0137-a-benchmark-run-stops-at-a-spending-cap-and-runs-two-setups-side-by-side.md)). Four long tasks (`--tag long`,
+([ADR 0137](docs/adr/0137-a-benchmark-run-stops-at-a-spending-cap-and-runs-two-setups-side-by-side.md)); `--pair
+model-notes` does the same without and with the notes for the model's family, such as DeepSeek's Reviewer told to keep
+its reasoning short, and every report lists the declined calls and the failed commands and says how the Reviewer's calls
+went ([ADR 0142](docs/adr/0142-a-model-family-gets-notes-of-its-own-each-measured-and-the-bench-keeps-the-calls-that-did-nothing.md)). Four long tasks (`--tag long`,
 [ADR 0131](docs/adr/0131-long-tasks-measure-what-shortening-and-summaries-keep.md)) run past the point where old
 results are shortened: a rule read first and needed last, a rename across seventeen files, one bad record in 5,000
 lines of output, and six changes asked for in one message. A tester's **Report a problem with this request**
