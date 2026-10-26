@@ -228,6 +228,11 @@ describe('the Reviewer before the agent finishes', () => {
     assert.ok(notices(h).includes('The Reviewer listed cases no test covers, so the agent checks that its change handles them.'))
   })
 
+  it('lists a word with each kind of character the change now strips among the cases no test covers (ADR 0151)', () => {
+    // `Well-Known Title` became `wellknown-title`: the change dropped hyphens, and none of the cases the Reviewer listed had one.
+    assert.match(COMPLETION_SYSTEM, /Under "untested", list the cases [^\n]*, a word with each kind of character the change now strips\), one short line each/)
+  })
+
   it('lets the work through when it finds nothing, and says so', async () => {
     const h = await loopHarness({
       scriptFor: (root) => [write(root, 'src/stats.ts', STATS), { text: 'Added mean().' }, { text: '```json\n{"summary": "Fine.", "findings": [], "untested": []}\n```' }],

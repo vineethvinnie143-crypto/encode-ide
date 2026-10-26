@@ -1012,6 +1012,8 @@ word if you want it tightened"), a note says it goes back once to settle it itse
 why the result is right.
 When it wants to try its fix on a few inputs, it should write the probe or scratch test in its own scratch folder
 (named in the chat's background, outside your project) without asking you, and leave nothing of it in your project.
+When its change drops characters (punctuation, say), its probes should include a word with each kind it drops, such
+as a hyphen inside a word.
 
 What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
 the tools you use now.

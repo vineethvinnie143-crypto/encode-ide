@@ -140,6 +140,7 @@ say so.
 | [0148](0148-a-request-that-asks-for-the-debugger-lists-it-and-the-fix-rule-names-the-function.md) | A request that asks for the debugger lists it, and the fix rule names the function | Accepted, builds on 0136, 0145, 0146 and 0147 |
 | [0149](0149-the-agents-debug-runs-start-its-probes-and-the-benchs-first-ctrl-c-lets-the-run-finish.md) | The agent's debug runs start its probes, and the bench's first Ctrl+C lets the run in progress finish | Accepted, amends 0145; builds on 0137, 0141 and 0146 |
 | [0150](0150-an-answer-that-leaves-a-result-of-the-change-as-it-is-goes-back-once.md) | An answer that leaves a result of the change as it is goes back to the agent once | Accepted, builds on 0095, 0126, 0147 and 0148 |
+| [0151](0151-a-change-that-drops-characters-is-tried-on-a-word-with-each-and-a-fix-goes-with-its-check.md) | A change that drops characters is tried on a word with each, and a fix late in a request goes with its check | Accepted, amends 0141, 0147 and 0150 |
 
 ## Template
 

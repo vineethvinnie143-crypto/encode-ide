@@ -32,7 +32,8 @@ case alone, with `a---b`.
   - The short guide of 0094 has neither rule. The strong models it is for keep to the scope of a request unasked, so it
     is left as it is.
 - **The inputs to try include the old handling.** "(repeated, at either end, beside what the tests cover)" becomes
-  "(repeated, at either end, mixed with what the code already handles, beside what the tests cover)".
+  "(repeated, at either end, mixed with what the code already handles, beside what the tests cover)". 0151 adds a word
+  with each kind of character the change now drops.
 - **The model hears how many steps are left, once** (`packages/core/src/loop.ts`).
   - In a request that may take 10 steps or more, the reminder goes with the step that leaves 4. It also goes with a
     check that sends the model back then.

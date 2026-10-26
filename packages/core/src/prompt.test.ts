@@ -8,7 +8,8 @@ import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, lastStepCheckN
 // ADR 0139 raised it from 6,100: a failing test is the spec, and neither a declined command nor a failing check ends the checking.
 // ADR 0141 raised it from 6,450: the inputs around a change are tried too, and probes go in the scratch folder.
 // ADR 0147 raised it from 6,600: a wrong result the agent's own checks find on input like the request's is fixed, not offered.
-const PROMPT_BUDGET_CHARS = 6_800
+// ADR 0151 raised it from 6,800: a change that drops characters is tried on a word with each kind it drops.
+const PROMPT_BUDGET_CHARS = 6_850
 
 const info = { root: '/work/app', platform: 'linux' as const, arch: 'x64', shell: 'bash', cwd: '/work/app', date: '2026-10-22', topLevel: ['src/', 'package.json'] }
 
@@ -64,11 +65,12 @@ describe('the system prompt', () => {
     // ADR 0148: one run still left `a---b` as "a known quirk, unchanged and not asked for", so the rule names the function and that excuse.
     assert.match(SYSTEM_PROMPT, /A wrong result your own checks show from a function you changed is part of the problem, even when the old code gave it too: fix it and say so, rather than offer to or call it a known quirk\. Mention a bug elsewhere; do not fix it\./)
     // `a  -  b` became `a---b`: the inputs tried were new punctuation alone, never with the spaces the code already turned into dashes.
-    assert.match(SYSTEM_PROMPT, /\(repeated, at either end, mixed with what the code already handles, beside what the tests cover\)/)
+    // ADR 0151: `Well-Known Title` became `wellknown-title`: the change dropped hyphens, and no input tried had one.
+    assert.match(SYSTEM_PROMPT, /\(repeated, at either end, mixed with what the code already handles, beside what the tests cover, a word with each kind of character it now drops\)/)
   })
 
   it('says how many steps are left, and what an answer at the last step does with its check (ADR 0147)', () => {
-    assert.equal(stepsLeftNote(4, 15), 'Steps left in this request: 4 of 15, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.')
+    assert.equal(stepsLeftNote(4, 15), 'Steps left in this request: 4 of 15, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed. An edit and the command that checks it can go in one batch, since they run in order.')
     assert.match(lastStepCheckNote(15), /^Your answer took the last step this request may take \(15 steps\), so tools are off for your next reply and what this check found cannot be acted on now\. Give the user your whole answer again/)
   })
 
