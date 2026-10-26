@@ -292,7 +292,14 @@ export function planReminder(gaps: readonly string[]): string {
 
 const MAX_OUTPUT_TOKENS = 16_000
 
-export type ReviewerAnswer = { ok: true; text: string; usage: Usage; model?: string } | { ok: false; why: string }
+/** `late`: the Reviewer was still at work when its time ran out (a model that thinks long, on a slow day). */
+export type ReviewerAnswer = { ok: true; text: string; usage: Usage; model?: string } | { ok: false; why: string; late?: true }
+
+/** "4 minutes", "90 seconds". */
+function duration(ms: number): string {
+  const [count, unit] = ms % 60_000 ? [Math.max(1, Math.round(ms / 1000)), 'second'] : [ms / 60_000, 'minute']
+  return `${count} ${unit}${count === 1 ? '' : 's'}`
+}
 
 /** One call to the Review role (or `role`), without tools, given up after `timeoutMs`; a model that cannot answer says why. */
 export async function askReviewer(
@@ -324,7 +331,8 @@ export async function askReviewer(
     return { ok: false, why: 'the change is too large for its model to read at once' }
   } catch (error) {
     if (call.signal.aborted) throw error
-    return { ok: false, why: late.signal.aborted ? 'it did not answer in time' : error instanceof Error ? error.message : String(error) }
+    if (late.signal.aborted) return { ok: false, why: `it was still at work after ${duration(call.timeoutMs)}`, late: true }
+    return { ok: false, why: error instanceof Error ? error.message : String(error) }
   } finally {
     clearTimeout(timer)
   }

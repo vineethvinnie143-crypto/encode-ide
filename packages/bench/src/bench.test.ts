@@ -254,7 +254,7 @@ describe('what a run spent', () => {
     assert.deepEqual(client.calls[0], { role: 'main', model: 'openrouter:some/model', outcome: 'done', inputTokens: 1_000, cachedTokens: 800, cacheWriteTokens: 0, outputTokens: 50, reasoningTokens: 0, cost: 0.002, ms: client.calls[0]!.ms })
   })
 
-  test('counts a call stopped before it began as costing nothing, and one stopped later as unknown (ADR 0139)', async () => {
+  test('counts a call stopped before it began as costing nothing, and one stopped later as unknown without a price (ADR 0139)', async () => {
     const inner: ModelClient = {
       budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000 }),
       complete: async () => {
@@ -266,6 +266,28 @@ describe('what a run spent', () => {
     await assert.rejects(client.complete(request(AbortSignal.abort())))
     await assert.rejects(client.complete(request(new AbortController().signal)))
     assert.deepEqual(client.calls.map((call) => [call.outcome, call.cost]), [['failed', 0], ['failed', undefined]])
+  })
+
+  test('guesses what a call stopped midway cost by the listed prices, and adds the attempts given up on to a reply', async () => {
+    let stopped = true
+    const inner: ModelClient = {
+      budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000, price: { input: 0.3, output: 1.2 } }),
+      complete: async (call) => {
+        call.onEvent?.({ type: 'attempt', attempt: 1, key: 'openrouter:m', provider: 'openrouter', model: 'm' })
+        call.onEvent?.({ type: 'thinking', text: 'x'.repeat(3_500) })
+        if (stopped) throw new Error('The Reviewer did not answer in time.')
+        call.onEvent?.({ type: 'discard', reason: 'The stream ended before the reply was complete.' })
+        return { kind: 'done', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }, usage: { inputTokens: 10_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0.01 }, finish: 'stop' }
+      },
+    }
+    const client = meteredClient(inner)
+    const request = { role: 'reviewer', payload: { system: [], messages: [], tools: [] }, requirements: { promptTokens: 10_000 }, signal: new AbortController().signal } as unknown as CompletionRequest
+    await assert.rejects(client.complete(request), /did not answer in time/)
+    stopped = false
+    await client.complete(request)
+    const [late, retried] = client.calls
+    assert.ok(Math.abs(late!.cost! - 0.0042) < 1e-12 && late!.unreported === late!.cost, JSON.stringify(late))
+    assert.ok(Math.abs(retried!.cost! - 0.0142) < 1e-12 && Math.abs(retried!.unreported! - 0.0042) < 1e-12, JSON.stringify(retried))
   })
 
   test("counts a call whose agent's history was rewritten, not one that only grew, nor a summary's own", async () => {
@@ -320,6 +342,11 @@ describe('reports', () => {
   test('says no cost when a call did not report one', () => {
     const { all } = summarize(report('m', [run('a', 'passed', { costReported: 3 })]))
     assert.equal(all.cost, undefined)
+  })
+
+  test('says how much of the cost is guessed for calls stopped midway', () => {
+    assert.match(formatReport(report('m', [run('a', 'passed', { unreportedCost: 0.004 }), run('b', 'passed')])), /^Of the \$0\.020, \$0\.0040 is guessed: calls that failed or were stopped midway, which no provider reports$/m)
+    assert.doesNotMatch(formatReport(report('m', [run('a', 'passed')])), /is guessed/)
   })
 
   test('prints a table and why each run that did not pass did not', () => {

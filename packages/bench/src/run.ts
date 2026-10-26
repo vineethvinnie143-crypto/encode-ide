@@ -37,6 +37,8 @@ export interface RunMetrics {
   /** US dollars, summed over the calls whose provider said; `costReported` of `requests` did. */
   cost: number
   costReported: number
+  /** Of `cost`, what was guessed for calls that failed or were stopped midway, which no provider reports (ModelCall.unreported). */
+  unreportedCost?: number
   /** What answered, `provider:model`. */
   models: string[]
   toolCalls: number
@@ -166,6 +168,7 @@ function metricsOf(entries: Iterable<ConversationEntry>, client: Pick<MeteredCli
       metrics.cost += call.cost
       metrics.costReported++
     }
+    if (call.unreported) metrics.unreportedCost = (metrics.unreportedCost ?? 0) + call.unreported
     if (call.model) models.add(call.model)
   }
   metrics.models = [...models].sort()

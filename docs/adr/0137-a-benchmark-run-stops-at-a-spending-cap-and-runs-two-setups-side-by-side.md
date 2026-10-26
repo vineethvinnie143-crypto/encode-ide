@@ -51,3 +51,22 @@ Two separate runs, one for each side of an A/B, have more problems:
 - Rounds replace task by task for every run, which changes the order in which a report lists its runs. Reports and
   their comparison group runs by task, so they read the same.
 - The key's credit limit remains the backstop the bench cannot get around.
+
+## Amendment (2026-10-26): what no provider reports is counted too
+
+The re-run of DeepSeek V4.1 Flash after 0139 and 0140 counted $0.194, while the key's usage rose $0.233. The gap was 11
+Reviewer calls that thought for 10,000 to 12,000 tokens and ran out the Reviewer's 4 minutes. A provider reports what
+a call cost only when its reply finishes, but it bills what the model read and wrote before that.
+
+- **The cap and the bench count it.** `tallyStream` (in `spending-cap.ts`) counts what each attempt of a call streams.
+  `unreportedCost` prices what was billed and not reported, on the high side:
+  - an attempt the router gave up on after it began writing read the whole prompt at the full input price and wrote
+    what it streamed, at 3.5 characters a token;
+  - a call stopped midway is counted the same way, whatever it had written;
+  - a call stopped before it began still costs nothing (0139);
+  - without a listed price there is no guess, and the call counts as before.
+- **Reports say how much is guessed.** A call keeps the guess as `unreported`, which is part of its `cost`. A run sums
+  it as `unreportedCost`, and the report adds one line, `Of the $X, $Y is guessed: …`, when there is any.
+- **The app says why a review ran out of time.** The Reviewer's notice reads "it was still at work after 4 minutes",
+  and adds that a faster model for the Review role would read the changes in time. Its time is unchanged: the run's
+  completed reviews took up to 218 s.

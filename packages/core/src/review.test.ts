@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ModelClient } from '@encode/providers'
-import { changeInput, completionPrompt, completionReminder, numberedChange, parseCompletion, parseGaps, planReminder, reviewWanted, testsKeptReminder, testsWanted } from './review'
+import { askReviewer, changeInput, completionPrompt, completionReminder, numberedChange, parseCompletion, parseGaps, planReminder, reviewWanted, testsKeptReminder, testsWanted } from './review'
 
 describe('the change the Reviewer reads', () => {
   it('numbers a new file, an edit and a deleted file by the lines they have, with no line after the last newline', () => {
@@ -173,5 +173,21 @@ describe('whether the Reviewer reads the work', () => {
     assert.equal(await reviewWanted('on', client('anthropic/claude-sonnet-4.5', 'anthropic/claude-sonnet-4.5'), {}), true)
     assert.equal(await reviewWanted('off', client('deepseek/deepseek-chat-v3.1', 'openai/gpt-5'), {}), false)
     assert.equal(await reviewWanted('auto', client('', '', true), {}), false)
+  })
+})
+
+describe('a call to the Reviewer', () => {
+  it('says the Reviewer was still at work when its time ran out, apart from other failures', async () => {
+    const waits: ModelClient = {
+      budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000 }),
+      complete: (request) =>
+        new Promise((_, reject) => {
+          request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true })
+        }),
+    }
+    const call = { system: 's', prompt: 'p', tool: 'CompletionReview', signal: new AbortController().signal }
+    assert.deepEqual(await askReviewer(waits, { ...call, timeoutMs: 20 }), { ok: false, why: 'it was still at work after 1 second', late: true })
+    const fails: ModelClient = { ...waits, complete: async () => Promise.reject(new Error('The connection dropped.')) }
+    assert.deepEqual(await askReviewer(fails, { ...call, timeoutMs: 4 * 60_000 }), { ok: false, why: 'The connection dropped.' })
   })
 })
