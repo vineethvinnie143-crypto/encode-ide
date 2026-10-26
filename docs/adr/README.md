@@ -131,6 +131,7 @@ say so.
 | [0139](0139-the-tests-are-the-persons-a-declined-command-does-not-end-the-checking-and-the-bench-keeps-what-it-ran.md) | The tests are the person's, a declined command does not end the checking, and the bench keeps what it ran | Accepted, amends 0096 and 0097; builds on 0092, 0135 and 0137 |
 | [0140](0140-checks-run-when-a-step-is-done-a-missing-name-is-looked-up-and-a-stronger-model-first-reads-the-stuck-steps.md) | Checks run when a step is done, a missing name is looked up, and a stronger model first reads the stuck steps | Accepted, amends 0095 and 0100; builds on 0094, 0096 and 0139 |
 | [0141](0141-the-agent-has-a-scratch-folder-for-its-probes-and-tries-the-inputs-around-a-change.md) | The agent has a scratch folder for its probes, and tries the inputs around a change | Accepted, amends 0126; builds on 0063, 0093, 0095, 0100 and 0139 |
+| [0142](0142-a-model-family-gets-notes-of-its-own-each-measured-and-the-bench-keeps-the-calls-that-did-nothing.md) | A model family gets notes of its own, each measured, and the bench keeps the calls that did nothing | Accepted, builds on 0094, 0096, 0100, 0137 and 0139 |
 
 ## Template
 

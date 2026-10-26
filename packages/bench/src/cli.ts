@@ -21,8 +21,9 @@
  * step asks for), --light-steps (steps that read results think at low effort, ADR 0135: compared with a run at the same
  * --effort without it, it shows what that saves and whether the pass rate holds), --max-cost <dollars> (a hard stop on
  * what the bench spends, ADR 0137: it adds up what the provider billed for every call and stops at the cap; a round
- * starts only when what is left pays for one like the last), --pair light-steps (every task run with and without light
- * steps, side by side, into two reports and their comparison; with --gate, it ends once the result is clear).
+ * starts only when what is left pays for one like the last), --pair light-steps|model-notes (every task run with and
+ * without light steps, or the notes for the model's family (ADR 0142), side by side, into two reports and their
+ * comparison; with --gate, it ends once the result is clear).
  *
  * Keys are read from the environment only: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, and
  * ENCODE_BENCH_API_KEY for --base-url. They are never printed, never given to the agent's commands, and taken out of
@@ -31,7 +32,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { readTurnReport, type TurnReport } from '@encode/core'
+import { readTurnReport, type AgentSettings, type TurnReport } from '@encode/core'
 import type { ModelClient, ReasoningEffort } from '@encode/providers'
 import { createAnthropicAdapter, createOpenAICompatibleAdapter, createOpenRouterAdapter, redactSecrets, spendingCap, type SpendingCap } from '@encode/providers'
 import { createRouter, parseRouterConfig, staticKeys } from '@encode/router'
@@ -155,8 +156,22 @@ function money(flags: Flags, name: string): number | undefined {
   return number
 }
 
-/** What a pair of runs compares (--pair): the setting the second run adds. */
-const PAIRS = { 'light-steps': { settings: { lightSteps: true }, names: ['light-off', 'light-on'] } } as const
+interface Pair {
+  /** What the first run sets, where the default is what the second one compares. */
+  first?: Partial<AgentSettings>
+  /** What the second run sets. */
+  settings: Partial<AgentSettings>
+  /** The reports' file suffixes and the label of each run's line. */
+  names: readonly [string, string]
+  /** What the comparison is of, in a sentence. */
+  label: string
+}
+
+/** What a pair of runs compares (--pair). */
+const PAIRS: Record<string, Pair> = {
+  'light-steps': { settings: { lightSteps: true }, names: ['light-off', 'light-on'], label: 'light steps' },
+  'model-notes': { first: { modelNotes: 'off' }, settings: { modelNotes: 'auto' }, names: ['notes-off', 'notes-on'], label: 'the model notes' },
+}
 
 const NEVER_LIGHT =
   'no step was light in the runs with light steps: the model cannot change its effort between steps without losing its cache, or it does not reason (ADR 0135)'
@@ -165,14 +180,14 @@ const NEVER_LIGHT =
  * When a pair has its answer: light steps that never happen leave nothing to compare, so after two runs that had a step
  * to make light; and from MIN_RUNS rounds on, a pass rate that fell beyond chance, or, with --gate, a gate passed.
  */
-function pairDecided(cut: number | undefined) {
+function pairDecided(name: string, pair: Pair, cut: number | undefined) {
   return (reports: readonly BenchReport[], round: number, roundDone: boolean): string | undefined => {
     const [before, after] = reports as [BenchReport, BenchReport]
-    if (round === 1 && !after.runs.some((run) => run.calls.some((call) => call.light)) && after.runs.filter((run) => run.metrics.requests > 2).length >= 2) return NEVER_LIGHT
+    if (name === 'light-steps' && round === 1 && !after.runs.some((run) => run.calls.some((call) => call.light)) && after.runs.filter((run) => run.metrics.requests > 2).length >= 2) return NEVER_LIGHT
     if (!roundDone || round < MIN_RUNS) return undefined
     const comparison = compareReports(before, after)
-    if (comparison.regressions.length) return `with light steps, tasks passed less often beyond chance (${comparison.regressions.join(', ')})`
-    if (cut !== undefined && gate(comparison, cut / 100).passed) return `light steps passed the gate: at least ${cut}% cheaper per task solved, at equal accuracy`
+    if (comparison.regressions.length) return `with ${pair.label}, tasks passed less often beyond chance (${comparison.regressions.join(', ')})`
+    if (cut !== undefined && gate(comparison, cut / 100).passed) return `${pair.label} passed the gate: at least ${cut}% cheaper per task solved, at equal accuracy`
     return undefined
   }
 }
@@ -212,8 +227,8 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
   const maxCost = money(flags, '--max-cost')
   const pairName = flags.values.get('--pair')
   if (pairName !== undefined && !Object.hasOwn(PAIRS, pairName)) throw new UsageError(`--pair is one of ${Object.keys(PAIRS).join(', ')}`)
-  const pair = pairName === undefined ? undefined : PAIRS[pairName as keyof typeof PAIRS]
-  if (pair && light) throw new UsageError('--pair light-steps runs every task with and without light steps: leave out --light-steps')
+  const pair = pairName === undefined ? undefined : PAIRS[pairName]
+  if (pairName === 'light-steps' && light) throw new UsageError('--pair light-steps runs every task with and without light steps: leave out --light-steps')
   const cut = count(flags, '--gate', 1, 90)
   if (cut !== undefined && !pair) throw new UsageError('--gate goes with compare, or with run --pair')
   const settings = { ...(window ? { contextCap: window } : {}), ...(effort ? { reasoning: effort } : {}), ...(light ? { lightSteps: true } : {}) }
@@ -274,7 +289,9 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
       unsaved = true
     })
   }
-  const reports = pair ? await runPair(chosen, { ...options, stopIf: pairDecided(cut), onProgress }, pair.settings) : [await runBench(chosen, { ...options, onProgress })]
+  const reports = pair
+    ? await runPair(chosen, { ...options, ...(pair.first ? { settings: { ...settings, ...pair.first } } : {}), stopIf: pairDecided(pairName!, pair, cut), onProgress }, pair.settings)
+    : [await runBench(chosen, { ...options, onProgress })]
   const outs = await save(reports)
   context.print('')
   if (pair) {

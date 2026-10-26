@@ -123,6 +123,7 @@ import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions
 import { FailedCalls, mendedNote } from './repeats'
 import { lookUpNote, unknownIn } from './unknown'
 import { CHANGE_TOOLS, CONSULT_STEPS_CHARS, CONSULT_SYSTEM, CONSULT_TOKENS, consultCost, consultNote, consultOffer, consultPrompt, helpsSmaller, recentSteps, saidWhatChanges, Setbacks, shortModel, SMALLER_MODEL_PART, STRONGER_AFTER, STRONGER_ROLES, strongerPrompt, takeOverNote, THINK_FIRST, type SentBack } from './smaller'
+import { reviewerSystem } from './model-notes'
 import { withoutImagesFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
@@ -2317,7 +2318,7 @@ export class AgentLoop {
     const input = changeInput(files)
     const checks = await this.checksInWords()
     const answer = await askReviewer(o.client, {
-      system: COMPLETION_SYSTEM,
+      system: await reviewerSystem(o.client, COMPLETION_SYSTEM, o.settings().modelNotes),
       prompt: completionPrompt({ requests: o.requests?.() ?? [], reply, input, ...(checks.text ? { checks: checks.text } : {}), scan: this.scanNotes }),
       tool: 'CompletionReview',
       sticky: o.services.sessionId,

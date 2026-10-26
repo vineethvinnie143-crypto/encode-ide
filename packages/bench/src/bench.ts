@@ -95,6 +95,7 @@ function emptyReport(options: BenchOptions, settings: Partial<AgentSettings> | u
     ...(window ? { window } : {}),
     ...(effort ? { effort } : {}),
     ...(settings?.lightSteps ? { lightSteps: true as const } : {}),
+    ...(settings?.modelNotes === 'off' ? { modelNotes: 'off' as const } : {}),
     runs: [],
   }
 }

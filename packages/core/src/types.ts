@@ -11,6 +11,7 @@ import type { ContextSignal } from './context-signals'
 import type { ErrorGate } from './edit-diagnostics'
 import type { GuideSetting } from './guide'
 import type { ReviewSetting } from './review'
+import type { ModelNotesSetting } from './model-notes'
 import type { SmallerHelp, StrongerOffer } from './smaller'
 import type { AgentStatus, ApprovalPolicy, ConversationEntry, ProblemCode, ThinkingProgress } from './ui'
 
@@ -68,6 +69,11 @@ export interface AgentSettings {
    * model of the Plan or Review role may do the rest of it (ADR 0100). `off`: never.
    */
   offerStronger?: StrongerOffer
+  /**
+   * `auto` (the default): a model of a family with notes gets them after a role's instructions, such as DeepSeek's
+   * Reviewer, told to keep its reasoning short (ADR 0142). `off`: no model does; the benchmark compares the two.
+   */
+  modelNotes?: ModelNotesSetting
 }
 
 /**

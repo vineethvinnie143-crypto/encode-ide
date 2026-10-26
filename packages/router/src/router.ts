@@ -235,6 +235,7 @@ function budgetOf(info: ModelInfo): ModelBudget {
     free: info.free,
     cache: cacheTermsOf({ family: info.family, reasoning: info.capabilities.reasoning, price: info.price }),
     ...(effortPerStep(info.family, info.model, info.capabilities.reasoning) ? { effortPerStep: true as const } : {}),
+    family: info.family,
   }
 }
 

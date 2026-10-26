@@ -58,6 +58,18 @@ export interface RunMetrics {
   durationMs: number
 }
 
+/** A tool call of a run: whether it did its job and, when it did not, what it was asked and what it said. */
+export interface ToolCallResult extends ReplayResult {
+  /** The benchmark said no to it: the task does not allow it. */
+  declined?: true
+  /** eNCode made the call itself (a check when a step is done, ADR 0140), not the model. */
+  byEncode?: true
+  /** For a call that failed or was declined: the command, or the input as JSON, cut at 300 characters. */
+  input?: string
+  /** For a call that failed or was declined: the start of what it said back. */
+  output?: string
+}
+
 export interface TaskRun {
   task: string
   attempt: number
@@ -73,7 +85,7 @@ export interface TaskRun {
   /** The calls one by one, for a closer look at a run that went wrong. */
   calls: ModelCall[]
   /** Each tool call in order and whether it did its job; `declined` when the benchmark said no to it. */
-  tools: (ReplayResult & { declined?: true })[]
+  tools: ToolCallResult[]
   /** How the code the run left reads, beyond its checks; absent for a run that was stopped or never ran. */
   quality?: Quality
 }
@@ -216,12 +228,25 @@ export async function runTask(task: BenchTask, options: RunOptions): Promise<Tas
   }
 }
 
+const DETAIL_CHARS = 300
+const clip = (text: string) => (text.length > DETAIL_CHARS ? `${text.slice(0, DETAIL_CHARS - 1)}…` : text)
+
 function toolsOf(entries: Iterable<ConversationEntry>): TaskRun['tools'] {
   const out: TaskRun['tools'] = []
   for (const entry of entries) {
     const tool = entry.tool
     if (entry.kind !== 'tool' || !tool) continue
-    out.push({ tool: tool.name, ok: tool.ok !== false, ...(tool.state === 'rejected' ? { declined: true as const } : {}) })
+    const ok = tool.ok !== false
+    const declined = tool.state === 'rejected'
+    // What went wrong is kept, so that a report says which commands were declined or failed, not only how many.
+    const input = typeof tool.input.command === 'string' ? tool.input.command : JSON.stringify(tool.input)
+    out.push({
+      tool: tool.name,
+      ok,
+      ...(declined ? { declined: true as const } : {}),
+      ...(tool.by === 'encode' ? { byEncode: true as const } : {}),
+      ...(!ok || declined ? { input: clip(input ?? ''), ...(tool.output ? { output: clip(tool.output.trim()) } : {}) } : {}),
+    })
   }
   return out
 }

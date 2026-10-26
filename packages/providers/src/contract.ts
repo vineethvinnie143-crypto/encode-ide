@@ -197,6 +197,8 @@ export interface ModelBudget {
   cache?: CacheTerms
   /** A step may think at low effort without costing the prompt cache (ADR 0135); absent when it may not. */
   effortPerStep?: true
+  /** The family the model is of, as far as the client knows (a preset: the model that answered for it). */
+  family?: ModelFamily
 }
 
 export interface BudgetQuery {

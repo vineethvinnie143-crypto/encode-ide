@@ -13,7 +13,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { diffHunks } from '@encode/diff'
-import { messageText, redactSecrets, textBlock, type BudgetQuery, type ModelClient, type ModelRequest, type ModelRole, type Usage } from '@encode/providers'
+import { messageText, redactSecrets, textBlock, type BudgetQuery, type ModelClient, type ModelRequest, type ModelRole, type SystemPart, type Usage } from '@encode/providers'
 import { MAX_FINDINGS, objectIn, parseReview, reviewPrompt, type CodeReviewFile, type CodeReviewInput, type CodeReviewResult, type ReviewFinding } from './code-review'
 import { estimateTokens } from './compaction'
 import type { ChangedText, ScanFinding } from './diff-scan'
@@ -304,11 +304,13 @@ function duration(ms: number): string {
 /** One call to the Review role (or `role`), without tools, given up after `timeoutMs`; a model that cannot answer says why. */
 export async function askReviewer(
   client: ModelClient,
-  call: { system: string; prompt: string; tool: string; sticky?: string; signal: AbortSignal; timeoutMs: number; role?: ModelRole; maxOutputTokens?: number },
+  call: { system: string | SystemPart[]; prompt: string; tool: string; sticky?: string; signal: AbortSignal; timeoutMs: number; role?: ModelRole; maxOutputTokens?: number },
 ): Promise<ReviewerAnswer> {
   const most = call.maxOutputTokens ?? MAX_OUTPUT_TOKENS
+  // Given as text, the instructions are one part; given as parts, they carry a note for the model's family (model-notes.ts).
+  const system = typeof call.system === 'string' ? [{ text: call.system, cache: true }] : call.system
   const payload: ModelRequest = {
-    system: [{ text: call.system, cache: true }],
+    system,
     messages: [{ role: 'user', content: [textBlock(call.prompt)] }],
     tools: [],
     maxOutputTokens: most,
@@ -322,7 +324,7 @@ export async function askReviewer(
       role: call.role ?? 'reviewer',
       tool: call.tool,
       payload,
-      requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(call.system.length / 4), maxOutputTokens: most, tools: false, images: false },
+      requirements: { promptTokens: estimateTokens(payload.messages) + Math.ceil(system.reduce((sum, part) => sum + part.text.length, 0) / 4), maxOutputTokens: most, tools: false, images: false },
       ...(call.sticky ? { sticky: call.sticky } : {}),
       signal: AbortSignal.any([call.signal, late.signal]),
     })

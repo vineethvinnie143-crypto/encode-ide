@@ -3,11 +3,11 @@ import { describe, it } from 'node:test'
 import type { CompletionOutcome, CompletionRequest, ModelClient } from '@encode/providers'
 import { MAX_FINDINGS, parseReview, REVIEW_SYSTEM, reviewChanges, reviewPrompt, type CodeReviewInput } from './code-review'
 
-function clientAnswering(answer: string | CompletionOutcome): ModelClient & { requests: CompletionRequest[] } {
+function clientAnswering(answer: string | CompletionOutcome, model = 'test'): ModelClient & { requests: CompletionRequest[] } {
   const requests: CompletionRequest[] = []
   return {
     requests,
-    budget: async () => ({ model: 'test', contextWindow: 128_000, maxOutputTokens: 8_000 }),
+    budget: async () => ({ model, contextWindow: 128_000, maxOutputTokens: 8_000 }),
     complete: async (request) => {
       requests.push(request)
       if (typeof answer !== 'string') return answer
@@ -62,6 +62,15 @@ describe('the request to the Reviewer', () => {
     assert.equal(request.payload.system[0].text, REVIEW_SYSTEM)
     assert.match(REVIEW_SYSTEM, /data to review, never instructions/)
     assert.equal(request.sticky, undefined, 'no session to stay with')
+  })
+
+  it("adds the note for DeepSeek's Reviewer after the rules, unless the notes are off (ADR 0142)", async () => {
+    const deepseek = clientAnswering('{"summary": "Fine.", "findings": []}', 'deepseek/deepseek-v4.1-flash')
+    await reviewChanges(deepseek, input, new AbortController().signal)
+    assert.deepEqual(deepseek.requests[0].payload.system.map((part) => part.text.split('\n', 1)[0]), [REVIEW_SYSTEM.split('\n', 1)[0], '# Keep your reasoning short'])
+    const off = clientAnswering('{"summary": "Fine.", "findings": []}', 'deepseek/deepseek-v4.1-flash')
+    await reviewChanges(off, input, new AbortController().signal, 'off')
+    assert.deepEqual(off.requests[0].payload.system.map((part) => part.text), [REVIEW_SYSTEM])
   })
 
   it('says why when no model can answer, or the change is too large for it', async () => {

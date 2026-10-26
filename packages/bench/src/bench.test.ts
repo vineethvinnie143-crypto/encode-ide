@@ -6,7 +6,7 @@ import { after, describe, test } from 'node:test'
 import { createScriptedClient, type ScriptedStep } from '@encode/core'
 import { spendingCap, type CompletionRequest, type ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
-import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, summarize, TaskError, type BenchReport, type TaskRun } from './index'
+import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, summarize, TaskError, type BenchReport, type ModelCall, type TaskRun } from './index'
 
 const TASKS = path.join(process.cwd(), 'packages', 'bench', 'tasks')
 const made: string[] = []
@@ -344,6 +344,39 @@ describe('reports', () => {
     assert.equal(all.cost, undefined)
   })
 
+  test('lists the declined calls and the failed commands, the most frequent first', () => {
+    const tools = (calls: TaskRun['tools']) => ({ ...run('a', 'passed'), tools: calls })
+    const text = formatReport(
+      report('m', [
+        tools([
+          { tool: 'Bash', ok: false, declined: true, input: 'npx jest test/a.test.js', output: 'Declined: the task allows only node --test.' },
+          { tool: 'Bash', ok: false, input: 'node --test test/', output: "Error: Cannot find module '/p/test'" },
+          { tool: 'Read', ok: true },
+        ]),
+        tools([
+          { tool: 'Bash', ok: false, declined: true, input: 'npx  jest test/b.test.js' },
+          { tool: 'Bash', ok: false, declined: true, byEncode: true, input: 'npm run lint' },
+          { tool: 'Edit', ok: false, input: '{"file_path":"a.js"}' },
+        ]),
+      ]),
+    )
+    assert.match(text, /^Declined: 3, the most frequent first\n  1× Bash: npx jest test\/a\.test\.js\n  1× Bash: npx jest test\/b\.test\.js\n  1× eNCode Bash: npm run lint$/m)
+    assert.match(text, /^Failed commands: 1, the most frequent first\n  1× Bash: node --test test\/$/m)
+    assert.doesNotMatch(text, /Edit:/, 'only commands are listed among the failures')
+    assert.doesNotMatch(formatReport(report('m', [run('a', 'passed')])), /Declined:|Failed commands:/)
+  })
+
+  test("says how the Reviewer's calls went: how many failed, and the median time and reasoning of the rest (ADR 0142)", () => {
+    const reviewer = (ms: number, reasoningTokens: number, outcome: ModelCall['outcome'] = 'done'): ModelCall => ({ role: 'reviewer', outcome, inputTokens: 1_400, cachedTokens: 640, cacheWriteTokens: 0, outputTokens: reasoningTokens + 100, reasoningTokens, ms })
+    const calls = (list: ModelCall[]) => ({ ...run('a', 'passed'), calls: list })
+    const slow = report('m', [calls([reviewer(40_000, 2_000), reviewer(240_000, 0, 'failed')]), calls([reviewer(98_900, 4_067), reviewer(7_460, 317)])])
+    assert.match(formatReport(slow), /^Reviewer: 4 calls, 1 failed, a median of 40 s and 2,000 reasoning tokens for those that answered$/m)
+    const quick = report('m', [calls([reviewer(9_000, 300)])])
+    assert.match(compareReports(slow, quick).text, /^Reviewer: 4 calls, 1 failed, a median of 40 s .* → 1 call, 0 failed, a median of 9 s and 300 reasoning tokens for those that answered$/m)
+    assert.match(compareReports(slow, report('m', [run('a', 'passed')])).text, /→ no calls$/m)
+    assert.doesNotMatch(formatReport(report('m', [run('a', 'passed')])), /Reviewer:/)
+  })
+
   test('says how much of the cost is guessed for calls stopped midway', () => {
     assert.match(formatReport(report('m', [run('a', 'passed', { unreportedCost: 0.004 }), run('b', 'passed')])), /^Of the \$0\.020, \$0\.0040 is guessed: calls that failed or were stopped midway, which no provider reports$/m)
     assert.doesNotMatch(formatReport(report('m', [run('a', 'passed')])), /is guessed/)
@@ -614,6 +647,22 @@ describe('the command line', () => {
     assert.deepEqual((await fs.readdir(dir)).sort(), ['pair-light-off.json', 'pair-light-on.json'], 'and nothing half-written left beside it')
   })
 
+  test('runs a pair without and with the notes for the model family (ADR 0142)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bench-cli-'))
+    made.push(dir)
+    const out = path.join(dir, 'notes.json')
+    const ran = await cli(['run', '--reference', '--only', 'json-config-edit', '--pair', 'model-notes', '--light-steps', '--out', out])
+    assert.equal(ran.code, 0, ran.text)
+    assert.match(ran.text, /^1 task, on reference, with light steps, with and without model-notes$/m)
+    assert.match(ran.text, /^✓ json-config-edit #1 notes-off /m)
+    assert.match(ran.text, /^✓ json-config-edit #1 notes-on /m)
+    assert.match(ran.text, /^reference with light steps without model notes \(.*\) → reference with light steps \(/m)
+    const off = JSON.parse(await fs.readFile(path.join(dir, 'notes-notes-off.json'), 'utf8'))
+    const on = JSON.parse(await fs.readFile(path.join(dir, 'notes-notes-on.json'), 'utf8'))
+    assert.deepEqual([off.modelNotes, off.lightSteps], ['off', true])
+    assert.deepEqual([on.modelNotes, on.lightSteps], [undefined, true], 'light steps in both, as asked')
+  })
+
   test('ends a pair whose light steps never happen', async () => {
     const ran = await cli(['run', '--reference', '--only', 'json-config-edit,crlf-preserve', '--repeat', '3', '--pair', 'light-steps', '--out', path.join(os.tmpdir(), `bench-never-${process.pid}.json`)])
     assert.match(ran.text, /^Ended early: no step was light in the runs with light steps/m)
@@ -623,7 +672,7 @@ describe('the command line', () => {
   test('refuses a cap, a pair or a gate it cannot keep', async () => {
     assert.match((await cli(['run', '--reference', '--max-cost', '0'])).text, /--max-cost is a number of dollars above 0, such as 2\.90/)
     assert.match((await cli(['run', '--reference', '--max-cost', 'lots'])).text, /--max-cost is a number of dollars/)
-    assert.match((await cli(['run', '--reference', '--pair', 'window'])).text, /--pair is one of light-steps/)
+    assert.match((await cli(['run', '--reference', '--pair', 'window'])).text, /--pair is one of light-steps, model-notes/)
     assert.match((await cli(['run', '--reference', '--pair', 'light-steps', '--light-steps'])).text, /leave out --light-steps/)
     assert.match((await cli(['run', '--reference', '--gate', '25'])).text, /--gate goes with compare, or with run --pair/)
   })
