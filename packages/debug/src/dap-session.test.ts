@@ -734,7 +734,8 @@ describe('a debug run of C++ through lldb-dap', { skip: !LLDB || !CXX ? 'no lldb
     const file = path.join(dir, 'cart.cpp')
     const program = path.join(dir, process.platform === 'win32' ? 'cart.exe' : 'cart')
     execFileSync(CXX!, ['-g', '-O0', '-o', program, file])
-    const r = run(lldbPlan(dir, program), {}, { uncaught: true, all: true }, dir)
+    // lldb says how the program ended (`process status`): the message, where its code is not the one it returned.
+    const r = run(lldbPlan(dir, program, { arguments: { program, args: [], cwd: dir, env: [], stopOnEntry: false, exitCommands: ['process status'] } }), {}, { uncaught: true, all: true }, dir)
     await r.session.start()
     const view = await r.until((v) => !!paused(v), 'the throw')
     const thread = paused(view)!
@@ -743,9 +744,10 @@ describe('a debug run of C++ through lldb-dap', { skip: !LLDB || !CXX ? 'no lldb
     // The throw is in the runtime (__cxa_throw; _CxxThrowException on Windows): line_total is below it.
     assert.ok(thread.frames!.some((frame) => /line_total/.test(frame.name) && frame.source?.path === file), JSON.stringify(thread.frames))
     await r.session.resume()
-    await r.until((v) => v.state === 'ended', 'the end')
+    const ended = await r.until((v) => v.state === 'ended', 'the end')
     assert.match(r.text(), /caught a quantity below zero/)
     assert.match(r.text(), /total 12/)
+    assert.equal(ended.exitCode, 0, r.text())
     await r.session.settled
   })
 })
@@ -783,7 +785,8 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     const commands = path.join(etc, 'lldb_commands')
     const initCommands = [`command script import "${path.join(etc, 'lldb_lookup.py')}"`, ...(existsSync(commands) ? [`command source -s 0 "${commands}"`] : [])]
     const rust = /^host:\s*\S+-windows-msvc\s*$/m.test(execFileSync(RUSTC!, ['-vV'], { encoding: 'utf8' })) ? ('msvc' as const) : true
-    const plan = (args: string[]) => lldbPlan(dir, program, { rust, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands } })
+    // lldb says how the program ended (`process status`): the message, where its code is not the one it returned.
+    const plan = (args: string[]) => lldbPlan(dir, program, { rust, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands, exitCommands: ['process status'] } })
 
     const r = run(plan([]), { [file]: [bp(2)] }, undefined, dir)
     await r.session.start()
@@ -796,8 +799,9 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     // line_total runs twice: without its breakpoint, the program runs to its end.
     await r.session.setBreakpoints(file, [])
     await r.session.resume()
-    await r.until((v) => v.state === 'ended', 'the end')
+    const done = await r.until((v) => v.state === 'ended', 'the end')
     assert.match(r.text(), /subtotal 41\.8/)
+    assert.equal(done.exitCode, 0, r.text())
     await r.session.settled
 
     const boom = run(plan(['boom']), {}, undefined, dir)
@@ -809,7 +813,7 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     await boom.session.resume()
     const ended = await boom.until((v) => v.state === 'ended' || (!!paused(v) && paused(v)!.frames![0]!.id !== paused(crashed)!.frames![0]!.id), 'the end after the panic')
     assert.equal(ended.state, 'ended', JSON.stringify(paused(ended)))
-    assert.equal(ended.exitCode, 101)
+    assert.equal(ended.exitCode, 101, boom.text())
     await boom.session.settled
   })
 })
