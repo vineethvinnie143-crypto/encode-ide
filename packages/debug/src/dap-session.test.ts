@@ -633,8 +633,20 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
       const bare = run(lldbPlan(dir, program, { rust: true }), { [file]: [bp(2)] }, undefined, dir)
       await bare.session.start()
       const stop = paused(await bare.until((v) => !!paused(v), 'the breakpoint without formatters'))!
-      const plain = await localsOf(bare, stop).then((list) => JSON.stringify(list).slice(0, 600), (problem: Error) => `failed too: ${problem.message} / ${bare.session.view().message ?? ''}`)
-      await bare.session.stop()
+      const steps: string[] = [`frames ${stop.frames!.slice(0, 3).map((frame) => frame.name).join(', ')}`]
+      try {
+        const scopes = await bare.session.scopes(stop.frames![0]!.id)
+        steps.push(`scopes ${scopes.map((scope) => `${scope.name}#${scope.ref}`).join(', ')} (${bare.session.view().state})`)
+        for (const scope of scopes) {
+          const values = await bare.session.variables(scope.ref)
+          steps.push(`${scope.name}: ${values.slice(0, 8).map((value) => `${value.name}:${value.type ?? ''}`).join(', ')}`)
+        }
+      } catch (problem) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+        steps.push(`failed: ${(problem as Error).message} / ${bare.session.view().message ?? ''}`)
+      }
+      const plain = steps.join(' | ')
+      await bare.session.stop().catch(() => undefined)
       throw new Error(`${error.message} / ${r.session.view().message ?? 'no message'} / without the formatters: ${plain}`)
     })
     const name = named(locals, 'name')

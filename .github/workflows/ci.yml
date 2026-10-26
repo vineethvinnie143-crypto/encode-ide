@@ -94,7 +94,13 @@ jobs:
       # its tool cache lacks: it is installed as eNCode's message tells a person to, off the PATH, so the C and Rust
       # runs prove that eNCode finds it where its installer put it. A newer LLVM names its own Python in the failure.
       - name: Python for lldb-dap
-        run: winget install --id Python.Python.3.10 --exact --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+        run: |
+          winget install --id Python.Python.3.10 --exact --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+          winget install --id Python.Python.3.11 --exact --source winget --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+          & "C:\Program Files\LLVM\bin\clang.exe" --version
+          winget install --id LLVM.LLVM --exact --source winget --silent --force --disable-interactivity --accept-package-agreements --accept-source-agreements
+          & "C:\Program Files\LLVM\bin\clang.exe" --version
+          rustc -vV
 
       - name: Unit tests
         env:
