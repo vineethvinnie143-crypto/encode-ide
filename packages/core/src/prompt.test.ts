@@ -5,7 +5,8 @@ import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, systemParts } 
 
 /** Every request carries the system prompt, so growing it is a decision, not an accident. */
 // ADR 0126 raised it from 5,600: the agent says what it found before each batch, and checks the outcome itself.
-const PROMPT_BUDGET_CHARS = 6_100
+// ADR 0139 raised it from 6,100: a failing test is the spec, and neither a declined command nor a failing check ends the checking.
+const PROMPT_BUDGET_CHARS = 6_450
 
 const info = { root: '/work/app', platform: 'linux' as const, arch: 'x64', shell: 'bash', cwd: '/work/app', date: '2026-10-22', topLevel: ['src/', 'package.json'] }
 
@@ -49,6 +50,16 @@ describe('the system prompt', () => {
       assert.match(text, /reaches other people/)
       assert.match(text, /messaging people/)
     }
+  })
+
+  it('keeps the tests as the spec, and the checking going past a declined command or a failing check (ADR 0139)', () => {
+    for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) {
+      assert.match(text, /A failing test is the spec/)
+      assert.match(text, /add or change tests only when the user asks/i)
+      assert.match(text, /a check that fails after your change is yours until/i)
+      assert.match(text, /declined command never ends your checking/)
+    }
+    assert.match(SYSTEM_PROMPT, /when told to leave them alone, change no test file at all/)
   })
 
   it('asks the agent to spend context carefully without giving up on reading before it edits', () => {

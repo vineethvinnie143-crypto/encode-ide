@@ -247,16 +247,35 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     ...(repeat > 1 ? { onRound: (round: number) => context.print(`Round ${round} of ${repeat}`) } : {}),
     onRun: (done: TaskRun, _task: BenchTask, setup: number) => context.print(runLine(done, pair ? ` ${pair.names[setup]}` : '', cap)),
   }
-  const reports = pair ? await runPair(chosen, { ...options, stopIf: pairDecided(cut) }, pair.settings) : [await runBench(chosen, options)]
-  const stamp = reports[0]!.startedAt.replace(/[:.]/g, '-')
+  // The reports are written after every run, and in full at the end, to the same files (ADR 0139).
   const given = flags.values.get('--out')
-  const base = path.resolve(given ?? path.join('bench-results', `${slugOf(reference ? 'reference' : model!)}-${stamp}.json`))
-  const outs = pair ? pair.names.map((suffix) => base.replace(/(\.json)?$/i, `-${suffix}.json`)) : [base]
-  await fs.mkdir(path.dirname(base), { recursive: true })
-  for (const [index, report] of reports.entries()) {
-    // A key can reach a report only by being echoed, by a provider or a model; it is taken out either way.
-    await fs.writeFile(outs[index]!, `${redactSecrets(JSON.stringify(report, null, 2), live?.secrets ?? [])}\n`)
+  const outsFor = (reports: readonly BenchReport[]) => {
+    const stamp = reports[0]!.startedAt.replace(/[:.]/g, '-')
+    const base = path.resolve(given ?? path.join('bench-results', `${slugOf(reference ? 'reference' : model!)}-${stamp}.json`))
+    return pair ? pair.names.map((suffix) => base.replace(/(\.json)?$/i, `-${suffix}.json`)) : [base]
   }
+  const save = async (reports: readonly BenchReport[]) => {
+    const outs = outsFor(reports)
+    await fs.mkdir(path.dirname(outs[0]!), { recursive: true })
+    for (const [index, report] of reports.entries()) {
+      // A key can reach a report only by being echoed, by a provider or a model; it is taken out either way. Written
+      // whole and then moved into place, so a crash mid-write leaves the last report, not half of this one.
+      const out = outs[index]!
+      await fs.writeFile(`${out}.part`, `${redactSecrets(JSON.stringify(report, null, 2), live?.secrets ?? [])}\n`)
+      await fs.rename(`${out}.part`, out)
+    }
+    return outs
+  }
+  // A report that cannot be saved along the way is said once; the runs go on, and the end tries again.
+  let unsaved = false
+  const onProgress = async (so: readonly BenchReport[]) => {
+    await save(so).catch((error: unknown) => {
+      if (!unsaved) context.print(plain(`Could not save the reports so far: ${error instanceof Error ? error.message : String(error)}`))
+      unsaved = true
+    })
+  }
+  const reports = pair ? await runPair(chosen, { ...options, stopIf: pairDecided(cut), onProgress }, pair.settings) : [await runBench(chosen, { ...options, onProgress })]
+  const outs = await save(reports)
   context.print('')
   if (pair) {
     const comparison = compareReports(reports[0]!, reports[1]!)

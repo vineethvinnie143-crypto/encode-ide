@@ -73,6 +73,9 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
     async complete(request: CompletionRequest): Promise<CompletionOutcome> {
       countResults(request)
       const rewrote = rewrites(request)
+      // A call stopped before it began reached no model, so it cost nothing (ADR 0139): a helper's call started as the
+      // run ended is one. A call stopped later may have been charged for what the model read, so its cost stays unknown.
+      const unsent = request.signal.aborted
       const started = now()
       try {
         const outcome = await inner.complete(request)
@@ -94,7 +97,18 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
         })
         return outcome
       } catch (error) {
-        calls.push({ role: request.role, outcome: 'failed', inputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0, ms: now() - started, ...(rewrote ? { rewrote: true as const } : {}) })
+        calls.push({
+          role: request.role,
+          outcome: 'failed',
+          inputTokens: 0,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          ...(unsent ? { cost: 0 } : {}),
+          ms: now() - started,
+          ...(rewrote ? { rewrote: true as const } : {}),
+        })
         throw error
       }
     },

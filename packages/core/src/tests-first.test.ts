@@ -21,9 +21,10 @@ function told(h: Harness): string[] {
 }
 
 describe('tests first on bigger work', () => {
-  it('tells the agent once, when a task list of three steps starts in a project with tests', async () => {
-    const h = await loopHarness({ script: [todos(3), todos(4), { text: 'Done.' }], services: { checks: checksOf([TYPECHECK, TEST]) } })
-    await h.run('add export to csv, with filters and paging')
+  it('tells the agent once, when a task list of three steps starts in a project with tests and the person asked for tests', async () => {
+    const request = 'add export to csv, with filters, paging and tests'
+    const h = await loopHarness({ script: [todos(3), todos(4), { text: 'Done.' }], services: { checks: checksOf([TYPECHECK, TEST]) }, requests: () => [request] })
+    await h.run(request)
     const [text] = told(h)
     assert.equal(told(h).length, 1, 'once a request')
     assert.match(text, /^<system-reminder>\nThis is bigger work, and the project has tests \(`pnpm test`\)\. Write the tests first:\n- add or change tests/)
@@ -51,5 +52,18 @@ describe('tests first on bigger work', () => {
     const off = await loopHarness({ script: [todos(3), { text: 'Done.' }], services: { checks: checksOf([TEST]) }, settings: { checkGate: 'off' } })
     await off.run('big change')
     assert.deepEqual([small, untested, written, asking, off].map((h) => told(h).length), [0, 0, 0, 0, 0])
+  })
+
+  it('stays quiet for a task list when the person did not ask for tests, and for a plan when they ruled tests out (ADR 0139)', async () => {
+    const listed = await loopHarness({ script: [todos(4), { text: 'Done.' }], services: { checks: checksOf([TEST]) }, requests: () => ['add export to csv'] })
+    await listed.run('add export to csv')
+    const request = 'The cart tests fail. Plan a fix of the code, not the tests.'
+    const planned = await loopHarness({
+      script: [{ calls: [{ name: 'ExitPlanMode', input: { plan: '1. Fix the total.' } }] }, { text: 'Done.' }],
+      services: { checks: checksOf([TEST]) },
+      requests: () => [request],
+    })
+    await planned.run(request, 'plan')
+    assert.deepEqual([listed, planned].map((h) => told(h).length), [0, 0])
   })
 })

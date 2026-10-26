@@ -25,6 +25,11 @@ export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | '
   onRound?(round: number): void
   /** After each run, the reports so far in hand: a reason to end the bench there, or undefined to go on. */
   stopIf?(reports: readonly BenchReport[], round: number, roundDone: boolean): string | undefined
+  /**
+   * After each run, the reports so far, marked partial and with what was spent, to be saved: a bench cut off by a
+   * restart keeps the runs it made (ADR 0139). The bench waits for it before the next run.
+   */
+  onProgress?(reports: readonly BenchReport[]): Promise<void> | void
   now?: () => Date
 }
 
@@ -129,14 +134,15 @@ async function runSetups(tasks: readonly BenchTask[], options: BenchOptions, set
         options.onRun?.(run, task, index)
         ended = options.stopIf?.(reports, attempt, taskIndex === tasks.length - 1 && step === order.length - 1)
         if (ended) break rounds
+        await options.onProgress?.(reports.map((report) => ({ ...withSpending(report, cap, cap?.stopped()), partial: true as const, runs: [...report.runs] })))
       }
     }
     lastRound = (cap?.spent() ?? 0) - before
   }
   const why = ended ?? cap?.stopped()
-  for (const report of reports) {
-    if (cap) report.spending = { limit: cap.limit, spent: cap.spent() }
-    if (why) report.endedEarly = why
-  }
-  return reports
+  return reports.map((report) => withSpending(report, cap, why))
+}
+
+function withSpending(report: BenchReport, cap: SpendingCap | undefined, why: string | undefined): BenchReport {
+  return { ...report, ...(cap ? { spending: { limit: cap.limit, spent: cap.spent() } } : {}), ...(why ? { endedEarly: why } : {}) }
 }

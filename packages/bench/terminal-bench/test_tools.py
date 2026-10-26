@@ -58,6 +58,9 @@ class ChooseTasksTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("Cannot run: nothing, train-model (needs 1 GPU).", err)
         self.assertEqual(run(choose_tasks.main, str(self.root), "--sample", "4")[0], 2)
+        # A sample of none is refused, never read as every task.
+        with self.assertRaises(SystemExit):
+            run(choose_tasks.main, str(self.root), "--sample", "0")
 
 
 class ReportTest(unittest.TestCase):

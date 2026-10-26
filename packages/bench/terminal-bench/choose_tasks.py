@@ -38,10 +38,17 @@ def why_not(config: dict, cpus: float, memory_mb: int) -> str | None:
     return None
 
 
+def at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("at least 1")
+    return value
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("root", type=Path, help="the downloaded dataset")
-    parser.add_argument("--sample", type=int, help="this many tasks, chosen at random")
+    parser.add_argument("--sample", type=at_least_one, help="this many tasks, chosen at random")
     parser.add_argument("--seed", type=int, default=1, help="the same seed chooses the same tasks")
     parser.add_argument("--names", default="", help="these tasks instead, separated by spaces")
     parser.add_argument("--cpus", type=float, default=4)
@@ -64,7 +71,7 @@ def main(argv: list[str]) -> int:
             print(f"Cannot run: {', '.join(unknown + refused)}.", file=sys.stderr)
             return 2
         chosen = named
-    elif args.sample:
+    elif args.sample is not None:
         if args.sample > len(runnable):
             print(f"Only {len(runnable)} tasks can run here, not {args.sample}.", file=sys.stderr)
             return 2

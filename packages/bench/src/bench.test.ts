@@ -153,7 +153,7 @@ describe('a run', () => {
     assert.equal(run.reply, 'Wrote done.txt.')
     assert.deepEqual(run.metrics.byTool.Bash, { calls: 2, failed: 0 })
     const sent = JSON.stringify(client.requests.at(-1)!.payload.messages)
-    assert.match(sent, /allows only the commands the task names/)
+    assert.match(sent, /it allows only these commands: `node --version`\. Do the task without this call, or with one of them\. A declined call is no reason to stop checking your work\./)
     assert.match(sent, /No one can answer during this benchmark run/)
   })
 
@@ -252,6 +252,20 @@ describe('what a run spent', () => {
     assert.deepEqual(client.resultChars, { Read: 120 })
     assert.equal(client.calls.length, 2)
     assert.deepEqual(client.calls[0], { role: 'main', model: 'openrouter:some/model', outcome: 'done', inputTokens: 1_000, cachedTokens: 800, cacheWriteTokens: 0, outputTokens: 50, reasoningTokens: 0, cost: 0.002, ms: client.calls[0]!.ms })
+  })
+
+  test('counts a call stopped before it began as costing nothing, and one stopped later as unknown (ADR 0139)', async () => {
+    const inner: ModelClient = {
+      budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000 }),
+      complete: async () => {
+        throw new Error('aborted')
+      },
+    }
+    const client = meteredClient(inner)
+    const request = (signal: AbortSignal) => ({ role: 'utility', payload: { system: [], messages: [], tools: [] }, requirements: {}, signal }) as unknown as CompletionRequest
+    await assert.rejects(client.complete(request(AbortSignal.abort())))
+    await assert.rejects(client.complete(request(new AbortController().signal)))
+    assert.deepEqual(client.calls.map((call) => [call.outcome, call.cost]), [['failed', 0], ['failed', undefined]])
   })
 
   test("counts a call whose agent's history was rewritten, not one that only grew, nor a summary's own", async () => {
@@ -419,6 +433,16 @@ describe('a bench that stops at its cap, and a pair of setups (ADR 0137)', () =>
     assert.match(formatReport(report), /^Spent \$0\.300 of the \$0\.350 cap$/m)
   })
 
+  test('hands over the reports so far after every run, marked partial, with what was spent (ADR 0139)', async () => {
+    const saved: BenchReport[][] = []
+    const report = await runBench(await tasks(), { client: writer(0.1), model: 'm', repeat: 1, settings: REFERENCE_SETTINGS, cap: spendingCap(1), onProgress: (reports) => void saved.push([...reports]) })
+    assert.deepEqual(saved.map(([first]) => [first!.partial, first!.runs.length, Math.round(first!.spending!.spent * 100)]), [[true, 1, 20], [true, 2, 40]])
+    assert.equal(report.partial, undefined, 'the whole report, at the end')
+    assert.equal(report.runs.length, 2)
+    assert.equal(saved[0]![0]!.runs.length, 1, 'a snapshot, not the report the bench goes on writing to')
+    assert.match(formatReport(saved[0]![0]!), /^Partial: written while the bench went on, which then did not finish\.$/m)
+  })
+
   test('starts a round only when what is left pays for one like the last', async () => {
     const report = await runBench(await tasks(), { client: writer(0.1), model: 'm', repeat: 5, settings: REFERENCE_SETTINGS, cap: spendingCap(1) })
     // A round costs $0.40: two rounds leave $0.20.
@@ -559,6 +583,8 @@ describe('the command line', () => {
     assert.equal(off.lightSteps, undefined)
     assert.equal(on.lightSteps, true)
     assert.deepEqual(on.spending, { limit: 2.9, spent: 0 })
+    assert.equal(off.partial, undefined, 'written in full at the end')
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['pair-light-off.json', 'pair-light-on.json'], 'and nothing half-written left beside it')
   })
 
   test('ends a pair whose light steps never happen', async () => {
