@@ -107,6 +107,13 @@ const CHANGE_DELAY_MS = 25
 const MAX_MAP_BYTES = 50 * 1024 * 1024
 /** What an agent's run printed is kept for its reports, up to this many lines. */
 const MAX_PRINTED = 2_000
+/**
+ * What a program printed just before it stopped can come in just after the stop: its pipe and the debugger's
+ * connection are two channels (on Windows the stop often wins). A report after a stop waits for the output to be
+ * quiet this long, and at most AFTER_STOP_MS.
+ */
+const QUIET_MS = 150
+const AFTER_STOP_MS = 600
 const MAX_AGENT_BREAKPOINTS = 50
 const BREAKPOINT_ID = /^[\w-]{1,64}$/
 const HIT_CONDITION = /^\s*(==|>=|<=|>|<|%)?\s*\d{1,9}\s*$/
@@ -181,6 +188,17 @@ interface OwnStops {
 interface AgentStart extends OwnStops {
   owner: string
   signal?: AbortSignal
+}
+
+/** Resolves once nothing more was printed for QUIET_MS, or after AFTER_STOP_MS, or when the call is stopped. */
+async function quiet(printed: Run['printed'], signal: AbortSignal): Promise<void> {
+  const count = () => printed.before + printed.lines.length
+  const end = Date.now() + AFTER_STOP_MS
+  let seen = -1
+  while (seen !== count() && Date.now() < end && !signal.aborted) {
+    seen = count()
+    await new Promise((resolve) => setTimeout(resolve, Math.min(QUIET_MS, end - Date.now())))
+  }
 }
 
 interface Run {
@@ -622,6 +640,7 @@ export class FolderDebugger {
             signal.addEventListener('abort', finish, { once: true })
           })
         }
+        if (!run.session.ended && run.session.view().stops > stops) await quiet(run.printed, signal)
         return view(run)
       },
       act: async (id, action, thread) => {

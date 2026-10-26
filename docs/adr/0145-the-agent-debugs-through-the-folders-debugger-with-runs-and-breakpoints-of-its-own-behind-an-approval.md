@@ -90,7 +90,9 @@ A new access, `{ type: 'debug', action: 'start' | 'drive', what, key }`:
 - A run it starts is marked with its owner. Its breakpoints and exception filters are its own, sent only to that run;
   the person's `setBreakpoints` and `setExceptions` leave agent runs alone, and the person's gutter does not show the
   agent's breakpoints.
-- Each run keeps what it printed (the last 2,000 lines), so a report says what came since the last one.
+- Each run keeps what it printed (the last 2,000 lines), so a report says what came since the last one. The
+  program's pipe and the debugger's connection are two channels, and on Windows a stop often arrives before what was
+  printed just before it: a report after a stop waits until nothing more is printed for 150 ms, at most 600 ms.
 - A session sees its own runs and the person's, never another session's. Closing the session (its scope released)
   stops its runs.
 - The turn's signal stops a run the turn started, its build included, when the person stops the turn.
