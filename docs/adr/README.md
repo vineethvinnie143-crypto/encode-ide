@@ -141,6 +141,7 @@ say so.
 | [0149](0149-the-agents-debug-runs-start-its-probes-and-the-benchs-first-ctrl-c-lets-the-run-finish.md) | The agent's debug runs start its probes, and the bench's first Ctrl+C lets the run in progress finish | Accepted, amends 0145; builds on 0137, 0141 and 0146 |
 | [0150](0150-an-answer-that-leaves-a-result-of-the-change-as-it-is-goes-back-once.md) | An answer that leaves a result of the change as it is goes back to the agent once | Accepted, builds on 0095, 0126, 0147 and 0148 |
 | [0151](0151-a-change-that-drops-characters-is-tried-on-a-word-with-each-and-a-fix-goes-with-its-check.md) | A change that drops characters is tried on a word with each, and a fix late in a request goes with its check | Accepted, amends 0141, 0147 and 0150 |
+| [0152](0152-a-result-shown-after-a-comma-counts-for-the-left-as-is-check.md) | A result shown after a comma counts for the left-as-is check | Accepted, amends 0150 |
 
 ## Template
 

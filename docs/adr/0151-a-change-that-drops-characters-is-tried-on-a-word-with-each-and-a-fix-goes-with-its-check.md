@@ -47,7 +47,8 @@ at `--effort max`. It passed 4. No run left `a---b` as it was.
   - It flags no more passing answers: still 6 of 109.
   - Matching any code span next to the words would flag 28 more passing answers, so the pattern names "passes
     through".
-- **Still open.** Five paid runs of regression-guard after the merge measure it.
+- Part 5 passed 4 of 5 after this. In runs 3 and 5 the fix and its check went in one batch and passed; run 4's
+  answer left `a---b` after a comma, which 0152 counts.
 
 ## Verification
 
