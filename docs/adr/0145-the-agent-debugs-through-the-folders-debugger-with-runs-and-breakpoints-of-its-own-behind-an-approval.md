@@ -64,7 +64,7 @@ Printed since the last report:
 Bounded: two lines of context each side, 12 frames (the runtime's folded to a count), 30 values of 240 characters,
 100 children, 60 printed lines or 4,000 characters, an exception's message without its stack (600 characters).
 Breakpoints that did not bind are named with the debugger's reason. A session has at most 3 runs of its own; each
-takes at most 50 breakpoints, inside the folder, on a line the file has.
+takes at most 50 breakpoints, inside the folder or the session's scratch folder (0149), on a line the file has.
 
 The tool is deferred (loaded through `ToolSearch`), offered only where the folder has a debugger (the desktop app, and
 the bench's debugging tasks of 0146), listed from the start once a request asks for the debugger (0148),

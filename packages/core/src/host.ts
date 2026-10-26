@@ -131,8 +131,9 @@ export interface HostOptions {
   /**
    * Settings, trust, rules, hooks and checkpoints of the folder a session works in. Asked once for each session that has a
    * folder. `notice` puts a line in the session's conversation (a hook that failed, a store that could not be read).
+   * `scratch`: the session's scratch folder (ADR 0141), a real path, when it has one.
    */
-  scope?(request: { sessionId: string; root: string; notice(text: string): void }): SessionScope | Promise<SessionScope>
+  scope?(request: { sessionId: string; root: string; scratch?: string; notice(text: string): void }): SessionScope | Promise<SessionScope>
   /** The git work behind the agent's worktrees, for every folder; without it the agent has no EnterWorktree. */
   worktrees?: WorktreeGit
   web?: WebAccess
@@ -320,18 +321,18 @@ export class AgentHost {
   private async make(log: SessionLog): Promise<AgentSession> {
     const project = log.snapshot().marks.projectRoot ?? this.workspaceRoot
     const root = project ? await realPath(project) : ''
+    // Only a session that can run has somewhere to put its probes; the folder's debugger runs them too (ADR 0149).
+    const scratch = root ? await this.scratch?.make(log.id) : undefined
     let scope: SessionScope | undefined
     if (root && this.o.scope) {
       try {
-        scope = await this.o.scope({ sessionId: log.id, root, notice: (text) => this.loaded.get(log.id)?.tell(text) })
+        scope = await this.o.scope({ sessionId: log.id, root, ...(scratch ? { scratch } : {}), notice: (text) => this.loaded.get(log.id)?.tell(text) })
       } catch (error) {
         // Without its rules a session must not run with the permissive defaults: it opens, and every tool call fails.
         this.o.warn?.(`Could not load the settings of ${root}: ${error instanceof Error ? error.message : String(error)}`)
         scope = refusing(error)
       }
     }
-    // Only a session that can run has somewhere to put its probes.
-    const scratch = root ? await this.scratch?.make(log.id) : undefined
     const session = new AgentSession(log, this.envFor(log.id, root, scope, await this.offLimitsFor(log.id, scratch), scratch))
     this.bornAt.set(session, this.epoch)
     this.loaded.set(log.id, session)

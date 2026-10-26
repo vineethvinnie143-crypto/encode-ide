@@ -138,6 +138,7 @@ say so.
 | [0146](0146-the-bench-has-debugging-tasks-run-with-the-folders-debugger.md) | The bench has debugging tasks, run with the folder's debugger | Accepted, builds on 0092, 0143 and 0145 |
 | [0147](0147-the-agent-fixes-what-its-own-checks-find-and-a-check-at-the-last-step-is-told.md) | The agent fixes what its own checks find, and a check at the last step is told | Accepted, builds on 0096, 0124 and 0141 |
 | [0148](0148-a-request-that-asks-for-the-debugger-lists-it-and-the-fix-rule-names-the-function.md) | A request that asks for the debugger lists it, and the fix rule names the function | Accepted, builds on 0136, 0145, 0146 and 0147 |
+| [0149](0149-the-agents-debug-runs-start-its-probes-and-the-benchs-first-ctrl-c-lets-the-run-finish.md) | The agent's debug runs start its probes, and the bench's first Ctrl+C lets the run in progress finish | Accepted, amends 0145; builds on 0137, 0141 and 0146 |
 
 ## Template
 

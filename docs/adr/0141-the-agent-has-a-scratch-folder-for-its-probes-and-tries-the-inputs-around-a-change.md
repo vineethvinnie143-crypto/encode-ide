@@ -50,5 +50,6 @@ the model's alone:
   leaves behind is in a folder that is removed for it.
 - A probe the agent runs is still a command, approved as any command is. The folder is per session, but a command of
   one session in the sandbox can write in another session's folder: they share the sandbox's temp folder.
+- The folder's debugger runs a probe there too, when the agent starts it (0149).
 - The `a  -  b` miss is a judgement the model makes. Trying the inputs around a change, from a place where trying is
   allowed, is what can catch it; how often it does is not measured yet.
