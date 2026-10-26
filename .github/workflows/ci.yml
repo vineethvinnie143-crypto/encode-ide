@@ -103,15 +103,6 @@ jobs:
           & "C:\Program Files\LLVM\bin\clang.exe" --version
           rustc -vV
 
-      # TEMPORARY, for PR 108 only: the lldb runs eight times, for how often lldb-server goes before lldb reads the exit.
-      - name: lldb runs, eight times
-        continue-on-error: true
-        run: |
-          for ($i = 1; $i -le 8; $i++) {
-            "run $i"
-            node scripts/test.mjs dap-session 2>&1 | Select-String -Pattern 'lldb did not read|lldb saw the program end|-1 !==|(pass|fail) \d+$'
-          }
-
       - name: Unit tests
         env:
           ENCODE_TEST_DIGEST: ${{ runner.temp }}/digest.txt
@@ -193,6 +184,17 @@ jobs:
             packages/editor-view/screenshots
           if-no-files-found: ignore
           retention-days: 3
+
+      # TEMPORARY, for PR 108 only: the lldb runs ten times, for how often lldb-server goes before lldb reads the exit.
+      # Last, so that its lines are in the end of the log.
+      - name: lldb runs, ten times
+        if: always()
+        continue-on-error: true
+        run: |
+          for ($i = 1; $i -le 10; $i++) {
+            "run $i"
+            node scripts/test.mjs dap-session 2>&1 | Select-String -Pattern 'lldb did not read|lldb saw the program end|(pass|fail) \d+$'
+          }
 
   # A build started by hand from main is published as a release, for the installed tester builds to update to (ADR 0127):
   # the installer, the portable program and encode-update.json, which names the build and each file's SHA-256. This
