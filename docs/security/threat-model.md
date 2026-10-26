@@ -2827,7 +2827,10 @@ What is new:
   terminal.
 - The program a run starts inherits the run's environment (the person's, with the configuration's `env`) and is not in
   the agent's sandbox, as a terminal's program is not.
-- lldb-dap and LLVM are the person's own install; eNCode finds them and does not check them.
+- lldb-dap and LLVM are the person's own install; eNCode finds them and does not check them. On Windows, the folder
+  of the Python lldb-dap needs is added to the end of lldb-dap's PATH when it is found off the PATH: a folder of the
+  person's own install that holds that exact DLL, after every folder already there, so it shadows nothing. The
+  program lldb-dap starts inherits that PATH.
 
 ### Verification
 

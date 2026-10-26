@@ -14,7 +14,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { installedDir, runtimeLaunch, versionAtLeast, type Installable } from '@encode/lsp'
-import { envValue, searchPath } from '@encode/tools'
+import { envKey, envValue, searchDirectories, searchPath } from '@encode/tools'
+import { dllImports } from './dll-imports'
 
 /** Why a run cannot start, in words for the person; `install` names what eNCode can install to fix it. */
 export class RunProblem extends Error {
@@ -327,6 +328,56 @@ export function findLldbDap(context: FindContext): string {
   if (found) return found
   const how = context.platform === 'win32' ? LLDB_MISSING.win32 : context.platform === 'darwin' ? LLDB_MISSING.darwin : LLDB_MISSING.other
   throw new RunProblem(`Debugging C, C++ and Rust needs lldb-dap, which comes with LLVM. To get it, ${how}, then start this again.`)
+}
+
+/** The Python LLVM's lldb-dap needs on Windows, and the folder it is in when Windows would not find it there itself. */
+export interface LldbPython {
+  /** As liblldb.dll names it: python311.dll. */
+  dll: string
+  /** 3.11 */
+  version: string
+  /** A folder to add to the end of lldb-dap's PATH, or null when Windows finds the library as things are. */
+  add: string | null
+}
+
+const PYTHON_DLL = /^python3(\d{1,2})\.dll$/i
+
+/**
+ * LLVM's Windows releases build lldb with Python and link it to one Python's library (python311.dll), which Windows
+ * must find when lldb-dap starts or it ends at once, saying nothing. The library is named by what liblldb.dll imports;
+ * where it is: next to lldb-dap, on the PATH, where python.org's installer puts that version, or where the py launcher
+ * says it is. A folder found any other way than the PATH goes on the end of lldb-dap's PATH, after everything already
+ * there. Null when lldb-dap needs no Python; a RunProblem, before anything starts, when it needs one that is missing.
+ */
+export async function lldbPython(lldbDap: string, context: FindContext): Promise<LldbPython | null> {
+  const dir = path.dirname(lldbDap)
+  const imported = [path.join(dir, 'liblldb.dll'), lldbDap].flatMap((file) => dllImports(file)).find((item) => PYTHON_DLL.test(item.name))
+  if (!imported) return null
+  const dll = imported.name.toLowerCase()
+  const version = `3.${PYTHON_DLL.exec(dll)![1]}`
+  const has = (folder: string) => isFile(path.join(folder, dll))
+  const system = envValue(context.env, 'SystemRoot', context.platform)
+  if (has(dir) || (system && has(path.join(system, 'System32'))) || searchDirectories(context.env, context.platform).some(has)) return { dll, version, add: null }
+  const local = envValue(context.env, 'LOCALAPPDATA', context.platform)
+  const folder = `Python${version.replace('.', '')}`
+  const places = [...(local ? [path.join(local, 'Programs', 'Python', folder), path.join(local, 'Programs', 'Python', `${folder}-arm64`)] : []), path.join(programFiles(context), folder), path.join(programFiles(context), `${folder}-arm64`)]
+  let found = places.find(has) ?? null
+  const launcher = found ? null : searchPath('py', context.env, context.platform)
+  if (launcher) {
+    const prefix = (await ask(context, launcher, [`-${version}`, '-I', '-c', 'import sys; print(sys.base_prefix)']))?.split(/\r?\n/)[0]?.trim()
+    if (prefix && path.isAbsolute(prefix) && has(prefix)) found = prefix
+  }
+  if (found) return { dll, version, add: found }
+  // Loaded only when lldb first runs Python: lldb-dap starts without it, and a Rust program shows its values plainer.
+  if (imported.delayed) return null
+  throw new RunProblem(`LLVM's lldb-dap needs Python ${version} (${dll}), which is not on this computer. Install Python ${version} (winget install Python.Python.${version}), then start this again.`)
+}
+
+/** `env` with `dir` on the end of its PATH. */
+export function withPathTail(env: Record<string, string>, dir: string, platform: NodeJS.Platform): Record<string, string> {
+  const key = envKey(env, 'PATH', platform)
+  const now = env[key]
+  return { ...env, [key]: now ? `${now}${platform === 'win32' ? ';' : ':'}${dir}` : dir }
 }
 
 /** A compiler for one C or C++ file: clang first, which writes what lldb reads best, then gcc and cc. */

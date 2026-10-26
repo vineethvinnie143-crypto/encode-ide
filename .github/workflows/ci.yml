@@ -90,6 +90,15 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # LLVM's lldb-dap on Windows is linked to one Python's DLL (ADR 0144). The runner keeps its Pythons in its tool
+      # cache; their folders go on the end of the PATH, so lldb-dap finds the one it needs and `python` stays the
+      # runner's own.
+      - name: Pythons for lldb-dap
+        run: |
+          $dirs = Get-ChildItem "$env:RUNNER_TOOL_CACHE\Python\*\x64" -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName
+          if ($dirs) { "PATH=$env:PATH;$($dirs -join ';')" >> $env:GITHUB_ENV }
+          Get-Command lldb-dap -ErrorAction SilentlyContinue | ForEach-Object Source
+
       - name: Unit tests
         env:
           ENCODE_TEST_DIGEST: ${{ runner.temp }}/digest.txt

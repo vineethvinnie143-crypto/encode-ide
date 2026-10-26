@@ -6,8 +6,10 @@
  */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
+import { PassThrough } from 'node:stream'
 import { after, describe, it } from 'node:test'
 import { searchPath } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
@@ -355,6 +357,63 @@ describe('a debug run of Go through Delve', { skip: !DLV || !GO ? 'no Delve and 
   })
 })
 
+
+// ---------------------------------------------------------------- a debugger that ends as it starts
+
+describe('a debugger that ends as it starts', () => {
+  const plan = (dir: string, file: string, args: string[]): DapPlan => ({
+    kind: 'dap',
+    profile: 'lldb',
+    adapter: { file, args, cwd: dir, env: environment(), transport: 'stdio' },
+    request: 'launch',
+    arguments: { program: path.join(dir, 'cart'), args: [], cwd: dir },
+    runDir: path.join(dir, '.run'),
+  })
+  const start = (options: Partial<ConstructorParameters<typeof DapSession>[0]> & { plan: DapPlan }) => {
+    const session = new DapSession({ id: 's1', name: 'test', breakpoints: () => new Map(), exceptions: { uncaught: true, all: false }, onChange: () => undefined, onOutput: () => undefined, ...options })
+    sessions.push(session)
+    return session
+  }
+  const failure = async (session: DapSession): Promise<string> => {
+    const error = await session.start().then(
+      () => assert.fail('it started'),
+      (error: unknown) => error as Error,
+    )
+    assert.equal(session.view().state, 'ended')
+    assert.equal(session.view().message, error.message)
+    return error.message
+  }
+
+  it('says what it exited with and what it wrote, not only that its connection closed', async () => {
+    const dir = await tempWorkspace()
+    const session = start({ plan: plan(dir, process.execPath, ['-e', 'process.stderr.write("error: no target\\n"); process.exit(3)']) })
+    assert.equal(await failure(session), 'lldb-dap ended (code 3) before the program started.\nerror: no target')
+  })
+
+  it("says on Windows that a library it needs is missing, and for lldb-dap that it is LLVM's Python", async () => {
+    const dir = await tempWorkspace()
+    // Windows starts the program, then its loader ends it with STATUS_DLL_NOT_FOUND before it reads or writes anything.
+    const spawn = (() => {
+      const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null as number | null, pid: 4242, kill: () => true })
+      setImmediate(() => {
+        child.emit('spawn')
+        setImmediate(() => {
+          child.exitCode = 3221225781
+          child.emit('exit', 3221225781, null)
+          child.stdout.end()
+          child.stdout.resume()
+          child.emit('close', 3221225781, null)
+        })
+      })
+      return child
+    }) as unknown as typeof import('node:child_process').spawn
+    const session = start({ plan: plan(dir, 'C:\\Program Files\\LLVM\\bin\\lldb-dap.exe', []), platform: 'win32', spawn })
+    assert.equal(
+      await failure(session),
+      "lldb-dap ended (code 3221225781) before the program started. Windows could not find a library (DLL) it needs. LLVM's lldb-dap needs the Python its LLVM release was built with: install that Python, or a newer LLVM.",
+    )
+  })
+})
 
 // ---------------------------------------------------------------- C and Rust, through lldb-dap
 

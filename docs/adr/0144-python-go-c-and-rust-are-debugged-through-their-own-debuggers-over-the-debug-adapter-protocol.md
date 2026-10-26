@@ -87,6 +87,14 @@ C++ and Rust. The constraints stay 0143's:
   `lldb-vscode`) and where LLVM's installers put it (`Program Files\LLVM\bin`, `/usr/lib/llvm-N/bin`,
   `/usr/bin/lldb-dap-N`, Homebrew, Xcode). Missing, the message says how to get LLVM on that system. For Rust, Rust's
   own formatters are loaded first, from `rustc --print sysroot`, so a `String` or a `Vec` shows its contents.
+- **lldb-dap's Python, on Windows**: LLVM's Windows releases link lldb to one Python's DLL (`python311.dll`), and
+  without it Windows ends lldb-dap before it says anything. Before a run starts, eNCode reads which Python DLL
+  `liblldb.dll` imports (its PE import tables, a few kilobytes of the file) and looks for it: next to lldb-dap, in
+  System32, on the PATH, where python.org's installer puts that version (`%LOCALAPPDATA%\Programs\Python\Python311`,
+  `Program Files\Python311`), or where `py -3.11` says it is. A folder found off the PATH goes on the end of lldb-dap's
+  PATH, after everything already there. Missing, the message names the Python and the winget line that installs it.
+  A debugger that still ends as it starts is reported with its exit code, its last lines, and on Windows a missing
+  DLL in words.
 - **The install dialog**: a start that needs debugpy or Delve answers with `install`. The window shows why, the steps
   of the install as for a language server (what is downloaded, from where, checked against what, kept where), and
   "Install and debug". When it is in place, the run starts. The installs go through `ServerInstalls`, which now knows

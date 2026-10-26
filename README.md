@@ -344,7 +344,8 @@ Protocol
   | C, C++ | lldb-dap (LLVM) | Builds the file with clang or gcc, with debug information, into the run's own folder |
   | Rust | lldb-dap (LLVM) | Builds the open program with cargo (or the file alone with rustc) and loads Rust's formatters |
 
-  lldb-dap comes with LLVM, which you install yourself (`winget install LLVM.LLVM` on Windows).
+  lldb-dap comes with LLVM, which you install yourself (`winget install LLVM.LLVM` on Windows). On Windows it also
+  needs the Python its LLVM was built with; eNCode finds it, or says which one to install.
 - **Configurations.** `.encode/debug.json` names runs of its own, for the Debug tab's list:
 
   ```json
