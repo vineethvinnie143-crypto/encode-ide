@@ -365,18 +365,36 @@ describe('a debug run of Go through Delve', { skip: !DLV || !GO ? 'no Delve and 
 // ---------------------------------------------------------------- an exception's own breakpoint
 
 describe("a stop at an exception's function breakpoint", () => {
-  // A debugger that sets the function breakpoints it is sent, then stops at the first: in a frame named as argv says,
-  // and saying which breakpoint it hit or not.
+  interface Stop {
+    /** Its frames, top first: a name, and lldb-dap's path for code without a file (`module`symbol`). */
+    frames: { name: string; path?: string }[]
+    /** It says which breakpoint it hit. */
+    hit: boolean
+  }
+  // A debugger that sets the function breakpoints it is sent, then stops as told: each continue goes to the next stop,
+  // and after the last the program exits with 101. It counts the continues it was sent.
   const adapter = `
-    const [frame, says] = process.argv.slice(1)
+    const stops = JSON.parse(process.argv[1])
+    let at = 0
+    let continues = 0
     let buffer = Buffer.alloc(0)
     const send = (message) => { const body = JSON.stringify(message); process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body) }
+    const stop = () => {
+      if (at >= stops.length) {
+        send({ seq: 0, type: 'event', event: 'output', body: { category: 'stdout', output: 'continues ' + continues + '\\n' } })
+        send({ seq: 0, type: 'event', event: 'exited', body: { exitCode: 101 } })
+        send({ seq: 0, type: 'event', event: 'terminated', body: {} })
+        return
+      }
+      send({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, ...(stops[at].hit ? { hitBreakpointIds: [40] } : {}) } })
+    }
     const answer = (request) => {
       switch (request.command) {
         case 'initialize': return { supportsConfigurationDoneRequest: true, supportsFunctionBreakpoints: true }
         case 'setFunctionBreakpoints': return { breakpoints: request.arguments.breakpoints.map((item, i) => ({ id: 40 + i, verified: true })) }
         case 'threads': return { threads: [{ id: 1, name: 'main' }] }
-        case 'stackTrace': return { stackFrames: [{ id: 1, name: frame, line: 0, column: 0 }], totalFrames: 1 }
+        case 'stackTrace': return { stackFrames: stops[at].frames.map((frame, i) => ({ id: i + 1, name: frame.name, line: i ? 7 : 0, column: 0, ...(frame.path ? { source: { name: frame.name, path: frame.path } } : {}) })), totalFrames: stops[at].frames.length }
+        case 'continue': return { allThreadsContinued: true }
         default: return {}
       }
     }
@@ -391,40 +409,72 @@ describe("a stop at an exception's function breakpoint", () => {
         buffer = buffer.subarray(end + 4 + length)
         send({ seq: 0, type: 'response', request_seq: request.seq, command: request.command, success: true, body: answer(request) })
         if (request.command === 'initialize') send({ seq: 0, type: 'event', event: 'initialized' })
-        if (request.command === 'configurationDone') send({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, ...(says === 'hit' ? { hitBreakpointIds: [40] } : {}) } })
+        if (request.command === 'configurationDone') stop()
+        if (request.command === 'continue') {
+          continues++
+          at++
+          setTimeout(stop, 20)
+        }
         if (request.command === 'disconnect') setTimeout(() => process.exit(0), 10)
       }
     })`
-  const stop = async (frame: string, says: 'hit' | 'nothing', rust: DapPlan['rust']) => {
+  const session = async (stops: Stop[], rust: DapPlan['rust']) => {
     const dir = await tempWorkspace()
-    const session = new DapSession({
+    const printed: string[] = []
+    const created = new DapSession({
       id: 's1',
       name: 'test',
-      plan: { kind: 'dap', profile: 'lldb', adapter: { file: process.execPath, args: ['-e', adapter, frame, says], cwd: dir, env: environment(), transport: 'stdio' }, request: 'launch', arguments: { program: path.join(dir, 'cart') }, runDir: path.join(dir, '.run'), rust },
+      plan: { kind: 'dap', profile: 'lldb', adapter: { file: process.execPath, args: ['-e', adapter, JSON.stringify(stops)], cwd: dir, env: environment(), transport: 'stdio' }, request: 'launch', arguments: { program: path.join(dir, 'cart') }, runDir: path.join(dir, '.run'), rust },
       breakpoints: () => new Map(),
       exceptions: { uncaught: true, all: false },
       onChange: () => undefined,
-      onOutput: () => undefined,
+      onOutput: (lines) => printed.push(...lines.map((line) => line.text)),
     })
-    sessions.push(session)
-    await session.start()
-    const end = Date.now() + 5_000
-    while (!session.view().threads[0]?.frames && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20))
-    const thread = session.view().threads[0]!
-    await session.stop()
+    sessions.push(created)
+    await created.start()
+    const until = async (test: (view: SessionView) => boolean) => {
+      const end = Date.now() + 5_000
+      while (!test(created.view()) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20))
+      return created.view()
+    }
+    return { session: created, printed, until }
+  }
+  const stopAt = async (frame: string, hit: boolean, rust: DapPlan['rust']) => {
+    const { session: created, until } = await session([{ frames: [{ name: frame }], hit }], rust)
+    const thread = (await until((view) => !!view.threads[0]?.frames)).threads[0]!
+    await created.stop()
     return thread
   }
 
   it('is the exception by the breakpoint the debugger says it hit, whatever the frame is named', async () => {
-    const thread = await stop('a thunk of the program', 'hit', 'msvc')
+    const thread = await stopAt('a thunk of the program', true, 'msvc')
     assert.deepEqual([thread.reason, thread.exception], ['exception', 'The program panicked: its message is in the output'])
   })
 
   it("is the exception by the frame's function when the debugger does not say, named alone or after its DLL", async () => {
-    assert.equal((await stop('VCRUNTIME140!_CxxThrowException', 'nothing', 'msvc')).reason, 'exception')
-    assert.equal((await stop('std::panicking::rust_panic', 'nothing', true)).reason, 'exception')
+    assert.equal((await stopAt('VCRUNTIME140!_CxxThrowException', false, 'msvc')).reason, 'exception')
+    assert.equal((await stopAt('std::panicking::rust_panic', false, true)).reason, 'exception')
     // A frame of the same name in another kind of program is a breakpoint like any other.
-    assert.equal((await stop('a thunk of the program', 'nothing', 'msvc')).reason, 'breakpoint')
+    assert.equal((await stopAt('a thunk of the program', false, 'msvc')).reason, 'breakpoint')
+  })
+
+  it("stops once for a throw that goes through the program's thunk into the runtime's DLL, and for each throw after", async () => {
+    const callers = [{ name: 'panic_unwind::imp::panic' }, { name: 'cart::main' }]
+    const thunk: Stop = { frames: [{ name: '_CxxThrowException', path: 'C:\\cart\\cart.exe`_CxxThrowException' }, ...callers], hit: true }
+    const runtime: Stop = { frames: [{ name: '_CxxThrowException', path: 'C:\\Windows\\System32\\VCRUNTIME140.dll`_CxxThrowException' }, ...callers], hit: true }
+    // Two panics from the same line, one after the other: each stops at the thunk only.
+    const { session: created, printed, until } = await session([thunk, runtime, thunk, runtime], 'msvc')
+    for (let panic = 0; panic < 2; panic++) {
+      const view = await until((now) => !!now.threads[0]?.frames && now.threads[0].state === 'paused')
+      assert.equal(view.threads[0]!.reason, 'exception')
+      assert.equal(view.threads[0]!.frames![0]!.source?.path, 'C:\\cart\\cart.exe`_CxxThrowException')
+      await created.resume()
+      await until((now) => now.threads[0]?.state !== 'paused' || now.state === 'ended')
+    }
+    await until((now) => now.state === 'ended')
+    assert.equal(created.view().exitCode, 101)
+    // Two continues were the person's; the other two, past the runtime's stop.
+    assert.ok(printed.some((line) => /continues 4/.test(line)), JSON.stringify(printed))
   })
 })
 
@@ -755,7 +805,11 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     const crashed = await boom.until((v) => !!paused(v), 'the panic')
     assert.equal(paused(crashed)!.reason, 'exception', JSON.stringify(paused(crashed)))
     assert.match(paused(crashed)!.exception ?? '', /panicked/)
-    await boom.session.stop()
+    // One stop for the panic: going on, the program ends as a panic ends it.
+    await boom.session.resume()
+    const ended = await boom.until((v) => v.state === 'ended' || (!!paused(v) && paused(v)!.frames![0]!.id !== paused(crashed)!.frames![0]!.id), 'the end after the panic')
+    assert.equal(ended.state, 'ended', JSON.stringify(paused(ended)))
+    assert.equal(ended.exitCode, 101)
     await boom.session.settled
   })
 })

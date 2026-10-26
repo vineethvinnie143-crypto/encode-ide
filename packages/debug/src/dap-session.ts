@@ -108,6 +108,8 @@ interface ThreadEntry {
   reason?: PauseReason
   exception?: string
   frames?: FrameView[]
+  /** The throw this thread last stopped for at an exception's function: the module of that stop, and the frames below. */
+  thrown?: { module: string; callers: string }
 }
 
 /** What one of the run's value ids stands for: the debugger's reference, a part of it, or groups of its items. */
@@ -616,25 +618,42 @@ export class DapSession implements RunSession {
     }
     const all = body.allThreadsStopped === true
     const top = threadId !== undefined ? this.thread(threadId, `Thread ${threadId}`) : [...this.threads.values()][0]
-    for (const entry of this.threads.values()) {
-      if (!all && entry !== top) continue
-      entry.paused = true
-      entry.reason = entry === top ? reason : 'pause'
-      entry.exception = undefined
-    }
-    if (top && reason === 'exception') top.exception = await this.exceptionText(top.dap, body)
-    const read = [top, ...[...this.threads.values()].filter((entry) => entry !== top && entry.paused).slice(0, MAX_STACKS - 1)].filter((entry): entry is ThreadEntry => !!entry)
-    await Promise.all(read.map((entry) => this.readStack(entry, entry === top ? MAX_FRAMES : OTHER_FRAMES, generation)))
+    const stopping = [...this.threads.values()].filter((entry) => all || entry === top)
+    const exception = top && reason === 'exception' ? await this.exceptionText(top.dap, body) : undefined
+    const read = [top, ...[...this.threads.values()].filter((entry) => entry !== top && (entry.paused || stopping.includes(entry))).slice(0, MAX_STACKS - 1)].filter((entry): entry is ThreadEntry => !!entry)
+    const stacks = await Promise.all(read.map((entry) => this.readStack(entry, entry === top ? MAX_FRAMES : OTHER_FRAMES, generation)))
     if (generation !== this.generation) return
     // A stop in a function an exception goes through (a Go or Rust panic) is the run's exception: known by the
     // breakpoint the debugger says it hit, else by the function the program stopped in.
     const hit = (Array.isArray(body.hitBreakpointIds) ? body.hitBreakpointIds : []).map((id) => (typeof id === 'number' ? this.exceptionBreakpoints.get(id) : undefined)).find((name) => name !== undefined)
-    const stoppedIn = hit ?? top?.frames?.[0]?.name
+    const stoppedIn = hit ?? stacks[0]?.frames[0]?.name
     const crash = top && reason === 'breakpoint' && stoppedIn ? this.profile.exceptionStop(stoppedIn, this.program()) : null
+    if (top) {
+      const before = top.thrown
+      top.thrown = undefined
+      if (crash) {
+        const module = stacks[0]?.module ?? ''
+        const callers = (stacks[0]?.frames ?? []).slice(1, 9).map((frame) => `${frame.name} ${frame.source?.path ?? ''}:${frame.line}`).join('\n')
+        // The same throw, gone from a thunk in the program on to the runtime's own function in its DLL (a Rust panic on
+        // Windows calls _CxxThrowException through one): it stopped once already.
+        if (before && module && before.module && before.module !== module && before.callers === callers) {
+          void dap.request('continue', { threadId: top.dap }, { timeoutMs: REQUEST_MS }).catch(() => undefined)
+          return
+        }
+        top.thrown = { module, callers }
+      }
+    }
+    // All at once, so that a look at the run between the debugger's answers never sees half a stop.
+    for (const entry of stopping) {
+      entry.paused = true
+      entry.reason = entry === top ? reason : 'pause'
+      entry.exception = undefined
+    }
+    read.forEach((entry, i) => (entry.frames = stacks[i]!.frames))
     if (top && crash) {
       top.reason = 'exception'
       top.exception = crash
-    }
+    } else if (top && exception !== undefined) top.exception = exception
     this.options.onChange()
   }
 
@@ -654,13 +673,18 @@ export class DapSession implements RunSession {
     return clip(said.join(': ') || 'An exception', 4_000)
   }
 
-  private async readStack(entry: ThreadEntry, levels: number, generation: number): Promise<void> {
+  /** A thread's frames, and the module of the top one: its id, else the module lldb-dap names in its path (`module`symbol`). */
+  private async readStack(entry: ThreadEntry, levels: number, generation: number): Promise<{ frames: FrameView[]; module: string | null }> {
     try {
       const answer = await this.dap!.request('stackTrace', { threadId: entry.dap, startFrame: 0, levels }, { timeoutMs: REQUEST_MS })
-      if (generation !== this.generation) return
-      entry.frames = (Array.isArray(answer.stackFrames) ? answer.stackFrames : []).filter(isRecord).slice(0, levels).map((frame) => this.frame(frame, entry.id))
+      if (generation !== this.generation) return { frames: [], module: null }
+      const raw = (Array.isArray(answer.stackFrames) ? answer.stackFrames : []).filter(isRecord).slice(0, levels)
+      const first = raw[0]
+      const where = first && isRecord(first.source) ? text(first.source.path) : undefined
+      const module = first ? (text(first.moduleId) ?? (where?.includes('`') ? where.slice(0, where.indexOf('`')) : null)) : null
+      return { frames: raw.map((frame) => this.frame(frame, entry.id)), module: module ?? null }
     } catch {
-      if (generation === this.generation) entry.frames = []
+      return { frames: [], module: null }
     }
   }
 

@@ -95,7 +95,9 @@ C++ and Rust. The constraints stay 0143's:
   `rust_panic`. So on Windows "every exception" also sets a function breakpoint on `_CxxThrowException`, and a Rust
   program built so has its panics stop there instead of at `rust_panic`, never both, so that one panic stops once.
   The stop is known as the exception by the breakpoint lldb-dap says it hit (`hitBreakpointIds`), else by the frame's
-  function.
+  function. A Rust program calls it through a thunk of its own, so the breakpoint has two places: the stop in the
+  thunk is shown, and the runtime's stop that follows for the same throw (in another module, with the same frames
+  below) is gone on from. A stop is shown whole, frames and exception together, once every answer for it is in.
 - **Rust's variables, on Windows**: lldb reads a Rust program built with Microsoft's tools from its PDB, where a `let`
   can begin a few bytes into the next line (seen with Rust 1.99 and lldb 23.1: line 3's first instruction lay before
   the block of the `let` on line 2). A breakpoint on the line right after a `let` lists that variable after one step;
