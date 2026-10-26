@@ -1,6 +1,6 @@
 # 0096. Before the agent finishes, its changes are scanned and read by the Reviewer, and a plan is read before the person sees it
 
-- Status: Accepted, builds on 0064, 0094 and 0095
+- Status: Accepted, builds on 0064, 0094 and 0095; amended by 0139 (untested cases are checked, and become tests only when the person asked for tests)
 - Date: 2026-10-24
 
 ## Context

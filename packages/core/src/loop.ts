@@ -117,7 +117,7 @@ import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { ThinkingTicker } from './thinking'
 import { ANSWER_AGAIN, BATCH_LOOKS, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
-import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted } from './review'
+import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted, testsKeptReminder, testsWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
 import { FailedCalls, mendedNote } from './repeats'
@@ -505,6 +505,8 @@ export class AgentLoop {
   /** Once a request (ADR 0097): the agent was told to write the tests first; the request wrote a test file. */
   private testsFirstSaid = false
   private wroteTest = false
+  /** Once a request (ADR 0139): test files the person said to leave alone were sent back. */
+  private testsKeptAsked = false
   /** What the request taught (ADR 0097): commands that failed and what worked after; whether it ended on an answer and was offered. */
   private lessons: Lesson[] = []
   private answered = false
@@ -599,6 +601,7 @@ export class AgentLoop {
     this.scanNotes = []
     this.testsFirstSaid = false
     this.wroteTest = false
+    this.testsKeptAsked = false
     this.lessons = []
     this.offered = false
     this.answered = false
@@ -1719,6 +1722,7 @@ export class AgentLoop {
     if (!messages.some(teaches) && !lessons.length) return
     this.offered = true
     const { file, text } = await instructionsAt(o.services.root)
+    if (signal.aborted) return
     const answer = await askReviewer(o.client, {
       system: CONVENTIONS_SYSTEM,
       prompt: conventionsPrompt({ messages, lessons, file, instructions: text }),
@@ -1738,14 +1742,17 @@ export class AgentLoop {
   }
 
   /**
-   * Once a request, when bigger work starts (a plan the person approved, or a task list of three steps or more) in a
-   * project with tests and before any test changed: the agent is told to write the tests first (ADR 0097).
+   * Once a request, when bigger work starts in a project with tests and before any test changed: the agent is told to
+   * write the tests first (ADR 0097). Bigger work is a plan the person approved, or a task list of three steps or more
+   * when the person asked for tests. Never when the person said to leave the tests alone (ADR 0139).
    */
   private async testsFirst(name: string, input: Record<string, unknown>, outcome: ToolOutcome, mode: AgentMode): Promise<string | null> {
     const { o } = this
     if (!this.gated || this.testsFirstSaid || this.wroteTest || mode !== 'code' || (o.settings().checkGate ?? 'auto') === 'off') return null
-    const bigger = (name === 'ExitPlanMode' && outcome.mode === 'code') || (name === 'TodoWrite' && Array.isArray(input.todos) && input.todos.length >= 3)
-    if (!bigger || !o.services.checks) return null
+    const wanted = testsWanted(o.requests?.() ?? [])
+    const planned = name === 'ExitPlanMode' && outcome.mode === 'code'
+    const listed = name === 'TodoWrite' && Array.isArray(input.todos) && input.todos.length >= 3 && wanted === 'asked'
+    if (!(planned || listed) || wanted === 'ruled-out' || !o.services.checks) return null
     const test = (await o.services.checks.list().catch(() => [] as ProjectCheck[])).find((check) => check.kind === 'test')
     if (!test) return null
     this.testsFirstSaid = true
@@ -2029,9 +2036,10 @@ export class AgentLoop {
   }
 
   /**
-   * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), the project's
-   * checks (ADR 0095), the scan of the changes, what the reply claims, and the Reviewer (ADR 0096). The first that
-   * sends the agent back tells the person why, and gives the reminder for the agent; null lets the turn end.
+   * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), test files the
+   * person said to leave alone (ADR 0139), the project's checks (ADR 0095), the scan of the changes, what the reply
+   * claims, and the Reviewer (ADR 0096). The first that sends the agent back tells the person why, and gives the
+   * reminder for the agent; null lets the turn end.
    */
   private async beforeFinish(turn: Turn, reply: string): Promise<string | null> {
     const { o } = this
@@ -2049,6 +2057,8 @@ export class AgentLoop {
     if (code) {
       const left = await this.edits?.gate(o.settings().errorGate ?? 'auto', turn.signal)
       if (left) return setback('errors', 'The language servers still report errors in the files the agent changed, so it goes on to fix them.', left)
+      const kept = await this.testsKept(turn)
+      if (kept) return back('The request said to leave the tests alone, so the agent puts back the test files it changed.', kept)
       const checked = await this.checkGate(turn)
       if (checked) return setback('checks', "The project's checks failed after the agent's changes, so it goes on to fix them.", checked)
       const scanned = await this.scanGate(turn)
@@ -2086,6 +2096,21 @@ export class AgentLoop {
     const files = await o.services.changes(turn.turnId).catch(() => [] as ChangedText[])
     this.scanNotes = scanChanges(files)
     return this.scanNotes.length ? scanReminder(this.scanNotes) : null
+  }
+
+  /**
+   * Once a request, unless checks are off (ADR 0139): when the person said to leave the tests alone ("fix the code,
+   * not the tests") and the request changed test files anyway, the agent puts them back before it may finish.
+   */
+  private async testsKept(turn: Turn): Promise<string | null> {
+    const { o } = this
+    if (o.agentId !== 'main' || this.testsKeptAsked || !o.services.changes || (o.settings().checkGate ?? 'auto') === 'off') return null
+    if (testsWanted(o.requests?.() ?? []) !== 'ruled-out') return null
+    const files = await o.services.changes(turn.turnId).catch(() => [] as ChangedText[])
+    const tests = files.filter((file) => isTestPath(file.path) && file.before !== file.after).map((file) => file.path)
+    if (!tests.length) return null
+    this.testsKeptAsked = true
+    return testsKeptReminder(tests)
   }
 
   /** The project's checks after the last change, in words, for the Reviewer. */
@@ -2136,14 +2161,16 @@ export class AgentLoop {
       notice("The Reviewer's answer about the changes could not be read.")
       return null
     }
-    const text = completionReminder(review, { tests: checks.tests && !files.some((file) => isTestPath(file.path)) })
+    const wanted = testsWanted(o.requests?.() ?? [])
+    const text = completionReminder(review, { tests: checks.tests && !files.some((file) => isTestPath(file.path)), wanted })
     if (!text) {
       const small = review.findings.slice(0, 3).map((finding) => `\`${finding.path}:${finding.line}\` ${finding.title}`)
       notice(small.length ? `The Reviewer read the changes; smaller points: ${small.join('; ')}.` : 'The Reviewer read the changes and found no problem.')
       return null
     }
     const serious = review.findings.some((finding) => finding.priority === 'P0' || finding.priority === 'P1')
-    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : 'The Reviewer listed cases no test covers, so the agent adds tests for them.', text, serious }
+    const untested = wanted === 'asked' ? 'The Reviewer listed cases no test covers, so the agent adds tests for them.' : 'The Reviewer listed cases no test covers, so the agent checks that its change handles them.'
+    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : untested, text, serious }
   }
 
   /** Once a request, when the person wants it: the Reviewer reads a plan before the person does. The gaps it finds, or null. */

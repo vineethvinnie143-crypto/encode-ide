@@ -22,6 +22,11 @@ export interface BenchReport {
   spending?: { limit: number; spent: number }
   /** Why the bench ended before it made every run it was asked for. */
   endedEarly?: string
+  /**
+   * Written while the bench went on, after a run (ADR 0139): it holds the runs made so far. The bench writes the whole
+   * report, without this, when it ends; a report that still says it was cut off by a restart or a crash.
+   */
+  partial?: true
   runs: TaskRun[]
 }
 
@@ -169,6 +174,7 @@ export function formatReport(report: BenchReport): string {
   if (all.costPerSolved !== undefined) lines.push(`Cost per task solved: ${dollars(all.costPerSolved)}`)
   if (report.spending) lines.push(`Spent ${dollars(report.spending.spent)} of the ${dollars(report.spending.limit)} cap`)
   if (report.endedEarly) lines.push(`Ended early: ${report.endedEarly}`)
+  if (report.partial) lines.push('Partial: written while the bench went on, which then did not finish.')
   const notes = report.runs.filter((run) => run.outcome !== 'passed' || run.quality?.issues.length)
   if (notes.length) lines.push('')
   for (const run of notes) {

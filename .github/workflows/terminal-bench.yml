@@ -143,9 +143,14 @@ jobs:
         run: |
           set -euo pipefail
           number='^[0-9]+([.][0-9]+)?$'
-          for value in "$TASKS" "$SEED" "$MAX_COST" "$BUDGET" "$CONCURRENT"; do
+          for value in "$MAX_COST" "$BUDGET"; do
             [[ $value =~ $number ]] || { echo "::error::$value is not a number."; exit 1; }
           done
+          # A count of 0 would choose every task the runner can run, past the budget.
+          for value in "$TASKS" "$SEED" "$CONCURRENT"; do
+            [[ $value =~ ^[0-9]+$ ]] || { echo "::error::$value is not a whole number."; exit 1; }
+          done
+          (( TASKS >= 1 && CONCURRENT >= 1 && CONCURRENT <= 4 )) || { echo "::error::At least 1 task, and 1 to 4 at once."; exit 1; }
           count=$TASKS
           [[ -n ${NAMES// /} ]] && count=$(wc -w <<< "$NAMES")
           awk -v b="$BUDGET" 'BEGIN { exit !(b > 0 && b <= 2.00) }' || { echo "::error::The budget is above 0 and at most \$2.00."; exit 1; }

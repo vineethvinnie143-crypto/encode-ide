@@ -98,8 +98,17 @@ export interface RunOptions {
   reference?: QualityFacts
 }
 
-const DECLINED =
-  'No one is watching this benchmark run, and it allows only the commands the task names. Do the task without this call, or with one of those commands.'
+/**
+ * What a declined call is told: the commands the task allows, by name, so that one refusal does not end the agent's
+ * checking of its work (ADR 0139). A rule such as `Bash(node --test:*)` is named `node --test ...`.
+ */
+export function declinedNote(allow: readonly string[]): string {
+  const commands = allow.map((rule) => `\`${rule.replace(/^Bash\((.*)\)$/, '$1').replace(/:\*$/, ' ...')}\``)
+  const allowed = commands.length
+    ? `it allows only these commands: ${commands.join(', ')}. Do the task without this call, or with one of them`
+    : 'it allows no commands. Do the task with the other tools'
+  return `No one is watching this benchmark run, and ${allowed}. A declined call is no reason to stop checking your work.`
+}
 const NO_ONE = 'No one can answer during this benchmark run. Choose what fits the request best, say what you chose, and go on.'
 /** Problems that say the model could not be reached, not that it did the task badly. */
 const NOT_MEASURED: ReadonlySet<ProblemCode> = new Set(['rate-limit', 'quota', 'payment', 'auth', 'network', 'unavailable', 'no-model', 'refused', 'host', 'internal'])
@@ -249,7 +258,7 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
         if (event.type === 'entry') entries.set(event.entry.id, event.entry)
         else if (event.type === 'approval-request') {
           declined++
-          setImmediate(() => created.approve(event.request.id, { approved: false, note: DECLINED }))
+          setImmediate(() => created.approve(event.request.id, { approved: false, note: declinedNote(task.allow) }))
         } else if (event.type === 'ask') {
           questions++
           setImmediate(() => created.answer(event.id, NO_ONE))

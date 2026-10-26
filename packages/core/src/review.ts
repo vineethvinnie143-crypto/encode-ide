@@ -111,6 +111,7 @@ export const COMPLETION_SYSTEM = [
   'Report only problems you can show from what you are given: what input or state makes it fail, and what happens then. Leave out style, naming, taste and praise, and anything about code you cannot see.',
   'Tie each finding to one line of the change. Lines are numbered as in their file and marked "+" added, "-" removed or " " unchanged. Name a "+" or " " line by its number; name a "-" line by its number with "old": true.',
   'Priority: P0 breaks the build, loses data or opens a security hole. P1 a bug people will hit, or a part of the request not done. P2 a bug in a rarer case. P3 a small problem worth a line.',
+  'A test weakened or removed so that it passes is P1. So is any change to a test file when the request says to leave the tests alone, as in "fix the code, not the tests".',
   `Give at most ${MAX_FINDINGS} findings, the most important first. No findings is the right answer for a sound change.`,
   'Under "untested", list the cases the change must handle that no test in it covers (an empty input, zero, a negative or very large number, a missing record, a failing call, two calls at once), one short line each, at most five. Leave it empty when the change adds no behaviour, or tests what it adds.',
   'Answer with JSON only, in this shape:',
@@ -169,9 +170,10 @@ const findingLine = (finding: ReviewFinding) =>
 
 /**
  * What goes back to the agent, or null when nothing should: P0 and P1 findings (with the P2s beside them), and the
- * untested cases when `tests` says the project has tests and the request added none.
+ * untested cases when `tests` says the project has tests and the request added none. The agent writes tests for those
+ * cases only when the person asked for tests; otherwise it checks that its change handles them (ADR 0139).
  */
-export function completionReminder(review: CompletionReview, options: { tests: boolean }): string | null {
+export function completionReminder(review: CompletionReview, options: { tests: boolean; wanted?: TestsWanted }): string | null {
   const serious = review.findings.filter((finding) => finding.priority === 'P0' || finding.priority === 'P1')
   const untested = options.tests ? review.untested : []
   if (!serious.length && !untested.length) return null
@@ -181,9 +183,67 @@ export function completionReminder(review: CompletionReview, options: { tests: b
     const minor = review.findings.filter((finding) => finding.priority === 'P2')
     if (minor.length) lines.push('Also worth a look:', ...minor.map(findingLine))
   }
-  if (untested.length) lines.push('No test covers these cases. Add tests for them to the project’s tests, and run them:', ...untested.map((item) => `- ${item}`))
-  lines.push('Fix what holds up, then finish. If a finding is wrong, say why in your reply.')
+  if (untested.length) lines.push(untestedLine(options.wanted ?? 'unsaid'), ...untested.map((item) => `- ${item}`))
+  lines.push('Fix what holds up, within what the person asked for and ruled out, then finish. If a finding is wrong, say why in your reply.')
   return lines.join('\n')
+}
+
+function untestedLine(wanted: TestsWanted): string {
+  if (wanted === 'asked') return 'No test covers these cases. Add tests for them to the project’s tests, and run them:'
+  const check = 'No test covers these cases. Check that your change handles each one: read the code, or run it on the case once.'
+  return wanted === 'ruled-out'
+    ? `${check} The person said to leave the tests alone, so change no test file:`
+    : `${check} The person did not ask for tests, so add or change none; name one worth adding in your reply instead:`
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// What the person said about the tests (ADR 0139)
+
+/** Whether the person's latest requests ask for tests, rule out changing them, or say nothing of them. */
+export type TestsWanted = 'asked' | 'ruled-out' | 'unsaid'
+
+const TESTS = String.raw`(?:unit |integration |existing |the |any |a |its |their |these |those |all |of )*(?:tests?|specs?|test files?|test cases?|test suites?)`
+const RULED_OUT = [
+  // "fix the code, not the tests"
+  new RegExp(String.raw`\bnot (?:the |any |its |their |a |existing )?(?:tests|specs|test files?|test suites?|test cases)\b|\bnot the (?:test|spec)\b`, 'i'),
+  // "don't touch the tests", "without changing any test files"
+  new RegExp(String.raw`\b(?:don['’]?t|do not|never|without|no need to)\s+(?:\w+\s+){0,2}?(?:touch|chang|modif|edit|alter|rewrit|updat|weaken|delet|remov)\w*\s+${TESTS}\b`, 'i'),
+  // "leave the tests alone", "leave the unit tests as they are"
+  new RegExp(String.raw`\bleave\s+${TESTS}(?:\s+\w+){0,2}?\s+(?:alone|as (?:they are|it is|is)|unchanged|untouched|intact)\b`, 'i'),
+  // "the tests must stay as they are"
+  new RegExp(String.raw`\b${TESTS}\s+(?:must|should|need to|have to|are to)\s+(?:stay|remain|be left|be kept)\s+(?:as (?:they are|it is|is)|unchanged|untouched|alone|intact)\b`, 'i'),
+]
+/** A failing test named as what the fix is for: "the X test fails. Fix slug so that it passes." */
+const FAILING_TEST = /\b(?:tests?|specs?)\b(?:(?!\.\s)[^\n]){0,80}?\b(?:fails?|failing|is red|are red|breaks?|broke)\b|\bfailing (?:tests?|specs?)\b/i
+const FIX_SO_IT_PASSES = /\b(?:fix|change|correct|repair)\s+(?!(?:the |that |this |those |these )?(?:tests?|specs?)\b|it\b|them\b)\S+(?:\s+\S+)?\s+so(?: that)?\s+(?:it|they|the (?:tests?|specs?)|both|all)\s+pass(?:es)?\b/i
+const ASKED = [
+  /\b(?:add|write|create|extend|expand|improve|update|fix|change|rewrite)\s+(?:(?:a|an|some|more|new|the|its|their|unit|integration|regression|e2e|end-to-end|missing|proper|good|failing|existing)\s+){0,3}(?:tests?|specs?|test cases?|test coverage)\b/i,
+  /\b(?:with|and|plus) (?:its |their |the |some |a |unit |new )?tests?\b|\btest[- ]first\b|\bTDD\b|\bcover (?:it |this |them |that )?with tests\b/i,
+]
+
+const rulesOut = (request: string) => RULED_OUT.some((pattern) => pattern.test(request)) || (FAILING_TEST.test(request) && FIX_SO_IT_PASSES.test(request))
+const asks = (request: string) => ASKED.some((pattern) => pattern.test(request))
+
+/**
+ * What the person's requests, oldest first, say about the tests. The latest decides; when it says nothing, a rule set
+ * in one of the two before it ("not the tests") still holds.
+ */
+export function testsWanted(requests: readonly string[]): TestsWanted {
+  const recent = requests.slice(-3)
+  const latest = recent.at(-1) ?? ''
+  if (rulesOut(latest)) return 'ruled-out'
+  if (asks(latest)) return 'asked'
+  return recent.slice(0, -1).some(rulesOut) ? 'ruled-out' : 'unsaid'
+}
+
+/** Sent back when the person said to leave the tests alone and the request changed test files anyway. */
+export function testsKeptReminder(paths: readonly string[]): string {
+  const named = paths.slice(0, 5).map((path) => `\`${path}\``).join(', ')
+  return [
+    `The person said to leave the tests alone, but this request changed ${paths.length === 1 ? 'a test file' : 'test files'}: ${named}${paths.length > 5 ? ` and ${paths.length - 5} more` : ''}.`,
+    'Put each one back exactly as it was before this request: undo your edits to it, and delete a test file you added.',
+    'Then make the code pass the tests as they were, and run them. If you think a test itself is wrong, say why in your reply instead of changing it.',
+  ].join('\n')
 }
 
 // ---------------------------------------------------------------------------------------------------------------

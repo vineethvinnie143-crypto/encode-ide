@@ -1,6 +1,6 @@
 # 0135. Steps that read results think at low effort, where the cache keeps
 
-- Status: Accepted, off by default until the benchmark shows the pass rate holds; builds on 0067, 0099, 0129 and 0130
+- Status: Accepted, off by default: on DeepSeek V4.1 Flash it cost 23% more per task solved, with no gain in passes beyond chance (0139); builds on 0067, 0099, 0129 and 0130
 - Date: 2026-10-25
 
 ## Context

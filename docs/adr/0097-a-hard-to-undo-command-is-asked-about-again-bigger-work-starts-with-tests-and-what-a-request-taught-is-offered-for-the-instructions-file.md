@@ -1,6 +1,6 @@
 # 0097. A hard-to-undo command is asked about again, bigger work starts with tests, and what a request taught is offered for the instructions file
 
-- Status: Accepted, builds on 0052, 0059, 0095 and 0096
+- Status: Accepted, builds on 0052, 0059, 0095 and 0096; amended by 0139 (a task list starts with tests only when the person asked for tests)
 - Date: 2026-10-24
 
 ## Context

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ModelClient } from '@encode/providers'
-import { changeInput, completionPrompt, completionReminder, numberedChange, parseCompletion, parseGaps, planReminder, reviewWanted } from './review'
+import { changeInput, completionPrompt, completionReminder, numberedChange, parseCompletion, parseGaps, planReminder, reviewWanted, testsKeptReminder, testsWanted } from './review'
 
 describe('the change the Reviewer reads', () => {
   it('numbers a new file, an edit and a deleted file by the lines they have, with no line after the last newline', () => {
@@ -86,7 +86,7 @@ describe("the Reviewer's answer", () => {
     const finding = (priority: 'P0' | 'P1' | 'P2' | 'P3', line: number) => ({ path: 'src/a.ts', side: 'new' as const, line, priority, title: `${priority} title`, body: 'Body.' })
     assert.equal(completionReminder({ summary: '', findings: [finding('P2', 1), finding('P3', 2)], untested: [] }, { tests: true }), null)
     assert.equal(completionReminder({ summary: '', findings: [], untested: ['an empty list'] }, { tests: false }), null)
-    const text = completionReminder({ summary: '', findings: [finding('P1', 3), finding('P2', 4), finding('P3', 5)], untested: ['an empty list'] }, { tests: true })
+    const text = completionReminder({ summary: '', findings: [finding('P1', 3), finding('P2', 4), finding('P3', 5)], untested: ['an empty list'] }, { tests: true, wanted: 'asked' })
     assert.equal(
       text,
       [
@@ -97,9 +97,56 @@ describe("the Reviewer's answer", () => {
         '- P2 `src/a.ts:4`: P2 title. Body.',
         'No test covers these cases. Add tests for them to the project’s tests, and run them:',
         '- an empty list',
-        'Fix what holds up, then finish. If a finding is wrong, say why in your reply.',
+        'Fix what holds up, within what the person asked for and ruled out, then finish. If a finding is wrong, say why in your reply.',
       ].join('\n'),
     )
+  })
+
+  it('asks for tests of the untested cases only when the person asked for tests, and otherwise a check of them', () => {
+    const review = { summary: '', findings: [], untested: ['an empty list'] }
+    const unsaid = completionReminder(review, { tests: true })!
+    assert.match(unsaid, /No test covers these cases\. Check that your change handles each one: read the code, or run it on the case once\. The person did not ask for tests, so add or change none; name one worth adding in your reply instead:\n- an empty list/)
+    assert.doesNotMatch(unsaid, /Add tests/)
+    const ruledOut = completionReminder(review, { tests: true, wanted: 'ruled-out' })!
+    assert.match(ruledOut, /The person said to leave the tests alone, so change no test file:\n- an empty list/)
+  })
+
+  it('reads from the requests whether the person asked for tests or ruled out changing them', () => {
+    const ruledOut = [
+      'The cart tests fail. Find out why and fix the code, not the tests.',
+      'The "drops punctuation" test in test/slug.test.js fails. Fix slug so that it passes.',
+      "Make the build green, but don't touch the tests.",
+      'Fix the parser without changing any of the existing tests.',
+      'Leave the unit tests as they are and fix the date bug.',
+      'The tests must stay unchanged; the bug is in the code.',
+      'node --test fails on the cart spec. Fix the code so the tests pass.',
+    ]
+    const asked = ['Add a mean function, with tests.', 'Write unit tests for the parser.', 'Add export to csv, with filters, paging and tests.', 'Fix the failing test in test/a.test.js, its expectation is out of date.', 'The login test fails because the fixture is stale. Fix the test so it passes.', 'Do it test-first.']
+    const unsaid = [
+      'Inventory.remove in inventory.py lets the stock go below zero. It must raise ValueError when there is not enough stock.',
+      'Rename getUserName to getDisplayName everywhere in the project.',
+      'Run the tests and tell me what fails.',
+      'This is not a test of the system, just a question: where is the session timeout set?',
+    ]
+    for (const request of ruledOut) assert.equal(testsWanted([request]), 'ruled-out', request)
+    for (const request of asked) assert.equal(testsWanted([request]), 'asked', request)
+    for (const request of unsaid) assert.equal(testsWanted([request]), 'unsaid', request)
+    assert.equal(testsWanted([]), 'unsaid')
+    assert.equal(testsWanted(['Fix the code, not the tests.', 'Also handle a negative quantity.']), 'ruled-out', 'an earlier rule holds')
+    assert.equal(testsWanted(['Fix the code, not the tests.', 'Now add tests for the negative case.']), 'asked', 'the latest request decides')
+    assert.equal(testsWanted(['Fix the code, not the tests.', 'a', 'b', 'c']), 'unsaid', 'only the last three requests count')
+  })
+
+  it('names the test files to put back', () => {
+    assert.equal(
+      testsKeptReminder(['test/cart.test.js']),
+      [
+        'The person said to leave the tests alone, but this request changed a test file: `test/cart.test.js`.',
+        'Put each one back exactly as it was before this request: undo your edits to it, and delete a test file you added.',
+        'Then make the code pass the tests as they were, and run them. If you think a test itself is wrong, say why in your reply instead of changing it.',
+      ].join('\n'),
+    )
+    assert.match(testsKeptReminder(['a', 'b', 'c', 'd', 'e', 'f', 'g']), /changed test files: `a`, `b`, `c`, `d`, `e` and 2 more\./)
   })
 
   it("reads a plan's gaps, and nothing from an answer without them", () => {
