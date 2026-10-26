@@ -79,6 +79,10 @@ describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
       ['1. `x  y` returns `x--y`; I kept it as it was.', undefined],
       // ADR 0151: a value shown passing through, with no result after it.
       ["One thing worth knowing but not changed: `'a//b'` or a leading/trailing slash passes through as-is, since the function never promised to clean up slash structure — say the word if you want empty segments collapsed too.", undefined],
+      // ADR 0152: a comma, or "which" or "it", between the input and its result (part 5's run 4).
+      ['One thing left as-is, outside this fix: a title with an existing hyphen next to spaces, e.g. `Hello - World`, still yields `hello---world`, since the code only collapses whitespace runs and never collapses repeated dashes.', undefined],
+      ['Kept as it was: `a  b`, which gives `a--b`.', undefined],
+      ['Deliberately unchanged: `a - b`; it still returns `a---b`.', undefined],
     ] as Array<[string, string | undefined]>) {
       // undefined: the whole reply is the block.
       assert.equal(leftAsIs(reply), block ?? reply, reply)
@@ -94,6 +98,7 @@ describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
       '**Left as is:**\n- the README\n\nChecked by running it: `a - b` → `a-b`.',
       'I left `README.md` unchanged, as you asked.',
       '`npm test` goes through cleanly, and I left the tests alone.',
+      'I ran `slug(\'a - b\')`, which now gives `a-b`, and left the tests alone.',
       'Done.\n```\n// `a - b` -> `a---b`, left as is\n```',
     ]) {
       assert.equal(leftAsIs(reply), undefined, reply)

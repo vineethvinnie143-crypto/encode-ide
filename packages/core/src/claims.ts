@@ -169,9 +169,12 @@ const LEFT_AS_IS = [
   /\bif you(?:['’]d| would)? (?:rather|prefer)\b/i,
   /\bworth knowing\b/i,
 ]
-/** A result of the code, shown: "`a - b` → `a---b`", "`x` still gives `y`", "`a//b` passes through as-is" (ADR 0151). */
+/**
+ * A result of the code, shown: "`a - b` → `a---b`", "`x` still gives `y`", "`x`, which gives `y`" (ADR 0152), "`a//b`
+ * passes through as-is" (ADR 0151).
+ */
 const SHOWN_RESULT = [
-  /`[^`\n]+`\s*(?:still\s+)?(?:→|->|=>|gives|yields|becomes|returns|produces|comes out as|turns into)\s*`[^`\n]*`/i,
+  /`[^`\n]+`\s*(?:[,;:]\s*)?(?:(?:which|it)\s+)?(?:still\s+)?(?:→|->|=>|gives|yields|becomes|returns|produces|comes out as|turns into)\s*`[^`\n]*`/i,
   /`[^`\n]+`[^.\n]{0,60}\b(?:pass(?:es)?|comes?) through\b/i,
 ]
 const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s/

@@ -69,6 +69,7 @@ had no hyphen inside a word.
 - **Still open.** Five paid runs of regression-guard after the merge measure it.
 - Part 4 passed 4 of 5 after this. The check fired twice and both fixes went unchecked at the step limit; 0151 has the
   fix and its check go in one batch, and counts a value shown passing through.
+- Part 5 passed 4 of 5 after 0151. The one miss had a comma between the input and "still yields"; 0152 counts it.
 
 ## Verification
 
