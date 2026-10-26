@@ -129,7 +129,7 @@ export async function runRepl(options: CliOptions, firstPrompt: string, model: M
     if (request.always) choices.push(`a always (${firstLine(request.always.rules.join(', '), 80)})`)
     choices.push('n no, or type what to do instead')
     say(style.dim(`  ${choices.join(' · ')}`))
-    const word = request.tool === 'EnterPlanMode' ? 'Plan first?' : request.tool === 'StrongerModel' ? 'Use the stronger model?' : 'Allow?'
+    const word = request.tool === 'EnterPlanMode' ? 'Plan first?' : request.tool === 'StrongerModel' ? 'Use the stronger model?' : request.tool === 'StrongerAdvice' ? 'Ask the stronger model?' : 'Allow?'
     const keys = ['Y', 'n', ...(request.grantable ? ['s'] : []), ...(request.always ? ['a'] : [])]
     const line = await ask(`${word} [${keys.join('/')}] `)
     let answer: ApprovalAnswer

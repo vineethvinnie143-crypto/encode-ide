@@ -23,6 +23,13 @@ export const CHECK_ROUNDS: Record<CheckGate, number> = { auto: 2, on: 4, off: 0 
 /** How long one check may run; a test suite that takes longer is not waited for. */
 export const CHECK_TIMEOUT_MS = 600_000
 
+/**
+ * The checks after a step of the task list (ADR 0140): how long one may run then, and how many times a request they
+ * run. A check that takes longer runs only before the agent finishes.
+ */
+export const STEP_CHECK_MS = 120_000
+export const STEP_CHECKS = 5
+
 /** At most this many commands, typechecks first. */
 const MAX_CHECKS = 4
 
@@ -341,6 +348,16 @@ export function regression(run: CheckRun, before: CheckRun | undefined): { text:
   const old = run.failures.filter((failure) => earlier.has(failure))
   if (!fresh.length) return undefined
   return { text: [`New since this request: ${shown(fresh)}.`, old.length ? `Failing before it too, not yours unless asked: ${shown(old)}.` : ''].filter(Boolean).join(' ') }
+}
+
+/** What the agent is told when a check fails, for its own changes, after it marked a step of its task list done (ADR 0140). */
+export function stepChecksReminder(failed: { step: string; check: ProjectCheck; output: string; compared: string }): string {
+  return [
+    `You marked "${failed.step.replace(/\s+/g, ' ').trim().slice(0, 200)}" done, so eNCode ran the project's checks. \`${failed.check.command}\` failed:`,
+    failed.output,
+    failed.compared,
+    'Fix it now, while the change is fresh, unless a step still open on your list is what will fix it; then say so and go on.',
+  ].join('\n')
 }
 
 export function checksReminder(failed: { check: ProjectCheck; output?: string; compared: string }, passed: readonly ProjectCheck[], skipped: readonly ProjectCheck[]): string {

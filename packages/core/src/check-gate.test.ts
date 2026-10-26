@@ -307,3 +307,48 @@ describe('a session', () => {
     assert.deepEqual(named, ['make check'])
   })
 })
+
+describe('the checks after a step of the task list (ADR 0140)', () => {
+  const todos = (...statuses: Array<'pending' | 'in_progress' | 'completed'>) => ({
+    calls: [{ name: 'TodoWrite', input: { todos: statuses.map((status, index) => ({ content: `Step ${index + 1}`, activeForm: `Doing step ${index + 1}`, status })) } }],
+  })
+
+  it('run when a step is marked done after a change, and send back what is new', async () => {
+    const ran: string[] = []
+    const h = await loopHarness({
+      scriptFor: (root) => [write(root, 'src/a.ts'), todos('completed', 'in_progress'), write(root, 'src/a.ts', 'export const a = 2\n'), todos('completed', 'completed'), { text: 'Done.' }],
+      shell: (root) => answering(root, ran, { 'npm run typecheck': [{ output: "src/a.ts(1,14): error TS2322: Type 'string' is not assignable to type 'number'.", exitCode: 2 }] }),
+      services: { checks: checksOf([TYPES, TEST]) },
+      todoList: true,
+    })
+    assert.deepEqual(await h.run('two steps'), { kind: 'done', reply: 'Done.' })
+    assert.deepEqual(ran, ['npm run typecheck', 'npm run typecheck', 'npm test'], 'typechecks first; at the end, nothing that already ran since the last change')
+    const [sent] = reminders(h)
+    assert.match(sent, /^<system-reminder>\nYou marked "Step 1" done, so eNCode ran the project's checks\. `npm run typecheck` failed:\nsrc\/a\.ts\(1,14\): error TS2322/)
+    assert.match(sent, /Fix it now, while the change is fresh, unless a step still open on your list is what will fix it/)
+    assert.equal(reminders(h).length, 1)
+  })
+
+  it('stay quiet with nothing newly done, no code changed, or checks off, and leave a slow check to the end', async () => {
+    const quiet = async (script: (root: string) => object[], settings: Record<string, unknown> = {}) => {
+      const ran: string[] = []
+      const h = await loopHarness({ scriptFor: script as never, shell: (root) => answering(root, ran, {}), services: { checks: checksOf([TEST]) }, todoList: true, settings })
+      await h.run('go')
+      return ran
+    }
+    assert.deepEqual(await quiet(() => [todos('completed'), { text: 'Done.' }]), [], 'no code changed')
+    assert.deepEqual(await quiet((root) => [write(root, 'src/a.ts'), todos('in_progress', 'pending'), { text: 'Done.' }]), ['npm test'], 'only the end runs it: nothing was done')
+    assert.deepEqual(await quiet((root) => [write(root, 'src/a.ts'), todos('completed'), { text: 'Done.' }], { checkGate: 'off' }), [])
+
+    const ran: string[] = []
+    const h = await loopHarness({
+      scriptFor: (root) => [write(root, 'src/a.ts'), todos('completed', 'pending'), write(root, 'src/a.ts', 'export const a = 2\n'), todos('completed', 'completed'), { text: 'Done.' }],
+      shell: (root) => answering(root, ran, { 'npm test': [{ output: 'running', timedOut: true }] }),
+      services: { checks: checksOf([TEST]) },
+      todoList: true,
+    })
+    await h.run('go')
+    assert.deepEqual(ran, ['npm test', 'npm test'], 'once after the first step, then only at the end')
+    assert.ok(h.surface.settled.some((entry) => entry.kind === 'notice' && entry.text === '`npm test` takes longer than 120 s, so eNCode runs it only before the agent finishes.'))
+  })
+})
