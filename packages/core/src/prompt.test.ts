@@ -67,7 +67,7 @@ describe('the system prompt', () => {
   })
 
   it('says how many steps are left, and what an answer at the last step does with its check (ADR 0147)', () => {
-    assert.equal(stepsLeftNote(4, 15), "4 of this request's 15 steps are left, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.")
+    assert.equal(stepsLeftNote(4, 15), 'Steps left in this request: 4 of 15, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.')
     assert.match(lastStepCheckNote(15), /^Your answer took the last step this request may take \(15 steps\), so tools are off for your next reply and what this check found cannot be acted on now\. Give the user your whole answer again/)
   })
 

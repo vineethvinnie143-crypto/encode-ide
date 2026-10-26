@@ -35,7 +35,7 @@ case alone, with `a---b`.
 - **The model hears how many steps are left, once** (`packages/core/src/loop.ts`).
   - In a request that may take 10 steps or more, the reminder goes with the step that leaves 4. It also goes with a
     check that sends the model back then.
-  - It says: "4 of this request's 15 steps are left, and tools go off after the last. Bring the work to its end in them
+  - It says: "Steps left in this request: 4 of 15, and tools go off after the last. Bring the work to its end in them
     and give your answer with two to spare, so what the checks of your answer find can still be fixed."
   - A message from the person gives the request its whole limit again, as in 0124, so it can come again after one.
   - A shorter limit is already plain to see, and 4 of 9 would be half the request.

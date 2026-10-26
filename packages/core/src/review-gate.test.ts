@@ -172,7 +172,7 @@ describe('the Reviewer before the agent finishes', () => {
     })
     assert.deepEqual(await h.run('add a mean function'), { kind: 'done', reply: 'Fixed the empty list.' })
     const sent = reminders(h).find((text) => /The Reviewer read your changes/.test(text))
-    assert.match(sent ?? '', /If you take more steps before you finish[^]*\n\n4 of this request's 10 steps are left/)
+    assert.match(sent ?? '', /If you take more steps before you finish[^]*\n\nSteps left in this request: 4 of 10,/)
     assert.ok(notices(h).includes("The Reviewer found a problem in the agent's changes, so it goes on to fix it."))
   })
 

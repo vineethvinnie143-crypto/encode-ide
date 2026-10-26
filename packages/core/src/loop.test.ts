@@ -205,12 +205,12 @@ describe('a turn', () => {
   it('tells the model once how many steps are left, four before the limit, in a request that may take ten or more (ADR 0147)', async () => {
     const glob = { calls: [{ name: 'Glob', input: { pattern: '*' } }] }
     const notes = (h: Harness) =>
-      h.conversation.messages().flatMap((message) => (message.role === 'user' ? message.content.flatMap((block) => (block.type === 'text' && /steps are left/.test(block.text) ? [block.text] : [])) : []))
+      h.conversation.messages().flatMap((message) => (message.role === 'user' ? message.content.flatMap((block) => (block.type === 'text' && /Steps left in this request/.test(block.text) ? [block.text] : [])) : []))
     const h = await loopHarness({ script: (_request, step) => (step < 10 ? glob : { text: 'Done.' }), maxSteps: 10 })
     assert.deepEqual(await h.run('loop'), { kind: 'max-steps', steps: 10, reply: 'Done.' })
     assert.equal(notes(h).length, 1)
     // With the results of the sixth step, before the request's own note on its last.
-    assert.match(JSON.stringify(h.client.requests[6].payload.messages.at(-1)), /4 of this request's 10 steps are left, and tools go off after the last/)
+    assert.match(JSON.stringify(h.client.requests[6].payload.messages.at(-1)), /Steps left in this request: 4 of 10, and tools go off after the last/)
     assert.match(JSON.stringify(h.client.requests[10].payload.messages.at(-1)), /That was the last step this request may take \(10 steps\)/)
 
     const short = await loopHarness({ script: (_request, step) => (step < 9 ? glob : { text: 'Done.' }), maxSteps: 9 })

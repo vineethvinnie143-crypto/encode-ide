@@ -128,7 +128,7 @@ export function stepLimitNote(steps: number): string {
  * spare leaves room to act on what the checks of it find (ADR 0147).
  */
 export function stepsLeftNote(left: number, steps: number): string {
-  return `${left} of this request's ${steps} steps are left, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.`
+  return `Steps left in this request: ${left} of ${steps}, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.`
 }
 
 /**
