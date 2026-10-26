@@ -444,6 +444,14 @@ async function overview(debug: AgentDebugger, ctx: ToolContext): Promise<string>
   return lines.join('\n')
 }
 
+/** Words of a request that ask for the debugger: such a request lists Debug, which ToolSearch otherwise loads (ADR 0148). */
+const ASKS_FOR_DEBUGGER = /\b(?:debugger|debugging|breakpoints?|step through|debug (?:it|this|that|the|why|what|how|where))\b/i
+
+/** Whether a request of the person's asks for the debugger. */
+export function asksForDebugger(request: string): boolean {
+  return ASKS_FOR_DEBUGGER.test(request)
+}
+
 export const debugTool: Tool<DebugInput> = {
   definition: {
     name: 'Debug',

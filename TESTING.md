@@ -888,7 +888,8 @@ the panic, which it says, with the panic's message in the console.
 
 - In a trusted folder with the checkout above, ask the agent: "Why is the Oat milk line total what it is? Use the
   debugger." The approval card says **Debug cart.js**, lists its breakpoint, and says it runs outside the sandbox.
-  Deny: nothing runs, and the agent says so. Ask again and allow it.
+  Deny: nothing runs, and the agent says so. Ask again and allow it. The agent should go straight to the debugger,
+  with no search for the tool first, also with a smaller model as Main.
 - The chat shows **Debugged** steps (`start cart.js`, `evaluate …`) and the answer quotes the values at the stop. The
   Debug tab lists the run with an **Agent** tag; your editor and your breakpoints did not move. The tag's square
   button stops it.

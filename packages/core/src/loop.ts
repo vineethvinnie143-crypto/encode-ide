@@ -38,6 +38,7 @@ import {
 } from '@encode/providers'
 import { hardToUndo, screenCommand, type Screened } from '@encode/permissions'
 import {
+  asksForDebugger,
   excerpt,
   isInsideReal,
   offLimitsFolder,
@@ -166,6 +167,8 @@ const SHOWN_STOPS: ReadonlySet<string> = new Set(['attempt_completion', 'ExitPla
 const TODO_NUDGE_STEPS = 6
 /** Steps in a row that each read or searched one thing, after which the model is asked once to batch them (ADR 0134). */
 const SOLO_LOOK_STEPS = 3
+/** The tool a request that asks for the debugger lists (ADR 0148). */
+const DEBUG_TOOL = 'Debug'
 /** Steps left when the model is told, once, how many remain (ADR 0147), in a request that may take STEPS_LEFT_FROM or more. */
 const STEPS_LEFT = 4
 const STEPS_LEFT_FROM = 10
@@ -854,6 +857,9 @@ export class AgentLoop {
 
   /** What the next request's tool list carries beyond the always listed: what the conversation loaded, and what stays. */
   private toolsLoaded(): Set<string> {
+    // A person who asks for the debugger gets it listed, and from then on, so the list and its cache hold: a model that
+    // does not search for tools never saw it, and fixed the bug by reading instead (ADR 0148).
+    if (!this.keptTools.has(DEBUG_TOOL) && this.o.requests?.().some(asksForDebugger)) this.keptTools.add(DEBUG_TOOL)
     const loaded = loadedTools(this.o.conversation.messages(), this.o.registry)
     for (const name of this.keptTools) loaded.add(name)
     return loaded
