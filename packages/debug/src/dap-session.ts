@@ -13,7 +13,7 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { killTree } from '@encode/tools'
-import { ADAPTERS, pauseReason, type AdapterKind, type AdapterProfile } from './adapters'
+import { ADAPTERS, pauseReason, type AdapterKind, type AdapterProfile, type ProgramKind } from './adapters'
 import { DapConnection, DapError, type DapEvent } from './dap'
 import { OutputBatch } from './output'
 import { fileKey } from './paths'
@@ -51,8 +51,8 @@ export interface DapPlan {
   runDir: string
   /** Work before the debugger starts, such as a build; what it gives back is added to the arguments. */
   prepare?(context: PrepareContext): Promise<Record<string, unknown> | void>
-  /** A Rust program: its panics are its exceptions. */
-  rust?: boolean
+  /** A Rust program: its panics are its exceptions. 'msvc': built for Windows with Microsoft's tools. */
+  rust?: boolean | 'msvc'
 }
 
 export interface DapSessionOptions {
@@ -481,6 +481,10 @@ export class DapSession implements RunSession {
     if (this.ready && !this.ended) await this.sendExceptions().catch(() => undefined)
   }
 
+  private program(): ProgramKind {
+    return { rust: this.options.plan.rust ?? false, windows: this.platform === 'win32' }
+  }
+
   private offeredFilters(): string[] {
     const list = Array.isArray(this.caps.exceptionBreakpointFilters) ? this.caps.exceptionBreakpointFilters : []
     return list.map((filter) => (isRecord(filter) ? text(filter.filter) : undefined)).filter((id): id is string => !!id)
@@ -491,7 +495,7 @@ export class DapSession implements RunSession {
     if (!dap || dap.closed) return
     const offered = this.offeredFilters()
     if (offered.length) await dap.request('setExceptionBreakpoints', { filters: this.profile.exceptionFilters(this.exceptions, offered) }, { timeoutMs: REQUEST_MS })
-    const functions = this.profile.exceptionFunctions(this.exceptions, { rust: this.options.plan.rust === true })
+    const functions = this.profile.exceptionFunctions(this.exceptions, this.program())
     // Sent empty too once one was set, so that turning an exception off takes its function away.
     if (this.caps.supportsFunctionBreakpoints && (functions.length || this.functionsSet)) {
       this.functionsSet = functions.length > 0
@@ -615,7 +619,7 @@ export class DapSession implements RunSession {
     await Promise.all(read.map((entry) => this.readStack(entry, entry === top ? MAX_FRAMES : OTHER_FRAMES, generation)))
     if (generation !== this.generation) return
     // A stop in a function an exception goes through (a Go or Rust panic) is the run's exception.
-    const crash = top && reason === 'breakpoint' && top.frames?.[0] ? this.profile.exceptionStop(top.frames[0].name) : null
+    const crash = top && reason === 'breakpoint' && top.frames?.[0] ? this.profile.exceptionStop(top.frames[0].name, this.program()) : null
     if (top && crash) {
       top.reason = 'exception'
       top.exception = crash

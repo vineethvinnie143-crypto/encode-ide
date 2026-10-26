@@ -269,6 +269,26 @@ describe('C, C++ and Rust', () => {
     assert.match((await problem(planRun('file', { root, platform: process.platform, env: noRust.env, file: path.join(root, 'tools', 'one.rs') }))).message, /needs rustc, which comes with Rust/)
   })
 
+  it("loads Rust's formatters as the Rust that builds the program has them, and knows a Rust that builds with Microsoft's tools", async () => {
+    const programs = await standIns(['lldb-dap', 'cargo', 'rustc'])
+    const { root } = await folder({ 'Cargo.toml': '[package]\nname = "cart"\n', 'src/main.rs': 'fn main() {}\n' })
+    const sysroot = path.join(root, 'toolchain')
+    const etc = path.join(sysroot, 'lib', 'rustlib', 'etc')
+    await fs.mkdir(etc, { recursive: true })
+    await fs.writeFile(path.join(etc, 'lldb_lookup.py'), '')
+    const plan = (host: string) =>
+      planRun('file', { root, platform: process.platform, env: programs.env, file: path.join(root, 'src', 'main.rs'), ask: answers({ 'rustc --print sysroot': `${sysroot}\n`, 'rustc -vV': `rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\nhost: ${host}\nrelease: 1.99.1\n` }) })
+    // Rust 1.98 on: importing lldb_lookup.py registers them.
+    const linux = dap(await plan('x86_64-unknown-linux-gnu'))
+    assert.deepEqual([linux.rust, linux.arguments.initCommands], [true, [`command script import "${path.join(etc, 'lldb_lookup.py')}"`]])
+    const windows = dap(await plan('x86_64-pc-windows-msvc'))
+    assert.equal(windows.rust, 'msvc')
+    assert.equal(dap(await plan('x86_64-pc-windows-gnu')).rust, true)
+    // Before, lldb_commands beside it did.
+    await fs.writeFile(path.join(etc, 'lldb_commands'), '')
+    assert.deepEqual(dap(await plan('x86_64-unknown-linux-gnu')).arguments.initCommands, [`command script import "${path.join(etc, 'lldb_lookup.py')}"`, `command source -s 0 "${path.join(etc, 'lldb_commands')}"`])
+  })
+
   it('finds lldb-dap on the PATH first, and says how to get LLVM when there is none', async (t) => {
     const programs = await standIns(['lldb-dap'])
     const context = { root: programs.bin, platform: process.platform, env: programs.env }

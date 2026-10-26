@@ -591,6 +591,49 @@ describe('a debug run of C through lldb-dap', { skip: !LLDB || !CC ? 'no lldb-da
   })
 })
 
+const CXX = searchPath('clang++', process.env) ?? searchPath('c++', process.env)
+
+const CART_CPP = `#include <cstdio>
+#include <stdexcept>
+
+int line_total(int price, int qty) {
+    if (qty < 0) throw std::invalid_argument("a quantity below zero");
+    return price * qty;
+}
+
+int main() {
+    try {
+        line_total(3, -1);
+    } catch (const std::exception &error) {
+        std::printf("caught %s\\n", error.what());
+    }
+    std::printf("total %d\\n", line_total(3, 4));
+    return 0;
+}
+`
+
+describe('a debug run of C++ through lldb-dap', { skip: !LLDB || !CXX ? 'no lldb-dap and C++ compiler here' : false }, () => {
+  it('stops for every exception when asked, a caught one too, in the function that threw it', { timeout: 120_000 }, async () => {
+    const dir = await tempWorkspace({ 'cart.cpp': CART_CPP })
+    const file = path.join(dir, 'cart.cpp')
+    const program = path.join(dir, process.platform === 'win32' ? 'cart.exe' : 'cart')
+    execFileSync(CXX!, ['-g', '-O0', '-o', program, file])
+    const r = run(lldbPlan(dir, program), {}, { uncaught: true, all: true }, dir)
+    await r.session.start()
+    const view = await r.until((v) => !!paused(v), 'the throw')
+    const thread = paused(view)!
+    assert.equal(thread.reason, 'exception', JSON.stringify(thread))
+    assert.ok(thread.exception, JSON.stringify(thread))
+    // The throw is in the runtime (__cxa_throw; _CxxThrowException on Windows): line_total is below it.
+    assert.ok(thread.frames!.some((frame) => /line_total/.test(frame.name) && frame.source?.path === file), JSON.stringify(thread.frames))
+    await r.session.resume()
+    await r.until((v) => v.state === 'ended', 'the end')
+    assert.match(r.text(), /caught a quantity below zero/)
+    assert.match(r.text(), /total 12/)
+    await r.session.settled
+  })
+})
+
 const CARGO = searchPath('cargo', process.env)
 const RUSTC = searchPath('rustc', process.env)
 
@@ -618,37 +661,20 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     execFileSync(CARGO!, ['build', '--quiet'], { cwd: dir, env: environment(), timeout: 200_000, stdio: 'ignore' })
     const file = path.join(dir, 'src', 'main.rs')
     const program = path.join(dir, 'target', 'debug', process.platform === 'win32' ? 'cart.exe' : 'cart')
+    // As eNCode loads them (packages/workspace, rustDebugging): Rust 1.98 on has no lldb_commands, and registers its
+    // formatters as lldb_lookup.py is imported.
     const etc = path.join(execFileSync(RUSTC!, ['--print', 'sysroot'], { encoding: 'utf8' }).trim(), 'lib', 'rustlib', 'etc')
-    const initCommands = [`command script import "${path.join(etc, 'lldb_lookup.py')}"`, `command source -s 0 "${path.join(etc, 'lldb_commands')}"`]
-    const plan = (args: string[]) => lldbPlan(dir, program, { rust: true, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands } })
+    const commands = path.join(etc, 'lldb_commands')
+    const initCommands = [`command script import "${path.join(etc, 'lldb_lookup.py')}"`, ...(existsSync(commands) ? [`command source -s 0 "${commands}"`] : [])]
+    const rust = /^host:\s*\S+-windows-msvc\s*$/m.test(execFileSync(RUSTC!, ['-vV'], { encoding: 'utf8' })) ? ('msvc' as const) : true
+    const plan = (args: string[]) => lldbPlan(dir, program, { rust, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands } })
 
     const r = run(plan([]), { [file]: [bp(2)] }, undefined, dir)
     await r.session.start()
     const view = await r.until((v) => !!paused(v), 'the breakpoint')
     const thread = paused(view)!
     assert.match(thread.frames![0]!.name, /line_total/)
-    const locals = await localsOf(r, thread).catch(async (error: Error) => {
-      // How lldb-dap went, and whether it reads the same frame without Rust's formatters.
-      await r.until((v) => v.state === 'ended', 'the run to end').catch(() => undefined)
-      const bare = run(lldbPlan(dir, program, { rust: true }), { [file]: [bp(2)] }, undefined, dir)
-      await bare.session.start()
-      const stop = paused(await bare.until((v) => !!paused(v), 'the breakpoint without formatters'))!
-      const steps: string[] = [`frames ${stop.frames!.slice(0, 3).map((frame) => frame.name).join(', ')}`]
-      try {
-        const scopes = await bare.session.scopes(stop.frames![0]!.id)
-        steps.push(`scopes ${scopes.map((scope) => `${scope.name}#${scope.ref}`).join(', ')} (${bare.session.view().state})`)
-        for (const scope of scopes) {
-          const values = await bare.session.variables(scope.ref)
-          steps.push(`${scope.name}: ${values.slice(0, 8).map((value) => `${value.name}:${value.type ?? ''}`).join(', ')}`)
-        }
-      } catch (problem) {
-        await new Promise((resolve) => setTimeout(resolve, 1_500))
-        steps.push(`failed: ${(problem as Error).message} / ${bare.session.view().message ?? ''}`)
-      }
-      const plain = steps.join(' | ')
-      await bare.session.stop().catch(() => undefined)
-      throw new Error(`${error.message} / ${r.session.view().message ?? 'no message'} / without the formatters: ${plain}`)
-    })
+    const locals = await localsOf(r, thread)
     const name = named(locals, 'name')
     assert.match(name?.value ?? '', /"Coffee beans"/, JSON.stringify(name))
     // line_total runs twice: without its breakpoint, the program runs to its end.

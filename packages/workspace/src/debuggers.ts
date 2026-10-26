@@ -399,13 +399,19 @@ export function findRust(name: 'cargo' | 'rustc', context: FindContext): string 
   throw new RunProblem(`Building a Rust program to debug it needs ${name}, which comes with Rust. Install Rust from https://rustup.rs, then start this again.`)
 }
 
-/** What lldb is told first for a Rust program: Rust's own formatters, so a String or a Vec shows its contents. */
-export async function rustFormatters(rustc: string, context: FindContext): Promise<string[]> {
-  const sysroot = (await ask(context, rustc, ['--print', 'sysroot']))?.split(/\r?\n/)[0]?.trim()
-  if (!sysroot) return []
-  const etc = path.join(sysroot, 'lib', 'rustlib', 'etc')
+/**
+ * What lldb needs for a Rust program, from the Rust that builds it: its own formatters, so a String or a Vec shows its
+ * contents, and whether it builds for Windows with Microsoft's tools, where a panic is thrown as a C++ exception is.
+ * Rust 1.98 and later register the formatters as lldb_lookup.py is imported; before, lldb_commands beside it did.
+ */
+export async function rustDebugging(rustc: string, context: FindContext): Promise<{ initCommands: string[]; msvc: boolean }> {
+  const [sysroot, version] = await Promise.all([ask(context, rustc, ['--print', 'sysroot']), ask(context, rustc, ['-vV'])])
+  const msvc = /^host:\s*\S+-windows-msvc\s*$/m.test(version ?? '')
+  const root = sysroot?.split(/\r?\n/)[0]?.trim()
+  if (!root) return { initCommands: [], msvc }
+  const etc = path.join(root, 'lib', 'rustlib', 'etc')
   const lookup = path.join(etc, 'lldb_lookup.py')
   const commands = path.join(etc, 'lldb_commands')
-  if (!isFile(lookup) || !isFile(commands) || /["\r\n]/.test(etc)) return []
-  return [`command script import "${lookup}"`, `command source -s 0 "${commands}"`]
+  if (!isFile(lookup) || /["\r\n]/.test(etc)) return { initCommands: [], msvc }
+  return { initCommands: [`command script import "${lookup}"`, ...(isFile(commands) ? [`command source -s 0 "${commands}"`] : [])], msvc }
 }

@@ -868,10 +868,13 @@ package's tests, and a breakpoint in a test stops.
 breakpoint in it and press `F5`: the console says it builds with clang, then the run stops. Without LLVM, the message
 says how to get it. LLVM's lldb-dap needs the Python its release was built with: when that Python is missing, the
 message names it and its winget line (`winget install Python.Python.3.11`); install it and press `F5` again, with no
-restart. If a run still says Windows could not find a library lldb-dap needs, tell us which LLVM you installed.
+restart. If a run still says Windows could not find a library lldb-dap needs, tell us which LLVM you installed. In
+C++, tick **Stop on every exception, caught ones too** in the Debug panel and throw one inside a `try`: the run stops
+at the throw, with your function a few frames down the stack.
 
 **Rust**: in a Cargo project, open `src/main.rs`, set a breakpoint and press `F5`. cargo builds it in the console, and a
-`String` or a `Vec` shows its contents.
+`String` or a `Vec` shows its contents. Index past the end of a `Vec`: the run stops at the panic, which it says, with
+the panic's message in the console.
 
 ## Worktrees
 

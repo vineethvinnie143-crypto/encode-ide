@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { DapPlan } from '@encode/debug'
 import { cargoBuild, compileFile, compileRust, type BuildContext } from './debug-builds'
-import { findCompiler, findDebugpy, findDelve, findGo, findLldbDap, findPython, findRust, lldbPython, rustFormatters, RunProblem, withPathTail, type FindContext } from './debuggers'
+import { findCompiler, findDebugpy, findDelve, findGo, findLldbDap, findPython, findRust, lldbPython, rustDebugging, RunProblem, withPathTail, type FindContext } from './debuggers'
 
 /** A run of a language's own debugger, as the folder's debugger starts it; the run's folder is given when it starts. */
 export interface DapRun {
@@ -171,7 +171,8 @@ export async function nativeRun(run: NativeRun, context: LanguageContext): Promi
       break
     }
   }
-  const initCommands = run.rust ? await rustFormatters(findRust('rustc', context), context).catch(() => []) : []
+  const rust = run.rust ? await rustDebugging(findRust('rustc', context), context).catch(() => ({ initCommands: [], msvc: false })) : null
+  const initCommands = rust?.initCommands ?? []
   return {
     kind: 'dap',
     name: run.name,
@@ -180,7 +181,7 @@ export async function nativeRun(run: NativeRun, context: LanguageContext): Promi
       kind: 'dap',
       profile: 'lldb',
       request: 'launch',
-      ...(run.rust ? { rust: true } : {}),
+      ...(rust ? { rust: rust.msvc ? ('msvc' as const) : true } : {}),
       adapter: { file: lldb, args: [], cwd: context.cwd, env: python?.add ? withPathTail(context.env, python.add, context.platform) : context.env, transport: 'stdio' },
       // The program inherits lldb-dap's environment, which is the run's: `env` adds to it.
       arguments: { ...(program.kind === 'program' ? { program: program.file } : {}), args: run.args, cwd: context.cwd, env: [], stopOnEntry: false, ...(initCommands.length ? { initCommands } : {}) },

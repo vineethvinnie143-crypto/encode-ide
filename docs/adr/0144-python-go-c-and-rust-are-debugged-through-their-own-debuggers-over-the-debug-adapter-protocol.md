@@ -44,8 +44,8 @@ C++ and Rust. The constraints stay 0143's:
   | --- | --- | --- | --- |
   | Reached over | standard input and output | a socket it dials (a Unix socket in the run's owner-only folder; 127.0.0.1 on Windows) | standard input and output |
   | Hit count `5` (from the 5th on) | `>= 5` | `>= 5` | `5`; only "from N on" (`== 5`, `% 5` are refused with why) |
-  | Uncaught exceptions | `uncaught` | an unrecovered panic, a fatal error | C++: lldb stops at `std::terminate`; Rust: a breakpoint on `rust_panic` |
-  | Every exception | `raised` | a breakpoint on `runtime.gopanic` | `cpp_throw` |
+  | Uncaught exceptions | `uncaught` | an unrecovered panic, a fatal error | C++: lldb stops at `std::terminate`; Rust: a breakpoint on `rust_panic` (`_CxxThrowException` for Rust built with Microsoft's tools) |
+  | Every exception | `raised` | a breakpoint on `runtime.gopanic` | `cpp_throw`, and on Windows a breakpoint on `_CxxThrowException` |
   | The console's expressions | `repl` | `repl` | `watch` (its `repl` answers as lldb's command line) |
 
 ### What runs (`packages/workspace`)
@@ -86,7 +86,14 @@ C++ and Rust. The constraints stay 0143's:
 - **lldb-dap** comes with LLVM, which is too large to fetch for a debugger: it is found on the PATH (`lldb-dap`,
   `lldb-vscode`) and where LLVM's installers put it (`Program Files\LLVM\bin`, `/usr/lib/llvm-N/bin`,
   `/usr/bin/lldb-dap-N`, Homebrew, Xcode). Missing, the message says how to get LLVM on that system. For Rust, Rust's
-  own formatters are loaded first, from `rustc --print sysroot`, so a `String` or a `Vec` shows its contents.
+  own formatters are loaded first, from `rustc --print sysroot`, so a `String` or a `Vec` shows its contents: Rust
+  1.98 and later register them as `lldb_lookup.py` is imported, and no longer ship the `lldb_commands` that did it
+  before, which is sourced only where it is.
+- **Exceptions through Microsoft's runtime, on Windows**: a program built for it (clang's default there, and Rust's
+  `x86_64-pc-windows-msvc`, as `rustc -vV` names its host) throws through `_CxxThrowException`. lldb's `cpp_throw`
+  stops in `__cxa_throw`, which such a program has none of, and lldb does not stop there for a breakpoint on
+  `rust_panic`. So on Windows "every exception" also sets a function breakpoint on `_CxxThrowException`, and a Rust
+  program built so has its panics stop there instead of at `rust_panic`, never both, so that one panic stops once.
 - **lldb-dap's Python, on Windows**: LLVM's Windows releases link lldb to one Python's DLL (`python311.dll`), and
   without it Windows ends lldb-dap before it says anything. Before a run starts, eNCode reads which Python DLL
   `liblldb.dll` imports (its PE import tables, a few kilobytes of the file) and looks for it: next to lldb-dap, in

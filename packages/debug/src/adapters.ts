@@ -7,6 +7,14 @@ import type { ExceptionFilters, PauseReason } from './types'
 
 export type AdapterKind = 'debugpy' | 'delve' | 'lldb'
 
+/** What the debugged program is, as far as its exceptions go. */
+export interface ProgramKind {
+  /** A Rust program; 'msvc' when Rust built it for Windows with Microsoft's tools (x86_64-pc-windows-msvc). */
+  rust: boolean | 'msvc'
+  /** The debugger runs on Windows. */
+  windows: boolean
+}
+
 export interface AdapterProfile {
   kind: AdapterKind
   /** For people. */
@@ -17,10 +25,10 @@ export interface AdapterProfile {
   hitCondition(ours: string): { value: string } | { problem: string }
   /** The exception filters to turn on, of those the debugger offered. */
   exceptionFilters(ours: ExceptionFilters, offered: readonly string[]): string[]
-  /** Functions to stop in for the exceptions asked for: every Go panic, a Rust program's panics. */
-  exceptionFunctions(ours: ExceptionFilters, options: { rust: boolean }): string[]
+  /** Functions to stop in for the exceptions asked for: every Go panic, a Rust program's panics, a C++ throw on Windows. */
+  exceptionFunctions(ours: ExceptionFilters, program: ProgramKind): string[]
   /** What a stop in one of those functions is, in words; null for a function that is not one of them. */
-  exceptionStop(functionName: string): string | null
+  exceptionStop(functionName: string, program: ProgramKind): string | null
   /**
    * When it offers no filters, it stops for a crash whatever it was told (an older Delve, for a panic): when the person
    * asked for no exceptions, the run goes on, and the program ends as it would without a debugger.
@@ -36,6 +44,9 @@ export interface AdapterProfile {
 }
 
 const HIT = /^\s*(==|>=|<=|>|<|%)?\s*(\d{1,9})\s*$/
+/** Where Microsoft's C++ runtime throws; a frame of it is named alone or after its DLL (VCRUNTIME140!, vcruntime140`). */
+const MSVC_THROW = '_CxxThrowException'
+const THROWN = /(^|[!`])_CxxThrowException$/
 
 /** A hit count's operator and number; `>=` when it has none. */
 export function readHitCondition(text: string): { op: '==' | '>=' | '<=' | '>' | '<' | '%'; count: number } | null {
@@ -92,9 +103,18 @@ export const ADAPTERS: Readonly<Record<AdapterKind, AdapterProfile>> = {
     },
     // C++: a throw stops, caught or not. One nothing catches ends in std::terminate, which lldb stops for anyway.
     exceptionFilters: (ours, offered) => (ours.all ? ['cpp_throw'] : []).filter((id) => offered.includes(id)),
-    // Rust: every panic goes through rust_panic before it unwinds, caught (catch_unwind) or not.
-    exceptionFunctions: (ours, options) => (options.rust && (ours.uncaught || ours.all) ? ['rust_panic'] : []),
-    exceptionStop: (name) => (/(^|::)rust_panic$/.test(name) ? 'The program panicked: its message is in the output' : null),
+    exceptionFunctions: (ours, program) => {
+      // Rust: every panic goes through rust_panic before it unwinds, caught (catch_unwind) or not. Built with Microsoft's
+      // tools, a panic is thrown as a C++ exception is, through _CxxThrowException; and there lldb does not stop for a
+      // breakpoint on rust_panic.
+      if (program.rust) return ours.uncaught || ours.all ? [program.rust === 'msvc' ? MSVC_THROW : 'rust_panic'] : []
+      // C++ on Windows: cpp_throw stops in __cxa_throw, which a program built for Microsoft's C++ runtime has none of.
+      return ours.all && program.windows ? [MSVC_THROW] : []
+    },
+    exceptionStop: (name, program) => {
+      if (program.rust && (/(^|::)rust_panic$/.test(name) || (program.rust === 'msvc' && THROWN.test(name)))) return 'The program panicked: its message is in the output'
+      return !program.rust && program.windows && THROWN.test(name) ? 'The program threw a C++ exception' : null
+    },
     alwaysStopsOnCrash: false,
     replContext: 'watch',
     chatter: [/^Running (initCommands|preRunCommands|launchCommands|stopCommands|exitCommands|terminateCommands):$/, /^\(lldb\) /, /^Process \d+ (exited with status|launched:)/],

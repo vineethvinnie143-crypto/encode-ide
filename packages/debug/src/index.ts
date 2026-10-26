@@ -1,4 +1,4 @@
-export { ADAPTERS, pauseReason, readHitCondition, type AdapterKind, type AdapterProfile } from './adapters'
+export { ADAPTERS, pauseReason, readHitCondition, type AdapterKind, type AdapterProfile, type ProgramKind } from './adapters'
 export { BOOTLOADER, nodeOptionsPath, prepareRunFolder, readBootInfo, withBootloader, type BootInfo } from './boot'
 export { CdpConnection, CdpError, inspectorTargets, type SocketFactory, type SocketLike } from './cdp'
 export { DapConnection, DapError, dapErrorText, type DapEvent, type DapOptions, type DapRequestHandler } from './dap'
