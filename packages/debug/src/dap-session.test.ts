@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
-import { after, describe, it } from 'node:test'
+import { after, describe, it, type TestContext } from 'node:test'
 import { searchPath } from '@encode/tools'
 import { tempWorkspace } from '@encode/tools/testing'
 import { DapSession, type DapPlan } from './dap-session'
@@ -623,6 +623,23 @@ function lldbPlan(dir: string, program: string, extra: Partial<DapPlan> = {}): D
   }
 }
 
+/** As a run ends, lldb prints the program's exit as it saw it: the code, and why where it has no code of the program's. */
+const EXIT_STATUS = 'script print("lldb saw the program end:", lldb.process.GetExitStatus(), lldb.process.GetExitDescription())'
+
+/**
+ * The program's exit code, as the run says it. On Windows lldb debugs through lldb-server, and when lldb-server is gone
+ * before lldb has read the program's exit, lldb has no code but -1 and says why (EXIT_STATUS prints it): that -1 is
+ * lldb's, not the program's, and is noted rather than failed.
+ */
+function assertExit(t: TestContext, r: Run, view: SessionView, code: number): void {
+  const saw = /lldb saw the program end: (-?\d+) (.*)/.exec(r.text())
+  if (view.exitCode === -1 && process.platform === 'win32' && saw?.[1] === '-1' && /lost connection|debugserver died/i.test(saw[2]!)) {
+    t.diagnostic(`lldb did not read the exit code: ${saw[2]}`)
+    return
+  }
+  assert.equal(view.exitCode, code, r.text())
+}
+
 const CART_C = `#include <stdio.h>
 
 struct item { const char *name; double price; int qty; };
@@ -729,13 +746,12 @@ int main() {
 `
 
 describe('a debug run of C++ through lldb-dap', { skip: !LLDB || !CXX ? 'no lldb-dap and C++ compiler here' : false }, () => {
-  it('stops for every exception when asked, a caught one too, in the function that threw it', { timeout: 120_000 }, async () => {
+  it('stops for every exception when asked, a caught one too, in the function that threw it', { timeout: 120_000 }, async (t) => {
     const dir = await tempWorkspace({ 'cart.cpp': CART_CPP })
     const file = path.join(dir, 'cart.cpp')
     const program = path.join(dir, process.platform === 'win32' ? 'cart.exe' : 'cart')
     execFileSync(CXX!, ['-g', '-O0', '-o', program, file])
-    // lldb says how the program ended (`process status`): the message, where its code is not the one it returned.
-    const r = run(lldbPlan(dir, program, { arguments: { program, args: [], cwd: dir, env: [], stopOnEntry: false, exitCommands: ['process status'] } }), {}, { uncaught: true, all: true }, dir)
+    const r = run(lldbPlan(dir, program, { arguments: { program, args: [], cwd: dir, env: [], stopOnEntry: false, exitCommands: [EXIT_STATUS] } }), {}, { uncaught: true, all: true }, dir)
     await r.session.start()
     const view = await r.until((v) => !!paused(v), 'the throw')
     const thread = paused(view)!
@@ -747,7 +763,7 @@ describe('a debug run of C++ through lldb-dap', { skip: !LLDB || !CXX ? 'no lldb
     const ended = await r.until((v) => v.state === 'ended', 'the end')
     assert.match(r.text(), /caught a quantity below zero/)
     assert.match(r.text(), /total 12/)
-    assert.equal(ended.exitCode, 0, r.text())
+    assertExit(t, r, ended, 0)
     await r.session.settled
   })
 })
@@ -774,7 +790,7 @@ fn main() {
 `
 
 describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUSTC ? 'no lldb-dap and Rust here' : false }, () => {
-  it("shows Rust's own values through its formatters, and stops for a panic", { timeout: 240_000 }, async () => {
+  it("shows Rust's own values through its formatters, and stops for a panic", { timeout: 240_000 }, async (t) => {
     const dir = await tempWorkspace({ 'Cargo.toml': '[package]\nname = "cart"\nversion = "0.1.0"\nedition = "2021"\n', 'src/main.rs': CART_RS })
     execFileSync(CARGO!, ['build', '--quiet'], { cwd: dir, env: environment(), timeout: 200_000, stdio: 'ignore' })
     const file = path.join(dir, 'src', 'main.rs')
@@ -785,8 +801,7 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     const commands = path.join(etc, 'lldb_commands')
     const initCommands = [`command script import "${path.join(etc, 'lldb_lookup.py')}"`, ...(existsSync(commands) ? [`command source -s 0 "${commands}"`] : [])]
     const rust = /^host:\s*\S+-windows-msvc\s*$/m.test(execFileSync(RUSTC!, ['-vV'], { encoding: 'utf8' })) ? ('msvc' as const) : true
-    // lldb says how the program ended (`process status`): the message, where its code is not the one it returned.
-    const plan = (args: string[]) => lldbPlan(dir, program, { rust, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands, exitCommands: ['process status'] } })
+    const plan = (args: string[]) => lldbPlan(dir, program, { rust, arguments: { program, args, cwd: dir, env: [], stopOnEntry: false, initCommands, exitCommands: [EXIT_STATUS] } })
 
     const r = run(plan([]), { [file]: [bp(2)] }, undefined, dir)
     await r.session.start()
@@ -801,7 +816,7 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     await r.session.resume()
     const done = await r.until((v) => v.state === 'ended', 'the end')
     assert.match(r.text(), /subtotal 41\.8/)
-    assert.equal(done.exitCode, 0, r.text())
+    assertExit(t, r, done, 0)
     await r.session.settled
 
     const boom = run(plan(['boom']), {}, undefined, dir)
@@ -813,7 +828,7 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     await boom.session.resume()
     const ended = await boom.until((v) => v.state === 'ended' || (!!paused(v) && paused(v)!.frames![0]!.id !== paused(crashed)!.frames![0]!.id), 'the end after the panic')
     assert.equal(ended.state, 'ended', JSON.stringify(paused(ended)))
-    assert.equal(ended.exitCode, 101, boom.text())
+    assertExit(t, boom, ended, 101)
     await boom.session.settled
   })
 })
