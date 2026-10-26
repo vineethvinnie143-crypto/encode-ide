@@ -1,0 +1,32 @@
+{
+  "id": "debug-menu-crash",
+  "title": "Debugging: the menu build crashes",
+  "prompt": "`node build.js` crashes with a TypeError instead of writing menu.txt. Find out why and fix it. site.json is right as it is, and each page keeps the order site.json lists it in, under its parent.",
+  "tags": [
+    "javascript",
+    "debugger"
+  ],
+  "debug": true,
+  "maxSteps": 30,
+  "allow": [
+    "Bash(node build.js)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "the menu is built, every page under its parent and in its order",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/menu.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "site.json is left alone",
+      "paths": [
+        "site.json"
+      ]
+    }
+  ]
+}

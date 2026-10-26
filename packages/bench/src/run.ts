@@ -7,11 +7,11 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { AgentHost, DEFAULT_SETTINGS, type AgentEvent, type AgentSettings, type ConversationEntry, type ProblemCode } from '@encode/core'
+import { AgentHost, DEFAULT_SETTINGS, type AgentEvent, type AgentSettings, type ApprovalRequest, type ConversationEntry, type ProblemCode } from '@encode/core'
 import type { ModelClient } from '@encode/providers'
 import type { Sandbox } from '@encode/sandbox'
 import type { WebAccess } from '@encode/tools'
-import { Workspaces } from '@encode/workspace'
+import { trustFolder, WorkspaceConfig, Workspaces } from '@encode/workspace'
 import { benchEnvironment, runChecks, type CheckResult } from './checks'
 import { meteredClient, type MeteredClient, type ModelCall } from './meter'
 import { changesBetween, copyProject, snapshot, type FileChanges } from './project'
@@ -139,6 +139,9 @@ const OFFLINE: WebAccess = {
 
 const EMPTY_CHANGES: FileChanges = { added: [], changed: [], removed: [] }
 
+/** A start of the agent's own debug run (ADR 0146), which a debugging task approves as the person would. */
+const debugStart = (request: ApprovalRequest) => request.tool === 'Debug' && request.input.action === 'start'
+
 /** The tools whose failure is a command's exit code. */
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(['Bash', 'BashOutput'])
 
@@ -261,6 +264,11 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
   await fs.mkdir(dir, { recursive: true })
   // The commands the task allows are the person's own rules, so they are judged as a person's rules are.
   await fs.writeFile(path.join(home, '.encode', 'settings.json'), `${JSON.stringify({ permissions: { allow: task.allow } }, null, 2)}\n`)
+  // Debugging runs the folder's code only in a folder the person trusts, and a person who asks for it has trusted it.
+  if (task.debug) {
+    const trusted = await trustFolder(new WorkspaceConfig({ root, home }))
+    if (!trusted.ok) throw new Error(`Could not trust ${root} for debugging: ${trusted.reason}`)
+  }
   const before = await snapshot(root)
 
   const client = meteredClient(options.client)
@@ -274,7 +282,14 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
   const started = Date.now()
   let stopped: TaskRun['stopped']
   try {
-    workspaces = new Workspaces({ home, checkpoints: { dir: path.join(base, 'checkpoints') }, ...(options.sandbox ? { sandbox: options.sandbox } : {}), transcriptPath: (id) => path.join(dir, `${id}.jsonl`) })
+    workspaces = new Workspaces({
+      home,
+      checkpoints: { dir: path.join(base, 'checkpoints') },
+      ...(options.sandbox ? { sandbox: options.sandbox } : {}),
+      transcriptPath: (id) => path.join(dir, `${id}.jsonl`),
+      // The debugger the desktop app gives the agent; its runs start from what the agent's commands start from.
+      ...(task.debug ? { debug: { runDir: path.join(base, 'debug'), env: benchEnvironment(), node: { file: process.execPath } } } : {}),
+    })
     const created: AgentHost = new AgentHost({
       dir,
       home,
@@ -285,8 +300,11 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
         options.onEvent?.(event)
         if (event.type === 'entry') entries.set(event.entry.id, event.entry)
         else if (event.type === 'approval-request') {
-          declined++
-          setImmediate(() => created.approve(event.request.id, { approved: false, note: declinedNote(task.allow) }))
+          if (task.debug && debugStart(event.request)) setImmediate(() => created.approve(event.request.id, true))
+          else {
+            declined++
+            setImmediate(() => created.approve(event.request.id, { approved: false, note: declinedNote(task.allow) }))
+          }
         } else if (event.type === 'ask') {
           questions++
           setImmediate(() => created.answer(event.id, NO_ONE))
@@ -324,6 +342,9 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
   const reply = [...entries.values()].filter((entry) => entry.kind === 'assistant' && entry.text?.trim()).at(-1)?.text ?? ''
   const after = await snapshot(root)
   const metrics = metricsOf(entries.values(), client, declined, questions, durationMs)
+  const tools = toolsOf(entries.values())
+  const used: Record<string, number> = {}
+  for (const call of tools) if (call.ok && !call.declined && !call.byEncode) used[call.tool] = (used[call.tool] ?? 0) + 1
   const checks =
     stopped === 'cancelled'
       ? []
@@ -334,6 +355,7 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
           before,
           reply,
           toolFailures: metrics.toolFailures,
+          used,
           ...(options.programEnv ? { programEnv: options.programEnv } : {}),
           ...(options.signal ? { signal: options.signal } : {}),
         })
@@ -362,7 +384,7 @@ async function runIn(base: string, task: BenchTask, options: RunOptions, attempt
     reply: reply.length > 4_000 ? `${reply.slice(0, 4_000)}…` : reply,
     metrics,
     calls: client.calls,
-    tools: toolsOf(entries.values()),
+    tools,
     ...(facts ? { quality: { issues: judgeQuality(facts, options.reference), facts } } : {}),
   }
 }

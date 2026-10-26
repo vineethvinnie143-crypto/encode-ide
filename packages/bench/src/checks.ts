@@ -32,6 +32,8 @@ export interface CheckContext {
   reply: string
   /** Tool calls that failed, commands aside. */
   toolFailures?: number
+  /** The model's tool calls that did their job, by tool: declined ones and eNCode's own calls aside. */
+  used?: Readonly<Record<string, number>>
   /** What a program needs set to run as itself: eNCode's own Node.js is the app run as Node. */
   programEnv?: ProgramEnv
   signal?: AbortSignal
@@ -178,6 +180,11 @@ export async function runChecks(task: BenchTask, context: CheckContext): Promise
       case 'tools': {
         const failed = context.toolFailures ?? 0
         results.push(failed <= check.failedAtMost ? { name: check.name, kind: 'tools', passed: true } : { name: check.name, kind: 'tools', passed: false, detail: `${failed} tool ${failed === 1 ? 'call' : 'calls'} failed` })
+        break
+      }
+      case 'used': {
+        const unused = check.tools.filter((tool) => !context.used?.[tool])
+        results.push(unused.length ? { name: check.name, kind: 'used', passed: false, detail: `${unused.join(', ')} did its job in no call` } : { name: check.name, kind: 'used', passed: true })
         break
       }
     }

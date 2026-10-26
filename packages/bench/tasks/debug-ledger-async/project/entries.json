@@ -1,0 +1,9 @@
+[
+  { "account": "alice", "amount": 100 },
+  { "account": "bob", "amount": 50 },
+  { "account": "alice", "amount": -30 },
+  { "account": "alice", "amount": 45 },
+  { "account": "bob", "amount": -20 },
+  { "account": "carol", "amount": 10 },
+  { "account": "alice", "amount": -15 }
+]

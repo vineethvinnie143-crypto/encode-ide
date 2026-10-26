@@ -1,0 +1,77 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "ToolSearch",
+          "input": {
+            "query": "select:Debug"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Debug",
+          "input": {
+            "action": "start",
+            "file": "summary.js",
+            "breakpoints": [
+              {
+                "file": "summary.js",
+                "line": 10,
+                "condition": "!(record.region in cents)"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Debug",
+          "input": {
+            "action": "stop"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/csv.js"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/csv.js",
+            "old_string": "export function parseLine(line) {\n  return line.split(',')\n}\n",
+            "new_string": "export function parseLine(line) {\n  // A field in quotes can hold commas, and \"\" inside it is one quote.\n  const fields = []\n  let field = ''\n  let quoted = false\n  for (let index = 0; index < line.length; index++) {\n    const char = line[index]\n    if (quoted) {\n      if (char === '\"' && line[index + 1] === '\"') {\n        field += '\"'\n        index++\n      } else if (char === '\"') quoted = false\n      else field += char\n    } else if (char === '\"') quoted = true\n    else if (char === ',') {\n      fields.push(field)\n      field = ''\n    } else field += char\n  }\n  fields.push(field)\n  return fields\n}\n"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node summary.js sales.csv"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Record 217 is `\"Smith, Jones & Co\"`: splitting the line on every comma cut the name in two, so its region read as ` Jones & Co\"` and its 1250.40 counted nowhere (record 89 lost east 342.75 the same way). `parseLine` now reads quoted fields, with commas and doubled quotes inside them; north is 105130.06."
+    }
+  ]
+}

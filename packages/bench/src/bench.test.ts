@@ -86,6 +86,13 @@ describe('task.json', () => {
     assert.deepEqual(task.requires, ['python'])
     assert.deepEqual(task.allow, [])
     assert.equal(task.checks[0]!.name, 'done.txt as asked')
+    assert.equal(task.debug, false)
+  })
+
+  test('a debugging task reads, with a check that the agent used the debugger', () => {
+    const task = parseTask({ ...base, debug: true, checks: [...base.checks, { kind: 'used', tools: ['Debug'] }] }, '/tasks/sample')
+    assert.equal(task.debug, true)
+    assert.deepEqual(task.checks[1], { kind: 'used', name: 'used Debug', tools: ['Debug'] })
   })
 
   test('refuses what a task must not hold, and says what is wrong with each', () => {
@@ -108,6 +115,9 @@ describe('task.json', () => {
       [{ ...base, checks: [{ kind: 'search', paths: ['src'], pattern: 'x', flags: 'g', expect: 'none' }] }, /flags may hold only/],
       [{ ...base, checks: [{ kind: 'reply' }] }, /needs matches or excludes/],
       [{ ...base, checks: [{ kind: 'exec' }] }, /kind must be/],
+      [{ ...base, debug: 'yes' }, /debug must be true or false/],
+      [{ ...base, checks: [{ kind: 'used', tools: [] }] }, /tools must name 1 to 5 tools/],
+      [{ ...base, checks: [{ kind: 'used', tools: ['Debug; rm'] }] }, /tools must name 1 to 5 tools/],
     ]
     for (const [json, expected] of cases) {
       const found = problems(json)
@@ -155,6 +165,33 @@ describe('a run', () => {
     const sent = JSON.stringify(client.requests.at(-1)!.payload.messages)
     assert.match(sent, /it allows only these commands: `node --version`\. Do the task without this call, or with one of them\. A declined call is no reason to stop checking your work\./)
     assert.match(sent, /No one can answer during this benchmark run/)
+  })
+
+  test("gives a debugging task the folder's debugger: its starts are approved, the rest still declined (ADR 0146)", { timeout: 120_000 }, async () => {
+    const checks = [...base.checks, { kind: 'used', name: 'the debugger stopped the program', tools: ['Debug'] }]
+    const files = { 'count.js': 'let total = 0\nfor (const n of [1, 2, 3]) total += n\nconsole.log(total)\n' }
+    const script = (): ScriptedStep[] => [
+      { calls: [{ name: 'ToolSearch', input: { query: 'select:Debug' } }] },
+      { calls: [{ name: 'Debug', input: { action: 'start', file: 'count.js', breakpoints: [{ file: 'count.js', line: 3 }] } }] },
+      { calls: [{ name: 'Debug', input: { action: 'stop' } }] },
+      { calls: [{ name: 'Bash', input: { command: 'curl https://example.com' } }] },
+      { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] },
+      { text: 'Wrote done.txt.' },
+    ]
+    const programs = await findPrograms([])
+    const debugging = await readTask(await makeTask({ ...base, id: 'debugging', debug: true, checks }, files))
+    const client = createScriptedClient(script())
+    const run = await runTask(debugging, { client, programs, settings: AS_WRITTEN })
+    assert.equal(run.outcome, 'passed', JSON.stringify(run.checks))
+    assert.equal(run.metrics.declined, 1)
+    assert.deepEqual(run.metrics.byTool.Debug, { calls: 2, failed: 0 })
+    assert.match(JSON.stringify(client.requests[2]!.payload.messages), /paused at count\.js:3/)
+
+    // Without it the folder has no debugger to offer, and the check says so.
+    const plain = await readTask(await makeTask({ ...base, id: 'plain', checks }, files))
+    const without = await runTask(plain, { client: createScriptedClient(script()), programs, settings: AS_WRITTEN })
+    assert.equal(without.outcome, 'failed')
+    assert.deepEqual(without.checks.at(-1), { name: 'the debugger stopped the program', kind: 'used', passed: false, detail: 'Debug did its job in no call' })
   })
 
   test("runs its checks without the environment's secrets, and with the folders they need", async () => {

@@ -66,7 +66,8 @@ Bounded: two lines of context each side, 12 frames (the runtime's folded to a co
 Breakpoints that did not bind are named with the debugger's reason. A session has at most 3 runs of its own; each
 takes at most 50 breakpoints, inside the folder, on a line the file has.
 
-The tool is deferred (loaded through `ToolSearch`), offered only where the folder has a debugger (the desktop app),
+The tool is deferred (loaded through `ToolSearch`), offered only where the folder has a debugger (the desktop app, and
+the bench's debugging tasks of 0146),
 and only to the main agent: it is on the subagents' excluded list, as a run is a long-lived, approved program.
 
 ### Approval (`packages/core/src/approval.ts`)

@@ -34,6 +34,8 @@ export type Check =
   | { kind: 'reply'; name: string; matches?: string; excludes?: string; flags: string }
   /** How the agent's tools fared: no more than so many calls failed (commands that exit with an error aside). */
   | { kind: 'tools'; name: string; failedAtMost: number }
+  /** Tools the agent used to do the task, such as Debug when the request asks for the debugger: each did its job at least once. */
+  | { kind: 'used'; name: string; tools: string[] }
 
 /** One tool call of a replay, and whether it did its job. */
 export interface ReplayResult {
@@ -62,6 +64,11 @@ export interface BenchTask {
   /** Folders kept in the task under another name, because git would not keep them (`_node_modules`: `node_modules`). */
   rename: Record<string, string>
   checks: Check[]
+  /**
+   * The agent gets the folder's debugger (ADR 0146): the folder is trusted, as a person who debugs has trusted it, and
+   * the agent's debug starts are approved, as the person would approve them. Default false.
+   */
+  debug: boolean
   /** The folder it was read from. */
   dir: string
   solution?: ScriptedStep[]
@@ -80,6 +87,7 @@ export class TaskError extends Error {
 
 export const TASK_ID = /^[a-z0-9][a-z0-9-]{0,59}$/
 const TAG = /^[a-z0-9][a-z0-9-]{0,29}$/
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 /** How a command check names its program: never a path, so a task runs the same on every machine. */
 const PROGRAM_WORD: Record<string, Program> = { '{{node}}': 'node', '{{python}}': 'python', '{{lua}}': 'lua' }
 const MAX_FILE_BYTES = 1024 * 1024
@@ -173,6 +181,8 @@ export function parseTask(json: unknown, dir: string): BenchTask {
   })
   if (!checks.length) problem('a task needs at least one check')
   requires.delete('node')
+  const debug = json.debug ?? false
+  if (typeof debug !== 'boolean') problem('debug must be true or false')
 
   const task: BenchTask = {
     id: id ?? '',
@@ -185,6 +195,7 @@ export function parseTask(json: unknown, dir: string): BenchTask {
     allow,
     rename,
     checks,
+    debug: debug === true,
     dir,
   }
   if (problems.length) throw new TaskError(dir, problems)
@@ -285,8 +296,14 @@ function parseCheck(entry: unknown, index: number, problem: (text: string) => un
       if (typeof failedAtMost !== 'number' || !Number.isInteger(failedAtMost) || failedAtMost < 0 || failedAtMost > 1_000) return problem(`${where}.failedAtMost must be a whole number from 0 to 1,000`)
       return { kind: 'tools', name: name ?? (failedAtMost ? `at most ${failedAtMost} tool calls failed` : 'no tool call failed'), failedAtMost }
     }
+    case 'used': {
+      const tools = strings('tools', 5)
+      if (!tools) return undefined
+      if (!tools.length || tools.some((tool) => !TOOL_NAME.test(tool))) return problem(`${where}.tools must name 1 to 5 tools, such as Debug`)
+      return { kind: 'used', name: name ?? `used ${tools.join(', ')}`, tools }
+    }
     default:
-      return problem(`${where}.kind must be command, file, search, unchanged, reply or tools`)
+      return problem(`${where}.kind must be command, file, search, unchanged, reply, tools or used`)
   }
 }
 

@@ -1,0 +1,15 @@
+{
+  "title": "Kettle docs",
+  "pages": [
+    { "id": "home", "title": "Home", "parent": null },
+    { "id": "start", "title": "Getting started", "parent": null },
+    { "id": "install", "title": "Install", "parent": "start" },
+    { "id": "first-brew", "title": "Your first brew", "parent": "start" },
+    { "id": "descale", "title": "Descaling", "parent": "care" },
+    { "id": "filters", "title": "Changing filters", "parent": "care" },
+    { "id": "care", "title": "Care", "parent": null },
+    { "id": "warranty", "title": "Warranty", "parent": "support" },
+    { "id": "support", "title": "Support", "parent": null },
+    { "id": "contact", "title": "Contact", "parent": "support" }
+  ]
+}

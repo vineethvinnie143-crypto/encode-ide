@@ -59,6 +59,18 @@ const HIT_CONDITION = /^\s*(==|>=|<=|>|<|%)?\s*\d{1,9}\s*$/
 
 const unavailable = 'Debug is not available here: this eNCode has no debugger for the folder (it runs in the desktop app, for the main agent).'
 
+/** What each of a session's own runs stops on, as its start asked; a report of a run that ended on an error says what would have stopped it. */
+const STOP_ON = new WeakMap<AgentDebugger, Map<string, NonNullable<DebugInput['stopOn']>>>()
+/** A JavaScript error as Node.js prints one it did not stop for: the error's line, then its stack. */
+const JS_ERROR = /^\s*(?:Uncaught )?\w*Error\b/m
+const JS_FRAME = /^\s+at .+:\d+:\d+\)?\s*$/m
+/**
+ * V8 counts an error thrown while an ES module loads as caught, since Node.js's module loader catches it to report it:
+ * stopping on uncaught exceptions lets it through, and only stopping on every exception stops where it is thrown.
+ */
+const LET_THROUGH =
+  'It ended on an error that did not stop it: the program caught it, or Node.js\'s module loader did (an error thrown while an ES module loads counts as caught). Start again with stopOn "all" to stop where it is thrown.'
+
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 const oneLine = (text: string) => text.replace(/\s*\r?\n\s*/g, ' ')
 const shown = (file: string, ctx: ToolContext) => displayPath(file, ctx)
@@ -160,11 +172,32 @@ function stackLines(frames: readonly AgentDebugFrame[], chosen: number, ctx: Too
 }
 
 /** The values of a frame: the first scope that is not costly to read (its locals). */
+/** Scopes inside a function's own (V8's blocks: a loop's `let`, a catch's error), read together with the function's. */
+const INNER_SCOPES: ReadonlySet<string> = new Set(['Block', 'Catch', 'With', 'Eval'])
+
+/**
+ * The values of a frame: its first scope, and when that is a block inside the function, the scopes out to the
+ * function's own, so a stop in a loop shows the loop's variable and the function's together. A name an inner scope
+ * has hides the outer one, as in the program.
+ */
 async function frameValues(debug: AgentDebugger, run: AgentDebugRun, frame: AgentDebugFrame): Promise<{ scope: string; values: AgentDebugValue[] } | null> {
-  const scopes = await debug.scopes(run.id, frame.id).catch(() => [])
-  const scope = scopes.find((item) => !item.expensive)
-  if (!scope) return null
-  return { scope: scope.name, values: await debug.variables(run.id, scope.ref).catch(() => []) }
+  const scopes = (await debug.scopes(run.id, frame.id).catch(() => [])).filter((item) => !item.expensive)
+  if (!scopes.length) return null
+  const read: typeof scopes = []
+  for (const scope of scopes) {
+    read.push(scope)
+    if (!INNER_SCOPES.has(scope.name)) break
+  }
+  const values: AgentDebugValue[] = []
+  const seen = new Set<string>()
+  for (const scope of read) {
+    for (const value of await debug.variables(run.id, scope.ref).catch(() => [])) {
+      if (seen.has(value.name)) continue
+      seen.add(value.name)
+      values.push(value)
+    }
+  }
+  return { scope: [...new Set(read.map((scope) => scope.name))].join(', '), values }
 }
 
 function printedLines(debug: AgentDebugger, run: AgentDebugRun, heading: string): string[] {
@@ -221,7 +254,12 @@ async function report(debug: AgentDebugger, run: AgentDebugRun, ctx: ToolContext
       out.push('Breakpoints not placed yet:', ...missed.slice(0, 10).map((status) => `  ${shown(status.file, ctx)}:${status.line}${status.message ? `: ${clip(status.message, 160)}` : ''}`))
     }
   }
-  out.push(...printedLines(debug, run, run.state === 'ended' ? 'It printed:' : 'Printed since the last report:'))
+  const printed = printedLines(debug, run, run.state === 'ended' ? 'It printed:' : 'Printed since the last report:')
+  out.push(...printed)
+  if (run.state === 'ended' && run.mine && run.exitCode && /^(?:node|tsx)\b/.test(run.detail) && STOP_ON.get(debug)?.get(run.id) === 'uncaught') {
+    const text = printed.join('\n')
+    if (JS_ERROR.test(text) && JS_FRAME.test(text)) out.push(LET_THROUGH)
+  }
   return out.join('\n')
 }
 
@@ -270,6 +308,9 @@ async function start(debug: AgentDebugger, input: DebugInput, ctx: ToolContext):
     const install = started.install ? ` eNCode can install it: ask the person to press F5 on the file in the editor, which offers the install.` : ''
     return fail(`${started.reason}${install}`)
   }
+  let stopsOn = STOP_ON.get(debug)
+  if (!stopsOn) STOP_ON.set(debug, (stopsOn = new Map()))
+  stopsOn.set(started.run, input.stopOn ?? 'uncaught')
   const run = (await debug.runs()).find((item) => item.id === started.run)
   if (!run) return fail(`Run ${started.run} ended as it started.`)
   return settle(debug, { ...run, stops: 0 }, input, ctx)

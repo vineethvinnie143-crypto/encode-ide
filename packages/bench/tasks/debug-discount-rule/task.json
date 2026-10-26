@@ -1,0 +1,40 @@
+{
+  "id": "debug-discount-rule",
+  "title": "Debugging: the wrong discount wins",
+  "prompt": "`node report.js` gives order A-1042 the Weekend discount and a total of 91.00. Its subtotal of 100.00 qualifies for Loyal customer at 15%, so the total should be 85.00. Use the debugger to find out why the wrong rule wins, then fix the code. rules.json is exported by the shop's admin tool as it is: leave it unchanged.",
+  "tags": [
+    "javascript",
+    "debugger"
+  ],
+  "debug": true,
+  "maxSteps": 30,
+  "allow": [
+    "Bash(node report.js)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "the report gives every order its best discount, for any export of the rules",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/report.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "the rules and the orders are left alone",
+      "paths": [
+        "rules.json",
+        "orders.json"
+      ]
+    },
+    {
+      "kind": "used",
+      "name": "the debugger stopped the program",
+      "tools": [
+        "Debug"
+      ]
+    }
+  ]
+}
