@@ -54,10 +54,9 @@ describe('the system prompt', () => {
   })
 
   it('asks for the inputs around a change, and probes in the scratch folder (ADR 0141)', () => {
-    for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) {
-      assert.match(text, /the inputs around the case you changed/)
-      assert.match(text, /scratch folder the environment names, never in the project/)
-    }
+    // A model that needs no guide tries the inputs around a change unasked (ADR 0094); where probes go is a rule for both.
+    assert.match(SYSTEM_PROMPT, /try the inputs around the case you changed/)
+    for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) assert.match(text, /scratch folder the environment names, never in the project/)
   })
 
   it('keeps the tests as the spec, and the checking going past a declined command or a failing check (ADR 0139)', () => {

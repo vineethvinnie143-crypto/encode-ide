@@ -38,7 +38,8 @@ the model's alone:
   - It goes with its session, and once nothing in it changed for a week (looked for when eNCode starts).
 - **The inputs around a change are tried (amends 0126).** The instructions now say to try the inputs around the case
   that changed (repeated, at either end, beside what the tests cover), and that probes and scratch tests go in the
-  scratch folder, never in the project. The instructions grow by about 160 characters, and the short ones by about 140.
+  scratch folder, never in the project. The instructions grow by about 160 characters. The short ones, for models
+  that try the inputs around a change unasked (0094), only say where probes go, and grow by about 70.
 - **The bench counts what the run made.** A snapshot of the project leaves out `__pycache__` and `.pytest_cache` as it
   leaves out `.git`. The regression task's test script is `node --test`. The report's line on tasks that passed every
   run says so in those words.
