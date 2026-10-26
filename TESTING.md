@@ -1007,6 +1007,9 @@ next, and why; each group of steps between two of those is one grey line ("Ran 4
 that opens on a click. Nothing folds when the request ends. Ask it to fix something it can check (a port, a page, a
 command): it should check the result itself, not leave it to you. When its answer still leaves a check to you ("I
 have not tested..."), a note says it goes back once to try that check itself first.
+When its answer shows an odd result of its own change and leaves it to you ("`a - b` still gives `a---b`; say the
+word if you want it tightened"), a note says it goes back once to settle it itself: it fixes it, or says in one line
+why the result is right.
 When it wants to try its fix on a few inputs, it should write the probe or scratch test in its own scratch folder
 (named in the chat's background, outside your project) without asking you, and leave nothing of it in your project.
 

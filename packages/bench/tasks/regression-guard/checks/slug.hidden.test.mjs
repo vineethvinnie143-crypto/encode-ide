@@ -11,4 +11,5 @@ test('punctuation, folders and spaces together', () => {
   assert.equal(slug('  Guides/Install & Run!  '), 'guides/install-run')
   assert.equal(slug('FAQ: What is it?'), 'faq-what-is-it')
   assert.equal(slug('a  -  b'), 'a-b')
+  assert.equal(slug('Well-Known Title'), 'well-known-title')
 })

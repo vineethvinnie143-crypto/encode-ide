@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { fileHolds, handBack, nameClaims, pathsIn, successClaims } from './claims'
+import { fileHolds, handBack, leftAsIs, leftAsIsReminder, nameClaims, pathsIn, successClaims } from './claims'
 
 describe('a reply that says the checks pass', () => {
   it('is a report, in its many forms', () => {
@@ -61,6 +61,47 @@ describe('a reply that leaves a check to the person', () => {
     ]) {
       assert.equal(handBack(reply), undefined, reply)
     }
+  })
+})
+
+describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
+  it('shows the result and the words that leave it in one paragraph or list item, as the bench runs that failed did', () => {
+    const run4 =
+      "Fixed and verified.\n\n**Left as is, deliberately:**\n- `null`/`undefined` still throw. That was the pre-existing behaviour.\n- `Hello - World` still gives `hello---world`, because the existing `\\s+` rule doesn't collapse dashes. Outside the failing test — say the word if you want it tightened."
+    const run5 =
+      "`npm test` now passes 3/3.\n\nTwo notes on behavior I chose, since the tests don't pin them down: `--already--dashed--` becomes `already--dashed` (inner doubles are kept, only the ends are trimmed), and non-ASCII letters are preserved rather than dropped. Tell me if you'd rather collapse inner dashes or restrict to ASCII, and I'll adjust."
+    for (const [reply, block] of [
+      [run4, "- `Hello - World` still gives `hello---world`, because the existing `\\s+` rule doesn't collapse dashes. Outside the failing test — say the word if you want it tightened."],
+      [run5, run5.split('\n\n')[1]],
+      ['One behaviour worth knowing, unchanged by me: a literal dash surrounded by spaces gives `a - b` → `a---b`, since each space becomes its own dash.', undefined],
+      ["Remaining known quirk, unchanged and not asked for: a dash next to punctuation can still repeat (`'Hello - World'` → `hello---world`).", undefined],
+      ['**Left as is:**\n- `a - b` -> `a---b`, outside the failing test.', '**Left as is:** - `a - b` -> `a---b`, outside the failing test.'],
+      ['1. `x  y` returns `x--y`; I kept it as it was.', undefined],
+    ] as Array<[string, string | undefined]>) {
+      // undefined: the whole reply is the block.
+      assert.equal(leftAsIs(reply), block ?? reply, reply)
+    }
+  })
+
+  it('is not a result fixed or checked, an offer with no result, a list headed otherwise, or code', () => {
+    for (const reply of [
+      'Fixed: `Hello, World!` → `hello-world`, and `a - b` → `a-b`.',
+      "Want me to open a PR? Tell me if you'd rather I didn't.",
+      'I left the tests alone, as you asked.',
+      '**Checked:**\n- `a - b` → `a-b`\n- `docs/Getting Started` → `docs/getting-started`',
+      '**Left as is:**\n- the README\n\nChecked by running it: `a - b` → `a-b`.',
+      'Done.\n```\n// `a - b` -> `a---b`, left as is\n```',
+    ]) {
+      assert.equal(leftAsIs(reply), undefined, reply)
+    }
+  })
+
+  it('is quoted to the agent on one line, clipped, with what to do', () => {
+    const sent = leftAsIsReminder(`- \`a - b\` → \`a---b\`.\nSay the word. ${'x'.repeat(400)}`)
+    assert.match(sent, /^Your answer leaves a result of the code as it is: "- `a - b` → `a---b`\. Say the word\. x+…"\n/)
+    assert.ok(sent.split('\n')[0].length < 380)
+    assert.match(sent, /it is part of the problem even when the old code gave it too: fix it, check it, and say so\./)
+    assert.match(sent, /keep it and say why in one line\. Do not leave the choice to the user\.$/)
   })
 })
 

@@ -553,6 +553,7 @@ const LANGUAGE_SERVER_NEWS = [
   'Steps left in this request:',
   'Before you finish: the task list the person sees',
   'Your answer leaves a check to the user',
+  'Your answer leaves a result of the code as it is',
   'The task list the person sees has not changed',
 ]
 const GATED = 'Before you finish: your changes this turn left errors'
