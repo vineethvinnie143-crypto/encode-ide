@@ -1,0 +1,6 @@
+[
+  { "name": "Spring sale", "minTotal": 50, "percent": "5" },
+  { "name": "Loyal customer", "minTotal": 80, "percent": "15" },
+  { "name": "Weekend", "minTotal": 30, "percent": "9" },
+  { "name": "Bulk order", "minTotal": 250, "percent": "20" }
+]

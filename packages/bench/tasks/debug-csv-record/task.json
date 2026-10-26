@@ -1,0 +1,39 @@
+{
+  "id": "debug-csv-record",
+  "title": "Debugging: one sales record read wrong",
+  "prompt": "`node summary.js sales.csv` says north sold 103879.66, but the finance team's figure for north is 105130.06. Use the debugger to find the record that is read wrong, then fix the reading so that every record of sales.csv is read right, customer names included. Leave sales.csv as it is.",
+  "tags": [
+    "javascript",
+    "debugger"
+  ],
+  "debug": true,
+  "maxSteps": 30,
+  "allow": [
+    "Bash(node summary.js:*)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "every record is read right, and the totals match",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/csv.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "sales.csv is left alone",
+      "paths": [
+        "sales.csv"
+      ]
+    },
+    {
+      "kind": "used",
+      "name": "the debugger stopped the program",
+      "tools": [
+        "Debug"
+      ]
+    }
+  ]
+}

@@ -139,6 +139,25 @@ describe("the agent's Debug tool (ADR 0145)", () => {
     await tool({ action: 'stop' })
   })
 
+  it('says what stops an ES module that throws as it loads, which V8 counts as caught by the loader', { timeout: 120_000 }, async () => {
+    const { tool } = await setup({ 'package.json': '{ "type": "module" }\n', 'menu.js': "import { build } from './build.js'\nbuild([{ id: 'a', parent: 'b' }])\n", 'build.js': 'export function build(pages) {\n  const byId = new Map()\n  for (const page of pages) byId.get(page.parent).children.push(page)\n}\n' })
+    const through = await tool({ action: 'start', file: 'menu.js' })
+    assert.match(through.text, /^Run r1 \(node menu\.js\) ended with exit code 1\./)
+    assert.ok(through.text.includes("TypeError: Cannot read properties of undefined (reading 'children')"), through.text)
+    assert.ok(through.text.includes('Start again with stopOn "all" to stop where it is thrown.'), through.text)
+    const stopped = await tool({ action: 'start', file: 'menu.js', stopOn: 'all' })
+    assert.match(stopped.text, /paused at build\.js:3 in build: exception\./)
+    // The loop's variable and the function's together: the loop's block alone would show only page.
+    assert.match(stopped.text, /^Values \(Block, Local, frame #0\):$/m)
+    assert.match(stopped.text, /^ {2}page = \{id: "a", parent: "b"\}/m)
+    assert.match(stopped.text, /^ {2}byId = Map\(0\)/m)
+    assert.match(stopped.text, /^ {2}pages = /m)
+    await tool({ action: 'stop' })
+    // A run that ended well, or one asked to stop on every exception, has nothing to add.
+    const plain = await tool({ action: 'start', file: 'menu.js', stopOn: 'none' })
+    assert.ok(!plain.text.includes('stopOn "all"'), plain.text)
+  })
+
   it('waits, reports a run that has not stopped, pauses it where it is and stops it', { timeout: 120_000 }, async () => {
     const { tool } = await setup({ 'spin.js': "let n = 0\nsetInterval(() => {\n  n++\n}, 5)\nconsole.log('spinning')\n" })
     const started = await tool({ action: 'start', file: 'spin.js', wait: 1 })

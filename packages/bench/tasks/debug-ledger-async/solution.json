@@ -1,0 +1,49 @@
+{
+  "steps": [
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node src/main.ts"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "src/ledger.ts"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "src/ledger.ts",
+            "old_string": "  async applyAll(entries: Entry[]): Promise<void> {\n    entries.forEach(async (entry) => {\n      await this.apply(entry)\n    })\n  }",
+            "new_string": "  async applyAll(entries: Entry[]): Promise<void> {\n    // One at a time, in order: apply reads a balance and writes it back later, so two at once would lose one of them.\n    for (const entry of entries) await this.apply(entry)\n  }"
+          }
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "node src/main.ts"
+          }
+        }
+      ]
+    },
+    {
+      "text": "`applyAll` handed each entry to `forEach` with an async callback, so it resolved before any entry was applied, and main.ts printed the balances while they were still 0. Running them all at once would not do either: `apply` reads a balance and writes it back after the accounts service answers, so concurrent entries overwrite each other. It now applies the entries one at a time, in order: alice 100, bob 30, carol 10."
+    }
+  ]
+}

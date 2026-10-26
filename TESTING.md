@@ -93,6 +93,7 @@ written down):
 pnpm bench run --model openrouter:deepseek/deepseek-v3.2 --repeat 5   # OPENROUTER_API_KEY; 5 runs a task tell a change from noise
 pnpm bench run --base-url https://api.deepseek.com --model deepseek-reasoner   # ENCODE_BENCH_API_KEY
 pnpm bench compare bench-results/<before>.json bench-results/<after>.json
+pnpm bench run --model openrouter:deepseek/deepseek-v3.2 --tag debugger --repeat 3   # the four debugging tasks, with the debugger
 ```
 
 What is most useful to hear: a model that still stops at the second step or later (the error's words), a reply whose
@@ -831,6 +832,10 @@ console.log('Total', sum)
   in `server.js` stops, although npm started it.
 - **Steps:** `F10` steps over, `F11` into, `Shift+F11` out. `F11` is full screen again once nothing is paused.
 - **Not trusted:** in a folder you have not trusted, `F5` says why it does not run, and the breakpoints stay.
+- **An ES module that throws as it loads** (`"type": "module"` in package.json, an error at its top level or in a
+  function called from there): **Stop on uncaught exceptions** does not stop. V8 counts that error as caught by
+  Node.js's module loader. The run ends with the error and its stack in the console. Tick **Stop on every exception,
+  caught ones too**, and it stops at the throw.
 
 ### Python, Go and C
 
@@ -888,6 +893,8 @@ the panic, which it says, with the panic's message in the console.
 - Start a run yourself (`F5`, paused at your breakpoint), then ask the agent to look at it: it reads the stop without
   asking, but asks before it steps or evaluates in your run.
 - Under Read Only the agent is told it cannot debug and says to switch to Workspace Write.
+- At a stop inside a loop, the agent's report lists the loop's variable and the function's values together, under
+  "Values (Block, Local, …)".
 
 ## Worktrees
 

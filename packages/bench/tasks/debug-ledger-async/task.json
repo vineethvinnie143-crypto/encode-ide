@@ -1,0 +1,32 @@
+{
+  "id": "debug-ledger-async",
+  "title": "Debugging: TypeScript balances that come out 0",
+  "prompt": "`node src/main.ts` prints a balance of 0 for every account, but entries.json gives alice 100, bob 30 and carol 10. Find out why and fix src/ledger.ts. The entries apply in the order entries.json lists them.",
+  "tags": [
+    "typescript",
+    "debugger"
+  ],
+  "debug": true,
+  "maxSteps": 30,
+  "allow": [
+    "Bash(node src/main.ts)"
+  ],
+  "checks": [
+    {
+      "kind": "command",
+      "name": "every entry is applied before applyAll resolves, none lost",
+      "run": [
+        "{{node}}",
+        "--test",
+        "{{checks}}/ledger.hidden.test.mjs"
+      ]
+    },
+    {
+      "kind": "unchanged",
+      "name": "entries.json is left alone",
+      "paths": [
+        "entries.json"
+      ]
+    }
+  ]
+}
