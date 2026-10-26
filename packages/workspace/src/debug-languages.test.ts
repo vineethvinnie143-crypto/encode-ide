@@ -560,8 +560,14 @@ describe('a Rust program debugged', { skip: !LLDB || !CARGO ? 'no lldb-dap and c
     const paused = await pausedAt(debug, 'src/bin/other.rs')
     assert.deepEqual([paused.top.source?.rel, paused.top.line], ['src/bin/other.rs', 3])
     const line = paused.locals.find((item) => item.name === 'line')
-    const parts = line?.ref ? await debug.variables(paused.run, line.ref) : []
-    assert.match(line?.value ?? '', /hello cart/, JSON.stringify({ line, parts: parts.slice(0, 8), output: output.slice(-16) }))
+    const seen = async () => ({
+      top: paused.top,
+      scopes: await Promise.all((await debug.scopes(paused.run, paused.top.id)).map(async (scope) => `${scope.name}: ${(await debug.variables(paused.run, scope.ref)).slice(0, 12).map((item) => `${item.name}:${item.type ?? ''}=${item.value}`).join(', ')}`)),
+      evaluated: await debug.evaluate(paused.run, 'line', { frame: paused.top.id, context: 'watch' }),
+      parts: line?.ref ? (await debug.variables(paused.run, line.ref)).slice(0, 8) : [],
+      output: output.slice(-4),
+    })
+    if (!/hello cart/.test(line?.value ?? '')) assert.fail(JSON.stringify(await seen()))
     assert.deepEqual(await debug.act(paused.run, { kind: 'continue' }), { ok: true })
     await until(debug, (state) => state.runs[0]?.state === 'ended', 'the end')
     assert.ok(output.includes('Building other with cargo…'), output.join('\n'))
