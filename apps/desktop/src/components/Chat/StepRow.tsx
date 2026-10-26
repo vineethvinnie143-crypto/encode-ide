@@ -1,6 +1,7 @@
 import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  Bug,
   CheckCircle2,
   ChevronRight,
   FileText,
@@ -47,6 +48,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   Task: { label: 'Subagent', icon: Network },
   AskUserQuestion: { label: 'Asked', doing: 'Asking', todo: 'Ask', icon: MessageCircleQuestion },
   Computer: { label: 'Used the computer', icon: Monitor },
+  Debug: { label: 'Debugged', doing: 'Debugging', todo: 'Debug', icon: Bug },
   TodoWrite: { label: 'Updated tasks', doing: 'Updating tasks', todo: 'Update tasks', icon: ListTree },
   EnterPlanMode: { label: 'Planning first', icon: ListTree },
   ExitPlanMode: { label: 'Proposed a plan', doing: 'Proposing a plan', todo: 'Propose a plan', icon: ListTree },
@@ -152,6 +154,15 @@ function detailOf(entry: ConversationEntry, root: string | null): string {
       return String(input.prompt ?? '').split('\n', 1)[0]
     case 'Skill':
       return String(input.skill ?? '')
+    case 'Debug': {
+      // What the step did: the start with its file, the expression, or the action.
+      const action = String(input.action ?? '')
+      if (action === 'start') return `start ${shownPath(String(input.file ?? input.config ?? ''), root)}`.trim()
+      if (action === 'evaluate') return String(input.expression ?? '')
+      if (action === 'variables') return input.name ? `variables ${String(input.name)}` : 'variables'
+      if (action === 'step') return `step ${String(input.step ?? 'over')}`
+      return action
+    }
     case 'EnterPlanMode':
       return String(input.reason ?? '')
     case 'TodoWrite': {

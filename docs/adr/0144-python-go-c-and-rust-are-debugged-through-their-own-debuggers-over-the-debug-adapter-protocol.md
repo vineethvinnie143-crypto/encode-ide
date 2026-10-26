@@ -128,7 +128,7 @@ C++ and Rust. The constraints stay 0143's:
 - A C or C++ run needs LLVM installed by the person. On Windows, LLVM's lldb-dap needs the Python its release was
   built with; when Windows cannot load it, the run says so.
 - Delve 1.27 refuses programs built by a Go much newer than it; the pin moves with Go's releases.
-- Still to come under 0143's plan: the agent's own debug tool, through approvals.
+- The last part of 0143's plan, the agent's own debug tool through approvals, is 0145.
 
 ## Verification
 

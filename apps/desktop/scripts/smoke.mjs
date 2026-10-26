@@ -2079,10 +2079,42 @@ async function runDebugChecks() {
   // Put back as found.
   await evaluate(`window.eNCode.debug.act(${JSON.stringify(before.id)}, { kind: 'dismiss' })`)
   await evaluate(`window.eNCode.debug.setBreakpoints(${JSON.stringify(file)}, [])`)
+  await runAgentDebugCheck(file)
   await runPythonDebugOffer()
   if (!wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
   await evaluate(`window.eNCode.workspace.delete(${JSON.stringify(file)}).catch(() => null)`)
   console.log('[smoke] debugger: breakpoints, a log point, F5, hover, step, console, F9 and the end of the run')
+}
+
+/**
+ * The agent's debugger (ADR 0145): the Debug tool asks before it runs the file, saying it runs outside the sandbox; its
+ * run stops at a breakpoint of its own, which the person's gutter does not show, and reads a value there. The Debug tab
+ * lists the run as the agent's without moving the person's editor to it, and its Stop button ends it.
+ */
+async function runAgentDebugCheck(file) {
+  await evaluate('window.eNCode.agent.reset()')
+  await sendPrompt('[scenario:debug-agent] Why is the Oat milk line what it is?')
+  const approvals = await driveAgent('50-debug-agent')
+  console.log('[smoke] agent debugger approvals:', JSON.stringify(approvals))
+  if (approvals.length !== 1 || !approvals[0].title.includes(`Debug ${file}`) || !approvals[0].reason.startsWith(`Debugging ${file} runs it outside the sandbox`)) {
+    throw new Error(`The agent's debug run should ask once, saying what it runs: ${JSON.stringify(approvals)}`)
+  }
+  const request = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
+  const sent = request.messages.map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content))).join('\n')
+  for (const said of [`paused at ${file}:10 in lineTotal: breakpoint`, 'item = {name: "Oat milk", price: 3.25, qty: 4}', 'item.qty * 2 = 8']) {
+    if (!sent.includes(said)) throw new Error(`The Debug tool's report is missing ${JSON.stringify(said)}: ${sent.slice(-2000)}`)
+  }
+  const state = await evaluate('window.eNCode.debug.state()')
+  const run = state.runs.find((item) => item.by === 'agent')
+  if (!run || run.state !== 'paused') throw new Error(`The agent's run should be paused: ${JSON.stringify(state.runs)}`)
+  if ((state.breakpoints[file] ?? []).length) throw new Error(`The agent's breakpoint is the agent's alone: ${JSON.stringify(state.breakpoints)}`)
+  await waitFor("[...document.querySelectorAll('.debug-pane .dp-run-by')].some((node) => node.textContent.trim() === 'Agent')", 8000, "the agent's run in the Debug tab")
+  if (await evaluate("!!document.querySelector('.code-editor .enc-line-paused')")) throw new Error("The agent's stop moved the person's editor")
+  await screenshot('50-debug-agent-run.png')
+  if (!(await click(".debug-pane .icon-btn[aria-label=\"Stop the agent's run\"]"))) throw new Error("No Stop on the agent's run")
+  await waitFor(`window.eNCode.debug.state().then((now) => now.runs.find((item) => item.id === ${JSON.stringify(run.id)})?.state === 'ended')`, 15000, "the agent's run to stop")
+  await evaluate(`window.eNCode.debug.act(${JSON.stringify(run.id)}, { kind: 'dismiss' })`)
+  console.log("[smoke] agent debugger: asked once, stopped on its own breakpoint, read a value, shown as the agent's and stopped")
 }
 
 /**

@@ -146,6 +146,7 @@ export class DapSession implements RunSession {
   private nextRef = 1
   /** Counts the program's pauses and goes: what was read for an older pause is dropped. */
   private generation = 0
+  private stops = 0
   private exceptions: ExceptionFilters
   private readonly wanted = new Map<string, { file: string; list: Breakpoint[] }>()
   private readonly sending = new Map<string, Promise<void>>()
@@ -193,6 +194,7 @@ export class DapSession implements RunSession {
       kind: this.options.plan.request,
       state,
       threads,
+      stops: this.stops,
       ...(this.exitCode !== undefined ? { exitCode: this.exitCode } : {}),
       ...(this.message ? { message: this.message } : {}),
     }
@@ -654,6 +656,7 @@ export class DapSession implements RunSession {
       top.reason = 'exception'
       top.exception = crash
     } else if (top && exception !== undefined) top.exception = exception
+    this.stops++
     this.options.onChange()
   }
 

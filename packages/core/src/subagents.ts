@@ -85,7 +85,8 @@ export interface SubagentDefinition extends SubagentType {
  * tool is one of those: up to four subagents run side by side, and there is one mouse; so is the Browser, whose tab is
  * the chat's one. Monitor, ScheduleWakeup and
  * SendMessage report back through notices only the main agent reads. A subagent works where the main agent works, so
- * it does not enter or leave worktrees either.
+ * it does not enter or leave worktrees either. Debug runs are the session's, each approved by the person while they
+ * watch the main agent's turn (ADR 0145).
  */
 export const SUBAGENT_EXCLUDED: readonly string[] = [
   'Task',
@@ -103,6 +104,7 @@ export const SUBAGENT_EXCLUDED: readonly string[] = [
   'Browser',
   'EnterWorktree',
   'ExitWorktree',
+  'Debug',
 ]
 
 /** The most steps a subagent takes before it must report. */

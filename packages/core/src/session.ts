@@ -41,6 +41,7 @@ import {
   type CodeIndex,
   type NativeDoc,
   type OffLimits,
+  type AgentDebugger,
   type CodeIntelligence,
   type BrowserBackend,
   type DesktopServices,
@@ -241,6 +242,8 @@ export interface SessionEnv {
   natives?: () => readonly NativeDoc[] | undefined
   /** The commands the settings files name as the project's checks, in place of those eNCode finds (ADR 0095). */
   checks?: () => readonly string[] | undefined
+  /** The folder's debugger as this session's agent sees it: Debug, for the main agent (ADR 0145). */
+  debug?: AgentDebugger
   skills: Skills & { entries(): SkillEntry[] }
   /** Where user-defined subagents live. */
   agentSources?: () => AgentSource[]
@@ -1253,6 +1256,7 @@ export class AgentSession {
         background: true,
         worktrees: Boolean(this.env.worktrees),
         code: Boolean(this.env.code?.()),
+        debug: Boolean(this.env.debug),
         ...(sandbox ? { sandbox } : {}),
       },
       [...(this.env.extraTools ?? [])],
@@ -1392,6 +1396,7 @@ export class AgentSession {
       cwd: this.workdir,
       ...(env.worktrees ? { worktrees: this.worktreeTools } : {}),
       ...(code ? { code } : {}),
+      ...(env.debug ? { debug: env.debug } : {}),
       codeMap: this.codeMap,
       ...(env.outputs ? { outputs: env.outputs } : {}),
       ...(env.scratch ? { scratch: env.scratch } : {}),

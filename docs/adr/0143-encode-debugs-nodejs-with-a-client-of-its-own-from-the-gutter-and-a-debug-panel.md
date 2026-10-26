@@ -118,6 +118,7 @@ Node.js speaks the Chrome DevTools Protocol (CDP) on its inspector port, so it n
   the same user can connect to it meanwhile.
 - When no Node.js is installed, a run uses eNCode's own through `ELECTRON_RUN_AS_NODE`, which T14 of the threat model
   plans to close for anything else.
-- Still to come, under this plan:
-  - Python, Go and C/C++, through debugpy, Delve and lldb-dap as separate programs over the Debug Adapter Protocol;
-  - the agent's own debug tool.
+- Still to come, under this plan (both since done):
+  - Python, Go and C/C++, through debugpy, Delve and lldb-dap as separate programs over the Debug Adapter Protocol
+    (0144, with Rust);
+  - the agent's own debug tool (0145).

@@ -79,6 +79,7 @@ export class DebugSession implements RunSession {
   private frames = 1
   private state: SessionView['state'] = 'starting'
   private exitCode: number | null | undefined
+  private stops = 0
   private message: string | undefined
   private child: ChildProcess | null = null
   private exited: Promise<void> | null = null
@@ -120,6 +121,7 @@ export class DebugSession implements RunSession {
       kind: this.options.plan.kind,
       state,
       threads,
+      stops: this.stops,
       ...(this.exitCode !== undefined ? { exitCode: this.exitCode } : {}),
       ...(this.message ? { message: this.message } : {}),
     }
@@ -248,6 +250,7 @@ export class DebugSession implements RunSession {
             void target.resume().catch(() => undefined)
             return
           }
+          this.stops++
           break
         case 'resumed':
           thread.exception = undefined

@@ -348,6 +348,45 @@ describe('the desktop', () => {
   })
 })
 
+describe('the debugger (ADR 0145)', () => {
+  const start: ToolAccess = { type: 'debug', action: 'start', what: 'src/cart.py', key: 'file\u0000/w/src/cart.py' }
+  const drive: ToolAccess = { type: 'debug', action: 'drive', what: 'r1, node app.js', key: 'r1' }
+
+  it('asks before every start and before driving a run of the person\'s, under Workspace Write and Auto review alike', async () => {
+    for (const policy of ['workspace-write', 'auto-review'] as const) {
+      const ctx = await context(policy)
+      const started = await decideApproval(start, ctx)
+      assert.equal(started.kind, 'ask', policy)
+      // The Reviewer does not answer it: the program runs outside the sandbox.
+      assert.equal(started.kind === 'ask' && started.reviewable, undefined, policy)
+      assert.match(started.kind === 'ask' ? started.reason : '', /^Debugging src\/cart\.py runs it outside the sandbox, with your environment/)
+      const driven = await decideApproval(drive, ctx)
+      assert.equal(driven.kind, 'ask', policy)
+      assert.match(driven.kind === 'ask' ? driven.reason : '', /^Run r1, node app\.js is yours: the agent asks before it steps it/)
+    }
+  })
+
+  it('refuses both under Read Only, and asks nothing under Full access', async () => {
+    const readOnly = await context('read-only')
+    for (const access of [start, drive]) assert.equal((await decideApproval(access, readOnly)).kind, 'deny')
+    const full = await context('full-access')
+    for (const access of [start, drive]) assert.equal((await decideApproval(access, full)).kind, 'allow')
+  })
+
+  it('is refused by a deny rule on Debug, and an allow rule does not skip the question', async () => {
+    const { ctx } = await withRules('workspace-write', { deny: ['Debug'] }, { tool: { name: 'Debug' } })
+    assert.equal((await decideApproval(start, ctx)).kind, 'deny')
+    const allowed = await withRules('workspace-write', { allow: ['Debug'] }, { tool: { name: 'Debug' } })
+    assert.equal((await decideApproval(start, allowed.ctx)).kind, 'ask')
+  })
+
+  it('may be approved for the session: the same start, or the same run; never as a rule', () => {
+    assert.equal(grantKey(start), 'debug-start\u0000file\u0000/w/src/cart.py')
+    assert.equal(grantKey(drive), 'debug-drive\u0000r1')
+    assert.equal(alwaysAllowFor(start, { root: '/w', platform: 'linux', dialect: 'bash' }), null)
+  })
+})
+
 describe('everything else', () => {
   it('lets session tools and subagents through, and asks about outside tool servers', async () => {
     const ctx = await context('workspace-write')

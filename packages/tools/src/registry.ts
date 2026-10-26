@@ -14,7 +14,10 @@ export const TOOL_SEARCH = 'ToolSearch'
 /** What every provider accepts as a tool name. */
 const TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/
 
-/** Tools that ask to be deferred are sent in full only while their definitions together stay under this many characters. */
+/**
+ * Tools that ask to be deferred are sent in full only while their definitions together stay under this many characters.
+ * The ones that always wait for a search are not sent either way, so they do not count.
+ */
 export const DEFER_ABOVE_CHARS = 10_000
 
 const ALL_MODES: readonly AgentMode[] = ['code', 'ask', 'plan']
@@ -126,7 +129,7 @@ export class ToolRegistry {
   private deferredSet(): ReadonlySet<string> {
     if (!this.deferredNames) {
       const asking = [...this.tools.values()].filter((tool) => tool.defer)
-      const chars = asking.reduce((sum, tool) => sum + JSON.stringify(tool.definition).length, 0)
+      const chars = asking.filter((tool) => tool.defer !== 'always').reduce((sum, tool) => sum + JSON.stringify(tool.definition).length, 0)
       const deferred = chars > DEFER_ABOVE_CHARS ? asking : asking.filter((tool) => tool.defer === 'always')
       this.deferredNames = new Set(deferred.map((tool) => tool.definition.name))
     }

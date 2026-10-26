@@ -133,6 +133,8 @@ say so.
 | [0141](0141-the-agent-has-a-scratch-folder-for-its-probes-and-tries-the-inputs-around-a-change.md) | The agent has a scratch folder for its probes, and tries the inputs around a change | Accepted, amends 0126; builds on 0063, 0093, 0095, 0100 and 0139 |
 | [0142](0142-a-model-family-gets-notes-of-its-own-each-measured-and-the-bench-keeps-the-calls-that-did-nothing.md) | A model family gets notes of its own, each measured, and the bench keeps the calls that did nothing | Accepted, builds on 0094, 0096, 0100, 0137 and 0139 |
 | [0143](0143-encode-debugs-nodejs-with-a-client-of-its-own-from-the-gutter-and-a-debug-panel.md) | eNCode debugs Node.js with a client of its own, from the gutter and a Debug panel | Accepted, builds on 0015, 0062, 0088 and 0111 |
+| [0144](0144-python-go-c-and-rust-are-debugged-through-their-own-debuggers-over-the-debug-adapter-protocol.md) | Python, Go, C and Rust are debugged through their own debuggers, over the Debug Adapter Protocol | Accepted, builds on 0062, 0083, 0114 and 0143 |
+| [0145](0145-the-agent-debugs-through-the-folders-debugger-with-runs-and-breakpoints-of-its-own-behind-an-approval.md) | The agent debugs through the folder's debugger, with runs and breakpoints of its own, behind an approval | Accepted, builds on 0004, 0136, 0143 and 0144 |
 
 ## Template
 

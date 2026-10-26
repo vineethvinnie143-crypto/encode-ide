@@ -877,6 +877,18 @@ at the throw, with your function a few frames down the stack.
 after one step: that is how Rust's debug information there marks it. Index past the end of a `Vec`: the run stops at
 the panic, which it says, with the panic's message in the console.
 
+### The agent's debugger
+
+- In a trusted folder with the checkout above, ask the agent: "Why is the Oat milk line total what it is? Use the
+  debugger." The approval card says **Debug cart.js**, lists its breakpoint, and says it runs outside the sandbox.
+  Deny: nothing runs, and the agent says so. Ask again and allow it.
+- The chat shows **Debugged** steps (`start cart.js`, `evaluate …`) and the answer quotes the values at the stop. The
+  Debug tab lists the run with an **Agent** tag; your editor and your breakpoints did not move. The tag's square
+  button stops it.
+- Start a run yourself (`F5`, paused at your breakpoint), then ask the agent to look at it: it reads the stop without
+  asking, but asks before it steps or evaluates in your run.
+- Under Read Only the agent is told it cannot debug and says to switch to Workspace Write.
+
 ## Worktrees
 
 In a git repository you can ask the agent to work apart from your checkout: "do this in a worktree". It makes one at

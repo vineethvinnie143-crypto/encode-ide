@@ -1805,11 +1805,15 @@ export interface DebugRun {
   kind: 'launch' | 'attach'
   state: 'starting' | 'running' | 'paused' | 'ended'
   threads: DebugThread[]
+  /** How many times it has stopped. */
+  stops: number
   exitCode?: number | null
   message?: string
   /** The configuration it was started from, and what it runs in a line. */
   config: string
   detail: string
+  /** Who started it: the person, or the agent through its Debug tool (ADR 0145). */
+  by: 'person' | 'agent'
 }
 
 export interface DebugState {

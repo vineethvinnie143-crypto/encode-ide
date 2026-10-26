@@ -175,6 +175,16 @@ function CallStack({ runs }: { runs: DebugRun[] }) {
         <div key={run.id} className="dp-run">
           <div className={cx('dp-run-title', run.state === 'ended' && 'is-ended')}>
             <span>{runTitle(run)}</span>
+            {run.by === 'agent' && (
+              <span className="dp-run-by" title="Started by the agent, with breakpoints of its own">
+                Agent
+              </span>
+            )}
+            {run.by === 'agent' && run.state !== 'ended' && (
+              <IconButton label="Stop the agent's run" size="sm" onClick={() => void useDebug.getState().stopRun(run.id)}>
+                <Square size={11} />
+              </IconButton>
+            )}
             {run.state === 'ended' && (
               <IconButton label="Put away this run" size="sm" onClick={() => void useDebug.getState().dismiss(run.id)}>
                 <X size={12} />

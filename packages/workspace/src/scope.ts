@@ -227,7 +227,13 @@ export class Workspaces {
       real = await realPathOf(root)
       this.realRoots.set(root, real)
     }
-    const config = this.config(real)
+    return this.debuggerFor(this.config(real))
+  }
+
+  /** The debugger of a folder whose settings are open; one per folder, shared by the window and its sessions' agents. */
+  private debuggerFor(config: WorkspaceConfig): FolderDebugger | undefined {
+    const options = this.options.debug
+    if (!options) return undefined
     const key = workspaceKey(config.root, this.platform === 'win32')
     let found = this.debuggers.get(key)
     if (!found) {
@@ -748,6 +754,8 @@ export class Workspaces {
     })
     sandbox?.warm()
     const code = this.languageServers(config.root)
+    // The agent's Debug tool (ADR 0145): its runs end with the session.
+    const debug = this.debuggerFor(config)?.forAgent(request.sessionId)
     return {
       // What keeps the record comes first: a hook that stops a result must not leave the record out of date.
       hooks: combineHooks(
@@ -796,7 +804,11 @@ export class Workspaces {
         const dir = this.options.languageServers?.tools?.dir
         return dir ? installedNatives(dir) : undefined
       },
-      release: async () => release(),
+      ...(debug ? { debug } : {}),
+      release: async () => {
+        await debug?.close().catch(() => undefined)
+        release()
+      },
       ...(recording ? { beforeWrite: recording.beforeWrite, checkpoints: recording.checkpoints } : {}),
     }
   }

@@ -23,6 +23,7 @@ export { createBashTool, bashOutputTool, killShellTool, type BashSandbox } from 
 export * from './background'
 export * from './worktree'
 export { applyPlan, formatDiagnostics, lspEditTool, lspTool } from './lsp'
+export { debugTool, type DebugInput } from './debug'
 export type { CodeDiagnostic, CodeLocation, CodeSymbol, EditPlan, FileDiagnostics, ServerView } from '@encode/lsp'
 export * from './shell/programs'
 export * from './shell/environment'

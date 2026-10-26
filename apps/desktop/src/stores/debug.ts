@@ -52,6 +52,8 @@ interface DebugStore {
   /** F5: continues a paused run, starts one when none runs. */
   continueOrStart(): Promise<void>
   dismiss(run: string): Promise<void>
+  /** Stops one run: the agent's, from its line in the call stack. */
+  stopRun(run: string): Promise<void>
   selectFrame(choice: FrameChoice): void
   open(ref: number): Promise<void>
   evaluate(text: string): Promise<void>
@@ -259,6 +261,12 @@ export const useDebug = create<DebugStore>((set, get) => {
 
     dismiss: async (run) => {
       await api.debug.act(run, { kind: 'dismiss' }).catch(() => undefined)
+      await get().refresh()
+    },
+
+    stopRun: async (run) => {
+      const result = await api.debug.act(run, { kind: 'stop' }).catch((error: unknown) => ({ ok: false as const, reason: errorText(error) }))
+      if (!result.ok) notify(result.reason)
       await get().refresh()
     },
 

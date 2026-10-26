@@ -14,6 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { workspaceKey } from '@encode/config'
 import { DapSession, DebugSession, type Breakpoint, type BreakpointStatus, type EvaluateContext, type EvaluateResult, type ExceptionFilters, type FrameView, type OutputLine, type RunSession, type ScopeView, type SessionView, type SourceView, type StepKind, type ThreadView, type VariableView } from '@encode/debug'
+import type { AgentBreakpoint, AgentDebugger, AgentDebugRun } from '@encode/tools'
 import type { WorkspaceConfig } from './config'
 import { debugConfigs, planRun, RunProblem, type DebugConfigs, type RunContext, type RunPlan } from './debug-configs'
 import type { WorkspaceFs } from './fs'
@@ -57,6 +58,13 @@ export type DebugRunView = Omit<SessionView, 'threads'> & {
   config: string
   /** What it runs, in a line. */
   detail: string
+  /** Who started it: the person, or an agent through its Debug tool (ADR 0145). */
+  by: 'person' | 'agent'
+}
+
+/** The folder's debugger as one session's agent sees it (ADR 0145); `close` stops the runs that agent started. */
+export interface AgentDebugView extends AgentDebugger {
+  close(): Promise<void>
 }
 
 /** A breakpoint, with how it stands in the runs going on. */
@@ -97,6 +105,9 @@ const SAVE_DELAY_MS = 300
 const CHANGE_DELAY_MS = 25
 /** A source map larger than this is not read. */
 const MAX_MAP_BYTES = 50 * 1024 * 1024
+/** What an agent's run printed is kept for its reports, up to this many lines. */
+const MAX_PRINTED = 2_000
+const MAX_AGENT_BREAKPOINTS = 50
 const BREAKPOINT_ID = /^[\w-]{1,64}$/
 const HIT_CONDITION = /^\s*(==|>=|<=|>|<|%)?\s*\d{1,9}\s*$/
 
@@ -160,12 +171,31 @@ interface Stored {
   exceptions: ExceptionFilters
 }
 
+/** What an agent's run has of its own: its breakpoints by whole path, and when it stops for exceptions. */
+interface OwnStops {
+  breakpoints: Map<string, Breakpoint[]>
+  exceptions: ExceptionFilters
+}
+
+/** A start an agent asked for (ADR 0145). */
+interface AgentStart extends OwnStops {
+  owner: string
+  signal?: AbortSignal
+}
+
 interface Run {
   id: string
   config: string
   file?: string
   plan: RunPlan
   session: RunSession
+  /** The session whose agent started it; absent for the person's runs. */
+  owner?: string
+  own?: OwnStops
+  /** The last lines it printed, and how many came before them. */
+  printed: { lines: OutputLine[]; before: number }
+  /** Called at each change of the run, for an agent waiting on it. */
+  waiters: Set<() => void>
 }
 
 export class FolderDebugger {
@@ -176,6 +206,7 @@ export class FolderDebugger {
   private loaded: Promise<void> | null = null
   private readonly runs = new Map<string, Run>()
   private nextRun = 1
+  private nextAgentBreakpoint = 1
   private saveTimer: NodeJS.Timeout | null = null
   private changeTimer: NodeJS.Timeout | null = null
   private closed = false
@@ -284,7 +315,8 @@ export class FolderDebugger {
   async state(): Promise<DebugState> {
     await this.load()
     const trusted = (await this.config.refresh()).folder.trusted
-    const live = [...this.runs.values()].filter((run) => !run.session.ended)
+    // The person's breakpoints stand as the person's runs placed them; an agent's run has its own.
+    const live = [...this.runs.values()].filter((run) => !run.session.ended && !run.owner)
     const breakpoints: Record<string, FolderBreakpoint[]> = {}
     for (const [rel, list] of this.breakpoints) {
       const statuses = new Map<string, BreakpointStatus>()
@@ -314,6 +346,7 @@ export class FolderDebugger {
       ...view,
       config: run.config,
       detail: run.plan.detail,
+      by: run.owner ? 'agent' : 'person',
       threads: view.threads.map((thread) => ({ ...thread, ...(thread.frames ? { frames: thread.frames.map((frame) => ({ ...frame, source: source(frame.source) })) } : {}) })),
     }
   }
@@ -322,8 +355,8 @@ export class FolderDebugger {
     return debugConfigs(this.root)
   }
 
-  /** Starts a run of a configuration; `file` is the editor's file, by its path in the folder. */
-  async start(request: { config: string; file?: string }): Promise<DebugStart> {
+  /** Starts a run of a configuration; `file` is the editor's file, by its path in the folder. `agent`: an agent's run. */
+  async start(request: { config: string; file?: string }, agent?: AgentStart): Promise<DebugStart> {
     if (this.closed) return { ok: false, reason: 'eNCode is closing.' }
     await this.load()
     if (!(await this.config.refresh()).folder.trusted) return { ok: false, reason: DEBUG_UNTRUSTED }
@@ -349,24 +382,37 @@ export class FolderDebugger {
       if (error instanceof RunProblem) return { ok: false, reason: error.message, ...(error.install ? { install: error.install } : {}) }
       throw error
     }
-    return this.launch(request.config, file, plan)
+    if (agent?.signal?.aborted) return { ok: false, reason: 'The run was stopped.' }
+    return this.launch(request.config, file, plan, agent)
   }
 
-  private async launch(config: string, file: string | undefined, plan: RunPlan): Promise<DebugStart> {
-    // A configuration started again replaces its earlier run that ended; only a few ended runs stay listed.
-    for (const [id, run] of this.runs) if (run.config === config && run.session.ended) this.runs.delete(id)
+  private async launch(config: string, file: string | undefined, plan: RunPlan, agent?: AgentStart): Promise<DebugStart> {
+    // A configuration started again replaces its earlier run that ended, by the same hand; only a few ended runs stay listed.
+    for (const [id, run] of this.runs) if (run.config === config && run.owner === agent?.owner && run.session.ended) this.runs.delete(id)
     const ended = [...this.runs.values()].filter((run) => run.session.ended)
     for (const run of ended.slice(0, Math.max(0, ended.length - KEEP_ENDED + 1))) this.runs.delete(run.id)
     const id = `r${this.nextRun++}`
     const runDir = path.join(this.options.runDir ?? path.join(os.tmpdir(), 'encode-debug'), `${process.pid}-${id}-${Date.now().toString(36)}`)
+    const own: OwnStops | undefined = agent ? { breakpoints: agent.breakpoints, exceptions: agent.exceptions } : undefined
+    const printed: Run['printed'] = { lines: [], before: 0 }
+    const waiters: Run['waiters'] = new Set()
     const shared = {
       id,
       name: plan.name,
       platform: this.platform,
-      breakpoints: () => this.placed(),
-      exceptions: this.exceptions,
-      onChange: () => this.changed(),
+      breakpoints: () => (own ? new Map(own.breakpoints) : this.placed()),
+      exceptions: own?.exceptions ?? this.exceptions,
+      onChange: () => {
+        for (const waiter of [...waiters]) waiter()
+        this.changed()
+      },
       onOutput: (lines: OutputLine[]) => {
+        printed.lines.push(...lines)
+        const over = printed.lines.length - MAX_PRINTED
+        if (over > 0) {
+          printed.lines.splice(0, over)
+          printed.before += over
+        }
         try {
           this.options.onOutput?.(this.root, id, lines)
         } catch {
@@ -383,9 +429,21 @@ export class FolderDebugger {
             plan: plan.kind === 'attach' ? { kind: 'attach', host: plan.host, port: plan.port } : { kind: 'launch', file: plan.file, args: plan.args, cwd: plan.cwd, env: plan.env, runDir, ...(plan.verbatim ? { verbatim: true } : {}) },
             readText: (map) => readBounded(map),
           })
-    const run: Run = { id, config, ...(file ? { file } : {}), plan, session }
+    const run: Run = { id, config, ...(file ? { file } : {}), plan, session, ...(agent ? { owner: agent.owner, own } : {}), printed, waiters }
     this.runs.set(id, run)
     this.changed()
+    // The agent's call was stopped: so is its run, a build included.
+    const signal = agent?.signal
+    if (signal) {
+      const stop = () => void session.stop().catch(() => undefined)
+      signal.addEventListener('abort', stop, { once: true })
+      const forget = () => {
+        if (!session.ended) return
+        signal.removeEventListener('abort', stop)
+        waiters.delete(forget)
+      }
+      waiters.add(forget)
+    }
     try {
       await session.start()
     } catch (error) {
@@ -445,7 +503,7 @@ export class FolderDebugger {
     else this.breakpoints.delete(file)
     this.save()
     const enabled = list.filter((breakpoint) => breakpoint.enabled)
-    await Promise.all([...this.runs.values()].filter((run) => !run.session.ended).map((run) => run.session.setBreakpoints(this.whole(file), enabled).catch(() => undefined)))
+    await Promise.all([...this.runs.values()].filter((run) => !run.session.ended && !run.own).map((run) => run.session.setBreakpoints(this.whole(file), enabled).catch(() => undefined)))
     this.changed()
     return { ok: true }
   }
@@ -454,7 +512,7 @@ export class FolderDebugger {
     await this.load()
     this.exceptions = filters
     this.save()
-    await Promise.all([...this.runs.values()].filter((run) => !run.session.ended).map((run) => run.session.setExceptions(filters).catch(() => undefined)))
+    await Promise.all([...this.runs.values()].filter((run) => !run.session.ended && !run.own).map((run) => run.session.setExceptions(filters).catch(() => undefined)))
     this.changed()
     return { ok: true }
   }
@@ -473,6 +531,145 @@ export class FolderDebugger {
     if (!expression.trim()) return { ok: false, message: 'Type an expression.' }
     if (expression.length > MAX_EXPRESSION_CHARS * 4) return { ok: false, message: 'That expression is too long.' }
     return session.evaluate(expression, { ...(options.frame !== undefined ? { frameId: options.frame } : {}), ...(options.thread !== undefined ? { threadId: options.thread } : {}), context: options.context }).catch((error: unknown) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }))
+  }
+
+  /** An agent's breakpoints, checked as the person's are, by whole path; or what is wrong with them. */
+  private agentBreakpoints(list: readonly AgentBreakpoint[]): Map<string, Breakpoint[]> | string {
+    if (list.length > MAX_AGENT_BREAKPOINTS) return `A run takes at most ${MAX_AGENT_BREAKPOINTS} breakpoints.`
+    const map = new Map<string, Breakpoint[]>()
+    for (const item of list) {
+      const rel = typeof item.file === 'string' ? this.relative(item.file) : null
+      if (!rel) return `${String(item.file)} is not in the open folder.`
+      if (!lineNumber(item.line)) return `${String(item.line)} is not a line number.`
+      if ((item.condition?.length ?? 0) > MAX_EXPRESSION_CHARS || (item.logMessage?.length ?? 0) > MAX_EXPRESSION_CHARS) return `A condition or a log message is at most ${MAX_EXPRESSION_CHARS} characters.`
+      if (item.hitCondition !== undefined && !HIT_CONDITION.test(item.hitCondition)) return `"${item.hitCondition}" is not a hit count: "5", "==5", ">5" or "%5".`
+      const whole = this.whole(rel)
+      const breakpoint: Breakpoint = {
+        id: `a${this.nextAgentBreakpoint++}`,
+        line: item.line,
+        enabled: true,
+        ...(item.condition?.trim() ? { condition: item.condition.trim() } : {}),
+        ...(item.hitCondition?.trim() ? { hitCondition: item.hitCondition.trim() } : {}),
+        ...(item.logMessage ? { logMessage: item.logMessage } : {}),
+      }
+      map.set(whole, [...(map.get(whole) ?? []), breakpoint])
+    }
+    return map
+  }
+
+  /**
+   * The folder's debugger as the agent of one session sees it (ADR 0145): the runs it started, with breakpoints of
+   * their own, and the person's runs. The approvals are the Debug tool's; this keeps each agent to its own runs and the
+   * person's, and keeps the person's breakpoints out of an agent's runs and the agent's out of the person's.
+   */
+  forAgent(owner: string): AgentDebugView {
+    /** How much of each run's output this agent has read. */
+    const marks = new Map<string, number>()
+    const visible = (id: string): Run | undefined => {
+      const run = this.runs.get(id)
+      return run && (!run.owner || run.owner === owner) ? run : undefined
+    }
+    const view = (run: Run): AgentDebugRun => {
+      const seen = run.session.view()
+      return {
+        id: run.id,
+        name: seen.name,
+        detail: run.plan.detail,
+        mine: run.owner === owner,
+        state: seen.state,
+        stops: seen.stops,
+        threads: seen.threads.map((thread) => ({
+          id: thread.id,
+          name: thread.name,
+          state: thread.state,
+          ...(thread.reason ? { reason: thread.reason } : {}),
+          ...(thread.exception ? { exception: thread.exception } : {}),
+          ...(thread.frames ? { frames: thread.frames.map((frame) => ({ id: frame.id, name: frame.name, file: frame.source?.path ?? null, line: frame.line, ...(frame.skipped ? { skipped: true } : {}) })) } : {}),
+        })),
+        ...(seen.exitCode !== undefined ? { exitCode: seen.exitCode } : {}),
+        ...(seen.message ? { message: seen.message } : {}),
+      }
+    }
+    const gone = { ok: false as const, reason: 'There is no such run.' }
+    return {
+      configs: async () => (await this.configs()).configs.map((config) => ({ id: config.id, name: config.name, detail: config.detail, ...(config.problem ? { problem: config.problem } : {}) })),
+      start: async (request) => {
+        await this.load()
+        const breakpoints = this.agentBreakpoints(request.breakpoints)
+        if (typeof breakpoints === 'string') return { ok: false, reason: breakpoints }
+        const exceptions = readExceptions(request.exceptions)
+        if (!exceptions) return { ok: false, reason: 'Those are not exception stops.' }
+        return this.start({ config: request.config, ...(request.file !== undefined ? { file: request.file } : {}) }, { owner, breakpoints, exceptions, ...(request.signal ? { signal: request.signal } : {}) })
+      },
+      runs: async () => [...this.runs.values()].filter((run) => !run.owner || run.owner === owner).map(view),
+      wait: async (id, stops, ms, signal) => {
+        const run = visible(id)
+        if (!run) return null
+        const done = () => run.session.ended || run.session.view().stops > stops
+        if (!done() && !signal.aborted) {
+          await new Promise<void>((resolve) => {
+            const finish = () => {
+              clearTimeout(timer)
+              run.waiters.delete(check)
+              signal.removeEventListener('abort', finish)
+              resolve()
+            }
+            const check = () => {
+              if (done()) finish()
+            }
+            const timer = setTimeout(finish, ms)
+            run.waiters.add(check)
+            signal.addEventListener('abort', finish, { once: true })
+          })
+        }
+        return view(run)
+      },
+      act: async (id, action, thread) => {
+        if (!visible(id)) return gone
+        const done = await this.act(id, { ...action, ...(thread !== undefined ? { thread } : {}) })
+        return done.ok ? { ok: true } : done
+      },
+      setBreakpoints: async (id, list) => {
+        const run = visible(id)
+        if (!run?.own || run.owner !== owner) return { ok: false, reason: "Only a run the agent started takes the agent's breakpoints." }
+        const next = this.agentBreakpoints(list)
+        if (typeof next === 'string') return { ok: false, reason: next }
+        const before = run.own.breakpoints
+        run.own.breakpoints = next
+        const files = new Set([...before.keys(), ...next.keys()])
+        if (!run.session.ended) await Promise.all([...files].map((file) => run.session.setBreakpoints(file, next.get(file) ?? []).catch(() => undefined)))
+        this.changed()
+        return { ok: true }
+      },
+      statuses: (id) => {
+        const run = visible(id)
+        if (!run?.own) return []
+        return [...run.own.breakpoints].flatMap(([file, list]) => {
+          const statuses = new Map(run.session.statuses(file).map((status) => [status.id, status]))
+          return list.map((breakpoint) => {
+            const status = statuses.get(breakpoint.id)
+            return { file, line: breakpoint.line, verified: status?.verified ?? false, ...(status?.line && status.line !== breakpoint.line ? { placed: status.line } : {}), ...(status?.message ? { message: status.message } : {}) }
+          })
+        })
+      },
+      scopes: async (id, frame) => (visible(id) ? this.scopes(id, frame) : []),
+      // An object's prototype is in every object: it says nothing the agent needs.
+      variables: async (id, ref) => (visible(id) ? (await this.variables(id, ref)).filter((value) => value.name !== '[[Prototype]]') : []),
+      evaluate: async (id, expression, at) => (visible(id) ? this.evaluate(id, expression, { ...at, context: 'repl' }) : { ok: false, message: gone.reason }),
+      printed: (id) => {
+        const run = visible(id)
+        if (!run) return { lines: [], dropped: 0 }
+        const { lines, before } = run.printed
+        const from = marks.get(id) ?? 0
+        const first = Math.max(from, before)
+        marks.set(id, before + lines.length)
+        return { lines: lines.slice(first - before).map((line) => ({ category: line.category, text: line.text })), dropped: first - from }
+      },
+      close: async () => {
+        const mine = [...this.runs.values()].filter((run) => run.owner === owner)
+        await Promise.all(mine.map((run) => (run.session.ended ? undefined : run.session.stop().catch(() => undefined))))
+      },
+    }
   }
 
   /** Stops every run: a program started for one ends, one attached to goes on. */
