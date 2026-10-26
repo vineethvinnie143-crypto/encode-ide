@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BUILTIN_SUBAGENT_TYPES, createToolRegistry } from '@encode/tools'
-import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, scratchReminder, systemParts } from './prompt'
+import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, lastStepCheckNote, scratchReminder, stepsLeftNote, systemParts } from './prompt'
 
 /** Every request carries the system prompt, so growing it is a decision, not an accident. */
 // ADR 0126 raised it from 5,600: the agent says what it found before each batch, and checks the outcome itself.
 // ADR 0139 raised it from 6,100: a failing test is the spec, and neither a declined command nor a failing check ends the checking.
 // ADR 0141 raised it from 6,450: the inputs around a change are tried too, and probes go in the scratch folder.
-const PROMPT_BUDGET_CHARS = 6_600
+// ADR 0147 raised it from 6,600: a wrong result the agent's own checks find on input like the request's is fixed, not offered.
+const PROMPT_BUDGET_CHARS = 6_800
 
 const info = { root: '/work/app', platform: 'linux' as const, arch: 'x64', shell: 'bash', cwd: '/work/app', date: '2026-10-22', topLevel: ['src/', 'package.json'] }
 
@@ -57,6 +58,17 @@ describe('the system prompt', () => {
     // A model that needs no guide tries the inputs around a change unasked (ADR 0094); where probes go is a rule for both.
     assert.match(SYSTEM_PROMPT, /try the inputs around the case you changed/)
     for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) assert.match(text, /scratch folder the environment names, never in the project/)
+  })
+
+  it("has a wrong result the agent's own checks find, on input like the request's, fixed and not offered (ADR 0147)", () => {
+    assert.match(SYSTEM_PROMPT, /A wrong result your own checks show from the code you changed, on input like the request's, is part of the problem even if it was there before: fix it and say so; do not offer to\. Mention an unrelated bug you notice; do not fix it\./)
+    // `a  -  b` became `a---b`: the inputs tried were new punctuation alone, never with the spaces the code already turned into dashes.
+    assert.match(SYSTEM_PROMPT, /\(repeated, at either end, mixed with what the code already handles, beside what the tests cover\)/)
+  })
+
+  it('says how many steps are left, and what an answer at the last step does with its check (ADR 0147)', () => {
+    assert.equal(stepsLeftNote(4, 15), "4 of this request's 15 steps are left, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.")
+    assert.match(lastStepCheckNote(15), /^Your answer took the last step this request may take \(15 steps\), so tools are off for your next reply and what this check found cannot be acted on now\. Give the user your whole answer again/)
   })
 
   it('keeps the tests as the spec, and the checking going past a declined command or a failing check (ADR 0139)', () => {

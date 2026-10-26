@@ -116,6 +116,66 @@ describe('the Reviewer before the agent finishes', () => {
     assert.equal(h.surface.usages.length, 4, "the Reviewer's call counts toward the request")
   })
 
+  it('tells the person what it found when the answer took the last step, in a reply made with tools off (ADR 0147)', async () => {
+    const answer = JSON.stringify({ summary: 'Mostly right.', findings: [finding] })
+    const closing = 'Added mean(). Still to do: it divides by zero for an empty list.'
+    const h = await loopHarness({
+      scriptFor: (root) => [write(root, 'src/stats.ts', STATS), { text: 'Added mean().' }, { text: answer }, { text: closing }],
+      services: { changes: async () => [stats] },
+      settings: { review: 'on' },
+      requests: () => ['add a mean function'],
+      maxSteps: 2,
+    })
+    // Before, the findings went to a model with no step left, and the request ended on the answer they were about.
+    assert.deepEqual(await h.run('add a mean function'), { kind: 'max-steps', steps: 2, reply: closing })
+    assert.deepEqual(h.client.requests.map((request) => [request.role, request.payload.toolChoice]), [['main', undefined], ['main', undefined], ['reviewer', undefined], ['main', 'none']])
+    const [sent] = reminders(h)
+    assert.match(sent, /- P1 `src\/stats\.ts:3`: Divides by zero for an empty list\./)
+    assert.match(sent, /Your answer took the last step this request may take \(2 steps\), so tools are off for your next reply and what this check found cannot be acted on now\./)
+    assert.doesNotMatch(sent, /If you take more steps/)
+    assert.ok(notices(h).includes("The Reviewer found a problem in the agent's changes. The answer took the request's last step, so the agent says what is left instead."))
+    assert.equal(h.surface.settled.filter((entry) => entry.kind === 'assistant').at(-1)?.text, closing)
+  })
+
+  it('does the same for an answer given with attempt_completion at the last step (ADR 0147)', async () => {
+    const answer = JSON.stringify({ summary: 'Mostly right.', findings: [finding] })
+    const h = await loopHarness({
+      completion: true,
+      scriptFor: (root) => [
+        write(root, 'src/stats.ts', STATS),
+        { calls: [{ name: 'attempt_completion', input: { result: 'Added mean().' } }] },
+        { text: answer },
+        { text: 'Added mean(). Still to do: an empty list.' },
+      ],
+      services: { changes: async () => [stats] },
+      settings: { review: 'on' },
+      requests: () => ['add a mean function'],
+      maxSteps: 2,
+    })
+    assert.deepEqual(await h.run('add a mean function'), { kind: 'max-steps', steps: 2, reply: 'Added mean(). Still to do: an empty list.' })
+    const last = JSON.stringify(h.client.requests[3].payload.messages.at(-1))
+    assert.equal(h.client.requests[3].payload.toolChoice, 'none')
+    assert.match(last, /Divides by zero for an empty list/)
+    assert.match(last, /Your answer took the last step this request may take \(2 steps\)/)
+    assert.doesNotMatch(last, /That was the last step|If you take more steps/)
+  })
+
+  it('tells the agent it sends back near the limit how many steps are left (ADR 0147)', async () => {
+    const answer = JSON.stringify({ summary: 'Mostly right.', findings: [finding] })
+    const glob = { calls: [{ name: 'Glob', input: { pattern: '*' } }] }
+    const h = await loopHarness({
+      scriptFor: (root) => [write(root, 'src/stats.ts', STATS), glob, glob, glob, glob, { text: 'Added mean().' }, { text: answer }, { text: 'Fixed the empty list.' }],
+      services: { changes: async () => [stats] },
+      settings: { review: 'on' },
+      requests: () => ['add a mean function'],
+      maxSteps: 10,
+    })
+    assert.deepEqual(await h.run('add a mean function'), { kind: 'done', reply: 'Fixed the empty list.' })
+    const sent = reminders(h).find((text) => /The Reviewer read your changes/.test(text))
+    assert.match(sent ?? '', /If you take more steps before you finish[^]*\n\n4 of this request's 10 steps are left/)
+    assert.ok(notices(h).includes("The Reviewer found a problem in the agent's changes, so it goes on to fix it."))
+  })
+
   it("tells a DeepSeek Reviewer to keep its reasoning short, after its instructions, unless the notes are off (ADR 0142)", async () => {
     const answer = JSON.stringify({ summary: 'Right.', findings: [] })
     const reviewed = async (model: string, modelNotes?: 'off') => {

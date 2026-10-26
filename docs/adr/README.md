@@ -136,6 +136,7 @@ say so.
 | [0144](0144-python-go-c-and-rust-are-debugged-through-their-own-debuggers-over-the-debug-adapter-protocol.md) | Python, Go, C and Rust are debugged through their own debuggers, over the Debug Adapter Protocol | Accepted, builds on 0062, 0083, 0114 and 0143 |
 | [0145](0145-the-agent-debugs-through-the-folders-debugger-with-runs-and-breakpoints-of-its-own-behind-an-approval.md) | The agent debugs through the folder's debugger, with runs and breakpoints of its own, behind an approval | Accepted, builds on 0004, 0136, 0143 and 0144 |
 | [0146](0146-the-bench-has-debugging-tasks-run-with-the-folders-debugger.md) | The bench has debugging tasks, run with the folder's debugger | Accepted, builds on 0092, 0143 and 0145 |
+| [0147](0147-the-agent-fixes-what-its-own-checks-find-and-a-check-at-the-last-step-is-told.md) | The agent fixes what its own checks find, and a check at the last step is told | Accepted, builds on 0096, 0124 and 0141 |
 
 ## Template
 

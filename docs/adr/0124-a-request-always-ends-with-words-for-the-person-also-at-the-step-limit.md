@@ -35,7 +35,8 @@ could end right after a step, with nothing written for the person, in three ways
   - The loop's end carries the reply: `{ kind: 'max-steps', steps, reply? }`. A subagent reports it to its parent, and a
     best-of attempt keeps it.
   - When the limit is reached right after the agent was sent back from an answer, no closing reply is asked for: that
-    answer came after its last step and stands.
+    answer came after its last step and stands. Since 0147, a check before the agent finishes that finds something in
+    that answer gets a closing reply that tells the person what is left; a beforeStop hook still leaves the answer.
 - **A message the person sends while the agent works gives the request the whole limit again.** Steps count from their
   latest message. A message the agent takes after its last allowed step is taken too, instead of being left for the
   next request.
