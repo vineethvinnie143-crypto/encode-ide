@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { CompletionRequest, ModelClient } from './contract'
-import { listedCost, spendingCap } from './spending-cap'
+import { listedCost, spendingCap, tallyStream, unreportedCost } from './spending-cap'
 
 describe('a spending cap (ADRs 0137, 0138)', () => {
   const request = { role: 'main', payload: { system: [], messages: [], tools: [] }, requirements: {}, signal: new AbortController().signal } as unknown as CompletionRequest
@@ -45,5 +45,63 @@ describe('a spending cap (ADRs 0137, 0138)', () => {
     assert.match(unknown.stopped() ?? '', /a call to some\/model said nothing of what it cost, and the model has no listed price/)
     assert.equal(unknown.signal.aborted, true)
     assert.throws(() => spendingCap(0), /above 0/)
+  })
+
+  describe('what no provider reports', () => {
+    const price = { input: 0.3, output: 1.2 }
+    const priced = (complete: ModelClient['complete']): ModelClient => ({ budget: async () => ({ model: 'm', contextWindow: 100_000, maxOutputTokens: 1_000, price }), complete })
+    const asked = (signal = new AbortController().signal) => ({ ...request, requirements: { promptTokens: 10_000, maxOutputTokens: 1_000, tools: false, images: false }, signal }) as CompletionRequest
+
+    test('counts a call stopped midway by what it read and what it streamed', async () => {
+      const cap = spendingCap(5)
+      const stop = new AbortController()
+      const client = cap.wrap(
+        priced(async (call) => {
+          call.onEvent?.({ type: 'attempt', attempt: 1, key: 'openrouter:m', provider: 'openrouter', model: 'm' })
+          call.onEvent?.({ type: 'thinking', text: 'x'.repeat(3_500) })
+          stop.abort(new Error('The Reviewer did not answer in time.'))
+          throw call.signal.reason
+        }),
+      )
+      await assert.rejects(client.complete(asked(stop.signal)), /did not answer in time/)
+      // 10k tokens read at $0.30 a million, 1k written at $1.20.
+      assert.ok(Math.abs(cap.spent() - 0.0042) < 1e-12, String(cap.spent()))
+    })
+
+    test('adds the attempts the router gave up on midway to what the reply cost', async () => {
+      const cap = spendingCap(5)
+      const client = cap.wrap(
+        priced(async (call) => {
+          call.onEvent?.({ type: 'attempt', attempt: 1, key: 'openrouter:m', provider: 'openrouter', model: 'm' })
+          call.onEvent?.({ type: 'text', text: 'x'.repeat(700) })
+          call.onEvent?.({ type: 'discard', reason: 'The stream ended before the reply was complete.' })
+          call.onEvent?.({ type: 'attempt', attempt: 2, key: 'openrouter:m', provider: 'openrouter', model: 'm' })
+          call.onEvent?.({ type: 'text', text: 'ok' })
+          return { kind: 'done', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }, usage: { inputTokens: 10_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0.01 }, finish: 'stop' }
+        }),
+      )
+      await client.complete(asked())
+      assert.ok(Math.abs(cap.spent() - (0.01 + 0.003 + 0.00024)) < 1e-12, String(cap.spent()))
+    })
+
+    test('counts nothing for a call stopped before it began, or an attempt that failed before it wrote', async () => {
+      const stopped = new AbortController()
+      stopped.abort(new Error('The run ended.'))
+      const cap = spendingCap(5)
+      await assert.rejects(
+        cap.wrap(
+          priced(async (call) => {
+            throw call.signal.reason
+          }),
+        ).complete(asked(stopped.signal)),
+        /run ended/,
+      )
+      assert.equal(cap.spent(), 0)
+      const { request: watched, tally } = tallyStream(asked())
+      watched.onEvent?.({ type: 'attempt', attempt: 1, key: 'a:m', provider: 'a', model: 'm' })
+      watched.onEvent?.({ type: 'discard', reason: 'refused' })
+      assert.equal(unreportedCost(watched, tally, false, { price }), 0)
+      assert.equal(unreportedCost(watched, { discarded: [7], current: 0 }, false, {}), undefined, 'no price, no guess')
+    })
   })
 })

@@ -172,6 +172,8 @@ export function formatReport(report: BenchReport): string {
   )
   lines.push(`Context per run: ${tenths(mean.rewrites)} rewrites (old results shortened or steps summarized), ${tenths(mean.summaries)} summaries`)
   if (all.costPerSolved !== undefined) lines.push(`Cost per task solved: ${dollars(all.costPerSolved)}`)
+  const unreported = report.runs.filter(isMeasured).reduce((sum, run) => sum + (run.metrics.unreportedCost ?? 0), 0)
+  if (all.cost !== undefined && unreported > 0) lines.push(`Of the ${dollars(all.cost)}, ${dollars(unreported)} is guessed: calls that failed or were stopped midway, which no provider reports`)
   if (report.spending) lines.push(`Spent ${dollars(report.spending.spent)} of the ${dollars(report.spending.limit)} cap`)
   if (report.endedEarly) lines.push(`Ended early: ${report.endedEarly}`)
   if (report.partial) lines.push('Partial: written while the bench went on, which then did not finish.')

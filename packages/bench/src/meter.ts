@@ -2,7 +2,7 @@
  * What a run spent, counted where it is spent: every model call goes through this client on its way to the real one,
  * the main agent's, its subagents', the Reviewer's and the summaries' alike.
  */
-import type { CompletionOutcome, CompletionRequest, Message, ModelClient } from '@encode/providers'
+import { tallyStream, unreportedCost, type CompletionOutcome, type CompletionRequest, type Message, type ModelBudget, type ModelClient } from '@encode/providers'
 
 export interface ModelCall {
   role: string
@@ -16,6 +16,11 @@ export interface ModelCall {
   outputTokens: number
   reasoningTokens: number
   cost?: number
+  /**
+   * Of `cost`, what no provider reported, guessed from what streamed (spending-cap.ts): attempts that failed midway, or
+   * the whole call when it was stopped midway (a Reviewer out of time).
+   */
+  unreported?: number
   ms: number
   /**
    * The agent's conversation was rewritten before this call: its history is not the last call's with more added, so
@@ -74,13 +79,16 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
       countResults(request)
       const rewrote = rewrites(request)
       // A call stopped before it began reached no model, so it cost nothing (ADR 0139): a helper's call started as the
-      // run ended is one. A call stopped later may have been charged for what the model read, so its cost stays unknown.
+      // run ended is one. A call stopped later was charged for what the model read and wrote: it is guessed.
       const unsent = request.signal.aborted
       const started = now()
+      const { request: watched, tally } = tallyStream(request)
+      const lost = async (stopped: boolean) => unreportedCost(request, tally, stopped, await inner.budget(request.role).catch(() => ({}) as Partial<ModelBudget>))
       try {
-        const outcome = await inner.complete(request)
+        const outcome = await inner.complete(watched)
         const usage = outcome.kind === 'done' ? outcome.usage : undefined
         const origin = outcome.kind === 'done' ? outcome.message.origin : undefined
+        const unreported = (await lost(false)) || undefined
         calls.push({
           role: request.role,
           ...(origin ? { model: `${origin.provider}:${origin.model}` } : {}),
@@ -90,13 +98,15 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
           cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
           outputTokens: usage?.outputTokens ?? 0,
           reasoningTokens: usage?.reasoningTokens ?? 0,
-          ...(usage?.cost !== undefined ? { cost: usage.cost } : {}),
+          ...(usage?.cost !== undefined ? { cost: usage.cost + (unreported ?? 0) } : {}),
+          ...(unreported !== undefined && usage?.cost !== undefined ? { unreported } : {}),
           ms: now() - started,
           ...(rewrote ? { rewrote: true as const } : {}),
           ...(request.light ? { light: true as const } : {}),
         })
         return outcome
       } catch (error) {
+        const unreported = unsent ? 0 : await lost(true)
         calls.push({
           role: request.role,
           outcome: 'failed',
@@ -105,7 +115,8 @@ export function meteredClient(inner: ModelClient, now: () => number = Date.now):
           cacheWriteTokens: 0,
           outputTokens: 0,
           reasoningTokens: 0,
-          ...(unsent ? { cost: 0 } : {}),
+          ...(unreported !== undefined ? { cost: unreported } : {}),
+          ...(unreported ? { unreported } : {}),
           ms: now() - started,
           ...(rewrote ? { rewrote: true as const } : {}),
         })

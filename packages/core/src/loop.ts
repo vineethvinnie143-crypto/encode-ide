@@ -2325,7 +2325,9 @@ export class AgentLoop {
       timeoutMs: REVIEW_TIMEOUT_MS,
     })
     if (!answer.ok) {
-      notice(`The Reviewer could not read the changes: ${lowerFirst(answer.why.replace(/\.$/, ''))}.`)
+      // A model that thinks long can run out the time on a slow day; one that answers sooner is the way out.
+      const faster = answer.late ? ' A faster model for the Review role would read them in time.' : ''
+      notice(`The Reviewer could not read the changes: ${lowerFirst(answer.why.replace(/\.$/, ''))}.${faster}`)
       return null
     }
     o.surface.usage(answer.usage, answer.model)
