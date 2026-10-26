@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { after, describe, it } from 'node:test'
-import type { AgentDebugger, AgentDebugRun } from '@encode/tools'
+import { asksForDebugger, type AgentDebugger, type AgentDebugRun } from '@encode/tools'
 import { SUBAGENT_EXCLUDED } from './subagents'
 import { closeHarnesses, sessionHarness } from './testing'
 
@@ -83,6 +83,26 @@ describe('the Debug tool in a session (ADR 0145)', () => {
     assert.match(result, /Run r1 \(node cart\.js\) paused at cart\.js:2 in lineTotal: breakpoint\./)
     assert.match(result, /total = 29/)
     assert.match(result, /Checking out 2 items/)
+  })
+
+  it('is listed from the start of a request that asks for the debugger, and stays for the session (ADR 0148)', async () => {
+    const h = await sessionHarness({ env: { debug: standIn() }, script: (_request, step) => ({ text: `answer ${step}` }) })
+    const asks = ['why is the total wrong?', 'Use the debugger to find out why the total is wrong.', 'thanks', 'rename it', 'and the tests', 'done?']
+    for (const text of asks) await h.session.start({ text, mode: 'code' })
+    const main = h.client.requests.filter((request) => request.role === 'main')
+    assert.equal(main.length, asks.length)
+    assert.ok(!tools(main[0]!).includes('Debug'), 'a request that does not ask for it waits for ToolSearch')
+    // DeepSeek V4.1 Flash, asked to use the debugger, never searched for it and fixed the bug by reading (ADR 0148).
+    for (const request of main.slice(1)) assert.ok(tools(request).includes('Debug'), 'listed once asked for, past the last three requests, so the list holds')
+  })
+
+  it('reads a request as asking for the debugger only by words that do (ADR 0148)', () => {
+    for (const text of ['Use the debugger to find the record that is read wrong', 'Debug why the total is 0', 'set a breakpoint at line 7', 'step through buildMenu', 'can you debug this?', 'Debugging the crash, please']) {
+      assert.ok(asksForDebugger(text), text)
+    }
+    for (const text of ['add debug logging to the server', 'turn off DEBUG mode', 'why is the total wrong?', 'the debug build fails', 'remove the debug flag']) {
+      assert.ok(!asksForDebugger(text), text)
+    }
   })
 
   it('is refused under Read Only, and runs nothing', async () => {

@@ -60,8 +60,9 @@ describe('the system prompt', () => {
     for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) assert.match(text, /scratch folder the environment names, never in the project/)
   })
 
-  it("has a wrong result the agent's own checks find, on input like the request's, fixed and not offered (ADR 0147)", () => {
-    assert.match(SYSTEM_PROMPT, /A wrong result your own checks show from the code you changed, on input like the request's, is part of the problem even if it was there before: fix it and say so; do not offer to\. Mention an unrelated bug you notice; do not fix it\./)
+  it("has a wrong result the agent's own checks find in a function it changed fixed and not offered (ADR 0147, 0148)", () => {
+    // ADR 0148: one run still left `a---b` as "a known quirk, unchanged and not asked for", so the rule names the function and that excuse.
+    assert.match(SYSTEM_PROMPT, /A wrong result your own checks show from a function you changed is part of the problem, even when the old code gave it too: fix it and say so, rather than offer to or call it a known quirk\. Mention a bug elsewhere; do not fix it\./)
     // `a  -  b` became `a---b`: the inputs tried were new punctuation alone, never with the spaces the code already turned into dashes.
     assert.match(SYSTEM_PROMPT, /\(repeated, at either end, mixed with what the code already handles, beside what the tests cover\)/)
   })

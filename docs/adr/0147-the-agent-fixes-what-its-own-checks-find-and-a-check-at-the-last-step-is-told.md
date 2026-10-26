@@ -25,7 +25,7 @@ case alone, with `a---b`.
 
 - **A wrong result the agent's own checks find is part of the problem** (`SYSTEM_PROMPT`, `packages/core/src/prompt.ts`).
   - The rule is: "A wrong result your own checks show from the code you changed, on input like the request's, is part of
-    the problem even if it was there before: fix it and say so; do not offer to."
+    the problem even if it was there before: fix it and say so; do not offer to." 0148 words it more sharply.
   - The rule after it stays: "Mention an unrelated bug you notice; do not fix it." A bug elsewhere, or on other input,
     is still only mentioned.
   - The short guide of 0094 has neither rule. The strong models it is for keep to the scope of a request unasked, so it

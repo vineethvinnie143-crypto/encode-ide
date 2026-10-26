@@ -194,6 +194,22 @@ describe('a run', () => {
     assert.deepEqual(without.checks.at(-1), { name: 'the debugger stopped the program', kind: 'used', passed: false, detail: 'Debug did its job in no call' })
   })
 
+  test('lists Debug from the first step of a task that asks for the debugger, with no ToolSearch (ADR 0148)', { timeout: 120_000 }, async () => {
+    const checks = [...base.checks, { kind: 'used', name: 'the debugger stopped the program', tools: ['Debug'] }]
+    const files = { 'count.js': 'let total = 0\nfor (const n of [1, 2, 3]) total += n\nconsole.log(total)\n' }
+    const asks = await readTask(await makeTask({ ...base, id: 'asks', prompt: 'Use the debugger to see the total in count.js, then write done.txt.', debug: true, checks }, files))
+    const client = createScriptedClient([
+      { calls: [{ name: 'Debug', input: { action: 'start', file: 'count.js', breakpoints: [{ file: 'count.js', line: 3 }] } }] },
+      { calls: [{ name: 'Debug', input: { action: 'stop' } }] },
+      { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] },
+      { text: 'The total is 6. Wrote done.txt.' },
+    ])
+    const run = await runTask(asks, { client, programs: await findPrograms([]), settings: AS_WRITTEN })
+    assert.equal(run.outcome, 'passed', JSON.stringify(run.checks))
+    assert.ok(client.requests[0]!.payload.tools.some((tool) => tool.name === 'Debug'))
+    assert.deepEqual(run.metrics.byTool.Debug, { calls: 2, failed: 0 })
+  })
+
   test("runs its checks without the environment's secrets, and with the folders they need", async () => {
     const dir = await makeTask(
       { ...base, checks: [{ kind: 'command', run: ['{{node}}', '{{checks}}/env.mjs'] }] },
