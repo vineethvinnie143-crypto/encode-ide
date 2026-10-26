@@ -139,6 +139,7 @@ say so.
 | [0147](0147-the-agent-fixes-what-its-own-checks-find-and-a-check-at-the-last-step-is-told.md) | The agent fixes what its own checks find, and a check at the last step is told | Accepted, builds on 0096, 0124 and 0141 |
 | [0148](0148-a-request-that-asks-for-the-debugger-lists-it-and-the-fix-rule-names-the-function.md) | A request that asks for the debugger lists it, and the fix rule names the function | Accepted, builds on 0136, 0145, 0146 and 0147 |
 | [0149](0149-the-agents-debug-runs-start-its-probes-and-the-benchs-first-ctrl-c-lets-the-run-finish.md) | The agent's debug runs start its probes, and the bench's first Ctrl+C lets the run in progress finish | Accepted, amends 0145; builds on 0137, 0141 and 0146 |
+| [0150](0150-an-answer-that-leaves-a-result-of-the-change-as-it-is-goes-back-once.md) | An answer that leaves a result of the change as it is goes back to the agent once | Accepted, builds on 0095, 0126, 0147 and 0148 |
 
 ## Template
 

@@ -113,7 +113,7 @@ import { isEditMiss, keepingMore, type ContextSignal, type ContextWatch } from '
 import { paysEveryToken, rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
 import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, sameCommand, STEP_CHECK_MS, STEP_CHECKS, stepChecksReminder, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
-import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
+import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, leftAsIs, leftAsIsReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
@@ -558,6 +558,8 @@ export class AgentLoop {
   /** This request ran a tool; its answer was sent back once for a check it left to the person (ADR 0126). */
   private toolsRan = false
   private handBackAsked = false
+  /** Its answer was sent back once for a result of the change it left as it is (ADR 0150). */
+  private leftAsked = false
   /** An automatic compaction happened since the model last replied: a reply that would end the request is asked about once. */
   private compactedSinceReply = false
   /** The model has replied in this request. */
@@ -652,6 +654,7 @@ export class AgentLoop {
     this.todoAsked = false
     this.toolsRan = false
     this.handBackAsked = false
+    this.leftAsked = false
     /** A message the user sent while the reply was written: it is answered before the turn ends. */
     const steered = async (): Promise<boolean> => {
       if (!o.steers?.waiting('end')) return false
@@ -2266,9 +2269,10 @@ export class AgentLoop {
   /**
    * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), test files the
    * person said to leave alone (ADR 0139), the project's checks (ADR 0095), the scan of the changes, what the reply
-   * claims, and the Reviewer (ADR 0096). The first that sends the agent back tells the person why, and gives the
-   * reminder for the agent; null lets the turn end. `last`: the answer took the request's last step, so what a check
-   * finds is told, not acted on (ADR 0147), and an answer that leaves a check to the person stands.
+   * claims, a check or a result of the change it leaves to the person (ADR 0126, 0150), and the Reviewer (ADR 0096).
+   * The first that sends the agent back tells the person why, and gives the reminder for the agent; null lets the turn
+   * end. `last`: the answer took the request's last step, so what a check finds is told, not acted on (ADR 0147), and an
+   * answer that leaves a check or a result to the person stands.
    */
   private async beforeFinish(turn: Turn, reply: string, last = false): Promise<string | null> {
     const { o } = this
@@ -2298,6 +2302,8 @@ export class AgentLoop {
     if (claims) return setback('claims', "eNCode could not confirm something the agent's reply says", 'it checks it', claims)
     const handed = last ? null : this.handBackCheck(turn, reply)
     if (handed) return back('The answer left a check to you', 'the agent tries to make it itself first', handed)
+    const left = last ? null : this.leftCheck(turn, reply)
+    if (left) return back('The answer left a result of the change to you', 'the agent settles it itself first', left)
     if (code) {
       const reviewed = await this.reviewGate(turn, reply)
       if (reviewed) return reviewed.serious ? setback('reviewer', reviewed.found, reviewed.then, reviewed.text) : back(reviewed.found, reviewed.then, reviewed.text)
@@ -2315,6 +2321,21 @@ export class AgentLoop {
     if (!sentence) return null
     this.handBackAsked = true
     return handBackReminder(sentence)
+  }
+
+  /**
+   * Once a request that changed files in Code mode, unless checks are off (ADR 0150): an answer that shows a result of
+   * the code and leaves it as it is ("`a - b` still gives `a---b`; say the word if you want it tightened") goes back to
+   * the agent, to fix it or say in one line why it is right.
+   */
+  private leftCheck(turn: Turn, reply: string): string | null {
+    const { o } = this
+    if (!this.gated || this.leftAsked || !this.toolsRan || turn.mode !== 'code' || (o.settings().checkGate ?? 'auto') === 'off') return null
+    if (o.services.checks && !o.services.checks.ledger.wroteInRequest) return null
+    const block = leftAsIs(reply)
+    if (!block) return null
+    this.leftAsked = true
+    return leftAsIsReminder(block)
   }
 
   /** Once a request, unless checks are off: the lines the request added, read for what is often a security bug. */

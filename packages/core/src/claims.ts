@@ -155,6 +155,55 @@ export function handBackReminder(sentence: string): string {
   ].join('\n')
 }
 
+/**
+ * Words that leave a result of the code as it is, or wait for the person's word on it (ADR 0150): "left as is", "a
+ * known quirk", "a deliberate choice", "say the word", "tell me if you'd rather".
+ */
+const LEFT_AS_IS = [
+  /\b(?:left|leave|leaving|kept|keep|keeping)\b[^.;:\n]{0,40}\b(?:as[- ]is|alone|unchanged|as it (?:is|was))\b/i,
+  /\bunchanged (?:by me|and not asked for)\b/i,
+  /\bknown quirk\b/i,
+  /\bdeliberate(?:ly)?\b/i,
+  /\b(?:say|give) the word\b/i,
+  /\b(?:tell|let) me(?: know)? if you(?:['’]d| would)? (?:rather|like|want|prefer)\b/i,
+  /\bif you(?:['’]d| would)? (?:rather|prefer)\b/i,
+  /\bworth knowing\b/i,
+]
+/** A result of the code, shown: "`a - b` → `a---b`", "`x` still gives `y`". */
+const SHOWN_RESULT = /`[^`\n]+`\s*(?:still\s+)?(?:→|->|=>|gives|yields|becomes|returns|produces|comes out as|turns into)\s*`[^`\n]*`/i
+const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s/
+
+/**
+ * The first paragraph or list item of the reply that shows a result of the code and leaves it as it is (ADR 0150), with
+ * the line that heads its list when the words are there ("Left as is:"). Code blocks are not read.
+ */
+export function leftAsIs(reply: string): string | undefined {
+  const blocks = reply
+    .replace(/```[\s\S]*?```/g, '\n\n')
+    .split(/\n\s*\n|\n(?=\s*(?:[-*+]|\d+[.)])\s)/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+  const leaves = (text: string) => LEFT_AS_IS.some((words) => words.test(text))
+  let heading: string | undefined
+  for (const block of blocks) {
+    const item = LIST_ITEM.test(block)
+    if (!item) heading = /:\**$/.test(block) && leaves(block) ? block : undefined
+    if (!SHOWN_RESULT.test(block)) continue
+    if (leaves(block)) return block
+    if (item && heading) return `${heading} ${block}`
+  }
+  return undefined
+}
+
+/** Sends the agent back to settle a result of its change that its answer leaves as it is, or to say why it is right. */
+export function leftAsIsReminder(block: string): string {
+  return [
+    `Your answer leaves a result of the code as it is: "${clip(block.replace(/\s+/g, ' '), 320)}"`,
+    "Before you finish, settle it yourself: run the code on that input if you have not. If code you changed in this request gives a wrong or odd result there on input like the request's (a separator doubled, a case half handled), it is part of the problem even when the old code gave it too: fix it, check it, and say so.",
+    'If the result is right, or the request rules it out, keep it and say why in one line. Do not leave the choice to the user.',
+  ].join('\n')
+}
+
 export function claimsReminder(found: readonly string[]): string {
   return [
     'Before you finish, check your reply against the project. eNCode could not confirm this in it:',

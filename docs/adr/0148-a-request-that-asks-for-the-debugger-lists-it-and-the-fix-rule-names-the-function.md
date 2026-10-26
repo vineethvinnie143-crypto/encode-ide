@@ -48,6 +48,8 @@ things.
 - The two neutral debugging tasks are unchanged: their requests do not ask, and the model still chooses.
 - **Still open.** A small model's choices vary from run to run. Five runs of regression-guard, and three of each task
   that asks for the debugger, measure this on the paid bench after the merge.
+- regression-guard passed 3 of 5 after this. Both failures still left the dashes as they were; 0150 sends such an
+  answer back.
 
 ## Verification
 

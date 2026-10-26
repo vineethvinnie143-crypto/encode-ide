@@ -281,6 +281,38 @@ describe('the hand-back check', () => {
   })
 })
 
+describe('the left-as-is check (ADR 0150)', () => {
+  const LEFT = 'Fixed `slug`. `a - b` still gives `a---b`, as before my change; say the word if you want it tightened.'
+
+  it('sends an answer that leaves a result of the change as it is back once, to settle it or say why it is right', async () => {
+    const h = await loopHarness({
+      scriptFor: (root) => [write(root, 'src/slug.js'), { text: LEFT }, { text: 'Fixed `slug`, and `a - b` now gives `a-b` too.' }],
+      services: { checks: checksOf([]) },
+    })
+    assert.deepEqual(await h.run('fix slug', 'code'), { kind: 'done', reply: 'Fixed `slug`, and `a - b` now gives `a-b` too.' })
+    const [sent, ...more] = reminders(h)
+    assert.match(sent, /Your answer leaves a result of the code as it is: "Fixed `slug`\. `a - b` still gives `a---b`, as before my change; say the word if you want it tightened\."/)
+    assert.match(sent, /run the code on that input if you have not/)
+    assert.match(sent, /Do not leave the choice to the user\./)
+    assert.deepEqual(more, [], 'once a request')
+    assert.ok(h.surface.settled.some((entry) => entry.kind === 'notice' && entry.text === 'The answer left a result of the change to you, so the agent settles it itself first.'))
+  })
+
+  it('lets the second answer through, and stays quiet with no change, outside Code mode and when checks are off', async () => {
+    const twice = await loopHarness({ scriptFor: (root) => [write(root, 'src/slug.js'), { text: LEFT }, { text: LEFT }], services: { checks: checksOf([]) } })
+    assert.deepEqual(await twice.run('go', 'code'), { kind: 'done', reply: LEFT })
+    const look = await loopHarness({ script: [{ calls: [{ name: 'Glob', input: { pattern: '*' } }] }, { text: LEFT }], services: { checks: checksOf([]) } })
+    await look.run('go', 'code')
+    assert.deepEqual(reminders(look), [], 'nothing changed')
+    const ask = await loopHarness({ scriptFor: (root) => [write(root, 'src/slug.js'), { text: LEFT }], services: { checks: checksOf([]) } })
+    await ask.run('go', 'ask')
+    assert.deepEqual(reminders(ask).filter((text) => /leaves a result/.test(text)), [], 'Ask mode')
+    const off = await loopHarness({ scriptFor: (root) => [write(root, 'src/slug.js'), { text: LEFT }], services: { checks: checksOf([]) }, settings: { checkGate: 'off' } })
+    await off.run('go', 'code')
+    assert.deepEqual(reminders(off), [], 'checks off')
+  })
+})
+
 describe('a session', () => {
   it("finds the project's checks where its shell is, and runs them for its agent; a settings list replaces them", async () => {
     const ran: string[] = []
