@@ -9,7 +9,7 @@ import { tempWorkspace } from '@encode/tools/testing'
 import { WorkspaceConfig } from './config'
 import { DEBUG_UNTRUSTED, FolderDebugger, readBreakpoints, type DebugState } from './debug'
 import { debugConfigs, planRun, RunProblem, substitute, typeStripping, type RunContext } from './debug-configs'
-import { nodeWorkspaceFs } from './fs'
+import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
 import { trustFolder } from './report'
 
 const json = (value: unknown) => JSON.stringify(value)
@@ -124,6 +124,41 @@ describe('breakpoints from the editor', () => {
       assert.equal(readBreakpoints([bad]), null, JSON.stringify(bad).slice(0, 80))
     }
     assert.equal(readBreakpoints([{ id: 'b1', line: 3, enabled: true }, { id: 'b1', line: 4, enabled: true }]), null, 'one id once')
+  })
+
+  it('keeps them when eNCode closes while a write is going, and writes again one that failed', async () => {
+    const { home, config } = await folder({ 'src/app.js': '1\n' })
+    const stateDir = path.join(home, 'debug-state')
+    const saved = new Map<string, string>()
+    let writes = 0
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    // The first write is held, as an antivirus scanning the new file holds it on Windows, then fails to rename.
+    const flaky: WorkspaceFs = {
+      ...nodeWorkspaceFs,
+      read: async (file) => saved.get(file) ?? null,
+      writeAtomic: async (file, text) => {
+        writes += 1
+        if (writes === 1) {
+          await held
+          throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' })
+        }
+        saved.set(file, text)
+      },
+    }
+    const debug = new FolderDebugger(config, flaky, { stateDir })
+    assert.deepEqual(await debug.setBreakpoints('src/app.js', [{ id: 'b1', line: 1, enabled: true }]), { ok: true })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.equal(writes, 1, 'the timer started a write')
+    let closed = false
+    const closing = debug.close().then(() => (closed = true))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.equal(closed, false, 'close waits for the write')
+    release()
+    await closing
+    assert.equal(writes, 2)
+    const again = new FolderDebugger(config, flaky, { stateDir })
+    assert.deepEqual((await again.state()).breakpoints, { 'src/app.js': [{ id: 'b1', line: 1, enabled: true }] })
   })
 })
 
