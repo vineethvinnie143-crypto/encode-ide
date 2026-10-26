@@ -169,8 +169,11 @@ const LEFT_AS_IS = [
   /\bif you(?:['’]d| would)? (?:rather|prefer)\b/i,
   /\bworth knowing\b/i,
 ]
-/** A result of the code, shown: "`a - b` → `a---b`", "`x` still gives `y`". */
-const SHOWN_RESULT = /`[^`\n]+`\s*(?:still\s+)?(?:→|->|=>|gives|yields|becomes|returns|produces|comes out as|turns into)\s*`[^`\n]*`/i
+/** A result of the code, shown: "`a - b` → `a---b`", "`x` still gives `y`", "`a//b` passes through as-is" (ADR 0151). */
+const SHOWN_RESULT = [
+  /`[^`\n]+`\s*(?:still\s+)?(?:→|->|=>|gives|yields|becomes|returns|produces|comes out as|turns into)\s*`[^`\n]*`/i,
+  /`[^`\n]+`[^.\n]{0,60}\b(?:pass(?:es)?|comes?) through\b/i,
+]
 const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s/
 
 /**
@@ -188,7 +191,7 @@ export function leftAsIs(reply: string): string | undefined {
   for (const block of blocks) {
     const item = LIST_ITEM.test(block)
     if (!item) heading = /:\**$/.test(block) && leaves(block) ? block : undefined
-    if (!SHOWN_RESULT.test(block)) continue
+    if (!SHOWN_RESULT.some((shown) => shown.test(block))) continue
     if (leaves(block)) return block
     if (item && heading) return `${heading} ${block}`
   }
@@ -199,7 +202,7 @@ export function leftAsIs(reply: string): string | undefined {
 export function leftAsIsReminder(block: string): string {
   return [
     `Your answer leaves a result of the code as it is: "${clip(block.replace(/\s+/g, ' '), 320)}"`,
-    "Before you finish, settle it yourself: run the code on that input if you have not. If code you changed in this request gives a wrong or odd result there on input like the request's (a separator doubled, a case half handled), it is part of the problem even when the old code gave it too: fix it, check it, and say so.",
+    "Before you finish, settle it yourself: run the code on that input if you have not. If code you changed in this request gives a wrong or odd result there on input like the request's (a separator doubled, a case half handled), it is part of the problem even when the old code gave it too: fix it, check it, and say so. Put the edit and the command that checks it in one batch: they run in order.",
     'If the result is right, or the request rules it out, keep it and say why in one line. Do not leave the choice to the user.',
   ].join('\n')
 }

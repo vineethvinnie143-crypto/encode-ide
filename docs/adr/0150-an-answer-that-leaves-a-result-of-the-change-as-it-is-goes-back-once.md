@@ -67,6 +67,8 @@ had no hyphen inside a word.
     its tokens.
 - The check reads words, as the claim and hand-back checks do: an answer that leaves the result in other words passes.
 - **Still open.** Five paid runs of regression-guard after the merge measure it.
+- Part 4 passed 4 of 5 after this. The check fired twice and both fixes went unchecked at the step limit; 0151 has the
+  fix and its check go in one batch, and counts a value shown passing through.
 
 ## Verification
 

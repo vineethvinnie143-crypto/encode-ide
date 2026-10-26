@@ -77,6 +77,8 @@ describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
       ["Remaining known quirk, unchanged and not asked for: a dash next to punctuation can still repeat (`'Hello - World'` → `hello---world`).", undefined],
       ['**Left as is:**\n- `a - b` -> `a---b`, outside the failing test.', '**Left as is:** - `a - b` -> `a---b`, outside the failing test.'],
       ['1. `x  y` returns `x--y`; I kept it as it was.', undefined],
+      // ADR 0151: a value shown passing through, with no result after it.
+      ["One thing worth knowing but not changed: `'a//b'` or a leading/trailing slash passes through as-is, since the function never promised to clean up slash structure — say the word if you want empty segments collapsed too.", undefined],
     ] as Array<[string, string | undefined]>) {
       // undefined: the whole reply is the block.
       assert.equal(leftAsIs(reply), block ?? reply, reply)
@@ -90,6 +92,8 @@ describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
       'I left the tests alone, as you asked.',
       '**Checked:**\n- `a - b` → `a-b`\n- `docs/Getting Started` → `docs/getting-started`',
       '**Left as is:**\n- the README\n\nChecked by running it: `a - b` → `a-b`.',
+      'I left `README.md` unchanged, as you asked.',
+      '`npm test` goes through cleanly, and I left the tests alone.',
       'Done.\n```\n// `a - b` -> `a---b`, left as is\n```',
     ]) {
       assert.equal(leftAsIs(reply), undefined, reply)
@@ -101,6 +105,7 @@ describe('a reply that leaves a result of the code as it is (ADR 0150)', () => {
     assert.match(sent, /^Your answer leaves a result of the code as it is: "- `a - b` → `a---b`\. Say the word\. x+…"\n/)
     assert.ok(sent.split('\n')[0].length < 380)
     assert.match(sent, /it is part of the problem even when the old code gave it too: fix it, check it, and say so\./)
+    assert.match(sent, /Put the edit and the command that checks it in one batch: they run in order\./)
     assert.match(sent, /keep it and say why in one line\. Do not leave the choice to the user\.$/)
   })
 })

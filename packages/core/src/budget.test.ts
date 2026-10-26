@@ -52,7 +52,8 @@ describe('the cost of a request before the first word', () => {
     ])
     // ADR 0141 raised it from 6,500: the inputs around a change are tried too, and probes go in the scratch folder.
     // ADR 0147 from 6,600: a wrong result the agent's own checks find on input like the request's is fixed, not offered.
-    assert.ok(system <= 6_800, `the instructions are ${system} characters; the ceiling is 6800`)
+    // ADR 0151 from 6,800: a change that drops characters is tried on a word with each kind it drops.
+    assert.ok(system <= 6_850, `the instructions are ${system} characters; the ceiling is 6850`)
     // CodeMap (ADR 0090) raised it from 20,500: a map in one call saves the Glob, Grep and Read rounds that find code.
     // Its package lookups (ADR 0091) from 21,000: one call reads a dependency's API instead of its files. The largest
     // set is Windows', whose Bash says how Git Bash names paths.
