@@ -422,6 +422,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (!root) return NO_FOLDER
     return agent.debugExceptions(root, filters as DebugExceptionFilters).catch(debugFailed)
   })
+  handle('debug:install-state', (id: unknown) => (typeof id === 'string' && /^[\w-]{1,64}$/.test(id) ? agent.debugInstallState(id).catch(() => null) : null))
   handle('debug:scopes', (run: unknown, frame: unknown) => {
     const root = workspace.current?.root
     if (!root || !isRunId(run) || !isNumber(frame)) return []

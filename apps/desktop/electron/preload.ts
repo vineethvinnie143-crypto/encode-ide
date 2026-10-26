@@ -228,6 +228,7 @@ const api: EncodeApi = {
     state: () => invoke('debug:state'),
     configs: () => invoke('debug:configs'),
     start: (config: string, file?: string) => invoke('debug:start', config, file),
+    installState: (id: string) => invoke('debug:install-state', id),
     act: (run: string, action) => invoke('debug:act', run, action),
     setBreakpoints: (file: string, breakpoints) => invoke('debug:breakpoints', file, breakpoints),
     setExceptions: (filters) => invoke('debug:exceptions', filters),

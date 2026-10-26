@@ -114,3 +114,29 @@ export interface OutputLine {
 }
 
 export type StepKind = 'over' | 'into' | 'out'
+
+/**
+ * A debug run, whatever debugs it: eNCode's own client of Node.js's inspector (ADR 0143), or a language's own debugger
+ * over the Debug Adapter Protocol (ADR 0144). The folder's debugger drives every run through this.
+ */
+export interface RunSession {
+  readonly id: string
+  readonly ended: boolean
+  /** Settles once the run has ended and its folder is gone. */
+  readonly settled: Promise<void>
+  view(): SessionView
+  /** Starts the run; fails, with the run ended and why in its view, when it cannot. */
+  start(): Promise<void>
+  /** A file's enabled breakpoints, by its whole path, as they are now. */
+  setBreakpoints(file: string, list: Breakpoint[]): Promise<void>
+  statuses(file: string): BreakpointStatus[]
+  setExceptions(filters: ExceptionFilters): Promise<void>
+  resume(threadId?: number): Promise<void>
+  pause(threadId?: number): Promise<void>
+  step(kind: StepKind, threadId?: number): Promise<void>
+  scopes(frameId: number): Promise<ScopeView[]>
+  variables(ref: number): Promise<VariableView[]>
+  evaluate(expression: string, options: { frameId?: number; threadId?: number; context: EvaluateContext }): Promise<EvaluateResult>
+  /** Stops the run: a started program ends; one attached to goes on without the debugger. */
+  stop(): Promise<void>
+}

@@ -93,6 +93,9 @@ jobs:
       - name: Unit tests
         env:
           ENCODE_TEST_DIGEST: ${{ runner.temp }}/digest.txt
+          # The debugger's installs (ADR 0144): debugpy's pinned wheel from PyPI and Delve with go install, each then
+          # debugging a program, so the whole path is proven on Windows.
+          ENCODE_TEST_INSTALLS: '1'
         run: pnpm test
 
       # Only what failed, a few lines each, so the end of a long log says what went wrong.

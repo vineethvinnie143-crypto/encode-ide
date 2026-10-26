@@ -286,9 +286,13 @@ export class AgentHostService {
     return (await this.ready()).request('debugConfigs', { root }, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
-  /** Starts a run; a program that waits long for its inspector, or a slow `npm run`, is given a minute. */
-  async debugStart(root: string, config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string }> {
-    return (await this.ready()).request('debugStart', { root, config, ...(file ? { file } : {}) }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  /** Starts a run: a program that waits long for its inspector, or one built first (cargo, Delve's go build), is given minutes. */
+  async debugStart(root: string, config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string; install?: string }> {
+    return (await this.ready()).request('debugStart', { root, config, ...(file ? { file } : {}) }, { timeoutMs: LONG_REQUEST_TIMEOUT_MS })
+  }
+
+  async debugInstallState(id: string): Promise<{ done: number; total: number } | { error: string } | null> {
+    return (await this.ready()).request('debugInstallState', { id }, { timeoutMs: REQUEST_TIMEOUT_MS })
   }
 
   async debugAct(root: string, run: string, action: DebugAction): Promise<DebugResult | { ok: true; run: string }> {

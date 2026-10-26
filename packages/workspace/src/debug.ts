@@ -1,7 +1,8 @@
 /**
  * A folder's debugger (ADR 0143): its breakpoints and when it stops for exceptions, kept between runs; the ways it
- * can be run (debug-configs.ts); and its runs, each a DebugSession of @encode/debug, as the panel and the editor see
- * them, with files named by their paths in the folder.
+ * can be run (debug-configs.ts); and its runs, as the panel and the editor see them, with files named by their paths
+ * in the folder. A Node.js run is a DebugSession of @encode/debug; a Python, Go, C, C++ or Rust run is a DapSession,
+ * through that language's own debugger (ADR 0144). Both are the same kind of run to everything here.
  *
  * A run starts the folder's code with the person's own environment, as a terminal does, so it starts only in a folder
  * the person trusts, and only when the person starts it. Attaching connects only to a program on this machine.
@@ -12,9 +13,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { workspaceKey } from '@encode/config'
-import { DebugSession, type Breakpoint, type BreakpointStatus, type EvaluateContext, type EvaluateResult, type ExceptionFilters, type FrameView, type OutputLine, type ScopeView, type SessionView, type SourceView, type StepKind, type ThreadView, type VariableView } from '@encode/debug'
+import { DapSession, DebugSession, type Breakpoint, type BreakpointStatus, type EvaluateContext, type EvaluateResult, type ExceptionFilters, type FrameView, type OutputLine, type RunSession, type ScopeView, type SessionView, type SourceView, type StepKind, type ThreadView, type VariableView } from '@encode/debug'
 import type { WorkspaceConfig } from './config'
-import { debugConfigs, planRun, RunProblem, type DebugConfigs, type RunPlan } from './debug-configs'
+import { debugConfigs, planRun, RunProblem, type DebugConfigs, type RunContext, type RunPlan } from './debug-configs'
 import type { WorkspaceFs } from './fs'
 
 export type { Breakpoint, BreakpointStatus, EvaluateContext, EvaluateResult, ExceptionFilters, OutputLine, PauseReason, ScopeView, StepKind, VariableView } from '@encode/debug'
@@ -26,6 +27,8 @@ export interface DebugOptions {
   runDir?: string
   /** eNCode's own Node.js, for a file when no Node.js is installed. */
   node?: { file: string; env?: Record<string, string> }
+  /** eNCode's tools folder, where it installs debuggers (debugpy, Delve) when the person says yes. */
+  tools?: string
   /** What runs start from. Default: this process's environment. */
   env?: Record<string, string | undefined>
   /** What the panel shows of a folder changed: its runs, a breakpoint's state. Called after a short pause, never in a burst. */
@@ -35,6 +38,7 @@ export interface DebugOptions {
   /** For tests. */
   spawn?: typeof spawn
   nodeVersion?(file: string, env: Record<string, string>): Promise<[number, number] | null>
+  ask?: RunContext['ask']
 }
 
 /** A file a frame is in, with its path in the folder when it is the folder's. */
@@ -76,6 +80,9 @@ export interface DebugState {
 export type DebugAction = { kind: 'continue' | 'pause' | 'stop' | 'restart' | 'dismiss'; thread?: number } | { kind: 'step'; step: StepKind; thread?: number }
 
 export type DebugResult = { ok: true } | { ok: false; reason: string }
+
+/** How a start ended: the run, or why there is none, and what eNCode can install to fix that (`debugpy`, `delve`). */
+export type DebugStart = { ok: true; run: string } | { ok: false; reason: string; install?: string }
 
 export const DEBUG_UNTRUSTED = "Debugging runs the folder's code, so it runs only in folders you trust. Trust the folder to debug it."
 
@@ -158,7 +165,7 @@ interface Run {
   config: string
   file?: string
   plan: RunPlan
-  session: DebugSession
+  session: RunSession
 }
 
 export class FolderDebugger {
@@ -254,6 +261,12 @@ export class FolderDebugger {
     return back.split(this.api.sep).join('/')
   }
 
+  /** A file of the folder's own, by its whole path. */
+  private inFolder(file: string): boolean {
+    const back = this.api.relative(this.root, file)
+    return !!back && !back.startsWith('..') && !this.api.isAbsolute(back)
+  }
+
   private whole(rel: string): string {
     return this.api.resolve(this.root, ...rel.split('/'))
   }
@@ -310,7 +323,7 @@ export class FolderDebugger {
   }
 
   /** Starts a run of a configuration; `file` is the editor's file, by its path in the folder. */
-  async start(request: { config: string; file?: string }): Promise<{ ok: true; run: string } | { ok: false; reason: string }> {
+  async start(request: { config: string; file?: string }): Promise<DebugStart> {
     if (this.closed) return { ok: false, reason: 'eNCode is closing.' }
     await this.load()
     if (!(await this.config.refresh()).folder.trusted) return { ok: false, reason: DEBUG_UNTRUSTED }
@@ -329,34 +342,31 @@ export class FolderDebugger {
         ...(file ? { file } : {}),
         ...(this.options.node ? { node: this.options.node } : {}),
         ...(this.options.nodeVersion ? { nodeVersion: this.options.nodeVersion } : {}),
+        ...(this.options.tools ? { tools: this.options.tools } : {}),
+        ...(this.options.ask ? { ask: this.options.ask } : {}),
       })
     } catch (error) {
-      if (error instanceof RunProblem) return { ok: false, reason: error.message }
+      if (error instanceof RunProblem) return { ok: false, reason: error.message, ...(error.install ? { install: error.install } : {}) }
       throw error
     }
     return this.launch(request.config, file, plan)
   }
 
-  private async launch(config: string, file: string | undefined, plan: RunPlan): Promise<{ ok: true; run: string } | { ok: false; reason: string }> {
+  private async launch(config: string, file: string | undefined, plan: RunPlan): Promise<DebugStart> {
     // A configuration started again replaces its earlier run that ended; only a few ended runs stay listed.
     for (const [id, run] of this.runs) if (run.config === config && run.session.ended) this.runs.delete(id)
     const ended = [...this.runs.values()].filter((run) => run.session.ended)
     for (const run of ended.slice(0, Math.max(0, ended.length - KEEP_ENDED + 1))) this.runs.delete(run.id)
     const id = `r${this.nextRun++}`
     const runDir = path.join(this.options.runDir ?? path.join(os.tmpdir(), 'encode-debug'), `${process.pid}-${id}-${Date.now().toString(36)}`)
-    const session = new DebugSession({
+    const shared = {
       id,
       name: plan.name,
-      plan:
-        plan.kind === 'attach'
-          ? { kind: 'attach', host: plan.host, port: plan.port }
-          : { kind: 'launch', file: plan.file, args: plan.args, cwd: plan.cwd, env: plan.env, runDir, ...(plan.verbatim ? { verbatim: true } : {}) },
       platform: this.platform,
       breakpoints: () => this.placed(),
       exceptions: this.exceptions,
-      readText: (map) => readBounded(map),
       onChange: () => this.changed(),
-      onOutput: (lines) => {
+      onOutput: (lines: OutputLine[]) => {
         try {
           this.options.onOutput?.(this.root, id, lines)
         } catch {
@@ -364,7 +374,15 @@ export class FolderDebugger {
         }
       },
       ...(this.options.spawn ? { spawn: this.options.spawn } : {}),
-    })
+    }
+    const session: RunSession =
+      plan.kind === 'dap'
+        ? new DapSession({ ...shared, plan: { ...plan.dap, runDir }, isOwn: (path) => this.inFolder(path) })
+        : new DebugSession({
+            ...shared,
+            plan: plan.kind === 'attach' ? { kind: 'attach', host: plan.host, port: plan.port } : { kind: 'launch', file: plan.file, args: plan.args, cwd: plan.cwd, env: plan.env, runDir, ...(plan.verbatim ? { verbatim: true } : {}) },
+            readText: (map) => readBounded(map),
+          })
     const run: Run = { id, config, ...(file ? { file } : {}), plan, session }
     this.runs.set(id, run)
     this.changed()
@@ -441,8 +459,8 @@ export class FolderDebugger {
     return { ok: true }
   }
 
-  scopes(runId: string, frame: number): ScopeView[] {
-    return this.runs.get(runId)?.session.scopes(frame) ?? []
+  async scopes(runId: string, frame: number): Promise<ScopeView[]> {
+    return (await this.runs.get(runId)?.session.scopes(frame).catch(() => [])) ?? []
   }
 
   async variables(runId: string, ref: number): Promise<VariableView[]> {

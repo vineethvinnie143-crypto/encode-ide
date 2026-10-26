@@ -2079,9 +2079,49 @@ async function runDebugChecks() {
   // Put back as found.
   await evaluate(`window.eNCode.debug.act(${JSON.stringify(before.id)}, { kind: 'dismiss' })`)
   await evaluate(`window.eNCode.debug.setBreakpoints(${JSON.stringify(file)}, [])`)
+  await runPythonDebugOffer()
   if (!wasTrusted) await evaluate("window.eNCode.permissions.act({ type: 'revoke' })")
   await evaluate(`window.eNCode.workspace.delete(${JSON.stringify(file)}).catch(() => null)`)
   console.log('[smoke] debugger: breakpoints, a log point, F5, hover, step, console, F9 and the end of the run')
+}
+
+/**
+ * Python through debugpy (ADR 0144), offline: F5 on a Python file, with no debugpy in eNCode's folder, opens the
+ * dialog that says why the run needs it and what installing it does, read through the main and agent processes from
+ * eNCode's own list. Cancel closes it with nothing installed. (The install itself, and runs with it, are proven by
+ * the unit tests on this machine.) Without a Python new enough, the console says so instead.
+ */
+async function runPythonDebugOffer() {
+  const file = 'debug-total.py'
+  await evaluate(`window.eNCode.workspace.write(${JSON.stringify(file)}, ${JSON.stringify('def total(prices):\n    return sum(prices)\n\nprint("total", total([2, 3, 4]))\n')})`)
+  await quickOpen(file, 'def total')
+  await evaluate("document.querySelector('.code-editor .enc-content')?.focus()")
+  await pressKey('F5')
+  const said = "[...document.querySelectorAll('.debug-pane .dp-line')].map((node) => node.textContent).filter((text) => /Python|debugpy/.test(text))"
+  await waitFor(`!!document.querySelector('.install-server-dialog .install-server-steps li') || ${said}.length > 0`, 30000, 'the offer of debugpy, or why Python cannot be debugged here')
+  const dialog = await evaluate(`(() => {
+    const box = document.querySelector('.install-server-dialog')
+    if (!box) return null
+    return {
+      title: box.querySelector('.ui-dialog-title')?.textContent ?? '',
+      lead: box.querySelector('.install-server-lead')?.textContent ?? '',
+      steps: [...box.querySelectorAll('.install-server-steps li')].map((node) => node.textContent),
+      button: [...box.querySelectorAll('.btn')].map((node) => node.textContent),
+    }
+  })()`)
+  if (!dialog) {
+    console.log('[smoke] debugger, Python: no offer of debugpy here:', JSON.stringify(await evaluate(said)))
+  } else {
+    console.log('[smoke] debugger, Python offer:', JSON.stringify(dialog))
+    if (dialog.title !== "Install debugpy, Python's debugger" || !/^Debugging Python needs debugpy/.test(dialog.lead) || !/debugpy-1\.8\.22-py2\.py3-none-any\.whl/.test(dialog.steps[0] ?? '') || !/checksum eNCode was built with/.test(dialog.steps[0] ?? '') || !dialog.button.includes('Install and debug')) {
+      throw new Error(`The offer of debugpy does not say what it would do: ${JSON.stringify(dialog)}`)
+    }
+    await screenshot('49-debugger-install-debugpy.png')
+    if (!(await click('.install-server-dialog .btn', 'Cancel'))) throw new Error('no Cancel in the offer of debugpy')
+    await waitFor("!document.querySelector('.install-server-dialog')", 4000, 'the offer of debugpy to close')
+    if ((await evaluate('window.eNCode.debug.state()')).runs.some((run) => run.name === file && run.state !== 'ended')) throw new Error('A run started though debugpy was not installed')
+  }
+  await evaluate(`window.eNCode.workspace.delete(${JSON.stringify(file)}).catch(() => null)`)
 }
 
 async function runWebLanguageChecks() {

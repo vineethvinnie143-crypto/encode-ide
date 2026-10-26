@@ -2184,8 +2184,13 @@ export interface EncodeApi {
   debug: {
     state(): Promise<DebugState | null>
     configs(): Promise<DebugConfigs | null>
-    /** Starts a run; `file` is the file the editor shows, by its path in the folder. */
-    start(config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string }>
+    /**
+     * Starts a run; `file` is the file the editor shows, by its path in the folder. A run that needs a debugger eNCode
+     * installs (debugpy, Delve) says which in `install`: `code.installPlan` and `code.install` take that id.
+     */
+    start(config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string; install?: string }>
+    /** How that install stands: its progress, why it failed, or null when none runs. */
+    installState(id: string): Promise<{ done: number; total: number } | { error: string } | null>
     act(run: string, action: DebugAction): Promise<DebugResult | { ok: true; run: string }>
     /** A file's breakpoints, all of them. */
     setBreakpoints(file: string, breakpoints: DebugBreakpoint[]): Promise<DebugResult>

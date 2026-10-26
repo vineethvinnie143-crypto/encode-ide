@@ -795,8 +795,9 @@ the text back exactly as it was. Say what you did just before, as closely as you
 
 ## The debugger
 
-eNCode debugs Node.js and TypeScript itself. Most useful to hear about: a breakpoint that does not stop, a line or a
-value that is wrong, a run that does not start or does not end, and anything confusing in the Debug tab.
+eNCode debugs Node.js and TypeScript itself, and Python, Go, C, C++ and Rust through their own debuggers. Most useful
+to hear about: a breakpoint that does not stop, a line or a value that is wrong, a run that does not start or does not
+end, an install that fails, and anything confusing in the Debug tab.
 
 Make a file `cart.js` in a trusted folder:
 
@@ -830,6 +831,46 @@ console.log('Total', sum)
   in `server.js` stops, although npm started it.
 - **Steps:** `F10` steps over, `F11` into, `Shift+F11` out. `F11` is full screen again once nothing is paused.
 - **Not trusted:** in a folder you have not trusted, `F5` says why it does not run, and the breakpoints stay.
+
+### Python, Go and C
+
+The same steps work in other languages. Each needs its language installed; eNCode fetches the debugger when it is
+missing, after you read what it will download.
+
+**Python** (3.10 or newer). Make `cart.py`:
+
+```python
+items = [
+    {"name": "Coffee beans", "price": 14.5, "qty": 2},
+    {"name": "Oat milk", "price": 3.25, "qty": 4},
+]
+
+def line_total(item):
+    total = item["price"] * item["qty"]
+    return round(total, 2)
+
+print("Total", sum(line_total(item) for item in items))
+```
+
+- Put a breakpoint on line 8 (`return round…`) and press `F5`. Without debugpy, a card says why, what it downloads
+  (debugpy 1.8.22 from PyPI), the checksum it is checked against, and where it is kept. **Install and debug** installs
+  it and starts the run; **Cancel** starts nothing.
+- It stops on line 8. The Debug tab shows `item` and `total`; the console evaluates `item["qty"] * 2`.
+- With a `.venv` in the folder, the run uses that Python: `import` of a package installed only there works.
+- Remove the breakpoint and `F5`: the console shows `Total 42.0`.
+
+**Go**. In a folder with a `go.mod` (`go mod init cart`), make `main.go` with a `lineTotal` function, put a
+breakpoint inside it and press `F5`. Without Delve, the card offers to build it with `go install` (a few minutes the
+first time); with a Go older than 1.25 it says it also fetches a Go for the debugger alone. A `_test.go` file runs its
+package's tests, and a breakpoint in a test stops.
+
+**C or C++** (needs LLVM: `winget install LLVM.LLVM`, then start eNCode again). Make `cart.c` with a loop, put a
+breakpoint in it and press `F5`: the console says it builds with clang, then the run stops. Without LLVM, the message
+says how to get it. If it says Windows could not find a library lldb-dap needs, tell us which LLVM you installed:
+LLVM's lldb-dap needs the Python its release was built with.
+
+**Rust**: in a Cargo project, open `src/main.rs`, set a breakpoint and press `F5`. cargo builds it in the console, and a
+`String` or a `Vec` shows its contents.
 
 ## Worktrees
 

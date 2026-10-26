@@ -29,7 +29,7 @@ import { createRouter, parseRouterConfig, type ConfigProblem, type KeySource, ty
 import { createWorktreeGit } from '@encode/git'
 import { SearchError, createSearchProvider, createWebAccess, realPathOf, searchPath, type KeySource as SearchKeySource, type ProviderOptions, type SearchProvider } from '@encode/tools'
 import { Sandbox } from '@encode/sandbox'
-import { readBreakpoints, readDebugAction, readExceptions, Workspaces, type FolderDebugger, type LanguageServerOptions, type OutputLine } from '@encode/workspace'
+import { DEBUGGERS, readBreakpoints, readDebugAction, readExceptions, Workspaces, type FolderDebugger, type LanguageServerOptions, type OutputLine } from '@encode/workspace'
 import { DEFAULT_SEARCH_PROVIDER, isKeyedSearchProvider, isSearchProviderId, searchProviderInfo, type KeyedSearchProviderId, type SearchCheckResult, type SearchProviderId } from '../../shared/search'
 import type { ModelAlert, ModelStatus, ReasoningEffort } from '../../shared/types'
 import { writePrivateFile } from '../services/private-file'
@@ -377,6 +377,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
               stateDir: path.join(init.debugDir, 'breakpoints'),
               runDir: path.join(init.debugDir, 'runs'),
               node: { file: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+              // Where eNCode installs debugpy and Delve when the person says yes (ADR 0144), beside the language servers.
+              ...(init.toolsDir ? { tools: init.toolsDir } : {}),
               onChange: (root: string) => {
                 try {
                   peer.notify('debug', { root })
@@ -497,6 +499,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
   peer.handle('debugState', async ({ root }) => (await debuggerOf(root)).state())
   peer.handle('debugConfigs', async ({ root }) => (await debuggerOf(root)).configs())
   peer.handle('debugStart', async ({ root, config, file }) => (await debuggerOf(root)).start({ config, ...(file ? { file } : {}) }))
+  // Only eNCode's own debuggers: what is installed is its list, as for the servers.
+  peer.handle('debugInstallState', async ({ id }) => (DEBUGGERS.some((item) => item.id === id) ? (workspaces?.installs?.state(id) ?? null) : null))
   // What the window sent is checked here, where the debugger's own rules are.
   peer.handle('debugAct', async ({ root, run, action }) => {
     const checked = readDebugAction(action)
