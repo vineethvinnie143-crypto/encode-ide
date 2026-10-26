@@ -102,6 +102,10 @@ C++ and Rust. The constraints stay 0143's:
   can begin a few bytes into the next line (seen with Rust 1.99 and lldb 23.1: line 3's first instruction lay before
   the block of the `let` on line 2). A breakpoint on the line right after a `let` lists that variable after one step;
   every line after shows it.
+- **Exit codes through lldb-server, on Windows**: lldb 23 runs a Windows program under lldb-server. If lldb-server is
+  gone before lldb has read the program's exit, lldb has no exit code and reports -1. That happened once in about 40
+  exits on CI, where the Rust program returns 101. eNCode shows the code lldb reports. The tests have lldb print its
+  own reason as the program ends, and accept -1 only together with that reason.
 - **lldb-dap's Python, on Windows**: LLVM's Windows releases link lldb to one Python's DLL (`python311.dll`), and
   without it Windows ends lldb-dap before it says anything. Before a run starts, eNCode reads which Python DLL
   `liblldb.dll` imports (its PE import tables, a few kilobytes of the file) and looks for it: next to lldb-dap, in
@@ -132,7 +136,9 @@ C++ and Rust. The constraints stay 0143's:
   requests, bounds on the header, the size and the JSON, timeouts.
 - `packages/debug/src/dap-session.test.ts`, against the real debuggers where installed: Python, Go, C and Rust,
   each with breakpoints, a log point, a condition and hit counts, evaluation, stepping, grouped long lists, and their
-  exceptions (Python's `ZeroDivisionError`, a Go panic, a Rust panic through its formatters).
+  exceptions (Python's `ZeroDivisionError`, a Go panic, a C++ throw caught under "every exception", a Rust panic
+  through its formatters), and the exit codes of the C++ and Rust programs. Stand-in debuggers check how an
+  exception's stop is recognized, and that a throw through a thunk stops once.
 - `packages/workspace/src/debug-languages.test.ts`: the configurations and what is wrong with one; which Python,
   debugpy, Go, Delve, lldb-dap, compiler and cargo each run finds, with stand-in programs, and what it says (and
   offers to install) when one is missing; whole runs through the folder's debugger with the real debuggers: a Python
