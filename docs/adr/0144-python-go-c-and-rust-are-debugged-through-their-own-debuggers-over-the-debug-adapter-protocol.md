@@ -93,8 +93,8 @@ C++ and Rust. The constraints stay 0143's:
   System32, on the PATH, where python.org's installer puts that version (`%LOCALAPPDATA%\Programs\Python\Python311`,
   `Program Files\Python311`), or where `py -3.11` says it is. A folder found off the PATH goes on the end of lldb-dap's
   PATH, after everything already there. Missing, the message names the Python and the winget line that installs it.
-  A debugger that still ends as it starts is reported with its exit code, its last lines, and on Windows a missing
-  DLL in words.
+  A debugger that ends unasked, as it starts or while the program runs, is reported with its exit code (Windows's
+  own codes in hexadecimal, as Windows names them), its last lines, and on Windows a missing DLL or a crash in words.
 - **The install dialog**: a start that needs debugpy or Delve answers with `install`. The window shows why, the steps
   of the install as for a language server (what is downloaded, from where, checked against what, kept where), and
   "Install and debug". When it is in place, the run starts. The installs go through `ServerInstalls`, which now knows

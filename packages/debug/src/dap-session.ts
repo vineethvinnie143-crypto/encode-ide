@@ -90,6 +90,8 @@ const GONE_GRACE_MS = 200
 const EXIT_WAIT_MS = 1_000
 /** Windows's STATUS_DLL_NOT_FOUND: the program could not load a library it needs (LLVM's lldb-dap, its Python's). */
 const MISSING_DLL = 0xc0000135
+/** How Windows ends a program that crashed, by its exit code. */
+const CRASHES: Record<number, string> = { 0xc0000005: 'an access violation', 0xc00000fd: 'a stack overflow', 0xc0000409: 'a check that failed in it', 0xc000001d: 'an instruction the processor does not have' }
 /** A hover reads names and their fields only: nothing that calls anything. */
 const NAME_CHAIN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/
 
@@ -204,6 +206,11 @@ export class DapSession implements RunSession {
       if (this.ended) return
       await this.startAdapter(plan.adapter)
       const dap = this.dap!
+      // Waited for from before the initialize request: the protocol lets a debugger send it right after its answer.
+      const initialized = new Promise<void>((resolve, reject) => {
+        this.initialized = { resolve, reject }
+      })
+      initialized.catch(() => undefined)
       this.caps = await dap.request(
         'initialize',
         {
@@ -224,9 +231,6 @@ export class DapSession implements RunSession {
         },
         { timeoutMs: INITIALIZE_MS },
       )
-      const initialized = new Promise<void>((resolve, reject) => {
-        this.initialized = { resolve, reject }
-      })
       const timer = setTimeout(() => this.initialized?.reject(new Error(`${this.profile.label} did not get ready within ${LAUNCH_MS / 1000} s.`)), LAUNCH_MS)
       timer.unref?.()
       const launched = dap.request(plan.request, { ...plan.arguments, ...extra }, { timeoutMs: LAUNCH_MS })
@@ -256,7 +260,7 @@ export class DapSession implements RunSession {
     // The debugger closed as it started: how it exited says more than the closed connection (a missing DLL on Windows).
     if (error instanceof DapError && error.code === 'closed' && this.exited) {
       await Promise.race([this.exited, new Promise((resolve) => setTimeout(resolve, EXIT_WAIT_MS).unref?.())])
-      if (this.adapterCode !== undefined) return this.goneReason(`${this.profile.label} ended (code ${this.adapterCode ?? 'none'})`, this.adapterCode)
+      if (this.adapterCode !== undefined) return this.goneReason(this.endedWith(this.adapterCode), this.adapterCode)
     }
     const tail = this.tail.filter((line) => line.trim()).slice(-6).join('\n')
     return tail && !said.includes(tail) ? `${said}\n${tail}` : said
@@ -324,7 +328,7 @@ export class DapSession implements RunSession {
       this.adapterCode = exitCode
     })
     // What the debugger sent last may still be on its way when it closes: it is read first.
-    void this.exited.then(() => setTimeout(() => this.adapterGone(`${this.profile.label} ended (code ${this.adapterCode ?? 'none'})`, this.adapterCode ?? null), GONE_GRACE_MS).unref?.())
+    void this.exited.then(() => setTimeout(() => this.adapterGone(this.endedWith(this.adapterCode ?? null), this.adapterCode ?? null), GONE_GRACE_MS).unref?.())
     const handlers = { onEvent: (event: DapEvent) => this.event(event), onClose: (reason: string) => this.lost(reason) }
     if (adapter.transport === 'stdio') {
       this.dap = new DapConnection(child.stdout!, child.stdin!, handlers)
@@ -342,7 +346,17 @@ export class DapSession implements RunSession {
     if (this.ended) return
     this.initialized?.reject(new DapError(reason, 'closed'))
     // While the run starts, the start says why it failed.
-    if (this.state !== 'starting') this.adapterGone(reason)
+    if (this.state === 'starting') return
+    // A debugger that is exiting says with its exit code why; one that stays is given up on a moment later.
+    if (this.child && this.adapterCode === undefined) setTimeout(() => this.adapterGone(reason), EXIT_WAIT_MS).unref?.()
+    else this.adapterGone(reason)
+  }
+
+  /** `lldb-dap ended (code 1)`; on Windows a code of its own (a crash, a missing DLL) in hexadecimal, as Windows names it. */
+  private endedWith(code: number | null): string {
+    const status = code === null ? null : code >>> 0
+    const shown = status === null ? 'none' : this.platform === 'win32' && status >= 0xc0000000 ? `0x${status.toString(16).toUpperCase()}` : String(code)
+    return `${this.profile.label} ended (code ${shown})`
   }
 
   /** The debugger went away: the run is over, as asked, as the program ended, or as something failed. */
@@ -355,8 +369,11 @@ export class DapSession implements RunSession {
   /** The debugger exited unasked: when, a library Windows could not find, and the last lines it wrote. */
   private goneReason(reason: string, code: number | null): string {
     const said = this.tail.filter((line) => line.trim()).slice(-6).join('\n')
-    const dll = this.platform === 'win32' && (code === MISSING_DLL || code === MISSING_DLL - 2 ** 32) ? ` Windows could not find a library (DLL) it needs.${this.profile.kind === 'lldb' ? " LLVM's lldb-dap needs the Python its LLVM release was built with: install that Python, or a newer LLVM." : ''}` : ''
-    return `${reason} ${this.state === 'starting' ? 'before the program started' : 'while the program ran'}.${dll}${said ? `\n${said}` : ''}`
+    const status = code === null ? null : code >>> 0
+    const windows = this.platform === 'win32' && status !== null
+    const dll = windows && status === MISSING_DLL ? ` Windows could not find a library (DLL) it needs.${this.profile.kind === 'lldb' ? " LLVM's lldb-dap needs the Python its LLVM release was built with: install that Python, or a newer LLVM." : ''}` : ''
+    const crash = windows && CRASHES[status] ? ` It crashed, with ${CRASHES[status]}.` : ''
+    return `${reason} ${this.state === 'starting' ? 'before the program started' : 'while the program ran'}.${dll}${crash}${said ? `\n${said}` : ''}`
   }
 
   // ---- Breakpoints ----

@@ -73,7 +73,7 @@ const exe = (name: string, platform: NodeJS.Platform) => (platform === 'win32' ?
 /** One C or C++ file, built with debug information into the run's folder; resolves with the program. */
 export async function compileFile(compiler: string, file: string, runDir: string, context: BuildContext): Promise<string> {
   const program = path.join(runDir, exe('program', context.platform))
-  context.print('info', `Building ${path.basename(file)} with ${path.basename(compiler)}…`)
+  context.print('info', `Building ${path.basename(file)} with ${path.basename(compiler).replace(/\.exe$/i, '')}…`)
   await runStep(compiler, ['-g', '-O0', '-o', program, file], context)
   return program
 }

@@ -410,8 +410,55 @@ describe('a debugger that ends as it starts', () => {
     const session = start({ plan: plan(dir, 'C:\\Program Files\\LLVM\\bin\\lldb-dap.exe', []), platform: 'win32', spawn })
     assert.equal(
       await failure(session),
-      "lldb-dap ended (code 3221225781) before the program started. Windows could not find a library (DLL) it needs. LLVM's lldb-dap needs the Python its LLVM release was built with: install that Python, or a newer LLVM.",
+      "lldb-dap ended (code 0xC0000135) before the program started. Windows could not find a library (DLL) it needs. LLVM's lldb-dap needs the Python its LLVM release was built with: install that Python, or a newer LLVM.",
     )
+  })
+
+  it('says how it ended when it goes while the program runs: its code, a crash in words, and its last lines', async () => {
+    const dir = await tempWorkspace()
+    // A debugger that starts the run as asked, then crashes.
+    const adapter = `
+      let buffer = Buffer.alloc(0)
+      const send = (message) => { const body = JSON.stringify(message); process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body) }
+      process.stdin.on('data', (chunk) => {
+        buffer = Buffer.concat([buffer, chunk])
+        for (;;) {
+          const end = buffer.indexOf('\\r\\n\\r\\n')
+          if (end < 0) return
+          const length = Number(/Content-Length: (\\d+)/.exec(buffer.subarray(0, end).toString())[1])
+          if (buffer.length < end + 4 + length) return
+          const request = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString())
+          buffer = buffer.subarray(end + 4 + length)
+          send({ seq: 0, type: 'response', request_seq: request.seq, command: request.command, success: true, body: request.command === 'threads' ? { threads: [] } : request.command === 'initialize' ? { supportsConfigurationDoneRequest: true } : {} })
+          if (request.command === 'initialize') send({ seq: 0, type: 'event', event: 'initialized' })
+          if (request.command === 'configurationDone') setTimeout(() => { process.stderr.write('fatal: lost the target\\n'); process.exit(7) }, 100)
+        }
+      })`
+    const session = start({ plan: plan(dir, process.execPath, ['-e', adapter]) })
+    await session.start()
+    const end = Date.now() + 5_000
+    while (session.view().state !== 'ended' && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.equal(session.view().message, 'lldb-dap ended (code 7) while the program ran.\nfatal: lost the target')
+  })
+
+  it('names a crash on Windows by its code and in words', async () => {
+    const dir = await tempWorkspace()
+    const spawn = (() => {
+      const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null as number | null, pid: 4243, kill: () => true })
+      setImmediate(() => {
+        child.emit('spawn')
+        setImmediate(() => {
+          child.exitCode = 3221225477
+          child.emit('exit', 3221225477, null)
+          child.stdout.end()
+          child.stdout.resume()
+          child.emit('close', 3221225477, null)
+        })
+      })
+      return child
+    }) as unknown as typeof import('node:child_process').spawn
+    const session = start({ plan: plan(dir, 'C:\\Program Files\\LLVM\\bin\\lldb-dap.exe', []), platform: 'win32', spawn })
+    assert.equal(await failure(session), 'lldb-dap ended (code 0xC0000005) before the program started. It crashed, with an access violation.')
   })
 })
 
@@ -576,7 +623,17 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     const view = await r.until((v) => !!paused(v), 'the breakpoint')
     const thread = paused(view)!
     assert.match(thread.frames![0]!.name, /line_total/)
-    const name = named(await localsOf(r, thread), 'name')
+    const locals = await localsOf(r, thread).catch(async (error: Error) => {
+      // How lldb-dap went, and whether it reads the same frame without Rust's formatters.
+      await r.until((v) => v.state === 'ended', 'the run to end').catch(() => undefined)
+      const bare = run(lldbPlan(dir, program, { rust: true }), { [file]: [bp(2)] }, undefined, dir)
+      await bare.session.start()
+      const stop = paused(await bare.until((v) => !!paused(v), 'the breakpoint without formatters'))!
+      const plain = await localsOf(bare, stop).then((list) => JSON.stringify(list).slice(0, 600), (problem: Error) => `failed too: ${problem.message} / ${bare.session.view().message ?? ''}`)
+      await bare.session.stop()
+      throw new Error(`${error.message} / ${r.session.view().message ?? 'no message'} / without the formatters: ${plain}`)
+    })
+    const name = named(locals, 'name')
     assert.match(name?.value ?? '', /"Coffee beans"/, JSON.stringify(name))
     // line_total runs twice: without its breakpoint, the program runs to its end.
     await r.session.setBreakpoints(file, [])

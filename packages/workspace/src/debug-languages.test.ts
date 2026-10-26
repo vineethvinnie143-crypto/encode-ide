@@ -447,7 +447,10 @@ async function pausedAt(debug: FolderDebugger, file: string) {
   const state = await until(debug, (now) => now.runs[0]?.threads.some((thread) => thread.state === 'paused' && !!thread.frames?.length) ?? false, `a pause in ${file}`)
   const thread = state.runs[0]!.threads.find((item) => item.state === 'paused' && item.frames?.length)!
   const top = thread.frames![0]!
-  const scope = (await debug.scopes(started.run, top.id))[0]!
+  const scope = (await debug.scopes(started.run, top.id))[0]
+  // A debugger that went while it was asked says how in the run's message.
+  if (!scope) await new Promise((resolve) => setTimeout(resolve, 1_500))
+  assert.ok(scope, `no scopes in the paused frame: ${JSON.stringify((await debug.state()).runs[0])}`)
   const locals = await debug.variables(started.run, scope.ref)
   return { run: started.run, state, thread, top, locals }
 }
