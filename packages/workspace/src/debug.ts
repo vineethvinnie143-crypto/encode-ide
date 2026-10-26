@@ -228,6 +228,8 @@ export class FolderDebugger {
   private nextRun = 1
   private nextAgentBreakpoint = 1
   private saveTimer: NodeJS.Timeout | null = null
+  private writing: Promise<void> = Promise.resolve()
+  private unsaved = false
   private changeTimer: NodeJS.Timeout | null = null
   private closed = false
 
@@ -280,14 +282,31 @@ export class FolderDebugger {
   }
 
   private save(): void {
-    const file = this.stateFile()
-    if (!file || this.saveTimer) return
+    if (!this.stateFile()) return
+    this.unsaved = true
+    if (this.saveTimer) return
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null
-      const stored: Stored = { version: 1, breakpoints: Object.fromEntries(this.breakpoints), exceptions: this.exceptions }
-      void this.fs.writeAtomic(file, JSON.stringify(stored)).catch(() => undefined)
+      void this.write()
     }, SAVE_DELAY_MS)
     this.saveTimer.unref?.()
+  }
+
+  /**
+   * Writes the breakpoints out, after any write still going: two at once would race to rename over the file. A write
+   * that fails leaves them unsaved, so the next one, or close(), tries again.
+   */
+  private write(): Promise<void> {
+    this.writing = this.writing.then(async () => {
+      const file = this.stateFile()
+      if (!file || !this.unsaved) return
+      this.unsaved = false
+      const stored: Stored = { version: 1, breakpoints: Object.fromEntries(this.breakpoints), exceptions: this.exceptions }
+      await this.fs.writeAtomic(file, JSON.stringify(stored)).catch(() => {
+        this.unsaved = true
+      })
+    })
+    return this.writing
   }
 
   private changed(): void {
@@ -734,12 +753,10 @@ export class FolderDebugger {
       await run.session.stop().catch(() => undefined)
       await run.session.settled
     }))
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer)
-      this.saveTimer = null
-      const file = this.stateFile()
-      if (file) await this.fs.writeAtomic(file, JSON.stringify({ version: 1, breakpoints: Object.fromEntries(this.breakpoints), exceptions: this.exceptions } satisfies Stored)).catch(() => undefined)
-    }
+    if (this.saveTimer) clearTimeout(this.saveTimer)
+    this.saveTimer = null
+    // Waits for a write the timer started, and writes what it has not saved yet.
+    await this.write()
   }
 }
 
