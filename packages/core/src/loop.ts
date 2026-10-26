@@ -127,6 +127,7 @@ import { withoutImagesFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
 import type { OutputStore } from './outputs'
+import { inScratch } from './scratch'
 import { recoverTextCalls } from './text-calls'
 import { AgentAbortedError, DEFAULT_MAX_STEPS, MAX_STEPS_LIMIT, type AgentSettings, type AlwaysAllow, type ApprovalPrompt, type Conversation, type LoopEnd, type Steers, type Surface, type Turn } from './types'
 import type { ConversationEntry, TodoItem, ToolReview } from './ui'
@@ -205,6 +206,11 @@ export interface LoopServices {
   codeMap?: CodeMapSource
   /** Where results too long for the model are kept whole (ADR 0093); without it their middle is left out. */
   outputs?: OutputStore
+  /**
+   * The session's scratch folder, a real path (ADR 0141): read and written without asking, and nothing written there is
+   * a change to the project.
+   */
+  scratch?: string
   /** The project's typecheck and tests, run before the turn ends (ADR 0095); the main agent's only. */
   checks?: ProjectChecks
   /** What a request's file tools changed, as text: for the scan and the Reviewer before the turn ends (ADR 0096). */
@@ -1248,6 +1254,31 @@ export class AgentLoop {
     ].join('\n\n')
   }
 
+  /** Keeps the earlier version of a file before a tool writes it, but in the scratch folder, where nothing is put back. */
+  private beforeWrite(keep: NonNullable<ToolContext['beforeWrite']>): NonNullable<ToolContext['beforeWrite']> {
+    const { scratch, platform } = this.o.services
+    if (!scratch) return keep
+    return async (file, previous, info) => {
+      if (!inScratch(scratch, await realPathOf(file).catch(() => file), platform)) await keep(file, previous, info)
+    }
+  }
+
+  /** The folders besides the workspace the agent works in without asking: the person's extra folders and the scratch folder. */
+  private extraRoots(): readonly string[] {
+    const { o } = this
+    const scratch = o.services.scratch
+    return scratch ? [...(o.extraRoots?.() ?? []), scratch] : (o.extraRoots?.() ?? [])
+  }
+
+  /** Of the files a call wrote, those of the project: what the agent writes in its scratch folder is no change to it (ADR 0141). */
+  private async projectFiles(files: readonly string[]): Promise<string[]> {
+    const { scratch, platform } = this.o.services
+    if (!scratch || !files.length) return [...files]
+    const kept: string[] = []
+    for (const file of files) if (!inScratch(scratch, await realPathOf(file).catch(() => file), platform)) kept.push(file)
+    return kept
+  }
+
   /** Whether the agent may read `file` without asking: the user's rules allow it, or it is in the workspace or a folder read without asking. */
   private async readableQuietly(file: string): Promise<boolean> {
     const { o } = this
@@ -1256,7 +1287,7 @@ export class AgentLoop {
     if (offLimitsFolder(o.services.offLimits, real)) return false
     const verdict = o.rules?.evaluate({ type: 'read', paths: [real] })
     if (verdict) return verdict.decision === 'allow'
-    for (const root of [o.services.root, ...(o.extraRoots?.() ?? []), ...(o.readRoots?.() ?? [])]) if (await isInsideReal(root, file)) return true
+    for (const root of [o.services.root, ...this.extraRoots(), ...(o.readRoots?.() ?? [])]) if (await isInsideReal(root, file)) return true
     return false
   }
 
@@ -1360,7 +1391,7 @@ export class AgentLoop {
         readRoots: o.readRoots?.(),
         ...(o.services.offLimits ? { offLimits: o.services.offLimits } : {}),
         ...(o.rules ? { rules: o.rules } : {}),
-        ...(o.extraRoots ? { extraRoots: o.extraRoots() } : {}),
+        extraRoots: this.extraRoots(),
         tool: { name: call.name, ...specifierOf(call.name, call.input) },
         approvedHosts: o.approvedHosts,
         approvedApps: this.approvedApps,
@@ -1548,7 +1579,7 @@ export class AgentLoop {
         home: o.services.home,
         dialect: o.services.shell.state().dialect,
         platform: o.services.platform === 'win32' ? 'win32' : 'posix',
-        extraRoots: o.extraRoots?.() ?? [],
+        extraRoots: this.extraRoots(),
         inside: isInsideReal,
       })
     } catch (error) {
@@ -1589,7 +1620,7 @@ export class AgentLoop {
       home: o.services.home,
       dialect: o.services.shell.state().dialect,
       platform: o.services.platform === 'win32' ? 'win32' : 'posix',
-      extraRoots: o.extraRoots?.() ?? [],
+      extraRoots: this.extraRoots(),
     })
     if (!why) return null
     entry.tool = { ...entry.tool!, state: 'reviewing' }
@@ -1643,7 +1674,7 @@ export class AgentLoop {
     const progress = this.progressFor(entry)
     const ctx = this.contextFor(block, input, entry, turn, progress.push)
     const { access } = prepared
-    const existed = access.type === 'write' && this.edits ? await this.edits.before(access.paths) : undefined
+    const existed = access.type === 'write' && this.edits ? await this.edits.before(await this.projectFiles(access.paths)) : undefined
 
     let outcome: ToolOutcome
     try {
@@ -1667,6 +1698,7 @@ export class AgentLoop {
     const output = outcome.display?.output ?? textOf(content)
     const found = this.scanWritten(outcome)
     if (found) content = [...content, textBlock(found.note)]
+    if (outcome.changed?.length && o.services.scratch) outcome = { ...outcome, changed: await this.projectFiles(outcome.changed) }
     const post = await this.hook('postToolUse', { ...this.event(turn), tool: block.name, toolUseId: block.id, input, ok: outcome.ok, output: textOf(content) })
     if (post?.block) {
       content = [...content, textBlock(`A hook did not accept this result: ${post.block}`)]
@@ -1875,7 +1907,7 @@ export class AgentLoop {
         : {}),
       ...(s.browser ? { browser: { get backend() { return s.browser!() }, vision: () => this.vision === true } } : {}),
       readsDocuments: () => this.documents === true,
-      ...(s.beforeWrite ? { beforeWrite: s.beforeWrite } : {}),
+      ...(s.beforeWrite ? { beforeWrite: this.beforeWrite(s.beforeWrite) } : {}),
       ...(s.summarize ? { summarize: s.summarize } : {}),
       ...(s.cwd ? { cwd: s.cwd() } : {}),
       ...(s.worktrees ? { worktrees: s.worktrees } : {}),
@@ -2064,7 +2096,9 @@ export class AgentLoop {
    */
   private async thinkFirst(calls: readonly ToolUseBlock[], turn: Turn): Promise<ReadonlySet<string>> {
     const { o } = this
-    const changes = calls.filter((call) => CHANGE_TOOLS.has(call.name) && !call.invalid)
+    // A probe in the scratch folder changes nothing of the project.
+    const probe = (call: ToolUseBlock) => typeof call.input.file_path === 'string' && path.isAbsolute(call.input.file_path) && inScratch(o.services.scratch, call.input.file_path, o.services.platform)
+    const changes = calls.filter((call) => CHANGE_TOOLS.has(call.name) && !call.invalid && !probe(call))
     if (this.changeSeen || turn.mode !== 'code' || !changes.length) return new Set()
     this.changeSeen = true
     if (!helpsSmaller(o.settings().smallerHelp, await this.workingModel())) return new Set()

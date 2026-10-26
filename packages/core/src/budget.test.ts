@@ -50,7 +50,8 @@ describe('the cost of a request before the first word', () => {
       ['tools', tools],
       ...payload.tools.map((tool): [string, number] => [`  ${tool.name}`, toolChars(tool)]),
     ])
-    assert.ok(system <= 6_500, `the instructions are ${system} characters; the ceiling is 6500`)
+    // ADR 0141 raised it from 6,500: the inputs around a change are tried too, and probes go in the scratch folder.
+    assert.ok(system <= 6_600, `the instructions are ${system} characters; the ceiling is 6600`)
     // CodeMap (ADR 0090) raised it from 20,500: a map in one call saves the Glob, Grep and Read rounds that find code.
     // Its package lookups (ADR 0091) from 21,000: one call reads a dependency's API instead of its files. The largest
     // set is Windows', whose Bash says how Git Bash names paths.

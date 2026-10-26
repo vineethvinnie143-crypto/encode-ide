@@ -239,6 +239,26 @@ describe("eNCode's own folder", () => {
     }
   })
 
+  it("lets a command name the agent's own folders in it as they are, but not lead out of them (ADR 0141)", async () => {
+    const { ctx, home, profile, temp } = await profiled('full-access')
+    const scratch = path.join(temp, 'scratch', 's1')
+    await fs.mkdir(scratch, { recursive: true })
+    const limits = { folders: [profile], except: [path.join(profile, 'sessions', 'outputs', 's1'), temp, scratch] }
+    const shell = { ...ctx.shell, env: { PATH: process.env.PATH ?? '', HOME: home } }
+    const judged = (line: string) => decideApproval(command(line, ctx.root), { ...ctx, shell, offLimits: limits })
+    for (const line of [`node ${path.join(scratch, 'probe.mjs')}`, `node --test "${path.join(scratch, 'slug.test.mjs')}"`, `python3 ${path.join(scratch, 'try.py')} && cat ${path.join(scratch, 'out.txt')}`]) {
+      assert.equal((await judged(line)).kind, 'allow', line)
+    }
+    for (const line of [
+      `cat ${path.join(scratch, '..', '..', '..', '..', 'eNCode-settings.json')}`,
+      `cat ${scratch}/"../../../../eNCode-settings.json"`,
+      `node ${path.join(scratch, 'probe.mjs')} ${path.join(profile, 'eNCode-settings.json')}`,
+      `ls ${path.join(profile, 'sessions', 'outputs', 's1')}0`,
+    ]) {
+      assert.ok(refused(await judged(line)), line)
+    }
+  })
+
   it('is spelled through the variables of Windows and PowerShell, in any case', async () => {
     const profile = 'C:\\Users\\u\\AppData\\Roaming\\eNCode'
     const ctx = await context('full-access', {

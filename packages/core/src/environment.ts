@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { messageText, type Message } from '@encode/providers'
 import type { AgentShell } from '@encode/tools'
-import { WORKSPACE_LINE, type EnvironmentInfo } from './prompt'
+import { SCRATCH_LINE, WORKSPACE_LINE, type EnvironmentInfo } from './prompt'
 
 const MAX_ENTRIES = 200
 const MAX_CLIMB = 8
@@ -83,10 +83,20 @@ export async function gatherEnvironment(root: string, shell: AgentShell, platfor
 
 /** The workspace root the model was last told about, read from its conversation; undefined when it was never told. */
 export function toldWorkspaceRoot(messages: readonly Message[]): string | undefined {
+  return toldLine(messages, WORKSPACE_LINE)
+}
+
+/** The scratch folder the model was last told about (ADR 0141); undefined when it was never told of one. */
+export function toldScratch(messages: readonly Message[]): string | undefined {
+  return toldLine(messages, SCRATCH_LINE)
+}
+
+/** What the last line that starts with `prefix` in the conversation's user messages says after it. */
+function toldLine(messages: readonly Message[], prefix: string): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== 'user') continue
     const lines = messageText(messages[i]).split('\n')
-    for (let j = lines.length - 1; j >= 0; j--) if (lines[j].startsWith(WORKSPACE_LINE)) return lines[j].slice(WORKSPACE_LINE.length).trim()
+    for (let j = lines.length - 1; j >= 0; j--) if (lines[j].startsWith(prefix)) return lines[j].slice(prefix.length).trim()
   }
   return undefined
 }

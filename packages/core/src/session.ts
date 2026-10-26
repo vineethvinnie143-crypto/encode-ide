@@ -85,7 +85,7 @@ import { SessionCodeMap } from './code-map'
 import { CheckLedger, detectChecks, isWithin, type ProjectChecks } from './checks'
 import type { ChangedText } from './diff-scan'
 import { estimateTokens, requestText } from './compaction'
-import { gatherEnvironment, localDate, toldWorkspaceRoot } from './environment'
+import { gatherEnvironment, localDate, toldScratch, toldWorkspaceRoot } from './environment'
 import { externalNotesFingerprint, renderExternalNotes, type ExternalToolSource } from './external'
 import type { RuleJudge } from './approval'
 import { filesNamed, gatherFiles, turnRecord, TURN_REPORT_LIMITS, type TurnRecordOutcome } from './turn-report'
@@ -96,7 +96,7 @@ import { loadMemory, memoryFingerprint, renderMemory } from './memory'
 import { saveConventions } from './conventions'
 import { memoryConversation } from './conversation'
 import { mentionBlocks } from './mentions'
-import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, type EnvironmentInfo, goalReminder, modeReminder, reminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
+import { CONTINUE_AFTER_LENGTH, dateReminder, environmentReminder, type EnvironmentInfo, goalReminder, modeReminder, reminder, scratchReminder, shortSystemParts, sideReminder, STEER_NOTE, systemParts, worktreeReminder } from './prompt'
 import { createAutoReviewer, type AutoReviewer } from './reviewer'
 import { withoutDocuments } from './documents'
 import { actionsFor, describeError, detailsOf, plainError, problem, problemFromError, type Problem } from './problems'
@@ -252,6 +252,8 @@ export interface SessionEnv {
   offLimits?: OffLimits
   /** Where results too long for the model are kept whole (ADR 0093); the session's folder in it is one of its read roots. */
   outputs?: OutputStore
+  /** The session's scratch folder, a real path (ADR 0141): for the agent's probes and throwaway scripts, outside the project. */
+  scratch?: string
   beforeWrite?: ToolContext['beforeWrite']
   /** Tools from outside eNCode, offered besides the built-in ones. */
   extraTools?: readonly Tool[]
@@ -454,6 +456,8 @@ interface TurnState {
   date?: string
   /** The workspace root the model was last told about. */
   root?: string
+  /** The scratch folder the model is known to have been told about (ADR 0141). */
+  scratch?: string
   /** The worktree the model was last told it works in ('' for none). */
   worktree?: string
   /** A side chat's model was told it is one. */
@@ -1270,7 +1274,7 @@ export class AgentSession {
   /** Where the agent works, and Explore's model when it is much cheaper than Main's (ADR 0134). */
   private async environment(): Promise<EnvironmentInfo> {
     const [environment, explore] = await Promise.all([gatherEnvironment(this.env.root, this.shell, this.env.platform), this.cheaperExplore()])
-    return explore ? { ...environment, explore } : environment
+    return { ...environment, ...(explore ? { explore } : {}), ...(this.env.scratch ? { scratch: this.env.scratch } : {}) }
   }
 
   /** Explore's model when it costs at most EXPLORE_CHEAPER of Main's to read with; both prices must be known. */
@@ -1390,6 +1394,7 @@ export class AgentSession {
       ...(code ? { code } : {}),
       codeMap: this.codeMap,
       ...(env.outputs ? { outputs: env.outputs } : {}),
+      ...(env.scratch ? { scratch: env.scratch } : {}),
       checks: this.checks,
       ...(env.checkpoints?.changes ? { changes: this.requestChanges } : {}),
       cacheClock: this.cacheClock,
@@ -1404,7 +1409,7 @@ export class AgentSession {
       settings: env.settings,
       hooks: env.hooks,
       parent: this.surface,
-      services: { root: env.root, home: env.home, platform: env.platform, ...(env.offLimits ? { offLimits: env.offLimits } : {}), sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}), checks: this.checks },
+      services: { root: env.root, home: env.home, platform: env.platform, ...(env.offLimits ? { offLimits: env.offLimits } : {}), sessionId: this.id, jobs: this.agentJobs, web: env.web, skills: env.skills, ...(env.beforeWrite ? { beforeWrite: env.beforeWrite } : {}), summarize: this.summarizePage, cwd: this.workdir, ...(code ? { code } : {}), codeMap: this.codeMap, ...(env.outputs ? { outputs: env.outputs } : {}), ...(env.scratch ? { scratch: env.scratch } : {}), checks: this.checks },
       files: this.files,
       // A subagent starts where the main agent works, in its worktree when it entered one.
       createShell: async () => {
@@ -1569,14 +1574,26 @@ export class AgentSession {
       if (reminderText) blocks.push(textBlock(reminderText))
     }
 
+    // Made again when something removed it while the session was open; the agent was told it is there.
+    if (env.scratch) await fs.mkdir(env.scratch, { recursive: true, mode: 0o700 }).catch(() => undefined)
+    let told = false
     if (first) {
       add(environmentReminder(await this.environment()))
+      told = true
     } else {
       // The session may have been opened in another folder than the one the model was told about.
       this.turn.root ??= toldWorkspaceRoot(this.messages)
-      if (this.turn.root && this.turn.root !== env.root) add(environmentReminder(await this.environment(), this.turn.root))
+      if (this.turn.root && this.turn.root !== env.root) {
+        add(environmentReminder(await this.environment(), this.turn.root))
+        told = true
+      }
     }
     this.turn.root = env.root
+    // A chat from before there were scratch folders, or a copy of one whose folder is the other chat's.
+    if (env.scratch && !told && this.turn.scratch !== env.scratch) {
+      if (toldScratch(this.messages) !== env.scratch) add(scratchReminder(env.scratch))
+    }
+    if (env.scratch) this.turn.scratch = env.scratch
 
     // Told when it changed other than through the agent's own EnterWorktree and ExitWorktree, whose results say so.
     if ((this.worktree?.path ?? '') !== (this.turn.worktree ?? '')) add(worktreeReminder(this.worktree, env.root))
