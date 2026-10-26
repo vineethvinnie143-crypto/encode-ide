@@ -8,7 +8,7 @@ import { describe, it } from 'node:test'
 import type { Message, ModelBudget, ModelRole, UserMessage } from '@encode/providers'
 import type { AgentShell } from '@encode/tools'
 import { CheckLedger } from './checks'
-import { helpsSmaller, saidWhatChanges, Setbacks, SMALLER_MODEL_PART, SMALLER_MODEL_TEXT, strongerPrompt, THINK_FIRST } from './smaller'
+import { CONSULT_SYSTEM, consultCost, consultOffer, helpsSmaller, recentSteps, saidWhatChanges, Setbacks, SMALLER_MODEL_PART, SMALLER_MODEL_TEXT, strongerPrompt, THINK_FIRST } from './smaller'
 import { loopHarness, stubShell, type Harness } from './testing'
 
 const user = (text: string): Message => ({ role: 'user', content: [{ type: 'text', text }] })
@@ -78,9 +78,39 @@ describe('help for smaller models', () => {
     assert.equal(prompt.title, 'Let claude-sonnet-4.5 take over this request?')
     assert.equal(
       prompt.detail,
-      "deepseek-chat ran into trouble twice in this request: the project's checks failed after its changes; and the same `Edit` call failed twice. claude-sonnet-4.5, the model of your Plan role, would do the rest of it. The next request goes back to deepseek-chat. It costs $3.00 per million tokens read and $15.00 written, against $0.28 and $0.42 for deepseek-chat.",
+      "deepseek-chat ran into trouble again in this request: the project's checks failed after its changes; and the same `Edit` call failed twice. claude-sonnet-4.5, the model of your Plan role, would do the rest of it. The next request goes back to deepseek-chat. It costs $3.00 per million tokens read and $15.00 written, against $0.28 and $0.42 for deepseek-chat.",
     )
     assert.match(strongerPrompt({ from: 'm', to: { ...to, price: undefined }, role: 'reviewer', reasons: [] }).detail, /your Review role.*It may cost more per token\.$/)
+  })
+
+  it('offers a look at the stuck steps first, with what that one call should cost (ADR 0140)', () => {
+    const to: ModelBudget = { model: 'anthropic/claude-sonnet-4.5', contextWindow: 1_000_000, maxOutputTokens: 64_000, price: { input: 3, output: 15 }, free: false }
+    const reasons = ['the same `Edit` call failed twice', 'the same `Edit` call failed twice']
+    const offer = consultOffer({ from: 'deepseek/deepseek-chat', to, role: 'reviewer', reasons, cost: 0.091 })
+    assert.equal(offer.title, 'Ask claude-sonnet-4.5 how to get past this?')
+    assert.equal(
+      offer.detail,
+      'deepseek-chat ran into trouble twice in this request: two `Edit` calls each failed twice. claude-sonnet-4.5, the model of your Review role, would read the last steps and say what is going wrong and how to get past it, in one call. deepseek-chat then goes on with the request. It should cost about $0.10.',
+    )
+    assert.match(consultOffer({ from: 'm', to, role: 'planner', reasons, cost: 0.004 }).detail, /It should cost about a cent or less\.$/)
+    assert.match(consultOffer({ from: 'm', to, role: 'planner', reasons, cost: 0 }).detail, /claude-sonnet-4\.5 is free to call\.$/)
+    assert.match(consultOffer({ from: 'm', to, role: 'planner', reasons }).detail, /It costs one call to that model\.$/)
+    // 40,000 characters read (10,000 tokens at $3 a million) and 1,500 tokens written at $15.
+    assert.equal(consultCost(to, 40_000)?.toFixed(4), '0.0525')
+    assert.equal(consultCost({ ...to, free: true }, 40_000), 0)
+    assert.equal(consultCost({ ...to, price: undefined }, 40_000), undefined)
+  })
+
+  it('gives it the steps of the request alone, newest kept when they do not all fit', () => {
+    const call = (id: string, command: string): Message => ({ role: 'assistant', content: [{ type: 'text', text: `I run ${command}.` }, { type: 'tool-use', id, name: 'Bash', input: { command } }] })
+    const result = (id: string, text: string, isError = false): Message => ({ role: 'user', content: [{ type: 'tool-result', toolUseId: id, content: [{ type: 'text', text }], isError }] })
+    const messages: Message[] = [user('an earlier request'), call('0', 'ls'), result('0', 'a.ts'), user('make the tests pass'), call('1', 'npm test'), result('1', '1 failing', true), call('2', 'npm run build'), result('2', 'built')]
+    assert.equal(
+      recentSteps(messages),
+      'Agent: I run npm test.\nCall Bash: {"command":"npm test"}\n\nFailed: 1 failing\n\nAgent: I run npm run build.\nCall Bash: {"command":"npm run build"}\n\nResult: built',
+    )
+    const long = recentSteps([...messages, result('3', 'x'.repeat(5_000))], 1_510)
+    assert.match(long, /^\[earlier steps left out\]\n\nResult: x{1,1499}…$/)
   })
 })
 
@@ -132,25 +162,36 @@ describe('think before edit', () => {
 
 describe('a stronger model after two setbacks', () => {
   const STRONG = 'anthropic/claude-sonnet-4.5'
-  /** The same failed change twice and another to the same file, then a fix, then the answer; the Plan role has a strong model. */
-  async function harness(options: { roles?: Partial<Record<ModelRole, string>>; decide?: boolean | { approved: false; note: string }; offerStronger?: 'ask' | 'off'; main?: string } = {}) {
+  const ADVICE = 'There is no `const b` in src/a.ts: read the file, then rename `const a`.'
+  type Plot = 'advice' | 'takeover' | 'declined'
+  /**
+   * A smaller model that sends the same failed change twice and another to the same file (two setbacks), so the Plan
+   * role's strong model is asked to read the steps; with `takeover`, two more setbacks after its advice.
+   */
+  async function harness(options: { roles?: Partial<Record<ModelRole, string>>; decide?: boolean | { approved: false; note: string }; offerStronger?: 'ask' | 'off'; main?: string; plot?: Plot } = {}) {
     const main = options.main ?? 'deepseek/deepseek-chat'
     const roles: Partial<Record<ModelRole, string>> = options.roles ?? { planner: STRONG }
+    const plot = options.plot ?? 'advice'
     const h = await loopHarness({
       files: { 'src/a.ts': 'export const a = 1\n' },
       scriptFor: (root) => {
         const file = path.join(root, 'src', 'a.ts')
+        const edit = (from: string) => ({ calls: [{ name: 'Edit', input: { file_path: file, old_string: from, new_string: 'const c' } }] })
+        const stuck = [edit('const e'), edit('const e'), edit('const f'), edit('const f')]
         return [
           { calls: [{ name: 'Read', input: { file_path: file } }] },
-          { calls: [{ name: 'Edit', input: { file_path: file, old_string: 'const b', new_string: 'const c' } }] },
-          { calls: [{ name: 'Edit', input: { file_path: file, old_string: 'const b', new_string: 'const c' } }] },
-          { calls: [{ name: 'Edit', input: { file_path: file, old_string: 'const d', new_string: 'const c' } }] },
-          { calls: [{ name: 'Edit', input: { file_path: file, old_string: 'const a', new_string: 'const c' } }] },
+          edit('const b'),
+          edit('const b'),
+          edit('const d'),
+          ...(plot === 'declined' ? [] : [{ text: ADVICE }]),
+          ...(plot === 'advice' ? [] : stuck),
+          edit('const a'),
           { text: 'Done.' },
         ]
       },
       client: { model: main },
       settings: { offerStronger: options.offerStronger ?? 'ask' },
+      requests: () => ['rename a to c'],
     })
     const budget = h.client.budget.bind(h.client)
     h.client.budget = async (role, query) => {
@@ -159,61 +200,84 @@ describe('a stronger model after two setbacks', () => {
       if (own) return { ...base, model: own, price: { input: 3, output: 15 }, free: false }
       return role === 'main' ? { ...base, price: { input: 0.28, output: 0.42 }, free: false } : base
     }
-    h.surface.decide = (prompt) => (prompt.tool === 'StrongerModel' ? (options.decide ?? true) : true)
+    h.surface.decide = (prompt) => (prompt.tool === 'StrongerModel' || prompt.tool === 'StrongerAdvice' ? (options.decide ?? true) : true)
     return h
   }
+  const asked = (h: Harness, tool: string) => h.surface.approvals.filter((prompt) => prompt.tool === tool)
 
-  it('asks once, and on yes the Plan role does the rest of the request, held to the gates afresh', async () => {
+  it('first asks it to read the last steps, in one call, and the agent goes on with what it says (ADR 0140)', async () => {
     const h = await harness()
+    assert.deepEqual(await h.run('rename a to c'), { kind: 'done', reply: 'Done.' })
+    const [offer] = asked(h, 'StrongerAdvice')
+    assert.equal(asked(h, 'StrongerAdvice').length, 1)
+    assert.equal(offer.title, 'Ask claude-sonnet-4.5 how to get past this?')
+    assert.match(offer.detail, /^deepseek-chat ran into trouble twice in this request: the same `Edit` call failed twice; and `Edit` failed twice on a\.ts\. claude-sonnet-4\.5, the model of your Plan role, would read the last steps and say what is going wrong and how to get past it, in one call\. deepseek-chat then goes on with the request\. It should cost about \$0\.0\d\.$/)
+    assert.equal(offer.grant, 'StrongerAdvice', 'the person may allow it for the session')
+    assert.equal(asked(h, 'StrongerModel').length, 0, 'no take-over after advice that worked')
+    assert.deepEqual(h.client.requests.map((request) => request.role), ['main', 'main', 'main', 'main', 'planner', 'main', 'main'])
+    const look = h.client.requests[4]
+    assert.deepEqual([look.tool, look.payload.tools.length, look.payload.system[0].text], ['StuckSteps', 0, CONSULT_SYSTEM])
+    const prompt = JSON.stringify(look.payload.messages)
+    assert.match(prompt, /1\. rename a to c/)
+    assert.match(prompt, /What went wrong, as eNCode saw it: the same `Edit` call failed twice/)
+    assert.match(prompt, /Call Edit: \{.*const b/)
+    assert.match(prompt, /const d.*\\n\\nFailed: src\/a\.ts: old_string was not found/, 'with the results of the step it saw last')
+    assert.ok(reminders(h).some((text) => text.includes(`claude-sonnet-4.5 read your last steps. It says:\n\n${ADVICE}\n\nIt saw only those steps`)))
+    assert.ok(h.surface.notices().includes('claude-sonnet-4.5 read the last steps and said how to get past them; deepseek-chat goes on.'))
+  })
+
+  it('after two more setbacks, asks whether it may do the rest of the request, held to the gates afresh', async () => {
+    const h = await harness({ plot: 'takeover' })
     await h.run('rename a to c')
-    const asked = h.surface.approvals.filter((prompt) => prompt.tool === 'StrongerModel')
-    assert.equal(asked.length, 1)
-    assert.equal(asked[0].title, 'Let claude-sonnet-4.5 take over this request?')
-    assert.match(asked[0].detail, /^deepseek-chat ran into trouble twice in this request: the same `Edit` call failed twice; and `Edit` failed twice on a\.ts\./)
-    assert.match(asked[0].detail, /It costs \$3\.00 per million tokens read and \$15\.00 written, against \$0\.28 and \$0\.42 for deepseek-chat\.$/)
-    assert.equal(asked[0].grant, 'StrongerModel', 'the person may allow it for the session')
+    const [offer] = asked(h, 'StrongerModel')
+    assert.equal(asked(h, 'StrongerModel').length, 1)
+    assert.equal(offer.title, 'Let claude-sonnet-4.5 take over this request?')
+    assert.match(offer.detail, /^deepseek-chat ran into trouble again in this request: 3 `Edit` calls each failed twice; and `Edit` failed twice on a\.ts\./)
+    assert.match(offer.detail, /It costs \$3\.00 per million tokens read and \$15\.00 written, against \$0\.28 and \$0\.42 for deepseek-chat\.$/)
+    assert.equal(offer.grant, 'StrongerModel')
     assert.deepEqual(
       h.client.requests.map((request) => request.role),
-      ['main', 'main', 'main', 'main', 'planner', 'planner'],
-      'from the step after the second setback',
+      ['main', 'main', 'main', 'main', 'planner', 'main', 'main', 'main', 'main', 'planner', 'planner'],
+      'its look after the second setback, and the rest from the step after the fourth',
     )
-    assert.ok(reminders(h).some((text) => text.includes('A stronger model does the rest of this request: deepseek-chat ran into trouble twice.')))
-    assert.ok(h.surface.notices().includes('claude-sonnet-4.5 does the rest of this request: deepseek-chat ran into trouble twice.'))
+    assert.ok(reminders(h).some((text) => text.includes('A stronger model does the rest of this request: deepseek-chat kept running into trouble.')))
+    assert.ok(h.surface.notices().includes('claude-sonnet-4.5 does the rest of this request: deepseek-chat ran into trouble again.'))
   })
 
   it('goes back to the agent’s own model for the next request', async () => {
-    const h = await harness()
+    const h = await harness({ plot: 'takeover' })
     await h.run('rename a to c')
     const before = h.client.requests.length
     await h.run('thanks')
     assert.equal(h.client.requests[before].role, 'main')
   })
 
-  it('keeps going with the model in use on no, and passes on what the person said', async () => {
-    const h = await harness({ decide: { approved: false, note: 'Try reading the file again.' } })
+  it('keeps going with the model in use on no, passes on what the person said, and offers nothing more in the request', async () => {
+    const h = await harness({ plot: 'declined', decide: { approved: false, note: 'Try reading the file again.' } })
     await h.run('rename a to c')
     assert.ok(h.client.requests.every((request) => request.role === 'main'))
+    assert.deepEqual([asked(h, 'StrongerAdvice').length, asked(h, 'StrongerModel').length], [1, 0])
     assert.ok(h.surface.notices().includes('deepseek-chat keeps going with this request.'))
     assert.ok(reminders(h).some((text) => text.includes('said: Try reading the file again.')))
   })
 
   it('never asks when turned off, for a strong model, or with no strong model of another role', async () => {
-    const off = await harness({ offerStronger: 'off' })
+    const off = await harness({ offerStronger: 'off', plot: 'declined' })
     await off.run('rename a to c')
-    const strong = await harness({ main: 'gpt-5' })
+    const strong = await harness({ main: 'gpt-5', plot: 'declined' })
     await strong.run('rename a to c')
-    const none = await harness({ roles: { planner: 'qwen/qwen3-coder' } })
+    const none = await harness({ roles: { planner: 'qwen/qwen3-coder' }, plot: 'declined' })
     await none.run('rename a to c')
-    for (const h of [off, strong, none]) assert.equal(h.surface.approvals.filter((prompt) => prompt.tool === 'StrongerModel').length, 0)
+    for (const h of [off, strong, none]) assert.equal(h.surface.approvals.filter((prompt) => prompt.tool.startsWith('Stronger')).length, 0)
     const reviewer = await harness({ roles: { reviewer: STRONG } })
     await reviewer.run('rename a to c')
-    assert.equal(reviewer.client.requests.at(-1)?.role, 'reviewer', "the Review role's strong model when Plan has none")
+    assert.ok(reviewer.client.requests.some((request) => request.role === 'reviewer' && request.tool === 'StuckSteps'), "the Review role's strong model when Plan has none")
   })
 
   it("counts the checks sending the work back, and the stronger model's work is checked again", async () => {
     const ran: string[] = []
     const failing = { output: '✖ adds (1ms)\n\nnot ok', exitCode: 1 }
-    const answers = [failing, failing, { output: '✔ adds (1ms)', exitCode: 0 }]
+    const answers = [failing, failing, failing, failing, { output: '✔ adds (1ms)', exitCode: 0 }]
     const shell = (root: string): AgentShell => ({
       ...stubShell(root),
       run: async (command) => {
@@ -224,18 +288,31 @@ describe('a stronger model after two setbacks', () => {
     })
     const write = (root: string, content: string) => ({ calls: [{ name: 'Write', input: { file_path: path.join(root, 'src', 'a.ts'), content } }] })
     const h = await loopHarness({
-      scriptFor: (root) => [write(root, 'export const a = 1\n'), { text: 'Done.' }, write(root, 'export const a = 2\n'), { text: 'Done.' }, write(root, 'export const a = 3\n'), { text: 'Fixed.' }],
+      scriptFor: (root) => [
+        write(root, 'export const a = 1\n'),
+        { text: 'Done.' },
+        write(root, 'export const a = 2\n'),
+        { text: 'Done.' },
+        { text: ADVICE },
+        write(root, 'export const a = 3\n'),
+        { text: 'Done.' },
+        write(root, 'export const a = 4\n'),
+        { text: 'Done.' },
+        write(root, 'export const a = 5\n'),
+        { text: 'Fixed.' },
+      ],
       shell,
       services: { checks: { list: async () => [{ command: 'npm test', kind: 'test' as const, source: 'package.json' }], ledger: new CheckLedger() } },
       client: { model: 'deepseek/deepseek-chat' },
-      settings: { offerStronger: 'ask' },
+      settings: { offerStronger: 'ask', checkGate: 'on' },
     })
     const budget = h.client.budget.bind(h.client)
     h.client.budget = async (role, query) => (role === 'planner' ? { ...(await budget(role, query)), model: STRONG } : budget(role, query))
     const end = await h.run('make the sum right')
     assert.deepEqual(end, { kind: 'done', reply: 'Fixed.' })
-    assert.equal(ran.length, 3, 'the checks ran after the stronger model changed the file too')
-    assert.match(h.surface.approvals.find((prompt) => prompt.tool === 'StrongerModel')?.detail ?? '', /ran into trouble twice in this request: the project's checks failed after its changes, twice\./)
-    assert.deepEqual(h.client.requests.map((request) => request.role), ['main', 'main', 'main', 'main', 'planner', 'planner'])
+    assert.equal(ran.length, 5, 'the checks ran after the stronger model changed the file too')
+    assert.match(asked(h, 'StrongerAdvice')[0]?.detail ?? '', /ran into trouble twice in this request: the project's checks failed after its changes, twice\./)
+    assert.match(asked(h, 'StrongerModel')[0]?.detail ?? '', /ran into trouble again in this request: the project's checks failed after its changes, 4 times\./)
+    assert.deepEqual(h.client.requests.map((request) => request.role), ['main', 'main', 'main', 'main', 'planner', 'main', 'main', 'main', 'main', 'planner', 'planner'])
   })
 })

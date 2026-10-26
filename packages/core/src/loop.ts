@@ -110,7 +110,7 @@ import { cacheKeyOf, type CacheClock } from './cache-hints'
 import { isEditMiss, keepingMore, type ContextSignal, type ContextWatch } from './context-signals'
 import { paysEveryToken, rewritePays, shorteningPolicy, stepsAhead, type Recency, type ShorteningPolicy } from './shortening'
 import { EditDiagnostics, STEP_WAIT_MS } from './edit-diagnostics'
-import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
+import { CHECK_ROUNDS, CHECK_TIMEOUT_MS, checksReminder, regression, sameCommand, STEP_CHECK_MS, STEP_CHECKS, stepChecksReminder, testsFirstReminder, type ProjectCheck, type ProjectChecks } from './checks'
 import { claimsReminder, fileHolds, firstExisting, handBack, handBackReminder, missingFiles, missingName, nameClaims, pathsIn, resolveIn, successClaims, unrunClaim } from './claims'
 import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFinding } from './diff-scan'
 import { describeError, detailsOf, plainError } from './problems'
@@ -121,7 +121,8 @@ import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completi
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
 import { FailedCalls, mendedNote } from './repeats'
-import { CHANGE_TOOLS, helpsSmaller, saidWhatChanges, Setbacks, shortModel, SMALLER_MODEL_PART, STRONGER_AFTER, STRONGER_ROLES, strongerPrompt, takeOverNote, THINK_FIRST, type SentBack } from './smaller'
+import { lookUpNote, unknownIn } from './unknown'
+import { CHANGE_TOOLS, CONSULT_STEPS_CHARS, CONSULT_SYSTEM, CONSULT_TOKENS, consultCost, consultNote, consultOffer, consultPrompt, helpsSmaller, recentSteps, saidWhatChanges, Setbacks, shortModel, SMALLER_MODEL_PART, STRONGER_AFTER, STRONGER_ROLES, strongerPrompt, takeOverNote, THINK_FIRST, type SentBack } from './smaller'
 import { withoutImagesFrom } from './screens'
 import type { AutoReviewer } from './reviewer'
 import { formatFindings, isCodePath, scanHunks, scanText, warningNote } from './scan'
@@ -302,6 +303,14 @@ const SECOND_LOOK_TOKENS = 4_000
 const CONVENTIONS_TIMEOUT_MS = 30_000
 const CONVENTIONS_TOKENS = 2_000
 const MAX_LESSONS = 5
+/** How long the stronger model may take over the stuck steps (ADR 0140). */
+const CONSULT_TIMEOUT_MS = 2 * 60_000
+/** Notes on what a failed command named that was not there, in one request (ADR 0140). */
+const MAX_LOOK_UPS = 3
+
+/** The items of a task list marked done, by their words. */
+const doneItems = (todos: readonly TodoItem[]) => todos.filter((todo) => todo.status === 'completed').map((todo) => todo.text)
+
 /** A command stopped for its time limit or interrupted: it says nothing of the code. */
 const ENDED_EARLY = /The command ran longer than \d+ s and was stopped\.|The command was interrupted\./
 
@@ -472,6 +481,8 @@ export class AgentLoop {
   /** Once a request (ADR 0100): the first change was looked at; the person was asked about a stronger model; the role whose model took over. */
   private changeSeen = false
   private strongerAsked = false
+  /** This request's stronger model read its last steps, or was asked to (ADR 0140). */
+  private consulted = false
   private stronger: ModelRole | undefined
   private readonly approvedApps: Set<string>
   /** Errors after every edit, and the gate at the end of a turn; only where language servers run. */
@@ -507,6 +518,15 @@ export class AgentLoop {
   private wroteTest = false
   /** Once a request (ADR 0139): test files the person said to leave alone were sent back. */
   private testsKeptAsked = false
+  /**
+   * The checks after a step of the task list is done (ADR 0140): the items already done, the runs in this request, and
+   * the checks too slow to run then, for the session.
+   */
+  private doneTodos = new Set<string>()
+  private stepChecks = 0
+  private readonly slowChecks = new Set<string>()
+  /** What this request's failed commands named that was not there, each told once (ADR 0140). */
+  private readonly unknowns = new Set<string>()
   /** What the request taught (ADR 0097): commands that failed and what worked after; whether it ended on an answer and was offered. */
   private lessons: Lesson[] = []
   private answered = false
@@ -586,7 +606,11 @@ export class AgentLoop {
     this.setbacks.clear()
     this.changeSeen = false
     this.strongerAsked = false
+    this.consulted = false
     this.stronger = undefined
+    this.doneTodos = new Set(doneItems(o.todos?.() ?? []))
+    this.stepChecks = 0
+    this.unknowns.clear()
     if (this.gated) o.services.checks?.ledger.startRequest()
     this.checkRounds = 0
     this.checksRefused = false
@@ -697,6 +721,12 @@ export class AgentLoop {
           state.context.push(found)
           light = false
         }
+        // The language servers' errors come first: the checks would only say them again.
+        const checked = await this.stepCheck(calls, { ...turn, mode: state.mode ?? mode }, state, Boolean(found))
+        if (checked) {
+          state.context.push(checked)
+          light = false
+        }
         // A model that finishes with attempt_completion is held to what one that just stops talking is.
         if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
           const sent = (await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)) ?? this.staleTodos()
@@ -707,7 +737,7 @@ export class AgentLoop {
           }
         }
         if (state.stop === undefined) {
-          const took = await this.offerStronger(turn)
+          const took = await this.offerStronger(turn, calls.map((call) => state.results.get(call.id) ?? failed(call.id, NOT_RUN)))
           if (took) {
             state.context.push(took)
             light = false
@@ -1646,6 +1676,8 @@ export class AgentLoop {
     if (prepared.fixes.length) content = [...content, textBlock(mendedNote(prepared.fixes))]
     const again = own ? undefined : this.failures.record(block.name, block.input, isError ? textOf(content) : undefined)
     if (again) content = [...content, textBlock(again)]
+    const lookUp = !own && isError && block.name === 'Bash' && typeof input.command === 'string' ? this.lookUp(input.command, output) : undefined
+    if (lookUp) content = [...content, textBlock(lookUp)]
     if (!own) this.setbacks.call(block.name, block.input, isError ? textOf(content) : undefined)
     const back = own ? undefined : this.watch()?.called(block.name, block.input, o.services.cwd?.() ?? o.services.root)
     if (back) this.signal(back)
@@ -1907,13 +1939,67 @@ export class AgentLoop {
     return null
   }
 
+  /**
+   * When a step marks an item of the task list done, after code changed in the request (ADR 0140): the project's checks
+   * that have not run since the last change run then, not only before the agent finishes, so a slip comes back one step
+   * old. Only new failures go back. At most STEP_CHECKS times a request, and a check that takes longer than
+   * STEP_CHECK_MS is left to the end of the request from then on. Not after a step whose edits the language servers
+   * already found errors in (`quiet`).
+   */
+  private async stepCheck(calls: readonly ToolUseBlock[], turn: Turn, state: StepState, quiet: boolean): Promise<string | null> {
+    const { o } = this
+    if (!calls.some((call) => call.name === 'TodoWrite' && state.results.get(call.id)?.isError !== true)) return null
+    const done = doneItems(o.todos?.() ?? [])
+    const fresh = done.filter((item) => !this.doneTodos.has(item))
+    for (const item of done) this.doneTodos.add(item)
+    const checks = o.services.checks
+    if (!fresh.length || quiet || !this.gated || turn.mode !== 'code' || this.checksRefused || this.stepChecks >= STEP_CHECKS) return null
+    if ((o.settings().checkGate ?? 'auto') === 'off' || !checks?.ledger.changedInRequest) return null
+    const list = await checks.list().catch(() => [] as ProjectCheck[])
+    const due = list.filter((check) => !this.slowChecks.has(sameCommand(check.command)) && !checks.ledger.current(check.command))
+    if (!due.length) return null
+    this.stepChecks++
+    for (const check of due) {
+      const ran = await this.runCheck(check, turn, STEP_CHECK_MS)
+      if (ran.kind === 'refused') {
+        this.checksRefused = true
+        return null
+      }
+      if (ran.kind === 'unfinished') {
+        this.slowChecks.add(sameCommand(check.command))
+        o.surface.settle(o.surface.entry({ kind: 'notice', text: `\`${check.command}\` takes longer than ${STEP_CHECK_MS / 1000} s, so eNCode runs it only before the agent finishes.` }))
+        continue
+      }
+      const run = checks.ledger.current(check.command)
+      if (!run || run.ok) continue
+      const compared = regression(run, checks.ledger.before(check.command))
+      if (!compared) continue
+      o.surface.settle(o.surface.entry({ kind: 'notice', text: `\`${check.command}\` failed after the agent ticked off a step of its task list, so it looks at that now.` }))
+      return stepChecksReminder({ step: fresh.at(-1)!, check, output: ran.output, compared: compared.text })
+    }
+    return null
+  }
+
+  /**
+   * A failed command that named something not there (ADR 0140): a program, an option, a script, a module or a name of
+   * a library. Its result says how to look up what is there, once a request for each, at most MAX_LOOK_UPS times.
+   */
+  private lookUp(command: string, output: string): string | undefined {
+    const found = this.unknowns.size < MAX_LOOK_UPS ? unknownIn(command, output) : undefined
+    if (!found) return undefined
+    const key = `${found.kind}\u0000${found.program ?? found.owner ?? ''}\u0000${found.name}`
+    if (this.unknowns.has(key)) return undefined
+    this.unknowns.add(key)
+    return lookUpNote(found, { platform: this.o.services.platform, codeMap: this.o.registry.has('CodeMap') && (!this.o.tools || this.o.tools.includes('CodeMap')) })
+  }
+
   /** Runs one check as a Bash call of eNCode's own: the same rules, approval, sandbox and hooks as the agent's commands. */
-  private async runCheck(check: ProjectCheck, turn: Turn): Promise<{ kind: 'refused' } | { kind: 'unfinished' } | { kind: 'ran'; output: string }> {
+  private async runCheck(check: ProjectCheck, turn: Turn, timeout = CHECK_TIMEOUT_MS): Promise<{ kind: 'refused' } | { kind: 'unfinished' } | { kind: 'ran'; output: string }> {
     const block: ToolUseBlock = {
       type: 'tool-use',
       id: `encode_check_${++this.checkRuns}`,
       name: 'Bash',
-      input: { command: check.command, description: `Check the changes: ${check.kind === 'typecheck' ? 'typecheck' : 'tests'}`, timeout: CHECK_TIMEOUT_MS },
+      input: { command: check.command, description: `Check the changes: ${check.kind === 'typecheck' ? 'typecheck' : 'tests'}`, timeout },
     }
     const state: StepState = { results: new Map(), context: [] }
     const prepared = await this.prepare(block, turn, state, true)
@@ -1989,12 +2075,15 @@ export class AgentLoop {
 
   /**
    * After two setbacks in a request of a smaller model (ADR 0100): when the Plan or Review role has a strong model of
-   * its own, the person is asked whether it may do the rest of the request. It costs more, so it is never done unasked;
-   * an answer for the session counts for every later request of it. Returns what the model is told, or null.
+   * its own, the person is asked whether it may read the last steps and say how to get past them (ADR 0140); after two
+   * more, whether it may do the rest of the request. Each costs more, so neither is done unasked; an answer for the
+   * session counts for every later request of it. `pending` is the step's results, not yet in the conversation.
+   * Returns what the model is told, or null.
    */
-  private async offerStronger(turn: Turn): Promise<string | null> {
+  private async offerStronger(turn: Turn, pending: readonly UserBlock[] = []): Promise<string | null> {
     const { o } = this
-    if (o.agentId !== 'main' || this.stronger || this.strongerAsked || this.setbacks.count < STRONGER_AFTER) return null
+    const needed = this.consulted ? STRONGER_AFTER * 2 : STRONGER_AFTER
+    if (o.agentId !== 'main' || this.stronger || this.strongerAsked || this.setbacks.count < needed) return null
     if ((o.settings().offerStronger ?? 'ask') === 'off') return null
     const from = await this.workingModel()
     if (isStrongModel(from)) return null
@@ -2007,10 +2096,11 @@ export class AgentLoop {
       }
     }
     if (!offer) return null
+    if (!this.consulted) return this.consult(offer, from, turn, pending)
     this.strongerAsked = true
     const current = await o.client.budget(o.role, this.query()).catch(() => undefined)
     const prompt = strongerPrompt({ from, to: offer.budget, role: offer.role, reasons: this.setbacks.reasons, ...(current?.price && current.model === from ? { price: current.price } : {}) })
-    const notice = o.surface.entry({ kind: 'notice', text: `${shortModel(from)} ran into trouble twice in this request.` })
+    const notice = o.surface.entry({ kind: 'notice', text: `${shortModel(from)} ran into trouble again in this request.` })
     const answer = await o.surface.approve(
       { entryId: notice.id, tool: 'StrongerModel', title: prompt.title, detail: prompt.detail, input: { model: offer.budget.model, role: offer.role }, grant: 'StrongerModel' },
       turn.signal,
@@ -2025,7 +2115,7 @@ export class AgentLoop {
       return answer.note ? `The person, asked whether a stronger model should take over, said: ${answer.note}` : null
     }
     this.stronger = offer.role
-    notice.text = `${shortModel(offer.budget.model)} does the rest of this request: ${shortModel(from)} ran into trouble twice.`
+    notice.text = `${shortModel(offer.budget.model)} does the rest of this request: ${shortModel(from)} ran into trouble again.`
     o.surface.settle(notice)
     // Its work is held to the finish gates afresh.
     this.checkRounds = 0
@@ -2033,6 +2123,57 @@ export class AgentLoop {
     this.reviewed = false
     this.edits?.freshGate()
     return takeOverNote(from)
+  }
+
+  /**
+   * The first offer after two setbacks (ADR 0140): the stronger model reads the request's last steps, in one call
+   * without tools, and says what is going wrong and how to get past it; the agent goes on with what it says.
+   */
+  private async consult(offer: { role: ModelRole; budget: Awaited<ReturnType<ModelClient['budget']>> }, from: string, turn: Turn, pending: readonly UserBlock[]): Promise<string | null> {
+    const { o } = this
+    this.consulted = true
+    const to = shortModel(offer.budget.model)
+    const messages: Message[] = pending.length ? [...o.conversation.messages(), { role: 'user', content: [...pending] }] : [...o.conversation.messages()]
+    const prompt = consultPrompt({ requests: o.requests?.() ?? [], reasons: this.setbacks.reasons, todos: o.todos?.() ?? [], steps: recentSteps(messages, CONSULT_STEPS_CHARS) })
+    const cost = consultCost(offer.budget, CONSULT_SYSTEM.length + prompt.length)
+    const card = consultOffer({ from, to: offer.budget, role: offer.role, reasons: this.setbacks.reasons, ...(cost !== undefined ? { cost } : {}) })
+    const notice = o.surface.entry({ kind: 'notice', text: `${shortModel(from)} ran into trouble twice in this request.` })
+    const answer = await o.surface.approve(
+      { entryId: notice.id, tool: 'StrongerAdvice', title: card.title, detail: card.detail, input: { model: offer.budget.model, role: offer.role }, grant: 'StrongerAdvice' },
+      turn.signal,
+    )
+    if (turn.signal.aborted) {
+      o.surface.settle(notice)
+      this.checkAbort(turn.signal)
+    }
+    if (!answer.approved) {
+      // The person chose to go on as it is: nothing more is offered in this request.
+      this.strongerAsked = true
+      notice.text = `${shortModel(from)} keeps going with this request.`
+      o.surface.settle(notice)
+      return answer.note ? `The person, asked whether a stronger model should look at what is going wrong, said: ${answer.note}` : null
+    }
+    notice.text = `${to} reads the last steps.`
+    const reply = await askReviewer(o.client, {
+      system: CONSULT_SYSTEM,
+      prompt,
+      tool: 'StuckSteps',
+      role: offer.role,
+      maxOutputTokens: CONSULT_TOKENS,
+      ...(o.services.sessionId ? { sticky: o.services.sessionId } : {}),
+      signal: turn.signal,
+      timeoutMs: CONSULT_TIMEOUT_MS,
+    })
+    if (!reply.ok || !reply.text.trim()) {
+      notice.text = `${to} could not answer${reply.ok ? '' : `: ${lowerFirst(reply.why.replace(/\.$/, ''))}`}, so ${shortModel(from)} goes on.`
+      o.surface.settle(notice)
+      this.checkAbort(turn.signal)
+      return null
+    }
+    o.surface.usage(reply.usage, reply.model)
+    notice.text = `${to} read the last steps and said how to get past them; ${shortModel(from)} goes on.`
+    o.surface.settle(notice)
+    return consultNote(offer.budget.model, reply.text)
   }
 
   /**

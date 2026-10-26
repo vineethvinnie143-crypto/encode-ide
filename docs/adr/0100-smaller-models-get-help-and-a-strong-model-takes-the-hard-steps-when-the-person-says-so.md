@@ -1,6 +1,6 @@
 # 0100. Smaller models get help, and a strong model takes the hard steps when the person says so
 
-- Status: Accepted, builds on 0052, 0094, 0095, 0096 and 0099
+- Status: Accepted, builds on 0052, 0094, 0095, 0096 and 0099; amended by 0140
 - Date: 2026-10-24
 
 ## Context

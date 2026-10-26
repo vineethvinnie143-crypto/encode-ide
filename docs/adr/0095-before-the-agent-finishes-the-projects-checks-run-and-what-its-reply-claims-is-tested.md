@@ -1,6 +1,6 @@
 # 0095. Before the agent finishes, the project's checks run, and what its reply claims is tested
 
-- Status: Accepted, builds on 0073 and 0093
+- Status: Accepted, builds on 0073 and 0093; amended by 0140
 - Date: 2026-10-24
 
 ## Context

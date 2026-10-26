@@ -341,12 +341,17 @@ const SCENARIOS = {
     { text: 'Added src/planned.ts.' },
   ],
   // Two setbacks: the same edit that matches nothing, twice, and another to the same file. eNCode asks whether the Plan
-  // role's strong model may finish the request; the smoke says yes, and that model answers (ADR 0100).
+  // role's strong model may read the steps (ADR 0140); the smoke says yes, and it answers. Two more setbacks, and eNCode
+  // asks whether that model may finish the request; the smoke says yes, and that model answers (ADR 0100).
   stronger: [
     { text: 'Reading it.', call: { name: 'Read', args: { file_path: 'src/utils.ts' } } },
     { text: 'Changing it.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + c', new_string: 'return a + b' } } },
     { text: 'Again.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + c', new_string: 'return a + b' } } },
     { text: 'Another way.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + d', new_string: 'return a + b' } } },
+    { text: 'Trying what it said.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + e', new_string: 'return a + b' } } },
+    { text: 'Again.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + e', new_string: 'return a + b' } } },
+    { text: 'Once more.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + f', new_string: 'return a + b' } } },
+    { text: 'Again.', call: { name: 'Edit', args: { file_path: 'src/utils.ts', old_string: 'return a + f', new_string: 'return a + b' } } },
     { text: 'src/utils.ts has no such line to change; it already reads as asked, so nothing was changed.' },
   ],
   // A long answer streamed slowly enough (about 25 pieces a second) to be stopped halfway, for Esc twice.
@@ -452,11 +457,12 @@ let lastReviewer = null
 let lastCodeReview = null
 let lastCompletionReview = null
 let lastSecondLook = null
+let lastStuckSteps = null
 let lastConventions = null
 let lastBestOf = null
 /** The latest suggestion asked for as you type, for the smoke to check what was sent. */
 let lastInline = null
-const stats = { closingRequests: 0, summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, conventionRequests: 0, bestOfRequests: 0 }
+const stats = { closingRequests: 0, summaryRequests: 0, titleRequests: 0, overflowRefusals: 0, invalidTranscripts: 0, reviewerRequests: 0, codeReviews: 0, completionReviews: 0, inlineRequests: 0, secondLooks: 0, stuckSteps: 0, conventionRequests: 0, bestOfRequests: 0 }
 /**
  * How the retry-check script fails until the smoke says otherwise (POST /__fail/<mode>): 'auth' refuses the key with
  * a provider's usual JSON, a key-shaped string in it; 'empty' sends replies with nothing in them; 'off' answers.
@@ -532,6 +538,7 @@ const LANGUAGE_SERVER_NEWS = [
   'Before you finish: your changes this turn left errors',
   'The Reviewer read your changes before the person sees them',
   'A stronger model does the rest of this request',
+  'You ran into trouble more than once, so',
   'The conversation was just compacted to fit the context window',
   'That was the last step this request may take',
   'Before you finish: the task list the person sees',
@@ -706,6 +713,11 @@ function completionReviewAnswer(user) {
   })}\n\`\`\``
 }
 
+/** A stronger model's look at the steps of a stuck agent (ADR 0140): the requests, what went wrong, the steps, no tools. */
+const STUCK_STEPS = 'You are a senior engineer helping a coding agent that is stuck.'
+const isStuckSteps = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(STUCK_STEPS))
+const STUCK_ADVICE = 'src/utils.ts has no `return a + c`: the Edit copies a line the file does not have.\n\n1. Read src/utils.ts again.\n2. Copy the line it has into old_string.'
+
 /** The second look before a hard-to-undo command (ADR 0097): the requests, the command and why, no tools. */
 const SECOND_LOOK = 'A coding agent is about to run a shell command that cannot easily be undone.'
 const isSecondLook = (messages) => messages.some((message) => message.role === 'system' && textOf(message.content).includes(SECOND_LOOK))
@@ -824,6 +836,10 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, lastSecondLook)
       return
     }
+    if (request.url === '/__last-stuck-steps') {
+      sendJson(response, 200, lastStuckSteps)
+      return
+    }
     if (request.url === '/__last-conventions') {
       sendJson(response, 200, lastConventions)
       return
@@ -933,6 +949,14 @@ document.getElementById('greet').addEventListener('click', () => {
       const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
       lastSecondLook = { model: body.model ?? null, tools: body.tools ?? [], user }
       await sendText(response, body, secondLookAnswer(user))
+      return
+    }
+
+    if (isStuckSteps(messages)) {
+      stats.stuckSteps += 1
+      const user = messages.filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n')
+      lastStuckSteps = { model: body.model ?? null, tools: body.tools ?? [], user }
+      await sendText(response, body, STUCK_ADVICE)
       return
     }
 
