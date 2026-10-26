@@ -377,6 +377,8 @@ export function runHostRuntime(port: Port, options: HostRuntimeOptions = {}): Ho
       workspace: init.workspace,
       // eNCode's profile is off limits to the agent; its commands keep the sandbox's temp folder in it.
       ...(privateFolders.length ? { offLimits: { folders: privateFolders, except: sandbox?.ownFolders() ?? [] } } : {}),
+      // The agent's scratch folders lie in the sandbox's temp folder, so that its commands may use them in it.
+      ...(sandbox ? { scratch: sandbox.scratchFolder() } : {}),
       client,
       settings: () => agentSettings(config!),
       emit: (event) => peer.notify('event', event),

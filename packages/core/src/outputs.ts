@@ -32,8 +32,8 @@ export interface OutputStoreOptions {
 
 const MB = 1024 * 1024
 const DAY = 24 * 60 * 60 * 1000
-/** Session ids are the store's own; anything else is never made into a folder. */
-const SESSION_ID = /^[\w.-]{1,200}$/
+/** Session ids are the store's own; anything else, `.` and `..` among them, is never made into a folder. */
+const SESSION_ID = /^(?!\.+$)[\w.-]{1,200}$/
 /** How often a long-running app looks for folders to remove, besides when there is no room. */
 const TIDY_EVERY_MS = DAY
 

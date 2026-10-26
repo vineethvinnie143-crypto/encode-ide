@@ -331,7 +331,7 @@ describe('reports', () => {
 
   test('says how many tasks passed on every run, and where the tokens went', () => {
     const text = formatReport(report('m', [run('a', 'passed', { cacheWriteTokens: 1_000, reasoningTokens: 200 }), run('a', 'failed'), run('b', 'passed'), run('b', 'passed')]))
-    assert.match(text, /Every run passed: 1 of 2 tasks \(pass\^2\)/)
+    assert.match(text, /Tasks that passed on every run: 1 of 2 \(pass\^2\)/)
     assert.match(text, /Too few runs to tell a change from noise/)
     assert.match(text, /Tokens per run: 10,000 read, 4,000 of them not from the cache, 250 written to it; 500 written, 50 of them reasoning/)
   })

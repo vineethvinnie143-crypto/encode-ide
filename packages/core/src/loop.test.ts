@@ -672,8 +672,8 @@ describe('the context window', () => {
       script: (request) => (request.role === 'summarizer' ? { text: 'SUMMARY' } : { text: 'ok' }),
     })
     for (let i = 0; i < 2; i++) {
-      await h.conversation.add(userText(`question ${i} ${'x'.repeat(7_000)}`), { turnId: `t${i}` })
-      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(7_000)}`)] }, { turnId: `t${i}` })
+      await h.conversation.add(userText(`question ${i} ${'x'.repeat(6_500)}`), { turnId: `t${i}` })
+      await h.conversation.add({ role: 'assistant', content: [textBlock(`answer ${i} ${'y'.repeat(6_500)}`)] }, { turnId: `t${i}` })
     }
     assert.deepEqual(await h.run('and now?'), { kind: 'done', reply: 'ok' })
     assert.deepEqual(h.client.requests.map((request) => request.role), ['main'])

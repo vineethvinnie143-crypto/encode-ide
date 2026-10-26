@@ -115,7 +115,7 @@ say so.
 | [0123](0123-parallel-answers-searches-for-free-and-a-free-tavily-key-is-offered-when-it-cannot.md) | Parallel answers searches for free, and a free Tavily key is offered when it cannot | Accepted, builds on 0058 and 0122 |
 | [0124](0124-a-request-always-ends-with-words-for-the-person-also-at-the-step-limit.md) | A request always ends with words for the person, also at the step limit | Accepted, builds on 0095 and 0109 |
 | [0125](0125-what-the-agent-waits-on-is-shown-and-the-task-list-moves-with-the-work.md) | What the agent waits on is shown, and the task list moves with the work | Accepted, builds on 0116 and 0124 |
-| [0126](0126-the-agent-tells-its-work-and-checks-the-outcome-itself.md) | The agent tells its work, and checks the outcome itself | Accepted, builds on 0095, 0116 and 0124 |
+| [0126](0126-the-agent-tells-its-work-and-checks-the-outcome-itself.md) | The agent tells its work, and checks the outcome itself | Accepted, builds on 0095, 0116 and 0124; amended by 0141 |
 | [0127](0127-tester-builds-update-themselves.md) | Tester builds update themselves | Accepted, builds on 0051 |
 | [0128](0128-a-conversation-stays-where-its-cache-is-and-the-usage-page-says-how-much-was-cached.md) | A conversation stays where its cache is, and Usage says how much was cached | Accepted, builds on 0062 and 0094 |
 | [0129](0129-a-cost-change-is-measured-beyond-noise-in-a-small-window-and-by-the-code-it-leaves.md) | A cost change is measured beyond noise, in a small window, and by the code it leaves | Accepted, builds on 0092 |
@@ -130,6 +130,7 @@ say so.
 | [0138](0138-the-command-line-runs-terminal-bench-through-harbor-held-to-a-spending-cap.md) | The command line runs Terminal-Bench through Harbor, held to a spending cap | Accepted, builds on 0092, 0108 and 0137 |
 | [0139](0139-the-tests-are-the-persons-a-declined-command-does-not-end-the-checking-and-the-bench-keeps-what-it-ran.md) | The tests are the person's, a declined command does not end the checking, and the bench keeps what it ran | Accepted, amends 0096 and 0097; builds on 0092, 0135 and 0137 |
 | [0140](0140-checks-run-when-a-step-is-done-a-missing-name-is-looked-up-and-a-stronger-model-first-reads-the-stuck-steps.md) | Checks run when a step is done, a missing name is looked up, and a stronger model first reads the stuck steps | Accepted, amends 0095 and 0100; builds on 0094, 0096 and 0139 |
+| [0141](0141-the-agent-has-a-scratch-folder-for-its-probes-and-tries-the-inputs-around-a-change.md) | The agent has a scratch folder for its probes, and tries the inputs around a change | Accepted, amends 0126; builds on 0063, 0093, 0095, 0100 and 0139 |
 
 ## Template
 

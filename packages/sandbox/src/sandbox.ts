@@ -141,6 +141,11 @@ export class Sandbox {
     return this.platform === 'win32' ? [this.temp, this.cacheRoot] : [this.temp]
   }
 
+  /** Where the agent's scratch folders go (ADR 0141): in the temp folder, so that commands in the sandbox use them too. */
+  scratchFolder(): string {
+    return path.join(this.temp, 'scratch')
+  }
+
   /** The last answer: `unavailable` with "Not checked yet" before `start` has finished. */
   status(): SandboxStatus {
     return { ...this.result }

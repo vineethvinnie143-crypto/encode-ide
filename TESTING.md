@@ -896,6 +896,8 @@ next, and why; each group of steps between two of those is one grey line ("Ran 4
 that opens on a click. Nothing folds when the request ends. Ask it to fix something it can check (a port, a page, a
 command): it should check the result itself, not leave it to you. When its answer still leaves a check to you ("I
 have not tested..."), a note says it goes back once to try that check itself first.
+When it wants to try its fix on a few inputs, it should write the probe or scratch test in its own scratch folder
+(named in the chat's background, outside your project) without asking you, and leave nothing of it in your project.
 
 What is most useful to hear: where it is wrong, where it is slow, where it is confusing, and where it feels worse than
 the tools you use now.

@@ -2691,3 +2691,48 @@ eNCode's own reader and stores the message, pictures included, in the session's 
 | AT5 | Text in a picture or a file steers the agent | What the person attaches is theirs, like what they type; a picture is content to the model, and the permission policy decides what any resulting tool call may do. | Accepted |
 | AT6 | A picture the model cannot see is dropped without a word | The model gets a note in its place and the person is told once which model could not see it. | Mitigated |
 
+
+## The agent's scratch folder
+
+Written with the pull request that gives each session one
+([0141](../adr/0141-the-agent-has-a-scratch-folder-for-its-probes-and-tries-the-inputs-around-a-change.md)).
+
+What is new:
+
+- a folder the agent host makes for each session that has a folder: `<sandbox>/tmp/scratch/<session>` in the desktop
+  app and the command line, `<sessions>/scratch/<session>` where there is no sandbox;
+- the agent's file tools read and write in it without asking, and a command may name it inside eNCode's own folder;
+- what is written there is no change of the project's: no checks, no language server, no earlier version kept.
+
+No new setting, IPC call or rule.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| SC1 | The folder, inside eNCode's profile, opens the rest of it: the agent reads keys or chats through a path that starts in the folder, or swaps the folder for a link to them | Only the session's own folder is excepted from the off-limits folders, and paths are judged on their real paths: `scratch/<id>/../../keys` and a link in the folder's place both resolve outside it and are refused. The folder's path is the store's, never what a link at it leads to. A command's words are judged on where they resolve first; the textual floor takes out a spelling of the folder only when the rest of that word holds no `..`, however quoted. In the sandbox the profile stays hidden; only the temp folder is open again. | Mitigated |
+| SC2 | A file id leads the store out of its folder: `..` or `.` as a session id | Session ids must have the store's shape and are never only dots; the same check now holds for the kept results' store (0093), where `..` passed it before. | Mitigated |
+| SC3 | Writing without asking becomes a way to change the person's files | Only the session's own folder counts. A write elsewhere outside the workspace asks as before; the person's deny rules and Read Only apply in the folder too. A link in the folder that leads into the project is a write to the project, judged and recorded as one. | Mitigated |
+| SC4 | A probe in the folder runs code without the person's say | Writing is free; running is not. A probe runs only as a command, approved, sandboxed and screened like any command. | Mitigated |
+| SC5 | One session's commands read or change another session's probes | Each session's file tools reach only its own folder. In the sandbox the sessions share the temp folder, so a command of one could reach another's folder, as it could the shell's own scripts there. | Accepted |
+| SC6 | What the agent puts there stays on disk: a secret a probe printed into a file | The folder is the owner's only (0700), in the profile; it goes with its session, and when nothing in it changed for a week. | Mitigated |
+
+### Residual risks
+
+- A command that builds the folder's path at run time to climb out of it gets past the textual floor, as for any path
+  in eNCode's folder; the sandbox, where it runs, still hides the profile.
+- On Windows a command outside the sandbox can read the whole profile, as before.
+
+### Verification
+
+- `scratch.test.ts` (core): the folder made at its real path, the owner's only, removed; no folder for `..`, `.` or a
+  path; old folders tidied, open and busy ones kept; a link in its place removed without its target; a write there not
+  asked about, not kept, and running no checks, while a write outside still asks; the agent told of it, writing without
+  asking, the folder going with the session; open inside an off-limits profile whose keys stay refused; an old chat
+  and a copy told of their own folder once.
+- `approval.test.ts`: a command may name the folder and the sandbox's temp folder; `..` out of it, quoted or not, and
+  another folder of the profile are refused.
+- `outputs.test.ts`: `..` is no session id.
+- `apps/cli/src/scratch.test.ts`: from the command line, in the sandbox where there is one, a probe written in the
+  folder imports the project's file, runs, and writes its output there; the project is left as it was.
+- `sandbox.test.ts`: the folder lies in the sandbox's temp folder, which is one of its own.

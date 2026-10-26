@@ -98,6 +98,7 @@ export async function openRuntime(options: RuntimeOptions): Promise<Runtime> {
     warn: options.warn,
     scope: workspaces.scope,
     offLimits: { folders: offLimits, except: sandbox?.ownFolders() ?? [] },
+    ...(sandbox ? { scratch: sandbox.scratchFolder() } : {}),
     // git by absolute path, looked up at each use: a bare `git` could be a git.exe in the project on Windows.
     worktrees: createWorktreeGit({ git: () => searchPath('git', env) }),
     web: createWebAccess(),

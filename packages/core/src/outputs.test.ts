@@ -32,6 +32,9 @@ describe('the store of long tool results', () => {
     assert.equal(path.basename(odd!), 'mcp__srv__get-.._.._.._escape.txt')
     assert.equal(await store.keep('s1', 'Bash-call_1', 'again'), path.join(dir, 's1', 'Bash-call_1-2.txt'), 'never over another')
     assert.equal(await store.keep('../s2', 'Bash-1', 'x'), undefined, 'a session id that is not one of the store’s')
+    assert.equal(await store.keep('..', 'Bash-1', 'x'), undefined, 'nor the folder above')
+    await store.remove('..')
+    assert.ok(await fs.stat(file!), 'nothing above the store is removed')
     assert.equal(store.folder('s1'), path.join(dir, 's1'))
   })
 

@@ -1,6 +1,6 @@
 # 0126. The agent tells its work, and checks the outcome itself
 
-- Status: Accepted, builds on 0095, 0116 and 0124
+- Status: Accepted, builds on 0095, 0116 and 0124; amended by 0141
 - Date: 2026-10-25
 
 ## Context

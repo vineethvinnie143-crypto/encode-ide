@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, describe, test } from 'node:test'
+import { changesBetween, snapshot } from './project'
 import { judgeQuality, lineChanges, oversized, qualityFacts, type QualityFacts } from './quality'
 import type { BenchTask } from './task'
 
@@ -71,6 +72,19 @@ describe('code quality (the plan Q3)', () => {
     assert.deepEqual(got.unparsed, ['lib/broken.js', 'config.json'])
     // gone.js 2, broken.js 1, the test 1, config.json 1 + 1, sum.js 2 + 1, the renamed vendor file 1 + 1.
     assert.equal(got.changedLines, 11)
+  })
+
+  test('counts no file that running the code makes on its own as one the run added', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bench-snapshot-'))
+    dirs.push(root)
+    await fs.writeFile(path.join(root, 'shipping.py'), 'def cost(): return 1\n')
+    const before = await snapshot(root)
+    for (const folder of ['__pycache__', 'tests/__pycache__', '.pytest_cache/v/cache']) await fs.mkdir(path.join(root, ...folder.split('/')), { recursive: true })
+    await fs.writeFile(path.join(root, '__pycache__', 'shipping.cpython-313.pyc'), 'x')
+    await fs.writeFile(path.join(root, 'tests', '__pycache__', 'test_shipping.cpython-313.pyc'), 'x')
+    await fs.writeFile(path.join(root, '.pytest_cache', 'v', 'cache', 'nodeids'), '[]')
+    await fs.writeFile(path.join(root, 'scratch.py'), 'print(1)\n')
+    assert.deepEqual(changesBetween(before, await snapshot(root)), { added: ['scratch.py'], changed: [], removed: [] })
   })
 
   test('leaves a parse unjudged where the program to tell is not here', async () => {

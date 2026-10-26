@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { BUILTIN_SUBAGENT_TYPES, createToolRegistry } from '@encode/tools'
-import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, systemParts } from './prompt'
+import { SHORT_SYSTEM_PROMPT, SYSTEM_PROMPT, environmentReminder, scratchReminder, systemParts } from './prompt'
 
 /** Every request carries the system prompt, so growing it is a decision, not an accident. */
 // ADR 0126 raised it from 5,600: the agent says what it found before each batch, and checks the outcome itself.
 // ADR 0139 raised it from 6,100: a failing test is the spec, and neither a declined command nor a failing check ends the checking.
-const PROMPT_BUDGET_CHARS = 6_450
+// ADR 0141 raised it from 6,450: the inputs around a change are tried too, and probes go in the scratch folder.
+const PROMPT_BUDGET_CHARS = 6_600
 
 const info = { root: '/work/app', platform: 'linux' as const, arch: 'x64', shell: 'bash', cwd: '/work/app', date: '2026-10-22', topLevel: ['src/', 'package.json'] }
 
@@ -52,6 +53,13 @@ describe('the system prompt', () => {
     }
   })
 
+  it('asks for the inputs around a change, and probes in the scratch folder (ADR 0141)', () => {
+    for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) {
+      assert.match(text, /the inputs around the case you changed/)
+      assert.match(text, /scratch folder the environment names, never in the project/)
+    }
+  })
+
   it('keeps the tests as the spec, and the checking going past a declined command or a failing check (ADR 0139)', () => {
     for (const text of [SYSTEM_PROMPT, SHORT_SYSTEM_PROMPT]) {
       assert.match(text, /A failing test is the spec/)
@@ -90,6 +98,13 @@ describe('the environment reminder', () => {
     assert.ok(!environmentReminder(info).includes('Explore'))
     assert.match(environmentReminder({ ...info, explore: { model: 'deepseek/deepseek-v4-flash', share: 0.18 } }), /\n- Explore subagents \(Task with subagent_type Explore\) run on deepseek\/deepseek-v4-flash, at 18% of your model's price: hand them a search that would take several rounds of Grep and Read/)
     assert.match(environmentReminder({ ...info, explore: { model: 'local/qwen', share: 0 } }), /run on local\/qwen, at no cost:/)
+  })
+
+  it('names the scratch folder, and what goes in it (ADR 0141)', () => {
+    assert.ok(!environmentReminder(info).includes('Scratch folder'))
+    const text = environmentReminder({ ...info, scratch: '/data/scratch/s1' })
+    assert.match(text, /\n- Scratch folder: \/data\/scratch\/s1\n {2}Yours, outside the project: writing here needs no asking\. Put probes, throwaway scripts and scratch tests here, never in the project/)
+    assert.match(scratchReminder('/data/scratch/s2'), /^<system-reminder>\nYour scratch folder for this chat:\n- Scratch folder: \/data\/scratch\/s2\n/)
   })
 
   it('keeps that note when the workspace changed', () => {

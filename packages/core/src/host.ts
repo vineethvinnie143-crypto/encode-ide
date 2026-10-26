@@ -39,6 +39,7 @@ import { combineHooks, type AgentHooks } from './hooks'
 import { migrateLegacySessions } from './migrate'
 import { createOutputStore, type OutputStore } from './outputs'
 import { GOAL_CONTINUE_PROMPT } from './prompt'
+import { createScratchStore, type ScratchStore } from './scratch'
 import { AgentSession, type RememberResult, type SessionCheckpoints, type SessionEnding, type SessionEnv } from './session'
 import type { SessionLog } from './session-records'
 import { createSessionStore, type FileSessionStore } from './session-store'
@@ -165,6 +166,11 @@ export interface HostOptions {
   timing?: SessionEnv['timing']
   /** Where results too long for the model are kept whole, a folder for each session (ADR 0093). Default `<dir>/outputs`; false keeps none. */
   outputs?: string | false
+  /**
+   * Where each session's scratch folder is made (ADR 0141): in the sandbox's own folder, so that its commands may use it.
+   * Default `<dir>/scratch`; false gives sessions none.
+   */
+  scratch?: string | false
 }
 
 const NO_SESSION = 'That session does not exist.'
@@ -203,10 +209,13 @@ export class AgentHost {
   private readonly assessor: ShellCommandAssessor
   private readonly desktop: DesktopBroker | undefined
   private readonly outputs: OutputStore | undefined
+  private readonly scratch: ScratchStore | undefined
 
   constructor(private readonly o: HostOptions) {
     this.store = createSessionStore({ dir: o.dir })
     this.outputs = o.outputs === false ? undefined : createOutputStore({ dir: o.outputs ?? path.join(o.dir, 'outputs') })
+    this.scratch = o.scratch === false ? undefined : createScratchStore({ dir: o.scratch ?? path.join(o.dir, 'scratch') })
+    void this.scratch?.tidy((id) => this.loaded.has(id) || this.opening.has(id))
     this.workspaceRoot = o.workspace ?? null
     this.home = o.home ?? os.homedir()
     this.platform = o.platform ?? process.platform
@@ -244,17 +253,18 @@ export class AgentHost {
   /** Real paths of the off-limits folders, found once. */
   private offLimitsReal?: Promise<[string[], string[]]>
 
-  /** What is off limits to a session: eNCode's own folders, but for the session's own results. */
-  private async offLimitsFor(sessionId: string): Promise<OffLimits | undefined> {
+  /** What is off limits to a session: eNCode's own folders, but for the session's own results and scratch folder. */
+  private async offLimitsFor(sessionId: string, scratch?: string): Promise<OffLimits | undefined> {
     const limits = this.o.offLimits
     if (!limits?.folders.length) return undefined
     const real = (folders: readonly string[]) => Promise.all(folders.map((folder) => realPathOf(path.resolve(folder))))
     this.offLimitsReal ??= Promise.all([real(limits.folders), real(limits.except ?? [])])
     const [folders, except] = await this.offLimitsReal
-    return { folders, except: this.outputs ? [...except, await realPathOf(this.outputs.folder(sessionId))] : except }
+    const own = [...(this.outputs ? [await realPathOf(this.outputs.folder(sessionId))] : []), ...(scratch ? [scratch] : [])]
+    return { folders, except: [...except, ...own] }
   }
 
-  private envFor(sessionId: string, root: string, scope?: SessionScope, offLimits?: OffLimits): SessionEnv {
+  private envFor(sessionId: string, root: string, scope?: SessionScope, offLimits?: OffLimits, scratch?: string): SessionEnv {
     const { o } = this
     const beforeWrite = scope?.beforeWrite ?? o.beforeWrite
     return {
@@ -286,6 +296,7 @@ export class AgentHost {
       // What the agent may read without asking besides the workspace: skills, the user's own folder, and the long results kept for this session.
       readRoots: () => [this.userDir, ...this.skillSources(root).map((source) => source.dir), ...(this.outputs ? [this.outputs.folder(sessionId)] : [])],
       ...(this.outputs ? { outputs: this.outputs } : {}),
+      ...(scratch ? { scratch } : {}),
       ...(beforeWrite ? { beforeWrite } : {}),
       ...(o.extraTools ? { extraTools: o.extraTools } : {}),
       ...(this.desktop ? { desktop: (sessionId: string) => this.desktop!.open(sessionId) } : {}),
@@ -315,7 +326,9 @@ export class AgentHost {
         scope = refusing(error)
       }
     }
-    const session = new AgentSession(log, this.envFor(log.id, root, scope, await this.offLimitsFor(log.id)))
+    // Only a session that can run has somewhere to put its probes.
+    const scratch = root ? await this.scratch?.make(log.id) : undefined
+    const session = new AgentSession(log, this.envFor(log.id, root, scope, await this.offLimitsFor(log.id, scratch), scratch))
     this.bornAt.set(session, this.epoch)
     this.loaded.set(log.id, session)
     return session
@@ -502,6 +515,7 @@ export class AgentHost {
       if (session) await this.retire(id, session, 'deleted')
       await this.store.remove(id)
       await this.outputs?.remove(id)
+      await this.scratch?.remove(id)
     }
     this.reportJobs()
   }
@@ -530,6 +544,7 @@ export class AgentHost {
     for (const side of sides) {
       await this.store.remove(side.id)
       await this.outputs?.remove(side.id)
+      await this.scratch?.remove(side.id)
     }
     return sides.length
   }

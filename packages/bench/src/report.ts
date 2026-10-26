@@ -164,7 +164,7 @@ export function formatReport(report: BenchReport): string {
   const { tasks, all } = summarize(report)
   const lines = [`${nameOf(report)}, ${report.startedAt}, ${report.platform}`, '', table([HEADER, ...tasks.map(row), row(all)])]
   const measuredTasks = tasks.filter((summary) => summary.passed + summary.failed > 0).length
-  lines.push('', `Every run passed: ${Math.round(all.passEvery * measuredTasks)} of ${measuredTasks} tasks (pass^${all.fewestRuns})`)
+  lines.push('', `Tasks that passed on every run: ${Math.round(all.passEvery * measuredTasks)} of ${measuredTasks} (pass^${all.fewestRuns})`)
   if (all.fewestRuns < MIN_RUNS) lines.push(`Too few runs to tell a change from noise: run each task ${MIN_RUNS} times or more (--repeat 5).`)
   const { mean } = all
   lines.push(
@@ -275,7 +275,7 @@ export function compareReports(before: BenchReport, after: BenchReport): Compari
   const lines = [`${nameOf(before)} (${before.startedAt}) → ${nameOf(after)} (${after.startedAt})`, '', table(rows), '']
   if (enoughRuns) {
     if (passChange) lines.push(`Pass rate: ${interval(passChange)}`)
-    if (passEveryChange) lines.push(`Every run passed: ${interval(passEveryChange)}`)
+    if (passEveryChange) lines.push(`Tasks that passed on every run: ${interval(passEveryChange)}`)
     if (cleanChange) lines.push(`Passed with clean code: ${interval(cleanChange)}`)
     if (costRatio) lines.push(`Cost per run: ${ratio(costRatio)}`)
   }

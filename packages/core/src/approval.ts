@@ -148,19 +148,36 @@ async function offLimitsIn(access: ToolAccess, context: ApprovalContext): Promis
       return check(access.paths)
     case 'command': {
       const named = await check(wordsAsPaths(access.command, context.shell.dialect, access.cwd, context.home, windows))
-      return named ?? limits.folders.find((folder) => spells(access.command, folder, context, windows))
+      if (named) return named
+      // The folders inside that are the agent's (its scratch folder, the sandbox's temp folder) may be named as they are.
+      const text = limits.except.reduce((left, folder) => withoutSpelling(left, folder, windows), plain(access.command))
+      return limits.folders.find((folder) => spells(text, folder, context, windows))
     }
     default:
       return undefined
   }
 }
 
+/** A path or a command with `/` for every separator, and one for each run of them. */
+const plain = (text: string) => text.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+const quoted = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** A pattern for a path's segments, whatever the separators between them. */
+const steps = (text: string) => plain(text).split('/').filter(Boolean).map(quoted).join('/+')
+/** Where a folder's name ends as a path segment would: `eNCode-dev` is not `eNCode`. */
+const SEGMENT_END = `(?![\\w.-])`
+
+/**
+ * A command's text, plain, without the spellings of `folder` as it is: but where the rest of that word holds `..`,
+ * which could lead out of it, however it is quoted.
+ */
+function withoutSpelling(text: string, folder: string, windows: boolean): string {
+  const source = `${plain(folder).startsWith('/') ? '/' : ''}${steps(folder)}${SEGMENT_END}[^\\s;|&<>()]*`
+  return text.replace(new RegExp(source, windows ? 'gi' : 'g'), (word) => (word.includes('..') ? word : '<own>'))
+}
+
 /** Whether a command's text names `folder`: as it is, from `~`, or from a variable of the shell's that holds a parent of it. */
 function spells(command: string, folder: string, context: ApprovalContext, windows: boolean): boolean {
   const api = windows ? path.win32 : path.posix
-  const plain = (text: string) => text.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
-  const quoted = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const steps = (text: string) => plain(text).split('/').filter(Boolean).map(quoted).join('/+')
   const holds = (parent: string) => {
     const relative = api.relative(parent, folder)
     return parent.length > 3 && !relative.startsWith('..') && !api.isAbsolute(relative)
@@ -169,8 +186,7 @@ function spells(command: string, folder: string, context: ApprovalContext, windo
     const rest = steps(api.relative(parent, folder))
     return rest ? `["']?/+${rest}` : ''
   }
-  // The folder's name ends where a path segment would: `eNCode-dev` is not `eNCode`.
-  const end = `(?![\\w.-])`
+  const end = SEGMENT_END
   const sources = [`${plain(folder).startsWith('/') ? '/' : ''}${steps(folder)}${end}`]
   if (holds(context.home)) sources.push(`~${tail(context.home)}${end}`)
   for (const [name, value] of Object.entries(context.shell.env)) {

@@ -30,6 +30,9 @@ export async function copyProject(task: BenchTask, to: string): Promise<void> {
   }
 }
 
+/** Folders whose contents are no change of the run's: git's, and what running the code makes on its own (Python's byte code, pytest's cache). */
+const NOT_THE_RUNS = new Set(['.git', '__pycache__', '.pytest_cache'])
+
 export async function snapshot(root: string): Promise<Snapshot> {
   const out: Snapshot = new Map()
   const walk = async (dir: string, prefix: string): Promise<void> => {
@@ -44,7 +47,7 @@ export async function snapshot(root: string): Promise<Snapshot> {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name
       const full = path.join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (entry.name !== '.git') await walk(full, relative)
+        if (!NOT_THE_RUNS.has(entry.name)) await walk(full, relative)
       } else if (entry.isSymbolicLink()) {
         out.set(relative, `link:${await fs.readlink(full).catch(() => '')}`)
       } else if (entry.isFile()) {

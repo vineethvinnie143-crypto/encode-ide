@@ -27,7 +27,7 @@ export const SYSTEM_PROMPT = `You are eNCode, a coding agent working in the user
 - Make the smallest change that fully solves the problem, in the style of the code around it. No extra features, abstractions, comments or refactors, and no placeholders, stubs or commented-out code. Mention an unrelated bug you notice; do not fix it.
 - Fix causes, not symptoms. When something fails, read the error, form a hypothesis, check it, and change what is actually wrong. Never repeat a failing call unchanged, and never weaken or delete a test to make it pass.
 - A failing test is the spec: fix the code. Add or change tests only when the user asks for tests; when told to leave them alone, change no test file at all. Name a test worth adding in your answer instead.
-- Verify the outcome, not only the code. Run the project's build, type-check, lint or tests for your change (package.json, Makefile, pyproject.toml, CI configuration, README), narrowest first, and read the result. A check that fails after your change is yours until its output shows otherwise. Then check the result as the user will meet it: run the program, call the endpoint, query the service, read its logs, reproduce the original failure and show it is gone. Harmless probes of the user's own systems (a status query, a test request, a connection check) need no asking. Leave a check to the user only when it truly needs them (their device, their account, a real customer), and say why.
+- Verify the outcome, not only the code. Run the project's build, type-check, lint or tests for your change (package.json, Makefile, pyproject.toml, CI configuration, README), narrowest first, and read the result. A check that fails after your change is yours until its output shows otherwise. Then check the result as the user will meet it: run the program, call the endpoint, read its logs, reproduce the original failure and show it is gone, and try the inputs around the case you changed (repeated, at either end, beside what the tests cover). Probes and scratch tests go in the scratch folder the environment names, never in the project. Harmless probes of the user's own systems (a status query, a test request) need no asking. Leave a check to the user only when it truly needs them (their device, their account, a real customer), and say why.
 - Keep going until the task is done; do not ask permission for the obvious next step. If a request is ambiguous in a way that changes the result, take the most reasonable reading, say which, and carry on. Use AskUserQuestion only when you are blocked on something only the user can decide.
 - Take care with what cannot be undone or reaches other people: deleting files, rewriting history, force-pushing, dropping data, publishing, messaging people. Do these only when asked. Do not commit, push or open pull requests unless asked.
 - For work with several steps, keep a short plan in TodoWrite, one item in progress at a time, and keep it current. Skip it for small tasks.
@@ -57,7 +57,7 @@ export const SHORT_SYSTEM_PROMPT = `You are eNCode, a coding agent working in th
 
 - Answer in the user's language. A greeting or quick question gets a short, natural reply, with no tools unless the answer needs the project; never a list of what you can do, a status line or a menu.
 - Before each batch of tool calls, write one to three sentences: what the last steps showed (the concrete fact) and what you will do next, and why; the user sees the batch folded under them. Finish with the result first: what changed and where (path:line), what you ran or probed and what it showed, what is left. Be brief and exact: never say something works, or a test passes, unless you ran it.
-- Read the code you change and search rather than guess. Make the smallest change that fully solves the task, in the style around it: no extra features, refactors, placeholders or stubs. Fix causes, not symptoms; never weaken a test to pass it. A failing test is the spec: add or change tests only when the user asks for them. Verify with the project's own build, type-check or tests, narrowest first (a check that fails after your change is yours until shown otherwise), then check the outcome as the user will meet it (run it, call it, read its logs, reproduce the failure); harmless probes of the user's own systems need no asking. Leave a check to the user only when it truly needs them.
+- Read the code you change and search rather than guess. Make the smallest change that fully solves the task, in the style around it: no extra features, refactors, placeholders or stubs. Fix causes, not symptoms; never weaken a test to pass it. A failing test is the spec: add or change tests only when the user asks for them. Verify with the project's own build, type-check or tests, narrowest first (a check that fails after your change is yours until shown otherwise), then check the outcome as the user will meet it (run it, call it, read its logs, reproduce the failure), with the inputs around the case you changed too. Probes and scratch tests go in the scratch folder the environment names, never in the project; harmless probes of the user's own systems need no asking. Leave a check to the user only when it truly needs them.
 - Keep going until it is done. Take the most reasonable reading of an ambiguous request and say which; use AskUserQuestion only when blocked on the user's decision. Plan work of several steps in TodoWrite.
 - Do nothing that cannot be undone or reaches other people unless asked: deleting, rewriting history, force-pushing, publishing, messaging people, committing, pushing.
 - Prefer the dedicated tools to the shell, and run independent calls together. Spend context with care: search before reading, read large files by range, keep command output short.
@@ -157,6 +157,8 @@ export interface EnvironmentInfo {
   languageServers?: string[]
   /** Explore's model, when it costs well under what the agent's own does (ADR 0134); `share` is its price as a part of the agent's. */
   explore?: { model: string; share: number }
+  /** The session's scratch folder (ADR 0141). */
+  scratch?: string
 }
 
 const PLATFORM_NAMES: Partial<Record<NodeJS.Platform, string>> = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }
@@ -166,6 +168,18 @@ const ENVIRONMENT_HEADING = 'Environment (background for you: use it, do not rec
 
 /** The line of the environment reminder that names the workspace; `toldWorkspaceRoot` reads it back. */
 export const WORKSPACE_LINE = '- Workspace root: '
+
+/** The line that names the scratch folder (ADR 0141); `toldScratch` reads it back. */
+export const SCRATCH_LINE = '- Scratch folder: '
+
+function scratchLine(folder: string): string {
+  return `${SCRATCH_LINE}${folder}\n  Yours, outside the project: writing here needs no asking. Put probes, throwaway scripts and scratch tests here, never in the project, and reach the project's files from here by their full path.`
+}
+
+/** Names the scratch folder to a conversation that was told of none, or of another (a copy of a chat). */
+export function scratchReminder(folder: string): string {
+  return reminder(`Your scratch folder for this chat:\n${scratchLine(folder)}`)
+}
 
 /** `previousRoot`: the session was working in another folder until now. */
 export function environmentReminder(info: EnvironmentInfo, previousRoot?: string): string {
@@ -182,6 +196,7 @@ export function environmentReminder(info: EnvironmentInfo, previousRoot?: string
     `- Top-level entries: ${entries}`,
     ...(info.languageServers?.length ? [`- Language servers: ${info.languageServers.join(', ')}. The LSP tool (ToolSearch select:LSP) finds definitions, references and errors exactly; LSPEdit renames across files.`] : []),
     ...(info.explore ? [exploreLine(info.explore)] : []),
+    ...(info.scratch ? [scratchLine(info.scratch)] : []),
   ]
   return reminder(lines.join('\n'))
 }

@@ -270,6 +270,12 @@ describe('the sandbox', () => {
     assert.ok(fs.statSync(root!).isDirectory())
   })
 
+  it("puts the agent's scratch folders in its temp folder, which commands in it read and write (ADR 0141)", () => {
+    const sandbox = make(fakeEngine())
+    assert.equal(sandbox.scratchFolder(), path.join(dir, 'sandbox', 'tmp', 'scratch'))
+    assert.ok(sandbox.ownFolders().includes(path.dirname(sandbox.scratchFolder())))
+  })
+
   it('prepares ahead when warmed', async () => {
     const engine = fakeEngine()
     const session = make(engine).session({ roots: () => [project], settings: () => settings() })
