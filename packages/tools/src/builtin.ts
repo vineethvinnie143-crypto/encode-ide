@@ -8,6 +8,7 @@ import { monitorTool, scheduleWakeupTool, sendMessageTool } from './background'
 import { bashOutputTool, createBashTool, killShellTool, type BashSandbox } from './bash'
 import { browserTool } from './browser/tool'
 import { computerTool } from './computer/tool'
+import { debugTool } from './debug'
 import { editTool, multiEditTool, readTool, writeTool } from './files'
 import {
   askUserQuestionTool,
@@ -55,6 +56,8 @@ export interface BuiltinToolOptions {
   worktrees?: boolean
   /** LSP and LSPEdit, for a session whose folder may run language servers. Default false. */
   code?: boolean
+  /** Debug, for a session's main agent where the folder has a debugger (the desktop app). Default false. */
+  debug?: boolean
   /** CodeMap. Default true. */
   codeMap?: boolean
   /** Set when the session's commands run in a sandbox, so that Bash says so (and offers to leave it when `escapable`). */
@@ -88,6 +91,7 @@ export function builtinTools(options: BuiltinToolOptions): Tool[] {
   }
   if (options.worktrees) tools.push(enterWorktreeTool as Tool, exitWorktreeTool as Tool)
   if (options.code) tools.push(lspTool as Tool, lspEditTool as Tool)
+  if (options.debug) tools.push(debugTool as Tool)
   if (options.skills?.length) tools.push(createSkillTool(options.skills) as Tool)
   if (options.goals ?? true) tools.push(createGoalTool as Tool, updateGoalTool as Tool, getGoalTool)
   if (options.completion) tools.push(attemptCompletionTool as Tool)

@@ -18,6 +18,8 @@ export interface DebugPlace {
 }
 
 const live = (run: DebugRun) => run.state !== 'ended'
+/** The person's own runs: the panel and the editor follow these, and leave the agent's alone until chosen (ADR 0145). */
+const theirs = (run: DebugRun) => run.by !== 'agent'
 
 /** The first frame worth showing: the person's own code, else the top. */
 export function firstFrame(thread: DebugThread): DebugFrame | null {
@@ -36,7 +38,8 @@ export function pausedThreads(run: DebugRun): DebugThread[] {
 
 /**
  * The frame to show after the state changed: the chosen one while its program is still paused there, else the place
- * where the program stopped (the thread that stopped, in the newest run that is paused), else none.
+ * where the program stopped (the thread that stopped, in the newest run that is paused), else none. A run the agent
+ * started is shown only when the person chose it: its stops do not move the editor while the person works.
  */
 export function chooseFrame(state: DebugState | null, chosen: FrameChoice | null): FrameChoice | null {
   if (!state) return null
@@ -53,7 +56,7 @@ export function chooseFrame(state: DebugState | null, chosen: FrameChoice | null
     }
   }
   for (const run of [...state.runs].reverse()) {
-    if (!live(run)) continue
+    if (!live(run) || !theirs(run)) continue
     for (const thread of pausedThreads(run)) {
       const frame = firstFrame(thread)
       if (frame) return { run: run.id, thread: thread.id, frame: frame.id }
@@ -103,11 +106,11 @@ export function placeOf(state: DebugState | null, choice: FrameChoice | null): (
   return found && rel ? { path: rel, line: found.frame.line, top: found.top } : null
 }
 
-/** The run the toolbar acts on: the chosen frame's, else the newest that has not ended. */
+/** The run the toolbar acts on: the chosen frame's, else the person's newest that has not ended. */
 export function currentRun(state: DebugState | null, choice: FrameChoice | null): DebugRun | null {
   if (!state) return null
   const chosen = choice ? state.runs.find((run) => run.id === choice.run && live(run)) : undefined
-  return chosen ?? [...state.runs].reverse().find(live) ?? null
+  return chosen ?? [...state.runs].reverse().find((run) => live(run) && theirs(run)) ?? null
 }
 
 /** What the toolbar offers for a run: nothing running, running, or paused. */

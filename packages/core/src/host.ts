@@ -20,6 +20,7 @@ import {
   type AgentShellOptions,
   type CodeIndex,
   type NativeDoc,
+  type AgentDebugger,
   type CodeIntelligence,
   type BrowserBackend,
   type DesktopBackend,
@@ -105,6 +106,8 @@ export interface SessionScope {
   natives?: () => readonly NativeDoc[] | undefined
   /** The commands the folder's settings name as its checks (ADR 0095); undefined to have eNCode find them. */
   checks?: () => readonly string[] | undefined
+  /** The folder's debugger as this session's agent sees it: the Debug tool (ADR 0145). */
+  debug?: AgentDebugger
   /** The session closed: let go of what was held for it. */
   release?: () => Promise<void>
 }
@@ -287,6 +290,7 @@ export class AgentHost {
       ...(scope?.codeIndex ? { codeIndex: scope.codeIndex } : {}),
       ...(scope?.natives ? { natives: scope.natives } : {}),
       ...(scope?.checks ? { checks: scope.checks } : {}),
+      ...(scope?.debug ? { debug: scope.debug } : {}),
       ...(o.worktrees && root ? { worktrees: o.worktrees } : {}),
       web: this.web,
       createShell: () => (o.createShell ? o.createShell(root) : createAgentShell({ ...this.shellOptions(scope), root, platform: this.platform })),

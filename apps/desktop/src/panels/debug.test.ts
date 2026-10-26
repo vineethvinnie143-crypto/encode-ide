@@ -22,7 +22,7 @@ import {
 const frame = (id: number, patch: Partial<DebugFrame> = {}): DebugFrame => ({ id, name: `f${id}`, line: id, column: 1, source: { path: `/w/src/f${id}.js`, name: `f${id}.js`, rel: `src/f${id}.js` }, ...patch })
 const node = (id: number): DebugFrame => frame(id, { source: { path: null, name: 'node:internal/modules/cjs/loader' }, skipped: true })
 const thread = (patch: Partial<DebugThread> = {}): DebugThread => ({ id: 1, name: 'main', state: 'paused', reason: 'breakpoint', frames: [frame(1), frame(2)], ...patch })
-const run = (id: string, patch: Partial<DebugRun> = {}): DebugRun => ({ id, name: 'app.js', kind: 'launch', state: 'running', threads: [thread()], config: 'file', detail: 'node app.js', ...patch })
+const run = (id: string, patch: Partial<DebugRun> = {}): DebugRun => ({ id, name: 'app.js', kind: 'launch', state: 'running', threads: [thread()], stops: 1, config: 'file', detail: 'node app.js', by: 'person', ...patch })
 const state = (...runs: DebugRun[]): DebugState => ({ trusted: true, breakpoints: {}, exceptions: { uncaught: true, all: false }, runs })
 const ids = (() => {
   let n = 0
@@ -62,6 +62,19 @@ describe('the frame the Debug panel shows (ADR 0143)', () => {
     assert.equal(chooseFrame(state(run('r1', { threads: [thread({ state: 'running', frames: undefined })] })), null), null)
     assert.equal(chooseFrame(state(run('r1', { state: 'ended' })), null), null)
     assert.equal(chooseFrame(null, { run: 'r1', thread: 1, frame: 1 }), null)
+  })
+
+  it("leaves the agent's runs alone until the person chooses one (ADR 0145)", () => {
+    const agent = run('r2', { by: 'agent', threads: [thread({ id: 4, frames: [frame(5)] })] })
+    // The agent's newer stop does not take the panel or the editor from the person's run.
+    assert.deepEqual(chooseFrame(state(run('r1'), agent), null), { run: 'r1', thread: 1, frame: 1 })
+    assert.equal(chooseFrame(state(agent), null), null)
+    // Chosen, it is followed like any run.
+    assert.deepEqual(chooseFrame(state(agent), { run: 'r2', thread: 4, frame: 5 }), { run: 'r2', thread: 4, frame: 5 })
+    // The toolbar acts on the person's run unless the agent's is chosen.
+    assert.equal(currentRun(state(run('r1'), agent), null)?.id, 'r1')
+    assert.equal(currentRun(state(agent), null), null)
+    assert.equal(currentRun(state(run('r1'), agent), { run: 'r2', thread: 4, frame: 5 })?.id, 'r2')
   })
 
   it('places the chosen frame in a file of the folder, and nowhere for code outside it', () => {

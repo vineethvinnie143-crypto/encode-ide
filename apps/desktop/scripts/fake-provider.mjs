@@ -212,6 +212,14 @@ const SCENARIOS = {
     { text: 'Web check finished.' },
   ],
   // WebSearch asks first, naming the host of the provider chosen in Settings. The check refuses it, so no search is sent.
+  // The agent's debugger (ADR 0145): it loads the tool, starts the smoke's checkout with a breakpoint of its own (which
+  // asks), reads a value at the stop and leaves the run paused for the person to see and stop.
+  'debug-agent': [
+    { text: 'Loading the debugger.', call: { name: 'ToolSearch', args: { query: 'select:Debug' } } },
+    { text: 'Stopping where a line total is worked out, for the first item with more than three.', call: { name: 'Debug', args: { action: 'start', file: 'debug-cart.js', breakpoints: [{ file: 'debug-cart.js', line: 10, condition: 'item.qty > 3' }] } } },
+    { text: 'Reading the quantity there.', call: { name: 'Debug', args: { action: 'evaluate', expression: 'item.qty * 2' } } },
+    { text: 'The run stopped at Oat milk, whose quantity doubled is 8. It is still paused in the Debug tab.' },
+  ],
   'search-check': [
     { text: 'Searching the web.', call: { name: 'WebSearch', args: { query: 'eNCode search check' } } },
     { text: 'Search check finished.' },

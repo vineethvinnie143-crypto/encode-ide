@@ -67,6 +67,7 @@ import {
   type ToolRegistry,
   type WebAccess,
   type Worktrees,
+  type AgentDebugger,
   type CodeIntelligence,
   type CodeMapSource,
 } from '@encode/tools'
@@ -205,6 +206,8 @@ export interface LoopServices {
   code?: CodeIntelligence
   /** The folder's code index: CodeMap (ADR 0090). */
   codeMap?: CodeMapSource
+  /** The folder's debugger as this session's agent sees it: Debug (ADR 0145); the main agent's only. */
+  debug?: AgentDebugger
   /** Where results too long for the model are kept whole (ADR 0093); without it their middle is left out. */
   outputs?: OutputStore
   /**
@@ -1914,6 +1917,7 @@ export class AgentLoop {
       ...(s.worktrees ? { worktrees: s.worktrees } : {}),
       ...(s.code ? { code: s.code } : {}),
       ...(s.codeMap ? { codeMap: s.codeMap } : {}),
+      ...(s.debug ? { debug: s.debug } : {}),
       ...(progress ? { progress } : {}),
     }
   }

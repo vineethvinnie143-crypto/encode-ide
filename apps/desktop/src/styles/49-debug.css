@@ -342,6 +342,18 @@
   color: var(--text-3);
   font-weight: 400;
 }
+/* A run the agent started (ADR 0145). */
+.dp-run-by {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-4);
+  color: var(--text-2);
+  font-size: calc(var(--fs-12) - 1px);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+}
 .dp-thread {
   padding: 2px 12px 2px 18px;
   color: var(--text-3);

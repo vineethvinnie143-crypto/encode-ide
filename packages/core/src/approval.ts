@@ -28,6 +28,9 @@
  * for itself. No rule, no Always allow and no Reviewer answers that question;
  * the settings can refuse it outright.
  *
+ * A debug run (0145) is the folder's code outside the sandbox too: under every policy but Full access the person
+ * allows each start, and each time the agent would drive a run of theirs; Read Only refuses both.
+ *
  * The user's permission rules (settings files, `@encode/permissions`) come in
  * three places, always in this order: a deny rule refuses under every policy;
  * a policy that denies (Read Only) or that never asks (Full access) is not
@@ -310,6 +313,17 @@ async function decideAccess(access: ToolAccess, context: ApprovalContext): Promi
       return ask(`${access.server} is an outside tool server, and eNCode cannot tell what its tools change.`, false)
     }
 
+    case 'debug': {
+      // A run is the folder's code outside the sandbox: the person's to allow, as a command that leaves the sandbox is.
+      if (policy === 'read-only') return deny("The approval policy is Read Only, so eNCode does not run the folder's code. Ask the user to switch to Workspace Write if debugging is needed.")
+      if (policy === 'full-access') return ALLOW
+      return ask(
+        access.action === 'start'
+          ? `Debugging ${access.what} runs it outside the sandbox, with your environment, as your own terminal would. While it runs, the agent can step it and evaluate expressions in it. Only you can allow that.`
+          : `Run ${access.what} is yours: the agent asks before it steps it, stops it or evaluates in it, since that can change what the program does.`,
+      )
+    }
+
     case 'desktop': {
       if (access.blocked) return deny(`${access.label} is never used: ${access.blocked}.`)
       if (policy === 'read-only') return deny('The approval policy is Read Only, so eNCode does not use the mouse or the keyboard. Ask the user to switch to Workspace Write.')
@@ -347,8 +361,9 @@ export function alwaysAllowFor(access: ToolAccess, context: { root: string; plat
 }
 
 /**
- * What approving "for this session" would cover: the same paths, or the same
- * command in the same directory. Anything else is asked each time.
+ * What approving "for this session" would cover: the same paths, the same
+ * command in the same directory, the same debug start or the same run of the
+ * person's. Anything else is asked each time.
  */
 export function grantKey(access: ToolAccess): string | undefined {
   switch (access.type) {
@@ -357,6 +372,8 @@ export function grantKey(access: ToolAccess): string | undefined {
       return access.paths.length ? `${access.type}\u0000${[...access.paths].sort().join('\u0000')}` : undefined
     case 'command':
       return `${access.unsandboxed ? 'command-outside-sandbox' : 'command'}\u0000${access.cwd}\u0000${access.command.replace(/\s+/g, ' ').trim()}`
+    case 'debug':
+      return `debug-${access.action}\u0000${access.key}`
     default:
       return undefined
   }

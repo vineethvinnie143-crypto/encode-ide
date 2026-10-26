@@ -364,6 +364,13 @@ Protocol
   `python` and `justMyCode`, or `"request": "attach"` with a `port` (5678 by default) for a program that runs debugpy's
   server on this machine. Go takes `buildFlags`; Rust takes `bin`, `example`, `package` and `manifest`.
 - **Trust.** A run starts the folder's code, so it starts only in a folder you trust.
+- **The agent debugs too**
+  ([ADR 0145](docs/adr/0145-the-agent-debugs-through-the-folders-debugger-with-runs-and-breakpoints-of-its-own-behind-an-approval.md)).
+  Asked why a value is wrong, it can start the program in the debugger with breakpoints of its own, read the stop
+  (the lines around it, the stack, the values, what was printed), step, and evaluate expressions, instead of adding
+  prints to your files. Each start asks you first, as it runs outside the sandbox; Read Only refuses. Its runs are
+  tagged **Agent** in the Debug tab with a Stop button, its breakpoints stay out of your gutter, and it asks before it
+  steps, evaluates in or stops a run of yours.
 
 ## The Review tab
 

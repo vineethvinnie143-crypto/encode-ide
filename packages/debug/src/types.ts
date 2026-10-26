@@ -78,6 +78,8 @@ export interface SessionView {
   kind: 'launch' | 'attach'
   state: SessionState
   threads: ThreadView[]
+  /** How many times the run has stopped with its frames read: a stop after an action is one more than before it. */
+  stops: number
   /** How the program ended, when it did. */
   exitCode?: number | null
   /** Why it could not start or why it ended, in words. */

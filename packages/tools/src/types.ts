@@ -63,6 +63,13 @@ export type ToolAccess =
    * for people, `title` the window's. `blocked` says why it can never be used, when it cannot.
    */
   | { type: 'desktop'; app: string; label: string; title: string; blocked?: string }
+  /**
+   * Runs the folder's code under its debugger (ADR 0145), outside the sandbox and with the person's environment, as a
+   * terminal of theirs would. `start`: a new run of `what`. `drive`: steps, evaluates in or changes the breakpoints of
+   * the person's own run `what`; a run the agent started was approved with its start. `key` says what approving it for
+   * the session covers: the same start, or the same run.
+   */
+  | { type: 'debug'; action: 'start' | 'drive'; what: string; key: string }
 
 /** How a call reads in an approval card and in the transcript. */
 export interface ToolSummary {
@@ -533,6 +540,97 @@ export type CodeIntelligence = Pick<
   | 'status'
 >
 
+// ---------------------------------------------------------------------------
+// The debugger (ADR 0145)
+
+/** A breakpoint of a run the agent starts: in a file by its whole path, on a 1-based line. */
+export interface AgentBreakpoint {
+  file: string
+  line: number
+  /** It stops only when this is true. */
+  condition?: string
+  /** It stops only on some hits: `5` (from the fifth on), `==5`, `>5`, `%5`. */
+  hitCondition?: string
+  /** It prints this instead of stopping; `{expression}` is replaced by its value. */
+  logMessage?: string
+}
+
+export interface AgentDebugFrame {
+  /** For scopes and evaluation, while the program stays paused there. */
+  id: number
+  name: string
+  /** Its file by whole path; null for code that is not a file. */
+  file: string | null
+  line: number
+  /** Code the person did not write (the runtime's own). */
+  skipped?: boolean
+}
+
+export interface AgentDebugThread {
+  id: number
+  name: string
+  state: 'running' | 'paused'
+  reason?: string
+  exception?: string
+  frames?: AgentDebugFrame[]
+}
+
+/** A run of the folder's debugger, as the Debug tool reads it: one the agent's session started, or one of the person's. */
+export interface AgentDebugRun {
+  id: string
+  name: string
+  /** What it runs, in a line. */
+  detail: string
+  /** This session's agent started it. */
+  mine: boolean
+  state: 'starting' | 'running' | 'paused' | 'ended'
+  /** How many times it has stopped: a stop after an action is one more than before it. */
+  stops: number
+  threads: AgentDebugThread[]
+  exitCode?: number | null
+  /** Why it could not start or why it ended. */
+  message?: string
+}
+
+export interface AgentDebugValue {
+  name: string
+  value: string
+  type?: string
+  /** It has children, read with this. */
+  ref?: number
+}
+
+/** How a breakpoint of the agent's run stands: placed in code that runs, or why not. */
+export interface AgentBreakpointStatus {
+  file: string
+  line: number
+  verified: boolean
+  /** The line it was placed on, when not its own. */
+  placed?: number
+  message?: string
+}
+
+/** The folder's debugger, for the Debug tool: the agent's own runs, and the person's to read and, once asked, to drive. */
+export interface AgentDebugger {
+  /** The ways the folder runs: `file` (a file of the folder), its own configurations, its scripts. */
+  configs(): Promise<{ id: string; name: string; detail: string; problem?: string }[]>
+  /** Starts a run with breakpoints of its own; `signal` stops it, a build included. `install`: what eNCode can install for it. */
+  start(request: { config: string; file?: string; breakpoints: AgentBreakpoint[]; exceptions: { uncaught: boolean; all: boolean }; signal?: AbortSignal }): Promise<{ ok: true; run: string } | { ok: false; reason: string; install?: string }>
+  /** This session's runs and the person's, newest last. */
+  runs(): Promise<AgentDebugRun[]>
+  /** The run once it has stopped more than `stops` times or ended; as it is when `ms` pass or `signal` fires. Null when it is gone. */
+  wait(run: string, stops: number, ms: number, signal: AbortSignal): Promise<AgentDebugRun | null>
+  act(run: string, action: { kind: 'continue' | 'pause' | 'stop' } | { kind: 'step'; step: 'over' | 'into' | 'out' }, thread?: number): Promise<{ ok: true } | { ok: false; reason: string }>
+  /** Replaces the breakpoints of a run the agent started; the person's breakpoints are never touched. */
+  setBreakpoints(run: string, list: AgentBreakpoint[]): Promise<{ ok: true } | { ok: false; reason: string }>
+  statuses(run: string): AgentBreakpointStatus[]
+  scopes(run: string, frame: number): Promise<{ name: string; ref: number; expensive: boolean }[]>
+  variables(run: string, ref: number): Promise<AgentDebugValue[]>
+  evaluate(run: string, expression: string, at: { frame?: number; thread?: number }): Promise<{ ok: true; value: string; type?: string; ref?: number } | { ok: false; message: string }>
+  /** What the run printed since this was last asked of it, and how many lines before those are no longer kept. */
+  printed(run: string): { lines: { category: string; text: string }[]; dropped: number }
+}
+
 /** The code map of a folder (ADR 0090): its files' definitions and the names they use, only the files the agent may read. */
 export interface CodeMapSource {
   files(dir: string, signal?: AbortSignal): Promise<{ files: IndexedFile[]; truncated: boolean }>
@@ -594,6 +692,8 @@ export interface ToolContext {
   readonly code?: CodeIntelligence
   /** CodeMap; absent where no index is kept. */
   readonly codeMap?: CodeMapSource
+  /** Debug (ADR 0145); the main agent's only, and absent where the folder debugs nothing (the CLI). */
+  readonly debug?: AgentDebugger
   /**
    * Awaited before every write, with the file's previous bytes (null when it
    * did not exist). Checkpoints hook in here; a rejection fails the write.

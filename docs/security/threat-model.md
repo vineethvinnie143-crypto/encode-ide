@@ -2758,8 +2758,8 @@ What is new:
 
 | # | Threat | Controls | Status |
 | --- | --- | --- | --- |
-| DB1 | Opening a folder runs its code, through a configuration of its own | A run starts only in a trusted folder, and only from the person's F5 or Start. The panel shows what a configuration runs before it starts. Not trusted, the start is refused with why. | Mitigated |
-| DB2 | A folder brings breakpoints whose conditions or log messages run code | Breakpoints are kept in eNCode's profile, by folder, never read from the folder. Only the person sets them. | Mitigated |
+| DB1 | Opening a folder runs its code, through a configuration of its own | A run starts only in a trusted folder, and only from the person's F5 or Start, or from the agent's start the person approved (DB19). The panel shows what a configuration runs before it starts. Not trusted, the start is refused with why. | Mitigated |
+| DB2 | A folder brings breakpoints whose conditions or log messages run code | Breakpoints are kept in eNCode's profile, by folder, never read from the folder. Only the person sets them; the agent's are its run's alone (DB20). | Mitigated |
 | DB3 | Attaching reaches a program on another machine, or a configuration points the debugger at one | `attach` takes only `127.0.0.1` or `localhost`; any other host is refused before anything connects. A launched run connects only to the addresses its own programs wrote into its owner-only folder. | Mitigated |
 | DB4 | Another program of the user connects to a program's inspector while it runs, and runs code in it | The inspector listens on a random port of 127.0.0.1 only for the run, as `node --inspect` does. A program of the same user could connect meanwhile; it could already run code as that user. | Accepted |
 | DB5 | A hover changes the program, or runs something slow | A hover evaluates with V8's `throwOnSideEffect` and a 1 s limit, and only a name with the names before it (`a.b.c`), never a call or an index. | Mitigated |
@@ -2845,3 +2845,46 @@ What is new:
 - Windows CI fetches the pinned wheel and builds Delve for real (`ENCODE_TEST_INSTALLS`), and the end-to-end smoke
   checks that a Python run without debugpy offers the install, with its source and checksum, and starts nothing when
   the person cancels.
+
+## The agent's debugger
+
+Written with the pull request that adds it
+([0145](../adr/0145-the-agent-debugs-through-the-folders-debugger-with-runs-and-breakpoints-of-its-own-behind-an-approval.md)).
+
+What is new:
+
+- the main agent has a `Debug` tool: it starts the folder's programs in the debugger with breakpoints of its own,
+  steps them, evaluates expressions in them, reads their values and what they print, and stops them;
+- it can read the person's runs, and drive them when the person says yes;
+- a new kind of access, `debug`, with a start and a drive, asked about on the approval card.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| DB19 | The agent runs the folder's code outside the sandbox without the person knowing | Every start asks under Workspace Write and Auto review, naming the file or configuration and the breakpoints, and saying the program runs outside the sandbox with the person's environment and that the agent can step it and evaluate in it. Read Only refuses. A folder that is not trusted refuses, as DB1. A `Debug` deny rule refuses; no allow rule skips the question, and no Always allow is offered. A yes for the session covers the same file or configuration only. | Mitigated |
+| DB20 | The agent moves the person's breakpoints, or steps, evaluates in or stops the person's paused program | The agent's breakpoints and exception filters belong to its run: they are sent to that run alone, the person's gutter does not show them, and the person's breakpoints are not sent to it. Reading a run of the person's is free; continuing, stepping, pausing, evaluating in or stopping one asks each time ("Run r2 is yours"), and Read Only refuses it. An agent's stop does not move the person's editor. | Mitigated |
+| DB21 | Text in a file or in the program's output steers the agent to evaluate code in its run | An evaluation runs in the agent's own run, a program the person approved starting outside the sandbox; it can do what that program can, no more. In the person's runs it asks (DB20). | Partial (DB-R3) |
+| DB22 | The agent's runs pile up, or outlive what started them | At most 3 live runs a session. Stopping the turn stops a run it started, its build included; closing the session stops all of its runs. The Debug tab marks each as the agent's, with a Stop button. | Mitigated |
+| DB23 | A report floods the model's context | A stop report holds 2 lines each side, 12 frames, 30 values of 240 characters, 100 children, 60 printed lines or 4,000 characters, and an exception's message without its stack (600 characters). A run keeps its last 2,000 printed lines. A wait lasts at most 120 s. | Mitigated |
+| DB24 | One session reads or drives another's runs | A session's view of the debugger lists its own runs and the person's; another session's run is not found. | Mitigated |
+| DB25 | A subagent debugs, out of the person's sight | `Debug` is on the subagents' excluded list, and is offered only to the main agent where the folder has a debugger. | Mitigated |
+| DB26 | A crafted breakpoint reaches outside the folder or floods the debugger | 50 breakpoints a run, each in a file inside the folder, on a line the file has, with a condition or message of at most 2,000 characters and a hit condition of the form the debuggers take (`> 3`, `% 2`). | Mitigated |
+
+### Residual risks
+
+- DB-R3: within a run the person approved, an expression the agent evaluates can change the program's state or call
+  what the program can (write a file, reach the network), as the program itself can. The card says so before the
+  run starts.
+- The values a run shows and what it prints reach the model's provider, as Read and Bash output do.
+
+### Verification
+
+- `packages/workspace/src/debug-agent.test.ts`: real runs through the tool: the person's breakpoint not hit by the
+  agent's run; the person's run read freely and driven only with `drive` access; two sessions apart; a session's
+  close stopping its runs; the 3-run cap, breakpoints outside the folder, a bad hit condition, an unknown
+  configuration and an untrusted folder refused; the turn's signal stopping a run; the report's bounds.
+- `packages/core/src/approval.test.ts` and `packages/core/src/debug-tool.test.ts`: the questions and refusals of
+  DB19 and DB20, nothing run before the yes, the tool kept from subagents.
+- The end-to-end smoke: the card asks once and says the run is outside the sandbox; the agent's breakpoint stays out
+  of the person's; the Debug tab shows the run as the agent's without moving the editor, and its Stop button ends it.

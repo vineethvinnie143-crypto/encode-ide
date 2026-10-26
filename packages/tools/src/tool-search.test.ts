@@ -54,6 +54,15 @@ describe('deferring tools', () => {
     assert.deepEqual(searching, ['Read', TOOL_SEARCH])
   })
 
+  it('counts only the tools whose definitions would be sent: the ones that always wait for a search do not push others out', () => {
+    const registry = registryWith(['github', GITHUB.slice(0, 3), 100])
+    // A large built-in tool that always waits (the debugger's is one): the short outside tools are still sent in full.
+    registry.register({ ...outsideTools('big', ['one'], 12_000)[0]!, defer: 'always' })
+    assert.ok(JSON.stringify(registry.get('mcp__big__one')!.definition).length > DEFER_ABOVE_CHARS)
+    assert.deepEqual(registry.deferred().map((tool) => tool.definition.name), ['NotebookEdit', 'mcp__big__one'])
+    assert.ok(registry.visibleDefinitions(undefined, new Set()).some((tool) => tool.name === 'mcp__github__create_issue'))
+  })
+
   it('leaves tools that do not ask for it alone, however many there are', () => {
     const registry = createToolRegistry({ dialect: 'bash', platform: 'linux' })
     for (const tool of outsideTools('big', GITHUB, 2000)) registry.register({ ...tool, defer: false })
