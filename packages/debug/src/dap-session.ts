@@ -150,6 +150,8 @@ export class DapSession implements RunSession {
   private readonly placed = new Map<string, Placed[]>()
   private ready = false
   private functionsSet = false
+  /** The debugger's ids of the function breakpoints set for exceptions, and the function of each. */
+  private readonly exceptionBreakpoints = new Map<number, string>()
   private readonly out: OutputBatch
   private readonly tail: string[] = []
   private stopping = false
@@ -499,7 +501,13 @@ export class DapSession implements RunSession {
     // Sent empty too once one was set, so that turning an exception off takes its function away.
     if (this.caps.supportsFunctionBreakpoints && (functions.length || this.functionsSet)) {
       this.functionsSet = functions.length > 0
-      await dap.request('setFunctionBreakpoints', { breakpoints: functions.map((name) => ({ name })) }, { timeoutMs: REQUEST_MS })
+      const answer = await dap.request('setFunctionBreakpoints', { breakpoints: functions.map((name) => ({ name })) }, { timeoutMs: REQUEST_MS })
+      this.exceptionBreakpoints.clear()
+      const placed = Array.isArray(answer.breakpoints) ? answer.breakpoints : []
+      functions.forEach((name, i) => {
+        const item = placed[i]
+        if (isRecord(item) && typeof item.id === 'number') this.exceptionBreakpoints.set(item.id, name)
+      })
     }
   }
 
@@ -618,8 +626,11 @@ export class DapSession implements RunSession {
     const read = [top, ...[...this.threads.values()].filter((entry) => entry !== top && entry.paused).slice(0, MAX_STACKS - 1)].filter((entry): entry is ThreadEntry => !!entry)
     await Promise.all(read.map((entry) => this.readStack(entry, entry === top ? MAX_FRAMES : OTHER_FRAMES, generation)))
     if (generation !== this.generation) return
-    // A stop in a function an exception goes through (a Go or Rust panic) is the run's exception.
-    const crash = top && reason === 'breakpoint' && top.frames?.[0] ? this.profile.exceptionStop(top.frames[0].name, this.program()) : null
+    // A stop in a function an exception goes through (a Go or Rust panic) is the run's exception: known by the
+    // breakpoint the debugger says it hit, else by the function the program stopped in.
+    const hit = (Array.isArray(body.hitBreakpointIds) ? body.hitBreakpointIds : []).map((id) => (typeof id === 'number' ? this.exceptionBreakpoints.get(id) : undefined)).find((name) => name !== undefined)
+    const stoppedIn = hit ?? top?.frames?.[0]?.name
+    const crash = top && reason === 'breakpoint' && stoppedIn ? this.profile.exceptionStop(stoppedIn, this.program()) : null
     if (top && crash) {
       top.reason = 'exception'
       top.exception = crash

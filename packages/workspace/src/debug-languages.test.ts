@@ -559,7 +559,9 @@ describe('a Rust program debugged', { skip: !LLDB || !CARGO ? 'no lldb-dap and c
     await debug.setBreakpoints('src/bin/other.rs', [{ id: 'b1', line: 3, enabled: true }])
     const paused = await pausedAt(debug, 'src/bin/other.rs')
     assert.deepEqual([paused.top.source?.rel, paused.top.line], ['src/bin/other.rs', 3])
-    assert.match(paused.locals.find((item) => item.name === 'line')?.value ?? '', /hello cart/)
+    const line = paused.locals.find((item) => item.name === 'line')
+    const parts = line?.ref ? await debug.variables(paused.run, line.ref) : []
+    assert.match(line?.value ?? '', /hello cart/, JSON.stringify({ line, parts: parts.slice(0, 8), output: output.slice(-16) }))
     assert.deepEqual(await debug.act(paused.run, { kind: 'continue' }), { ok: true })
     await until(debug, (state) => state.runs[0]?.state === 'ended', 'the end')
     assert.ok(output.includes('Building other with cargo…'), output.join('\n'))

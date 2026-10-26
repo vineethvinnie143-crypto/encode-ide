@@ -362,6 +362,72 @@ describe('a debug run of Go through Delve', { skip: !DLV || !GO ? 'no Delve and 
 })
 
 
+// ---------------------------------------------------------------- an exception's own breakpoint
+
+describe("a stop at an exception's function breakpoint", () => {
+  // A debugger that sets the function breakpoints it is sent, then stops at the first: in a frame named as argv says,
+  // and saying which breakpoint it hit or not.
+  const adapter = `
+    const [frame, says] = process.argv.slice(1)
+    let buffer = Buffer.alloc(0)
+    const send = (message) => { const body = JSON.stringify(message); process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body) }
+    const answer = (request) => {
+      switch (request.command) {
+        case 'initialize': return { supportsConfigurationDoneRequest: true, supportsFunctionBreakpoints: true }
+        case 'setFunctionBreakpoints': return { breakpoints: request.arguments.breakpoints.map((item, i) => ({ id: 40 + i, verified: true })) }
+        case 'threads': return { threads: [{ id: 1, name: 'main' }] }
+        case 'stackTrace': return { stackFrames: [{ id: 1, name: frame, line: 0, column: 0 }], totalFrames: 1 }
+        default: return {}
+      }
+    }
+    process.stdin.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk])
+      for (;;) {
+        const end = buffer.indexOf('\\r\\n\\r\\n')
+        if (end < 0) return
+        const length = Number(/Content-Length: (\\d+)/.exec(buffer.subarray(0, end).toString())[1])
+        if (buffer.length < end + 4 + length) return
+        const request = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString())
+        buffer = buffer.subarray(end + 4 + length)
+        send({ seq: 0, type: 'response', request_seq: request.seq, command: request.command, success: true, body: answer(request) })
+        if (request.command === 'initialize') send({ seq: 0, type: 'event', event: 'initialized' })
+        if (request.command === 'configurationDone') send({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, allThreadsStopped: true, ...(says === 'hit' ? { hitBreakpointIds: [40] } : {}) } })
+        if (request.command === 'disconnect') setTimeout(() => process.exit(0), 10)
+      }
+    })`
+  const stop = async (frame: string, says: 'hit' | 'nothing', rust: DapPlan['rust']) => {
+    const dir = await tempWorkspace()
+    const session = new DapSession({
+      id: 's1',
+      name: 'test',
+      plan: { kind: 'dap', profile: 'lldb', adapter: { file: process.execPath, args: ['-e', adapter, frame, says], cwd: dir, env: environment(), transport: 'stdio' }, request: 'launch', arguments: { program: path.join(dir, 'cart') }, runDir: path.join(dir, '.run'), rust },
+      breakpoints: () => new Map(),
+      exceptions: { uncaught: true, all: false },
+      onChange: () => undefined,
+      onOutput: () => undefined,
+    })
+    sessions.push(session)
+    await session.start()
+    const end = Date.now() + 5_000
+    while (!session.view().threads[0]?.frames && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20))
+    const thread = session.view().threads[0]!
+    await session.stop()
+    return thread
+  }
+
+  it('is the exception by the breakpoint the debugger says it hit, whatever the frame is named', async () => {
+    const thread = await stop('a thunk of the program', 'hit', 'msvc')
+    assert.deepEqual([thread.reason, thread.exception], ['exception', 'The program panicked: its message is in the output'])
+  })
+
+  it("is the exception by the frame's function when the debugger does not say, named alone or after its DLL", async () => {
+    assert.equal((await stop('VCRUNTIME140!_CxxThrowException', 'nothing', 'msvc')).reason, 'exception')
+    assert.equal((await stop('std::panicking::rust_panic', 'nothing', true)).reason, 'exception')
+    // A frame of the same name in another kind of program is a breakpoint like any other.
+    assert.equal((await stop('a thunk of the program', 'nothing', 'msvc')).reason, 'breakpoint')
+  })
+})
+
 // ---------------------------------------------------------------- a debugger that ends as it starts
 
 describe('a debugger that ends as it starts', () => {
@@ -687,7 +753,7 @@ describe('a debug run of Rust through lldb-dap', { skip: !LLDB || !CARGO || !RUS
     const boom = run(plan(['boom']), {}, undefined, dir)
     await boom.session.start()
     const crashed = await boom.until((v) => !!paused(v), 'the panic')
-    assert.equal(paused(crashed)!.reason, 'exception')
+    assert.equal(paused(crashed)!.reason, 'exception', JSON.stringify(paused(crashed)))
     assert.match(paused(crashed)!.exception ?? '', /panicked/)
     await boom.session.stop()
     await boom.session.settled
