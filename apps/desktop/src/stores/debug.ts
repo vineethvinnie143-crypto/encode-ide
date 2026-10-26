@@ -7,7 +7,7 @@ import { create } from '../store'
 import type { DebugAction, DebugBreakpoint, DebugConfigs, DebugEvaluateResult, DebugExceptionFilters, DebugOutputLine, DebugScope, DebugState, DebugVariable } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
-import { addAt, chooseFrame, currentRun, frameOf, moveLines, placeOf, plain, toggleAt, type FrameChoice } from '../panels/debug'
+import { addAt, chooseFrame, currentRun, frameOf, moveLines, pausedThreads, placeOf, plain, toggleAt, type FrameChoice } from '../panels/debug'
 import { useEditor } from './editor'
 import { usePanels } from './panels'
 import { useUi } from './ui'
@@ -245,7 +245,7 @@ export const useDebug = create<DebugStore>((set, get) => {
       const { state, frame } = get()
       const run = currentRun(state, frame)
       if (!run) return
-      const thread = action.thread ?? (frame && frame.run === run.id ? frame.thread : run.threads.find((item) => item.state === 'paused')?.id)
+      const thread = action.thread ?? (frame && frame.run === run.id ? frame.thread : pausedThreads(run)[0]?.id)
       const result = await api.debug.act(run.id, { ...action, ...(thread !== undefined ? { thread } : {}) }).catch((error: unknown) => ({ ok: false as const, reason: errorText(error) }))
       if (!result.ok) notify(result.reason)
       await get().refresh()

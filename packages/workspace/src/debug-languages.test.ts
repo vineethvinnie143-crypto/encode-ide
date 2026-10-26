@@ -444,8 +444,10 @@ async function pausedAt(debug: FolderDebugger, file: string) {
   const started = await debug.start({ config: 'file', file })
   assert.ok(started.ok, JSON.stringify(started))
   if (!started.ok) throw new Error('not started')
-  const state = await until(debug, (now) => now.runs[0]?.threads.some((thread) => thread.state === 'paused' && !!thread.frames?.length) ?? false, `a pause in ${file}`)
-  const thread = state.runs[0]!.threads.find((item) => item.state === 'paused' && item.frames?.length)!
+  const stopped = (thread: { state: string; reason?: string; frames?: unknown[] }) => thread.state === 'paused' && thread.reason !== 'pause' && !!thread.frames?.length
+  const state = await until(debug, (now) => now.runs[0]?.threads.some(stopped) ?? false, `a pause in ${file}`)
+  // The thread that stopped: lldb-dap pauses every thread, and on Windows the first listed is often the system's.
+  const thread = state.runs[0]!.threads.find(stopped)!
   const top = thread.frames![0]!
   const scope = (await debug.scopes(started.run, top.id))[0]
   // A debugger that went while it was asked says how in the run's message.

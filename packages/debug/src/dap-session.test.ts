@@ -79,7 +79,11 @@ function run(plan: DapPlan, breakpoints: Record<string, Breakpoint[]>, exception
   }
 }
 
-const paused = (view: SessionView): ThreadView | undefined => view.threads.find((thread) => thread.state === 'paused' && thread.frames?.length)
+/** The thread that stopped: lldb-dap and Delve pause every thread, and the first listed may be any of them. */
+const paused = (view: SessionView): ThreadView | undefined => {
+  const stopped = view.threads.filter((thread) => thread.state === 'paused' && thread.frames?.length)
+  return stopped.find((thread) => thread.reason !== 'pause') ?? stopped[0]
+}
 const bp = (line: number, extra: Partial<Breakpoint> = {}): Breakpoint => ({ id: `bp${line}`, line, enabled: true, ...extra })
 const named = (list: VariableView[], name: string) => list.find((item) => item.name === name)
 
