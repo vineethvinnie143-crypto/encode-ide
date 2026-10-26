@@ -24,10 +24,15 @@ import { reviewLine } from './review-text'
 /** The buttons' words, for a request that is not about touching something. */
 const WORDS: Record<string, { approve: string; session: string; deny: string; explain: string; withNote: string }> = {
   EnterPlanMode: { approve: 'Plan first', session: 'Plan first whenever it asks', deny: 'Go ahead without a plan', explain: 'Say how to go ahead', withNote: 'Go ahead with this note' },
-  StrongerModel: { approve: 'Use it for this request', session: 'Use it whenever one fails twice', deny: 'Keep going', explain: 'Say how to go on', withNote: 'Keep going with this note' },
+  StrongerModel: { approve: 'Use it for this request', session: 'Use it whenever one keeps failing', deny: 'Keep going', explain: 'Say how to go on', withNote: 'Keep going with this note' },
   StrongerAdvice: { approve: 'Ask it', session: 'Ask it whenever one is stuck', deny: 'Keep going', explain: 'Say how to go on', withNote: 'Keep going with this note' },
 }
 const DEFAULT_WORDS = { approve: 'Approve', session: 'Approve for this session', deny: 'Deny', explain: 'Deny and explain', withNote: 'Deny with this note' }
+
+/** A question in words, with the names it quotes in backticks (`Edit`) set as code. */
+function prose(text: string) {
+  return text.split(/(`[^`\n]+`)/).map((part, index) => (index % 2 === 1 ? <code key={index}>{part.slice(1, -1)}</code> : part))
+}
 
 export default function ApprovalCard() {
   const approvals = useChat((state) => state.approvals)
@@ -144,7 +149,7 @@ export default function ApprovalCard() {
         </div>
       )}
       {/* A question in words, not a command or a file: read as prose. */}
-      {approval.tool === 'StrongerModel' || approval.tool === 'StrongerAdvice' ? <p className="approval-prose">{approval.detail}</p> : <pre className="approval-detail">{approval.detail}</pre>}
+      {approval.tool === 'StrongerModel' || approval.tool === 'StrongerAdvice' ? <p className="approval-prose">{prose(approval.detail)}</p> : <pre className="approval-detail">{approval.detail}</pre>}
       {approval.warnings && approval.warnings.length > 0 && (
         <div className="approval-warnings" role="note">
           <AlertTriangle size={14} />

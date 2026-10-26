@@ -117,6 +117,14 @@
   font-size: var(--fs-13);
   line-height: 20px;
 }
+.approval-prose code {
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-4);
+  background: var(--surface-3);
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+}
 .approval-detail {
   margin: 0;
   max-height: 140px;

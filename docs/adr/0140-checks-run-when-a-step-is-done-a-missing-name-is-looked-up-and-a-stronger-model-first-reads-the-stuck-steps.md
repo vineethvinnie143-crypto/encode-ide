@@ -55,7 +55,9 @@ None of this has been measured on a paid model yet: the person tries it on real 
     the next steps. It goes to the agent as advice to check against the code, and the agent goes on with its own model.
   - After two more setbacks the person is asked, as before, whether that model may do the rest of the request.
   - On no, the agent goes on and nothing more is offered in the request. "Ask it whenever one is stuck" allows the look
-    for the session; the take-over stays its own question.
+    for the session; the take-over stays its own question, and its session button now reads "Use it whenever one keeps
+    failing".
+  - The cards set the names they quote (`Edit`) as code.
   - Nothing here runs unasked: print mode and the bench decline every approval.
 
 ## Consequences

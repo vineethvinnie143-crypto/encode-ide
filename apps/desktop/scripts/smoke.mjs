@@ -3674,13 +3674,25 @@ async function runSmallerModelChecks() {
   await sendPrompt('[scenario:stronger] Make add in src/utils.ts return a + b')
   const approvals = await driveAgent('15g-stronger')
   console.log('[smoke] a stronger model asked:', JSON.stringify(approvals.map((card) => card.title)))
-  const card = approvals.find((candidate) => candidate.title.includes('take over this request'))
-  if (!card || !card.title.includes('Let claude-sonnet-4.5 take over this request?')) throw new Error(`No offer of the stronger model: ${JSON.stringify(approvals)}`)
-  if (!/mock-model ran into trouble twice in this request: the same `Edit` call failed twice; and `Edit` failed twice on utils\.ts\./.test(card.detail)) throw new Error(`The offer reads ${JSON.stringify(card.detail)}`)
+  if (approvals.length !== 2) throw new Error(`Two offers were expected, a look and then the take-over: ${JSON.stringify(approvals)}`)
+  // First a look at the stuck steps (ADR 0140).
+  const [look, card] = approvals
+  if (look.title !== 'Ask claude-sonnet-4.5 how to get past this?') throw new Error(`No offer of a look at the steps: ${JSON.stringify(approvals)}`)
+  // The card sets `Edit` as code, so its text has no backticks.
+  if (!/^mock-model ran into trouble twice in this request: the same Edit call failed twice; and Edit failed twice on utils\.ts\. claude-sonnet-4\.5, the model of your Plan role, would read the last steps/.test(look.detail)) throw new Error(`The offer of a look reads ${JSON.stringify(look.detail)}`)
+  const stuck = await (await fetch(`http://127.0.0.1:${providerPort}/__last-stuck-steps`)).json()
+  if (stuck?.model !== 'claude-sonnet-4.5' || stuck.tools.length) throw new Error(`The look went to ${stuck?.model} with ${stuck?.tools?.length} tools`)
+  if (!stuck.user.includes('[scenario:stronger] Make add in src/utils.ts return a + b') || !stuck.user.includes('"old_string":"return a + d"')) throw new Error(`The look was given ${JSON.stringify(stuck.user)}`)
+  // Then, after two more setbacks, the take-over (ADR 0100).
+  if (!card.title.includes('Let claude-sonnet-4.5 take over this request?')) throw new Error(`No offer of the stronger model: ${JSON.stringify(approvals)}`)
+  if (!/mock-model ran into trouble again in this request: 3 Edit calls each failed twice; and Edit failed twice on utils\.ts\./.test(card.detail)) throw new Error(`The offer reads ${JSON.stringify(card.detail)}`)
   const last = await (await fetch(`http://127.0.0.1:${providerPort}/__last-request`)).json()
   if (last.model !== 'claude-sonnet-4.5') throw new Error(`The rest of the request went to ${last.model}`)
+  const advised = last.messages.some((message) => message.role === 'user' && JSON.stringify(message.content).includes('claude-sonnet-4.5 read your last steps. It says:'))
+  if (!advised) throw new Error('The agent was not told what the look said')
   const told = await noticesOf()
-  if (!told.some((text) => text.includes('claude-sonnet-4.5 does the rest of this request: mock-model ran into trouble twice.'))) throw new Error(`No notice of the take-over: ${JSON.stringify(told)}`)
+  if (!told.some((text) => text.includes('claude-sonnet-4.5 read the last steps and said how to get past them; mock-model goes on.'))) throw new Error(`No notice of the look: ${JSON.stringify(told)}`)
+  if (!told.some((text) => text.includes('claude-sonnet-4.5 does the rest of this request: mock-model ran into trouble again.'))) throw new Error(`No notice of the take-over: ${JSON.stringify(told)}`)
   await evaluate("window.eNCode.settings.save({ offerStronger: 'off', roles: {} })")
 }
 
