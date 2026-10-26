@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, describe, test } from 'node:test'
-import { createScriptedClient, type ScriptedStep } from '@encode/core'
+import { createScriptedClient, toldScratch, type ScriptedStep } from '@encode/core'
 import { spendingCap, type CompletionRequest, type ModelClient } from '@encode/providers'
 import { main, plain } from './cli'
 import { compareReports, dropChance, findPrograms, formatReport, gate, meanInterval, meteredClient, parseReport, parseTask, playReplay, ratioInterval, readTask, readTasks, t95, AS_WRITTEN, REFERENCE_SETTINGS, referenceClient, runBench, runPair, runTask, summarize, TaskError, type BenchReport, type ModelCall, type TaskRun } from './index'
@@ -208,6 +208,34 @@ describe('a run', () => {
     assert.equal(run.outcome, 'passed', JSON.stringify(run.checks))
     assert.ok(client.requests[0]!.payload.tools.some((tool) => tool.name === 'Debug'))
     assert.deepEqual(run.metrics.byTool.Debug, { calls: 2, failed: 0 })
+  })
+
+  test('starts a probe the agent wrote in its scratch folder, which stays out of the project (ADR 0149)', { timeout: 120_000 }, async () => {
+    const checks = [...base.checks, { kind: 'used', name: 'the debugger stopped the program', tools: ['Debug'] }]
+    const files = { 'count.js': 'function total(list) {\n  let sum = 0\n  for (const n of list) sum += n\n  return sum\n}\nmodule.exports = { total }\n' }
+    const task = await readTask(await makeTask({ ...base, id: 'probe', prompt: 'Use the debugger to see what total gives for [1, 2, 3], then write done.txt.', debug: true, checks }, files))
+    let probe = ''
+    const client = createScriptedClient((request, step) => {
+      if (step === 0) {
+        probe = path.join(toldScratch(request.payload.messages)!, 'probe.js')
+        // A file run starts in the project, so the probe reaches its file from there.
+        return { calls: [{ name: 'Write', input: { file_path: probe, content: "const { total } = require(require('node:path').join(process.cwd(), 'count.js'))\nconsole.log(total([1, 2, 3]))\n" } }] }
+      }
+      const steps: ScriptedStep[] = [
+        { calls: [{ name: 'Debug', input: { action: 'start', file: probe, breakpoints: [{ file: 'count.js', line: 4 }] } }] },
+        { calls: [{ name: 'Debug', input: { action: 'stop' } }] },
+        { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] },
+        { text: 'total gives 6. Wrote done.txt.' },
+      ]
+      return steps[Math.min(step, steps.length) - 1]!
+    })
+    const run = await runTask(task, { client, programs: await findPrograms([]), settings: AS_WRITTEN })
+    assert.equal(run.outcome, 'passed', JSON.stringify(run.checks))
+    assert.deepEqual(run.metrics.byTool.Debug, { calls: 2, failed: 0 })
+    const stop = JSON.stringify(client.requests[2]!.payload.messages)
+    assert.match(stop, /paused at count\.js:4/)
+    assert.match(stop, /sum = 6/)
+    assert.deepEqual(run.changes, { added: ['done.txt'], changed: [], removed: [] })
   })
 
   test("runs its checks without the environment's secrets, and with the folders they need", async () => {
@@ -531,9 +559,9 @@ describe('reports', () => {
 })
 
 describe('a bench that stops at its cap, and a pair of setups (ADR 0137)', () => {
-  /** Writes done.txt, then says so: two calls a run, each billed at `cost`. */
-  const writer = (cost: number) =>
-    createScriptedClient((request) => (request.payload.messages.some((message) => message.content.some((block) => block.type === 'tool-result')) ? { text: 'Done.' } : { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] }), { costPerCall: cost })
+  /** Writes done.txt, then says so: two calls a run, each billed at `cost`. `before`: called as each call is made. */
+  const writer = (cost: number, before?: () => void) =>
+    createScriptedClient((request) => (before?.(), request.payload.messages.some((message) => message.content.some((block) => block.type === 'tool-result')) ? { text: 'Done.' } : { calls: [{ name: 'Write', input: { file_path: 'done.txt', content: 'done\n' } }] }), { costPerCall: cost })
   const tasks = async () => [await readTask(await makeTask(base)), await readTask(await makeTask({ ...base, id: 'other' }))]
 
   test('stops the run whose next call could pass the cap, and makes no other', async () => {
@@ -554,6 +582,25 @@ describe('a bench that stops at its cap, and a pair of setups (ADR 0137)', () =>
     assert.equal(report.runs.length, 2)
     assert.equal(saved[0]![0]!.runs.length, 1, 'a snapshot, not the report the bench goes on writing to')
     assert.match(formatReport(saved[0]![0]!), /^Partial: written while the bench went on, which then did not finish\.$/m)
+  })
+
+  test('ends after the run in progress when told to finish, and that run is still checked (ADR 0149)', async () => {
+    const finish = new AbortController()
+    const seen: string[] = []
+    // Told to finish as the first run makes its first call: Ctrl+C once.
+    const report = await runBench(await tasks(), { client: writer(0.01, () => finish.abort()), model: 'm', repeat: 2, settings: REFERENCE_SETTINGS, finish: finish.signal, onRun: (done) => seen.push(`${done.task}#${done.attempt} ${done.outcome}`) })
+    assert.deepEqual(seen, ['sample#1 passed'])
+    assert.equal(report.runs[0]!.checks.length, 1)
+    assert.equal(report.endedEarly, 'it was asked to stop after the run in progress')
+    // Told after the last run, it ended as it would have.
+    const late = new AbortController()
+    const whole = await runBench(await tasks(), { client: writer(0.01), model: 'm', repeat: 1, settings: REFERENCE_SETTINGS, finish: late.signal, onRun: (done) => void (done.task === 'other' && late.abort()) })
+    assert.deepEqual([whole.runs.length, whole.endedEarly], [2, undefined])
+    // Ctrl+C twice: the run in progress is stopped as well, unchecked.
+    const twice = [new AbortController(), new AbortController()] as const
+    const stopped = await runBench(await tasks(), { client: writer(0.01, () => twice.forEach((control) => control.abort())), model: 'm', repeat: 2, settings: REFERENCE_SETTINGS, finish: twice[0].signal, signal: twice[1].signal })
+    assert.deepEqual(stopped.runs.map((done) => [done.task, done.stopped, done.checks.length]), [['sample', 'cancelled', 0]])
+    assert.equal(stopped.endedEarly, undefined)
   })
 
   test('starts a round only when what is left pays for one like the last', async () => {

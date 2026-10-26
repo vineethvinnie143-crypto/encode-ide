@@ -41,7 +41,7 @@ const open: FolderDebugger[] = []
 // A run a failed test left behind is stopped, so the test's process can end.
 after(() => Promise.all(open.map((debug) => debug.close())))
 
-async function setup(files: Record<string, string>, options: { trusted?: boolean; tools?: string; env?: Record<string, string> } = {}) {
+async function setup(files: Record<string, string>, options: { trusted?: boolean; tools?: string; env?: Record<string, string>; scratch?: string } = {}) {
   const root = await fs.realpath(await tempWorkspace(files))
   const home = await fs.realpath(await tempWorkspace())
   const config = new WorkspaceConfig({ root, home })
@@ -49,7 +49,7 @@ async function setup(files: Record<string, string>, options: { trusted?: boolean
   if (options.trusted !== false) await trustFolder(config)
   const debug = new FolderDebugger(config, nodeWorkspaceFs, { runDir: path.join(home, 'runs'), env: options.env ?? environment(), ...(options.tools ? { tools: options.tools } : {}) })
   open.push(debug)
-  const view = debug.forAgent('session-1')
+  const view = debug.forAgent('session-1', options.scratch)
   let call = 0
   const tool = async (input: DebugInput, agent: AgentDebugView = view): Promise<ToolOutcome & { text: string }> => {
     const ctx = testContext(root, { debug: agent, toolUseId: `call-${++call}` })
@@ -218,6 +218,44 @@ describe("the agent's Debug tool (ADR 0145)", () => {
     const untrusted = await setup({ 'cart.js': CART }, { trusted: false })
     const refused = await untrusted.tool({ action: 'start', file: 'cart.js' })
     assert.deepEqual([refused.ok, refused.text], [false, DEBUG_UNTRUSTED])
+  })
+
+  it("runs a probe in the session's scratch folder, with breakpoints in it and in the folder, and nothing outside both (ADR 0149)", { timeout: 120_000 }, async () => {
+    const scratch = await fs.realpath(await tempWorkspace())
+    const price = 'function lineTotal(item) {\n  const total = item.price * item.qty\n  return Math.round(total * 100) / 100\n}\nmodule.exports = { lineTotal }\n'
+    const { root, home, debug, tool } = await setup({ 'price.js': price }, { scratch })
+    const probe = path.join(scratch, 'probe.js')
+    await fs.writeFile(probe, `const { lineTotal } = require(${JSON.stringify(path.join(root, 'price.js'))})\nconst item = { price: 2.5, qty: 3 }\nconst got = lineTotal(item)\nconsole.log('probe', got)\n`)
+
+    const started = await tool({ action: 'start', file: probe, breakpoints: [{ file: 'price.js', line: 3 }, { file: probe, line: 4 }] })
+    assert.ok(started.ok, started.text)
+    assert.match(started.text, /^Run r1 \(node .*probe\.js\) paused at price\.js:3 in lineTotal: breakpoint\.$/m)
+    assert.match(started.text, /^ {2}total = 7\.5$/m)
+    const next = await tool({ action: 'continue' })
+    assert.match(next.text, /paused at .*probe\.js:4/)
+    assert.match(next.text, /^ {2}got = 7\.5$/m)
+    // The person cannot start the agent's probe again from the Debug tab: it is outside the folder.
+    assert.deepEqual(await debug.act('r1', { kind: 'restart' }), { ok: false, reason: "That run's program is the agent's probe, outside the open folder: only the agent can start it again." })
+    const ended = await tool({ action: 'continue' })
+    assert.match(ended.text, /ended with exit code 0\./)
+    assert.ok(ended.text.includes('  probe 7.5'), ended.text)
+
+    // Outside both folders, a probe not written yet, and a breakpoint outside both.
+    const elsewhere = path.join(home, 'elsewhere.js')
+    await fs.writeFile(elsewhere, "console.log('elsewhere')\n")
+    assert.equal((await tool({ action: 'start', file: elsewhere })).text, 'That file is in neither the open folder nor your scratch folder.')
+    assert.equal((await tool({ action: 'start', file: path.join(scratch, 'later.js') })).text, `There is no ${path.join(scratch, 'later.js')}: write the probe first.`)
+    assert.match((await tool({ action: 'start', file: probe, breakpoints: [{ file: elsewhere, line: 1 }] })).text, /elsewhere\.js is in neither the open folder nor your scratch folder\.$/)
+    // A link in the scratch folder that leads out of it runs what it leads to, which the person was not shown.
+    if (process.platform !== 'win32') {
+      const link = path.join(scratch, 'link.js')
+      await fs.symlink(elsewhere, link)
+      assert.equal((await tool({ action: 'start', file: link })).text, `${link} leads out of your scratch folder.`)
+    }
+    // A session told of no scratch folder runs only the folder's files.
+    assert.equal((await tool({ action: 'start', file: probe }, debug.forAgent('session-2'))).text, 'That file is not in the open folder.')
+    // The person's own start never runs a file outside the folder.
+    assert.deepEqual(await debug.start({ config: 'file', file: probe }), { ok: false, reason: 'That file is not in the open folder.' })
   })
 
   it('stops a run whose call was stopped', { timeout: 120_000 }, async () => {

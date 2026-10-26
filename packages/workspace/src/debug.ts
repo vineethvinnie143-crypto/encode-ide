@@ -187,6 +187,8 @@ interface OwnStops {
 /** A start an agent asked for (ADR 0145). */
 interface AgentStart extends OwnStops {
   owner: string
+  /** The session's scratch folder, a real path: a probe there runs as a file of the folder does (ADR 0149). */
+  scratch?: string
   signal?: AbortSignal
 }
 
@@ -312,8 +314,31 @@ export class FolderDebugger {
 
   /** A file of the folder's own, by its whole path. */
   private inFolder(file: string): boolean {
-    const back = this.api.relative(this.root, file)
+    return this.within(this.root, file)
+  }
+
+  private within(folder: string, file: string): boolean {
+    const back = this.api.relative(folder, file)
     return !!back && !back.startsWith('..') && !this.api.isAbsolute(back)
+  }
+
+  /** A path an agent gave, as a whole path in its session's scratch folder; null otherwise. */
+  private inScratch(scratch: string, given: string): string | null {
+    if (!given || given.includes('\0') || given.length > 4_096) return null
+    const file = this.api.resolve(this.root, given)
+    return this.within(scratch, file) ? file : null
+  }
+
+  /**
+   * The program of an agent's start in its scratch folder (ADR 0149), by its real path: a link there that leads out of
+   * the folder runs what it leads to, which the person was not shown, so it is refused.
+   */
+  private async probe(scratch: string, given: string): Promise<{ file: string } | { reason: string } | null> {
+    const file = this.inScratch(scratch, given)
+    if (!file) return null
+    const real = await fs.realpath(file).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? undefined : null))
+    if (real === undefined) return { reason: `There is no ${given}: write the probe first.` }
+    return real && this.within(scratch, real) ? { file: real } : { reason: `${given} leads out of your scratch folder.` }
   }
 
   private whole(rel: string): string {
@@ -381,8 +406,14 @@ export class FolderDebugger {
     let file: string | undefined
     if (request.file !== undefined) {
       const rel = this.relative(request.file)
-      if (!rel) return { ok: false, reason: 'That file is not in the open folder.' }
-      file = this.whole(rel)
+      if (rel) file = this.whole(rel)
+      else {
+        // An agent's probe in its scratch folder, which reaches the folder's files by their whole paths (ADR 0149).
+        const probe = agent?.scratch ? await this.probe(agent.scratch, request.file) : null
+        if (!probe) return { ok: false, reason: agent?.scratch ? 'That file is in neither the open folder nor your scratch folder.' : 'That file is not in the open folder.' }
+        if ('reason' in probe) return { ok: false, reason: probe.reason }
+        file = probe.file
+      }
     }
     let plan: RunPlan
     try {
@@ -441,7 +472,7 @@ export class FolderDebugger {
     }
     const session: RunSession =
       plan.kind === 'dap'
-        ? new DapSession({ ...shared, plan: { ...plan.dap, runDir }, isOwn: (path) => this.inFolder(path) })
+        ? new DapSession({ ...shared, plan: { ...plan.dap, runDir }, isOwn: (path) => this.inFolder(path) || (!!agent?.scratch && this.within(agent.scratch, path)) })
         : new DebugSession({
             ...shared,
             plan: plan.kind === 'attach' ? { kind: 'attach', host: plan.host, port: plan.port } : { kind: 'launch', file: plan.file, args: plan.args, cwd: plan.cwd, env: plan.env, runDir, ...(plan.verbatim ? { verbatim: true } : {}) },
@@ -495,6 +526,8 @@ export class FolderDebugger {
           this.changed()
           break
         case 'restart': {
+          // An agent's probe in its scratch folder is its own to start (ADR 0149).
+          if (run.file && !this.inFolder(run.file)) return { ok: false, reason: "That run's program is the agent's probe, outside the open folder: only the agent can start it again." }
           await session.stop()
           await session.settled
           this.runs.delete(runId)
@@ -551,17 +584,17 @@ export class FolderDebugger {
     return session.evaluate(expression, { ...(options.frame !== undefined ? { frameId: options.frame } : {}), ...(options.thread !== undefined ? { threadId: options.thread } : {}), context: options.context }).catch((error: unknown) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error) }))
   }
 
-  /** An agent's breakpoints, checked as the person's are, by whole path; or what is wrong with them. */
-  private agentBreakpoints(list: readonly AgentBreakpoint[]): Map<string, Breakpoint[]> | string {
+  /** An agent's breakpoints, checked as the person's are, by whole path; or what is wrong with them. `scratch`: its probes may have some (ADR 0149). */
+  private agentBreakpoints(list: readonly AgentBreakpoint[], scratch?: string): Map<string, Breakpoint[]> | string {
     if (list.length > MAX_AGENT_BREAKPOINTS) return `A run takes at most ${MAX_AGENT_BREAKPOINTS} breakpoints.`
     const map = new Map<string, Breakpoint[]>()
     for (const item of list) {
       const rel = typeof item.file === 'string' ? this.relative(item.file) : null
-      if (!rel) return `${String(item.file)} is not in the open folder.`
+      const whole = rel ? this.whole(rel) : typeof item.file === 'string' && scratch ? this.inScratch(scratch, item.file) : null
+      if (!whole) return `${String(item.file)} is ${scratch ? 'in neither the open folder nor your scratch folder' : 'not in the open folder'}.`
       if (!lineNumber(item.line)) return `${String(item.line)} is not a line number.`
       if ((item.condition?.length ?? 0) > MAX_EXPRESSION_CHARS || (item.logMessage?.length ?? 0) > MAX_EXPRESSION_CHARS) return `A condition or a log message is at most ${MAX_EXPRESSION_CHARS} characters.`
       if (item.hitCondition !== undefined && !HIT_CONDITION.test(item.hitCondition)) return `"${item.hitCondition}" is not a hit count: "5", "==5", ">5" or "%5".`
-      const whole = this.whole(rel)
       const breakpoint: Breakpoint = {
         id: `a${this.nextAgentBreakpoint++}`,
         line: item.line,
@@ -579,8 +612,9 @@ export class FolderDebugger {
    * The folder's debugger as the agent of one session sees it (ADR 0145): the runs it started, with breakpoints of
    * their own, and the person's runs. The approvals are the Debug tool's; this keeps each agent to its own runs and the
    * person's, and keeps the person's breakpoints out of an agent's runs and the agent's out of the person's.
+   * `scratch`: the session's scratch folder (ADR 0141), a real path, where the agent's probes may run (ADR 0149).
    */
-  forAgent(owner: string): AgentDebugView {
+  forAgent(owner: string, scratch?: string): AgentDebugView {
     /** How much of each run's output this agent has read. */
     const marks = new Map<string, number>()
     const visible = (id: string): Run | undefined => {
@@ -613,11 +647,11 @@ export class FolderDebugger {
       configs: async () => (await this.configs()).configs.map((config) => ({ id: config.id, name: config.name, detail: config.detail, ...(config.problem ? { problem: config.problem } : {}) })),
       start: async (request) => {
         await this.load()
-        const breakpoints = this.agentBreakpoints(request.breakpoints)
+        const breakpoints = this.agentBreakpoints(request.breakpoints, scratch)
         if (typeof breakpoints === 'string') return { ok: false, reason: breakpoints }
         const exceptions = readExceptions(request.exceptions)
         if (!exceptions) return { ok: false, reason: 'Those are not exception stops.' }
-        return this.start({ config: request.config, ...(request.file !== undefined ? { file: request.file } : {}) }, { owner, breakpoints, exceptions, ...(request.signal ? { signal: request.signal } : {}) })
+        return this.start({ config: request.config, ...(request.file !== undefined ? { file: request.file } : {}) }, { owner, breakpoints, exceptions, ...(scratch ? { scratch } : {}), ...(request.signal ? { signal: request.signal } : {}) })
       },
       runs: async () => [...this.runs.values()].filter((run) => !run.owner || run.owner === owner).map(view),
       wait: async (id, stops, ms, signal) => {
@@ -651,7 +685,7 @@ export class FolderDebugger {
       setBreakpoints: async (id, list) => {
         const run = visible(id)
         if (!run?.own || run.owner !== owner) return { ok: false, reason: "Only a run the agent started takes the agent's breakpoints." }
-        const next = this.agentBreakpoints(list)
+        const next = this.agentBreakpoints(list, scratch)
         if (typeof next === 'string') return { ok: false, reason: next }
         const before = run.own.breakpoints
         run.own.breakpoints = next

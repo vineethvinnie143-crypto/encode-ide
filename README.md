@@ -641,7 +641,9 @@ file replays with `pnpm turn-report report.json`, call by call against what the 
 running its commands; `--save <name>` keeps it as a task whose replay the tests then hold to. Four debugging tasks
 (`--tag debugger`, [ADR 0146](docs/adr/0146-the-bench-has-debugging-tasks-run-with-the-folders-debugger.md)) give the
 agent the folder's debugger, as the app does, and approve its debug starts: a discount rule that loses to a weaker one,
-a menu build that crashes, one sales record read wrong among 300, and TypeScript balances that come out 0.
+a menu build that crashes, one sales record read wrong among 300, and TypeScript balances that come out 0. Ctrl+C once
+ends the bench after the run in progress, which is checked as any run is, and twice stops that run too
+([ADR 0149](docs/adr/0149-the-agents-debug-runs-start-its-probes-and-the-benchs-first-ctrl-c-lets-the-run-finish.md)).
 
 Against other agents, the command line runs Terminal-Bench through Harbor
 ([ADR 0138](docs/adr/0138-the-command-line-runs-terminal-bench-through-harbor-held-to-a-spending-cap.md)):

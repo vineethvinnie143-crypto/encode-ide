@@ -712,7 +712,7 @@ export class Workspaces {
   }
 
   /** What the host's `scope` option is given. The folder's settings are read before the session opens. */
-  readonly scope = async (request: { sessionId: string; root: string; notice(text: string): void }): Promise<SessionScope> => {
+  readonly scope = async (request: { sessionId: string; root: string; scratch?: string; notice(text: string): void }): Promise<SessionScope> => {
     const config = this.config(request.root)
     const hub = this.hub(config)
     // Taken before anything is awaited, so that the hub cannot be let go of between getting it and holding it.
@@ -744,7 +744,7 @@ export class Workspaces {
     }
   }
 
-  private scopeOf(request: { sessionId: string; root: string; notice(text: string): void }, config: WorkspaceConfig, hub: McpHub, release: () => void): SessionScope {
+  private scopeOf(request: { sessionId: string; root: string; scratch?: string; notice(text: string): void }, config: WorkspaceConfig, hub: McpHub, release: () => void): SessionScope {
     const recording = this.recorder(request, config)
     const { env, hookRunner, transcriptPath } = this.options
     // The folder and the extra folders its settings name are where commands may write; its settings may tighten the rest.
@@ -754,8 +754,8 @@ export class Workspaces {
     })
     sandbox?.warm()
     const code = this.languageServers(config.root)
-    // The agent's Debug tool (ADR 0145): its runs end with the session.
-    const debug = this.debuggerFor(config)?.forAgent(request.sessionId)
+    // The agent's Debug tool (ADR 0145): its runs end with the session, and its probes run from its scratch folder (ADR 0149).
+    const debug = this.debuggerFor(config)?.forAgent(request.sessionId, request.scratch)
     return {
       // What keeps the record comes first: a hook that stops a result must not leave the record out of date.
       hooks: combineHooks(

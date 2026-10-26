@@ -96,6 +96,8 @@ pnpm bench compare bench-results/<before>.json bench-results/<after>.json
 pnpm bench run --model openrouter:deepseek/deepseek-v3.2 --tag debugger --repeat 3   # the four debugging tasks, with the debugger
 ```
 
+Ctrl+C once ends the bench after the run in progress, which is still checked; twice stops that run too.
+
 What is most useful to hear: a model that still stops at the second step or later (the error's words), a reply whose
 reasoning shows as its answer, and a family whose answers got worse when its reasoning went back.
 
@@ -898,6 +900,9 @@ the panic, which it says, with the panic's message in the console.
 - Under Read Only the agent is told it cannot debug and says to switch to Workspace Write.
 - At a stop inside a loop, the agent's report lists the loop's variable and the function's values together, under
   "Values (Block, Local, …)".
+- Ask the agent to try its fix on more input with the debugger. It may write a probe in its scratch folder and debug
+  that: the card says **Debug** with the probe's path, and the Debug tab lists the run with an **Agent** tag. Restart
+  there says only the agent can start it again.
 
 ## Worktrees
 

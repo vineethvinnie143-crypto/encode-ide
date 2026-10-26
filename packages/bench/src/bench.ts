@@ -19,6 +19,11 @@ export interface BenchOptions extends Omit<RunOptions, 'client' | 'programs' | '
   repeat?: number
   /** A hard stop on what the runs spend, every run of every setup together (ADR 0137). */
   cap?: SpendingCap
+  /**
+   * Once this fires no run starts, and the run in progress goes on to its checks: Ctrl+C once (ADR 0149). `signal`
+   * stops the run in progress too.
+   */
+  finish?: AbortSignal
   /** `setup`: which of runPair's two setups ran it; 0 for runBench. */
   onRun?(run: TaskRun, task: BenchTask, setup: number): void
   /** A round starts: 1 for the first. */
@@ -111,20 +116,27 @@ async function runSetups(tasks: readonly BenchTask[], options: BenchOptions, set
   const references = new Map<string, QualityFacts | undefined>()
   let ended: string | undefined
   let lastRound = 0
+  // Told to finish with a run left to start, and not stopped outright: the report says it ended early.
+  const finishing = () => {
+    if (!options.finish?.aborted || signal?.aborted) return false
+    ended ??= 'it was asked to stop after the run in progress'
+    return true
+  }
   rounds: for (let attempt = 1; attempt <= repeat; attempt++) {
     // A round starts only when what is left pays for one like the last: a round cut short measures some tasks less.
     if (cap && attempt > 1 && cap.spent() + lastRound > cap.limit) {
       cap.stop(`round ${attempt} would cost about ${dollars(lastRound)}, and ${dollars(Math.max(0, cap.limit - cap.spent()))} of the spending cap is left`)
     }
-    if (signal?.aborted) break
+    if (signal?.aborted || finishing()) break
     options.onRound?.(attempt)
     const before = cap?.spent() ?? 0
     for (const [taskIndex, task] of tasks.entries()) {
+      if (signal?.aborted || finishing()) break rounds
       if (live !== 'reference' && !references.has(task.id)) references.set(task.id, await referenceFacts(task, options, programs))
       const reference = references.get(task.id)
       const order = setups.map((_, index) => (attempt % 2 ? index : setups.length - 1 - index))
       for (const [step, index] of order.entries()) {
-        if (signal?.aborted) break rounds
+        if (signal?.aborted || finishing()) break rounds
         const client = live === 'reference' ? referenceClient(task) : live
         const settings = live === 'reference' ? { ...setups[index], ...REFERENCE_SETTINGS } : setups[index]
         const run = client

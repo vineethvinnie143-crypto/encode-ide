@@ -49,8 +49,10 @@ export interface CliContext {
   root: string
   env: NodeJS.ProcessEnv
   print(text: string): void
-  /** Whatever the bench should stop on, such as Ctrl+C. */
+  /** Whatever stops the bench and the run in progress, such as Ctrl+C twice. */
   signal?: AbortSignal
+  /** Whatever ends the bench once the run in progress is done and checked, such as Ctrl+C once (ADR 0149). */
+  finish?: AbortSignal
   /** For tests: the model client a run uses instead of one made from --model. */
   client?: ModelClient
   now?: () => Date
@@ -257,6 +259,7 @@ async function run(flags: Flags, context: CliContext): Promise<number> {
     ...(flags.switches.has('--keep') ? { keep: true, onKept: (kept: string) => context.print(`  kept in ${kept}`) } : {}),
     ...(sandbox ? { sandbox } : {}),
     ...(context.signal ? { signal: context.signal } : {}),
+    ...(context.finish ? { finish: context.finish } : {}),
     ...(context.now ? { now: context.now } : {}),
     ...(cap ? { cap } : {}),
     ...(repeat > 1 ? { onRound: (round: number) => context.print(`Round ${round} of ${repeat}`) } : {}),

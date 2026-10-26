@@ -473,7 +473,7 @@ export const debugTool: Tool<DebugInput> = {
       properties: {
         action: { type: 'string', enum: [...ACTIONS] },
         config: { type: 'string', maxLength: 200, description: 'start: "file", or a configuration\'s name. Default "file".' },
-        file: { type: 'string', description: 'start with config "file": the file to run, absolute or relative to the project.' },
+        file: { type: 'string', description: 'start with config "file": the file to run, absolute or relative to the project. A probe in your scratch folder runs too.' },
         breakpoints: {
           type: 'array',
           maxItems: MAX_BREAKPOINTS,

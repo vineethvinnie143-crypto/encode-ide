@@ -17,6 +17,8 @@
  * for --base-url); they are never printed, never reach the agent's commands, and are taken out of every report.
  * Behind a proxy (HTTPS_PROXY set), run with NODE_USE_ENV_PROXY=1: Node's fetch ignores the proxy otherwise.
  *
+ * Ctrl+C once ends the bench after the run in progress, which is checked as any run is; twice stops that run too.
+ *
  * A task's checks are programs (node, python or lua scripts): run only tasks you trust.
  * Exit status: 0 when every run passed, 1 when one failed, 2 when the bench could not run.
  */
@@ -50,9 +52,19 @@ try {
 const { main } = await import(pathToFileURL(bundle).href)
 fs.rmSync(dir, { recursive: true, force: true })
 
-const controller = new AbortController()
-process.once('SIGINT', () => {
-  console.log('\nStopping after the run in progress; the report keeps what finished.')
-  controller.abort()
+// Ctrl+C once: no run starts after the one in progress, which goes on to its checks. Twice: that run is stopped too.
+// Either way the report keeps what finished; a third leaves at once, without it (ADR 0149).
+const finish = new AbortController()
+const stop = new AbortController()
+let interrupts = 0
+process.on('SIGINT', () => {
+  interrupts++
+  if (interrupts === 1) {
+    console.log('\nStopping after the run in progress, which goes on to its checks; Ctrl+C again stops it now. The report keeps what finished.')
+    finish.abort()
+  } else if (interrupts === 2) {
+    console.log('\nStopping the run in progress; the report keeps what finished.')
+    stop.abort()
+  } else process.exit(130)
 })
-process.exitCode = await main(process.argv.slice(2), { root, env: process.env, print: (text) => console.log(text), signal: controller.signal })
+process.exitCode = await main(process.argv.slice(2), { root, env: process.env, print: (text) => console.log(text), signal: stop.signal, finish: finish.signal })

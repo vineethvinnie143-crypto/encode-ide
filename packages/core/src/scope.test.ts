@@ -37,13 +37,13 @@ function rulesOf(root: string, home: string, texts: Array<['allow' | 'ask' | 'de
 }
 
 describe('a session scope', () => {
-  it('is asked for once for each session that has a folder, with the real path of the folder', async () => {
-    const asked: Array<{ sessionId: string; root: string }> = []
+  it('is asked for once for each session that has a folder, with the real path of the folder and its scratch folder', async () => {
+    const asked: Array<{ sessionId: string; root: string; scratch?: string; made?: boolean }> = []
     const h = await hostHarness({
       script: [{ text: 'ok' }],
       host: {
-        scope: (request) => {
-          asked.push(request)
+        scope: async (request) => {
+          asked.push({ ...request, made: !!request.scratch && (await fs.stat(request.scratch).catch(() => undefined))?.isDirectory() })
           return {}
         },
       },
@@ -53,6 +53,9 @@ describe('a session scope', () => {
     await h.host.start(first.id, { text: 'again', mode: 'code' })
     assert.deepEqual(asked.map((request) => request.sessionId), [first.id])
     assert.equal(asked[0].root, await fs.realpath(h.root))
+    // The scratch folder is made first: the folder's debugger runs the agent's probes from it (ADR 0149).
+    assert.equal(asked[0].scratch, path.join(await fs.realpath(h.dir), 'scratch', first.id))
+    assert.equal(asked[0].made, true)
     // A session that belongs to no project works in the open folder, so it is asked for too.
     const free = await h.host.create({ projectRoot: null })
     await h.host.start(free.id, { text: 'hello', mode: 'code' })
