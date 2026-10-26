@@ -122,9 +122,11 @@ describe('a debug run of Node.js', () => {
 
     // The second and third calls stop too; then the program ends.
     for (let hit = 0; hit < 3; hit++) {
+      const before = paused(r.session.view())!.frames![0]!.id
       await r.session.resume(paused(r.session.view())!.id)
       if (hit === 2) break
-      await r.until((v) => paused(v)?.frames?.[0]?.line === 2, `hit ${hit + 2}`)
+      // A new stop, not the last one still shown until Node.js says it resumed: each stop numbers its frames afresh.
+      await r.until((v) => paused(v)?.frames?.[0]?.line === 2 && paused(v)!.frames![0]!.id !== before, `hit ${hit + 2}`)
     }
     view = await r.until((v) => v.state === 'ended', 'the end')
     assert.equal(view.exitCode, 0)
