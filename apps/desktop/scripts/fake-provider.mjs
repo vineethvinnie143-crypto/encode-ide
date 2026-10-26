@@ -549,6 +549,8 @@ const LANGUAGE_SERVER_NEWS = [
   'You ran into trouble more than once, so',
   'The conversation was just compacted to fit the context window',
   'That was the last step this request may take',
+  'Your answer took the last step this request may take',
+  'Steps left in this request:',
   'Before you finish: the task list the person sees',
   'Your answer leaves a check to the user',
   'The task list the person sees has not changed',

@@ -381,7 +381,9 @@ While the agent works on something long, type a correction and press `Ctrl+Enter
 then appear in the conversation where the agent took it, and the agent should change course at its next step. `Enter`
 instead queues the message for after the turn (Settings → General swaps the two keys). A message the agent takes gives
 the request its whole step limit again. When a request reaches the limit (Settings → Agent → Max agent steps), it should
-still end with an answer that says how far it got, and a line under it with **Continue** and **Change the limit**. Set **Effort** with the chip under
+still end with an answer that says how far it got, and a line under it with **Continue** and **Change the limit**. If the
+Reviewer or a check finds something in an answer at the last step, its notice should say so, and the answer after it
+should say what is still to do. Set **Effort** with the chip under
 the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High. While it
 thinks, its latest words should show in a quiet line under **Thinking**, and a command that runs for five seconds or
 more should show a clock beside its spinner. A command that only sleeps for longer than 10 seconds is not run: the agent

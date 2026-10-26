@@ -117,7 +117,7 @@ import { isTestPath, scanChanges, scanReminder, type ChangedText, type ScanFindi
 import { describeError, detailsOf, plainError } from './problems'
 import { shortGuide } from './guide'
 import { ThinkingTicker } from './thinking'
-import { ANSWER_AGAIN, BATCH_LOOKS, CONTINUE_AFTER_LENGTH, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
+import { ANSWER_AGAIN, BATCH_LOOKS, CONTINUE_AFTER_LENGTH, lastStepCheckNote, RESUME_AFTER_COMPACTION, reminder, stepLimitNote, stepsLeftNote, stoppedNote, todoFinishNote, todoReminder } from './prompt'
 import { askReviewer, changeInput, COMPLETION_SYSTEM, completionPrompt, completionReminder, parseCompletion, parseGaps, PLAN_SYSTEM, planPrompt, planReminder, reviewWanted, testsKeptReminder, testsWanted } from './review'
 import { parseSecondLook, SECOND_LOOK_SYSTEM, secondLookPrompt } from './second-look'
 import { CONVENTIONS_SYSTEM, conventionsPrompt, instructionsAt, parseConventions, teaches, type Lesson } from './conventions'
@@ -166,6 +166,11 @@ const SHOWN_STOPS: ReadonlySet<string> = new Set(['attempt_completion', 'ExitPla
 const TODO_NUDGE_STEPS = 6
 /** Steps in a row that each read or searched one thing, after which the model is asked once to batch them (ADR 0134). */
 const SOLO_LOOK_STEPS = 3
+/** Steps left when the model is told, once, how many remain (ADR 0147), in a request that may take STEPS_LEFT_FROM or more. */
+const STEPS_LEFT = 4
+const STEPS_LEFT_FROM = 10
+/** What a notice says, at the last step, in place of what the agent goes on to do (ADR 0147). */
+const AT_LAST_STEP = "The answer took the request's last step, so the agent says what is left instead."
 /** Calls that only read or search the project, and run together when one reply makes several. */
 const LOOKS = new Set(['Read', 'Grep', 'Glob', 'CodeMap'])
 /** Calls after which, when each worked, the next step may think at low effort (ADR 0135): reads, searches and commands. */
@@ -655,8 +660,22 @@ export class AgentLoop {
 
     /** Steps since the person's latest message: each message they send gives the request the whole limit again (ADR 0124). */
     let step = 0
+    let leftSaid = false
+    /** Once, near the limit: how many steps are left, so the answer comes with room to act on its checks (ADR 0147). */
+    const stepsLeft = (): string | undefined => {
+      const left = maxSteps - step
+      if (leftSaid || maxSteps < STEPS_LEFT_FROM || left > STEPS_LEFT || left < 1) return undefined
+      leftSaid = true
+      return stepsLeftNote(left, maxSteps)
+    }
+    /** What sends the model back after its answer, with the steps left when they are few. */
+    const withLeft = (text: string): string => {
+      const left = stepsLeft()
+      return left ? `${text}\n\n${left}` : text
+    }
     for (;;) {
-      // Only a reply the agent was sent back from reaches the limit here: its answer stands, after its last step.
+      // Only a reply sent on at its last step (cut off, after a compaction, or by a beforeStop hook) reaches the limit
+      // here: its answer stands, after its last step.
       if (step >= maxSteps) return { kind: 'max-steps', steps: maxSteps }
       step++
       this.checkAbort(signal)
@@ -676,6 +695,7 @@ export class AgentLoop {
         }
         if (await steered()) {
           step = 0
+          leftSaid = false
           continue
         }
         // A summary in place of the work so far reads like a fresh start, and a weaker model may answer it with a
@@ -686,24 +706,35 @@ export class AgentLoop {
           continue
         }
         const reply = messageText(message)
-        const sent = await this.beforeFinish({ ...turn, mode }, reply)
+        // An answer at the last step is still checked, but nothing can act on what that finds: the reply after it, made
+        // with tools held back, tells the person what is left (ADR 0147).
+        const last = step >= maxSteps
+        const sent = await this.beforeFinish({ ...turn, mode }, reply, last)
+        if (sent && last) {
+          await o.conversation.add(userText(reminder(`${sent}\n\n${lastStepCheckNote(maxSteps)}`)), { turnId: turn.turnId })
+          const closed = await this.closingReply({ ...turn, mode })
+          if (closed.kind === 'end') return closed.end
+          return { kind: 'max-steps', steps: maxSteps, ...(closed.reply ? { reply: closed.reply } : {}) }
+        }
         if (sent) {
           const took = await this.offerStronger(turn)
-          await o.conversation.add(userText(reminder(`${took ? `${sent}\n\n${took}` : sent}\n\n${ANSWER_AGAIN}`)), { turnId: turn.turnId })
+          await o.conversation.add(userText(reminder(withLeft(`${took ? `${sent}\n\n${took}` : sent}\n\n${ANSWER_AGAIN}`))), { turnId: turn.turnId })
           continue
         }
-        const stale = this.staleTodos()
+        // The task list cannot be brought up to date with no step left.
+        const stale = last ? undefined : this.staleTodos()
         if (stale) {
-          await o.conversation.add(userText(reminder(`${stale}\n\n${ANSWER_AGAIN}`)), { turnId: turn.turnId })
+          await o.conversation.add(userText(reminder(withLeft(`${stale}\n\n${ANSWER_AGAIN}`))), { turnId: turn.turnId })
           continue
         }
         const stop = await this.hook('beforeStop', { ...this.event({ ...turn, mode }), lastMessage: reply, continued: stopRounds > 0 })
         if (stop?.continue && stopRounds++ < MAX_STOP_ROUNDS) {
-          await o.conversation.add({ role: 'user', content: [textBlock(stop.continue), textBlock(reminder(ANSWER_AGAIN))] }, { turnId: turn.turnId })
+          await o.conversation.add({ role: 'user', content: [textBlock(stop.continue), textBlock(reminder(withLeft(ANSWER_AGAIN)))] }, { turnId: turn.turnId })
           continue
         }
         if (await steered()) {
           step = 0
+          leftSaid = false
           continue
         }
         this.answered = true
@@ -716,6 +747,8 @@ export class AgentLoop {
       let light = false
       /** Why the request ends after this step with nothing written for the person: the reply after it is made with tools held back. */
       let closing: string | undefined
+      /** A check of attempt_completion's answer at the last step found something: the closing reply says what is left. */
+      let checkedLast = false
       try {
         await this.runCalls(calls, { ...turn, mode }, state)
         ran = true
@@ -739,9 +772,11 @@ export class AgentLoop {
         }
         // A model that finishes with attempt_completion is held to what one that just stops talking is.
         if (state.stop !== undefined && state.stopBy === 'attempt_completion') {
-          const sent = (await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop)) ?? this.staleTodos()
+          const last = step >= maxSteps
+          const sent = (await this.beforeFinish({ ...turn, mode: state.mode ?? mode }, state.stop, last)) ?? (last ? undefined : this.staleTodos())
           if (sent) {
-            state.context.push(`${sent}\n\n${ANSWER_AGAIN}`)
+            state.context.push(last ? sent : `${sent}\n\n${ANSWER_AGAIN}`)
+            checkedLast = last
             state.stop = undefined
             light = false
           }
@@ -769,11 +804,18 @@ export class AgentLoop {
           content.push(...blocks)
           took = theirs && blocks.length > 0
         }
-        if (took) step = 0
-        else if (ran) closing = state.stop === undefined ? (step >= maxSteps ? stepLimitNote(maxSteps) : undefined) : this.stopNote(state, message)
+        if (took) {
+          step = 0
+          leftSaid = false
+        } else if (ran) {
+          closing = state.stop === undefined ? (step >= maxSteps ? (checkedLast ? lastStepCheckNote(maxSteps) : stepLimitNote(maxSteps)) : undefined) : this.stopNote(state, message)
+        }
+        // Not when a tool ended the request here, or a message of the person's gave it the whole limit again.
+        const left = ran && !took && state.stop === undefined ? stepsLeft() : undefined
+        if (left) content.push(textBlock(reminder(left)))
         if (closing) content.push(textBlock(reminder(closing)))
         // A message of the person's, like the first of a request, is thought about at the effort set.
-        this.lightNext = ran && light && !took && !closing
+        this.lightNext = ran && light && !took && !closing && !left
         await o.conversation.add({ role: 'user', content }, { turnId: turn.turnId })
       }
       if (state.mode) mode = state.mode
@@ -2219,38 +2261,40 @@ export class AgentLoop {
    * What eNCode checks before the agent may finish, in order: the language servers' errors (ADR 0073), test files the
    * person said to leave alone (ADR 0139), the project's checks (ADR 0095), the scan of the changes, what the reply
    * claims, and the Reviewer (ADR 0096). The first that sends the agent back tells the person why, and gives the
-   * reminder for the agent; null lets the turn end.
+   * reminder for the agent; null lets the turn end. `last`: the answer took the request's last step, so what a check
+   * finds is told, not acted on (ADR 0147), and an answer that leaves a check to the person stands.
    */
-  private async beforeFinish(turn: Turn, reply: string): Promise<string | null> {
+  private async beforeFinish(turn: Turn, reply: string, last = false): Promise<string | null> {
     const { o } = this
     const code = turn.mode === 'code'
-    const back = (notice: string, text: string) => {
-      o.surface.settle(o.surface.entry({ kind: 'notice', text: notice }))
+    /** `found`: what the check found; `then`: what the agent goes on to do about it, when a step is left for that. */
+    const back = (found: string, then: string, text: string) => {
+      o.surface.settle(o.surface.entry({ kind: 'notice', text: last ? `${found}. ${AT_LAST_STEP}` : `${found}, so ${then}.` }))
       return text
     }
-    const setback = (gate: SentBack, notice: string, text: string) => {
+    const setback = (gate: SentBack, found: string, then: string, text: string) => {
       if (o.agentId === 'main') this.setbacks.sentBack(gate)
       if (gate === 'checks') this.signal('checkBounces')
       if (gate === 'claims') this.signal('claimBounces')
-      return back(notice, text)
+      return back(found, then, text)
     }
     if (code) {
       const left = await this.edits?.gate(o.settings().errorGate ?? 'auto', turn.signal)
-      if (left) return setback('errors', 'The language servers still report errors in the files the agent changed, so it goes on to fix them.', left)
+      if (left) return setback('errors', 'The language servers still report errors in the files the agent changed', 'it goes on to fix them', left)
       const kept = await this.testsKept(turn)
-      if (kept) return back('The request said to leave the tests alone, so the agent puts back the test files it changed.', kept)
+      if (kept) return back('The request said to leave the tests alone', 'the agent puts back the test files it changed', kept)
       const checked = await this.checkGate(turn)
-      if (checked) return setback('checks', "The project's checks failed after the agent's changes, so it goes on to fix them.", checked)
+      if (checked) return setback('checks', "The project's checks failed after the agent's changes", 'it goes on to fix them', checked)
       const scanned = await this.scanGate(turn)
-      if (scanned) return back("eNCode's scan found what is often a security bug in the agent's changes, so it goes on to check it.", scanned)
+      if (scanned) return back("eNCode's scan found what is often a security bug in the agent's changes", 'it goes on to check it', scanned)
     }
     const claims = await this.claimCheck(reply)
-    if (claims) return setback('claims', "eNCode could not confirm something the agent's reply says, so it checks it.", claims)
-    const handed = this.handBackCheck(turn, reply)
-    if (handed) return back('The answer left a check to you, so the agent tries to make it itself first.', handed)
+    if (claims) return setback('claims', "eNCode could not confirm something the agent's reply says", 'it checks it', claims)
+    const handed = last ? null : this.handBackCheck(turn, reply)
+    if (handed) return back('The answer left a check to you', 'the agent tries to make it itself first', handed)
     if (code) {
       const reviewed = await this.reviewGate(turn, reply)
-      if (reviewed) return reviewed.serious ? setback('reviewer', reviewed.notice, reviewed.text) : back(reviewed.notice, reviewed.text)
+      if (reviewed) return reviewed.serious ? setback('reviewer', reviewed.found, reviewed.then, reviewed.text) : back(reviewed.found, reviewed.then, reviewed.text)
     }
     return null
   }
@@ -2310,7 +2354,7 @@ export class AgentLoop {
    * the reply. P0 and P1 findings go back to the agent, and so do the cases no test covers when the project has tests
    * and the request added none. Anything else is only told to the person.
    */
-  private async reviewGate(turn: Turn, reply: string): Promise<{ notice: string; text: string; serious: boolean } | null> {
+  private async reviewGate(turn: Turn, reply: string): Promise<{ found: string; then: string; text: string; serious: boolean } | null> {
     const { o } = this
     if (o.agentId !== 'main' || this.reviewed || !o.services.changes) return null
     if (o.services.checks && !o.services.checks.ledger.changedInRequest) return null
@@ -2351,8 +2395,9 @@ export class AgentLoop {
       return null
     }
     const serious = review.findings.some((finding) => finding.priority === 'P0' || finding.priority === 'P1')
-    const untested = wanted === 'asked' ? 'The Reviewer listed cases no test covers, so the agent adds tests for them.' : 'The Reviewer listed cases no test covers, so the agent checks that its change handles them.'
-    return { notice: serious ? "The Reviewer found a problem in the agent's changes, so it goes on to fix it." : untested, text, serious }
+    if (serious) return { found: "The Reviewer found a problem in the agent's changes", then: 'it goes on to fix it', text, serious }
+    const then = wanted === 'asked' ? 'the agent adds tests for them' : 'the agent checks that its change handles them'
+    return { found: 'The Reviewer listed cases no test covers', then, text, serious }
   }
 
   /** Once a request, when the person wants it: the Reviewer reads a plan before the person does. The gaps it finds, or null. */

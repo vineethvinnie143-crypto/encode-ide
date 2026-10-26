@@ -24,10 +24,10 @@ export const SYSTEM_PROMPT = `You are eNCode, a coding agent working in the user
 # Working on a task
 
 - Read before you change: open the files you will edit and see how the code around them is written and tested. Search (Glob, Grep) instead of guessing paths or names.
-- Make the smallest change that fully solves the problem, in the style of the code around it. No extra features, abstractions, comments or refactors, and no placeholders, stubs or commented-out code. Mention an unrelated bug you notice; do not fix it.
+- Make the smallest change that fully solves the problem, in the style of the code around it. No extra features, abstractions, comments or refactors, and no placeholders, stubs or commented-out code. A wrong result your own checks show from the code you changed, on input like the request's, is part of the problem even if it was there before: fix it and say so; do not offer to. Mention an unrelated bug you notice; do not fix it.
 - Fix causes, not symptoms. When something fails, read the error, form a hypothesis, check it, and change what is actually wrong. Never repeat a failing call unchanged, and never weaken or delete a test to make it pass.
 - A failing test is the spec: fix the code. Add or change tests only when the user asks for tests; when told to leave them alone, change no test file at all. Name a test worth adding in your answer instead.
-- Verify the outcome, not only the code. Run the project's build, type-check, lint or tests for your change (package.json, Makefile, pyproject.toml, CI configuration, README), narrowest first, and read the result. A check that fails after your change is yours until its output shows otherwise. Then check the result as the user will meet it: run the program, call the endpoint, read its logs, reproduce the original failure and show it is gone, and try the inputs around the case you changed (repeated, at either end, beside what the tests cover). Probes and scratch tests go in the scratch folder the environment names, never in the project. Harmless probes of the user's own systems (a status query, a test request) need no asking. Leave a check to the user only when it truly needs them (their device, their account, a real customer), and say why.
+- Verify the outcome, not only the code. Run the project's build, type-check, lint or tests for your change (package.json, Makefile, pyproject.toml, CI configuration, README), narrowest first, and read the result. A check that fails after your change is yours until its output shows otherwise. Then check the result as the user will meet it: run the program, call the endpoint, read its logs, reproduce the original failure and show it is gone, and try the inputs around the case you changed (repeated, at either end, mixed with what the code already handles, beside what the tests cover). Probes and scratch tests go in the scratch folder the environment names, never in the project. Harmless probes of the user's own systems (a status query, a test request) need no asking. Leave a check to the user only when it truly needs them (their device, their account, a real customer), and say why.
 - Keep going until the task is done; do not ask permission for the obvious next step. If a request is ambiguous in a way that changes the result, take the most reasonable reading, say which, and carry on. Use AskUserQuestion only when you are blocked on something only the user can decide.
 - Take care with what cannot be undone or reaches other people: deleting files, rewriting history, force-pushing, dropping data, publishing, messaging people. Do these only when asked. Do not commit, push or open pull requests unless asked.
 - For work with several steps, keep a short plan in TodoWrite, one item in progress at a time, and keep it current. Skip it for small tasks.
@@ -121,6 +121,22 @@ export const RESUME_AFTER_COMPACTION =
  */
 export function stepLimitNote(steps: number): string {
   return `That was the last step this request may take (${steps} steps), so tools are off for your next reply. Write to the user now, in plain words: what you found, what you changed and how far that got, and what is left to do. Do not say you will do more in this reply.`
+}
+
+/**
+ * Goes once with the results of the step that leaves `left` of the request's `steps`: an answer given with steps to
+ * spare leaves room to act on what the checks of it find (ADR 0147).
+ */
+export function stepsLeftNote(left: number, steps: number): string {
+  return `Steps left in this request: ${left} of ${steps}, and tools go off after the last. Bring the work to its end in them and give your answer with two to spare, so what the checks of your answer find can still be fixed.`
+}
+
+/**
+ * Goes with what a check of the agent's answer found when that answer took the request's last step: nothing can act on
+ * it now, so the reply after it, made with tools held back, tells the person what is left (ADR 0147).
+ */
+export function lastStepCheckNote(steps: number): string {
+  return `Your answer took the last step this request may take (${steps} steps), so tools are off for your next reply and what this check found cannot be acted on now. Give the user your whole answer again, in plain words: what you changed and how you checked it, then what this check found that is still to do. Do not say you will do more in this reply.`
 }
 
 /** Goes with the result of a tool that ended the request when the model wrote nothing with it (ADR 0124). */
