@@ -321,6 +321,9 @@ started, the problems the language servers found and the debugger. Tabs, layout 
 
 Node.js and TypeScript programs are debugged in eNCode itself, with a client of its own
 ([ADR 0143](docs/adr/0143-encode-debugs-nodejs-with-a-client-of-its-own-from-the-gutter-and-a-debug-panel.md)).
+Python, Go, C, C++ and Rust are debugged through their own debuggers, which eNCode drives over the Debug Adapter
+Protocol
+([ADR 0144](docs/adr/0144-python-go-c-and-rust-are-debugged-through-their-own-debuggers-over-the-debug-adapter-protocol.md)).
 
 - **Breakpoints.** Click left of a line number, or press `F9`. Right-click there for a breakpoint with a condition, one
   that stops on some hits (`5`, `% 3`), or a log point that prints instead of stopping (`total is {total}`).
@@ -331,6 +334,35 @@ Node.js and TypeScript programs are debugged in eNCode itself, with a client of 
 - **While paused.** The editor shows the line, and a hover shows the value under the pointer. The Debug tab
   (`Ctrl+Shift+D`) shows the values, your watches, the call stack and the breakpoints, and its console evaluates in
   the paused frame.
+- **Other languages.** `F5` on a `.py`, `.go`, `.rs`, `.c` or `.cpp` file debugs it with that language's debugger,
+  the same breakpoints and the same Debug tab:
+
+  | Language | Debugger | What eNCode does first |
+  | --- | --- | --- |
+  | Python | debugpy | Uses the folder's `.venv`, the active environment or the PATH's Python, and its debugpy; without one, offers to install debugpy 1.8.22 (pinned by checksum, Python 3.10 or newer) |
+  | Go | Delve | Runs the file's package (a `_test.go` file runs its tests); without Delve, offers to build Delve 1.27.2 with `go install`, and fetches its own Go when the computer's is older than 1.25 |
+  | C, C++ | lldb-dap (LLVM) | Builds the file with clang or gcc, with debug information, into the run's own folder |
+  | Rust | lldb-dap (LLVM) | Builds the open program with cargo (or the file alone with rustc) and loads Rust's formatters |
+
+  lldb-dap comes with LLVM, which you install yourself (`winget install LLVM.LLVM` on Windows). On Windows it also
+  needs the Python its LLVM was built with; eNCode finds it, or says which one to install.
+- **Configurations.** `.encode/debug.json` names runs of its own, for the Debug tab's list:
+
+  ```json
+  {
+    "configurations": [
+      { "name": "API", "program": "src/server.ts" },
+      { "name": "Worker", "type": "python", "module": "app.worker", "args": ["--once"] },
+      { "name": "Tests", "type": "go", "program": "./store", "mode": "test" },
+      { "name": "Importer", "type": "rust", "bin": "importer", "env": { "RUST_LOG": "debug" } },
+      { "name": "Engine", "type": "lldb", "program": "build/engine" }
+    ]
+  }
+  ```
+
+  `type` is `node` (the default), `python`, `go`, `lldb` (a C or C++ program you built) or `rust`. Python also takes
+  `python` and `justMyCode`, or `"request": "attach"` with a `port` (5678 by default) for a program that runs debugpy's
+  server on this machine. Go takes `buildFlags`; Rust takes `bin`, `example`, `package` and `manifest`.
 - **Trust.** A run starts the folder's code, so it starts only in a folder you trust.
 
 ## The Review tab
@@ -487,7 +519,7 @@ packages/bench/               the agent's benchmark: tasks with hidden checks, r
 packages/checkpoints/         what the file tools changed, saved before each change, and put back on request (the Rewind dialog's engine)
 packages/config/              settings files, workspace trust and saved rules
 packages/core/                the agent: loop, approvals, compaction, sessions, memory, subagents, host
-packages/debug/               the debugger's engine: a Chrome DevTools Protocol client, Node.js programs and the ones they start, source maps, values (@encode/debug)
+packages/debug/               the debugger's engine: a Chrome DevTools Protocol client, Node.js programs and the ones they start, source maps, values, and a Debug Adapter Protocol client for debugpy, Delve and lldb-dap (@encode/debug)
 packages/diff/                Myers diff, hunks that apply and unapply, word diffs (@encode/diff)
 packages/editor/              the editor without a DOM: state, commands, search, highlighting, review (@encode/editor)
 packages/editor-view/         the editor's DOM view, themed by CSS variables and tested in Chromium (@encode/editor-view)

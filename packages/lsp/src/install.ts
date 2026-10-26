@@ -23,7 +23,7 @@ import { ArchiveRefused, readGzip, readTar, readZip, unpackZip, writeFiles, type
 import type { Installable, ServerSpec } from './catalog'
 import type { LaunchPlan } from './discover'
 import { NPM_LOCKS } from './npm-locks'
-import { RUNTIMES, type Runtime, type RuntimeDownload, type RuntimeId } from './runtimes'
+import { RUNTIMES, versionAtLeast, type Runtime, type RuntimeDownload, type RuntimeId } from './runtimes'
 
 export interface NpmFile {
   /** Where it goes: `node_modules/a` or `node_modules/a/node_modules/b`. */
@@ -114,6 +114,8 @@ export type ServerInstall =
       bin?: string
       /** The toolchain eNCode fetches into its own folder when the computer has none new enough (ADR 0114). */
       runtime?: RuntimeId
+      /** The oldest version of that toolchain it takes, when newer than the toolchain's own minimum (Delve: Go 1.25). */
+      runtimeAtLeast?: string
       /** The server's own build, taken when the toolchain is not on the computer (rust-analyzer without rustup). */
       otherwise?: DownloadInstall
       /** Added to the environment the installed program starts with. */
@@ -176,6 +178,8 @@ const HOSTS = new Map([
   ['api.adoptium.net', '/v3/'],
   ['proxy.golang.org', '/golang.org/toolchain/'],
   ['storage.googleapis.com', '/proxy-golang-org-prod/'],
+  // Python's debugger, debugpy, from PyPI's file host (ADR 0144).
+  ['files.pythonhosted.org', '/packages/'],
 ])
 const MAX_DOWNLOAD = 400 * 1024 * 1024
 const MAX_UNPACKED = 1024 * 1024 * 1024
@@ -388,7 +392,7 @@ export async function planInstall(spec: Installable, context: InstallContext): P
   if (install.kind === 'download') return planDownload(spec, install, context)
   const runtime = install.runtime ? RUNTIMES[install.runtime] : undefined
   if (runtime) {
-    const chain = await toolchainFor(runtime, context)
+    const chain = await toolchainFor(runtime, context, false, install.runtimeAtLeast)
     if (chain.kind === 'none') return { unavailable: lacking(spec, chain) }
     return planToolchain(spec, install, base, chain, context)
   }
@@ -420,12 +424,12 @@ async function planDownload(spec: Installable, install: DownloadInstall, context
     const chain = await toolchainFor(runtime, context, true)
     if (chain.kind === 'fetch') {
       const size = chain.download.size ?? (await sizeOf(context, chain.download.url, runtime.limits.maxDownload))
-      steps.push(`${fetchStep(chain.download, runtime, size)} The server runs on it.`)
+      steps.push(`${fetchStep(chain.download, runtime, size)} The ${spec.role ?? 'server'} runs on it.`)
       bytes += size ?? 0
       fetched = runtime
     } else if (chain.kind === 'ours') steps.push(`It runs on eNCode's own copy of ${runtime.label} (${chain.version}).`)
     else if (chain.kind === 'system') steps.push(`It runs on the ${runtime.label} on this computer (${chain.program}).`)
-    else steps.push(`It needs ${runtime.label} ${runtime.minimum} or newer to run, and ${chain.older}. ${chain.why} Get it from ${runtime.site}.`)
+    else steps.push(`It needs ${runtime.label} ${chain.minimum} or newer to run, and ${chain.older}. ${chain.why} Get it from ${runtime.site}.`)
   } else if (install.needs) steps.push(`It needs ${install.needs}.`)
   steps.push(keepStep(spec, fetched))
   return { id: spec.id, label: spec.label, what: installName(spec), version: resolved.version, ...(bytes ? { bytes } : {}), dir: path.join(context.toolsDir, spec.id, resolved.version), steps }
@@ -443,8 +447,8 @@ async function planToolchain(spec: Installable, install: ToolchainInstall, base:
   } else if (chain.kind === 'ours') steps.push(`Runs ${command}, with eNCode's own copy of ${chain.runtime.label} (${chain.version}).`)
   else steps.push(`Runs ${command}, with ${install.needs} from ${chain.program}.`)
   for (const [, file] of files) steps.push(file.about)
-  if (!install.bin) steps.push(`It adds the server to your ${install.needs} installation, where eNCode finds it.`)
-  else steps.push(chain.kind === 'fetch' ? keepStep(spec, chain.runtime) : `Keeps the server in eNCode's own folder (${dir}).`)
+  if (!install.bin) steps.push(`It adds the ${spec.role ?? 'server'} to your ${install.needs} installation, where eNCode finds it.`)
+  else steps.push(chain.kind === 'fetch' ? keepStep(spec, chain.runtime) : `Keeps the ${spec.role ?? 'server'} in eNCode's own folder (${dir}).`)
   return { id: spec.id, label: spec.label, what: installName(spec), version: install.version, ...(bytes ? { bytes } : {}), dir, steps }
 }
 
@@ -454,12 +458,12 @@ function fetchStep(download: RuntimeDownload, runtime: Runtime, size: number | u
 
 function keepStep(spec: Installable, fetched?: Runtime): string {
   if (!fetched) return "Keeps it in eNCode's own folder, named below. Nothing else on this computer changes."
-  return `Keeps both in eNCode's own folder. Nothing is installed for the whole computer, no administrator is asked for, and the PATH stays as it is: this copy of ${fetched.label} is for the language server alone. To build ${spec.label} programs yourself, install ${fetched.whole} from ${fetched.site}.`
+  return `Keeps both in eNCode's own folder. Nothing is installed for the whole computer, no administrator is asked for, and the PATH stays as it is: this copy of ${fetched.label} is for the ${spec.role ?? 'language server'} alone. To build ${spec.label} programs yourself, install ${fetched.whole} from ${fetched.site}.`
 }
 
 /** Why a server cannot be installed without its toolchain, and where the person gets it. */
 function lacking(spec: Installable, chain: Extract<Toolchain, { kind: 'none' }>): string {
-  return `Installing ${installName(spec)} needs ${chain.runtime.label} ${chain.runtime.minimum} or newer, and ${chain.older}. ${chain.why} Get it from ${chain.runtime.site}, then try again.`
+  return `Installing ${installName(spec)} needs ${chain.runtime.label} ${chain.minimum} or newer, and ${chain.older}. ${chain.why} Get it from ${chain.runtime.site}, then try again.`
 }
 
 // ---------------------------------------------------------------------------------------------------------- toolchains
@@ -469,28 +473,30 @@ type Toolchain =
   | { kind: 'system'; program: string }
   | { kind: 'ours'; runtime: Runtime; dir: string; version: string }
   | { kind: 'fetch'; runtime: Runtime; download: RuntimeDownload }
-  | { kind: 'none'; runtime: Runtime; older: string; why: string }
+  | { kind: 'none'; runtime: Runtime; minimum: string; older: string; why: string }
 
 /**
  * The toolchain a server gets: the computer's own when it is new enough, else the copy eNCode fetched before, else one
  * to fetch, or why there is none. With `oursFirst`, eNCode's copy comes before the computer's (the Java server runs on
- * it whenever it is there, since it is known to be new enough).
+ * it whenever it is there, since it is known to be new enough). `atLeast` asks more of the computer's than the
+ * toolchain's own minimum; eNCode's copy is always newer than any of them.
  */
-async function toolchainFor(runtime: Runtime, context: InstallContext, oursFirst = false): Promise<Toolchain> {
+async function toolchainFor(runtime: Runtime, context: InstallContext, oursFirst = false, atLeast?: string): Promise<Toolchain> {
   const ours = installedRuntime(runtime.id, context.toolsDir)
   if (ours && oursFirst) return { kind: 'ours', runtime, ...ours }
   const program = systemProgram(runtime, context)
-  if (program && (await newEnough(runtime, program, context))) return { kind: 'system', program }
+  if (program && (await newEnough(runtime, program, context, atLeast))) return { kind: 'system', program }
   if (ours) return { kind: 'ours', runtime, ...ours }
+  const minimum = atLeast ?? runtime.minimum
   const older = program ? `the one on this computer (${program}) is older` : 'it is not on this computer'
   try {
     const download = await runtime.resolve(platformKey(context.platform, context.arch), (url) => json(context, url))
     if (download) return { kind: 'fetch', runtime, download }
-    return { kind: 'none', runtime, older, why: `eNCode cannot fetch it for this computer (${context.platform}, ${context.arch}).` }
+    return { kind: 'none', runtime, minimum, older, why: `eNCode cannot fetch it for this computer (${context.platform}, ${context.arch}).` }
   } catch (error) {
     if (context.signal?.aborted) throw error
     const reason = error instanceof Error ? error.message : String(error)
-    return { kind: 'none', runtime, older, why: `eNCode could not find one to fetch: ${reason.replace(/\.$/, '')}.` }
+    return { kind: 'none', runtime, minimum, older, why: `eNCode could not find one to fetch: ${reason.replace(/\.$/, '')}.` }
   }
 }
 
@@ -505,13 +511,13 @@ function systemProgram(runtime: Runtime, context: LaunchContext): string | null 
 }
 
 /** Whether the program says a version the servers take. It runs briefly in eNCode's own folder, never the project. */
-async function newEnough(runtime: Runtime, program: string, context: InstallContext): Promise<boolean> {
+async function newEnough(runtime: Runtime, program: string, context: InstallContext, atLeast?: string): Promise<boolean> {
   fs.mkdirSync(context.toolsDir, { recursive: true })
   const run = context.run ?? runProgram
   const signal = context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(CHECK_MS)]) : AbortSignal.timeout(CHECK_MS)
   try {
     const result = await run(program, runtime.check.args, { env: { ...context.env, ...runtime.check.env }, cwd: context.toolsDir, signal })
-    return runtime.check.enough(result.output)
+    return runtime.check.enough(result.output) && (!atLeast || versionAtLeast(result.output.trim(), atLeast.split('.').map(Number)))
   } catch {
     if (context.signal?.aborted) throw new InstallFailed('The install was stopped.')
     return false
@@ -530,7 +536,7 @@ export function removeRuntime(id: RuntimeId, toolsDir: string): void {
 }
 
 /** What a program started with eNCode's copy of a toolchain is given: its home, and its folder first on the PATH. */
-function runtimeEnv(runtime: Runtime, dir: string, context: LaunchContext): Record<string, string> {
+function runtimeEnv(runtime: Runtime, dir: string, context: Pick<LaunchContext, 'platform' | 'env'>): Record<string, string> {
   const bin = path.dirname(path.join(dir, ...runtime.bin(context.platform).split('/')))
   const windows = context.platform === 'win32'
   // Windows names it Path; one key for it, or the child would get two.
@@ -540,11 +546,18 @@ function runtimeEnv(runtime: Runtime, dir: string, context: LaunchContext): Reco
 }
 
 /** eNCode's copy of a toolchain, as a server starts with it, or undefined when there is none. */
-function ownRuntime(id: RuntimeId, toolsDir: string, context: LaunchContext): { program: string; env: Record<string, string> } | undefined {
+function ownRuntime(id: RuntimeId, toolsDir: string, context: Pick<LaunchContext, 'platform' | 'env'>): { program: string; env: Record<string, string> } | undefined {
   const runtime = RUNTIMES[id]
   const found = installedRuntime(id, toolsDir)
   if (!found) return undefined
   return { program: path.join(found.dir, ...runtime.bin(context.platform).split('/')), env: runtimeEnv(runtime, found.dir, context) }
+}
+
+/** eNCode's copy of a toolchain as a program it installed starts with it (Delve builds with its Go), or undefined. */
+export function runtimeLaunch(id: RuntimeId, toolsDir: string, platform: NodeJS.Platform, env: Record<string, string>): { program: string; version: string; env: Record<string, string> } | undefined {
+  const own = ownRuntime(id, toolsDir, { platform, env })
+  const found = installedRuntime(id, toolsDir)
+  return own && found ? { ...own, version: found.version } : undefined
 }
 
 /** Fetches a toolchain into `<tools>/runtimes/<id>/<version>`; resolves with that folder. */
@@ -638,7 +651,7 @@ export async function installServer(spec: Installable, context: InstallContext):
   // The toolchain comes first: when the server then fails to install, the toolchain is kept for the next try.
   let chain: Toolchain | undefined
   if ((install.kind === 'toolchain' || install.kind === 'download') && install.runtime) {
-    chain = await toolchainFor(RUNTIMES[install.runtime], context, install.kind === 'download')
+    chain = await toolchainFor(RUNTIMES[install.runtime], context, install.kind === 'download', install.kind === 'toolchain' ? install.runtimeAtLeast : undefined)
     if (chain.kind === 'fetch') chain = { kind: 'ours', runtime: chain.runtime, dir: await installRuntime(chain.runtime, chain.download, context), version: chain.download.version }
     else if (chain.kind === 'none' && install.kind === 'toolchain') fail(lacking(spec, chain))
   }

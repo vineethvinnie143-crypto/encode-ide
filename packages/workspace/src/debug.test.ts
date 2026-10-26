@@ -35,7 +35,7 @@ describe('the ways a folder can be debugged', () => {
           { name: 'Dev', npmScript: 'dev' },
           { name: 'Docker', request: 'attach', port: 9230, host: 'localhost' },
           { name: 'Far away', request: 'attach', host: '10.0.0.5' },
-          { name: 'Python', type: 'python', program: 'a.py' },
+          { name: 'Java', type: 'java', program: 'A.java' },
           { name: 'Both', program: 'a.js', npmScript: 'dev' },
         ],
       }),
@@ -49,9 +49,9 @@ describe('the ways a folder can be debugged', () => {
         ['own:1', 'Dev', 'launch', 'script dev', ''],
         ['own:2', 'Docker', 'attach', '127.0.0.1:9230', ''],
         ['own:3', 'Far away', 'launch', '.encode/debug.json', 'eNCode attaches only to a program on this machine ("host": "localhost").'],
-        ['own:4', 'Python', 'launch', '.encode/debug.json', 'eNCode debugs Node.js programs ("type": "node"); "python" is not one yet.'],
+        ['own:4', 'Java', 'launch', '.encode/debug.json', '"type" is "node", "python", "go", "lldb" (C and C++) or "rust"; "java" is not one eNCode debugs.'],
         ['own:5', 'Both', 'launch', '.encode/debug.json', 'Name the program to run ("program") or a script of package.json ("npmScript"), one of them.'],
-        ['file', 'Current file', 'launch', 'The file open in the editor, with Node.js', ''],
+        ['file', 'Current file', 'launch', 'The file open in the editor: JavaScript, TypeScript, Python, Go, Rust, C or C++', ''],
         ['script:dev', 'Script: dev', 'launch', 'node server.js', ''],
         ['script:test', 'Script: test', 'launch', 'node --test', ''],
         ['attach', 'Attach to port 9229', 'attach', '127.0.0.1:9229', ''],
@@ -94,7 +94,7 @@ describe('the ways a folder can be debugged', () => {
     const run = await args('src/b.tsx', [20, 11])
     assert.deepEqual(run.args, [path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(root, 'src', 'b.tsx')])
     assert.equal(run.detail, 'tsx src/b.tsx')
-    await assert.rejects(planRun('file', context(root)), /Open the JavaScript or TypeScript file to debug in the editor first/)
+    await assert.rejects(planRun('file', context(root)), /Open the file to debug in the editor first/)
   })
 
   it("runs a package script as npm does, with the package's node_modules/.bin first on PATH", async () => {
@@ -142,9 +142,10 @@ describe('a folder debugged', () => {
   const PROGRAM = ['const items = [1, 2, 3]', 'let total = 0', 'for (const item of items) {', '  total += item', '}', "console.log('total', total)", ''].join('\n')
 
   it('runs only in a trusted folder', async () => {
-    const { root, config } = await folder({ 'app.js': PROGRAM })
+    const { root, config } = await folder({ 'app.js': PROGRAM, 'app.py': 'print(1)\n', 'main.go': 'package main\n\nfunc main() {}\n', 'main.c': 'int main(void) { return 0; }\n' })
     const debug = new FolderDebugger(config, nodeWorkspaceFs, {})
-    assert.deepEqual(await debug.start({ config: 'file', file: 'app.js' }), { ok: false, reason: DEBUG_UNTRUSTED })
+    // Before anything is found or built, whatever the language.
+    for (const file of ['app.js', 'app.py', 'main.go', 'main.c']) assert.deepEqual(await debug.start({ config: 'file', file }), { ok: false, reason: DEBUG_UNTRUSTED }, file)
     assert.equal((await debug.state()).trusted, false)
     assert.deepEqual(await debug.start({ config: 'file', file: '../outside.js' }).then((result) => result.ok), false)
     await fs.rm(root, { recursive: true, force: true })
@@ -169,7 +170,7 @@ describe('a folder debugged', () => {
     assert.equal(paused.breakpoints['src/app.js']![0]!.verified, true)
     const item = await debug.evaluate(started.run, 'item * 10', { frame: top.id, context: 'repl' })
     assert.deepEqual(item, { ok: true, value: '20', type: 'number' })
-    const scope = debug.scopes(started.run, top.id)[0]!
+    const scope = (await debug.scopes(started.run, top.id))[0]!
     const names = (await debug.variables(started.run, scope.ref)).map((variable) => variable.name)
     assert.ok(names.includes('item'), names.join(', '))
     assert.deepEqual(await debug.act(started.run, { kind: 'continue' }), { ok: true })

@@ -26,24 +26,35 @@ export function firstFrame(thread: DebugThread): DebugFrame | null {
 }
 
 /**
- * The frame to show after the state changed: the chosen one while its program is still paused there, else the first
- * paused program's first frame worth showing (the newest run's first), else none.
+ * A run's paused threads, the one that stopped first: when a debugger stops every thread (lldb-dap, Delve), the others
+ * are paused only because it did, and on Windows the first listed is often a worker of the system's thread pool.
+ */
+export function pausedThreads(run: DebugRun): DebugThread[] {
+  const paused = run.threads.filter((thread) => thread.state === 'paused')
+  return [...paused.filter((thread) => thread.reason !== 'pause'), ...paused.filter((thread) => thread.reason === 'pause')]
+}
+
+/**
+ * The frame to show after the state changed: the chosen one while its program is still paused there, else the place
+ * where the program stopped (the thread that stopped, in the newest run that is paused), else none.
  */
 export function chooseFrame(state: DebugState | null, chosen: FrameChoice | null): FrameChoice | null {
   if (!state) return null
   if (chosen) {
-    const thread = state.runs.find((run) => run.id === chosen.run && live(run))?.threads.find((item) => item.id === chosen.thread)
+    const run = state.runs.find((item) => item.id === chosen.run && live(item))
+    const thread = run?.threads.find((item) => item.id === chosen.thread)
     if (thread?.state === 'paused' && thread.frames?.some((frame) => frame.id === chosen.frame)) return chosen
-    // The same program paused again elsewhere: its new place.
-    if (thread?.state === 'paused') {
-      const frame = firstFrame(thread)
-      if (frame) return { run: chosen.run, thread: thread.id, frame: frame.id }
+    // The same program paused again elsewhere: its new place, in the thread that stopped this time.
+    if (run && thread?.state === 'paused') {
+      for (const item of [...pausedThreads(run).filter((other) => other.reason !== 'pause'), thread]) {
+        const frame = firstFrame(item)
+        if (frame) return { run: run.id, thread: item.id, frame: frame.id }
+      }
     }
   }
   for (const run of [...state.runs].reverse()) {
     if (!live(run)) continue
-    for (const thread of run.threads) {
-      if (thread.state !== 'paused') continue
+    for (const thread of pausedThreads(run)) {
       const frame = firstFrame(thread)
       if (frame) return { run: run.id, thread: thread.id, frame: frame.id }
     }

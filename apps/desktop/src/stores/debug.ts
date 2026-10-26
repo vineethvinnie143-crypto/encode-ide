@@ -7,7 +7,7 @@ import { create } from '../store'
 import type { DebugAction, DebugBreakpoint, DebugConfigs, DebugEvaluateResult, DebugExceptionFilters, DebugOutputLine, DebugScope, DebugState, DebugVariable } from '@shared/types'
 import { api } from '../api'
 import { errorText } from '../ipc-error'
-import { addAt, chooseFrame, currentRun, frameOf, moveLines, placeOf, plain, toggleAt, type FrameChoice } from '../panels/debug'
+import { addAt, chooseFrame, currentRun, frameOf, moveLines, pausedThreads, placeOf, plain, toggleAt, type FrameChoice } from '../panels/debug'
 import { useEditor } from './editor'
 import { usePanels } from './panels'
 import { useUi } from './ui'
@@ -37,12 +37,16 @@ interface DebugStore {
   console: ConsoleItem[]
   watches: string[]
   watchValues: Record<string, DebugEvaluateResult>
+  /** A debugger eNCode can install for the run asked for (ADR 0144), why the run needs it, and the run to start after. */
+  installFor: { id: string; reason: string; config: string } | null
 
   refresh(): Promise<void>
   loadConfigs(): Promise<void>
   choose(id: string): void
   /** Starts the chosen configuration (or `id`); a configuration of the file runs the editor's file. */
   start(id?: string): Promise<void>
+  /** The install dialog closed: installed (the run starts), or not. */
+  closeInstall(installed: boolean): void
   /** Continue, pause, step, stop or restart the run in front, on the program the panel shows. */
   act(action: DebugAction): Promise<void>
   /** F5: continues a paused run, starts one when none runs. */
@@ -173,6 +177,7 @@ export const useDebug = create<DebugStore>((set, get) => {
     console: [],
     watches: readList(WATCH_KEY),
     watchValues: {},
+    installFor: null,
 
     refresh: async () => {
       const mine = ++generation
@@ -220,7 +225,9 @@ export const useDebug = create<DebugStore>((set, get) => {
       const file = config.file ? editor.activePath : undefined
       if (config.file && !file) return notify('Open the file to debug first.')
       usePanels.getState().openBottom('debug')
-      const result = await api.debug.start(config.id, file ?? undefined).catch((error: unknown) => ({ ok: false as const, reason: errorText(error) }))
+      const result = await api.debug.start(config.id, file ?? undefined).catch((error: unknown) => ({ ok: false as const, reason: errorText(error), install: undefined }))
+      // A debugger eNCode installs is missing: the person reads what installing it does, and the run starts after.
+      if (!result.ok && result.install) return set({ installFor: { id: result.install, reason: result.reason, config: config.id } })
       if (!result.ok) {
         set({ console: [...get().console, { id: nextItem++, kind: 'failed' as const, text: result.reason }].slice(-MAX_CONSOLE) })
         return notify(result.reason)
@@ -228,11 +235,17 @@ export const useDebug = create<DebugStore>((set, get) => {
       await get().refresh()
     },
 
+    closeInstall: (installed) => {
+      const asked = get().installFor
+      set({ installFor: null })
+      if (installed && asked) void get().start(asked.config)
+    },
+
     act: async (action) => {
       const { state, frame } = get()
       const run = currentRun(state, frame)
       if (!run) return
-      const thread = action.thread ?? (frame && frame.run === run.id ? frame.thread : run.threads.find((item) => item.state === 'paused')?.id)
+      const thread = action.thread ?? (frame && frame.run === run.id ? frame.thread : pausedThreads(run)[0]?.id)
       const result = await api.debug.act(run.id, { ...action, ...(thread !== undefined ? { thread } : {}) }).catch((error: unknown) => ({ ok: false as const, reason: errorText(error) }))
       if (!result.ok) notify(result.reason)
       await get().refresh()

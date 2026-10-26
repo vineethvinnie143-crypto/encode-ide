@@ -146,7 +146,9 @@ export type DesktopHostRequests = HostRequests & {
   /** The ways a folder can be debugged. */
   debugConfigs: { params: { root: string }; result: DebugConfigs }
   /** Starts a run the person asked for; `file` is the editor's, by its path in the folder. */
-  debugStart: { params: { root: string; config: string; file?: string }; result: { ok: true; run: string } | { ok: false; reason: string } }
+  debugStart: { params: { root: string; config: string; file?: string }; result: { ok: true; run: string } | { ok: false; reason: string; install?: string } }
+  /** How the install of a debugger eNCode installs (debugpy, Delve) stands: its progress, why it failed, or null. */
+  debugInstallState: { params: { id: string }; result: { done: number; total: number } | { error: string } | null }
   /** Continues, pauses, steps, stops, restarts or puts away a run. */
   debugAct: { params: { root: string; run: string; action: DebugAction }; result: DebugResult | { ok: true; run: string } }
   /** A file's breakpoints, all of them, by its path in the folder. */

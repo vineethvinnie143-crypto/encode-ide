@@ -102,7 +102,7 @@ describe('a debug run of Node.js', () => {
     assert.equal(top.source?.path, file)
     assert.deepEqual(r.session.statuses(file), [{ id: 'bp2', verified: true }])
 
-    const scopes = r.session.scopes(top.id)
+    const scopes = await r.session.scopes(top.id)
     assert.equal(scopes[0].name, 'Local')
     const locals = await r.session.variables(scopes[0].ref)
     assert.deepEqual(
@@ -122,9 +122,11 @@ describe('a debug run of Node.js', () => {
 
     // The second and third calls stop too; then the program ends.
     for (let hit = 0; hit < 3; hit++) {
+      const before = paused(r.session.view())!.frames![0]!.id
       await r.session.resume(paused(r.session.view())!.id)
       if (hit === 2) break
-      await r.until((v) => paused(v)?.frames?.[0]?.line === 2, `hit ${hit + 2}`)
+      // A new stop, not the last one still shown until Node.js says it resumed: each stop numbers its frames afresh.
+      await r.until((v) => paused(v)?.frames?.[0]?.line === 2 && paused(v)!.frames![0]!.id !== before, `hit ${hit + 2}`)
     }
     view = await r.until((v) => v.state === 'ended', 'the end')
     assert.equal(view.exitCode, 0)
@@ -142,7 +144,7 @@ describe('a debug run of Node.js', () => {
     const view = await r.until((v) => !!paused(v), 'the third hit')
     const top = paused(view)!.frames![0]
     assert.equal(top.line, 3)
-    const locals = await r.session.variables(r.session.scopes(top.id)[0].ref)
+    const locals = await r.session.variables((await r.session.scopes(top.id))[0].ref)
     assert.equal(locals.find((variable) => variable.name === 'sum')?.value, '3')
     await r.session.resume()
     await r.until((v) => v.state === 'ended', 'the end')
@@ -230,7 +232,7 @@ require.extensions['.ts'] = function (module, filename) {
     assert.equal(top.source?.path, file)
     assert.equal(top.line, 2)
     assert.equal(top.name, 'half')
-    const locals = await r.session.variables(r.session.scopes(top.id)[0].ref)
+    const locals = await r.session.variables((await r.session.scopes(top.id))[0].ref)
     assert.equal(locals.find((variable) => variable.name === 'n')?.value, '9')
     await r.session.resume()
     await r.until((v) => v.state === 'ended', 'the end')

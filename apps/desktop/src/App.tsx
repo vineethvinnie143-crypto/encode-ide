@@ -23,6 +23,7 @@ import { api } from './api'
 import { useKeymap } from './commands/useKeymap'
 import { clearMarks, setMarks, startLanguageSync } from './editor/surface'
 import { EditorIssueDialog, InstallServerDialog } from './editor/surface-view'
+import { InstallDebuggerDialog } from './components/debug/InstallDebuggerDialog'
 import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useCode } from './stores/code'
@@ -265,6 +266,7 @@ export default function App() {
       <AboutDialog />
       <RemoteDialog />
       <InstallServerDialog />
+      <InstallDebuggerDialog />
       <EditorIssueDialog />
       <TurnReportDialog />
       <ConfirmDialog />

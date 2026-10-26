@@ -45,6 +45,17 @@ describe('the frame the Debug panel shows (ADR 0143)', () => {
     assert.deepEqual(chooseFrame(moved, { run: 'r1', thread: 1, frame: 2 }), { run: 'r1', thread: 1, frame: 7 })
   })
 
+  it('goes to the thread that stopped, not one paused with it (a worker of Windows\'s thread pool listed first)', () => {
+    const worker = thread({ id: 7, name: 'Thread 7', reason: 'pause', frames: [frame(70, { name: 'NtWaitForWorkViaWorkerFactory', source: { path: null, name: 'ntdll.dll' } })] })
+    const main = thread({ id: 1, reason: 'breakpoint', frames: [frame(10), frame(11)] })
+    assert.deepEqual(chooseFrame(state(run('r1', { threads: [worker, main] })), null), { run: 'r1', thread: 1, frame: 10 })
+    // The worker was chosen by the person; the next stop is the main thread's.
+    const next = thread({ id: 1, reason: 'step', frames: [frame(12)] })
+    assert.deepEqual(chooseFrame(state(run('r1', { threads: [thread({ ...worker, frames: [frame(71)] }), next] })), { run: 'r1', thread: 7, frame: 70 }), { run: 'r1', thread: 1, frame: 12 })
+    // Still where the person looks while that frame is there.
+    assert.deepEqual(chooseFrame(state(run('r1', { threads: [worker, main] })), { run: 'r1', thread: 7, frame: 70 }), { run: 'r1', thread: 7, frame: 70 })
+  })
+
   it('goes to the newest run that is paused, and to none when nothing is', () => {
     const both = state(run('r1'), run('r2', { threads: [thread({ id: 4, frames: [frame(5)] })] }))
     assert.deepEqual(chooseFrame(both, null), { run: 'r2', thread: 4, frame: 5 })

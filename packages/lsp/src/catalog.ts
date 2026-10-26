@@ -25,6 +25,8 @@ export interface Installable {
   installer?: ServerInstall
   /** What it is, for a title, when it is not a server: "FiveM's natives for Lua". */
   what?: string
+  /** What it is in a sentence, when it is not a language server: "debugger". */
+  role?: string
 }
 
 /** What a server is told for one folder, worked out each time it starts (FiveM's resources, ADR 0084). */

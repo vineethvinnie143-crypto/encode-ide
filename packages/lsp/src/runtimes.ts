@@ -70,7 +70,8 @@ function major(version: string): number {
   return first === 1 && match[2] !== undefined ? Number(match[2]) : first
 }
 
-function versionAtLeast(version: string, minimum: readonly number[]): boolean {
+/** Whether the first version in `version` (`go1.24.7`, `10.0.402`) is `minimum` or newer. */
+export function versionAtLeast(version: string, minimum: readonly number[]): boolean {
   const parts = (/\d+(?:\.\d+)*/.exec(version)?.[0] ?? '').split('.').map(Number)
   for (let index = 0; index < minimum.length; index++) {
     const part = parts[index] ?? 0

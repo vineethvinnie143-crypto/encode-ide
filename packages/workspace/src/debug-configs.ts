@@ -1,8 +1,8 @@
 /**
- * The ways a folder can be debugged (ADR 0143), and what each one starts: the folder's own `.encode/debug.json`, the
- * file open in the editor, each script of the folder's package.json, and a program already listening on the
+ * The ways a folder can be debugged (ADR 0143, 0144), and what each one starts: the folder's own `.encode/debug.json`,
+ * the file open in the editor, each script of the folder's package.json, and a program already listening on the
  * inspector's port. A run is worked out here, not started: what program runs, with what arguments, where, and with
- * what environment.
+ * what environment. Python, Go, C, C++ and Rust runs go through their own debuggers (debug-languages.ts).
  *
  * Node.js is the one on PATH, as a terminal would run it, or eNCode's own when none is installed. TypeScript runs
  * through the project's tsx when it has one, else through Node.js's own type stripping when it is new enough. A
@@ -15,6 +15,10 @@ import path from 'node:path'
 import { isScriptFile, isTypeScriptFile } from '@encode/debug'
 import { shimScript } from '@encode/lsp'
 import { batchCommand, envKey, searchPath, windowsSystemProgram } from '@encode/tools'
+import { cargoManifest, goRun, nativeRun, pythonRun, type DapRun, type LanguageContext } from './debug-languages'
+import { RunProblem, type FindContext } from './debuggers'
+
+export { RunProblem } from './debuggers'
 
 export const DEBUG_FILE = '.encode/debug.json'
 const MAX_FILE_BYTES = 256 * 1024
@@ -25,6 +29,8 @@ const MAX_ARGS = 200
 const MAX_ARG_CHARS = 8_000
 const MAX_ENV = 200
 const DEFAULT_PORT = 9229
+/** debugpy's own default, as `python -m debugpy --listen 5678` uses. */
+const PYTHON_PORT = 5678
 const VERSION_TIMEOUT_MS = 5_000
 const DETAIL_CHARS = 160
 
@@ -48,15 +54,11 @@ export interface DebugConfigs {
   problem?: string
 }
 
-/** A run worked out: a program to start, or one to attach to. */
+/** A run worked out: a Node.js program to start, or one to attach to, or a run of a language's own debugger. */
 export type RunPlan =
   | { kind: 'launch'; name: string; file: string; args: string[]; cwd: string; env: Record<string, string>; verbatim?: true; detail: string }
   | { kind: 'attach'; name: string; host: string; port: number; detail: string }
-
-/** Why a run cannot start, in words for the person. */
-export class RunProblem extends Error {
-  override name = 'RunProblem'
-}
+  | DapRun
 
 /** What working out a run needs to know. */
 export interface RunContext {
@@ -71,14 +73,47 @@ export interface RunContext {
   node?: { file: string; env?: Record<string, string> }
   /** For tests: the version of a Node.js, `[major, minor]`, or null when it does not say. */
   nodeVersion?(file: string, env: Record<string, string>): Promise<[number, number] | null>
+  /** eNCode's tools folder, where it installs debuggers. */
+  tools?: string
+  /** For tests: a program's answer to a question (`--version`). */
+  ask?: FindContext['ask']
 }
+
+/** The languages a configuration's `type` names, by every name it may have. */
+const TYPES = new Map<unknown, Language>([
+  ['node', 'node'],
+  ['pwa-node', 'node'],
+  ['python', 'python'],
+  ['debugpy', 'python'],
+  ['go', 'go'],
+  ['lldb', 'lldb'],
+  ['lldb-dap', 'lldb'],
+  ['rust', 'rust'],
+])
+
+type Language = 'node' | 'python' | 'go' | 'lldb' | 'rust'
 
 /** One configuration of `.encode/debug.json`, read. */
 interface OwnConfig {
   name: string
+  type: Language
   request: 'launch' | 'attach'
   program?: string
   npmScript?: string
+  /** Python: a module run as `python -m`. */
+  module?: string
+  /** Python: the interpreter. */
+  python?: string
+  /** Python: frames of libraries are skipped. */
+  justMyCode: boolean
+  /** Go: a program, or its tests. */
+  mode: 'debug' | 'test'
+  buildFlags: string[]
+  /** Rust: which program of the Cargo project, and where its Cargo.toml is. */
+  bin?: string
+  example?: string
+  package?: string
+  manifest?: string
   args: string[]
   cwd?: string
   env: Record<string, string | null>
@@ -114,9 +149,11 @@ function readOwn(raw: unknown, index: number): OwnEntry {
   const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 80) : fallback
   try {
     if (raw.name !== undefined && typeof raw.name !== 'string') throw new RunProblem('Its name must be text.')
-    if (raw.type !== undefined && raw.type !== 'node' && raw.type !== 'pwa-node') throw new RunProblem(`eNCode debugs Node.js programs ("type": "node"); "${String(raw.type)}" is not one yet.`)
+    const type = raw.type === undefined ? 'node' : TYPES.get(raw.type)
+    if (!type) throw new RunProblem(`"type" is "node", "python", "go", "lldb" (C and C++) or "rust"; "${String(raw.type)}" is not one eNCode debugs.`)
     const request = raw.request ?? 'launch'
     if (request !== 'launch' && request !== 'attach') throw new RunProblem('"request" is "launch" (start the program) or "attach" (to one already running).')
+    if (request === 'attach' && type !== 'node' && type !== 'python') throw new RunProblem('eNCode attaches to Node.js and Python programs; start this one with "request": "launch".')
     const text = (key: string): string | undefined => {
       const value = raw[key]
       if (value === undefined) return undefined
@@ -133,8 +170,23 @@ function readOwn(raw: unknown, index: number): OwnEntry {
     }
     const program = text('program')
     const npmScript = text('npmScript')
-    if (request === 'launch' && (program === undefined) === (npmScript === undefined)) throw new RunProblem('Name the program to run ("program") or a script of package.json ("npmScript"), one of them.')
-    const port = raw.port === undefined ? DEFAULT_PORT : raw.port
+    const module = text('module')
+    if (type !== 'node' && (npmScript !== undefined || raw.runtime !== undefined)) throw new RunProblem('"npmScript" and "runtime" are for Node.js configurations.')
+    if (type === 'node' && request === 'launch' && (program === undefined) === (npmScript === undefined)) throw new RunProblem('Name the program to run ("program") or a script of package.json ("npmScript"), one of them.')
+    if (type === 'python' && request === 'launch' && (program === undefined) === (module === undefined)) throw new RunProblem('Name the script to run ("program") or a module ("module", run as python -m), one of them.')
+    if (type === 'lldb' && program === undefined) throw new RunProblem('Name the program to debug ("program"): the executable your build makes.')
+    const mode = raw.mode ?? 'debug'
+    if (type === 'go' && mode !== 'debug' && mode !== 'test') throw new RunProblem('"mode" is "debug" (the program) or "test" (its tests).')
+    if (raw.justMyCode !== undefined && typeof raw.justMyCode !== 'boolean') throw new RunProblem('"justMyCode" is true or false.')
+    const buildFlags = strings(raw.buildFlags, '"buildFlags"')
+    if (buildFlags.some((flag) => !flag || /\s/.test(flag))) throw new RunProblem('"buildFlags" must be words without spaces: give each flag on its own.')
+    const bin = text('bin')
+    const example = text('example')
+    if (bin !== undefined && example !== undefined) throw new RunProblem('Name a program ("bin") or an example ("example"), not both.')
+    const pkg = text('package')
+    const manifest = text('manifest')
+    const python = text('python')
+    const port = raw.port === undefined ? (type === 'python' ? PYTHON_PORT : DEFAULT_PORT) : raw.port
     if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535) throw new RunProblem('"port" must be a port number.')
     const asked = raw.host === undefined ? '127.0.0.1' : typeof raw.host === 'string' ? raw.host.trim().toLowerCase() : ''
     const host = LOOPBACK.get(asked)
@@ -143,9 +195,19 @@ function readOwn(raw: unknown, index: number): OwnEntry {
     const runtime = text('runtime')
     return {
       name,
+      type,
       request,
       ...(program !== undefined ? { program } : {}),
       ...(npmScript !== undefined ? { npmScript } : {}),
+      ...(module !== undefined ? { module } : {}),
+      ...(python !== undefined ? { python } : {}),
+      justMyCode: raw.justMyCode !== false,
+      mode: mode as 'debug' | 'test',
+      buildFlags,
+      ...(bin !== undefined ? { bin } : {}),
+      ...(example !== undefined ? { example } : {}),
+      ...(pkg !== undefined ? { package: pkg } : {}),
+      ...(manifest !== undefined ? { manifest } : {}),
       args: strings(raw.args, '"args"'),
       ...(cwd !== undefined ? { cwd } : {}),
       env,
@@ -224,15 +286,30 @@ export async function debugConfigs(root: string): Promise<DebugConfigs> {
   const configs: DebugConfigView[] = own.entries.map((entry, index) => {
     const base = { id: `own:${index}`, name: entry.name }
     if ('problem' in entry) return { ...base, kind: 'launch', detail: DEBUG_FILE, problem: entry.problem }
-    if (entry.request === 'attach') return { ...base, kind: 'attach', detail: `${entry.host}:${entry.port}` }
-    const what = entry.npmScript !== undefined ? `script ${entry.npmScript}` : `${entry.runtime ?? 'node'} ${entry.program}`
-    return { ...base, kind: 'launch', detail: clip([what, ...entry.args].join(' ')) }
+    if (entry.request === 'attach') return { ...base, kind: 'attach', detail: `${entry.type === 'python' ? 'debugpy at ' : ''}${entry.host}:${entry.port}` }
+    return { ...base, kind: 'launch', detail: clip([launchWhat(entry), ...entry.args].join(' ')) }
   })
-  configs.push({ id: 'file', name: 'Current file', kind: 'launch', detail: 'The file open in the editor, with Node.js', file: true })
+  configs.push({ id: 'file', name: 'Current file', kind: 'launch', detail: 'The file open in the editor: JavaScript, TypeScript, Python, Go, Rust, C or C++', file: true })
   const pkg = await packageJson(root)
   for (const [name, line] of pkg?.scripts.slice(0, MAX_SCRIPTS) ?? []) configs.push({ id: `script:${name}`, name: `Script: ${name}`, kind: 'launch', detail: clip(line) })
   configs.push({ id: 'attach', name: `Attach to port ${DEFAULT_PORT}`, kind: 'attach', detail: `127.0.0.1:${DEFAULT_PORT}` })
   return { configs, ...(own.problem ? { problem: own.problem } : {}) }
+}
+
+/** What a configuration that starts a program runs, in a few words. */
+function launchWhat(entry: OwnConfig): string {
+  switch (entry.type) {
+    case 'node':
+      return entry.npmScript !== undefined ? `script ${entry.npmScript}` : `${entry.runtime ?? 'node'} ${entry.program}`
+    case 'python':
+      return entry.module !== undefined ? `python -m ${entry.module}` : `python ${entry.program}`
+    case 'go':
+      return `dlv ${entry.mode} ${entry.program ?? '.'}`
+    case 'lldb':
+      return `lldb-dap ${entry.program}`
+    case 'rust':
+      return `cargo build${entry.bin !== undefined ? ` --bin ${entry.bin}` : entry.example !== undefined ? ` --example ${entry.example}` : ''}`
+  }
 }
 
 // ---------------------------------------------------------------- variables
@@ -471,18 +548,90 @@ async function runtimeProgram(runtime: string, cwd: string, context: RunContext,
   return { file: found, prefix: [] }
 }
 
+/** What a language's own debugger is given to find its programs, and where the run is. */
+function languageContext(context: RunContext, cwd: string, extra: Record<string, string | null> = {}): LanguageContext {
+  return { root: context.root, platform: context.platform, env: runEnvironment(context, null, extra), cwd, ...(context.tools ? { tools: context.tools } : {}), ...(context.ask ? { ask: context.ask } : {}) }
+}
+
+const C_FILE = /\.c$/i
+const CPP_FILE = /\.(cc|cpp|cxx|c\+\+)$/i
+
+/** The file open in the editor, run by the debugger of its language. */
+async function fileRun(file: string, context: RunContext): Promise<RunPlan> {
+  const { root } = context
+  const name = path.basename(file)
+  if (isScriptFile(file) || isTypeScriptFile(file)) {
+    const node = findNode(context)
+    if (!node) throw new RunProblem('Node.js was not found. Install it, then start this again.')
+    const run = await nodeRun(file, [], [], context, node)
+    return { kind: 'launch', name, file: node.file, args: run.args, cwd: root, env: runEnvironment(context, node), detail: run.how }
+  }
+  const languages = languageContext(context, root)
+  const dir = path.dirname(file)
+  if (/\.pyw?$/i.test(file)) return pythonRun({ name, program: file, args: [], justMyCode: true }, languages)
+  if (/\.go$/i.test(file)) {
+    // A test file runs its package's tests; in a module, a program is its package, and a lone file is built alone.
+    const test = /_test\.go$/i.test(file)
+    const inModule = (await goModule(dir, root, context.platform)) !== null
+    return goRun({ name, program: test || inModule ? dir : file, mode: test ? 'test' : 'debug', args: [], buildFlags: [] }, languages)
+  }
+  if (/\.rs$/i.test(file)) {
+    const manifest = cargoManifest(dir, root)
+    return nativeRun({ name, program: manifest ? { kind: 'cargo', manifest, file } : { kind: 'rustc', file }, args: [], rust: true }, languages)
+  }
+  if (C_FILE.test(file) || CPP_FILE.test(file)) return nativeRun({ name, program: { kind: 'file', file, language: C_FILE.test(file) ? 'c' : 'cpp' }, args: [], rust: false }, languages)
+  throw new RunProblem(`eNCode debugs JavaScript, TypeScript, Python, Go, Rust, C and C++ files, and ${name} is none of them.`)
+}
+
+/** The nearest go.mod from a folder up to the root, or null. */
+async function goModule(from: string, root: string, platform: NodeJS.Platform): Promise<string | null> {
+  for (const dir of foldersUp(from, root, platform)) if (await isFile(path.join(dir, 'go.mod'))) return path.join(dir, 'go.mod')
+  return null
+}
+
+/** A configuration of `.encode/debug.json` for a language with its own debugger. */
+async function languageRun(entry: OwnConfig, cwd: string, args: string[], extra: Record<string, string | null>, fill: (text: string) => string, context: RunContext): Promise<RunPlan> {
+  const { root, platform } = context
+  const languages = languageContext(context, cwd, extra)
+  const whole = (file: string) => inFolder(fill(file), root, platform)
+  const named = (run: DapRun) => ({ ...run, name: entry.name })
+  switch (entry.type) {
+    case 'python': {
+      const python = entry.python !== undefined ? fill(entry.python) : undefined
+      const common = { name: entry.name, args, justMyCode: entry.justMyCode, ...(python !== undefined ? { python } : {}) }
+      if (entry.request === 'attach') return named(await pythonRun({ ...common, attach: { host: entry.host, port: entry.port } }, languages))
+      if (entry.module !== undefined) return named(await pythonRun({ ...common, module: fill(entry.module) }, languages))
+      const program = whole(entry.program!)
+      if (!(await isFile(program))) throw new RunProblem(`${entry.name}: ${display(program, root)} does not exist.`)
+      return named(await pythonRun({ ...common, program }, languages))
+    }
+    case 'go': {
+      const program = entry.program !== undefined ? whole(entry.program) : root
+      if (!(await isFile(program)) && !(await isFolder(program))) throw new RunProblem(`${entry.name}: ${display(program, root)} does not exist.`)
+      return named(await goRun({ name: entry.name, program, mode: entry.mode, args, buildFlags: entry.buildFlags.map(fill) }, languages))
+    }
+    case 'lldb':
+      return named(await nativeRun({ name: entry.name, program: { kind: 'program', file: whole(entry.program!) }, args, rust: false }, languages))
+    case 'rust': {
+      const manifest = entry.manifest !== undefined ? whole(entry.manifest) : cargoManifest(cwd, root)
+      if (!manifest || !(await isFile(manifest))) throw new RunProblem(`${entry.name}: there is no Cargo.toml${entry.manifest !== undefined ? ` at ${display(whole(entry.manifest), root)}` : ' in the folder'}. Name it with "manifest".`)
+      const which = { ...(entry.bin !== undefined ? { bin: fill(entry.bin) } : {}), ...(entry.example !== undefined ? { example: fill(entry.example) } : {}), ...(entry.package !== undefined ? { package: fill(entry.package) } : {}) }
+      return named(await nativeRun({ name: entry.name, program: { kind: 'cargo', manifest, ...which }, args, rust: true }, languages))
+    }
+    default:
+      throw new RunProblem(`${entry.name}: eNCode cannot run it.`)
+  }
+}
+
 /** What a configuration of the folder starts, worked out; a RunProblem says why it cannot. */
 export async function planRun(id: string, context: RunContext): Promise<RunPlan> {
   const { root, platform } = context
   if (id === 'attach') return { kind: 'attach', name: `Attach to port ${DEFAULT_PORT}`, host: '127.0.0.1', port: DEFAULT_PORT, detail: `127.0.0.1:${DEFAULT_PORT}` }
   if (id === 'file') {
     const file = context.file
-    if (!file) throw new RunProblem('Open the JavaScript or TypeScript file to debug in the editor first.')
-    const node = findNode(context)
-    if (!node) throw new RunProblem('Node.js was not found. Install it, then start this again.')
+    if (!file) throw new RunProblem('Open the file to debug in the editor first.')
     if (!(await isFile(file))) throw new RunProblem(`${path.basename(file)} is not saved yet: save it first.`)
-    const run = await nodeRun(file, [], [], context, node)
-    return { kind: 'launch', name: path.basename(file), file: node.file, args: run.args, cwd: root, env: runEnvironment(context, node), detail: run.how }
+    return fileRun(file, context)
   }
   if (id.startsWith('script:')) {
     const name = id.slice('script:'.length)
@@ -494,13 +643,14 @@ export async function planRun(id: string, context: RunContext): Promise<RunPlan>
   const entry = entries[Number(own[1])]
   if (!entry) throw new RunProblem(problem ?? `${DEBUG_FILE} has changed: choose the configuration again.`)
   if ('problem' in entry) throw new RunProblem(`${entry.name}: ${entry.problem}`)
-  if (entry.request === 'attach') return { kind: 'attach', name: entry.name, host: entry.host, port: entry.port, detail: `${entry.host}:${entry.port}` }
+  if (entry.request === 'attach' && entry.type === 'node') return { kind: 'attach', name: entry.name, host: entry.host, port: entry.port, detail: `${entry.host}:${entry.port}` }
   const fill = (text: string) => substitute(text, context)
   const cwd = inFolder(entry.cwd ? fill(entry.cwd) : root, root, platform)
   if (!(await isFolder(cwd))) throw new RunProblem(`${entry.name}: the folder it runs in, ${display(cwd, root)}, does not exist.`)
   const args = entry.args.map(fill)
   const runtimeArgs = entry.runtimeArgs.map(fill)
   const extra = Object.fromEntries(Object.entries(entry.env).map(([key, value]) => [key, value === null ? null : fill(value)]))
+  if (entry.type !== 'node') return languageRun(entry, cwd, args, extra, fill, context)
   if (entry.npmScript !== undefined) return { ...(await scriptRun(fill(entry.npmScript), args, cwd, context, extra)), name: entry.name }
   const program = inFolder(fill(entry.program!), root, platform)
   if (!(await isFile(program))) throw new RunProblem(`${entry.name}: ${display(program, root)} does not exist.`)

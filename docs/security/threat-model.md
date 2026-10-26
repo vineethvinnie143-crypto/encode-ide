@@ -2789,3 +2789,59 @@ What is new:
 - The end-to-end smoke (`runDebugChecks`), on Windows CI: not trusted refused; a click in the gutter and the gutter's
   menu set a breakpoint and a log point; F5 stops on the line, a hover reads `item.price`, F10 steps, the console
   evaluates, F9 removes the breakpoint, and the run ends with what it printed.
+
+## Python, Go, C and Rust in the debugger
+
+Written with the pull request that adds them
+([0144](../adr/0144-python-go-c-and-rust-are-debugged-through-their-own-debuggers-over-the-debug-adapter-protocol.md)).
+
+What is new:
+
+- the agent host starts a language's own debugger as a separate program (debugpy, Delve, lldb-dap) and speaks the
+  Debug Adapter Protocol with it, over its standard input and output or a socket it dials;
+- a run of C, C++ or Rust builds the program first (clang or gcc, rustc, cargo), and a Go run has Delve build it;
+- eNCode can install debugpy (a wheel from PyPI) and Delve (built with `go install`) into its own tools folder, after
+  the person reads the steps;
+- `.encode/debug.json` takes `"type"` (`python`, `go`, `lldb`, `rust`) and their fields: an interpreter, a module,
+  build flags, a Cargo program, an executable.
+
+### Threats and controls
+
+| # | Threat | Controls | Status |
+| --- | --- | --- | --- |
+| DB10 | A configuration names an interpreter, a compiler or an executable that is the folder's own, and starting it runs code | Only in a trusted folder and only from the person's start, as DB1. The panel shows what runs (`python app.py`, `clang -g main.c`, `cargo build --bin api`) before it starts. Programs are started without a shell, with their arguments as given. | Mitigated |
+| DB11 | A download is swapped on its way, or PyPI serves a different debugpy | debugpy is one wheel, pinned by version, size and sha256 in eNCode's code, fetched only from `files.pythonhosted.org/packages/` (a new host on the list for that path alone). A file that does not match is refused and nothing is kept. | Mitigated |
+| DB12 | Delve's install runs code that is not Delve | `go install github.com/go-delve/delve/cmd/dlv@v1.27.2`: a tagged version, checked by the Go checksum database as every `go install` is, built into eNCode's tools folder (`GOBIN`), never the person's. When the computer's Go is older than 1.25, eNCode's own Go (0114, pinned by sha256) builds it. | Mitigated |
+| DB13 | A Python attach reaches a program on another machine | `"request": "attach"` for Python takes only `127.0.0.1` or `localhost`, as Node.js's (DB3). C, C++, Go and Rust do not attach. | Mitigated |
+| DB14 | Another program connects to the debugger's socket and drives the run | Delve dials eNCode: on Linux and macOS a Unix socket in the run's owner-only folder (`0700`); on Windows a random port of 127.0.0.1. The first connection is the debugger's and every later one is closed. On Windows a program of the same user could connect first; it could already run code as that user. | Accepted (as DB4) |
+| DB15 | A debugger sends what floods the host or the window | eNCode's client bounds a header to 8 KB and a message to 64 MB, and closes the connection on a body that is not JSON. A run reads at most 200 threads, 200 frames, 2,000 values a level, a value of 10,000 characters and a name of 500; every request has a time limit. A debugger's requests back (`runInTerminal`, `startDebugging`) are answered "not supported", so it cannot start a program through eNCode. | Mitigated |
+| DB16 | A hover runs code | A hover sends only a name with the names before it (`item.qty`), never a call or an index, as `hover` where the debugger offers it, with a 2 s limit. | Partial (DB-R2) |
+| DB17 | A build writes into the person's folder, or leaves a program behind | A single file is built into the run's own folder, which goes when the run ends; Delve's program too (`output`), not `__debug_bin` in the folder. cargo writes its `target/` as it does from a terminal. Stop ends a build's whole tree. | Mitigated |
+| DB18 | A debugger lasts longer than its run | Stop sends `terminate`, then `disconnect`, then ends the debugger's whole tree (process group, or the tree on Windows). Closing the folder or eNCode stops every run. | Partial (DB-R1) |
+
+### Residual risks
+
+- DB-R2: what a hover reads is the debugger's to evaluate. A Python property, or a Go or Rust value whose formatter
+  runs code, can run something while it is read, as it does in any debugger's hover.
+- A Go run trusts the folder's `go.mod`: a `toolchain` line can make the go command fetch that Go, as it does in a
+  terminal.
+- The program a run starts inherits the run's environment (the person's, with the configuration's `env`) and is not in
+  the agent's sandbox, as a terminal's program is not.
+- lldb-dap and LLVM are the person's own install; eNCode finds them and does not check them. On Windows, the folder
+  of the Python lldb-dap needs is added to the end of lldb-dap's PATH when it is found off the PATH: a folder of the
+  person's own install that holds that exact DLL, after every folder already there, so it shadows nothing. The
+  program lldb-dap starts inherits that PATH.
+
+### Verification
+
+- `packages/debug/src/dap.test.ts`: framing, split and joined messages, bounds on the header, the size and the JSON,
+  timeouts, requests back answered "not supported".
+- `packages/debug/src/dap-session.test.ts`: real runs of debugpy, Delve and lldb-dap where installed, with values,
+  lists and frames read within their bounds.
+- `packages/workspace/src/debug-languages.test.ts`: what each configuration runs and what is refused (an unknown type,
+  attach to another machine, a mode or flags out of shape); the debugpy wheel refused when its checksum differs; the
+  pinned versions; whole runs that build into the run's folder.
+- `packages/workspace/src/debug.test.ts`: not trusted refused for every language.
+- Windows CI fetches the pinned wheel and builds Delve for real (`ENCODE_TEST_INSTALLS`), and the end-to-end smoke
+  checks that a Python run without debugpy offers the install, with its source and checksum, and starts nothing when
+  the person cancels.

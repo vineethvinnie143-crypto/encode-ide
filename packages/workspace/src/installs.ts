@@ -2,17 +2,20 @@
  * Language servers eNCode installs when the person asks (ADR 0083): one install at a time per server, its progress
  * for the Settings screen, and what to tell the folders' hubs once a server is there or gone. Servers go in eNCode's
  * own tools folder, shared by every folder; what may run is still decided per folder (trusted folders only). A library
- * a server reads (FiveM's natives, ADR 0084) is installed the same way, and its server starts again to read it.
+ * a server reads (FiveM's natives, ADR 0084) is installed the same way, and its server starts again to read it. So are
+ * the debuggers eNCode installs (debugpy, Delve: ADR 0144), which no server waits for: a run finds them as it starts.
  */
 import { InstallFailed, installedDir, installServer, LANGUAGE_LIBRARIES, LANGUAGE_SERVERS, planInstall, removeInstall, removeRuntime, type Installable, type InstallContext, type InstallPlan, type LibrarySpec, type ServerSpec } from '@encode/lsp'
 import { agentEnvironment } from '@encode/tools'
 import { launchContext, type InstallState, type ServerTools } from './code'
+import { DEBUGGERS } from './debuggers'
 
 export interface ServerInstallsOptions {
   tools: ServerTools
   platform: NodeJS.Platform
   catalog?: readonly ServerSpec[]
   libraries?: readonly LibrarySpec[]
+  debuggers?: readonly Installable[]
   /** What installers start from, before secrets are taken out. */
   env?: Record<string, string | undefined>
   /** A server was installed or removed: the folders look for it again (stopping it first, when it is to be removed). */
@@ -30,12 +33,17 @@ export class ServerInstalls {
 
   constructor(private readonly options: ServerInstallsOptions) {}
 
-  private spec(id: string): ServerSpec | LibrarySpec | undefined {
-    return (this.options.catalog ?? LANGUAGE_SERVERS).find((spec) => spec.id === id) ?? (this.options.libraries ?? LANGUAGE_LIBRARIES).find((spec) => spec.id === id)
+  private get debuggers(): readonly Installable[] {
+    return this.options.debuggers ?? DEBUGGERS
+  }
+
+  private spec(id: string): ServerSpec | LibrarySpec | Installable | undefined {
+    return (this.options.catalog ?? LANGUAGE_SERVERS).find((spec) => spec.id === id) ?? (this.options.libraries ?? LANGUAGE_LIBRARIES).find((spec) => spec.id === id) ?? this.debuggers.find((spec) => spec.id === id)
   }
 
   /** The folders' servers look again; for a library, its server starts again, so that it reads the library. */
   private async rediscover(spec: Installable, how: { stop?: boolean }): Promise<void> {
+    if (this.debuggers.includes(spec)) return
     const library = 'server' in spec && typeof spec.server === 'string' ? spec.server : null
     if (!library) return this.options.rediscover(spec.id, how)
     await this.options.rediscover(library, { stop: true })
@@ -123,7 +131,7 @@ export class ServerInstalls {
       removeInstall(spec, this.options.tools.dir)
       // eNCode's copy of the server's toolchain goes too, once no other server it installed runs on it (ADR 0114).
       const runtime = 'installer' in spec && (spec.installer?.kind === 'toolchain' || spec.installer?.kind === 'download') ? spec.installer.runtime : undefined
-      const catalog = this.options.catalog ?? LANGUAGE_SERVERS
+      const catalog: readonly Installable[] = [...(this.options.catalog ?? LANGUAGE_SERVERS), ...this.debuggers]
       const shared = catalog.some((other) => other.id !== spec.id && (other.installer?.kind === 'toolchain' || other.installer?.kind === 'download') && other.installer.runtime === runtime && installedDir(other, this.options.tools.dir))
       if (runtime && !shared) removeRuntime(runtime, this.options.tools.dir)
       return { ok: true, dir: '' }
