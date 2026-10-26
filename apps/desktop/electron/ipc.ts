@@ -38,6 +38,9 @@ import type {
   AgentCreateInput,
   AgentStartInput,
   ApprovalAnswer,
+  DebugAction,
+  DebugBreakpoint,
+  DebugExceptionFilters,
   EditorChangeResult,
   InlineSuggestAnswer,
   McpAction,
@@ -199,12 +202,24 @@ export function registerIpc(deps: IpcDeps): void {
 
   /** Opens a folder where its name says (remote/places.ts); one the system's dialog chose is always this PC's. */
   const openWorkspaceAt = async (rootPath: string, options: { local?: boolean } = {}) => {
+    const before = workspace.current?.root ?? null
     agent.closeDocuments()
     const opened = await places.open(rootPath, options)
     // A folder elsewhere is remembered by its full name, so it opens there again.
     settings.touchWorkspace(opened.remote?.uri ?? opened.root)
     await tellHostFolder(opened.root)
+    if (before && before !== opened.root) void stopDebugRuns(before)
     return opened
+  }
+
+  /** The runs of a folder that is no longer open stop: nothing shows them any more (ADR 0143). */
+  const stopDebugRuns = async (root: string): Promise<void> => {
+    try {
+      const state = await agent.debugState(root)
+      await Promise.all(state.runs.filter((run) => run.state !== 'ended').map((run) => agent.debugAct(root, run.id, { kind: 'stop' }).catch(() => undefined)))
+    } catch {
+      // The host is down, and its runs with it.
+    }
   }
 
   handle('app:about', () => aboutInfo(currentEnvironment(app.isPackaged)))
@@ -358,6 +373,75 @@ export function registerIpc(deps: IpcDeps): void {
   })
   handle('code:inline-cancel', (id: unknown) => {
     if (typeof id === 'number') inline.cancel(id)
+  })
+  // The debugger of the open folder (ADR 0143). Ids, numbers and the file are checked here; the breakpoints, the
+  // exception settings and the actions where the debugger's own rules are, in the agent host.
+  const debugFile = (rel: unknown): string | null => {
+    if (typeof rel !== 'string') return null
+    try {
+      return workspace.toRelative(workspace.resolve(rel)) || null
+    } catch {
+      return null
+    }
+  }
+  const isRunId = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,64}$/.test(value)
+  const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 2 ** 31 - 1
+  const NO_FOLDER = { ok: false as const, reason: 'Open a folder first.' }
+  const debugFailed = (error: unknown) => ({ ok: false as const, reason: hostFailure(error).message })
+  handle('debug:state', () => {
+    const root = workspace.current?.root
+    return root ? agent.debugState(root).catch(() => null) : null
+  })
+  handle('debug:configs', () => {
+    const root = workspace.current?.root
+    return root ? agent.debugConfigs(root).catch(() => null) : null
+  })
+  handle('debug:start', (config: unknown, rel: unknown) => {
+    const root = workspace.current?.root
+    if (!root) return NO_FOLDER
+    if (typeof config !== 'string' || !config || config.length > 300) return { ok: false, reason: 'Choose what to debug.' }
+    const file = rel === undefined || rel === null ? undefined : debugFile(rel)
+    if (file === null) return { ok: false, reason: 'That file is not in the open folder.' }
+    return agent.debugStart(root, config, file).catch(debugFailed)
+  })
+  handle('debug:act', (run: unknown, action: unknown) => {
+    const root = workspace.current?.root
+    if (!root) return NO_FOLDER
+    if (!isRunId(run)) return { ok: false, reason: 'That run is over.' }
+    return agent.debugAct(root, run, action as DebugAction).catch(debugFailed)
+  })
+  handle('debug:breakpoints', (rel: unknown, breakpoints: unknown) => {
+    const root = workspace.current?.root
+    if (!root) return NO_FOLDER
+    const file = debugFile(rel)
+    if (!file) return { ok: false, reason: 'That file is not in the open folder.' }
+    return agent.debugBreakpoints(root, file, breakpoints as DebugBreakpoint[]).catch(debugFailed)
+  })
+  handle('debug:exceptions', (filters: unknown) => {
+    const root = workspace.current?.root
+    if (!root) return NO_FOLDER
+    return agent.debugExceptions(root, filters as DebugExceptionFilters).catch(debugFailed)
+  })
+  handle('debug:scopes', (run: unknown, frame: unknown) => {
+    const root = workspace.current?.root
+    if (!root || !isRunId(run) || !isNumber(frame)) return []
+    return agent.debugScopes(root, run, frame).catch(() => [])
+  })
+  handle('debug:variables', (run: unknown, ref: unknown) => {
+    const root = workspace.current?.root
+    if (!root || !isRunId(run) || !isNumber(ref)) return []
+    return agent.debugVariables(root, run, ref).catch(() => [])
+  })
+  handle('debug:evaluate', (run: unknown, expression: unknown, options: unknown) => {
+    const root = workspace.current?.root
+    if (!root) return { ok: false, message: 'Open a folder first.' }
+    const { frame, thread, context } = (typeof options === 'object' && options !== null ? options : {}) as { frame?: unknown; thread?: unknown; context?: unknown }
+    if (!isRunId(run) || typeof expression !== 'string' || expression.length > 10_000) return { ok: false, message: 'That expression could not be read.' }
+    if (context !== 'repl' && context !== 'watch' && context !== 'hover') return { ok: false, message: 'That expression could not be read.' }
+    if ((frame !== undefined && !isNumber(frame)) || (thread !== undefined && !isNumber(thread))) return { ok: false, message: 'That expression could not be read.' }
+    return agent
+      .debugEvaluate(root, run, expression, { context, ...(frame !== undefined ? { frame } : {}), ...(thread !== undefined ? { thread } : {}) })
+      .catch((error: unknown) => ({ ok: false, message: hostFailure(error).message }))
   })
   handle('code:report', () => {
     const root = workspace.current?.root

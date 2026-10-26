@@ -793,6 +793,44 @@ right-to-left text where the cursor or a click lands somewhere other than where 
 keyboard suddenly typing nowhere (the editor lost the focus without you leaving it), and an Undo that does not bring
 the text back exactly as it was. Say what you did just before, as closely as you can.
 
+## The debugger
+
+eNCode debugs Node.js and TypeScript itself. Most useful to hear about: a breakpoint that does not stop, a line or a
+value that is wrong, a run that does not start or does not end, and anything confusing in the Debug tab.
+
+Make a file `cart.js` in a trusted folder:
+
+```js
+const items = [
+  { name: 'Coffee beans', price: 14.5, qty: 2 },
+  { name: 'Oat milk', price: 3.25, qty: 4 },
+]
+function lineTotal(item) {
+  const total = item.price * item.qty
+  return Math.round(total * 100) / 100
+}
+let sum = 0
+for (const item of items) sum += lineTotal(item)
+console.log('Total', sum)
+```
+
+- Click left of the number of line 7 (`return Math.round…`): a red dot. Press `Ctrl+Shift+D` for the Debug tab, choose
+  **Current file** and press `F5`. The program stops on line 7, which is marked in amber. The Debug tab shows `item`
+  with its name, price and quantity, and the call stack.
+- Point at `price` on line 6: a card shows `item.price = 14.5`.
+- Type `item.qty * 2` in the console at the bottom and press Enter: `4`.
+- Press `F5`: it stops again, now with Oat milk. Press `F9` on line 7 to take the breakpoint away, and `F5`: the console
+  shows `Total 42` and that the program exited with code 0.
+- Right-click left of a line number: **Add conditional breakpoint…** with `item.qty > 3` stops only on Oat milk;
+  **Add log point…** with `sum is {sum}` prints instead of stopping.
+- Type a few empty lines above a breakpoint: the dot moves down with its line.
+- **TypeScript:** in a project with tsx or TypeScript compiled with source maps, a breakpoint in a `.ts` file stops on
+  that line.
+- **A script:** in a project whose `package.json` has `"dev": "node server.js"`, choose **Script: dev**. A breakpoint
+  in `server.js` stops, although npm started it.
+- **Steps:** `F10` steps over, `F11` into, `Shift+F11` out. `F11` is full screen again once nothing is paused.
+- **Not trusted:** in a folder you have not trusted, `F5` says why it does not run, and the breakpoints stay.
+
 ## Worktrees
 
 In a git repository you can ask the agent to work apart from your checkout: "do this in a worktree". It makes one at

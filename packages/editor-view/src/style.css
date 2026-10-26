@@ -207,6 +207,66 @@
   background: var(--e-tok-deleted);
 }
 
+/*
+ * Breakpoints: a column at the gutter's left (BREAKPOINT_COLUMN). Its marks are background layers of the line number,
+ * so that folding's chevron and the change bars keep the pseudo-elements: where a frame is paused on top, then the
+ * breakpoint under it. The host sets one breakpoint class and at most one frame class on a line.
+ */
+
+.enc-breakpoints .enc-gutter-num {
+  background-image: var(--enc-frame-mark, none), var(--enc-bp-mark, none);
+  background-repeat: no-repeat;
+  background-position: 3px center;
+  background-size: 10px 10px;
+  cursor: default;
+}
+.enc-breakpoints .enc-gutter-num:not(.enc-bp, .enc-bp-cond, .enc-bp-log, .enc-bp-off, .enc-bp-log-off, .enc-bp-hollow):hover {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4.5' fill='%23e5484d' fill-opacity='0.4'/%3E%3C/svg%3E");
+}
+.enc-bp {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4.5' fill='%23e5484d'/%3E%3C/svg%3E");
+}
+/* Stops only when a condition holds, or on some hits: a bar across the dot. */
+.enc-bp-cond {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4.5' fill='%23e5484d'/%3E%3Crect x='2.5' y='4.25' width='5' height='1.5' rx='0.5' fill='white'/%3E%3C/svg%3E");
+}
+/* Prints instead of stopping: a diamond. */
+.enc-bp-log {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Crect x='1.8' y='1.8' width='6.4' height='6.4' rx='1' transform='rotate(45 5 5)' fill='%23e5484d'/%3E%3C/svg%3E");
+}
+.enc-bp-off {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4.5' fill='%238b8d98'/%3E%3C/svg%3E");
+}
+.enc-bp-log-off {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Crect x='1.8' y='1.8' width='6.4' height='6.4' rx='1' transform='rotate(45 5 5)' fill='%238b8d98'/%3E%3C/svg%3E");
+}
+/* Set, but not placed in code that runs yet: a ring. */
+.enc-bp-hollow {
+  --enc-bp-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='3.8' fill='none' stroke='%23e5484d' stroke-width='1.4'/%3E%3C/svg%3E");
+}
+/* Where the program is paused (the top frame), and the frame chosen further down the stack. */
+.enc-frame-top {
+  --enc-frame-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M1 2.2h4.6L9.2 5 5.6 7.8H1z' fill='%23f5a524' stroke='%23000' stroke-opacity='0.35' stroke-width='0.6'/%3E%3C/svg%3E");
+}
+.enc-frame-other {
+  --enc-frame-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M1 2.2h4.6L9.2 5 5.6 7.8H1z' fill='%2330a46c' stroke='%23000' stroke-opacity='0.35' stroke-width='0.6'/%3E%3C/svg%3E");
+}
+/* Paused on a line with a breakpoint: the arrow, with the breakpoint as a dot in it. */
+.enc-frame-top:is(.enc-bp, .enc-bp-cond, .enc-bp-log, .enc-bp-hollow, .enc-bp-off, .enc-bp-log-off) {
+  --enc-bp-mark: none;
+  --enc-frame-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M0.6 1.6h5.2L9.6 5 5.8 8.4H0.6z' fill='%23f5a524' stroke='%23000' stroke-opacity='0.35' stroke-width='0.6'/%3E%3Ccircle cx='3.9' cy='5' r='1.9' fill='%23e5484d'/%3E%3C/svg%3E");
+}
+.enc-frame-other:is(.enc-bp, .enc-bp-cond, .enc-bp-log, .enc-bp-hollow, .enc-bp-off, .enc-bp-log-off) {
+  --enc-bp-mark: none;
+  --enc-frame-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M0.6 1.6h5.2L9.6 5 5.8 8.4H0.6z' fill='%2330a46c' stroke='%23000' stroke-opacity='0.35' stroke-width='0.6'/%3E%3Ccircle cx='3.9' cy='5' r='1.9' fill='%23e5484d'/%3E%3C/svg%3E");
+}
+.enc-line-paused {
+  background: rgba(245, 165, 36, 0.16);
+}
+.enc-line-frame {
+  background: rgba(48, 164, 108, 0.14);
+}
+
 /* Folding: chevrons in the gutter's last column, shown while the pointer is over the gutter or the block is folded */
 
 .enc-folding .enc-gutter-num {
@@ -1120,6 +1180,12 @@
     forced-color-adjust: none;
     background: none;
     box-shadow: inset 0 0 0 1px GrayText;
+  }
+  .enc-line-paused,
+  .enc-line-frame {
+    forced-color-adjust: none;
+    background: none;
+    box-shadow: inset 0 0 0 2px Highlight;
   }
   .enc-mark-find,
   .enc-mark-peek,

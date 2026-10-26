@@ -71,6 +71,11 @@ export class PointerHandler {
       return
     }
     const inGutter = !!target.closest('.enc-gutter')
+    // The breakpoints column is the host's: a click there sets or clears a breakpoint, it selects nothing.
+    if (inGutter && view.inBreakpointColumn(event.clientX)) {
+      view.emit('gutterClick', { line: view.lineAtClientY(event.clientY), modifiers: { shift: event.shiftKey, alt: event.altKey, mod: view.mac ? event.metaKey : event.ctrlKey } })
+      return
+    }
     if (inGutter && view.options.folding && event.clientX >= view.gutterRight() - FOLD_COLUMN && !event.shiftKey) {
       const line = view.lineAtClientY(event.clientY)
       if (view.folding.isFolded(line) || view.folding.startsAt(line)) {
@@ -243,6 +248,13 @@ export class PointerHandler {
     if (this.ignored(event) || this.onScrollbar(event)) return
     event.preventDefault()
     const view = this.view
+    const target = event.target as Element | null
+    if (target?.closest('.enc-gutter') && view.inBreakpointColumn(event.clientX)) {
+      const line = view.lineAtClientY(event.clientY)
+      view.focus()
+      view.emit('contextmenu', { x: event.clientX, y: event.clientY, pos: view.state.doc.line(line).from, line })
+      return
+    }
     const pos = view.posAtCoords(event.clientX, event.clientY)
     const inside = view.state.selection.ranges.some((range) => range.from <= pos && pos <= range.to && !range.empty)
     if (!inside) view.dispatch({ selection: EditorSelection.cursor(pos), origin: 'select' })

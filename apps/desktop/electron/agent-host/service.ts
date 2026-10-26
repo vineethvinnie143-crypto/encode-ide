@@ -11,7 +11,7 @@ import { createHostClient, DEFAULT_MAX_STEPS, type AgentEvent, type AgentStatus,
 import { Peer, type Port, type RequestOptions } from '@encode/protocol'
 import { parseBrowserRequest, type BrowserAnswer, type BrowserRequest } from '@encode/tools'
 import { DEFAULT_SEARCH_PROVIDER, KEYED_SEARCH_PROVIDER_IDS, type KeyedSearchProviderId, type SearchCheckResult } from '../../shared/search'
-import type { CodeDiagnostic, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, InlineSuggestAnswer, InlineSuggestRequest, LanguageServersReport, ServerInstallPlan, ServerInstallResult, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
+import type { CodeDiagnostic, DebugAction, DebugBreakpoint, DebugConfigs, DebugEvaluateContext, DebugEvaluateResult, DebugExceptionFilters, DebugOutputLine, DebugResult, DebugScope, DebugState, DebugVariable, EditorAnswer, EditorAsk, EditorChangeRequest, EditorChangeResult, InlineSuggestAnswer, InlineSuggestRequest, LanguageServersReport, ServerInstallPlan, ServerInstallResult, McpAction, McpOutcome, McpReport, ModelAlert, ModelStatus, PermissionsAction, PermissionsOutcome, PermissionsReport, SandboxAction, SandboxOutcome, SandboxReport } from '../../shared/types'
 import type { DesktopHostApi, EditorDocumentEvent, HostConfig, HostInit, MainApi, ModelCheckResult } from './api'
 import type { CodeReviewInput, CodeReviewResult } from '@encode/core'
 import type { CommitDraftInput } from './commit-message'
@@ -50,6 +50,10 @@ export interface AgentHostServiceOptions {
   onDiagnostics?(root: string, file: string, diagnostics: CodeDiagnostic[]): void
   /** How the model test that runs is going. */
   onModelTest?(progress: ModelTestProgress): void
+  /** What the debug panel shows of a folder changed (ADR 0143). */
+  onDebug?(root: string): void
+  /** What a debugged program printed, a batch at a time. */
+  onDebugOutput?(root: string, run: string, lines: DebugOutputLine[]): void
   log?(message: string): void
   /** The pause before the first restart, ms; it doubles with every failure. Default 400. */
   restartDelayMs?: number
@@ -273,6 +277,44 @@ export class AgentHostService {
     return (await (await this.ready()).request('codeAsk', { root, ask }, { timeoutMs: CODE_ASK_TIMEOUT_MS })) as EditorAnswer<K>
   }
 
+  /** A folder's debugger as the panel shows it (ADR 0143). */
+  async debugState(root: string): Promise<DebugState> {
+    return (await this.ready()).request('debugState', { root }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugConfigs(root: string): Promise<DebugConfigs> {
+    return (await this.ready()).request('debugConfigs', { root }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  /** Starts a run; a program that waits long for its inspector, or a slow `npm run`, is given a minute. */
+  async debugStart(root: string, config: string, file?: string): Promise<{ ok: true; run: string } | { ok: false; reason: string }> {
+    return (await this.ready()).request('debugStart', { root, config, ...(file ? { file } : {}) }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugAct(root: string, run: string, action: DebugAction): Promise<DebugResult | { ok: true; run: string }> {
+    return (await this.ready()).request('debugAct', { root, run, action }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugBreakpoints(root: string, file: string, breakpoints: DebugBreakpoint[]): Promise<DebugResult> {
+    return (await this.ready()).request('debugBreakpoints', { root, file, breakpoints }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugExceptions(root: string, filters: DebugExceptionFilters): Promise<DebugResult> {
+    return (await this.ready()).request('debugExceptions', { root, filters }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugScopes(root: string, run: string, frame: number): Promise<DebugScope[]> {
+    return (await this.ready()).request('debugScopes', { root, run, frame }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugVariables(root: string, run: string, ref: number): Promise<DebugVariable[]> {
+    return (await this.ready()).request('debugVariables', { root, run, ref }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
+  async debugEvaluate(root: string, run: string, expression: string, options: { frame?: number; thread?: number; context: DebugEvaluateContext }): Promise<DebugEvaluateResult> {
+    return (await this.ready()).request('debugEvaluate', { root, run, expression, ...options }, { timeoutMs: REQUEST_TIMEOUT_MS })
+  }
+
   /** A suggestion at the editor's cursor; `signal` stops it when the editor no longer wants it. */
   async inlineSuggest(root: string, request: InlineSuggestRequest, signal: AbortSignal): Promise<InlineSuggestAnswer> {
     return (await this.ready()).request('inlineSuggest', { root, request }, { timeoutMs: INLINE_TIMEOUT_MS, signal })
@@ -391,6 +433,8 @@ export class AgentHostService {
     peer.on('code', ({ root }) => this.o.onCode?.(root))
     peer.on('diagnostics', ({ root, file, diagnostics }) => this.o.onDiagnostics?.(root, file, diagnostics))
     peer.on('modelTest', (progress) => this.o.onModelTest?.(progress))
+    peer.on('debug', ({ root }) => this.o.onDebug?.(root))
+    peer.on('debugOutput', ({ root, run, lines }) => this.o.onDebugOutput?.(root, run, lines))
     peer.on('warn', (message) => this.log(message))
     child.onExit(() => this.exited(child, peer))
 

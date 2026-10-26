@@ -41,6 +41,14 @@ export type HostToRenderer = [
   Expect<Same<Workspace.EditorAsks, Ui.EditorAsks>>,
   Expect<Same<Workspace.EditorAnswer, Ui.EditorAnswer>>,
   Expect<Same<Workspace.EditorChangeResult, Ui.EditorChangeResult>>,
+  Expect<Same<Workspace.DebugState, Ui.DebugState>>,
+  Expect<Same<Workspace.DebugRunView, Ui.DebugRun>>,
+  Expect<Same<Workspace.DebugConfigs, Ui.DebugConfigs>>,
+  Expect<Same<Workspace.ScopeView, Ui.DebugScope>>,
+  Expect<Same<Workspace.VariableView, Ui.DebugVariable>>,
+  Expect<Same<Workspace.EvaluateResult, Ui.DebugEvaluateResult>>,
+  Expect<Same<Workspace.OutputLine, Ui.DebugOutputLine>>,
+  Expect<Same<Workspace.DebugResult, Ui.DebugResult>>,
 ]
 
 /** The renderer to the host: what the app asks for. */
@@ -57,4 +65,8 @@ export type RendererToHost = [
   Expect<Same<Core.ErrorGate, Ui.ErrorGate>>,
   Expect<Same<Workspace.EditorAsk, Ui.EditorAsk>>,
   Expect<Same<Workspace.EditorChangeRequest, Ui.EditorChangeRequest>>,
+  Expect<Same<Workspace.Breakpoint, Ui.DebugBreakpoint>>,
+  Expect<Same<Workspace.ExceptionFilters, Ui.DebugExceptionFilters>>,
+  Expect<Same<Workspace.DebugAction, Ui.DebugAction>>,
+  Expect<Same<Workspace.EvaluateContext, Ui.DebugEvaluateContext>>,
 ]

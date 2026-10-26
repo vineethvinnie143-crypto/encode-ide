@@ -64,6 +64,8 @@ const GHOST_ORDER: Readonly<Record<NonNullable<InlaySpec['kind']>, number>> = { 
 const KIND_LIMIT = 0xfff
 const NO_BRACKETS: readonly number[] = []
 const GUTTER_PAD_LEFT = 14
+/** The breakpoints column at the gutter's left, px. */
+export const BREAKPOINT_COLUMN = 16
 const GUTTER_PAD_RIGHT = 12
 /** Documents up to this many lines are scanned once for their longest line. */
 const SCAN_LIMIT = 50_000
@@ -101,6 +103,11 @@ export interface EditorViewConfig {
   commands?: Readonly<Record<string, ViewCommand>>
   /** Overrides platform detection, for tests: "MacIntel", "Win32". */
   platform?: string
+  /**
+   * A column at the gutter's left for a debugger's breakpoints (BREAKPOINT_COLUMN wide): a click in it is a
+   * `gutterClick`, not a selection of lines, and the host marks lines with gutter classes. Default false.
+   */
+  breakpoints?: boolean
   /** Blocks fold, with chevrons in the gutter. Default true. */
   folding?: boolean
   /** The first lines of the blocks the top of the view is in stay pinned above the text. Default false. */
@@ -159,6 +166,7 @@ type Options = Required<
     | 'ligatures'
     | 'ariaLabel'
     | 'folding'
+    | 'breakpoints'
     | 'stickyScroll'
     | 'bracketColors'
     | 'minimap'
@@ -193,13 +201,16 @@ export interface ViewEvents {
   focus: () => void
   blur: () => void
   /** The pointer asked for a context menu at `pos`. */
-  contextmenu: (event: { x: number; y: number; pos: number }) => void
+  /** The pointer asked for a context menu at `pos`; in the breakpoints column, for `line` (1-based), with the selection kept. */
+  contextmenu: (event: { x: number; y: number; pos: number; line?: number }) => void
   /** A key binding named a command the view does not run itself (goto line): the host handles it. */
   request: (name: string) => void
   /** Ctrl/Cmd+click at `pos`. */
   navigate: (event: { pos: number; modifiers: { shift: boolean; alt: boolean } }) => void
   /** Blocks were folded or unfolded: a host keeps `folding.folded` to fold them again when the file comes back. */
   folds: () => void
+  /** A click in the breakpoints column, at `line` (1-based); `mod` is Ctrl, or Cmd on macOS. */
+  gutterClick: (event: { line: number; modifiers: { shift: boolean; alt: boolean; mod: boolean } }) => void
 }
 
 interface LineEl {
@@ -430,6 +441,7 @@ export class EditorView {
       ligatures: config.ligatures ?? false,
       ariaLabel: config.ariaLabel ?? 'Editor',
       folding: config.folding ?? true,
+      breakpoints: config.breakpoints ?? false,
       stickyScroll: config.stickyScroll ?? false,
       bracketColors: config.bracketColors ?? false,
       minimap: config.minimap ?? false,
@@ -501,6 +513,7 @@ export class EditorView {
     this.root.classList.toggle('enc-readonly', this.state.config.readOnly)
     this.root.classList.toggle('enc-no-numbers', !this.options.lineNumbers)
     this.root.classList.toggle('enc-folding', this.options.folding)
+    this.root.classList.toggle('enc-breakpoints', this.options.breakpoints)
     this.root.style.setProperty('--enc-tab-size', String(this.state.config.tabSize))
 
     this.input = new InputHandler(this)
@@ -927,6 +940,7 @@ export class EditorView {
     this.root.classList.toggle('enc-ligatures', this.options.ligatures)
     this.root.classList.toggle('enc-no-numbers', !this.options.lineNumbers)
     this.root.classList.toggle('enc-folding', this.options.folding)
+    this.root.classList.toggle('enc-breakpoints', this.options.breakpoints)
     this.restartBlink()
     this.requestRender()
   }
@@ -1442,7 +1456,8 @@ export class EditorView {
     // The gutter and the minimap first: what is left between them is what long lines wrap to.
     const digits = Math.max(3, String(doc.lineCount).length)
     const foldColumn = this.options.folding ? FOLD_COLUMN : 0
-    const gutterWidth = (this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12) + foldColumn
+    const breakpointColumn = this.options.breakpoints ? BREAKPOINT_COLUMN : 0
+    const gutterWidth = (this.options.lineNumbers ? Math.ceil(GUTTER_PAD_LEFT + digits * charWidth + GUTTER_PAD_RIGHT) : 12) + foldColumn + breakpointColumn
     this.minimapWidth = this.minimap.widthFor(viewportWidth, gutterWidth)
     if (gutterWidth !== this.gutterWidth) {
       this.gutterWidth = gutterWidth
@@ -2390,6 +2405,13 @@ export class EditorView {
   /** The client x of the gutter's right edge. */
   gutterRight(): number {
     return this.gutter.getBoundingClientRect().right
+  }
+
+  /** Whether a client x is in the breakpoints column, when the view has one. */
+  inBreakpointColumn(clientX: number): boolean {
+    if (!this.options.breakpoints) return false
+    const left = this.gutter.getBoundingClientRect().left
+    return clientX >= left && clientX < left + BREAKPOINT_COLUMN
   }
 
   /** The line (1-based) at a client y. */

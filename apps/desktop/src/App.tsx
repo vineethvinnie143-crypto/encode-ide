@@ -26,6 +26,7 @@ import { EditorIssueDialog, InstallServerDialog } from './editor/surface-view'
 import { useResizable } from './hooks/useResizable'
 import { useChat } from './stores/chat'
 import { useCode } from './stores/code'
+import { appendDebugOutput, resetDebug, useDebug } from './stores/debug'
 import { useEditor } from './stores/editor'
 import { useScreenReaderRunning } from './stores/editor-layout'
 import { useGit } from './stores/git'
@@ -130,6 +131,22 @@ export default function App() {
   useEffect(() => {
     clearMarks()
     void useCode.getState().refresh()
+  }, [workspaceRoot])
+
+  // The debugger's runs and breakpoints follow the agent host; what a run prints comes as it prints (ADR 0143).
+  useEffect(() => {
+    const offDebug = api.debug.onChanged(() => void useDebug.getState().refresh())
+    const offOutput = api.debug.onOutput(({ run, lines }) => appendDebugOutput(run, lines))
+    return () => {
+      offDebug()
+      offOutput()
+    }
+  }, [])
+  useEffect(() => {
+    resetDebug()
+    if (!workspaceRoot) return
+    void useDebug.getState().refresh()
+    void useDebug.getState().loadConfigs()
   }, [workspaceRoot])
 
   useEffect(() => {

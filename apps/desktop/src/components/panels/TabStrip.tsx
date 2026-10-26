@@ -2,7 +2,7 @@ import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { PanelTab, PanelTabKind } from '../../panels/model'
 import { IconButton } from '../../ui/Button'
 import { cx } from '../../ui/cx'
-import { Activity, AlertTriangle, Bot, Code2, Files, GitPullRequest, Globe, ListTree, MessageSquare, Plus, SquareTerminal, X } from '../../ui/icons'
+import { Activity, AlertTriangle, Bot, Bug, Code2, Files, GitPullRequest, Globe, ListTree, MessageSquare, Plus, SquareTerminal, X } from '../../ui/icons'
 import { keyToMove, moveIndex } from '../../ui/nav'
 
 const ICONS: Record<PanelTabKind, typeof Files> = {
@@ -16,6 +16,7 @@ const ICONS: Record<PanelTabKind, typeof Files> = {
   jobs: Activity,
   problems: AlertTriangle,
   chat: MessageSquare,
+  debug: Bug,
 }
 
 /**

@@ -332,6 +332,8 @@ export class RemoteMachine {
       profileDir: own,
       toolsDir: path.posix.join(data, 'tools'),
       serverCacheDir: path.posix.join(data, 'server-cache'),
+      // A run of the debugger starts that machine's code there, as its terminal does (ADR 0143).
+      debugDir: path.posix.join(data, 'debug'),
     }
   }
 

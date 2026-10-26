@@ -25,6 +25,7 @@ import {
   withPreviews,
 } from './code'
 import { actOn, type PermissionsAction, type PermissionsOutcome } from './actions'
+import { FolderDebugger, type DebugOptions } from './debug'
 import { applyEditorPlan, ChangeRefused, previewPlan, undoEditorChange, type AppliedChange, type AppliedRecord, type ChangeContext } from './editor-changes'
 import { WorkspaceConfig, type ConfigSnapshot } from './config'
 import { nodeWorkspaceFs, type WorkspaceFs } from './fs'
@@ -100,6 +101,8 @@ export interface WorkspacesOptions {
   sandbox?: Sandbox
   /** The folders' language servers, for the agent and the editor. Without it no server is started. */
   languageServers?: LanguageServerOptions
+  /** The folders' debuggers (ADR 0143). Without it nothing is debugged. */
+  debug?: DebugOptions
 }
 
 /**
@@ -117,6 +120,8 @@ export class Workspaces {
   private readonly hubs = new Map<string, McpHub>()
   /** A folder's language servers, shared by its sessions and the editor; each server in it stops when unused. */
   private readonly code = new Map<string, LanguageServers>()
+  /** A folder's debugger: its breakpoints and its runs. */
+  private readonly debuggers = new Map<string, FolderDebugger>()
   private readonly indexes = new Map<string, CodeIndex>()
   /** Servers eNCode installs when asked, for every folder; none without a tools folder. */
   readonly installs: ServerInstalls | undefined
@@ -211,6 +216,25 @@ export class Workspaces {
       this.code.set(key, servers)
     }
     return servers
+  }
+
+  /** The debugger of a folder, given as any path to it, or undefined when the program debugs nothing. */
+  async folderDebugger(root: string): Promise<FolderDebugger | undefined> {
+    const options = this.options.debug
+    if (!options) return undefined
+    let real = this.realRoots.get(root)
+    if (!real) {
+      real = await realPathOf(root)
+      this.realRoots.set(root, real)
+    }
+    const config = this.config(real)
+    const key = workspaceKey(config.root, this.platform === 'win32')
+    let found = this.debuggers.get(key)
+    if (!found) {
+      found = new FolderDebugger(config, this.fs, options, this.platform)
+      this.debuggers.set(key, found)
+    }
+    return found
   }
 
   /** The code index of a folder, given as a real path (ADR 0090): one per folder, shared by its sessions. */
@@ -621,10 +645,12 @@ export class Workspaces {
   async close(): Promise<void> {
     const hubs = [...this.hubs.values()]
     const code = [...this.code.values()]
+    const debuggers = [...this.debuggers.values()]
     this.hubs.clear()
     this.code.clear()
+    this.debuggers.clear()
     this.indexes.clear()
-    await Promise.all([...hubs.map((hub) => hub.close().catch(() => undefined)), ...code.map((servers) => servers.dispose().catch(() => undefined))])
+    await Promise.all([...hubs.map((hub) => hub.close().catch(() => undefined)), ...code.map((servers) => servers.dispose().catch(() => undefined)), ...debuggers.map((folder) => folder.close().catch(() => undefined))])
   }
 
   /** The folder's permissions as the Permissions screen shows them. The folder may be given as any path to it. */

@@ -143,4 +143,78 @@ export const pointer = [
       assert.deepEqual(await selection(), before)
     },
   },
+  {
+    name: 'the breakpoint column: a click or a right click there names the line and leaves the selection, and its marks are drawn',
+    async run({ mount, page, selection, assert, shot }) {
+      const lines = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n')
+      await mount({ text: lines, path: 'a.js', focus: false, config: { breakpoints: true } })
+      await page.eval(() => {
+        window.events = { clicks: [], menus: [] }
+        window.view.on('gutterClick', (event) => window.events.clicks.push(event))
+        window.view.on('contextmenu', (event) => window.events.menus.push(event))
+      })
+      const spot = (line, dx) =>
+        page.eval(
+          ({ line, dx }) => {
+            const gutter = document.querySelector('.enc-gutter').getBoundingClientRect()
+            const row = [...document.querySelectorAll('.enc-gutter-num')].find((el) => el.textContent === String(line)).getBoundingClientRect()
+            return { x: gutter.left + dx, y: row.top + row.height / 2 }
+          },
+          { line, dx },
+        )
+      const width = () => page.eval(() => document.querySelector('.enc-gutter').getBoundingClientRect().width)
+      const wide = await width()
+
+      let p = await spot(3, 6)
+      await page.click(p.x, p.y)
+      await page.frames(2)
+      p = await spot(5, 12)
+      await page.click(p.x, p.y, { shift: true })
+      await page.frames(2)
+      const { clicks } = await page.eval(() => window.events)
+      assert.deepEqual(clicks, [
+        { line: 3, modifiers: { shift: false, alt: false, mod: false } },
+        { line: 5, modifiers: { shift: true, alt: false, mod: false } },
+      ])
+      assert.deepEqual(await selection(), [[0, 0]], 'a click in the column selects nothing')
+
+      p = await spot(7, 6)
+      await page.mouse('mouseMoved', p.x, p.y)
+      await page.mouse('mousePressed', p.x, p.y, { button: 'right', count: 1 })
+      await page.mouse('mouseReleased', p.x, p.y, { button: 'right', count: 1 })
+      await page.frames(2)
+      const { menus } = await page.eval(() => window.events)
+      assert.equal(menus.length, 1)
+      assert.equal(menus[0].line, 7)
+      assert.equal(menus[0].pos, await page.eval(() => window.view.state.doc.line(7).from))
+      assert.deepEqual(await selection(), [[0, 0]], 'nor does a right click there')
+
+      // A mark of the host is a layer of the number's background; the paused frame's is drawn over it.
+      await page.eval(() => {
+        const doc = window.view.state.doc
+        window.view.setSource('bp', window.enc.DecorationSet.of(doc, { gutter: [{ line: 3, className: 'enc-bp' }, { line: 9, className: 'enc-bp-log' }] }))
+        window.view.setSource('frame', window.enc.DecorationSet.of(doc, { gutter: [{ line: 9, className: 'enc-frame-top' }], lines: [{ line: 9, className: 'enc-line-paused' }] }))
+      })
+      await page.frames(2)
+      const marks = await page.eval(() =>
+        Object.fromEntries(
+          [...document.querySelectorAll('.enc-gutter-num')]
+            .filter((el) => ['2', '3', '9'].includes(el.textContent))
+            .map((el) => [el.textContent, getComputedStyle(el).backgroundImage.split('url(').length - 1]),
+        ),
+      )
+      assert.deepEqual(marks, { 2: 0, 3: 1, 9: 1 }, 'a dot on line 3; on line 9 the arrow, with the log point in it')
+      await shot('breakpoints')
+
+      // Off, the column goes, and a click on a number selects its line as before.
+      await page.eval(() => window.view.setOptions({ breakpoints: false }))
+      await page.frames(2)
+      assert.equal(Math.round(wide - (await width())), 16, 'the column is 16 px wide')
+      p = await spot(3, 6)
+      await page.click(p.x, p.y)
+      await page.frames(2)
+      assert.equal((await page.eval(() => window.events)).clicks.length, 2)
+      assert.notDeepEqual(await selection(), [[0, 0]])
+    },
+  },
 ]

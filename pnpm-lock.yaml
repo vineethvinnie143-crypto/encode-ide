@@ -259,6 +259,25 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  packages/debug:
+    dependencies:
+      '@encode/lsp':
+        specifier: workspace:*
+        version: link:../lsp
+      '@encode/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@encode/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   packages/diff:
     devDependencies:
       '@encode/testkit':
@@ -520,6 +539,9 @@ importers:
       '@encode/core':
         specifier: workspace:*
         version: link:../core
+      '@encode/debug':
+        specifier: workspace:*
+        version: link:../debug
       '@encode/hooks':
         specifier: workspace:*
         version: link:../hooks

@@ -9,7 +9,7 @@ import { stubManagedShell } from '@encode/core/testing'
 import { createPortPair } from '@encode/protocol'
 import { tempWorkspace } from '@encode/tools/testing'
 import type { ModelAlert } from '../../shared/types'
-import type { HostConfig } from './api'
+import type { HostConfig, HostInit } from './api'
 import { runHostRuntime, type HostRuntime } from './runtime'
 import { AgentHostService, type HostProcess } from './service'
 
@@ -106,6 +106,8 @@ interface Fixture {
   /** What the main process answers for the local profile's key. */
   key: { current: string }
   stateFile: string
+  /** The folder open in the host. */
+  workspace: string
 }
 
 const services: AgentHostService[] = []
@@ -113,7 +115,7 @@ after(async () => {
   for (const service of services.splice(0)) await service.dispose()
 })
 
-async function fixture(stateFile?: string): Promise<Fixture> {
+async function fixture(stateFile?: string, more: Partial<Omit<HostInit, 'config'>> = {}): Promise<Fixture> {
   const dir = await tempWorkspace()
   const home = await tempWorkspace()
   const workspace = await tempWorkspace()
@@ -135,7 +137,7 @@ async function fixture(stateFile?: string): Promise<Fixture> {
       runtimes.push(runHostRuntime(hostSide, { hostOptions: { createShell: stubManagedShell, goalDelayMs: 0, nameSessions: false }, log: () => undefined, onShutdown: exit }))
       return { port: mainSide, kill: exit, onExit: (handler) => (onExit = handler) }
     },
-    init: () => ({ dir, home, workspace, routerStateFile: state }),
+    init: () => ({ dir, home, workspace, routerStateFile: state, ...more }),
     apiKey: (profileId, server) => {
       keysAsked.push(`${profileId} ${server}`)
       return (profileId === 'local' || profileId === 'other') && server === origin ? key.current : ''
@@ -147,7 +149,7 @@ async function fixture(stateFile?: string): Promise<Fixture> {
     log: () => undefined,
   })
   services.push(service)
-  return { service, events, alerts, keysAsked, runtimes, key, stateFile: state }
+  return { service, events, alerts, keysAsked, runtimes, key, stateFile: state, workspace }
 }
 
 /** One turn: the last error the session reported, or the reply it ended with. */
@@ -452,5 +454,34 @@ describe('what the router has learned', () => {
     const f = await fixture(file)
     f.service.configure(config())
     assert.equal((await turn(f)).reply, 'fine')
+  })
+})
+
+describe('the debugger in the agent host (ADR 0143)', () => {
+  it("serves a folder's debugger, which waits for the folder to be trusted, and checks what the window sends", async () => {
+    const f = await fixture(undefined, { debugDir: path.join(await tempWorkspace(), 'debug') })
+    f.service.configure(config())
+    fs.mkdirSync(path.join(f.workspace, 'src'), { recursive: true })
+    fs.writeFileSync(path.join(f.workspace, 'src', 'main.js'), 'const a = 1\nconsole.log(a)\n')
+    const state = await f.service.debugState(f.workspace)
+    assert.deepEqual(state, { trusted: false, breakpoints: {}, exceptions: { uncaught: true, all: false }, runs: [] })
+    const { configs } = await f.service.debugConfigs(f.workspace)
+    assert.deepEqual(configs.map((item) => item.id), ['file', 'attach'])
+    assert.deepEqual(await f.service.debugStart(f.workspace, 'file', 'src/main.js'), { ok: false, reason: "Debugging runs the folder's code, so it runs only in folders you trust. Trust the folder to debug it." })
+
+    assert.deepEqual(await f.service.debugBreakpoints(f.workspace, 'src/main.js', [{ id: 'b1', line: 2, enabled: true, condition: 'a > 0' }]), { ok: true })
+    assert.deepEqual((await f.service.debugState(f.workspace)).breakpoints, { 'src/main.js': [{ id: 'b1', line: 2, enabled: true, condition: 'a > 0' }] })
+    // What a window could send that is not a breakpoint, an exception setting or an action goes no further.
+    assert.deepEqual(await f.service.debugBreakpoints(f.workspace, 'src/main.js', [{ id: 'b 1', line: 0, enabled: true }] as never), { ok: false, reason: 'Those breakpoints could not be read.' })
+    assert.deepEqual(await f.service.debugExceptions(f.workspace, { uncaught: 'yes' } as never), { ok: false, reason: 'Those settings could not be read.' })
+    assert.deepEqual(await f.service.debugAct(f.workspace, 'r1', { kind: 'step', step: 'sideways' } as never), { ok: false, reason: 'That is not something a run can do.' })
+    assert.deepEqual(await f.service.debugAct(f.workspace, 'r1', { kind: 'continue' }), { ok: false, reason: 'That run is over.' })
+    assert.deepEqual((await f.service.debugState(f.workspace)).breakpoints['src/main.js']?.length, 1, 'the refused list changed nothing')
+  })
+
+  it('has no debugger without a folder for it', async () => {
+    const f = await fixture()
+    f.service.configure(config())
+    await assert.rejects(f.service.debugState(f.workspace), /no debugger/)
   })
 })

@@ -1,4 +1,4 @@
-export { EditorView, LONG_LINE, type EditorViewConfig, type ViewEvents, type ViewMetrics, type ViewZone } from './view'
+export { BREAKPOINT_COLUMN, EditorView, LONG_LINE, type EditorViewConfig, type ViewEvents, type ViewMetrics, type ViewZone } from './view'
 export { viewCommands, type ViewCommand } from './commands'
 export { DecorationSet, type DecorationSource, type DecorationSpec, type LineSpec, type MarkSpec } from './decorations'
 export { HeightMap, MAX_SCROLL_HEIGHT, ScrollScale, normalizeHidden, sameHidden, type HiddenLines, type Zone } from './heights'
