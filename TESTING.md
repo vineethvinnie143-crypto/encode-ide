@@ -389,7 +389,9 @@ should say what is still to do. Set **Effort** with the chip under
 the message box or `Ctrl+Shift+M`; a reasoning model should answer faster on Low and think longer on High. While it
 thinks, its latest words should show in a quiet line under **Thinking**, and a command that runs for five seconds or
 more should show a clock beside its spinner. A command that only sleeps for longer than 10 seconds is not run: the agent
-is told to check for what it waits on instead. The **Tasks** card should move as the agent works, and be up to date
+is told to check for what it waits on instead; a command it started in the background is waited for with BashOutput,
+whose card says "Waiting up to 30 s…" and which stops at once on Stop (the agent should not write sleep loops of its
+own to wait for it). The **Tasks** card should move as the agent works, and be up to date
 when the request ends; an item left open then stops turning.
 
 `Ctrl+F` finds words in the session, inside folded steps and long command output too; `Enter` and `Shift+Enter` move

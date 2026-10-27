@@ -144,7 +144,7 @@ export function createBashTool(dialect: ShellDialect, platform: NodeJS.Platform,
         const told = ctx.background ? ' You are told when it ends, so do not wait for it.' : ''
         return {
           ok: true,
-          content: `Started in the background with id ${job.id}.${told} Read its output with BashOutput (bash_id "${job.id}"); stop it with KillShell (shell_id "${job.id}").`,
+          content: `Started in the background with id ${job.id}.${told} Read its output with BashOutput (bash_id "${job.id}"; it waits for new output, so no sleep loop is needed); stop it with KillShell (shell_id "${job.id}").`,
           display: { output: `Background job ${job.id}` },
         }
       }
@@ -187,16 +187,20 @@ interface BashOutputInput extends Record<string, unknown> {
   filter?: string
 }
 
+/** How long a read of a running command with nothing new waits for it. */
+export const OUTPUT_WAIT_MS = 30_000
+
 export const bashOutputTool: Tool<BashOutputInput> = {
-  brief: 'Reads what a background command (bash_id, from Bash) printed since the last read, whether it still runs, and its exit code. filter: a regular expression for the lines to return.',
+  brief: 'Reads what a background command (bash_id) printed since the last read, waiting up to 30 s if nothing is new; whether it runs, its exit code. filter: a regex for lines to return.',
   definition: {
     name: 'BashOutput',
     description: [
       'Reads what a background command printed since the last read.',
       '',
-      '- bash_id is the id Bash returned when it started the command.',
-      '- Also reports whether the command is still running, and its exit code once it ended.',
-      '- filter is a regular expression; only output lines that match it are returned (the rest are still marked read).',
+      '- bash_id: the id Bash returned.',
+      '- Waits up to 30 s for new output or the end: wait here, not in a sleep loop.',
+      '- Reports whether it runs, and its exit code once it ended.',
+      '- filter: a regex; only matching lines are returned (the rest are marked read).',
     ].join('\n'),
     inputSchema: {
       type: 'object',
@@ -223,10 +227,20 @@ export const bashOutputTool: Tool<BashOutputInput> = {
   access: () => ({ type: 'none' }),
   describe: (input) => ({ title: `Read output of ${input.bash_id}` }),
   async run(input, ctx) {
-    const read = ctx.jobs.read(input.bash_id, input.filter ? { filter: new RegExp(input.filter) } : {})
+    const options = input.filter ? { filter: new RegExp(input.filter) } : {}
+    let read = ctx.jobs.read(input.bash_id, options)
     if (!read) {
       const known = ctx.jobs.list().map((job) => job.id)
       return fail(`There is no background command ${input.bash_id}.${known.length ? ` Known ids: ${known.join(', ')}.` : ''}`)
+    }
+    // Nothing new from a command that still runs: waiting here is what the model would otherwise do in a loop of its own, for minutes (ADR 0153).
+    const until = Date.now() + OUTPUT_WAIT_MS
+    let waited = false
+    while (read.job.status === 'running' && !read.output.trim() && !ctx.signal.aborted && Date.now() < until) {
+      if (!waited) ctx.progress?.(`Waiting up to ${OUTPUT_WAIT_MS / 1000} s for ${input.bash_id} to print…`)
+      waited = true
+      await ctx.jobs.wait(input.bash_id, until - Date.now(), ctx.signal)
+      read = ctx.jobs.read(input.bash_id, options) ?? read
     }
     const { job, output } = read
     const status = job.status === 'running' ? 'running' : `${job.status}${job.exitCode !== undefined ? `, exit code ${job.exitCode}` : ''}`

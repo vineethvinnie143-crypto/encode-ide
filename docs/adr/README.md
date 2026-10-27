@@ -142,6 +142,7 @@ say so.
 | [0150](0150-an-answer-that-leaves-a-result-of-the-change-as-it-is-goes-back-once.md) | An answer that leaves a result of the change as it is goes back to the agent once | Accepted, builds on 0095, 0126, 0147 and 0148 |
 | [0151](0151-a-change-that-drops-characters-is-tried-on-a-word-with-each-and-a-fix-goes-with-its-check.md) | A change that drops characters is tried on a word with each, and a fix late in a request goes with its check | Accepted, amends 0141, 0147 and 0150 |
 | [0152](0152-a-result-shown-after-a-comma-counts-for-the-left-as-is-check.md) | A result shown after a comma counts for the left-as-is check | Accepted, amends 0150 |
+| [0153](0153-bashoutput-waits-for-a-command-that-runs-and-the-advice-stops-recommending-long-loops.md) | BashOutput waits for a command that runs, and the advice stops recommending long loops | Accepted, amends 0125 |
 
 ## Template
 

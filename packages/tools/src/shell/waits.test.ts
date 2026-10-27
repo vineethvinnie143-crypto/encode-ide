@@ -61,11 +61,14 @@ describe('topStatements', () => {
 })
 
 describe('blindWaitAdvice', () => {
-  it('says what was not run and how to wait for the thing itself, in the shell in use', () => {
+  it('says what was not run, to wait for a command in BashOutput and for anything else with a short loop, in the shell in use', () => {
     const pwsh = blindWaitAdvice(110, 'pwsh')
     assert.match(pwsh, /^Not run: this command waits 110 s doing nothing/)
-    assert.match(pwsh, /Start-Sleep -Seconds 5 \}/)
-    assert.match(pwsh, /run_in_background/)
-    assert.match(blindWaitAdvice(Number.POSITIVE_INFINITY, 'bash'), /waits without end[\s\S]*sleep 5; done/)
+    assert.match(pwsh, /run_in_background and read it with BashOutput: that waits up to 30 s for new output/)
+    assert.match(pwsh, /\$i -lt 6[\s\S]*Start-Sleep -Seconds 5 \}/)
+    const bash = blindWaitAdvice(Number.POSITIVE_INFINITY, 'bash')
+    assert.match(bash, /waits without end[\s\S]*seq 6[\s\S]*sleep 5; done/)
+    // The loop takes 30 s at most: a longer one is the stall this advice is there to end.
+    assert.ok(!/seq 24|-lt 24/.test(pwsh + bash))
   })
 })

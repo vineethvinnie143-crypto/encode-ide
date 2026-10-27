@@ -26,6 +26,7 @@ const noShell: AgentShell = {
 const noJobs: JobManager = {
   start: async () => unexpected('jobs'),
   read: () => unexpected('jobs'),
+  wait: async () => unexpected('jobs'),
   kill: async () => unexpected('jobs'),
   list: () => [],
 }

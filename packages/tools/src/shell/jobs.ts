@@ -11,6 +11,8 @@ import type { ManagedShell, RunningCommand } from './run'
 
 const KEEP_CHARS = 1_000_000
 const MAX_JOBS = 32
+/** After the first new output, a wait lets a burst finish so one read gets the lines of one moment. */
+const SETTLE_MS = 200
 
 interface Job {
   info: JobInfo
@@ -21,6 +23,8 @@ interface Job {
   cursor: number
   handle?: RunningCommand
   killed: boolean
+  /** Reads that wait for it: told when output comes (`false`) and when it ends (`true`). */
+  waiters: Set<(ended: boolean) => void>
 }
 
 export interface BackgroundJobs extends JobManager {
@@ -66,7 +70,7 @@ export function createJobManager(shell: ManagedShell, options: JobManagerOptions
         ...(startOptions.description?.trim() ? { description: startOptions.description.trim().slice(0, 200) } : {}),
         ...(startOptions.agentId ? { agentId: startOptions.agentId } : {}),
       }
-      const job: Job = { info, output: '', dropped: 0, cursor: 0, killed: false }
+      const job: Job = { info, output: '', dropped: 0, cursor: 0, killed: false, waiters: new Set() }
       jobs.set(id, job)
       prune()
       const append = (text: string) => {
@@ -78,6 +82,7 @@ export function createJobManager(shell: ManagedShell, options: JobManagerOptions
           job.output = job.output.slice(cut)
           job.dropped += cut
         }
+        if (clean) for (const wake of [...job.waiters]) wake(false)
       }
       try {
         job.handle = await shell.start(command, { cwd: path.resolve(cwd), ...(startOptions.unsandboxed ? { unsandboxed: true } : {}), onOutput: append })
@@ -92,6 +97,7 @@ export function createJobManager(shell: ManagedShell, options: JobManagerOptions
         const status: JobStatus = job.killed ? 'killed' : exitCode === 0 ? 'done' : 'error'
         job.info.status = status
         if (exitCode !== null) job.info.exitCode = exitCode
+        for (const wake of [...job.waiters]) wake(true)
         changed()
         options.onEnd?.({ ...job.info })
       })
@@ -119,6 +125,28 @@ export function createJobManager(shell: ManagedShell, options: JobManagerOptions
       return { job: { ...job.info }, output: fresh }
     },
 
+    wait(id, ms, signal) {
+      const job = jobs.get(id)
+      if (!job || job.info.status !== 'running' || job.dropped + job.output.length > job.cursor || signal.aborted || ms <= 0) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        let settle: NodeJS.Timeout | undefined
+        const finish = () => {
+          clearTimeout(timer)
+          clearTimeout(settle)
+          job.waiters.delete(wake)
+          signal.removeEventListener('abort', finish)
+          resolve()
+        }
+        const wake = (ended: boolean) => {
+          if (ended) finish()
+          else settle ??= setTimeout(finish, SETTLE_MS)
+        }
+        const timer = setTimeout(finish, ms)
+        job.waiters.add(wake)
+        signal.addEventListener('abort', finish, { once: true })
+      })
+    },
+
     async kill(id) {
       const job = jobs.get(id)
       if (!job || job.info.status !== 'running' || !job.handle) return false
@@ -132,6 +160,7 @@ export function createJobManager(shell: ManagedShell, options: JobManagerOptions
     output: (id) => jobs.get(id)?.output,
 
     async dispose() {
+      for (const job of jobs.values()) for (const wake of [...job.waiters]) wake(true)
       await Promise.all(
         [...jobs.values()].filter((job) => job.info.status === 'running' && job.handle).map((job) => {
           job.killed = true

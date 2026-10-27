@@ -236,12 +236,32 @@ describe('the agent shell', { skip: program?.dialect === 'bash' ? false : 'needs
     await new Promise((resolve) => setTimeout(resolve, 1_000))
     const first = await bashOutputTool.run({ bash_id: 'bash_1' }, ctx)
     assert.match(textOf(first.content), /^Status: running\n\nfirst\nsecond$/)
-    const again = await bashOutputTool.run({ bash_id: 'bash_1' }, ctx)
+    // A read with nothing new waits for the command (below); a call that is stopped does not.
+    const stoppedCall = new AbortController()
+    stoppedCall.abort()
+    const again = await bashOutputTool.run({ bash_id: 'bash_1' }, { ...ctx, signal: stoppedCall.signal })
     assert.equal(again.content, 'Status: running\n\n(no new output)')
     const stopped = await killShellTool.run({ shell_id: 'bash_1' }, ctx)
     assert.equal(stopped.ok, true)
     assert.equal(jobs.list()[0].status, 'killed')
     assert.match(textOf((await bashOutputTool.run({ bash_id: 'nope' }, ctx)).content), /no background command nope\. Known ids: bash_1/)
+  })
+
+  it('waits in BashOutput for the next lines of a command that runs, instead of returning nothing (ADR 0153)', async () => {
+    const { root, shell } = await shellIn()
+    const jobs = createJobManager(shell)
+    const ctx = testContext(root, { shell, jobs })
+    const bash = createBashTool(shell.dialect, process.platform)
+    await bash.run({ command: 'echo first; sleep 1.5; echo second; sleep 60', run_in_background: true }, ctx)
+    const first = textOf((await bashOutputTool.run({ bash_id: 'bash_1' }, ctx)).content)
+    assert.match(first, /^Status: running\n\nfirst(\r?\nsecond)?$/)
+    if (!first.includes('second')) {
+      const started = Date.now()
+      const next = await bashOutputTool.run({ bash_id: 'bash_1' }, ctx)
+      assert.match(textOf(next.content), /^Status: running\n\nsecond$/)
+      assert.ok(Date.now() - started < 20_000, 'it came back with the line, not after the whole wait')
+    }
+    await killShellTool.run({ shell_id: 'bash_1' }, ctx)
   })
 
   it('names who started a job and what it is for, passes its output on as it comes, and says when it ends', async () => {
