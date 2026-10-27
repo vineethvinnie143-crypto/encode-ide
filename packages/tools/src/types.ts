@@ -316,6 +316,8 @@ export interface JobManager {
   start(command: string, options: JobStartOptions): Promise<JobInfo>
   /** Output since the last read, optionally only lines matching `filter`. */
   read(id: string, options?: { filter?: RegExp }): { job: JobInfo; output: string } | undefined
+  /** Until the job prints something new or ends, for at most `ms`; at once when it already has, or has ended, or `signal` fires. */
+  wait(id: string, ms: number, signal: AbortSignal): Promise<void>
   kill(id: string): Promise<boolean>
   list(): JobInfo[]
 }

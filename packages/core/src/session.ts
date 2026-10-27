@@ -1495,6 +1495,7 @@ export class AgentSession {
   private readonly agentJobs: JobManager = {
     start: (command, options) => this.jobsManager.start(command, options),
     read: (id, options) => this.jobsManager.read(id, options),
+    wait: (id, ms, signal) => this.jobsManager.wait(id, ms, signal),
     kill: (id) => {
       this.quiet.add(id)
       return this.jobsManager.kill(id)

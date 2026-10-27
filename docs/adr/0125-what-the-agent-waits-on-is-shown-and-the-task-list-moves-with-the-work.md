@@ -43,7 +43,8 @@ step limit again, background news included. A monitor with a line after every st
     statement PowerShell reads as an expression (`"waited"`) does not hide the wait before it.
   - The model is told why the command did not run, and to check for the thing itself every few seconds, with a limit,
     in one command, with an example in its own shell. For work that takes minutes, it should use `run_in_background`.
-    A wait started with `run_in_background` runs.
+    A wait started with `run_in_background` runs. (0153: the example loop is six rounds, and a command is waited for
+    with `BashOutput`, which waits up to 30 s.)
 - **The task list moves with the work.**
   - The loop reads the list the person sees (the main agent's only). After six steps in a row that left a list with
     open items as it was, the list goes to the model with the step's results: "The task list the person sees has not

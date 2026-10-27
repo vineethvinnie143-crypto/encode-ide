@@ -172,6 +172,7 @@ export const stubJobs: JobManager = {
     throw new Error('This test has no background jobs.')
   },
   read: () => undefined,
+  wait: async () => {},
   kill: async () => false,
   list: () => [],
 }

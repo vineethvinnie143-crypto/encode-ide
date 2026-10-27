@@ -154,16 +154,19 @@ export function blindWait(command: string, dialect: ShellDialect): number {
   return parsed.ok ? bashWaits(parsed.script) : 0
 }
 
-/** What the model is told instead of the wait: look for the thing itself, with a limit. */
+/**
+ * What the model is told instead of the wait: a command it started waits in BashOutput, and anything else is looked for
+ * itself, with a limit that keeps one call short (ADR 0153).
+ */
 export function blindWaitAdvice(seconds: number, dialect: ShellDialect): string {
   const howLong = Number.isFinite(seconds) ? `${Math.round(seconds)} s` : 'without end'
   const loop =
     dialect === 'pwsh'
-      ? 'for ($i = 0; $i -lt 24; $i++) { if (<a check that passes once it is ready>) { break }; Start-Sleep -Seconds 5 }'
-      : 'for i in $(seq 24); do <a check that passes once it is ready> && break; sleep 5; done'
+      ? 'for ($i = 0; $i -lt 6; $i++) { if (<a check that passes once it is ready>) { break }; Start-Sleep -Seconds 5 }'
+      : 'for i in $(seq 6); do <a check that passes once it is ready> && break; sleep 5; done'
   return [
     `Not run: this command waits ${howLong} doing nothing, which holds the request with nothing to show and is usually too long or too short.`,
-    `Wait for the thing itself: check for it every few seconds, with a limit, in one command, for example\n${loop}`,
-    'For work that takes minutes, start it with run_in_background: you are told when it ends.',
+    'To wait for a command, run it with run_in_background and read it with BashOutput: that waits up to 30 s for new output, and you are told when the command ends. Do not poll its output in a loop.',
+    `To wait for something else, check for it every few seconds, for at most 30 s a call, for example\n${loop}`,
   ].join('\n\n')
 }
